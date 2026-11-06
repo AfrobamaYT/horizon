@@ -4,8 +4,8 @@ use crate::{
     save::{float, number},
     text::Text,
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::entity_data::{Value, serializer};
-use horizon_world::nbt::Tag;
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -482,7 +482,7 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::Compound;
+    use horizon_core::nbt::Compound;
 
     /// Whether a text quad seen from `camera` (yaw, pitch, at `eye` from the
     /// display) faces it (counter-clockwise on screen, the face back-face

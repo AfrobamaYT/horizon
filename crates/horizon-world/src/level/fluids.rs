@@ -1,10 +1,5 @@
 //! `FlowingFluid` (water and lava) ticking and spreading, `LiquidBlock`
 //! interactions, liquid containers (waterlogging) and bucket pickup.
-use super::{
-    Behaviours, Dimension, LevelAccess, Sim, Spread,
-    classes::{Class, Interface},
-    update::{HORIZONTAL, above, below, rel},
-};
 use crate::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
@@ -13,6 +8,14 @@ use horizon_core::{
     geometry::{Axis, Direction, ShapeOp, VoxelShape},
     position::BlockPos,
     random::RandomSource,
+};
+use {
+    super::{
+        Behaviours, LevelAccess, Sim, Spread,
+        classes::{Class, Interface},
+        update::{HORIZONTAL, above, below, rel},
+    },
+    horizon_core::dimension::Dimension,
 };
 
 /// `LiquidBlock.POSSIBLE_FLOW_DIRECTIONS`.

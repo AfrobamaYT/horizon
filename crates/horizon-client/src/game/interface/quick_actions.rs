@@ -10,7 +10,7 @@
 //! `handleKeybinds` then shows it with `showDialog(holder, gui.screen())`; the
 //! data comes from the pack stack, so a world's data packs supply it.
 use super::Game;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 impl Game<'_> {
     /// `Minecraft.getQuickActionsDialog`: the dialogs the tag names, from

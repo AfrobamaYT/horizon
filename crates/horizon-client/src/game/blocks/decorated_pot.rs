@@ -11,7 +11,7 @@ use horizon_client::{
     save,
 };
 use horizon_core::random::LegacyRandom;
-use horizon_world::{loot::LootData, nbt::Tag};
+use {horizon_core::nbt::Tag, horizon_world::loot::LootData};
 
 /// `DecoratedPotBlockEntity.WobbleStyle` ordinals.
 const WOBBLE_POSITIVE: i32 = 0;

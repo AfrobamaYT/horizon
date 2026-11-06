@@ -84,6 +84,33 @@ pub(super) fn server_sources(
     Ok(sources)
 }
 
+/// Build server recipes privately so a refused reload leaves the current cache intact.
+pub(super) fn prepare_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+) -> std::io::Result<Arc<ResolvedSources>> {
+    Ok(Arc::new(ResolvedSources::load_or_empty(
+        root,
+        overlay,
+        &server_data_load(root, item_data)?,
+    )))
+}
+
+pub(super) fn install_server_sources(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+    sources: Arc<ResolvedSources>,
+) {
+    *SOURCES.lock().unwrap_or_else(|e| e.into_inner()) = Some(ServerSources {
+        root: root.to_owned(),
+        generation: item_data.defaults().generation(),
+        overlay: overlay_key(overlay),
+        sources,
+    });
+}
+
 /// The recipes of a load of `origin`: a server's are shared, a client's own.
 pub(super) fn load_sources(
     root: &std::path::Path,
@@ -226,20 +253,18 @@ pub(super) fn forget_sync_data() {
 
 /// Without a hub yet, retain this world's frozen registries through `/reload`
 /// too. World entry discards this snapshot before loading another world's.
-pub(super) fn reload_cached_sync_data(
-    root: &std::path::Path,
-    item_data: &ItemData,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<(), String> {
-    let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
-    if let Some(kept) = kept {
-        reload_sync_data(root, item_data, overlay, &kept)?;
-    }
-    Ok(())
+pub(super) fn cached_reload_sync() -> Option<Arc<SyncData>> {
+    SYNC.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .data
+        .as_ref()
+        .and_then(|cached| cached.result.as_ref().ok())
+        .cloned()
 }
 
 /// Keep lazy-cache admission aligned with the current packs even when no
 /// complete wire snapshot has been loaded yet. Damage definitions stay frozen.
+#[cfg(test)]
 fn prepare_sync_reload(
     sync: &mut SyncCache,
     overlay: &horizon_world::loot::PackOverlay,
@@ -255,35 +280,35 @@ fn prepare_sync_reload(
 /// tags, recipes and advancements read again with the world's packs, the
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
-pub(super) fn reload_sync_data(
+pub(super) fn prepare_wire_reload(
     root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
+    sources: &ResolvedSources,
 ) -> std::result::Result<Arc<SyncData>, String> {
-    // Kept pack dialogs count as packs: a world opened without packs after
-    // a `/reload` that dropped them must read its own registries again.
-    let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::reload(
-        root,
-        overlay,
-        kept,
-        item_data.defaults(),
-        server_sources(root, item_data, overlay)
-            .map_err(|error| error.to_string())?
-            .as_ref(),
-    )
-    .map(|mut sync| {
+    SyncData::reload(root, overlay, kept, item_data.defaults(), sources).map(|mut sync| {
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
-    });
-    SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some(Synced {
+    })
+}
+
+pub(super) fn install_wire_reload(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+    sync: Option<Arc<SyncData>>,
+) {
+    // Kept pack dialogs count as packs: a world opened without packs after
+    // a `/reload` that dropped them must read its own registries again.
+    let mut cache = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    cache.world_packs = !overlay.files.is_empty();
+    cache.data = sync.map(|sync| Synced {
         root: root.to_owned(),
-        with_packs: packs,
+        with_packs: !overlay.files.is_empty() || sync.has_pack_entries(),
         generation: item_data.defaults().generation(),
-        result: sync.clone(),
+        result: Ok(sync),
     });
-    sync
 }
 
 impl Game<'_> {
@@ -433,7 +458,7 @@ pub(super) struct LanHost {
     /// The world border as the guests were last told of it (lan/border.rs).
     pub border_sent: Option<lan::border::Sent>,
     /// Guests' commands waiting for the hub to be back in `self.lan`, where
-    /// a command can reach every player (game/network/lan_actions.rs).
+    /// a command can reach every player (game/network/lan_actions/commands.rs).
     pub commands: Vec<super::lan_actions::GuestCommand>,
     /// Mods' quiet commands waiting to run a few a tick (game/network/lan_quiet.rs).
     pub quiet: std::collections::VecDeque<super::lan_quiet::QuietBatch>,
@@ -1810,7 +1835,7 @@ impl Game<'_> {
         vehicle: Option<u32>,
         others: &[u32],
         remove: bool,
-    ) -> Option<(horizon_world::nbt::Tag, [i32; 4])> {
+    ) -> Option<(horizon_core::nbt::Tag, [i32; 4])> {
         vehicle?;
         let back = self.dim;
         let theirs = super::Dim::from_id(dim);
@@ -1857,8 +1882,8 @@ impl Game<'_> {
         };
         let saved = guest
             .saved
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(p) = saved {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(p) = saved {
             p.insert("RootVehicle".into(), tag);
         }
         guest.saved_vehicle = Some(attach);
@@ -1901,7 +1926,7 @@ impl Game<'_> {
             host.hub.seat_order += 1;
             let order = host.hub.seat_order;
             host.hub.guests.update(i, |g| {
-                if let Some(horizon_world::nbt::Tag::Compound(p)) = &mut g.saved {
+                if let Some(horizon_core::nbt::Tag::Compound(p)) = &mut g.saved {
                     p.remove(&"RootVehicle".into());
                 }
                 g.vehicle = Some(id);
@@ -3422,10 +3447,10 @@ impl Game<'_> {
     /// itself, the sound and the crumbs are played here.
     pub(super) fn player_equipment_broke(
         &mut self,
-        slot: horizon_world::player_inventory::EquipmentSlot,
+        slot: horizon_core::equipment_slot::EquipmentSlot,
         stack: &horizon_client::items::ItemStack,
     ) {
-        use horizon_world::player_inventory::EquipmentSlot;
+        use horizon_core::equipment_slot::EquipmentSlot;
         let event = match slot {
             EquipmentSlot::MainHand => 47,
             EquipmentSlot::OffHand => 48,
@@ -3788,8 +3813,8 @@ pub(super) fn living_flags(using: Option<(usize, u32)>) -> i8 {
 
 /// The name a mod hears for an equipment slot (the armor stand hook's names, plus
 /// the two slots a mount's gear uses).
-fn equipment_slot_name(slot: horizon_world::player_inventory::EquipmentSlot) -> &'static str {
-    use horizon_world::player_inventory::EquipmentSlot;
+fn equipment_slot_name(slot: horizon_core::equipment_slot::EquipmentSlot) -> &'static str {
+    use horizon_core::equipment_slot::EquipmentSlot;
     match slot {
         EquipmentSlot::MainHand => "mainhand",
         EquipmentSlot::OffHand => "offhand",
@@ -4621,7 +4646,7 @@ mod tests {
     /// The names a mod matches on for a broken item's slot (a contract).
     #[test]
     fn a_broken_items_slot_is_named_for_mods() {
-        use horizon_world::player_inventory::EquipmentSlot::*;
+        use horizon_core::equipment_slot::EquipmentSlot::*;
         let named: Vec<_> = [MainHand, OffHand, Head, Chest, Legs, Feet, Body, Saddle]
             .map(equipment_slot_name)
             .to_vec();

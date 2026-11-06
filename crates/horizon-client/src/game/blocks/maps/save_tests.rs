@@ -1,5 +1,5 @@
 use super::{MapBanner, MapData, MapFrame};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 const OPTIONAL: [&str; 6] = [
     "scale",

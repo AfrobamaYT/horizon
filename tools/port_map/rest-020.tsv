@@ -21,7 +21,7 @@ ServerOpList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList
 ServerOpList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 ServerOpList.canBypassPlayerLimit	port	crates/horizon-client/src/game/interface/dedicated/mod.rs::Game::run_dedicated	the bypasses_limit closure: an op entry with bypassesPlayerLimit; read by Shared::try_admit
 ServerOpListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::OpEntry::serialize	level and bypassesPlayerLimit keys
-SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/network/lan_actions.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
+SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/network/lan_actions/sleep.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
 StoredUserList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 StoredUserList.removeExpired	port	crates/horizon-server-files/src/user_lists.rs::UserList::get	expired entries are dropped on each get, as vanilla
 UserBanList.getUserList	skip:ui		tab-completion names only (PardonCommand suggestions)

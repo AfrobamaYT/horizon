@@ -7,7 +7,7 @@ use crate::{
     Error, Result,
     packets::configuration::{RegistryData, UpdateTags},
 };
-use horizon_world::nbt::{JavaString, Tag};
+use horizon_core::nbt::{JavaString, Tag};
 use std::{collections::HashMap, path::Path};
 
 /// One registry: names by network id and the reverse lookup.

@@ -697,6 +697,7 @@ pub(super) mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -1394,7 +1395,7 @@ pub(super) mod tests {
                 mob.extra.tame = true;
                 let mut held = ItemStack::new(item, 3);
                 held.damage = 7;
-                held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                held.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
                 game.inventory[game.selected] = Some(held.clone());
                 let index = game.mobs.len();
                 game.mobs.push(mob);
@@ -1427,7 +1428,7 @@ pub(super) mod tests {
                 .clone();
             let item = kind.tempt.first().expect("a swallowable item").to_string();
             let mut held = ItemStack::new(&item, 3);
-            held.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            held.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
             game.inventory[game.selected] = Some(held.clone());
             game.mobs.push(Mob::new(12, kind.clone(), Vec3::ZERO, 0.0));
             assert!(game.interact_sulfur_cube(0, &item));
@@ -1467,7 +1468,7 @@ pub(super) mod tests {
                 mob.extra.tame = true;
                 let mut stack = ItemStack::new(item, 3);
                 stack.damage = 7;
-                stack.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+                stack.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
                 mob.extra.set_body_stack(Some(stack.clone()));
                 let index = game.mobs.len();
                 game.mobs.push(mob);
@@ -2109,14 +2110,16 @@ pub(super) mod tests {
             let real_holder = horizon_world::attachments::Holder::Player(1);
             attachment
                 .set(
-                    game.attachment_map_quiet(real_holder).unwrap(),
+                    game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     17,
                 )
                 .unwrap();
             attachment
                 .set(
-                    game.attachment_map_quiet(holder).unwrap(),
+                    game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     3,
                 )
@@ -2130,7 +2133,8 @@ pub(super) mod tests {
             let nether_actor = game.native_fake_player(nether, 2345, "parked").unwrap();
             attachment
                 .set(
-                    game.attachment_map_quiet(holder).unwrap(),
+                    game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                        .unwrap(),
                     horizon_world::attachments::Holder::Level,
                     8,
                 )
@@ -2138,7 +2142,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2154,7 +2159,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2216,7 +2222,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2226,7 +2233,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(real_holder).unwrap(),
+                        game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2236,7 +2244,8 @@ pub(super) mod tests {
             assert_eq!(
                 attachment
                     .get(
-                        game.attachment_map_quiet(holder).unwrap(),
+                        game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+                            .unwrap(),
                         horizon_world::attachments::Holder::Level
                     )
                     .unwrap(),
@@ -2301,8 +2310,8 @@ pub(super) mod tests {
                         horizon_client::items::ItemStack::new("minecraft:knowledge_book", 1);
                     book.data_mut().set_other(
                         "minecraft:recipes",
-                        Some(horizon_world::nbt::Tag::List(vec![
-                            horizon_world::nbt::Tag::String("minecraft:stick".into()),
+                        Some(horizon_core::nbt::Tag::List(vec![
+                            horizon_core::nbt::Tag::String("minecraft:stick".into()),
                         ])),
                     );
                     let slot = game.held_slot();
@@ -3009,6 +3018,7 @@ pub(super) mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -3173,6 +3183,7 @@ pub(super) mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

@@ -5,6 +5,10 @@ pub trait Hooks {
     /// (`register_select_item_model_property`), asked each time a `minecraft:select` on it picks a
     /// case. Set value only for a property your mod owns; left `None`, the model's fallback is drawn.
     /// The borrowed stack is the one being resolved, including nested bundle items.
-    #[hook(side = "client", contract = "listen")]
+    #[hook(
+        side = "client",
+        contract = "listen",
+        neoforge = "RegisterSelectItemModelPropertyEvent"
+    )]
     fn item_model_select_property();
 }

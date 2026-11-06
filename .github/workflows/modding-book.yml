@@ -2,7 +2,7 @@ name: modding-book
 on:
   push:
     branches: [main]
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "tools/*modding*", "tests/test_modding_concept_pages.py"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "crates/horizon-mod-api-gen/**", "xtask/**", "tools/*modding*", "tests/test_modding_*.py"]
   workflow_dispatch:
 jobs:
   book:
@@ -15,7 +15,7 @@ jobs:
       - if: steps.book.outputs.present == 'true'
         run: cargo install mdbook --locked --version 0.4.52
       - if: steps.book.outputs.present == 'true'
-        run: python3 -m unittest tests.test_modding_concept_pages
+        run: python3 -m unittest tests.test_modding_concept_pages tests.test_modding_hook_notes
       - if: steps.book.outputs.present == 'true'
         run: mdbook build docs/modding
       - if: steps.book.outputs.present == 'true'
@@ -24,7 +24,7 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo doc -p horizon-mod-api --no-deps
       # The game's constructors live in the hidden `mod_api::__private`; no rustdoc page or link may name it.
       - if: steps.book.outputs.present == 'true'
-        run: "! grep -rl __private target/doc/mod_api docs/modding/src"
+        run: "! grep -rl __private target/doc/mod_api docs/modding/src target/modding-book"
       - if: steps.book.outputs.present == 'true'
         run: cargo test -p horizon-modding-examples
       # book.toml sets build-dir = "../../target/modding-book", relative to docs/modding.

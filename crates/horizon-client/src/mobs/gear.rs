@@ -131,24 +131,25 @@ pub fn damage_bonus(levels: &[(Arc<str>, u32)], target: Option<Species>) -> f32 
     bonus
 }
 /// `Mob.doHurtTarget`'s `getAttributeValue(ATTACK_DAMAGE)`: the mob's own
-/// value plus the `attack_damage` modifiers of the item in its main hand
-/// (an iron axe adds 8, a sword 4 to 7, a trident 8), which vanilla applies
-/// to the attribute map when the item is equipped.
+/// value plus the `attack_damage` modifiers of the stack in its main hand
+/// (an iron axe adds 8, a sword 4 to 7, a trident 8) — the stack's own
+/// `attribute_modifiers`, components included, or its item's, as
+/// `item_attribute_modifier` leaves them (#941). Vanilla applies them to the
+/// attribute map when the item is equipped; the live map reads the same rows.
 pub fn attack_damage(m: &Mob, items: Option<&crate::items::Items>) -> f32 {
     let base = f64::from(m.attrs.attack_damage);
-    let modifiers = m
-        .extra
-        .main_hand_id()
-        .and_then(|id| items?.get(id))
-        .map(|i| i.modifiers.as_slice());
-    modifiers.map_or(base, |modifiers| {
-        super::equip::attribute_with(
-            modifiers,
-            "minecraft:attack_damage",
-            base,
-            super::equip::Slot::MainHand,
-        )
-    }) as f32
+    let Some(items) = items else {
+        return base as f32;
+    };
+    let Some(stack) = m.extra.slot_stack(horizon_items::equipment::MAINHAND) else {
+        return base as f32;
+    };
+    super::equip::attribute_with(
+        &crate::item_attributes::attribute_modifiers(stack, items),
+        "minecraft:attack_damage",
+        base,
+        super::equip::Slot::MainHand,
+    ) as f32
 }
 /// The extra damage of the mob's held weapon against a target species.
 pub fn melee_bonus(m: &Mob, target: Option<Species>) -> f32 {
