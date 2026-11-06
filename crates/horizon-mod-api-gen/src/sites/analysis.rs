@@ -24,7 +24,7 @@ fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
 }
 impl<'a> Visit<'a> for Bindings {
     fn visit_ident(&mut self, id: &'a Ident) {
-        self.identifiers.insert(unraw(&id));
+        self.identifiers.insert(unraw(id));
     }
     fn visit_pat_ident(&mut self, pattern: &'a syn::PatIdent) {
         self.names.insert(unraw(&pattern.ident));
@@ -67,7 +67,7 @@ impl<'a> Visit<'a> for Bindings {
             }
             _ => return,
         };
-        self.names.insert(unraw(&id));
+        self.names.insert(unraw(id));
     }
 }
 
