@@ -6,11 +6,12 @@ api = "0.2"
 side = "both"
 capabilities = ["registries"]
 
-[[native.injection]]
+[[inject]]
 id = "tail"
-target = "horizon_client::game::chat::Game<'_>::handle_chat_input"
-kind = "HEAD"
-trait_method = "handle_chat_input"
+at = "horizon_client::game::chat::Game<'_>::handle_chat_input"
+kind = "head"
+with = "handle_chat_input"
+hash = "a67549f95b962755"
 
 [wasm]
 sha512 = "fc029853bc6d8c1bc4fdecc2b70305bed34520c71f69efe8b251002003a5a04e90af38d29123c88518751a51b5b060b8de909f4f8395dd96d92a1cc43cc97da3"

@@ -1,10 +1,13 @@
-//! Wasm mods listening at the game's points (#589): a `[wasm]` package's `[[native.injection]]`
+//! Wasm mods listening at the game's points (#589): a `[wasm]` package's `[[inject]]`
 //! entries name the places its `mod.wasm` fills. At load each is checked against this game's
 //! points and against the mod's own listeners, then the mod registers in the points crate's one
 //! list of listeners, exactly as a native mod does: its places fire it through
 //! `mod_points::wire::forwarded`, as hook calls within its group's limits.
 use crate::Refusal;
-use horizon_mods::manifest::{InjectionKind, Manifest};
+use horizon_mods::manifest::{
+    InjectionKind, Manifest,
+    inject::{Access, Inject, Kind},
+};
 use mod_api::__private::wasm_host::{CallHost, Exports};
 use mod_points::__private::wire::{Forward, HostKind, PointHost, Record, Value, forwarded};
 use mod_points::PointId;
@@ -66,18 +69,19 @@ impl Forward for Listeners {
     }
 }
 
-/// The place a manifest's injection names: the point at its `target`, at the head or return its
-/// `kind` says, whose `Points` method its `trait_method` must be (`<point>` at the head,
-/// `<point>_return` at the return).
-fn declared_place(target: &str, method: &str, kind: InjectionKind) -> Result<usize, Refusal> {
-    let place = target_place(target, kind)?;
-    let missing = || Refusal::NoSuchPoint {
-        point: format!("{target} ({method})"),
+/// Resolve the API function slots currently supported by the guest export path.
+fn declared_place(inject: &Inject) -> Result<usize, Refusal> {
+    let kind = match (inject.access, inject.kind, inject.priority) {
+        (Access::Api, Kind::Head, 0) => InjectionKind::Head,
+        (Access::Api, Kind::Return, 0) => InjectionKind::Return,
+        _ => {
+            return Err(Refusal::Points(format!(
+                "{}: wasm injects currently require API head/return with priority 0",
+                inject.id
+            )));
+        }
     };
-    if NAMES[place] != method {
-        return Err(missing());
-    }
-    Ok(place)
+    target_place(&inject.at, kind)
 }
 
 /// The point at a target's head or return, shared by API and raw listener validation.
@@ -129,15 +133,11 @@ impl Listening {
 /// Checks a loaded wasm mod's listeners against its manifest and this game's points: the listeners
 /// to register, none for a mod whose manifest lists no injections.
 pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Listening>, Refusal> {
-    let Some(wasm) = &manifest.wasm else {
+    if manifest.wasm.is_none() {
         return Ok(None);
-    };
+    }
     let raw = crate::raw::listen(manifest, exports)?;
-    if !wasm
-        .points()
-        .iter()
-        .any(|injection| injection.trait_method.is_some())
-    {
+    if manifest.inject.is_empty() {
         return Ok(raw.map(|raw| Listening {
             exports: exports.clone(),
             fire: None,
@@ -146,12 +146,13 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         }));
     }
     let mut declared = BTreeSet::new();
-    for injection in wasm.points() {
-        // Raw subscriptions were checked above; only API-typed points enter this list.
-        let (Some(target), Some(method)) = (&injection.target, &injection.trait_method) else {
-            continue;
-        };
-        declared.insert(declared_place(target, method, injection.kind)?);
+    for inject in &manifest.inject {
+        if !declared.insert(declared_place(inject)?) {
+            return Err(Refusal::Points(format!(
+                "{}: multiple injects at one wasm API place await the function registry",
+                inject.id
+            )));
+        }
     }
     let interface = format!(
         "{}-listeners",
@@ -208,30 +209,38 @@ mod tests {
 
     #[test]
     fn an_injection_names_the_place_its_kind_and_method_say() {
-        let head = declared_place(TICK, "tick", InjectionKind::Head).unwrap();
-        let back = declared_place(TICK, "tick_return", InjectionKind::Return).unwrap();
-        assert_eq!((NAMES[head], NAMES[back]), ("tick", "tick_return"));
-        // The method must be the one the kind places at the target.
-        for (method, kind) in [
-            ("tick_return", InjectionKind::Head),
-            ("tick", InjectionKind::Return),
-            ("tick_world", InjectionKind::Head),
+        let mut inject = Inject {
+            id: "tick".into(),
+            at: TICK.into(),
+            kind: Kind::Head,
+            with: "any_function".into(),
+            access: Access::Api,
+            priority: 0,
+            hash: "signature".into(),
+            call: None,
+            nth: None,
+            ctx: None,
+        };
+        assert_eq!(NAMES[declared_place(&inject).unwrap()], "tick");
+        inject.kind = Kind::Return;
+        assert_eq!(NAMES[declared_place(&inject).unwrap()], "tick_return");
+        for (access, kind, priority) in [
+            (Access::Internals, Kind::Head, 0),
+            (Access::Api, Kind::WrapCall, 0),
+            (Access::Api, Kind::Head, 1),
         ] {
-            assert!(
-                matches!(
-                    declared_place(TICK, method, kind),
-                    Err(Refusal::NoSuchPoint { .. })
-                ),
-                "{method} at {kind:?}"
-            );
+            inject.access = access;
+            inject.kind = kind;
+            inject.priority = priority;
+            assert!(matches!(declared_place(&inject), Err(Refusal::Points(_))));
         }
-        assert!(
-            declared_place(
-                "horizon_client::game::Game<'_>::gone",
-                "gone",
-                InjectionKind::Head
-            )
-            .is_err()
-        );
+        inject.access = Access::Api;
+        inject.kind = Kind::Head;
+        inject.priority = 0;
+        inject.at = "game::gone".into();
+        assert!(matches!(
+            declared_place(&inject),
+            Err(Refusal::NoSuchPoint { .. })
+        ));
     }
 }

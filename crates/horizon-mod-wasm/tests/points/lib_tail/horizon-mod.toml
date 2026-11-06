@@ -9,8 +9,13 @@ capabilities = ["registries"]
 [dependencies]
 counter_lib = "^1"
 
-[[native.injection]]
+[[inject]]
 id = "tail"
-target = "horizon_client::game::chat::Game<'_>::handle_chat_input"
-kind = "HEAD"
-trait_method = "handle_chat_input"
+at = "horizon_client::game::chat::Game<'_>::handle_chat_input"
+kind = "head"
+with = "handle_chat_input"
+hash = "a67549f95b962755"
+
+[wasm]
+sha512 = "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+toolchain = "1.99.1 58cf8f9c35b355199727627d07ae34a4e2846d67"

@@ -13,6 +13,9 @@ use std::{
 };
 use syn::{ImplItem, Item, Type};
 
+mod guest;
+pub use guest::{GuestInject, guest_exports};
+
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
 pub struct GamePoint {
