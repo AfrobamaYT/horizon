@@ -1713,7 +1713,12 @@ impl Game<'_> {
             return false;
         }
         self.as_console_in_overworld(|game| {
-            let previous = game.command_source.replace(game.server_source());
+            let previous = game
+                .command_source
+                .replace(super::commands::execute::Source {
+                    silent: false,
+                    ..game.server_source()
+                });
             if let Some(command) = game.native_command_input(line, 4) {
                 let mut ran = false;
                 game.native_perform_console_command(&command, &mut ran);
@@ -2333,6 +2338,19 @@ mod tests {
                     game.spawn = Some(horizon_core::geometry::Vec3::new(10.5, 70.0, -2.5));
                     game.yaw = 45.0;
                     game.pitch = 30.0;
+                    for (line, key) in [
+                        ("typed give guest13 nope", "command.unknown.argument"),
+                        ("typed give missing 1", "argument.entity.notfound.player"),
+                    ] {
+                        game.chat_capture = Some(Vec::new());
+                        assert!(game.perform_native_console_command(line));
+                        let output = game.chat_capture.take().unwrap();
+                        assert_eq!(
+                            output[0].plain(),
+                            Text::translate(key, &[]).plain(),
+                            "{line}"
+                        );
+                    }
                     assert!(game.perform_native_console_command("typed give @s 1"));
                     assert_eq!(
                         heard.lock().unwrap().len(),
