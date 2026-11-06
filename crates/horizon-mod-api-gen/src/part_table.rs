@@ -30,6 +30,27 @@ fn key(item: &Item) -> String {
 }
 
 fn merge(out: &mut Vec<Item>, input: Vec<Item>) -> Result<(), String> {
+    macro_rules! members {
+        ($old:ident, $new:ident, $kind:ident, $identity:ident) => {{
+            let members = std::mem::take(&mut $new.items);
+            let mut header = $old.clone();
+            header.items.clear();
+            if header.to_token_stream().to_string() != $new.to_token_stream().to_string() {
+                return Err(format!("incompatible envelope: {}", $identity));
+            }
+            for member in members {
+                if $old.items.iter().any(|m| match (m, &member) {
+                    (syn::$kind::Fn(a), syn::$kind::Fn(b)) => a.sig.ident == b.sig.ident,
+                    (syn::$kind::Const(a), syn::$kind::Const(b)) => a.ident == b.ident,
+                    (syn::$kind::Type(a), syn::$kind::Type(b)) => a.ident == b.ident,
+                    _ => m.to_token_stream().to_string() == member.to_token_stream().to_string(),
+                }) {
+                    return Err(format!("duplicate member in {}", $identity));
+                }
+                $old.items.push(member);
+            }
+        }};
+    }
     for item in input {
         let identity = key(&item);
         let position = if let Some(position) = out.iter().position(|old| key(old) == identity) {
@@ -49,50 +70,8 @@ fn merge(out: &mut Vec<Item>, input: Vec<Item>) -> Result<(), String> {
             out.len() - 1
         };
         match (&mut out[position], item) {
-            (Item::Trait(old), Item::Trait(mut new)) => {
-                let members = std::mem::take(&mut new.items);
-                let mut header = old.clone();
-                header.items.clear();
-                if header.to_token_stream().to_string() != new.to_token_stream().to_string() {
-                    return Err(format!("incompatible envelope: {identity}"));
-                }
-                for member in members {
-                    if old.items.iter().any(|m| match (m, &member) {
-                        (syn::TraitItem::Fn(a), syn::TraitItem::Fn(b)) => {
-                            a.sig.ident == b.sig.ident
-                        }
-                        (syn::TraitItem::Const(a), syn::TraitItem::Const(b)) => a.ident == b.ident,
-                        (syn::TraitItem::Type(a), syn::TraitItem::Type(b)) => a.ident == b.ident,
-                        _ => {
-                            m.to_token_stream().to_string() == member.to_token_stream().to_string()
-                        }
-                    }) {
-                        return Err(format!("duplicate member in {identity}"));
-                    }
-                    old.items.push(member);
-                }
-            }
-            (Item::Impl(old), Item::Impl(mut new)) => {
-                let members = std::mem::take(&mut new.items);
-                let mut header = old.clone();
-                header.items.clear();
-                if header.to_token_stream().to_string() != new.to_token_stream().to_string() {
-                    return Err(format!("incompatible envelope: {identity}"));
-                }
-                for member in members {
-                    if old.items.iter().any(|m| match (m, &member) {
-                        (syn::ImplItem::Fn(a), syn::ImplItem::Fn(b)) => a.sig.ident == b.sig.ident,
-                        (syn::ImplItem::Const(a), syn::ImplItem::Const(b)) => a.ident == b.ident,
-                        (syn::ImplItem::Type(a), syn::ImplItem::Type(b)) => a.ident == b.ident,
-                        _ => {
-                            m.to_token_stream().to_string() == member.to_token_stream().to_string()
-                        }
-                    }) {
-                        return Err(format!("duplicate member in {identity}"));
-                    }
-                    old.items.push(member);
-                }
-            }
+            (Item::Trait(old), Item::Trait(mut new)) => members!(old, new, TraitItem, identity),
+            (Item::Impl(old), Item::Impl(mut new)) => members!(old, new, ImplItem, identity),
             (Item::Mod(old), Item::Mod(mut new))
                 if old.content.is_some() && new.content.is_some() =>
             {
@@ -119,10 +98,11 @@ pub(crate) fn source(root: &Path) -> Result<String, String> {
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         merge(&mut items, file.items)?;
     }
-    Ok(items
-        .iter()
-        .map(|i| format!("{}\n", i.to_token_stream()))
-        .collect())
+    Ok(prettyplease::unparse(&syn::File {
+        shebang: None,
+        attrs: Vec::new(),
+        items,
+    }))
 }
 
 #[cfg(test)]
@@ -210,8 +190,12 @@ mod tests {
         ));
         let dir = root.join(DIRECTORY);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("zeta.rs"), "impl P { fn zeta() {} }").unwrap();
-        assert!(source(&root).unwrap().contains("zeta"));
+        fs::write(
+            dir.join("zeta.rs"),
+            "impl P { fn zeta() { if true { return; } if false { return; } } }",
+        )
+        .unwrap();
+        assert!(!source(&root).unwrap().contains("} if "));
         fs::write(dir.join("alpha.rs"), "impl P { fn alpha() {} }").unwrap();
         let added = source(&root).unwrap();
         assert!(added.find("alpha") < added.find("zeta"));
