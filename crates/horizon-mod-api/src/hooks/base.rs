@@ -229,10 +229,7 @@ pub trait Hooks {
     /// The minimap a native mod shows: set `minimap` when it is none yet.
     #[hook(side = "client", contract = "replace", out = "minimap")]
     fn minimap();
-    /// Options > Mods lists the native mods: push yours.
-    #[hook(side = "both", contract = "collect", out = "mods")]
-    fn mods();
-    /// The buttons of mod `mod_id`'s settings page, under its keys: push
+    /// The buttons of mod `mod_id`'s settings page: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     #[hook(side = "both", contract = "collect", out = "buttons")]

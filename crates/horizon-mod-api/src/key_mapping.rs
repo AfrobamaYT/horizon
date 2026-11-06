@@ -1,41 +1,47 @@
 //! The keys a native mod registers on Options > Controls.
 
 use crate::ClientModifiers;
+pub use horizon_mods::mod_list::KeyConflictContext;
 
-/// A key a native mod registers (`register_key_mappings`): it is listed under the mod's name on
+/// A key a mod registers through `Registrar::register_key_mapping`: it is listed under the mod's name on
 /// Options > Controls, and the player's binding and reset are kept by mod id in `horizon-mods.txt`.
 /// Its default is `key` with `modifiers` held; shift, control and alt are bound, super is not.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct NativeKeyRegistration {
-    /// The id of the mod that registers it: the heading on Controls and the key of its saved binding.
-    pub mod_id: String,
     /// The key's id, unique within its mod (`zoom`).
     pub id: String,
-    /// The label Controls shows (a literal).
+    /// The translation key for the label Controls shows.
     pub label: String,
     /// The default key (`key.keyboard.z`).
     pub key: String,
     /// The default modifiers, in GLFW's input-event encoding (shift 1, control 2, alt 4).
     pub modifiers: ClientModifiers,
-    /// The category it is listed under within its mod's heading; empty for none.
+    /// The category translation key within its mod's heading; empty for none.
     pub category: String,
+    /// When this mapping can conflict with another binding.
+    pub context: KeyConflictContext,
 }
 
 impl NativeKeyRegistration {
-    /// Key `id` of mod `mod_id`, bound to `key` with no modifiers and labelled `id`.
-    pub fn new(mod_id: &str, id: &str, key: &str) -> Self {
+    /// Sets the conflict context.
+    pub fn context(mut self, context: KeyConflictContext) -> Self {
+        self.context = context;
+        self
+    }
+    /// Key `id` of the registering mod, bound to `key` with no modifiers and labelled `id`.
+    pub fn new(id: &str, key: &str) -> Self {
         Self {
-            mod_id: mod_id.to_owned(),
             id: id.to_owned(),
             label: id.to_owned(),
             key: key.to_owned(),
             modifiers: ClientModifiers::default(),
             category: String::new(),
+            context: KeyConflictContext::Universal,
         }
     }
 
-    /// Sets the label Controls shows.
+    /// Sets the label translation key Controls shows.
     pub fn label(mut self, label: &str) -> Self {
         self.label = label.to_owned();
         self
@@ -47,7 +53,7 @@ impl NativeKeyRegistration {
         self
     }
 
-    /// Sets the category the key is listed under.
+    /// Sets the category translation key the binding is listed under.
     pub fn category(mut self, category: &str) -> Self {
         self.category = category.to_owned();
         self

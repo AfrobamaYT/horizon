@@ -1084,6 +1084,7 @@ impl Loading {
             }
             WindowEvent::MouseInput { state, button, .. } if self.menu.options_open => {
                 if state == ElementState::Pressed && self.menu.options.selected_key.is_some() {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                     let events = self.menu.options.bind_mouse(&mut self.settings, button);
                     self.menu_option_events(events);
                 } else if matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -1169,6 +1170,15 @@ impl Loading {
                     title.scroll_worlds(amount, self.menu.cursor, (batch.width, batch.height));
                 }
             }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Released && self.menu.options_open =>
+            {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
+                    let events = self.menu.options.key_released(&mut self.settings, key);
+                    self.menu_option_events(events);
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 if event.physical_key == PhysicalKey::Code(KeyCode::F11) {
                     self.settings.fullscreen = !self.settings.fullscreen;
@@ -1183,6 +1193,7 @@ impl Loading {
                             .shortcut(atlas, s, &mut self.menu.clipboard)
                     });
                     if !handled && let PhysicalKey::Code(key) = event.physical_key {
+                        self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                         let events = self.menu.options.key(
                             &mut self.settings,
                             atlas,

@@ -52,8 +52,6 @@ pub struct Installed {
 /// buttons. The keys the player chooses are kept in `ModList::keys`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativePage {
-    /// Each key's name, label and default key (`key.keyboard.z`).
-    pub keys: Vec<[String; 3]>,
     /// The keys the mod registers on Options > Controls, under its title.
     pub mappings: Vec<KeyMapping>,
     pub buttons: Vec<String>,
@@ -64,13 +62,76 @@ pub struct NativePage {
 pub struct KeyMapping {
     /// Its id within the mod (`zoom`); its saved binding is `key.<mod id>.<id>`.
     pub id: String,
+    /// The label's translation key.
     pub label: String,
     /// The default key (`key.keyboard.z`).
     pub key: String,
     /// The default modifiers: [`SHIFT`], [`CONTROL`] and [`ALT`] bits.
     pub modifiers: u32,
-    /// The category it is listed under; empty for none.
+    pub context: KeyConflictContext,
+    /// The category's translation key; empty for none.
     pub category: String,
+}
+
+/// The screens in which two mappings can conflict.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: the built-in conflict contexts
+pub enum KeyConflictContext {
+    #[default]
+    Universal,
+    InGame,
+    Gui,
+}
+impl KeyConflictContext {
+    pub fn conflicts(self, other: Self) -> bool {
+        self == Self::Universal || other == Self::Universal || self == other
+    }
+}
+/// Compare bindings, excluding unbound keys and pairs that are both at default.
+pub fn bindings_conflict(
+    (key, modifiers, context, at_default): (&str, u32, KeyConflictContext, bool),
+    (other_key, other_modifiers, other_context, other_default): (
+        &str,
+        u32,
+        KeyConflictContext,
+        bool,
+    ),
+) -> bool {
+    key != "key.keyboard.unknown"
+        && key == other_key
+        && modifiers == other_modifiers
+        && context.conflicts(other_context)
+        && (!at_default || !other_default)
+}
+
+#[cfg(test)]
+mod conflict_tests {
+    use super::{KeyConflictContext::*, bindings_conflict};
+
+    #[test]
+    fn contexts_modifiers_unbound_and_defaults_are_respected() {
+        let binding = ("key.keyboard.z", 0, InGame, false);
+        assert!(bindings_conflict(
+            binding,
+            ("key.keyboard.z", 0, Universal, true)
+        ));
+        assert!(!bindings_conflict(
+            binding,
+            ("key.keyboard.z", 0, Gui, false)
+        ));
+        assert!(!bindings_conflict(
+            binding,
+            ("key.keyboard.z", 1, InGame, false)
+        ));
+        assert!(!bindings_conflict(
+            ("key.keyboard.z", 0, InGame, true),
+            ("key.keyboard.z", 0, InGame, true)
+        ));
+        assert!(!bindings_conflict(
+            ("key.keyboard.unknown", 0, Universal, false),
+            ("key.keyboard.unknown", 0, Universal, false)
+        ));
+    }
 }
 
 /// The modifier bits of a key binding, in GLFW's input-event encoding.

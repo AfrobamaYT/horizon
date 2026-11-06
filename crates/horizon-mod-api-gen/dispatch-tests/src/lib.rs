@@ -160,7 +160,6 @@ mod tests {
         pub(super) struct NativeBlockRim;
         pub(super) struct NativeColoredLight;
         pub(super) struct NativeMinimap;
-        pub(super) struct NativeMod;
         pub(super) struct NativePanelEvent;
         pub(super) struct NativeScreen;
         #[derive(Default)]
@@ -210,7 +209,6 @@ mod tests {
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
         pub(super) struct NativeCommand;
-        pub(super) struct NativeKeyRegistration;
         pub(super) struct AdvancementProgress {
             pub done: bool,
         }
