@@ -39,10 +39,15 @@ def manifest(tool, files):
 def main():
     root = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
     base = subprocess.check_output(["git", "rev-parse", sys.argv[1]], cwd=root, text=True).strip()
-    scratch = (Path(sys.argv[2]) if len(sys.argv) > 2 else root / "target/api-pr1-gate") / base[:12]
+    scratch = (Path(sys.argv[2]) if len(sys.argv) > 2 else root / "target/api-pr1-gate").resolve() / base[:12]
     tree = scratch / "base"
     if not tree.exists():
         subprocess.run(["git", "worktree", "add", "--detach", str(tree), base], cwd=root, check=True)
+    actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tree, text=True).strip()
+    dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=tree, text=True)
+    if actual != base or dirty:
+        sys.exit(f"gate refused scratch worktree {tree}: expected clean {base}, found {actual}"
+                 + (f"\n{dirty}" if dirty else ""))
     old_out = build(tree, scratch / "target")
     target = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
     new_out = build(root, target, tool=True)
@@ -52,7 +57,8 @@ def main():
         subprocess.run(["diff", str(old_out / "mod-api.wit"), str(new_out / "mod-api.wit")])
         print("gate failed: mod-api.wit differs")
         failed = True
-    old = manifest(tool, [old_out / "mod_api_generated_host.rs"])
+    old_areas = sorted((tree / "crates/horizon-mod-api/src/host").glob("*.rs"))
+    old = manifest(tool, [old_out / "mod_api_generated_host.rs", *old_areas])
     areas = sorted((root / "crates/horizon-mod-api/src/host").glob("*.rs"))
     new = manifest(tool, [new_out / "mod_api_generated_host.rs", *areas])
     if old != new:
