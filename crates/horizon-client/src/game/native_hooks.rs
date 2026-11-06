@@ -13843,6 +13843,76 @@ mod screen_open_tests {
         }
     }
 
+    /// Cancels the second press it hears and no other: an allowed down, then a cancelled repeat.
+    struct CancelSecondPress(Arc<Mutex<usize>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for CancelSecondPress {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            let mut heard = self.0.lock().unwrap();
+            if event.pressed {
+                *heard += 1;
+                if *heard == 2 {
+                    return Flow::Cancel;
+                }
+            }
+            Flow::Continue
+        }
+    }
+
+    /// A cancelled repeat keeps the hold an accepted press made, while a cancelled first press
+    /// is never held, nor are its repeats.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_repeat_keeps_the_hold_and_a_cancelled_first_press_is_never_held() {
+        use winit::keyboard::KeyCode;
+        let heard = Arc::new(Mutex::new(0));
+        let mods = vec![ModEntry::new(
+            "second",
+            Box::new(CancelSecondPress(heard.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // The first down is allowed and held; its repeat is cancelled but the hold stays.
+                game.physical_keys.insert(space);
+                assert!(!game.key_press_canceled(space, true, false));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(game.physical_keys.contains(&space));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(Arc::new(Mutex::new(Vec::new())))),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // A cancelled first press is not held, and neither is its repeat.
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, false));
+                assert!(!game.physical_keys.contains(&space));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(!game.physical_keys.contains(&space));
+                // Its release clears the rejection.
+                assert!(!game.key_press_canceled(space, false, false));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+    }
+
     /// A cancelled press of a mapping is dropped while playing, and only then asked; the
     /// release of the same key is asked too but never canceled, so nothing stays held.
     #[test]
