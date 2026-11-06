@@ -1312,10 +1312,14 @@ impl Game<'_> {
     /// sent to the player whose command it is after the call, as vanilla
     /// commands' feedback is.
     pub(super) fn native_feedback(&mut self, line: Text) {
-        match &mut self.chat_capture {
-            Some(lines) => lines.push(line),
-            None => self.system_message(line),
-        }
+        let source = self.command_source.unwrap_or_else(|| self.player_source());
+        self.with_source(
+            super::commands::execute::Source {
+                dimension: source.origin_dimension,
+                ..source
+            },
+            |game| game.feedback_unbroadcast(line),
+        );
     }
     /// The player whose action or command a hook hears, as their state is
     /// swapped in (`native_perform_command`, `native_right_click_block`,
@@ -1606,6 +1610,45 @@ impl Game<'_> {
         host.native_commands.as_ref()?.levels.get(name).copied()
     }
 
+    /// Resolve the source once at the command boundary, retaining its output origin.
+    fn native_command_origin(
+        &mut self,
+        permission: u8,
+    ) -> super::commands::R<mod_api::CommandSource> {
+        use super::commands::err;
+        use mod_api::CommandSource;
+        let permission = mod_api::NativePermissionLevel::from_level(i32::from(permission));
+        let source = self.command_source.unwrap_or_else(|| self.player_source());
+        let origin = if let Some(id) = self.exec.functions.last() {
+            CommandSource::Function {
+                id: mod_api::Identifier::parse(id).map_err(|_| err("command.failed", &[]))?,
+                permission,
+            }
+        } else if let Some((x, y, z)) = source.block {
+            CommandSource::CommandBlock {
+                position: [x, y, z],
+                level: source.origin_dimension.key(),
+                permission,
+            }
+        } else if let Some(id) = source.cart {
+            let entity = self
+                .with_source(
+                    super::commands::execute::Source {
+                        dimension: source.origin_dimension,
+                        ..source
+                    },
+                    |game| game.native_entity(id),
+                )
+                .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
+            CommandSource::CommandBlockMinecart { entity, permission }
+        } else if let Some(player) = self.native_acting_player() {
+            CommandSource::Player { player, permission }
+        } else {
+            CommandSource::Console { permission }
+        };
+        Ok(origin)
+    }
+
     /// Parse once with the source's permission, then resolve its typed arguments.
     /// A denied or malformed invocation never reaches argument resolution or listeners.
     fn native_command_input(
@@ -1613,11 +1656,15 @@ impl Game<'_> {
         line: &str,
         permission: u8,
     ) -> Option<mod_api::CommandInvocation> {
+        let source = self.native_command_origin(permission).ok()?;
         let commands = self
             .lan
             .as_ref()
             .and_then(|host| host.native_commands.as_ref())?;
-        let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
+        let previous = std::mem::replace(
+            &mut self.ui.registries.permission,
+            source.permission().level(),
+        );
         let parse = commands.dispatcher.parse(line, &self.ui.registries);
         self.ui.registries.permission = previous;
         if let Err(error) = parse.executable() {
