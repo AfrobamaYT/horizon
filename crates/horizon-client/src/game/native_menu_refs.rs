@@ -261,8 +261,8 @@ impl Game<'_> {
     fn native_menu_rules(&self, menu: MenuRef, slot: usize) -> Option<Box<Menu>> {
         self.native_menu_slot_backing(menu, slot)?;
         let guest = self.native_menu_guest(menu)?;
-        let (kind, disabled) = match &guest.menu {
-            None => (Kind::Inventory, None),
+        let (kind, disabled, menu_id) = match &guest.menu {
+            None => (Kind::Inventory, None, None),
             Some(open) => {
                 let world = self.native_level_world(self.native_level(&guest.dimension)?)?;
                 let name = self
@@ -286,10 +286,11 @@ impl Game<'_> {
                     Some(BlockEntity::Crafter(c)) => Some(c.disabled),
                     _ => None,
                 };
-                (kind, disabled)
+                (kind, disabled, name)
             }
         };
         let mut rules = Box::new(Menu::new(kind));
+        rules.set_registry_id(menu_id);
         (slot < rules.slot_count()).then_some(())?;
         load_player(&mut rules, guest);
         for (k, off) in disabled.iter().flatten().enumerate() {
@@ -641,7 +642,7 @@ mod tests {
             assert_eq!(inventory.slot_count(game), None);
             let host = game.lan.as_mut().unwrap();
             host.play.clear();
-            host.hub.guests[0] = guest();
+            host.hub.guests.replace(0, guest());
             assert_eq!(inventory.slot_count(game), None);
 
             use horizon_client::{containers::BlockEntity, lan::menu::Slots};

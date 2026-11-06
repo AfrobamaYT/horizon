@@ -581,7 +581,7 @@ impl Game<'_> {
         if self.stats_press_scrollbar(size) {
             return;
         }
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (w, h) = (b.width, b.height);
         let (x0, tw) = tabs(w);
         for i in 0..3 {
@@ -637,7 +637,7 @@ impl Game<'_> {
     /// A press on the statistics list's scrollbar holds it
     /// (`AbstractSelectionList.updateScrolling`).
     pub(super) fn stats_press_scrollbar(&mut self, size: [u32; 2]) -> bool {
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (w, h) = (b.width, b.height);
         let content = self.stats_content();
         self.stats_ui

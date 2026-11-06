@@ -22,6 +22,16 @@ use horizon_world::{
 };
 use std::{collections::HashMap, sync::Arc};
 
+/// Saved data carried by `ConversionType.convertCommon` outside the modelled
+/// mob fields. The converted entity has its own identity and type-specific data;
+/// only its command tags are inherited from the old entity's raw compound.
+pub fn conversion_tags(raw: Option<&Tag>) -> Option<Tag> {
+    let Tag::List(tags) = raw?.get("Tags")? else {
+        return None;
+    };
+    (!tags.is_empty()).then(|| Tag::compound([("Tags", Tag::List(tags.clone()))]))
+}
+
 fn string(s: &str) -> Tag {
     Tag::String(s.into())
 }
@@ -401,6 +411,8 @@ pub fn mob_to_nbt(
             "DeathTime",
             Tag::Short(m.death_time.clamp(0, i32::from(i16::MAX)) as i16),
         ),
+        // Mob.addAdditionalSaveData writes the current virtual getter, not raw input.
+        ("CanPickUpLoot", Tag::Byte(i8::from(m.can_pick_up_loot()))),
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
     ] {
         put(&mut tag, key, value);
@@ -562,7 +574,6 @@ pub fn mob_to_nbt(
     for (key, value) in [
         ("AbsorptionAmount", Tag::Float(0)),
         ("FallFlying", Tag::Byte(0)),
-        ("CanPickUpLoot", Tag::Byte(i8::from(m.can_pick_up_loot()))),
         ("current_impulse_context_reset_grace_time", Tag::Int(0)),
         (
             "Brain",
@@ -3151,7 +3162,7 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
         motion: a.velocity,
         rotation: [a.yaw, a.pitch],
         on_ground: a.on_ground,
-        fall_distance: 0.0,
+        fall_distance: a.enchantment_fall_distance,
     };
     let mut tag = base.tag(raw);
     // `equipment` is saved only when something is worn, `Marker` only when set.
@@ -3242,6 +3253,7 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
 const SPEED_ATTRIBUTE: &str = "minecraft:movement_speed";
 pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
     let mut a = ArmorStand::new(id, position(tag)?, rotation(tag)[0]);
+    a.enchantment_fall_distance = float(tag.get("fall_distance")).unwrap_or(0.0);
     // AttributeMap.load makes an instance for each saved attribute.
     a.speed_instance = matches!(tag.get("attributes"), Some(Tag::List(list))
         if list.iter().any(|attr| text(attr.get("id")).as_deref() == Some(SPEED_ATTRIBUTE)));
@@ -3329,7 +3341,7 @@ pub fn boat_from_nbt(tag: &Tag) -> Option<(Vec3, Vec3, f32)> {
 
 /// `VillagerData`: type, profession and level.
 fn villager_data(m: &Mob) -> Tag {
-    use crate::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+    use crate::mobs::render::VILLAGER_TYPES;
     Tag::compound([
         (
             "type",
@@ -3342,7 +3354,7 @@ fn villager_data(m: &Mob) -> Tag {
             "profession",
             string(&format!(
                 "minecraft:{}",
-                PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()]
+                crate::mobs::villager::profession(m.extra.variant2).id
             )),
         ),
         ("level", Tag::Int(m.extra.villager_level.max(1))),
@@ -3461,18 +3473,15 @@ fn put_memories(map: &mut Compound, m: &Mob) {
     );
 }
 fn read_villager(m: &mut Mob, tag: &Tag) {
-    use crate::{
-        merchant::Trader,
-        mobs::render::{PROFESSIONS, VILLAGER_TYPES},
-    };
+    use crate::{merchant::Trader, mobs::render::VILLAGER_TYPES};
     if let Some(data) = tag.get("VillagerData") {
         let name = |key| text(data.get(key)).map(|s| s.trim_start_matches("minecraft:").to_owned());
         if let Some(t) = name("type").and_then(|t| VILLAGER_TYPES.iter().position(|v| *v == t)) {
             m.extra.variant = t as u8;
         }
         m.extra.variant2 = name("profession")
-            .and_then(|p| PROFESSIONS.iter().position(|v| *v == p))
-            .unwrap_or(0) as u8;
+            .and_then(|p| crate::mobs::villager::profession_index(&p))
+            .unwrap_or(0);
         m.extra.villager_level = number(data.get("level"))
             .unwrap_or(1)
             .clamp(1, i64::from(i32::MAX)) as i32;
@@ -3572,6 +3581,35 @@ mod tnt_power_tests {
 mod tests {
     use super::*;
     use crate::items::ItemStack;
+
+    #[test]
+    fn conversion_keeps_only_the_old_mobs_command_tags() {
+        let tags = Tag::List(vec![
+            Tag::String("subject".into()),
+            Tag::String("quest".into()),
+        ]);
+        let raw = Tag::compound([
+            ("id", Tag::String("minecraft:husk".into())),
+            ("UUID", Tag::IntArray(vec![1, 2, 3, 4])),
+            ("HuskConversionTime", Tag::Int(1)),
+            ("Tags", tags.clone()),
+        ]);
+        let original = raw.clone();
+        assert_eq!(
+            conversion_tags(Some(&raw)),
+            Some(Tag::compound([("Tags", tags)]))
+        );
+        assert_eq!(raw, original);
+        assert_eq!(conversion_tags(None), None);
+        assert_eq!(
+            conversion_tags(Some(&Tag::compound([("Tags", Tag::List(Vec::new()))]))),
+            None
+        );
+        assert_eq!(
+            conversion_tags(Some(&Tag::Compound(Default::default()))),
+            None
+        );
+    }
 
     #[test]
     fn cubes_omit_supplied_age_and_pigs_keep_modeled_age() {
@@ -7072,5 +7110,91 @@ mod piglin_live_anger_memory_tests {
         let saved = mob_to_nbt(&m, [42, 43, 44, 45], Some(&raw), None);
         assert!(memory(&saved).is_none());
         assert_unrelated(&saved);
+    }
+}
+
+#[cfg(test)]
+mod pickup_loot_save_tests {
+    use super::*;
+    use crate::mobs::Species;
+
+    #[test]
+    fn pickup_save_uses_live_state_instead_of_raw_and_preserves_overrides() {
+        for (species, id) in [
+            (Species::Pig, "minecraft:pig"),
+            (Species::Allay, "minecraft:allay"),
+            (Species::SulfurCube, "minecraft:sulfur_cube"),
+        ] {
+            let mut kind = crate::mobs::sensor_scan_tests::kind();
+            let ty = Arc::make_mut(&mut kind);
+            ty.id = id.into();
+            ty.species = species;
+            let types = HashMap::from([(id.to_string(), kind)]);
+            for supplied in [None, Some(false), Some(true)] {
+                let mut raw = Tag::compound([
+                    ("id", string(id)),
+                    ("Pos", doubles(&[4.5, 200.0, 4.5])),
+                    ("audit:unrelated", Tag::Int(7)),
+                ]);
+                if let Some(on) = supplied {
+                    put(&mut raw, "CanPickUpLoot", Tag::Byte(i8::from(on)));
+                }
+                let mut mob = mob_from_nbt(&raw, &types, 1, None).unwrap();
+                for live in [false, true] {
+                    mob.extra.pick_up_loot = live;
+                    mob.extra
+                        .set_main_hand(live.then(|| "minecraft:stone".into()));
+                    mob.extra.set_body(live.then(|| "minecraft:stone".into()));
+                    let expected = if species == Species::SulfurCube {
+                        !live
+                    } else {
+                        live
+                    };
+                    for input in [None, Some(&raw)] {
+                        let saved = mob_to_nbt(&mob, [46, 0, 0, 1], input, None);
+                        assert_eq!(
+                            saved.get("CanPickUpLoot"),
+                            Some(&Tag::Byte(i8::from(expected))),
+                            "{id} supplied={supplied:?} live={live} raw={}",
+                            input.is_some()
+                        );
+                        if input.is_some() {
+                            assert_eq!(saved.get("audit:unrelated"), Some(&Tag::Int(7)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod stand_fall_save_tests {
+    use super::*;
+
+    #[test]
+    fn decoded_stand_fall_distance_survives_save_without_raw_or_with_stale_raw() {
+        let stale = Tag::compound([("fall_distance", Tag::Double(99.0_f64.to_bits()))]);
+        for no_gravity in [false, true] {
+            for distance in [0.0_f64, 1.25, 17.5] {
+                let input = Tag::compound([
+                    ("Pos", doubles(&[4.5, 205.0, 4.5])),
+                    ("NoGravity", Tag::Byte(i8::from(no_gravity))),
+                    ("fall_distance", Tag::Double(distance.to_bits())),
+                ]);
+                let stand = armor_stand_from_nbt(&input, 1).unwrap();
+                for raw in [None, Some(&stale)] {
+                    let saved = armor_stand_to_nbt(&stand, [28, 0, 0, 1], raw);
+                    assert_eq!(
+                        saved.get("fall_distance"),
+                        Some(&Tag::Double(distance.to_bits())),
+                        "distance={distance} no_gravity={no_gravity} raw={}",
+                        raw.is_some()
+                    );
+                    assert_eq!(saved.get("Pos"), input.get("Pos"));
+                    assert_eq!(stand.no_gravity, no_gravity);
+                }
+            }
+        }
     }
 }

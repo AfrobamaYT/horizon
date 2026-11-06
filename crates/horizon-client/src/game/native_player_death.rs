@@ -221,7 +221,7 @@ mod tests {
             );
 
             // Put in place of the saved one, it reads through the handle.
-            game.lan.as_mut().unwrap().hub.guests[0] = fresh;
+            game.lan.as_mut().unwrap().hub.guests.replace(0, fresh);
             assert_eq!(player.last_death_location(&*game), Some(at([4, 70, -9])));
             std::fs::remove_dir_all(&world).unwrap();
         });

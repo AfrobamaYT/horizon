@@ -6,8 +6,8 @@ use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
-    BlockKey, BlockSoundType, BlockStateConstraint, BlockStateMatchError, BlockStateProperty,
-    BlockStateRange, EffectKey,
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, StateConstraint,
+    StateMatchError, StateProperty,
 };
 use std::sync::{Arc, Mutex};
 
@@ -23,6 +23,13 @@ impl Game<'_> {
     pub(super) fn native_effect_key_id(&self, key: EffectKey) -> String {
         mod_api::__private::effect_key_id(key)
             .expect("invalid effect key slot")
+            .to_owned()
+    }
+
+    /// The canonical block entity type id retained by the load-owned slot.
+    pub(super) fn native_block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
+        mod_api::__private::block_entity_type_name(key)
+            .expect("invalid block entity type key slot")
             .to_owned()
     }
 
@@ -92,14 +99,14 @@ impl Game<'_> {
     pub(super) fn native_block_state_definition(
         &self,
         block: BlockKey,
-    ) -> Option<Vec<BlockStateProperty>> {
+    ) -> Option<Vec<StateProperty>> {
         let resolved = mod_api::__private::resolved_block(block)?;
         let state = self.pack.assets.registry.state(resolved.default)?;
         let properties = self.pack.block_registries.blocks.get(&state.name)?;
         Some(
             properties
                 .iter()
-                .map(|(name, values)| BlockStateProperty::new(name.clone(), values.clone()))
+                .map(|(name, values)| StateProperty::new(name.clone(), values.clone()))
                 .collect(),
         )
     }
@@ -109,14 +116,24 @@ impl Game<'_> {
         &self,
         state: BlockStateId,
         block: BlockKey,
-        constraints: &[BlockStateConstraint],
-    ) -> Option<Result<bool, BlockStateMatchError>> {
+        constraints: &[StateConstraint],
+    ) -> Option<Result<bool, StateMatchError>> {
         let resolved = mod_api::__private::resolved_block(block)?;
         let registry = self.pack.assets.registry;
         let target = registry.state(resolved.default)?;
         let state = registry.state(state)?;
         let definition = self.pack.block_registries.blocks.get(&target.name)?;
-        Some(match_state(definition, target, state, constraints))
+        Some(match_state_properties(
+            definition,
+            state.name == target.name,
+            |name, value| {
+                state
+                    .properties
+                    .get(name)
+                    .is_some_and(|actual| actual == value)
+            },
+            constraints,
+        ))
     }
 
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
@@ -150,24 +167,21 @@ impl Game<'_> {
     }
 }
 
-fn match_state(
+pub(super) fn match_state_properties(
     definition: &[(String, Vec<String>)],
-    target: &BlockState,
-    state: &BlockState,
-    constraints: &[BlockStateConstraint],
-) -> Result<bool, BlockStateMatchError> {
-    let mut matches = state.name == target.name;
+    same_type: bool,
+    has_value: impl Fn(&str, &str) -> bool,
+    constraints: &[StateConstraint],
+) -> Result<bool, StateMatchError> {
+    let mut matches = same_type;
     for (index, constraint) in constraints.iter().enumerate() {
         let Some((_, values)) = definition.iter().find(|(name, _)| name == &constraint.name) else {
-            return Err(BlockStateMatchError::UnknownProperty(index as u32));
+            return Err(StateMatchError::UnknownProperty(index as u32));
         };
         if !values.contains(&constraint.value) {
-            return Err(BlockStateMatchError::InvalidValue(index as u32));
+            return Err(StateMatchError::InvalidValue(index as u32));
         }
-        matches &= state
-            .properties
-            .get(&constraint.name)
-            .is_some_and(|value| value == &constraint.value);
+        matches &= has_value(&constraint.name, &constraint.value);
     }
     Ok(matches)
 }
@@ -277,25 +291,31 @@ mod tests {
         let (reg, registry) = blocks();
         let target = registry.state(BlockStateId(1)).unwrap();
         let definition = &reg.blocks["minecraft:oak_stairs"];
-        let check = |id, constraints: &[BlockStateConstraint]| {
-            match_state(
+        let check = |id, constraints: &[StateConstraint]| {
+            let state = registry.state(BlockStateId(id)).unwrap();
+            match_state_properties(
                 definition,
-                target,
-                registry.state(BlockStateId(id)).unwrap(),
+                target.name == state.name,
+                |name, value| {
+                    state
+                        .properties
+                        .get(name)
+                        .is_some_and(|actual| actual == value)
+                },
                 constraints,
             )
         };
-        let east = BlockStateConstraint::new("facing", "east");
+        let east = StateConstraint::new("facing", "east");
         assert_eq!(check(4, std::slice::from_ref(&east)), Ok(true));
         assert_eq!(check(1, std::slice::from_ref(&east)), Ok(false));
         assert_eq!(check(0, std::slice::from_ref(&east)), Ok(false));
         assert_eq!(
-            check(4, &[BlockStateConstraint::new("shape", "straight")]),
-            Err(BlockStateMatchError::UnknownProperty(0))
+            check(4, &[StateConstraint::new("shape", "straight")]),
+            Err(StateMatchError::UnknownProperty(0))
         );
         assert_eq!(
-            check(4, &[BlockStateConstraint::new("facing", "up")]),
-            Err(BlockStateMatchError::InvalidValue(0))
+            check(4, &[StateConstraint::new("facing", "up")]),
+            Err(StateMatchError::InvalidValue(0))
         );
         assert_eq!(check(4, &[]), Ok(true));
         assert_eq!(definition.len(), 2);

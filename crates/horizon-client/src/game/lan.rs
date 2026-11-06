@@ -924,7 +924,7 @@ pub(super) fn mob_meta(
         }
         // Villager.DATA_VILLAGER_DATA and ZombieVillager's (after Zombie's three).
         "minecraft:villager" | "minecraft:zombie_villager" => {
-            use horizon_client::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+            use horizon_client::mobs::render::VILLAGER_TYPES;
             if kind == "minecraft:villager" {
                 unhappy_counter(m, meta, defaults);
             } else {
@@ -935,7 +935,7 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = PROFESSIONS[e.variant2 as usize % PROFESSIONS.len()];
+            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -2655,8 +2655,12 @@ impl Game<'_> {
                 streaming: Some(&self.streaming),
             };
             host.hub.movement_checks = (
-                self.ui.rules.bool("player_movement_check"),
-                self.ui.rules.bool("elytra_movement_check"),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
             );
             host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
             let pass = self.level_pass;
@@ -3003,8 +3007,12 @@ impl Game<'_> {
                     streaming: Some(&self.streaming),
                 };
                 host.hub.movement_checks = (
-                    self.ui.rules.bool("player_movement_check"),
-                    self.ui.rules.bool("elytra_movement_check"),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
                 );
                 // IntegratedServer.getScaledTrackingDistance: the Entity Distance
                 // option scales what an integrated server or a LAN host tracks (a
@@ -3013,10 +3021,16 @@ impl Game<'_> {
                     host.hub.entity_range_percent =
                         (self.settings.entity_distance * 100.0).round() as i32;
                 }
-                host.hub
-                    .set_immediate_respawn(self.ui.rules.bool("immediate_respawn"));
-                host.hub
-                    .set_limited_crafting(self.ui.rules.bool("limited_crafting"));
+                host.hub.set_immediate_respawn(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::IMMEDIATE_RESPAWN),
+                );
+                host.hub.set_limited_crafting(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::LIMITED_CRAFTING),
+                );
                 // A server with several levels runs a pass for each
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
@@ -3585,7 +3599,10 @@ impl Game<'_> {
         // covers what the player tracks (`ChunkTrackingView`, within its view
         // distance + 1) and those chunks' lit neighbours.
         let radius = host.hub.config.view_distance + 1;
-        let rule = self.ui.rules.bool("spectators_generate_chunks");
+        let rule = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPECTATORS_GENERATE_CHUNKS);
         // The held players are sent the level, so their chunks are kept as the placed ones'.
         self.streaming.extra = host
             .hub

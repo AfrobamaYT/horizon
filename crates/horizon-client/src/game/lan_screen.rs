@@ -568,7 +568,8 @@ impl Game<'_> {
         // The response itself lists the server's available rules; the client
         // may not own this world's level.dat (including on the server thread).
         let features = if entries.iter().any(|e| {
-            horizon_client::gamerules::rule(&e.name)
+            horizon_client::gamerules::rule_registry()
+                .rule(&e.name)
                 .is_some_and(|r| r.name == horizon_client::gamerules::MAX_MINECART_SPEED.name)
         }) {
             vec![horizon_client::gamerules::MINECART_IMPROVEMENTS.to_owned()]
@@ -685,8 +686,8 @@ impl Game<'_> {
             return;
         }
         for (name, value) in changes {
-            if self.ui.rules.set(name, value) {
-                self.game_rule_changed(name, value, None);
+            if self.ui.rules.set(&name, value) {
+                self.game_rule_changed(&name, value, None);
             }
             self.system_message(Text::tr("commands.gamerule.set", &[&name, &value]));
         }

@@ -276,7 +276,9 @@ authoritative context or an unavailable mapping returns `None`, not a stale memb
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
 `schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by
-`block_state_id`, tag names and fluid ids are separate domains and remain strings.
+`block_state_id`, tag names and existing fluid operation arguments remain strings for now.
+
+Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and the remaining fluid operations move to these keys in subsequent changes.
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
@@ -339,10 +341,11 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 
 `r.block_entity_type_key("other:press")` looks up another mod's type, and
 `r.block_entity_type_key("minecraft:chest")` looks up a vanilla type. Both return the same opaque
-`BlockEntityTypeKey` as the declaration builder: equality and hashing use the type ID, not its blocks.
-The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
-and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
-`minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+`BlockEntityTypeKey` as the declaration builder: equality and hashing use the shared load-owned
+registration slot, not the type's blocks. Bare names use the `minecraft:` namespace. The final
+registry resolves requests after all declarations and refuses unknown IDs, naming the requesting mod
+and type. `key.id(host)` reads the canonical name for diagnostics; a key retains its identity until
+restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
 `living.hurt_and_break(host, slot, amount)` changes equipped durability on the server; negative amounts repair. It returns the pre-shrink stack only on break, and `None` when nothing breaks or the entity or slot is unavailable. Creative players' equipment is exempt. The operation does not fire equip effects.
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
@@ -662,6 +665,8 @@ tables. Fact queries and matching allocate nothing; `definition` copies the prop
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
 | `definition(block)` | Property names and legal serialized values |
 | `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
+
+Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
 

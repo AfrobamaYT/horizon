@@ -452,7 +452,13 @@ impl Game<'_> {
             if self.exec.returned.is_some() {
                 break;
             }
-            if self.exec.commands > self.ui.rules.int("max_command_sequence_length").max(1) as u32 {
+            if self.exec.commands
+                > self
+                    .ui
+                    .rules
+                    .int_at(horizon_client::gamerules::vanilla::MAX_COMMAND_SEQUENCE_LENGTH)
+                    .max(1) as u32
+            {
                 break;
             }
         }
@@ -1078,6 +1084,9 @@ mod tests {
         .unwrap();
         with_game(|game| {
             game.load_world(WorldRequest {
+                rule_registry: std::sync::Arc::new(
+                    horizon_client::gamerules::RuleRegistry::vanilla(),
+                ),
                 save_root: root.clone(),
                 folder: "test".into(),
                 name: Some("test".into()),

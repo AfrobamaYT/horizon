@@ -202,7 +202,11 @@ impl SpawnLevel for PatrolCx<'_, '_, '_> {
 }
 impl PatrolLevel for PatrolCx<'_, '_, '_> {
     fn spawn_patrols(&self) -> bool {
-        self.level.game.ui.rules.bool("spawn_patrols")
+        self.level
+            .game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_PATROLS)
     }
     fn bright_outside(&self) -> bool {
         self.level.game.dim == Dim::Overworld && self.level.game.sky_darken() < 4
@@ -457,7 +461,10 @@ impl Game<'_> {
         amplifier: Option<i32>,
     ) -> Option<i32> {
         if self.spectator()
-            || !self.ui.rules.bool("raids")
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::RAIDS)
             || !self.gameplay_attribute(horizon_client::patrol::CAN_START_RAID, at)
         {
             return None;
@@ -662,7 +669,13 @@ impl Game<'_> {
                 centers: &centers,
             };
             let members = |id: i32| infos.get(&id).cloned().unwrap_or_default();
-            raids.tick(&lvl, self.ui.rules.bool("raids"), &members)
+            raids.tick(
+                &lvl,
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::RAIDS),
+                &members,
+            )
         };
         self.raiding.raids = raids;
         for (id, (old, _)) in old_states {
@@ -1308,7 +1321,14 @@ impl Game<'_> {
                 game.world.day_time,
             )
         };
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         let mut random = std::mem::replace(
             &mut self.world.random,
             horizon_core::random::LegacyRandom::new(0),
@@ -1349,7 +1369,14 @@ impl Game<'_> {
         if self.dim != Dim::Overworld {
             return;
         }
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         if self.sky_darken() < 4 || !enemies {
             self.raiding.siege.tonight = false;
             self.raiding.siege.set_up = false;

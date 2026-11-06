@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Client window and screen state
+
+`ClientHost::window_focused()` reports the last focus state from the window
+system. `ClientHost::observed_screen_id()` returns the same ID screen hooks see,
+including overlays. `None` means no view is available: there may be no open
+screen or no renderer yet. It does not mean the client is outside a world.
+Read again after a screen or focus change.
+
 ## Input preferences
 
 `ClientHost::input_options()` returns a copy of the current mouse and movement
@@ -813,7 +821,7 @@ or transactions. Declarations still go on each event or registrar.
 
 - `native_item_decorations(stack, x, y, batch)` appends custom GUI drawing after the default bar, cooldown shade and count have been painted for an item icon. The stack is the displayed stack, x/y are its icon's top-left in GUI units, the units the batch takes (no item-local translation remains active). Existing GUI helpers can draw badges, text and overlays. The shared path covers the hotbar, carried stacks, menu slots, recipe book and item tooltip icons, and the item icons of the advancement, beacon, stats and trading screens. `native_item_bar` still controls the bar separately; this hook does not suppress vanilla decorations.
 
-- Using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player and LAN alike. `native_use_animation` picks the first person pose of a use (eat, drink, bow, trident, brush), and `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client.
+- Using an item over time, as vanilla's `Item.getUseDuration`, `getUseAnimation` and `finishUsingItem` and NeoForge's `LivingEntityUseItemEvent.Start` and `.Finish`. `native_use_duration` answers a stack's use time: a mod's own item with no use of vanilla's that answers above 0 is used over time on a right click, until it is let go or the time runs out, on single player and LAN alike. `native_use_animation` changes the item's vanilla use animation, including specialised item poses, each first-person frame and each local or remote player model tick; a spear override without kinetic data is refused. `native_can_eat` decides whether a food can be eaten now. `native_living_entity_use_item_start` may change a use's duration or refuse it, on the server and where the window's client predicts the use, and on the server `native_living_entity_use_item_finish` may replace what the hand holds once the time ran out (consumables, potions and mods' items). Both take the using entity, None for a player, so mobs can fire them later, and the hand in use. Change the world only where this game runs the world, not on a server's client.
 
 - Items and block state properties for drawing mod block entities: in `native_block_entity_submit`, `native_draw_item(draw,
   stack, display, owner_yaw, seed)` draws an item stack under `draw`'s pose as a campfire's or a shelf's
@@ -1305,6 +1313,12 @@ registration path.
 - The in-world HUD's two moments, as NeoForge's `RenderGuiEvent.Pre` and `.Post`: `render_gui_pre(host, event)` runs once a frame in a world, before any vanilla HUD layer, and a mod that returns `Flow::Cancel` hides the whole HUD as F1 does (no layer, no `gui_layer_pre` or `gui_layer_post`, no `render_gui_post`, no chat or toasts); it is not heard under F1 or while a server dialog or the connection screen covers the window. `render_gui_post(host, draw, corners)` is the old `hud` hook, unchanged: it draws after the minimap, so a mod that implemented `hud` implements `render_gui_post`. Client side; a frame with no listener costs one branch each.
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
+- How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
+  `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a
+  second or the server's slower `/tick rate`, and may set another, once a frame before that frame's client ticks run.
+  25 runs the client twice as fast, 100 half as fast, still at most ten ticks a frame; an answer that is not a finite
+  number above zero keeps vanilla's. Only the window's clock changes; a server keeps its own rate. Client side; with no
+  listener, one branch a frame.
 
 - A player swapping their main and off hand items: `native_player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back.
 
@@ -2488,8 +2502,10 @@ handle, an entity the client doesn't track and a level it doesn't show:
   change and no draw. `set_owner` on an arrow also allows pickup for a player owner (`AbstractArrow.setOwner`);
   `deflect` does not (vanilla's `EntityReference` overload). Arrows (and a mob's trident for
   `pickup`) also have `pickup`/`set_pickup` (`NativeArrowPickup`), `base_damage`/`set_base_damage` and
-  `critical`/`set_critical`; the critical flag reaches clients through the entity data, and the others are
-  server-only as in vanilla.
+  `critical`/`set_critical` and `pierce_level`/`set_pierce_level`. The pierce level is a signed byte:
+  vanilla stores all values from -128 through 127 unchanged, and nonpositive values do not pierce. The
+  typed result distinguishes a stale handle, a non-arrow projectile and a wrong-side host. The critical
+  flag reaches clients through entity data; these handle methods operate on the server.
 - `living.drop(host, stack, throw_randomly, include_thrower_name)` throws a stack the mod holds from the eyes
   (`LivingEntity.drop`) and gives the item entity; it never touches a slot. `is_tamed(host)` and `owner(host)` read a
   tamable mob or a horse (`TamableAnimal.isTame`, its owner's UUID).
@@ -3147,3 +3163,31 @@ It searches the world's saved templates before data packs and returns the rotate
 in vanilla placement order, with each transformed state and its saved block-entity data. It uses
 the palette selected at `at`; processors and entities are not included. Invalid or missing names
 return `None`. A builder can retain this snapshot and place its blocks over time.
+
+## Entity model layers
+
+`Hooks::layer_definitions` is the client registration-phase counterpart of NeoForge 26.3's
+`EntityRenderersEvent.RegisterLayerDefinitions`. It receives a `RegistrationContext`, once at
+client startup, and collects `(id, LayerDefinition)` entries in dependency order. Dedicated
+and integrated server roles do not fire this client event. IDs are `<mod id>:<model>#<layer>`;
+vanilla-namespace, malformed and duplicate IDs are logged and left out.
+
+A `LayerDefinition` holds a `MeshDefinition` of named parts whose `CubeListBuilder` boxes sit
+at a `PartPose`, on a texture of the given size. Texture offsets, mirroring and
+`CubeDeformation` match vanilla's model builders. This listener is compiled in the API tests:
+
+```rust,ignore
+{{#include ../../../../crates/horizon-client/tests/mod_api_hooks.rs:layer_definitions}}
+```
+
+`ClientHost::bake_layer` bakes a registered layer or a vanilla layer by its
+`entity-models.json` name (`minecraft:zombie#main`) into an owned `ModelPart` tree. Bake once
+and keep it. Before each frame, call `reset_all_poses` and set the parts' positions and
+rotations as `setupAnim` does. A layer unavailable from the cached mob types is read from
+resources for each bake, so do not bake it every frame.
+
+Draw the tree with `BlockEntityDrawContext::model_part`, using the same draw context the mob
+or block entity submit hook received. There is no separate Host drawing helper. Positions
+are texels, +y down and the front towards -z; convert the mob's frame with scale
+`[1.0, -1.0, -1.0]` then translation `[0.0, -1.501, 0.0]`, as `LivingEntityRenderer` does.
+The sprite is the entity texture ID and the tint is `0xRRGGBB`.

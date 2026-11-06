@@ -360,7 +360,7 @@ fn direction(face: i32) -> [i32; 3] {
 fn building_players(host: &LanHost) -> Vec<BuildingPlayer> {
     host.hub
         .guests
-        .iter()
+        .simulation_iter()
         .map(|g| BuildingPlayer {
             conn: Some(g.conn),
             dimension: Dim::from_id(&g.dimension),
@@ -396,7 +396,7 @@ impl Game<'_> {
         super::dedicated::crash_fixture("guest", || {
             self.lan
                 .as_ref()
-                .is_some_and(|host| host.hub.guests.iter().any(|g| g.conn == conn && g.placed))
+                .is_some_and(|host| host.hub.guest(conn).is_some_and(|g| g.placed))
         });
         let dimension =
             (self.serving.is_some() || self.options.dedicated.is_some()).then_some(self.dim.id());
@@ -408,12 +408,7 @@ impl Game<'_> {
 
     /// Where guest `conn` is in the hub's list.
     pub(super) fn guest_index(&self, conn: u32) -> Option<usize> {
-        self.lan
-            .as_ref()?
-            .hub
-            .guests
-            .iter()
-            .position(|g| g.conn == conn)
+        self.lan.as_ref()?.hub.guests.connection_index(conn)
     }
 
     /// `as_guest`, with the system messages the guest's action earns (the
@@ -1705,6 +1700,18 @@ impl Game<'_> {
             host.hub.guest(conn).is_some_and(|g| g.spectator())
                 && self.boat_loot_pending(self.boats[i].id)
         });
+        if spectator_pending {
+            // ServerPlayer.openMenu: the refused spectator's action bar, red.
+            let message = horizon_client::text::Text::translate("container.spectatorCantOpen", &[])
+                .with_color(horizon_client::text::RED);
+            host.hub.send_to(
+                conn,
+                &C::SystemChat(play::SystemChat {
+                    content: horizon_client::lan::data::component_nbt(&message.component()),
+                    overlay: true,
+                }),
+            );
+        }
         if spectator_pending || !self.guest_may_open(conn, menu, None) {
             let viewed = self.lan.as_ref().is_some_and(|host| {
                 host.hub
@@ -2954,7 +2961,7 @@ impl Game<'_> {
             S::SetGameRule(p) if permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
-                        if let Some(rule) = horizon_client::gamerules::rule(&entry.name)
+                        if let Some(rule) = self.ui.rules.rule(&entry.name).cloned()
                             && let Some(value) = self.ui.rules.get(rule.name)
                         {
                             let Some(host) = self.lan.as_ref() else {
@@ -3523,7 +3530,7 @@ impl Game<'_> {
         if let Some(g) = host
             .hub
             .guests
-            .iter()
+            .simulation_iter()
             .find(|g| g.entity_id == id && g.conn != conn && host.hub.here(g))
         {
             return Some(g.bounds());
@@ -3959,7 +3966,10 @@ impl Game<'_> {
             return Err(ActionRefused::Stale);
         };
         let (old_yaw, old_pitch) = (host.hub.guests[gi].yaw, host.hub.guests[gi].pitch);
-        if self.look_at_entity(gi, id, None).is_none() {
+        let boat = self.boats.iter().position(|boat| boat.id as i32 == id);
+        // A packet names its target already. Keep the attacker's actual yaw
+        // for the boat's knockback instead of aiming a ray at its center.
+        if boat.is_none() && self.look_at_entity(gi, id, None).is_none() {
             return Err(ActionRefused::InvalidTarget);
         }
         // A mace's smash sets the attacker's velocity and sends it at once, before the
@@ -3970,7 +3980,12 @@ impl Game<'_> {
                     .player
                     .as_mut()
                     .is_some_and(|p| std::mem::take(&mut p.health.sync_velocity));
-                g.attack();
+                if let Some(index) = boat {
+                    g.strike_boat(index);
+                    g.swing_arm();
+                } else {
+                    g.attack();
+                }
                 let p = g.player.as_mut()?;
                 let sent = std::mem::replace(&mut p.health.sync_velocity, marked);
                 sent.then_some(p.velocity)
@@ -4464,7 +4479,12 @@ impl Game<'_> {
             progress: g.xp_progress,
             total: g.xp_total,
         };
-        xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+        xp.respawn(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                || g.game_mode == SPECTATOR,
+        );
         (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
         // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
         // the new player not yet placed.
@@ -4907,7 +4927,12 @@ impl Game<'_> {
                 progress: g.xp_progress,
                 total: g.xp_total,
             }
-            .death_reward(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
+            .death_reward(
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::KEEP_INVENTORY)
+                    || g.game_mode == SPECTATOR,
+            );
             let (name, uuid) = (g.name.clone(), g.uuid);
             // ServerPlayer.die: dropAllDeathLoot unless a spectator, from the eyes less 0.3.
             let drops = (g.game_mode != SPECTATOR)
@@ -4926,7 +4951,11 @@ impl Game<'_> {
             // ServerPlayer.die: with showDeathMessages, the message goes to
             // the dying player's death screen and to everyone the team lets
             // see it; without it, the death screen gets an empty one.
-            let message = if self.ui.rules.bool("show_death_messages") {
+            let message = if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SHOW_DEATH_MESSAGES)
+            {
                 let me = self.player_text(&name, uuid);
                 let text = match cause {
                     Some(key) => horizon_client::text::Text::translate(&key, &[me]),
@@ -5455,7 +5484,12 @@ impl Game<'_> {
 
     /// `SleepStatus.sleepersNeeded`.
     fn sleepers_needed(&self, active: i64) -> i64 {
-        let percent = i64::from(self.ui.rules.int("players_sleeping_percentage").max(0));
+        let percent = i64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+                .max(0),
+        );
         ((active * percent + 99) / 100).max(1)
     }
 
@@ -5484,7 +5518,12 @@ impl Game<'_> {
             return;
         }
         // ServerLevel.canSleepThroughNights.
-        if self.ui.rules.int("players_sleeping_percentage") > 100 {
+        if self
+            .ui
+            .rules
+            .int_at(horizon_client::gamerules::vanilla::PLAYERS_SLEEPING_PERCENTAGE)
+            > 100
+        {
             return;
         }
         let needed = self.sleepers_needed(active);
@@ -5741,8 +5780,10 @@ impl Game<'_> {
             let mut events = std::mem::take(&mut w.player.events);
             // LayeredCauldronBlock.handleEntityOnFireInside along those moves.
             for event in &events {
-                if let MotionEvent::CauldronExtinguish { pos } = event {
-                    game.cauldron_extinguish(*pos);
+                match event {
+                    MotionEvent::CauldronExtinguish { pos } => game.cauldron_extinguish(*pos),
+                    MotionEvent::PowderSnowMelt { pos } => game.powder_snow_melt(*pos),
+                    _ => {}
                 }
             }
             // Entity.baseTick: rain puts out a burning player.
@@ -5946,6 +5987,11 @@ impl Game<'_> {
                             .entity_event(g.entity_id, super::combat::DROWN_EVENT);
                     }
                     self.drown_particles(at, [0.0; 3]);
+                }
+                // ServerPlayer.onInsideBlock: the enter_block trigger, for the
+                // player who moved.
+                MotionEvent::EnterBlock { state } => {
+                    self.as_guest(conn, |game| game.trigger_enter_block(state));
                 }
                 // HoneyBlock.maybeDoSlideEffects: the sound reaches the
                 // others (Player.playSound excludes the player, whose client
@@ -7052,10 +7098,14 @@ mod tests {
                 NativeBlockUpdateFlags::NEIGHBORS
             ));
             assert!(!game.lan_open_container(12, (2, 64, 0)));
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
-            game.lan.as_mut().unwrap().hub.guests[0].kind = GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(game.lan_open_container(12, (0, 64, 0)));
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
         });

@@ -593,11 +593,12 @@ impl Game<'_> {
             return Err(ActionRefused::Stale);
         }
         let found = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().enumerate().find(|(_, g)| {
-                g.placed
-                    && g.uuid == player.fields().uuid
-                    && g.entity_id as u32 == player.fields().entity.id()
-            })
+            let index = host
+                .hub
+                .guests
+                .identity_index(player.fields().uuid, player.fields().entity.id())?;
+            let guest = host.hub.guests.get(index)?;
+            guest.placed.then_some((index, guest))
         });
         let (gi, conn) = match found {
             Some((gi, g)) if g.is_fake() => (gi, g.conn),
@@ -783,7 +784,7 @@ impl Game<'_> {
             ));
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().find(|guest| {
+            host.hub.guests.simulation_iter().find(|guest| {
                 guest.placed
                     && guest.participates_online()
                     && guest.uuid == uuid
@@ -880,13 +881,12 @@ impl Game<'_> {
         {
             return Some(read);
         }
-        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
-            guest.placed
-                && guest.is_fake()
-                && guest.uuid == player.fields().uuid
-                && guest.entity_id as u32 == player.fields().entity.id()
-                && !self.lan_guest_swaps.contains(&guest.conn)
-        })?;
+        let guests = &self.lan.as_ref()?.hub.guests;
+        let guest = guests
+            .get(guests.identity_index(player.fields().uuid, player.fields().entity.id())?)?;
+        if !guest.placed || !guest.is_fake() || self.lan_guest_swaps.contains(&guest.conn) {
+            return None;
+        }
         Some(PlayerRead::Guest(guest))
     }
 
@@ -3782,8 +3782,13 @@ mod fake_action_tests {
                             assert_eq!(outcome, Ok(expected));
                         }
                     }
-                    let per_tick = start.elapsed() / ticks;
-                    let per_action = per_tick / count as u32;
+                    let elapsed = start.elapsed();
+                    let per_tick = elapsed / ticks;
+                    let per_action = elapsed / (ticks * players.len() as u32);
+                    eprintln!(
+                        "fake_action kind={kind:?} players={count} ns_per_action={}",
+                        per_action.as_nanos()
+                    );
                     println!(
                         "{kind:?}, {count} fakes: {per_tick:?} a tick, {per_action:?} an action"
                     );

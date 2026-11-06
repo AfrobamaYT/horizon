@@ -68,8 +68,12 @@ impl Game<'_> {
         }
         let interaction = match blast {
             NativeBlast::Keep => BlockInteraction::Keep,
-            NativeBlast::Block => self.destroy_type("block_explosion_drop_decay"),
-            NativeBlast::Tnt => self.destroy_type("tnt_explosion_drop_decay"),
+            NativeBlast::Block => {
+                self.destroy_type(horizon_client::gamerules::vanilla::BLOCK_EXPLOSION_DROP_DECAY)
+            }
+            NativeBlast::Tnt => {
+                self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY)
+            }
         };
         // `Level.explode(null, ...)`: no source. Called from inside another
         // blast (`native_explosion_detonate`), it must not take that blast's

@@ -66,7 +66,7 @@ impl Game<'_> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
-        BlockEntityTypeKey::registered(save::block_entity_id(block_entity, block))
+        mod_api::__private::block_entity_type_key(save::block_entity_id(block_entity, block))
     }
 
     /// The block entity's position.
@@ -538,12 +538,14 @@ mod tests {
             assert!(!player.open_menu(game, chest));
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
             game.lan = host;
-            game.lan.as_mut().unwrap().hub.guests[0].kind =
-                horizon_client::lan::guest::GuestKind::Fake;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Fake;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Cancelled);
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].kind =
-                horizon_client::lan::guest::GuestKind::Network;
+            let mut guest = game.lan.as_mut().unwrap().hub.guests.remove(0);
+            guest.kind = horizon_client::lan::guest::GuestKind::Network;
+            game.lan.as_mut().unwrap().hub.guests.insert(0, guest);
             assert!(player.open_menu(game, chest));
             let stick_lock = compound("{items:\"minecraft:stick\"}");
             assert!(chest.set_lock(game, Some(stick_lock.clone())));
@@ -638,8 +640,8 @@ mod tests {
             ));
             assert_eq!(slot3(game), Some(3));
             assert_eq!(
-                chest.kind(game).as_ref().map(|kind| kind.id()),
-                Some("minecraft:chest")
+                chest.kind(game).map(|kind| kind.id(game)),
+                Some("minecraft:chest".to_owned())
             );
             assert_eq!(chest.position(game), Some([0, 64, 0]));
             assert!(!chest.merge_data(game, compound(stick)), "no change");

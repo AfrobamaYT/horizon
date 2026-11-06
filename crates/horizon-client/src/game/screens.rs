@@ -405,7 +405,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size);
+            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
             (b.width, b.height)
         };
         let links = !self.server_links().is_empty();
@@ -454,7 +454,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size);
+            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
             (b.width, b.height)
         };
         let links = !self.server_links().is_empty();
@@ -725,7 +725,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let hit = death_buttons(b.width, b.height, self.level.hardcore)
             .into_iter()
             .find(|d| ui::hovered(self.cursor, d.0, d.1, 200.0, 20.0))

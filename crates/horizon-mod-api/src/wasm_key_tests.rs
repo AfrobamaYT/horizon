@@ -1,6 +1,9 @@
 //! Real generated imports against the canonical load-owned registry tables.
 use super::*;
-use crate::{Backend, BackendRef, BlockKey, EffectKey, Hooks, Host, ModEntry, Registrar};
+use crate::{
+    Backend, BackendRef, BlockEntityTypeKey, BlockKey, EffectKey, FluidKey, Hooks, Host, ModEntry,
+    Registrar,
+};
 
 #[test]
 fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
@@ -10,6 +13,14 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
             let block = r.block_key("stone");
             let effect = r.effect_key("speed");
+            let fluid = r.declare_fluid("chocolate");
+            assert_eq!(FluidKey::from_slot(fluid.0), Ok(fluid));
+            assert!(FluidKey::from_slot(fluid.0 + 1).is_err());
+            let block_entity = r.block_entity_type_key("test:machine");
+            assert_eq!(
+                BlockEntityTypeKey::from_slot(block_entity.0),
+                Ok(block_entity)
+            );
             assert_eq!(BlockKey::from_slot(block.0), Ok(block));
             assert_eq!(EffectKey::from_slot(effect.0), Ok(effect));
             assert!(BlockKey::from_slot(block.0 + 1).is_err());
@@ -42,11 +53,24 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     }
     crate::install_parts(&[ModEntry::new("boundary", Box::new(Requests))]).unwrap();
     crate::registry_keys::resolve_effects().unwrap();
+    crate::registry_keys::resolve_block_entity_types(
+        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+            Default::default(),
+            vec!["test:machine".into()],
+        ),
+    )
+    .unwrap();
     struct Table(Cell<usize>);
     impl Backend for Table {
         fn block_key_id(&self, key: BlockKey) -> String {
             self.0.set(self.0.get() + 1);
             crate::registry_keys::block_id(key).unwrap().to_owned()
+        }
+        fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
+            self.0.set(self.0.get() + 1);
+            crate::registry_keys::block_entity_type_name(key)
+                .unwrap()
+                .to_owned()
         }
         fn effect_key_id(&self, key: EffectKey) -> String {
             self.0.set(self.0.get() + 1);
@@ -102,6 +126,16 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         Imports::effect_key_id(&mut state, 0).unwrap(),
         "minecraft:speed"
     );
+    assert_eq!(
+        Imports::block_entity_type_key_id(&mut state, 0).unwrap(),
+        "test:machine"
+    );
+    assert!(
+        Imports::block_entity_type_key_id(&mut state, u32::MAX)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown BlockEntityTypeKey slot")
+    );
     // Canonical effect enumeration adds host-owned keys not explicitly requested by a mod.
     let poison = crate::part_table::tests::effect_key("poison");
     assert_ne!(poison.0, 0);
@@ -110,7 +144,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         "minecraft:poison"
     );
     let calls = table.0.get();
-    assert_eq!(calls, 3);
+    assert_eq!(calls, 4);
     for slot in [1, u32::MAX] {
         assert!(
             Imports::block_key_id(&mut state, slot)

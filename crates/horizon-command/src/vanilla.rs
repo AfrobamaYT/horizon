@@ -5,7 +5,7 @@ use super::{
     Dispatcher,
     args::{ArgType, Resource, integer},
 };
-use horizon_client_core::gamerules::{MINECART_IMPROVEMENTS, Value, available_rules};
+use horizon_client_core::gamerules::{MINECART_IMPROVEMENTS, Value, rule_registry};
 
 /// Permission levels (Commands.LEVEL_*).
 pub const ALL: u8 = 0;
@@ -298,7 +298,7 @@ fn registered_with_features(dev: bool, minecart_improvements: bool) -> Dispatche
     // gamerule <rule> [<value>] (short and namespaced names)
     let gr = d.literal(root, "gamerule");
     d.requires(gr, GAMEMASTERS);
-    for rule in available_rules(minecart_improvements) {
+    for rule in rule_registry().available_rules(minecart_improvements) {
         for name in [rule.name.to_owned(), format!("minecraft:{}", rule.name)] {
             let r = d.literal(gr, &name);
             d.executes(r, "gamerule");
