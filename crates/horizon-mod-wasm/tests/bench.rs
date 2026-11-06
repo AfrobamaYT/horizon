@@ -21,7 +21,7 @@ mod internals_bench;
 /// One overworld, and nothing else.
 struct World;
 
-impl mod_api::prelude::EntityHandlesHost for World {
+impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld")
             .then(|| LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD))
@@ -31,15 +31,15 @@ impl mod_api::prelude::EntityHandlesHost for World {
     }
 }
 impl Host for World {}
-mod_api::impl_host_areas!(World, except(entity_handles));
+mod_api::impl_host_areas!(World, except(entities));
 
-impl mod_api::prelude::BaseServerHost for World {
+impl mod_api::prelude::ConfigServerHost for World {
     fn tick_stats(&self) -> (f32, f64) {
         (20.0, 50.0)
     }
 }
 impl ServerHost for World {}
-mod_api::impl_server_host_areas!(World, except(base));
+mod_api::impl_server_host_areas!(World, except(config));
 
 /// One call of the hook `work` names: the server tick for `tick`, else the chat hook with
 /// `work` as the message; what the mod wrote back.

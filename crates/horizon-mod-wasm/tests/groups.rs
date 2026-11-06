@@ -17,18 +17,16 @@ fn overworld() -> LevelRef {
     LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
-impl mod_api::prelude::LevelReadsBackend for World {
+impl mod_api::prelude::LevelsBackend for World {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == overworld()
     }
-}
-impl mod_api::prelude::LevelWorldBackend for World {
     fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
         (level == overworld() && mod_api::__private::game_rule_bool_slot(key).is_some())
             .then_some(true)
     }
 }
-impl mod_api::prelude::BlockEntityRefsBackend for World {
+impl mod_api::prelude::BlockEntitiesBackend for World {
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         (entity.fields().position == [0, 64, 0])
             .then(|| mod_api::__private::block_entity_type_key("test:counter_box"))
@@ -36,14 +34,14 @@ impl mod_api::prelude::BlockEntityRefsBackend for World {
     }
 }
 impl Backend for World {}
-mod_api::impl_backend_areas!(World, except(level_reads, level_world, block_entity_refs));
+mod_api::impl_backend_areas!(World, except(block_entities, levels));
 
-impl mod_api::prelude::EntityHandlesHost for World {
+impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld").then(overworld)
     }
 }
-impl mod_api::prelude::BlockEntityRefsHost for World {
+impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
         Some(mod_api::__private::game::block_entity_ref(level, position))
     }
@@ -53,7 +51,7 @@ impl Host for World {
         Some(BackendRef::of(self))
     }
 }
-mod_api::impl_host_areas!(World, except(entity_handles, block_entity_refs));
+mod_api::impl_host_areas!(World, except(block_entities, entities));
 
 impl ServerHost for World {}
 mod_api::impl_server_host_areas!(World);

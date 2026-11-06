@@ -40,7 +40,7 @@ pub trait ServicesServerHost {
         )
     }
 }
-/// The client host's methods of the `services` area, implemented by the game and reached through [`ClientHost`].
+/// The client host's methods of the `services` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ServicesClientHost {
     /// The client_session service.
     /// Not on wasm: a frame resource; its methods are the imports.
