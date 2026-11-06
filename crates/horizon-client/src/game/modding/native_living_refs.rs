@@ -425,6 +425,120 @@ impl Game<'_> {
         player.attributes.value(Some(key), kind).ok()
     }
 
+    /// `Entity.canUsePortal`: the decision the game's own portal trip runs —
+    /// a player's (alive, nobody's passenger, not asleep: the gates
+    /// `client_inside_nether_portal` and the guest trip check), a mob's walk
+    /// gate (`mob_can_use_portal`, #1275's read: not a boss that never
+    /// travels, not a creaking bound to its heart, riding nothing, carrying
+    /// no one this side holds back). None for a stale handle, an armor stand
+    /// or the dragon: the portal walk carries neither as its own traveller.
+    pub(super) fn native_living_can_use_portal(&self, living: LivingRef) -> Option<bool> {
+        match self.native_living_read_target(living)? {
+            Target::Player => {
+                let p = self.player.as_ref()?;
+                Some(!p.health.dead_or_dying() && self.riding.is_none() && !p.sleeping)
+            }
+            Target::Guest(conn) => {
+                let g = self.command_guest(conn)?;
+                let p = g.motion.as_deref()?;
+                Some(!p.health.dead_or_dying() && g.vehicle.is_none() && !p.sleeping)
+            }
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                Some(self.mob_can_use_portal(m))
+            }
+            _ => None,
+        }
+    }
+
+    /// `Mob.isWithinMeleeAttackRange`: the melee goal's own reach check — the
+    /// mob's box inflated by sqrt(2.04) − 0.6 over the target's box, or an
+    /// active item's attack range for a mob (a spear's reach) — whether this
+    /// living entity's next melee strike reaches `target`. The check is a
+    /// mob's; a player's attack reach is another rule (the interaction range
+    /// attribute), so a player answers None.
+    pub(super) fn native_living_in_melee_range(
+        &self,
+        living: LivingRef,
+        target: EntityRef,
+    ) -> Option<bool> {
+        let Target::Mob(id) = self.native_living_read_target(living)? else {
+            return None;
+        };
+        let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+        let [min, max] = self.native_entity_bounding_box(target)?;
+        let bounds = horizon_core::geometry::Aabb::new(
+            horizon_core::geometry::Vec3::new(min[0], min[1], min[2]),
+            horizon_core::geometry::Vec3::new(max[0], max[1], max[2]),
+        );
+        Some(m.melee_reaches(bounds))
+    }
+
+    /// `LivingEntity.canFreeze`: the decision the freeze tick itself runs — a
+    /// mob's (`ai::can_freeze`: not `#freeze_immune_entity_types`, no
+    /// `#freeze_immune_wearables` worn), a player's (`PlayerMotion::can_freeze`:
+    /// not a spectator, no immune armor). None for a stale handle, an armor
+    /// stand or the dragon.
+    pub(super) fn native_living_can_freeze(&self, living: LivingRef) -> Option<bool> {
+        match self.native_living_read_target(living)? {
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                let w = self.mob_world_base(&[]);
+                Some(horizon_client::mobs::ai::can_freeze(m, &w))
+            }
+            t => Some(self.native_player_body(t)?.can_freeze()),
+        }
+    }
+
+    /// `LivingEntity.canBreatheUnderwater`: the species' own — the air tick's
+    /// gate — a fish's, an axolotl's, a construct's (`breathes_water`). A
+    /// player drowns: false, their air ticks down. None for a stale handle,
+    /// an armor stand or the dragon.
+    pub(super) fn native_living_can_breathe_underwater(
+        &self,
+        living: LivingRef,
+    ) -> Option<bool> {
+        match self.native_living_read_target(living)? {
+            Target::Mob(id) => Some(
+                self.mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.removed)?
+                    .kind
+                    .flags
+                    .breathes_water,
+            ),
+            Target::Player | Target::Guest(_) => Some(false),
+            _ => None,
+        }
+    }
+
+    /// The bed's facing of a sleeper, as the engine keeps it: a villager's
+    /// (or wandering trader's) saved sleep pose, the bed block's own `facing`
+    /// for a player or a guest. None for a stale handle, a kind that keeps
+    /// no bed, and anyone not asleep.
+    pub(super) fn native_living_bed_orientation(&self, living: LivingRef) -> Option<&'static str> {
+        match self.native_living_read_target(living)? {
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                horizon_client::mobs::villager::sleeping(m)
+                    .then(|| facing_name(m.extra.ints[1]))
+                    .flatten()
+            }
+            Target::Player | Target::Guest(_) => {
+                let p = self.native_living_sleeping_pos(living)?;
+                let w = self.mob_world_base(&[]);
+                match w.prop(p[0], p[1], p[2], "facing") {
+                    Some("north") => Some("north"),
+                    Some("south") => Some("south"),
+                    Some("west") => Some("west"),
+                    Some("east") => Some("east"),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// The entity's health (`LivingEntity.getHealth`; Paper's
     /// `Damageable#getHealth`). During a player's turn only that player
     /// resolves: the hub is out for their action, and other players'
@@ -1042,6 +1156,17 @@ impl Game<'_> {
         let item = self.just_spawned_item()?;
         item.thrower = thrower;
         Some(item.id)
+    }
+}
+
+/// A bed facing code (`villager::bed_facing_code`) as its name.
+fn facing_name(code: i32) -> Option<&'static str> {
+    match code {
+        1 => Some("north"),
+        2 => Some("south"),
+        3 => Some("west"),
+        4 => Some("east"),
+        _ => None,
     }
 }
 
@@ -2390,5 +2515,145 @@ mod tests {
         for (i, n) in names.iter().enumerate() {
             assert!(!names[..i].contains(n), "{n} named twice");
         }
+    }
+    /// The living reads of #943 answer the engine's own decisions.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_engines_own_portal_melee_freeze_and_air_answers() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use mod_api::Host;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            // Two zombies an arm's length apart, and one a stride away.
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(30, zombie.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0));
+            game.mobs
+                .push(Mob::new(31, zombie.clone(), Vec3::new(1.5, 64.0, 0.5), 0.0));
+            game.mobs
+                .push(Mob::new(32, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
+            let near = game.native_living(game.native_entity(30).unwrap()).unwrap();
+            let beside = game.native_entity(31).unwrap();
+            let far = game.native_entity(32).unwrap();
+
+            // The walk gate's own answers: alive and travelling, until dead.
+            {
+                let host: &dyn Host = game;
+                assert_eq!(near.can_use_portal(host), Some(true));
+            }
+            game.mobs[0].health = 0.0;
+            {
+                let host: &dyn Host = game;
+                assert_eq!(near.can_use_portal(host), Some(false));
+            }
+            game.mobs[0].health = 20.0;
+
+            // The melee goal's own reach: beside it, yes; a stride away, no.
+            // The freeze tick's decision, and a freeze-immune wearable on it.
+            // The air tick's gate: a zombie drowns.
+            {
+                let host: &dyn Host = game;
+                assert_eq!(near.in_melee_range(host, beside), Some(true));
+                assert_eq!(near.in_melee_range(host, far), Some(false));
+                assert_eq!(near.can_freeze(host), Some(true));
+                // The air tick's gate: whatever the species table holds for it.
+                assert_eq!(
+                    near.can_breathe_underwater(host),
+                    Some(game.mobs[0].kind.flags.breathes_water)
+                );
+            }
+            game.mobs[0].extra.equipment.set(
+                horizon_items::equipment::FEET,
+                Some(horizon_client::items::ItemStack::new("minecraft:leather_boots", 1)),
+            );
+            {
+                let host: &dyn Host = game;
+                assert_eq!(near.can_freeze(host), Some(false));
+            }
+
+            // A player's own answers: alive and awake, freezable, drowning.
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            {
+                let host: &dyn Host = game;
+                assert_eq!(player.can_use_portal(host), Some(true));
+                assert_eq!(player.can_freeze(host), Some(true));
+                assert_eq!(player.can_breathe_underwater(host), Some(false));
+            }
+            game.player.as_mut().unwrap().sleeping = true;
+            {
+                let host: &dyn Host = game;
+                assert_eq!(player.can_use_portal(host), Some(false));
+            }
+            game.player.as_mut().unwrap().sleeping = false;
+            game.player.as_mut().unwrap().freeze_immune = true;
+            {
+                let host: &dyn Host = game;
+                assert_eq!(player.can_freeze(host), Some(false));
+            }
+
+            // A squid breathes water; a stale handle answers nothing.
+            let squid = game
+                .res
+                .mob_types()
+                .get("minecraft:squid")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(33, squid, Vec3::new(7.5, 64.0, 0.5), 0.0));
+            let squid = game.native_living(game.native_entity(33).unwrap()).unwrap();
+            {
+                let host: &dyn Host = game;
+                assert_eq!(squid.can_breathe_underwater(host), Some(true));
+            }
+            game.mobs.clear();
+            {
+                let host: &dyn Host = game;
+                assert_eq!(near.can_use_portal(host), None);
+                assert_eq!(near.in_melee_range(host, beside), None);
+                assert_eq!(near.can_freeze(host), None);
+                assert_eq!(near.can_breathe_underwater(host), None);
+            }
+        });
+    }
+
+    /// A sleeper's bed orientation, as the engine keeps it (#943).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_sleepers_bed_orientation() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use mod_api::Host;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let villager = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(30, villager, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let sleeper = game.native_living(game.native_entity(30).unwrap()).unwrap();
+            let host: &dyn Host = game;
+            // Awake: no bed.
+            assert_eq!(sleeper.bed_orientation(host), None);
+            // `start_sleeping` keeps the bed's facing: a bed facing south.
+            game.mobs[0].extra.ints[1] = 2;
+            let host: &dyn Host = game;
+            assert_eq!(sleeper.bed_orientation(host), Some("south"));
+            game.mobs[0].extra.ints[1] = 1;
+            let host: &dyn Host = game;
+            assert_eq!(sleeper.bed_orientation(host), Some("north"));
+            game.mobs.clear();
+            let host: &dyn Host = game;
+            assert_eq!(sleeper.bed_orientation(host), None);
+        });
     }
 }

@@ -11,7 +11,7 @@ use mod_api::EntityRef;
 
 impl Game<'_> {
     /// A player's body, where it is kept now.
-    fn native_player_body(&self, t: Target) -> Option<&horizon_client::motion::PlayerMotion> {
+    pub(super) fn native_player_body(&self, t: Target) -> Option<&horizon_client::motion::PlayerMotion> {
         match t {
             Target::Player => self.player.as_ref(),
             Target::Guest(conn) => self.lan.as_ref()?.hub.guest(conn)?.motion.as_deref(),
