@@ -1418,7 +1418,7 @@ mod tests {
         let before = Fixture::new("struct Game; mod lan_actions;");
         before.put(
             "crates/horizon-client/src/game/lan_actions.rs",
-            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } fn action(&self, value: u8) -> u8 { value } }", 
+            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } fn action(&self, value: u8) -> u8 { value } }",
         );
         let after = Fixture::new("struct Game; mod lan_actions;");
         let directory = "crates/horizon-client/src/game/lan_actions";
