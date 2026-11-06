@@ -28,7 +28,7 @@ and from `farmland_trample`, the farmland-specific in-write event."#]
         neoforge = "ScreenEvent.Render.Pre (transparent background)",
         cancellable = true,
         out = "canceled",
-        target = "horizon_client::game::native_hooks::Game<'_>::native_screen_transparent_background"
+        target = "horizon_client::game::native_hooks::screen_transparent_background::Game<'_>::native_screen_transparent_background"
     )]
     fn screen_transparent_background();
 }
@@ -40,14 +40,14 @@ pub trait Helpers {
     /// API @API:screen_transparent_background@.
     #[helper(
         side = "client",
-        target = "horizon_client::game::native_hooks::Game<'_>::native_apply_screen_blur"
+        target = "horizon_client::game::native_hooks::screen_transparent_background::Game<'_>::native_apply_screen_blur"
     )]
     fn apply_screen_blur();
     /// The user's configured menu background blur radius (`menuBackgroundBlurriness` in options.txt,
     /// usually 0.0 to 10.0; default 5.0). 0.0 means blur is turned off. API @API:screen_transparent_background@.
     #[helper(
         side = "client",
-        target = "horizon_client::game::native_hooks::Game<'_>::native_menu_blur_radius"
+        target = "horizon_client::game::native_hooks::screen_transparent_background::Game<'_>::native_menu_blur_radius"
     )]
     fn menu_blur_radius();
     /// `Screen.renderMenuBackground`: draws the tiled menu background (32x32) across `rect`
@@ -56,7 +56,7 @@ pub trait Helpers {
     /// texture (`gui/menu_background`). API @API:screen_transparent_background@.
     #[helper(
         side = "client",
-        target = "horizon_client::game::native_hooks::Game<'_>::native_draw_menu_background"
+        target = "horizon_client::game::native_hooks::screen_transparent_background::Game<'_>::native_draw_menu_background"
     )]
     fn draw_menu_background();
     /// Repeats sprite `sprite` across `rect` (`[x, y, w, h]` in GUI pixels) with each tile
@@ -64,7 +64,7 @@ pub trait Helpers {
     /// API @API:screen_transparent_background@.
     #[helper(
         side = "client",
-        target = "horizon_client::game::native_hooks::Game<'_>::native_tiled_sprite"
+        target = "horizon_client::game::native_hooks::screen_transparent_background::Game<'_>::native_tiled_sprite"
     )]
     fn tiled_sprite();
 }

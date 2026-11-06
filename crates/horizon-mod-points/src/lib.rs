@@ -35,7 +35,7 @@ pub use registry::{RegisterError, register, stop};
 // hidden: the game's side of the points, not part of the API a mod is written against
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::registry::{POINTS, RawKind, RawListener, register_raw, seal};
+    pub use crate::registry::{POINTS, RawKind, RawListener, SITES, register_raw, seal, wrap};
     #[cfg(any(target_arch = "wasm32", feature = "wasm-host"))]
     pub use crate::wire;
     use crate::{PointId, Points};

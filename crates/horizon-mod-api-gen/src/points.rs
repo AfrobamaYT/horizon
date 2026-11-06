@@ -214,7 +214,7 @@ fn crate_files(root: &Path, krate: &str) -> Result<Vec<GameFile>, String> {
 
 /// The crates the points' own crate is built on (`horizon-mod-points` and everything under it), by
 /// library name: their functions can't be points, since their slots would have to reach up to it.
-fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
     let mut seen = std::collections::BTreeSet::from(["horizon_mod_points".to_owned()]);
     let mut pending = vec![root.join("crates/horizon-mod-points")];
     while let Some(package) = pending.pop() {
@@ -300,15 +300,16 @@ fn gated(attrs: &[syn::Attribute]) -> bool {
 }
 
 /// A point's function, as found in a parsed file.
-struct Found<'a> {
-    module: String,
+pub(crate) struct Found<'a> {
+    pub(crate) module: String,
     attrs: &'a [syn::Attribute],
     vis: &'a syn::Visibility,
-    sig: &'a syn::Signature,
+    pub(crate) sig: &'a syn::Signature,
+    pub(crate) body: &'a syn::Block,
     /// The `impl`'s type and generics; none for a free function.
     owner: Option<(&'a Type, &'a syn::Generics)>,
     /// Where the item that holds it ends: the `impl` block, or the function. Its raw types go there.
-    end: proc_macro2::LineColumn,
+    pub(crate) end: proc_macro2::LineColumn,
 }
 
 impl Found<'_> {
@@ -321,7 +322,7 @@ impl Found<'_> {
     }
 
     /// Its path in its crate, as an injection's `target` names it.
-    fn target(&self) -> String {
+    pub(crate) fn target(&self) -> String {
         match self.owner {
             Some((ty, _)) => format!("{}::{}::{}", self.module, owner(ty), self.sig.ident),
             None => format!("{}::{}", self.module, self.sig.ident),
@@ -384,7 +385,7 @@ impl Found<'_> {
 }
 
 /// `r#type` as `type`.
-fn unraw(ident: &syn::Ident) -> String {
+pub(crate) fn unraw(ident: &syn::Ident) -> String {
     ident.to_string().trim_start_matches("r#").to_owned()
 }
 
@@ -421,7 +422,7 @@ fn owner(ty: &Type) -> String {
 /// eligible function of its inherent `impl`s (a `Game` method only with a `&self`/`&mut self`
 /// receiver) and its free functions; elsewhere, those `keep` admits. Inline modules every build
 /// compiles count too.
-fn file_points<'a>(
+pub(crate) fn file_points<'a>(
     module: &str,
     items: &'a [Item],
     keep: &dyn Fn(&Found<'_>) -> bool,
@@ -443,6 +444,7 @@ fn file_points<'a>(
                     attrs: &function.attrs,
                     vis: &function.vis,
                     sig: &function.sig,
+                    body: &function.block,
                     owner: None,
                     end: function.block.brace_token.span.close().end(),
                 };
@@ -466,6 +468,7 @@ fn file_points<'a>(
                             attrs: &method.attrs,
                             vis: &method.vis,
                             sig: &method.sig,
+                            body: &method.block,
                             owner: Some((&block.self_ty, &block.generics)),
                             end: block.brace_token.span.close().end(),
                         };
@@ -659,7 +662,7 @@ pub struct Staged {
 }
 
 /// The byte offset of `at` in `source`, whose line starts are `lines`.
-fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
+pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
     let line = lines[at.line - 1];
     source[line..]
         .char_indices()
@@ -748,11 +751,18 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
-    // The two dependencies each lower crate gets, also written into the lock file's entry for
-    // it, so a `--locked` build of the staged copy accepts them.
+    dependencies(root, packages)?;
+    Ok(staged)
+}
+
+/// Give listed lower-crate points and sites their staged dependencies, including the lock file.
+pub(crate) fn dependencies(
+    root: &Path,
+    packages: std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
     const ADDED: [&str; 2] = ["horizon-mod-points", "horizon-mod-api-macros"];
     if packages.is_empty() {
-        return Ok(staged);
+        return Ok(());
     }
     let lock_path = root.join("Cargo.lock");
     // A Windows checkout has CRLF line endings; Cargo reads either, and the entries match on LF.
@@ -793,7 +803,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
     }
     fs::write(&lock_path, lock).map_err(|e| format!("{}: {e}", lock_path.display()))?;
-    Ok(staged)
+    Ok(())
 }
 
 /// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's

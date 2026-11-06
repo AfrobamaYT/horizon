@@ -58,6 +58,7 @@ mod agent_settings;
 mod allays;
 mod armor_stands;
 mod atlas_slots;
+mod attachment_index;
 mod attachment_sync;
 mod banners;
 mod beacon;
@@ -292,6 +293,7 @@ mod native_lifecycle;
 mod native_live_holder_tests;
 mod native_living_effects;
 mod native_living_flags;
+mod native_living_position;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -2875,6 +2877,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
+    standalone_geometry: native_block_entity_draw::StandaloneGeometry,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
     screen_fx: horizon_client::screen_effects::ScreenEffects,
@@ -3571,6 +3574,8 @@ struct Game<'a> {
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
+    /// Typed per-level membership follows dimensions, not the temporary world swap.
+    attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/remote.rs).
     remote: Option<remote::Remote>,
     /// This world is open to the network (game/lan.rs).
@@ -4675,6 +4680,7 @@ impl Game<'_> {
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
         let bob = self.particles.random().next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -15497,6 +15503,7 @@ impl Game<'_> {
         let p = Vec3::new(at[0], at[1], at[2]);
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -16036,20 +16043,19 @@ impl Game<'_> {
             let ticks_used =
                 owner.use_duration as f32 - (owner.use_item_remaining_ticks as f32 - a + 1.0);
             use horizon_client::first_person::ItemPose;
-            // ItemUseAnimation.SPEAR.
-            let animation = using.then(|| self.item_use_animation(&stack));
+            use item_use::ItemUseState;
+            let state = using.then(|| self.item_use_state(&stack));
             use horizon_world::consumable::UseAnimation;
-            let pose = match animation {
-                Some(UseAnimation::Spear) => ItemPose::Spear {
-                    kinetic: horizon_client::spear::Kinetic::of(&stack.item)
-                        .expect("spear animation requires kinetic data"),
+            let pose = match state {
+                Some(ItemUseState::Spear(timing)) => ItemPose::Spear {
+                    timing,
                     time_held: ticks_used,
                     ticks_since_hit: self.kinetic_hit_ticks(a),
                 },
-                Some(UseAnimation::Bow) => ItemPose::Bow { ticks_used },
-                Some(UseAnimation::Crossbow) | None
+                Some(ItemUseState::Other(UseAnimation::Bow)) => ItemPose::Bow { ticks_used },
+                Some(ItemUseState::Other(UseAnimation::Crossbow)) | None
                     if &*stack.item == "minecraft:crossbow"
-                        || animation == Some(UseAnimation::Crossbow) =>
+                        || state.map(ItemUseState::animation) == Some(UseAnimation::Crossbow) =>
                 {
                     let charged = stack.data().is_some_and(|d| !d.charged.is_empty());
                     ItemPose::Crossbow {
@@ -16059,13 +16065,15 @@ impl Game<'_> {
                         charged: charged && hand == Hand::Main,
                     }
                 }
-                Some(UseAnimation::Trident) => ItemPose::Trident { ticks_used },
+                Some(ItemUseState::Other(UseAnimation::Trident)) => {
+                    ItemPose::Trident { ticks_used }
+                }
                 // ItemUseAnimation.BRUSH: applyBrushTransform.
-                Some(UseAnimation::Brush) => ItemPose::Brush {
+                Some(ItemUseState::Other(UseAnimation::Brush)) => ItemPose::Brush {
                     remaining: owner.use_item_remaining_ticks as f32,
                     partial: a,
                 },
-                Some(animation) => item_use::use_pose(
+                Some(ItemUseState::Other(animation)) => item_use::use_pose(
                     animation,
                     owner.use_item_remaining_ticks as f32,
                     owner.use_duration as f32,
@@ -19892,6 +19900,15 @@ impl Game<'_> {
                 self.mapped_key_event(key, false, false)?;
                 return Ok(());
             }
+            if let WindowEvent::KeyboardInput { event, .. } = &event
+                && event.state == ElementState::Released
+                && self.screen == Screen::Options
+                && let PhysicalKey::Code(key) = event.physical_key
+            {
+                self.ui.options.modifiers = self.native_modifiers().bits;
+                let events = self.ui.options.key_released(&mut self.settings, key);
+                self.handle_option_events(events)?;
+            }
             // ScreenEvent.MouseButtonPressed.Pre / MouseButtonReleased.Pre:
             // the open screen hears of the press before anything reads it, and
             // a cancelled one goes no further — no hotbar key, no slot, no
@@ -21241,6 +21258,7 @@ impl<'a> Game<'a> {
         let mod_phase = mod_api::__private::PhaseOwner::new(phase);
         // A scoped hook on this thread asks this game's parts.
         mod_api::__private::mark_game_thread();
+        let standalone_geometry = native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         let loop_side = options.execution_role.loop_side();
         let root = options.resources.clone();
         let mod_sources = options.mods.clone();
@@ -21303,6 +21321,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
+            standalone_geometry,
             fog: Default::default(),
             screen_fx: Default::default(),
             item_activation: Default::default(),
@@ -21703,6 +21722,7 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            attachment_indexes: Default::default(),
             remote: None,
             lan: None,
             integrated: None,
@@ -23716,10 +23736,12 @@ fn start_game<'a>(
         result?;
         return Ok(None);
     }
-    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // The atlases the initial load stitched, then FMLClientSetupEvent: once per process, here in
+    // `run`, after the initial load applied.
     // A dedicated server has no client and returned above; a splitscreen guest's `run` is
     // another local player of the same process.
     if game.options.is_client_start() {
+        game.texture_atlases_stitched();
         game.native_client_setup();
     }
     // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.
@@ -24473,6 +24495,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
+    mods::register_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

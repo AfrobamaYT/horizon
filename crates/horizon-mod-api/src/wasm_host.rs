@@ -16,6 +16,10 @@ use wasmtime::component::{Component, Instance, Linker};
 
 use crate::wasm_refused::Refused;
 
+#[cfg(test)]
+#[path = "wasm_transport_tests.rs"]
+mod transport_tests;
+
 /// Why a linked group can't run, named for the Mods page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -147,6 +151,50 @@ impl Default for Budgets {
 // exhaustive: its fields are private
 pub struct State {
     limits: wasmtime::StoreLimits,
+    buffers: HashMap<std::any::TypeId, Box<dyn Any + Send>>,
+}
+
+impl State {
+    /// Reuses transport scratch owned by this store, including after a refused or trapped call.
+    /// Wasmtime's owned list bindings otherwise allocate a fresh host vector per crossing.
+    pub fn with_buffer<T: Default + Send + 'static, R>(
+        mut store: wasmtime::StoreContextMut<'_, Self>,
+        f: impl FnOnce(&mut T, wasmtime::StoreContextMut<'_, Self>) -> R,
+    ) -> R {
+        struct Scope<'a, T: Send + 'static> {
+            store: wasmtime::StoreContextMut<'a, State>,
+            buffer: Option<T>,
+        }
+        impl<T: Send + 'static> Drop for Scope<'_, T> {
+            fn drop(&mut self) {
+                *self
+                    .store
+                    .data_mut()
+                    .buffers
+                    .get_mut(&std::any::TypeId::of::<T>())
+                    .unwrap()
+                    .downcast_mut::<Option<T>>()
+                    .expect("scratch type matches its key") = self.buffer.take();
+            }
+        }
+        let buffer = store
+            .data_mut()
+            .buffers
+            .entry(std::any::TypeId::of::<T>())
+            .or_insert_with(|| Box::new(None::<T>))
+            .downcast_mut::<Option<T>>()
+            .expect("scratch type matches its key")
+            .take()
+            .unwrap_or_default();
+        let mut scope = Scope {
+            store,
+            buffer: Some(buffer),
+        };
+        f(
+            scope.buffer.as_mut().unwrap(),
+            wasmtime::AsContextMut::as_context_mut(&mut scope.store),
+        )
+    }
 }
 
 thread_local! {
@@ -813,7 +861,13 @@ pub fn instantiate(
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
         .build();
-    let mut store = Store::new(engine, State { limits });
+    let mut store = Store::new(
+        engine,
+        State {
+            limits,
+            buffers: HashMap::new(),
+        },
+    );
     store.limiter(|state| &mut state.limits);
     budgets.arm(&mut store, Call::Load);
     let instance: Instance = linker
@@ -981,6 +1035,18 @@ mod tests {
     }
 
     #[test]
+    fn world_line_array_tuple_roundtrip() {
+        let line = crate::WorldLine::new(
+            [1.25, -2.5, 3.75],
+            [4.0, 5.5, -6.25],
+            0x12345678,
+            2.5,
+            crate::WorldDepth::ThroughWalls,
+        );
+        assert_eq!(glue::world_line_roundtrip(&line).unwrap(), line);
+    }
+
+    #[test]
     fn recipe_rule_generated_wire_roundtrip() {
         use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, Tag};
         let mut recipe = Recipe::new(
@@ -1091,7 +1157,16 @@ mod tests {
             wait,
             ..Budgets::default()
         };
-        Arc::new(Group::new(Store::new(&engine, State { limits }), budgets))
+        Arc::new(Group::new(
+            Store::new(
+                &engine,
+                State {
+                    limits,
+                    buffers: HashMap::new(),
+                },
+            ),
+            budgets,
+        ))
     }
 
     #[test]

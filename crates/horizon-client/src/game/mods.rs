@@ -240,6 +240,13 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
     Game::native_standalone_models(&RegistrationContext::new(), &mut names);
     Some(names)
 }
+pub(super) fn collect_key_mappings<'declared>(
+    role: ExecutionRole,
+    declared: &'declared [(&'static str, mod_api::NativeKeyRegistration)],
+) -> &'declared [(&'static str, mod_api::NativeKeyRegistration)] {
+    if role.is_client() { declared } else { &[] }
+}
+
 /// The native mods' entity model layers (`native_layer_definitions`), kept
 /// once at start for `native_bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
@@ -272,6 +279,17 @@ pub(super) fn register_range_select_item_model_properties(role: ExecutionRole) {
         &mut properties,
     );
     horizon_assets::item_model::register_range_properties(properties);
+}
+/// The native mods' categorical item model properties
+/// (`native_register_select_item_model_property`), kept once at start, before resources
+/// load, so `select` models on them read the mod's value.
+pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut properties = Vec::new();
+    Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
+    horizon_assets::item_model::register_select_properties(properties);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -971,6 +989,20 @@ mod tests {
     use super::*;
     use horizon_mods::runtime::{BuiltMod, Runtime};
 
+    #[test]
+    fn only_clients_collect_registered_keys() {
+        let declared = [(
+            "sample",
+            mod_api::NativeKeyRegistration::new("zoom", "key.keyboard.z"),
+        )];
+        assert_eq!(
+            collect_key_mappings(ExecutionRole::Client, &declared).len(),
+            1
+        );
+        assert!(collect_key_mappings(ExecutionRole::IntegratedServer, &declared).is_empty());
+        assert!(collect_key_mappings(ExecutionRole::DedicatedServer, &declared).is_empty());
+    }
+
     mod inventory {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -1317,7 +1349,8 @@ mod tests {
         } else {
             assert_eq!(ids, ["plain"]);
         }
-        std::env::set_current_dir(&f.0).unwrap();
+        // Out of the fixture: Windows won't remove a process's working directory.
+        std::env::set_current_dir(std::env::temp_dir()).unwrap();
     }
 
     #[test]

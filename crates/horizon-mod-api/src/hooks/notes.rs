@@ -837,14 +837,23 @@ handle, an entity the client doesn't track and a level it doesn't show:
   player swap an outer player's displaced record is unavailable, and during a player's turn the other
   players' handles read `None` until the hub is back.
 - `living.attribute_value(host, id)` is `AttributeMap.getValue` and `attribute_base` is `getBaseValue`, for a
-  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks, a stale
-  handle, or on a client). A mob, a stand and the dragon answer from a live attribute map built from the type's
+  player, a guest, a mob, an armor stand and the dragon (`None` for an attribute the entity type lacks or a stale
+  handle). A mob, a stand and the dragon answer from a live attribute map built from the type's
   defaults, the saved `attributes` list (bases and permanent modifiers, with their ids), and the attribute modifiers
   of the items they hold and wear, put on and taken off slot by slot in `EquipmentSlot` order as
   `LivingEntity.collectEquipmentChanges` does (transient: never saved). The map is built when first needed. Mob
   behavior still reads the type's defaults, so a modifier does not yet change how a mob moves or hits. An item's
   modifiers are the stack's own `attribute_modifiers` component or its item type's, as `item_attribute_modifier`
-  leaves them.
+  leaves them. On a client the reads answer for the local player only, from the client's own copy of the synced
+  instances (`ClientboundUpdateAttributes`, the type's defaults before the server sends any); every other entity
+  reads `None` there, the client keeping no attribute map of another entity's, only the few fields it draws
+  (`handleUpdateAttributes` for a mob extracts its maximum health and scale for the renderer).
+- `living.attributes(host)` lists the ids of the attributes the entity's type has (the holder's attribute set the
+  value and base reads answer from), in registry order. `living.attribute_modifiers(host, id)` is
+  `AttributeInstance.getModifiers`: the attribute's modifiers in the order they were added — a mod's transient and
+  permanent ones, the saved list's, and what the worn and held items grant. An attribute no modifier is on answers
+  an empty list; `None` for an attribute the entity type lacks, a stale handle, or on a client for any entity but
+  the local player. Diverges from upstream: new helpers.
 - The writes take players, guests (in their own turn), mobs and armor stands, and answer false for an attribute the
   type lacks, the dragon (`/attribute` refuses it, and nothing reads its attributes yet), a stale handle, or on a
   client. `living.add_attribute_modifier(host, id, modifier, lifetime)` is `AttributeInstance.addTransientModifier`
@@ -914,6 +923,9 @@ handle, an entity the client doesn't track and a level it doesn't show:
 - `player.open_menu(host, block_entity)` opens its menu on the server and returns true only when opened. It returns
   false for stale or wrong-level handles, non-providers, cancelled opens, and players without a connection (including
   fake players), since no connection can receive the menu.
+- `block_entity.viewers(host)` lists the players with its container open on the server, read from their open menus
+  when called: players in its level, not spectators or fake players, a double chest's menu on both halves. `None` for
+  a stale handle or a client.
 - `level.block_shape(host, pos, kind)` reads block-local outline or collision boxes with an empty context. It returns
   `None` for a client, a stale handle, or a closed level; parked levels can be read.
 - `level.entities_in(host, min, max)` lists resolvable entities whose boxes intersect the given box in the level in place; see its method documentation for the kinds and tick-time visibility not yet covered.
@@ -1312,6 +1324,9 @@ as the terrain samples them.
   grass. The model is the state's first random variant; faces that don't lie flat on a side (a flower's crossed
   planes) are left out, and the `particle` sprite stands for them. Fluids give their still texture on every side.
 - `native_texture_sprites(textures)`: a texture's sprite by name (`block/stone`), none for one no model uses.
+- `native_gui_sprite(sprite)`: a GUI atlas sprite's `AtlasRegion` by `Identifier` (`minecraft:gui/sprites/container/slot`,
+  `minecraft:particle/flame`, `mymod:gui/panel`), its UV rect and its size in its own pixels, none for one the atlas
+  lacks. Plain data, right until the next `texture_atlas_stitched` for `TextureAtlas::Gui`.
 - `native_block_sprites_version()` changes each time the resources load (a resource pack turned on or off moves the
   layers, and the arrays are new): ask again then.
 
@@ -1754,6 +1769,7 @@ or transactions. Declarations still go on each event or registrar.
 `native_screen_opening(current, new, outcome)` (`ScreenEvent.Opening`), `native_screen_closing(screen)` (`ScreenEvent.Closing`) and `native_screen_init_post(screen)` (`ScreenEvent.Init.Post`) take a `NativeScreenView`. Every change of the game's screen (all of the game's screen assignments) goes through `Game::set_screen`, which mirrors `Gui.setScreen`: when a different screen would open, `screen_opening` fires first with the screen that is open (`current`) and the one about to open (`new`; the id `playing` is vanilla's null, no screen), and answers `ScreenOpening::Cancel` (the current screen stays) or `ScreenOpening::ModScreen` (the answering mod's own screen opens instead, if it can open there; the replacement fires nothing again); the first mod to answer wins, and the dispatch records its id, so a mod can open only its own screen. Then `screen_closing` fires for the screen being left (never for `playing`), and the new screen opens. The same screen again fires nothing, and a game where no mod listens to `screen_opening` or `screen_closing` assigns the screen with no event. `screen_init_post` is still observed once per frame (an open or a resize). The screens of the game's `Screen` list (inventory, containers, pause, options, chat, creative, stats, advancements, mod screens, dead, win…) announce themselves in `set_screen`, before they change, and honour `Cancel` and `ModScreen`. The overlays drawn over gameplay (sign editors, book edit/sign/view and lectern screens, dialogs, and the command, link, code-of-conduct and server-pack prompts) open through `Game::open_screen_overlay`, which fires `screen_opening` before the overlay is set and honours `Cancel` and `ModScreen` in the same way (a canceled server-pack prompt leaves its packs unanswered, a canceled code of conduct leaves the server waiting, as in NeoForge), then `screen_closing` for an overlay it replaces. The title's own screens (`world_select`, `world_create`, `world_edit`, `multiplayer`, `onboarding`…) open in the same way: `Title::set_mode` asks for the screen while a mod listens to `screen_opening` or `screen_closing`, and the game fires `screen_opening` (from the title screen shown) and `screen_closing` for the one left before it applies it, after the window event or control command that asked; `Cancel` keeps the screen shown, and `ModScreen` opens the screen asked for, since a mod's own screen can't open over the title. The multiplayer list's own steps (`add_server`, `edit_server`, `direct_connect`, `server_delete`, `friends_join`, and back to `multiplayer`) are title screens too and go the same way. The title appearing as a whole (at startup, when a world closes, after a disconnect or a failed join) and going (when a world opens) goes through `Game::show_title` and `Game::hide_title`: `screen_opening` (from no screen to the title's screen, or back) and `screen_closing` for what it leaves fire before the change, and `screen_init_post` follows an appearance; a `Cancel` doesn't keep the title shut when there is no world to show instead, nor keep it open over a world that opens. Still announced by the per-frame observer, through the same function and in the same order but after the change, so a mod's answer can't keep it shut: an overlay's closing. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. A menu swapped inside the open inventory screen is not a change of screen.
 
 - `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API.
+- `native_texture_atlas_stitched(atlas)` (NeoForge's `TextureAtlasStitchedEvent`) fires on the render thread once per atlas the resources publish, `TextureAtlas::Blocks` and then `TextureAtlas::Gui`: on the first load before `client_setup`, and after every successful reload before `client_resources_reloaded`. A failed reload fires nothing, and the old sprites stay right. Horizon packs vanilla's many atlases into these two: the block sprite arrays (`texture_sprites` answers a `SpriteRef`) and the GUI atlas of GUI sprites, particles and flat item and block textures (`gui_sprite` answers an `AtlasRegion`). Look up the sprites a mod draws here, once, and keep them until that atlas is stitched again; never by name every frame. `TextureAtlas` is `#[non_exhaustive]`. A dedicated server never fires it.
 
 - `client_stopped` fires after the client shutdown finishes. `game_shutting_down` fires after that on clients and after the dedicated server stops, with a side-typed host. Both fire once on orderly process exit; neither fires for a splitscreen guest. There is no separate `client_started`: `client_setup` covers that moment.
 
@@ -2656,8 +2672,8 @@ registration path.
   `native_sprite` takes an optional `tint` (`0xAARRGGBB`) that multiplies every texel, as a fluid's colour does.
   `DrawContext::text(text, at, argb, shadow)` takes its colour as vanilla's `GuiGraphics` does, `0xAARRGGBB`
   (`0xFFFFFFFF` is opaque white), and draws nothing for a fully transparent one, as vanilla's does.
-  `DrawContext::text_width(text)` and `DrawContext::sprite_size(name)` measure what `native_text` and `native_sprite`
-  draw, in GUI pixels and in the sprite's own pixels, to lay text and sprites out before drawing them (`Font.width`).
+  `DrawContext::text_width(text)` measures what `native_text` draws, in GUI pixels, to lay text out before drawing
+  it (`Font.width`). A sprite's own size is `gui_sprite(&id)`'s `size`, read once in `texture_atlas_stitched`.
   Diverges from upstream: there `native_text` takes an opaque `0xRRGGBB`.
   Slot clicks keep their `SlotClicked` numbering: inputs, then results.
 
@@ -2692,6 +2708,19 @@ registration path.
   complete, with the local player, the stack's `TooltipDisplay` and its `TooltipFlag` (`advanced`, `creative`),
   and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
   does not fire with no player while search trees are built, as NeoForge does.
+
+- Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
+  `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,
+  or `Before(id)` and `After(id)` for a component detail Horizon lists (`minecraft:lore`, `minecraft:enchantments`...), where
+  the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
+  component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
+  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
+  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
+  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
+  components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
+  for one component; all run in registration order at an equal placement. The player is always the local player,
+  including for nested crossbow projectiles where vanilla passes no player; use `nested` to distinguish those calls.
 
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
@@ -2896,6 +2925,16 @@ registration path.
   its own tick as it is now, if it is still the tick's block.
 
 - The commands a mod owns on the client, as NeoForge's `RegisterClientCommandsEvent`: `register_client_commands` is asked for a `NativeCommand` per usage (`x <mode:word>`, the same usage form as `register_commands`), so the chat box colours, completes and lists them, arguments included, like the game's own, and `command` runs them. A name the game already has keeps that command; a nonzero `level` has no meaning on the client and the command is left out with a log line. It replaces `commands`, which gave bare names: a mod that implemented it pushes `NativeCommand::new("name <args:text>")` instead. Asked at connect, never per frame.
+- The keys a mod registers on Options > Controls, as NeoForge's `RegisterKeyMappingsEvent`: call
+  `Registrar::register_key_mapping(NativeKeyRegistration::new("zoom", "key.keyboard.z").label("key.mymod.zoom"))`
+  from `Hooks::register`. Ownership comes from the registrar; invalid or duplicate local ids refuse startup.
+  `.category(...)` takes a translation key, `.modifiers(...)` sets shift/control/alt, and `.context(...)` takes
+  `KeyConflictContext::{Universal, InGame, Gui}`. Only client startup collects the retained declarations for Controls;
+  dedicated and integrated servers do not. One editor persists keys and modifiers in `horizon-mods.txt`.
+  Conflicts compare vanilla and mod bindings, context and modifiers, excluding unbound and both-default pairs.
+  `host.mod_key(mod_id, id)` returns the saved or declared `(key, ClientModifiers)`, or `None` for an unregistered id.
+  This registration does not listen for presses. Diverges from upstream: the old `mods` hook, `NativeMod.keys`
+  and the Options > Mods key editor are removed, with no compatibility route.
 - The `command` hook runs a client command: the local player's typed or clicked chat command, without its slash, before the server and the game's own commands see it; set `ran` when the mod ran it. Client-side, with the `ClientHost`. Contract version `2`: a mod written for `1` was given the side-typed host, and was also asked on a server for commands run there (command blocks, LAN guests, the console, the integrated server thread); now only the client asks, and only for its own player's commands.
 
 - Recipes of any type (`RecipeManager.getAllRecipesFor`), vanilla's (`minecraft:smelting`, `minecraft:campfire_cooking`) and a mod's own (`mymod:crusher`, for a machine or an altar) through one read: `host.recipes_of_type("minecraft:smelting")` gives each recipe in force, in file order, as a `Recipe`: its `id`, `kind`, `group`, typed `ingredients` and `results` (for shaped, shapeless and cooking recipes, as the game parsed them; a recipe the game cannot parse is not in force and not listed), `cooking_time` and `experience` for the cooking types, and its file's `json`, which is all a mod's own type has. The recipes are those of `data/<namespace>/recipe/` in vanilla, content mods (`.hmod`) and the world's data packs, with data packs merged and load conditions held, so a pack's override or removal shows; a type nobody uses gives nothing. `native_recipe_ingredient` and `native_recipe_result` read the usual fields, tags included (a bare id is read as `minecraft:`; items the game doesn't know are left out, and the helper gives nothing if none is left). The recipes are the server's table: on the server thread, a dedicated server or a LAN host; a client, the single-player window included, sees vanilla's and the content mods' recipes, not the world's data packs', unless a mod had the server send it the type (`native_datapack_sync`). All three give nothing outside a world. The game crafts the recipes of its own types itself, and shows none of a mod's own in the recipe book; `/reload` reads a data pack's again, so look them up again when you need them. The lookup borrows the table, with no copy.
