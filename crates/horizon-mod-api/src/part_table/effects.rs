@@ -88,22 +88,26 @@ pub mod tests {
 
         assert!(EffectKey::from_slot(u32::MAX).is_err());
         struct Table;
-        impl Backend for Table {
+        impl mod_api::prelude::BlockStateIdsBackend for Table {
             fn effect_key_id(&self, key: EffectKey) -> String {
                 crate::registry_keys::effect_id(key)
                     .expect("invalid effect key slot")
                     .to_owned()
             }
         }
+        impl Backend for Table {}
+        mod_api::impl_backend_areas!(Table, except(block_state_ids));
         impl Host for Table {
             fn backend(&self) -> Option<BackendRef<'_>> {
                 Some(BackendRef::of(self))
             }
         }
+        mod_api::impl_host_areas!(Table);
         assert_eq!(keys[0].id(&Table), "minecraft:speed");
         assert_eq!(keys[1].id(&Table), "key_test:later");
         struct NoGame;
         impl Host for NoGame {}
+        mod_api::impl_host_areas!(NoGame);
         assert!(std::panic::catch_unwind(|| keys[0].id(&NoGame)).is_err());
     }
 }

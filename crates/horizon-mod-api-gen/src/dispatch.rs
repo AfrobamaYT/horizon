@@ -320,7 +320,7 @@ pub(super) fn emit(
                 surface_calls.insert(
                     name.as_str(),
                     format!(
-                        "&mut super::mod_api_host::generated::{} {{ game: self, surface: {name} }}",
+                        "&mut crate::game::host::draw::{} {{ game: self, surface: {name} }}",
                         context.game_struct()
                     ),
                 );
