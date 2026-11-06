@@ -2,7 +2,7 @@
 //!
 //! This module is never compiled (`#[cfg(any())]` in `lib.rs`): `horizon-mod-api-gen` reads these
 //! files with `syn` and builds the `Hooks` trait, its dispatch, the `Host` traits, the game's entry
-//! points and the rustdoc from them. They are in `mod` so that `rustfmt` formats them.
+//! points and the rustdoc from them. Lint checks these files directly with `rustfmt`.
 //!
 //! Each area file holds up to three traits, each declaration a bodiless `fn name();` with its rustdoc:
 //!
@@ -33,7 +33,8 @@
 //! is refused. The generator reads the files in name order, `base.rs` first, and each file in declaration
 //! order; that is the order of the generated `HookId`, the dispatch and the WIT, and it comes from
 //! the directory, so a new hook never edits an existing line to be placed. A new hook goes in a file
-//! of its own (or at the end of the file of its family). The build generates the module list from the directory. The JSON catalog (`native-hooks.json`,
+//! of its own (or at the end of the file of its family). The generator discovers the files directly.
+//! The JSON catalog (`native-hooks.json`,
 //! `tools/native-hook-fragments/`) is retired and a file there fails the build.
 //!
 //! The game function a hook names starts as `let _ = (every, parameter);`; `cargo run -p xtask --

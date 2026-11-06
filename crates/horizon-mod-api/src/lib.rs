@@ -84,11 +84,6 @@ pub struct EffectKey(u32);
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockEntityTypeKey(u32);
 
-// Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
-#[cfg(any())]
-mod hooks {
-    include!(concat!(env!("OUT_DIR"), "/hook_modules.rs"));
-}
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod biome;
