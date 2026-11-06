@@ -119,9 +119,7 @@ impl Game<'_> {
                     g.replay = None;
                     return None;
                 }
-                let Some(replay) = g.replay.as_deref_mut() else {
-                    return None;
-                };
+                let replay = g.replay.as_deref_mut()?;
                 // Ticks no longer kept (a server that stalled for seconds): wait for the next teleport.
                 let Some(over) = replay.catch_up(record, server, tolerance, &mut run) else {
                     g.replay = None;
