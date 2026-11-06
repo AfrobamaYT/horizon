@@ -121,6 +121,9 @@ pub(crate) fn resolve<'a>(
             let Expr::Path(path) = &*call.func else {
                 return Err(Cause::Missing("indirect call").into());
             };
+            if path.qself.is_some() {
+                return Err(Cause::Missing("qualified-self call is not supported").into());
+            }
             if path.path.segments.iter().any(|s| !s.arguments.is_empty()) {
                 return Err(Cause::Signature("generic callee").into());
             }

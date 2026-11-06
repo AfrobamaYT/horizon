@@ -15,6 +15,11 @@ fn catalog(parameter: &str) -> Vec<Internal> {
         ),
         entry("add", "fn", "fn add(value: u32) -> u32"),
         entry("View", "struct", "struct View<'a>(&'a u32);"),
+        entry(
+            "Child::add",
+            "method",
+            "impl Child { fn add(value: u32) -> bool }",
+        ),
     ]
 }
 
@@ -121,6 +126,7 @@ fn site_resolution_refuses_unresolved_receivers_and_non_record_shapes() {
         ("u32", "self.child.step(opaque!())", "macro-dependent"),
         ("u32", "self.child.step()", "argument count"),
         ("u32", "unknown(1)", "unresolved callee path"),
+        ("u32", "<Child>::add(1)", "qualified-self"),
     ] {
         let entries = catalog(parameter);
         let sig = syn::parse_quote!(fn tick(&mut self, child: &mut Child));
