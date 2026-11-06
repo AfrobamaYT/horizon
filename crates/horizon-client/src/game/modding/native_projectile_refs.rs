@@ -84,35 +84,39 @@ impl Game<'_> {
             Backing::Trident(i) => self.tridents[i].guest.map_or(Target::Player, Target::Guest),
             Backing::Rocket(i) => {
                 let r = &self.rockets[i];
-                match r.owner? {
-                    Who::Player => r.guest.map_or(Target::Player, Target::Guest),
-                    Who::Mob(id) => Target::Mob(id),
+                match r.owner {
+                    Some(Who::Player) => r.guest.map_or(Target::Player, Target::Guest),
+                    Some(Who::Mob(id)) => Target::Mob(id),
+                    None => self.target_by_uuid(ints_uuid(r.owner_uuid?))?,
                 }
             }
         };
         self.native_owner_entity(target)
     }
 
-    /// The owner fields for `Projectile.setOwner(owner)`. None for an owner
-    /// that is stale or not a player or mob: Horizon keeps only those.
+    /// The owner fields for `Projectile.setOwner(owner)`. `Who` names the
+    /// owners a hit can be credited to; any other entity is kept by its UUID
+    /// alone, as a saved owner is (`Projectile.getOwner` resolves that). None
+    /// for a stale owner, or a fishing hook, which no UUID finds again.
     fn native_projectile_owner_fields(&mut self, owner: Option<EntityRef>) -> Option<OwnerFields> {
         let Some(owner) = owner else {
             return Some((None, None, None));
         };
-        let guest = match self.native_entity_target(owner)? {
-            Target::Player => (Who::Player, self.lan_acting),
-            Target::Guest(conn) => (Who::Player, Some(conn)),
-            Target::Mob(id) => (Who::Mob(id), None),
-            _ => return None,
+        let (who, guest) = match self.native_entity_target(owner)? {
+            Target::Player => (Some(Who::Player), self.lan_acting),
+            Target::Guest(conn) => (Some(Who::Player), Some(conn)),
+            Target::Mob(id) => (Some(Who::Mob(id)), None),
+            Target::Hook(_) => return None,
+            _ => (None, None),
         };
         let uuid = uuid_ints(self.entity_uuid(owner)?);
-        Some((Some(guest.0), Some(uuid), guest.1))
+        Some((who, Some(uuid), guest))
     }
 
     /// `Projectile.setOwner` on the thing a handle names. False when the
     /// owner does not fit: a trident a player threw always has a player owner.
     fn native_projectile_apply_owner(&mut self, backing: Backing, fields: OwnerFields) -> bool {
-        let (who, _, guest) = fields;
+        let (who, uuid, guest) = fields;
         match backing {
             Backing::List(i) => {
                 self.creatures.projectiles.update(i, |p| {
@@ -130,16 +134,15 @@ impl Game<'_> {
                 self.tridents[i].guest = guest;
             }
             Backing::Rocket(i) => {
-                let r = &mut self.rockets[i];
-                (r.owner, r.guest) = (who, guest);
+                self.rockets[i].set_owner(who, uuid, guest);
             }
         }
         true
     }
 
-    /// `Projectile.setOwner`. False for a stale projectile, or an owner that is
-    /// stale or neither a player nor a mob (a trident a player threw takes a
-    /// player only). Does not touch `leftOwner`.
+    /// `Projectile.setOwner`. False for a stale projectile or owner, or an
+    /// owner that is a fishing hook (a trident a player threw takes a player
+    /// only). Does not touch `leftOwner`.
     pub(super) fn projectile_set_owner(
         &mut self,
         projectile: ProjectileRef,
@@ -224,7 +227,7 @@ impl Game<'_> {
                 if let Some((velocity, _)) = turn.apply(r.velocity, power, &mut r.random) {
                     r.velocity = velocity;
                 }
-                (r.owner, r.guest) = (owner.0, owner.2);
+                r.set_owner(owner.0, owner.1, owner.2);
                 true
             }
         }
@@ -408,7 +411,21 @@ mod tests {
             assert!(handle.set_owner(game, Some(mob)));
             assert_eq!(handle.owner(game), Some(mob));
             assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(99)));
-            assert!(!handle.set_owner(game, Some(entity)));
+            // Any entity may own it; `Who` stays for the owners a hit credits.
+            let boat_id = game.take_entity_id();
+            game.boats.push(super::super::boats::Boat::new(
+                boat_id,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.entity(boat_id).unwrap();
+            assert!(handle.set_owner(game, Some(boat)));
+            assert_eq!(handle.owner(game), Some(boat));
+            assert_eq!(game.creatures.projectiles[0].owner, None);
+            let saved = game.uuid_for(boat_id);
+            assert_eq!(game.creatures.projectiles[0].owner_uuid, Some(saved));
+            assert!(handle.set_owner(game, Some(mob)));
 
             assert_eq!(handle.pierce_level(game), Ok(0));
             let role = game.options.execution_role;
@@ -611,6 +628,27 @@ mod tests {
                 rocket_random.next_float()
             );
             assert_eq!(rocket.owner(game), None);
+
+            // A rocket keeps an owner that is neither player nor mob, across a
+            // save too, but a player's trident still refuses one.
+            let boat_id = game.take_entity_id();
+            game.boats.push(super::super::boats::Boat::new(
+                boat_id,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.entity(boat_id).unwrap();
+            assert!(!trident.set_owner(game, Some(boat)));
+            assert!(rocket.set_owner(game, Some(boat)));
+            assert_eq!(rocket.owner(game), Some(boat));
+            assert_eq!(game.rockets[0].owner, None);
+            let saved = game.uuid_for(boat_id);
+            let tag = game.rockets[0].to_nbt([9; 4], None, None);
+            let back = Rocket::from_nbt(
+                horizon_client::entity_nbt::firework_rocket_from_nbt(&tag, None).unwrap(),
+            );
+            assert_eq!(back.owner_uuid, Some(saved));
         });
     }
 

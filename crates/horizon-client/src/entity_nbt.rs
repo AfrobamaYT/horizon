@@ -2979,6 +2979,8 @@ pub struct RocketNbt {
     pub item: Option<crate::items::ItemStack>,
     pub angled: bool,
     pub owner: Option<Who>,
+    /// The saved `Owner`, whoever it names.
+    pub owner_uuid: Option<[i32; 4]>,
     pub left_owner: bool,
 }
 pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<RocketNbt> {
@@ -2991,6 +2993,7 @@ pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<R
         item: tag.get("FireworksItem").and_then(item_from_nbt),
         angled: flag(tag, "ShotAtAngle"),
         owner: (player.is_some() && owner == player).then_some(Who::Player),
+        owner_uuid: owner,
         left_owner: flag(tag, "LeftOwner"),
     })
 }
