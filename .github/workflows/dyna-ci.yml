@@ -393,8 +393,6 @@ jobs:
           fi
       - name: Check duplicate public native functions
         run: python3 tools/sync_upstream.py --check
-      - name: Test offline research tooling
-        run: python3 -m unittest discover -s tests -v
       - name: Install Dyna runner dependencies without root
         if: steps.rust.outputs.required != 'false' && needs.changes.outputs.self_hosted == 'true'
         run: bash tools/ci/dyna_ci_deps.sh
@@ -442,6 +440,10 @@ jobs:
       - name: Test Rust documentation examples
         if: steps.rust.outputs.required != 'false'
         run: cargo +stable test $JOBS --workspace --doc
+      # Last, and whatever happened above: a tooling failure must never skip the Rust tests.
+      - name: Test offline research tooling
+        if: ${{ !cancelled() }}
+        run: python3 -m unittest discover -s tests -v
   # The #[ignore]d library tests that need the prepared vanilla data, which verify doesn't have. Main pushes and
   # dispatches only, on Dyna's large runner where that data lives. Every shard runs, with one package per shard
   # (the plan lives in tools/ci/ignored_shards.py). tools/ci/ignored_tests.py fails on a new failure and on a known
