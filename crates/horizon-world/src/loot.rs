@@ -394,6 +394,11 @@ pub struct EntityLootParams {
     /// The killing player's luck.
     pub luck: f32,
 }
+/// The most a table's read of an enchantment level counts as. A mod can answer
+/// any level, and what it answers drives loops: a stack of that size splits one
+/// stack at a time, and a binomial bonus draws once a level. `ItemEnchantments`
+/// keeps vanilla's levels to 255, so vanilla's rolls never reach this.
+pub const MAX_LOOT_LEVEL: i32 = 1024;
 /// `EquipmentSlot.VALUES` order.
 pub const EQUIPMENT_SLOTS: [&str; 8] = [
     "mainhand", "offhand", "feet", "legs", "chest", "head", "body", "saddle",

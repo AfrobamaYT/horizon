@@ -665,23 +665,20 @@ impl Game<'_> {
                 } else {
                     false
                 };
-                let mut drops = match world_items!(self).loot_sequence(&table) {
-                    Some(seq) => {
-                        let random = self.rand_sequences.get(&seq, self.level.seed);
-                        world_items!(self).block_drops(
-                            self.pack.assets.registry,
-                            state,
-                            tool.as_ref(),
-                            random,
-                        )
-                    }
-                    None => world_items!(self).block_drops(
-                        self.pack.assets.registry,
-                        state,
-                        tool.as_ref(),
-                        &mut self.world.random,
-                    ),
+                // LootCommand: the source's entity is `this`, if it has one.
+                let entity = match self.command_source.map(|s| s.entity) {
+                    None | Some(Some(Target::Player)) => Some(self.native_clicker().1 as u32),
+                    Some(Some(Target::Guest(conn))) => self
+                        .player_entity_id_by_connection(Some(conn))
+                        .map(|id| id as u32),
+                    Some(Some(target)) => crate::game::native_entities::target_id(target),
+                    Some(None) => None,
                 };
+                let roll = horizon_client::items::BlockLootRoll {
+                    held: tool.as_ref(),
+                    ..Default::default()
+                };
+                let mut drops = self.roll_block_loot(p, state, entity, roll);
                 if has_block_entity {
                     for drop in &mut drops {
                         pending.attach(p, drop);
