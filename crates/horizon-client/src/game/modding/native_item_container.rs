@@ -9,7 +9,7 @@
 //! item keeps them. They hold no world state, so they work on any side.
 use super::Game;
 use horizon_client::items::ItemStack;
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `ItemContainerContents`' limit on slots.
 const MAX_SLOTS: u32 = 256;
@@ -273,7 +273,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::JavaString;
+    use horizon_core::nbt::JavaString;
     use std::sync::Arc;
 
     fn bag(count: u32) -> ItemStack {

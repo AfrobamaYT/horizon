@@ -15,6 +15,15 @@ pub fn run() -> Result<(), String> {
     horizon_mod_api_gen::fill_hooks(&checkout()?)
 }
 
+/// Prints the hook-notes chapter for the book preprocessor, without writing a source file.
+pub fn notes() -> Result<(), String> {
+    print!(
+        "{}",
+        horizon_mod_api_gen::generate_hook_notes(&checkout()?)?
+    );
+    Ok(())
+}
+
 pub fn wit(out: &Path) -> Result<(), String> {
     std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     horizon_mod_api_gen::generate(&checkout()?, out, horizon_mod_api_gen::Target::Api)

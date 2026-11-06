@@ -2,7 +2,8 @@
 
 use super::{Dim, Game};
 use horizon_world::attachments::{
-    AttachmentLifetime, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
+    AttachmentLifetime, Attachments, Holder, index::AttachmentIndex,
+    observer::IndexedAttachmentObserver,
 };
 use mod_api::{AttachmentHolder, ChunkRef};
 use std::{
@@ -11,6 +12,15 @@ use std::{
 };
 
 pub(super) type Indexes = HashMap<Dim, Arc<Mutex<AttachmentIndex<AttachmentHolder>>>>;
+
+pub(super) fn bind_entity_map(
+    map: &mut Attachments,
+    index: &Arc<Mutex<AttachmentIndex<AttachmentHolder>>>,
+    entity: mod_api::EntityRef,
+    slot: &mut AttachmentLifetime,
+) {
+    *slot = AttachmentLifetime::new(map.bind_index(index, AttachmentHolder::Entity(entity)));
+}
 
 #[cfg(test)]
 mod painting_tests;
@@ -34,10 +44,7 @@ impl Game<'_> {
             return;
         };
         let index = self.attachment_indexes.entry(self.dim).or_default();
-        *slot = AttachmentLifetime::new(map.bind_index(
-            index,
-            AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
-        ));
+        bind_entity_map(map, index, mod_api::EntityRef::new(level.epoch(), id), slot);
     }
 
     /// Publish the dimension's saved maps before listeners observe its load.
@@ -65,9 +72,9 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
-    use horizon_world::{
-        attachments::Attachments,
-        nbt::{Compound, Tag},
+    use {
+        horizon_core::nbt::{Compound, Tag},
+        horizon_world::attachments::Attachments,
     };
 
     fn saved() -> Attachments {
@@ -117,7 +124,11 @@ mod tests {
             Arc::make_mut(game.world.chunks.get_mut(&(2, 3)).unwrap()).lit = true;
             VALUE
                 .set(
-                    game.attachment_slot(Holder::Chunk([2, 3])).unwrap(),
+                    game.attachment_slot(
+                        Holder::Chunk([2, 3]),
+                        mod_api::AttachmentAccess::Existing,
+                    )
+                    .unwrap(),
                     Holder::Chunk([2, 3]),
                     13,
                 )

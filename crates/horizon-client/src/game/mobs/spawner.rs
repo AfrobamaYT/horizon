@@ -16,11 +16,11 @@ use horizon_client::{
     },
     particles::{ParticleOptions, ParticleType},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 use std::collections::{HashMap, HashSet};
 
 type Pos = (i32, i32, i32);
@@ -476,7 +476,7 @@ impl Game<'_> {
         &mut self,
         pos: [i32; 3],
         kind: &str,
-        data: Option<&horizon_world::nbt::Compound>,
+        data: Option<&horizon_core::nbt::Compound>,
     ) -> Option<bool> {
         let key = (pos[0], pos[1], pos[2]);
         let trial = match self.world.block_entities.get(&key) {

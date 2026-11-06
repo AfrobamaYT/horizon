@@ -19,10 +19,6 @@ use horizon_protocol::{
     servers::parse_address,
     text::{Language, plain, translatable},
 };
-use horizon_world::{
-    item_defaults::ItemData,
-    nbt::{JavaString, Tag},
-};
 use std::path::Path;
 use std::{
     collections::HashMap,
@@ -33,6 +29,10 @@ use std::{
     },
     thread::JoinHandle,
     time::Duration,
+};
+use {
+    horizon_core::nbt::{JavaString, Tag},
+    horizon_world::item_defaults::ItemData,
 };
 
 /// `CommonListenerCookie.serverCookies`: cookies the server asked the client
@@ -74,7 +74,7 @@ pub enum Event {
     /// ClientboundResourcePackPopPacket: one pack, or every pack.
     PackPop(Option<u128>),
     /// `show_dialog` in configuration: the dialog itself.
-    ShowDialog(horizon_world::nbt::Tag),
+    ShowDialog(horizon_core::nbt::Tag),
     /// `clear_dialog` in configuration.
     ClearDialog,
     /// ClientboundCodeOfConductPacket: the game shows it and answers with
@@ -375,7 +375,7 @@ impl Session {
     }
     /// ServerboundCustomClickActionPacket (a dialog's answer), in whichever
     /// phase the connection is.
-    pub fn send_custom_click(&self, id: &str, payload: Option<horizon_world::nbt::Tag>) {
+    pub fn send_custom_click(&self, id: &str, payload: Option<horizon_core::nbt::Tag>) {
         let click = cfg::CustomClickAction {
             id: id.to_owned(),
             payload,

@@ -32,7 +32,7 @@ pub(super) struct OminousItemSpawner {
     /// Its UUID, and the compound it was loaded from (fields Horizon doesn't
     /// model survive a save).
     pub(super) uuid: [i32; 4],
-    pub(super) raw: Option<Box<horizon_world::nbt::Tag>>,
+    pub(super) raw: Option<Box<horizon_core::nbt::Tag>>,
 }
 
 /// `ProjectileItem.DispenseConfig` of the items fired down: power,
@@ -81,7 +81,7 @@ impl Game<'_> {
     }
     /// A saved spawner, as `readAdditionalSaveData` leaves it: its tick
     /// count starts again from 0.
-    pub(super) fn load_ominous_item_spawner(&mut self, tag: horizon_world::nbt::Tag) {
+    pub(super) fn load_ominous_item_spawner(&mut self, tag: horizon_core::nbt::Tag) {
         let Some((item, at, spawn_item_after)) =
             horizon_client::entity_nbt::ominous_item_spawner_from_nbt(&tag)
         else {

@@ -259,6 +259,7 @@ fn initial_load_stages_and_applies_client_reload_listeners() {
             .unwrap();
             let mut loaded = load_resources(
                 root,
+                Vec::new(),
                 None,
                 &game.options.resources,
                 &game.settings,

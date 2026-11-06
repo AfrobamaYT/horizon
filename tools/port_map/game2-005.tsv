@@ -104,7 +104,7 @@ Player.baseDamageScaleFactor	inline	crates/horizon-client/src/game/items/mace.rs
 Player.isEffectiveAi	skip:other		client-side AI gate; Horizon has no effective-AI check in its loop
 Player.hasContainerOpen	missing		no test for an open container menu: screens are `self.screen`, and nothing distinguishes a container menu from the inventory menu
 Player.startSleepInBed	port	crates/horizon-client/src/game.rs::Game::try_sleep	
-Player.isSleepingLongEnough	port	crates/horizon-client/src/game/network/lan_actions.rs::sleep_counts	100 ticks in bed is what counts a sleeper as deep for SleepStatus.update
+Player.isSleepingLongEnough	port	crates/horizon-client/src/game/network/lan_actions/sleep.rs::sleep_counts	100 ticks in bed is what counts a sleeper as deep for SleepStatus.update
 Player.updateSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming	
 Player.getXpNeededForNextLevel	port	crates/horizon-client/src/entities.rs::Experience::needed	
 Player.hasEnoughFoodToDoExhaustiveManoeuvres	inline	crates/horizon-client/src/sprint.rs::Conditions::possible	the food-or-mayfly test is the sprint gate's `enough_food || may_fly`: `enough_food` is `FoodData::has_enough_food` (food level above 6) filled in `motion.rs`, and `player_food::enough_food_for_manoeuvres` is the same test as a probed free function

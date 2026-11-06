@@ -12,7 +12,7 @@
 //! [`overlay`] merges a block entity Horizon models (and re-encodes from its own,
 //! partial state) with the NBT it was loaded from, so fields Horizon does not model
 //! survive and only what the game changed is replaced.
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 fn string(s: &str) -> Tag {
     Tag::String(s.into())
@@ -854,7 +854,7 @@ fn keyed_by_slot(list: &[Tag]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_world::nbt::parse_snbt;
+    use horizon_core::nbt::parse_snbt;
 
     fn snbt(s: &str) -> Tag {
         parse_snbt(s).expect("snbt").0

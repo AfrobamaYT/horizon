@@ -3,7 +3,7 @@
 //! `back_text` NBT layout.
 pub use crate::chunk::block_entity::{SavedLine, SignData, SignText};
 use crate::{scoreboard, text::Text};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 /// `DyeColor` names and `getTextColor` values by id.
 pub const DYE_TEXT: [(&str, u32); 16] = [

@@ -3,7 +3,7 @@ use horizon_world::{
     attachments::{ATTACHMENTS_KEY, attachment_compound},
     level::Ticks,
 };
-use mod_api::{BlockPos, Direction};
+use mod_api::{AttachmentAccess, BlockPos, Direction};
 
 fn world_attachments(
     world: &mut horizon_client::world::World,
@@ -91,10 +91,11 @@ impl Game<'_> {
     pub(super) fn attachment_map(
         &mut self,
         holder: mod_api::Holder,
+        access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if self.native_authoritative() {
             self.world.attachment_syncs.insert(holder);
-            return self.attachment_map_quiet(holder);
+            return self.attachment_map_quiet(holder, access);
         }
         match self.remote.as_mut() {
             Some(remote) => Ok(remote.attachments.entry(holder).or_default()),
@@ -107,12 +108,13 @@ impl Game<'_> {
     pub(super) fn attachment_map_quiet(
         &mut self,
         holder: mod_api::Holder,
+        access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if !self.native_authoritative() {
             return Err(mod_api::AttachmentError::MissingHolder);
         }
         self.journal_attachments(holder);
-        self.attachment_slot(holder)
+        self.attachment_slot(holder, access)
     }
 
     /// Where `holder`'s attachment map lives now: an entity's by its UUID, a player's where
@@ -120,6 +122,7 @@ impl Game<'_> {
     pub(super) fn attachment_slot(
         &mut self,
         holder: mod_api::Holder,
+        access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
@@ -132,8 +135,34 @@ impl Game<'_> {
                     .get(&id)
                     .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
             )?;
+            let painting = if access == AttachmentAccess::Store {
+                self.paintings.iter().position(|painting| painting.id == id)
+            } else {
+                None
+            };
+            if painting.is_some()
+                && self
+                    .persist
+                    .removals
+                    .contains(&super::commands::Target::Painting(id))
+            {
+                return Err(AttachmentError::MissingHolder);
+            }
+            let level = painting.and_then(|_| self.native_level(self.dim.id()));
             let uuid = self.uuid_for(id);
-            return Ok(self.entity_attachments.entry(uuid).or_default());
+            let map = self.entity_attachments.entry(uuid).or_default();
+            if let Some(i) = painting {
+                let level = level.ok_or(AttachmentError::MissingHolder)?;
+                if !self.paintings[i].attachment_lifetime.is_bound() {
+                    super::attachment_index::bind_entity_map(
+                        map,
+                        self.attachment_indexes.entry(self.dim).or_default(),
+                        mod_api::EntityRef::new(level.epoch(), id),
+                        &mut self.paintings[i].attachment_lifetime,
+                    );
+                }
+            }
+            return Ok(map);
         }
         if let mod_api::Holder::Player(uuid) = holder {
             if self.lan_acting_uuid == Some(uuid) {
@@ -247,8 +276,9 @@ impl mod_api::AttachmentHost for Game<'_> {
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
+        access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
-        self.attachment_map(holder)
+        self.attachment_map(holder, access)
     }
 }
 
@@ -256,6 +286,7 @@ impl mod_api::AttachmentHost for super::GameLevel<'_> {
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
+        _: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         if !self.native_authoritative {
             return Err(mod_api::AttachmentError::MissingHolder);
@@ -328,7 +359,9 @@ impl mod_api::AttachmentHost for super::native_hooks::HitLevel<'_> {
     fn attachments(
         &mut self,
         holder: mod_api::Holder,
+        access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+        let _ = access;
         self.0.attachments(holder)
     }
 }

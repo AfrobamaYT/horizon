@@ -2350,7 +2350,7 @@ mod tests {
             );
             let mut old = ItemStack::new("minecraft:stone", 3);
             old.damage = 7;
-            old.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("kept".into()));
+            old.data_mut().custom_name = Some(horizon_core::nbt::Tag::String("kept".into()));
             mob.extra.set_body_stack(Some(old.clone()));
             game.mobs.push(mob);
             let incoming = ItemStack::new("minecraft:dirt", 5);

@@ -4,7 +4,7 @@ name: modding-book-pages
 on:
   push:
     branches: [main]
-    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "tools/*modding*", "tests/test_modding_concept_pages.py"]
+    paths: ["docs/modding/**", "crates/horizon-mod-api/**", "crates/horizon-mod-api-gen/**", "xtask/**", "tools/*modding*", "tests/test_modding_*.py"]
   workflow_dispatch:
 permissions:
   contents: read

@@ -9,7 +9,7 @@ use horizon_client::{
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use mod_api::NativeLootDrops;
 
 /// `Vec3.yRot(angle)`.

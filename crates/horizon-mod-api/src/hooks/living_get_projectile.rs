@@ -11,7 +11,7 @@ pub trait Hooks {
         side = "both",
         contract = "collect",
         out = "projectile",
-        neoforge = "net.neoforged.neoforge.event.entity.living.LivingGetProjectileEvent (NeoForge.EVENT_BUS, not cancellable)"
+        neoforge = "LivingGetProjectileEvent"
     )]
     fn living_get_projectile();
 }

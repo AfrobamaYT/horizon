@@ -11,7 +11,8 @@ pub trait Hooks {
         contract = "replace",
         out = "answer",
         scope = "item",
-        key = "stack"
+        key = "stack",
+        neoforge = "IItemExtension.onItemUseFirst"
     )]
     fn on_item_use_first();
 }
