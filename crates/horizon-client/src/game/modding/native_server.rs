@@ -1543,10 +1543,9 @@ impl Game<'_> {
                 .any(|c| c.usage.split(' ').next() == Some(name.as_str()))
         });
         let mut execution_tree = tree.clone();
-        execution_tree["children"]
-            .as_object_mut()
-            .unwrap()
-            .retain(|name, _| levels.contains_key(name));
+        if let Some(children) = execution_tree["children"].as_object_mut() {
+            children.retain(|name, _| levels.contains_key(name));
+        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };
