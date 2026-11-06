@@ -12,6 +12,9 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         Target::Client => vec![
             ("mod_api_host_generated.rs", generated.implementation),
             ("mod_api_fire_generated.rs", generated.fire),
+            // The mob tick's goal read view (#1077), included beside the
+            // engine's `GoalCx` in `mobs/part_goals.rs`.
+            ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api => {
             let hooks = generated.hooks;

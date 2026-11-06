@@ -1362,7 +1362,7 @@ impl Game<'_> {
     }
 
     pub(super) fn send(&self, packet: S) {
-        if let Some(r) = &self.remote {
+        if self.remote.is_some() {
             // MultiPlayerGameMode's attack, interact, useItem, useItemOn, releaseUsingItem, dropItem and
             // piercingAttack run ensureHasSentCarriedItem before their packet: a slot the number keys
             // chose this tick goes out first. A miss, a dig's start or a swap waits for the next tick.
@@ -1373,6 +1373,15 @@ impl Game<'_> {
             {
                 self.remote_send_carried();
             }
+            self.send_play(packet);
+        }
+    }
+    /// `Connection.send` for the game's play packets: a mod may cancel one
+    /// (`client_packet_send`), and the server never hears of it.
+    fn send_play(&self, packet: S) {
+        if let Some(r) = &self.remote
+            && !self.client_packet_send_canceled(&packet)
+        {
             r.session.send(packet);
         }
     }
@@ -2804,7 +2813,9 @@ impl Game<'_> {
             });
         }
         if let Some(t) = mob_type {
-            let mut mob = Mob::new(id as u32, t, at, head);
+            // The window's copy of the server's mob: no mod part goals —
+            // their `register_goals` ran on the authoritative side (#1077).
+            let mut mob = Mob::new_remote(id as u32, t, at, head);
             super::remote_mob_data::client_defaults(&mut mob);
             (mob.yaw, mob.previous_yaw) = (yaw, yaw);
             (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
@@ -9347,7 +9358,7 @@ impl Game<'_> {
             && r.carried.get() != Some(self.selected)
         {
             r.carried.set(Some(self.selected));
-            r.session.send(S::SetCarriedItem(play::SetCarriedItem {
+            self.send_play(S::SetCarriedItem(play::SetCarriedItem {
                 slot: self.selected as i16,
             }));
         }

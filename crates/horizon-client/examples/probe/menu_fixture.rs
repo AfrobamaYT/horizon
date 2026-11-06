@@ -101,7 +101,9 @@ pub fn main() -> horizon_client::Result<()> {
         &crate::test_resources::server_load(),
     );
     let enchantments = horizon_client::enchant::Enchantments::load(root, &defaults);
-    let names = horizon_client::creative::Names::load(root);
+    let names = horizon_client::creative::Names::load(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+    );
     let case_maps = CaseMaps::default();
     let env = Env {
         player: None,
