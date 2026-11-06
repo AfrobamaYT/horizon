@@ -801,7 +801,9 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
             )
             .unwrap()
             .unwrap();
-            started.tick().unwrap();
+            // The event loop dispatches this before any per-tick work,
+            // even on the title screen, without a world or renderer.
+            started.native_client_tick_pre();
             assert_eq!(*seen.lock().unwrap(), ["setup", "Client", "Common", "tick"]);
         })
     });
