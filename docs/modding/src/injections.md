@@ -260,6 +260,141 @@ The source tree carries no `#[point]`: the build of the prebuilt game, and the l
 put one on each method in the copy they compile. A plain `cargo build` of the game in a checkout has no
 points; a mod listening there builds, and its listeners never fire.
 
+## Raw listeners and declared internals
+
+When an API-typed point cannot carry the state a mod needs, a native mod can declare game
+internals and a raw listener. Each internal is an API request: propose the missing hook, handle
+or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the mod can move back
+to the typed API.
+
+```toml
+[native]
+game = "26.3"
+horizon = "<exact game commit>"
+mixins = "<exact mixins commit>"
+internals = [
+    { path = "horizon_client::game::Game", hash = "<written by the tool>" },
+    { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
+]
+
+[[native.injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick"
+kind = "HEAD"
+raw = "count"
+```
+
+Run `cargo horizon-mod internals sync` in the mod's folder after editing its Rust code. It
+checks the mod against a discovery-only copy of the pinned game's source, uses compiler
+warnings to find actual internal uses (including glob imports and macros), and replaces
+`[native].internals` with their exact paths, kinds and hashes. Unused declarations are removed;
+retained declarations keep their formatting. The command prints added and removed entries.
+It is explicit: a normal build never changes the declarations reviewers and players read.
+
+Install `horizon-launcher` on `PATH`, or set `HORIZON_LAUNCHER` to its executable. The command
+invokes `horizon-launcher native-build --sync-internals <mod folder> --trust-native-code`, whose
+stdout is a JSON list of discovered catalog entries for the tool. This runs `cargo check`, not
+the game, but Rust build scripts and procedural macros execute with your rights: run it only
+on code you trust. No installed game or instance is needed. The launcher caches the isolated
+source and metadata build per pin under `native/internals-sync/<commit>/`; the second check
+reuses those compiler outputs. Neither that cache nor its temporary diagnostic attributes is
+used by normal builds or published prebuilt games. The source must be cached or downloadable;
+`E_INTERNAL_SOURCE_UNAVAILABLE` explains when it cannot be obtained, without changing the
+manifest or falling back to a different pin. Any compiler or catalog error also leaves the
+manifest alone. Discovery checks the mod's library on the current host with default features;
+configuration-gated catalog entries are still refused. Mods with source-spliced helper files
+or module injections are refused with `E_INTERNAL_SOURCE_INJECTION`: declare their internals
+explicitly with `internals add` instead. This invocation stages one mod project; required mod
+dependencies that are not in that project are refused by the dependency resolver, not silently
+omitted.
+
+`cargo horizon-mod internals add <path>` remains useful for those explicit declarations and
+writes the path and hash from the pinned game's `internals.json`; don't invent hashes. When several member kinds share a path (such as a field
+and a method named `listening`), pass `--kind <kind>` to select the catalog entry, for example
+`cargo horizon-mod internals add horizon_client::game::native_ticks::TickRound::listening --kind method`.
+The tool reports the available kinds if the choice is missing and writes the resolved `kind`
+into each added declaration, even for unambiguous paths. A declaration may omit `kind` only
+when its path has a single kind. Kind names match `internals.json`: inherent methods use `method`, free
+functions use `fn`, and fields use `field`. A `--kind` applies to all paths in that invocation.
+`cargo horizon-mod update` shows the signature changes and refreshes hashes while retaining
+member kinds. Each injection has exactly one of `trait_method`, `helper` or `raw`.
+`raw` names a function in the mod's crate root, not a helper source file, and accepts only
+`HEAD` or `RETURN` with no mixin bindings or selectors.
+
+Depend on `horizon-internals` (library `internals`) at the same pin as `horizon-mod-api`, never
+on `horizon-client` directly. The build generates a facade for this mod alone. Its nested
+modules re-export declared types and free functions: the declaration above makes
+`internals::game::Game` available. Declaring a field or inherent method exports its owner type;
+a type necessarily brings all its public fields and inherent methods. Undeclared types have no
+name in the facade and do not compile.
+
+The facade is generated when the game builds the mod, and it re-exports items the prebuilt
+game makes public; the game's source keeps them private. So a plain `cargo check` of the
+mod resolves `horizon-internals` to an empty crate and can't see `internals::…`. Compile
+a mod that declares internals with `horizon-launcher native-build <mod folder>`, which stages it
+against the pinned game the same way the launcher does on install, and report its errors.
+
+A raw injection also exposes the point's listener and raw record in `internals::raw`, for
+example `__TickListener` and `__TickRaw`. Discovery keeps those same typed exports and does
+not change `[[native.injection]]`; raw listeners need no special sync step. Implement `pub fn count` with the exact listener type
+from `points.json` (including the receiver and argument-record lifetime). The facade's safe,
+typed `raw::tick` constructor registers it in the generated executable; a mismatched function
+fails at that registration line, naming the injection. `RETURN` uses the point's return
+listener and `raw::tick_return` constructor. Raw listeners work against the prebuilt game as
+well as source builds; only source-spliced helpers and modules require a game rebuild.
+
+Both routes check the actual game's metadata before compiling mods:
+
+- `E_INTERNAL_MISSING`: the declared path is absent (type shapes not exposed as internals
+  cannot be declared). Run `cargo horizon-mod internals sync` to discover this pin's used
+  internals. Undeclared-item compiler errors also point to this command.
+- `E_INTERNAL_CHANGED`: the hash changed; the error names the new signature and asks for
+  `cargo horizon-mod update`.
+- `E_INTERNAL_AMBIGUOUS`: several member kinds share the path; choose one of the listed kinds
+  with `internals add <path> --kind <kind>`.
+- `E_INTERNAL_GATED`: the entry exists only under a `cfg`; target-specific declarations are
+  not supported.
+- `E_NOT_RAW`: the injection's target has no raw form, for example because it is generic or
+  takes `impl Trait`.
+- `E_GAME_DEPENDENCY`: the mod depends directly on `horizon-client`; use the facade instead.
+- `E_INTERNAL_PATH`: the entry cannot be re-exported as an item, for example an entire module;
+  declare its types or free functions instead.
+
+The build log lists each mod's internals and raw places. The same information is recorded in
+`native-mods.json` beside the built game.
+
+### Wasm raw listeners
+
+A wasm mod uses the same `[native] internals` declarations and `raw` injections beside `[wasm]`,
+but omits all three native pins and carries no helper or support-module source. Its generated view
+imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.
+The compiled declaration includes each manifest internal and every named type whose layout it walks.
+All paths and hashes are checked at load, before any listener registers. A field also requires its
+owner's matching type hash. A missing opt-in entry names
+`crates/horizon-mod-api-gen/wasm-internals/<mod_id>.txt`; a game built without a table refuses declaring mods.
+
+The slot runs API listeners first, then raw listeners in the native/wasm registration order. A raw
+listener has no Host; its only game access is through the view. Nodes last for one listener call:
+keeping one into the next call refuses `gone`. Writes are journaled and reads see those writes.
+Calling a declared game function applies the journal first and invalidates cached paths. A normal
+listener return applies its remaining writes; a trap discards them and stops the group. Writes that
+no longer resolve are dropped and logged. A trap after a game function call does not undo that call
+or the writes already applied before it.
+
+### Closures and callbacks
+
+A declared function that takes a closure (`impl Fn...`, `dyn Fn...`) has no thunk. A synchronous
+callback would have to re-enter the guest from inside that guest's own import, which the component
+model forbids (the runtime refuses it as `Reentered`); a second instance would not see the guest's
+state. The view therefore refuses a closure argument as opaque and reports it in the stage's skipped
+functions.
+
+Use the game's non-closure helper for the operation instead. For `Game::with_level`'s
+`BlockState.canSurvive`, that is `Game::level_can_survive(pos, state)`: it runs the same level rule
+in the same call frame, and its writes follow the journal rules above. A helper that needs another
+level-scoped operation is an API request; it lands as a declared non-closure method rather than as a
+callback.
+
 ## Reference
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
@@ -279,3 +414,7 @@ points; a mod listening there builds, and its listeners never fire.
   pass.
 - A hook point's contract is versioned: `hook_version` names the contract a mod built against. A contract
   never changes; an incompatible change adds a version.
+
+### Syncing wasm internals to a game repository
+
+From a wasm mod directory, run `cargo horizon-mod internals sync --repo <path>` to write its reviewed `crates/horizon-mod-api-gen/wasm-internals/<mod_id>.txt` input in the Horizon repository. Without `--repo`, the command searches upward for the Horizon workspace. It reads only `horizon-mod.toml`, combining declared internal paths and raw injection targets in sorted, deduplicated order; it does not change the manifest or run the launcher. Commit the resulting file to the game repository. The `--repo` option is not valid for native mods.

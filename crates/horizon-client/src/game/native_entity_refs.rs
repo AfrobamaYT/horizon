@@ -133,6 +133,16 @@ impl Game<'_> {
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.id()))
     }
+    /// Loaded server levels, in vanilla dimension order. Empty without a server world.
+    pub(super) fn native_list_levels(&self) -> Vec<LevelRef> {
+        if !self.is_logical_server() || self.native_lifecycle.epoch().is_none() {
+            return Vec::new();
+        }
+        self.loaded_dims()
+            .into_iter()
+            .filter_map(|dim| self.native_level(dim.id()))
+            .collect()
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -365,11 +375,9 @@ impl Game<'_> {
         })
     }
 
-    /// Gameplay's cached face support in the current or a parked level. Returns
-    /// None for clients, stale or closed levels, unloaded or out-of-height blocks,
-    /// dynamic-shape states (including moving pistons and shulker boxes), or an
-    /// exporter error. Dynamic support is a follow-up on #29. False means not
-    /// sturdy.
+    /// Gameplay's face support in the current or a parked server level, including
+    /// live block entities for dynamic shapes. None for stale or closed levels,
+    /// unloaded blocks, unsupported states or a shape query error.
     pub(super) fn native_level_block_face_sturdy(
         &self,
         level: LevelRef,
@@ -390,7 +398,25 @@ impl Game<'_> {
         };
         let b = self.res.behaviours();
         if !b.has_cached_support(state) {
-            return None;
+            use horizon_client::collisions::SceneCollisions;
+            use horizon_world::{block_support::SupportType, dynamic_support::DynamicSupport};
+            let binding = self.res.collision();
+            let dynamic = DynamicSupport::from_state(binding.registry().state(state)?).ok()??;
+            let world = self.native_level_world(level)?;
+            let mut scene = SceneCollisions {
+                world,
+                binding,
+                subject: None,
+            };
+            let support = match support {
+                NativeSupportType::Full => SupportType::Full,
+                NativeSupportType::Center => SupportType::Center,
+                NativeSupportType::Rigid => SupportType::Rigid,
+                _ => unreachable!("NativeSupportType: unhandled variant"),
+            };
+            return dynamic
+                .is_face_sturdy(&mut scene, pos, direction, support)
+                .ok();
         }
         Some(match support {
             NativeSupportType::Full => b.is_face_sturdy(state, direction),
@@ -612,7 +638,12 @@ pub(super) mod tests {
         }
         let _mods = mod_api::__private::part_tests::game_thread();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        Some(super::super::mods::content_root(&base, &Default::default()).unwrap())
+        Some(
+            super::super::mods::content_root(&base, &Default::default())
+                .unwrap()
+                .prepared()
+                .to_path_buf(),
+        )
     }
 
     pub(in crate::game) fn with_game(test: impl FnOnce(&mut super::Game<'_>)) {
@@ -650,7 +681,7 @@ pub(super) mod tests {
 
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -670,12 +701,26 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+        let registry = game.pack.assets.registry;
+        let ids: std::collections::HashSet<_> = (0..registry.len())
+            .map(|i| {
+                registry
+                    .state(mod_api::BlockStateId(i as u32))
+                    .unwrap()
+                    .name
+                    .clone()
+            })
+            .collect();
+        mod_api::__private::part_tests::register_game_keys(ids);
+
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
         game.resolve_parts().unwrap();
@@ -782,6 +827,32 @@ pub(super) mod tests {
             let level = game.native_level(game.dim.id()).unwrap();
             assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
             assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_can_survive_asks_the_blocks_own_rule() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let sapling = registry.default_state("minecraft:oak_sapling").unwrap();
+            game.world.set(0, 64, 0, grass).unwrap();
+            assert!(game.level_can_survive([0, 65, 0], sapling));
+            game.world.set(0, 64, 0, stone).unwrap();
+            assert!(!game.level_can_survive([0, 65, 0], sapling));
+            assert!(
+                !game
+                    .level_can_survive([0, 65, 0], horizon_world::registry::BlockStateId(u32::MAX))
+            );
+            assert!(!game.level_can_survive([100, 65, 100], sapling));
         });
     }
 
@@ -1350,6 +1421,7 @@ pub(super) mod tests {
             assert_eq!(game.mobs[0].equipment_stacks()[6], Some(held.clone()));
             game.mobs.clear();
             game.mobs.push(Mob::new(13, kind, Vec3::ZERO, 0.0));
+            game.creatures.ticked.insert(13);
             game.spawn_item(
                 ItemStack {
                     count: 3,
@@ -1480,7 +1552,12 @@ pub(super) mod tests {
                 horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
             )
             .unwrap();
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = Some(Box::new(motion));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = Some(Box::new(motion)))
+                .unwrap();
             let player = game.native_player_ref(12).unwrap();
             assert_eq!(
                 player.inventory(game),
@@ -1497,7 +1574,12 @@ pub(super) mod tests {
                 Some(20.0)
             );
             assert_eq!(guest_living.max_health(host), Some(20.0));
-            game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap().motion = None;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.motion = None)
+                .unwrap();
             // Body and saddle are stored on a guest like on a mob.
             let living = game.native_living(player.fields().entity).unwrap();
             let saddle = ItemStack::new("minecraft:saddle", 1);
@@ -1706,18 +1788,27 @@ pub(super) mod tests {
             // default mode (survival) they get its abilities.
             let root = std::env::temp_dir().join(format!("abilities-force-{}", std::process::id()));
             game.world_root = root.clone();
-            let g = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
-            g.game_mode = 1;
-            g.abilities.update_for_mode(1);
-            assert!(g.abilities.may_fly && g.abilities.instabuild);
-            horizon_client::lan::playerdata::save(g, &root);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |g| {
+                    g.game_mode = 1;
+                    g.abilities.update_for_mode(1);
+                    assert!(g.abilities.may_fly && g.abilities.instabuild);
+                    horizon_client::lan::playerdata::save(g, &root);
+                })
+                .unwrap();
             let joined = |game: &mut super::super::Game<'_>, force| {
                 let host = game.lan.as_mut().unwrap();
                 host.hub.config.default_game_mode = 0;
                 host.hub.config.force_game_mode = force;
-                let g = host.hub.guest_mut(13).unwrap();
-                g.game_mode = 0;
-                g.abilities = Default::default();
+                host.hub
+                    .update_guest(13, |g| {
+                        g.game_mode = 0;
+                        g.abilities = Default::default();
+                    })
+                    .unwrap();
                 game.lan_guest_joined(13, &[], [0.0, 64.0, 0.0]);
                 let g = game.lan.as_ref().unwrap().hub.guest(13).unwrap();
                 (
@@ -1747,9 +1838,8 @@ pub(super) mod tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(12)
-                .unwrap()
-                .dimension = "minecraft:the_nether".into();
+                .update_guest(12, |guest| guest.dimension = "minecraft:the_nether".into())
+                .unwrap();
             assert!(!game.native_entity_start_riding(guest, vehicle, true));
             assert!(!game.native_entity_start_riding(vehicle, guest, true));
             let _ = std::fs::remove_dir_all(root);
@@ -1909,7 +1999,10 @@ pub(super) mod tests {
             .unwrap();
             let host = game.lan.as_mut().unwrap();
             host.hub.guests = std::mem::take(&mut hub.guests);
-            host.hub.guests[1].position = [1600.0, 64.0, 0.0];
+            {
+                let value = [1600.0, 64.0, 0.0];
+                host.hub.guests.update(1, |guest| guest.position = value);
+            }
             game.lan_update_streaming();
             assert!(
                 game.streaming
@@ -2140,14 +2233,38 @@ pub(super) mod tests {
             game.options.dedicated = None;
             let players = game.native_server_players();
             assert_eq!(players.len(), 1);
-            assert_eq!(players[0].uuid, 1);
+            assert_eq!(players[0].uuid(), 1);
             // A fake record in the Nether does not keep that level ticking.
-            game.lan.as_mut().unwrap().hub.guests[1].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(1, |guest| guest.dimension = value);
+            }
             let ticking = game.levels_to_tick();
             assert!(!ticking.contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(game.levels_to_tick().contains(&super::super::Dim::Nether));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:overworld".into();
+            {
+                let value = "minecraft:overworld".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             game.lan_acting = Some(real_id);
             let selector = horizon_client::command::args::Selector {
                 kind: 'a',
@@ -2535,9 +2652,140 @@ pub(super) mod tests {
                 .default_state("minecraft:shulker_box")
                 .unwrap();
             game.world.set(0, 64, 0, shulker).unwrap();
+            use horizon_client::block_entity_anim::{Shulker, ShulkerStatus};
+            // The early guest packet pass changes opener status before entity
+            // hooks run, and before tick_block_entities synchronizes animations.
+            // Exercise that producer with both an absent and a closed snapshot.
+            for had_snapshot in [false, true] {
+                game.be_anims.shulkers.remove(&[0, 64, 0]);
+                game.world.shulkers.remove(&[0, 64, 0]);
+                if had_snapshot {
+                    game.world.shulkers.insert([0, 64, 0], Shulker::default());
+                }
+                for support in [Support::Full, Support::Center, Support::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                        Some(true),
+                    );
+                }
+                assert!(game.container_openers_changed((0, 64, 0), true));
+                assert_eq!(
+                    game.be_anims.shulkers[&[0, 64, 0]].status,
+                    ShulkerStatus::Opening
+                );
+                for parked in [false, true] {
+                    if parked {
+                        assert!(
+                            game.enter_command_level(super::super::Dim::Nether)
+                                .is_some()
+                        );
+                    }
+                    for support in [Support::Full, Support::Center, Support::Rigid] {
+                        assert_eq!(
+                            level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                            Some(false),
+                        );
+                        assert_eq!(
+                            level.block_face_sturdy(game, [0, 64, 0], Face::Down, support),
+                            Some(true),
+                        );
+                    }
+                }
+                assert!(
+                    game.enter_command_level(super::super::Dim::Overworld)
+                        .is_some()
+                );
+                assert!(game.container_openers_changed((0, 64, 0), false));
+                assert_eq!(
+                    game.world.shulkers[&[0, 64, 0]].status,
+                    ShulkerStatus::Closing
+                );
+                for support in [Support::Full, Support::Center, Support::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                        Some(false),
+                    );
+                }
+            }
+            game.be_anims.shulkers.remove(&[0, 64, 0]);
+            for status in [
+                ShulkerStatus::Closed,
+                ShulkerStatus::Opening,
+                ShulkerStatus::Opened,
+                ShulkerStatus::Closing,
+            ] {
+                game.world.shulkers.insert(
+                    [0, 64, 0],
+                    Shulker {
+                        status,
+                        ..Default::default()
+                    },
+                );
+                for support in [Support::Full, Support::Center, Support::Rigid] {
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Up, support),
+                        Some(status == ShulkerStatus::Closed),
+                    );
+                    assert_eq!(
+                        level.block_face_sturdy(game, [0, 64, 0], Face::Down, support),
+                        Some(true),
+                    );
+                }
+            }
+            assert!(
+                game.enter_command_level(super::super::Dim::Nether)
+                    .is_some()
+            );
             assert_eq!(
                 level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
-                None
+                Some(false),
+            );
+            assert!(
+                game.enter_command_level(super::super::Dim::Overworld)
+                    .is_some()
+            );
+            game.world.shulkers.remove(&[0, 64, 0]);
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(true),
+            );
+            let moving = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:moving_piston")
+                .unwrap();
+            game.world.set(0, 64, 0, moving).unwrap();
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(false),
+            );
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.moving_pistons.push((
+                [0, 64, 0],
+                horizon_world::piston_shape::MovingPistonState {
+                    moved_state: stone,
+                    direction: horizon_core::geometry::Direction::East,
+                    extending: true,
+                    source: false,
+                    progress: 1.0,
+                    previous_progress: 1.0,
+                },
+            ));
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(true),
+            );
+            game.world.moving_pistons[0].1.progress = 0.5;
+            game.world.moving_pistons[0].1.previous_progress = 0.5;
+            assert_eq!(
+                level.block_face_sturdy(game, [0, 64, 0], Face::Up, Support::Full),
+                Some(false),
             );
             let stale = LevelRef::new(
                 NativeWorldEpoch::new(level.epoch().get() + 1),
@@ -2745,7 +2993,7 @@ pub(super) mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2765,7 +3013,9 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2774,6 +3024,7 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+
         let level = game.native_level("minecraft:overworld").unwrap();
         assert!(
             game.enter_command_level(super::super::Dim::Nether)
@@ -2794,6 +3045,8 @@ pub(super) mod tests {
                 .is_some()
         );
         let nether = game.native_level("minecraft:the_nether").unwrap();
+        let host: &dyn mod_api::ServerHost = &game;
+        assert_eq!(host.levels().list_levels(), vec![level, nether]);
         let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
         assert_eq!(
             game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Outline),
@@ -2904,7 +3157,7 @@ pub(super) mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2925,7 +3178,9 @@ pub(super) mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2934,6 +3189,7 @@ pub(super) mod tests {
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
+
         let level = game.native_level("minecraft:overworld").unwrap();
         let stone = game
             .pack

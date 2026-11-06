@@ -766,6 +766,10 @@ enum Cmd {
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
     /// plays. Not sandboxed: the mods' code runs with your rights
     NativeBuild {
+        /// Discover internal uses through compiler diagnostics. Prints resolved declarations
+        /// as JSON for cargo horizon-mod internals sync; never installs or selects a game
+        #[arg(long, conflicts_with_all = ["server_output", "instance", "version", "update", "profile"], requires = "folder")]
+        sync_internals: bool,
         /// A mod folder (horizon-mod.toml with [native], Cargo.toml and src/), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
@@ -819,7 +823,7 @@ enum Cmd {
     /// minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions
     /// on|off, prune-old-versions on|off (delete old versions after an install, keeping the
     /// selected one, the ones instances use and the newest few), keep-versions N (how many of the
-    /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port
+    /// newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
@@ -1234,7 +1238,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 } else {
                     " "
                 };
-                let state = if !backend::is_prepared(tag) {
+                let state = if !backend::check_prepared(tag) {
                     "not prepared"
                 } else if backend::has_sounds(tag) {
                     "prepared"
@@ -1265,9 +1269,9 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let tag = backend::install_tag(&tag, false, progress(label))?;
             if as_json {
                 json(
-                    serde_json::json!({ "installed": tag, "prepared": backend::is_prepared(&tag) }),
+                    serde_json::json!({ "installed": tag, "prepared": backend::check_prepared(&tag) }),
                 );
-            } else if backend::is_prepared(&tag) {
+            } else if backend::check_prepared(&tag) {
                 println!(
                     "Installed {tag}. It is prepared already, from another installed version."
                 );
@@ -1284,6 +1288,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             );
         }
         Cmd::NativeBuild {
+            sync_internals,
             folder,
             server_output,
             allow_jar_downloads,
@@ -1295,6 +1300,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         } => {
             if !trust_native_code {
                 return Err("Native mods run with full access to this computer. Read their source, then pass --trust-native-code.".into());
+            }
+            if sync_internals {
+                let entries = native_mods::sync_internals(&folder.expect("required by clap"))?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&entries).map_err(|error| error.to_string())?
+                );
+                return Ok(());
             }
             let started = std::time::Instant::now();
             let profile = match profile.as_deref().and_then(native_mods::Profile::parse) {
@@ -1384,7 +1397,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 return Err("An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.".into());
             }
             let tag = build_import::import(&path, version.as_deref())?;
-            let prepared = backend::is_prepared(&tag);
+            let prepared = backend::check_prepared(&tag);
             if as_json {
                 json(serde_json::json!({ "imported": tag, "prepared": prepared }));
             } else if prepared {
@@ -2541,7 +2554,7 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 let log = &|line: String| eprintln!("{line}");
                 let resources = backend::resolve_version(None)
                     .ok()
-                    .filter(|t| backend::is_prepared(t))
+                    .filter(|t| backend::check_prepared(t))
                     .map(|t| backend::resources(&t));
                 let pack = modpacks::import_and_port(&file, resources.as_deref(), log)?;
                 println!("{} ({})", modpacks::outcome(&pack), pack.summary());
@@ -3611,7 +3624,7 @@ fn modpack(action: ModpackCmd, as_json: bool) -> Result<(), String> {
         } => {
             let tag = backend::resolve_version(version.as_deref()).ok();
             let resources = tag
-                .filter(|t| backend::is_prepared(t))
+                .filter(|t| backend::check_prepared(t))
                 .map(|t| backend::resources(&t));
             show(&modpacks::port(
                 &work(&pack)?,
@@ -3799,6 +3812,35 @@ mod tests {
             Cli::try_parse_from(["horizon-launcher", "mods", "check", "x", "--instance", "A"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn native_build_sync_is_explicit_and_never_selects_an_instance() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(
+                [
+                    &["horizon-launcher", "native-build", "--sync-internals"],
+                    args,
+                ]
+                .concat(),
+            )
+        };
+        assert!(matches!(
+            parse(&["mod", "--trust-native-code"]).unwrap().command,
+            Some(Cmd::NativeBuild {
+                sync_internals: true,
+                folder: Some(_),
+                ..
+            })
+        ));
+        assert!(parse(&[]).is_err());
+        for args in [
+            ["mod", "--instance", "A"],
+            ["mod", "--server-output", "out"],
+            ["mod", "--profile", "developer"],
+        ] {
+            assert!(parse(&args).is_err());
+        }
     }
 
     #[test]

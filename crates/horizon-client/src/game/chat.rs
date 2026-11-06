@@ -154,6 +154,16 @@ pub(super) enum ChatExit {
 fn should_discard_draft(reason: ChatExit, save_chat_drafts: bool) -> bool {
     reason != ChatExit::Interrupted && (reason != ChatExit::Intentional || !save_chat_drafts)
 }
+/// An owned command tree, initialized even before a world is opened.
+pub struct SessionDispatcher(pub Arc<horizon_client::command::Dispatcher>);
+impl Default for SessionDispatcher {
+    fn default() -> Self {
+        let registry = horizon_client::gamerules::RuleRegistry::vanilla();
+        Self(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(&registry, &[]),
+        ))
+    }
+}
 /// UI and command state that lives beside the game.
 #[derive(Default)]
 pub struct UiState {
@@ -169,6 +179,8 @@ pub struct UiState {
     pub in_bed_chat: bool,
     pub registries: Registries,
     pub rules: GameRules,
+    /// The server session command tree.
+    pub dispatcher: SessionDispatcher,
     pub clock: WorldClock,
     /// Command state for registered clocks other than Overworld. Overworld's
     /// canonical ticks stay in World.day_time and its state stays in clock.
@@ -739,7 +751,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
             dispatcher: chat_tree(&self.remote),
@@ -1108,7 +1120,11 @@ impl Game<'_> {
     pub(super) fn chat_scroll(&mut self, amount: f32) {
         let cursor = self.cursor;
         let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new([r.config.width, r.config.height]).height
+            HudBatch::new(
+                [r.config.width, r.config.height],
+                self.settings.gui_scale_inputs(),
+            )
+            .height
         });
         let _ = height;
         let mouse = (cursor.0.floor() as i32, cursor.1.floor() as i32);
@@ -1125,7 +1141,11 @@ impl Game<'_> {
     pub(super) fn chat_click(&mut self) {
         let cursor = self.cursor;
         let height = self.renderer.as_ref().map_or(720.0, |r| {
-            HudBatch::new([r.config.width, r.config.height]).height
+            HudBatch::new(
+                [r.config.width, r.config.height],
+                self.settings.gui_scale_inputs(),
+            )
+            .height
         });
         let m = Measure(&self.gui.atlas.font);
         let c = Commands {
@@ -1134,7 +1154,11 @@ impl Game<'_> {
         };
         if self.ui.in_bed_chat && self.sleeping.is_some() {
             let width = self.renderer.as_ref().map_or(1280.0, |r| {
-                HudBatch::new([r.config.width, r.config.height]).width
+                HudBatch::new(
+                    [r.config.width, r.config.height],
+                    self.settings.gui_scale_inputs(),
+                )
+                .width
             });
             let (x, y, w, h) = Self::leave_bed_button(width, height);
             if horizon_client::screen_draw::inside((cursor.0 as i32, cursor.1 as i32), x, y, w, h) {
@@ -1249,6 +1273,7 @@ impl Game<'_> {
         let Some(url) = &self.link_prompt else {
             return;
         };
+        horizon_client::widgets::cover_frame();
         // ConfirmLinkScreen: the question and the link (its warning is a
         // widget of its own, not narrated).
         horizon_client::widgets::begin_screen(|| {
@@ -1266,7 +1291,7 @@ impl Game<'_> {
             Text::translate("chat.copy", &[]),
             Text::translate("gui.no", &[]),
         ];
-        let layout = self.link_prompt_layout(url, (w, h));
+        let mut layout = self.link_prompt_layout(url, (w, h));
         layout.declare_no(2);
         layout.draw(batch, atlas, self.cursor, &labels);
     }
@@ -1500,7 +1525,12 @@ impl Game<'_> {
     /// Advance the overworld clock (ServerClockManager.tick) when
     /// `advance_time` allows it.
     pub(super) fn advance_clock(&mut self) {
-        if !self.ui.rules.bool("advance_time") || self.ui.clock.paused {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
+            || self.ui.clock.paused
+        {
             return;
         }
         let c = &mut self.ui.clock;
@@ -1513,7 +1543,12 @@ impl Game<'_> {
     /// advance the overworld clock at, 0 while it is paused (`/time pause`)
     /// or `advance_time` is off.
     pub(super) fn network_clock_rate(&self) -> f32 {
-        if self.ui.rules.bool("advance_time") && !self.ui.clock.paused {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ADVANCE_TIME)
+            && !self.ui.clock.paused
+        {
             self.ui.clock.rate
         } else {
             0.0
@@ -1523,28 +1558,50 @@ impl Game<'_> {
     pub(super) fn level_rules(&self) -> horizon_world::level::GameRules {
         let r = &self.ui.rules;
         horizon_world::level::GameRules {
-            water_source_conversion: r.bool("water_source_conversion"),
-            lava_source_conversion: r.bool("lava_source_conversion"),
-            random_tick_speed: r.int("random_tick_speed"),
-            block_drops: r.bool("block_drops"),
-            mob_griefing: r.bool("mob_griefing"),
-            max_snow_accumulation_height: r.int("max_snow_accumulation_height"),
-            spawn_mobs: r.bool("spawn_mobs"),
-            spawn_monsters: r.bool("spawn_monsters"),
-            fire_spread_radius_around_player: r.int("fire_spread_radius_around_player"),
-            spread_vines: r.bool("spread_vines"),
+            water_source_conversion: r
+                .bool_at(horizon_client::gamerules::vanilla::WATER_SOURCE_CONVERSION),
+            lava_source_conversion: r
+                .bool_at(horizon_client::gamerules::vanilla::LAVA_SOURCE_CONVERSION),
+            random_tick_speed: r.int_at(horizon_client::gamerules::vanilla::RANDOM_TICK_SPEED),
+            block_drops: r.bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS),
+            mob_griefing: r.bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING),
+            max_snow_accumulation_height: r
+                .int_at(horizon_client::gamerules::vanilla::MAX_SNOW_ACCUMULATION_HEIGHT),
+            spawn_mobs: r.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS),
+            spawn_monsters: r.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS),
+            fire_spread_radius_around_player: r
+                .int_at(horizon_client::gamerules::vanilla::FIRE_SPREAD_RADIUS_AROUND_PLAYER),
+            spread_vines: r.bool_at(horizon_client::gamerules::vanilla::SPREAD_VINES),
         }
     }
     /// Apply rules mirrored in other state (natural regeneration, difficulty).
     pub(super) fn sync_rules(&mut self) {
-        self.world.health_rules.natural_regeneration =
-            self.ui.rules.bool("natural_health_regeneration");
+        self.world.health_rules.natural_regeneration = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::NATURAL_HEALTH_REGENERATION);
         // Player.isInvulnerableTo: the damage-type rules.
-        self.world.health_rules.drowning_damage = self.ui.rules.bool("drowning_damage");
-        self.world.health_rules.fall_damage = self.ui.rules.bool("fall_damage");
-        self.world.health_rules.fire_damage = self.ui.rules.bool("fire_damage");
-        self.world.health_rules.freeze_damage = self.ui.rules.bool("freeze_damage");
-        horizon_client::mobs::sulfur_cube::set_tnt_explodes(self.ui.rules.bool("tnt_explodes"));
+        self.world.health_rules.drowning_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::DROWNING_DAMAGE);
+        self.world.health_rules.fall_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FALL_DAMAGE);
+        self.world.health_rules.fire_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FIRE_DAMAGE);
+        self.world.health_rules.freeze_damage = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::FREEZE_DAMAGE);
+        horizon_client::mobs::sulfur_cube::set_tnt_explodes(
+            self.ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES),
+        );
         use horizon_world::food::Difficulty;
         self.world.health_rules.difficulty = match self.ui.difficulty {
             0 => Difficulty::Peaceful,
@@ -1556,8 +1613,17 @@ impl Game<'_> {
     /// `ServerClockManager.ServerClockInstance.loadFrom`: restore the existing
     /// Overworld state when a world opens; clear the other command-state cache.
     pub(super) fn load_world_state(&mut self) {
-        self.ui.rules =
-            GameRules::load_with_features(&self.world_root, &self.level.enabled_features);
+        self.ui.rules = GameRules::load_with_registry(
+            &self.world_root,
+            &self.level.enabled_features,
+            self.level.rule_registry.clone(),
+        );
+        self.ui.dispatcher = SessionDispatcher(Arc::new(
+            horizon_client::command::vanilla::session_dispatcher(
+                &self.level.rule_registry,
+                &self.level.enabled_features,
+            ),
+        ));
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
@@ -2221,7 +2287,7 @@ mod tests {
         use std::collections::HashMap;
         // The missing-glyph metrics measure without game assets.
         let font = Font::load(
-            Path::new("/nonexistent-horizon-chat-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::default(),
             &HashMap::new(),
             &[],
             (1, 1),

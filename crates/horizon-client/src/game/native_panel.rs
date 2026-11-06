@@ -163,7 +163,10 @@ pub(super) fn inside(p: (f32, f32), [x, y, w, h]: [f32; 4]) -> bool {
 impl Game<'_> {
     fn browser_batch(&self) -> Option<HudBatch> {
         let r = self.renderer.as_ref()?;
-        Some(HudBatch::new([r.config.width, r.config.height]))
+        Some(HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        ))
     }
     /// The mod showing a panel, with its items made into stacks once per
     /// change; none while no mod shows one or no container screen is up.
@@ -573,9 +576,10 @@ mod tests {
         }
     }
     fn fluid(id: &str, amount: u32) -> FluidStack {
-        FluidStack::new(id, amount)
+        FluidStack::new(mod_api::__private::fluid_key(id).unwrap(), amount)
     }
     fn view() -> NativeRecipeView {
+        mod_api::__private::part_tests::game_thread();
         NativeRecipeView {
             layout: NativeRecipeLayout::Grid,
             width: 5,

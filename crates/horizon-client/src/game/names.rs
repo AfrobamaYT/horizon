@@ -8,12 +8,110 @@
 //! and the player's own in third person with the `ownNameTag` extra.
 use super::{Game, view_vector};
 use horizon_client::{
-    block_entity_render::vertex_light, hud::HudBatch, mesher::Vertex, mobs::Mob, save::uuid_text,
-    scoreboard as sb, text::Text,
+    block_entity_render::vertex_light,
+    hud::{HudAtlas, HudBatch, HudVertex},
+    mesher::Vertex,
+    mobs::Mob,
+    save::uuid_text,
+    scoreboard as sb,
+    text::Text,
 };
 
 /// The world size of one text pixel in a name tag: `Matrix4f.scale(0.025F, -0.025F, 0.025F)`.
 pub(super) const NAME_TAG_UNIT: f32 = 0.025;
+
+/// Local glyph quads only: camera transforms and lighting stay per frame.
+/// Slots follow submission order; comparing the whole styled text also handles entity reorder,
+/// team/score changes and native name hooks without keeping entity IDs alive.
+#[derive(Default)]
+pub(super) struct NameTagLayouts {
+    epoch: (u64, u64, bool),
+    next: usize,
+    lines: Vec<Option<NameTagLine>>,
+}
+
+struct NameTagLine {
+    text: Text,
+    alpha: u32,
+    background: bool,
+    y: f32,
+    behind: usize,
+    vertices: Vec<HudVertex>,
+}
+
+impl NameTagLayouts {
+    fn begin_frame(&mut self, atlas: &HudAtlas) {
+        let epoch = (
+            atlas.revision,
+            atlas.font.epoch(),
+            horizon_client::lang::bidirectional(),
+        );
+        if self.epoch != epoch {
+            self.lines.clear();
+            self.epoch = epoch;
+        }
+        self.next = 0;
+    }
+
+    fn end_frame(&mut self) {
+        self.lines.truncate(self.next);
+    }
+
+    fn name_tag(
+        &mut self,
+        batch: &mut HudBatch,
+        atlas: &HudAtlas,
+        text: &Text,
+        y: f32,
+        alpha: u32,
+        background: bool,
+    ) -> usize {
+        // At most 512 * 512 HUD vertices (~10 MiB), plus short text keys. Longer tags and
+        // excess lines still render normally. Animated/random glyphs and live inline skins
+        // must go through the font each time, including legacy formatting supplied by hooks.
+        const MAX_LINES: usize = 512;
+        const MAX_VERTICES: usize = 512;
+        let slot = self.next;
+        self.next += 1;
+        let stable =
+            text.resolved().spans.iter().all(|span| {
+                span.style.obfuscated != Some(true) && span.style.inline_object.is_none()
+            }) && text.spans.iter().map(|s| s.text.len()).sum::<usize>() <= 1024;
+        if slot < MAX_LINES
+            && stable
+            && let Some(Some(line)) = self.lines.get(slot)
+            && line.text == *text
+            && line.alpha == alpha
+            && line.background == background
+            && line.y == y
+        {
+            batch.vertices.extend_from_slice(&line.vertices);
+            return line.behind;
+        }
+        let behind = batch.name_tag(
+            atlas,
+            text,
+            y,
+            alpha << 24 | 0xFF_FFFF,
+            if background { 0x3F00_0000 } else { 0 },
+        );
+        if slot < MAX_LINES {
+            if self.lines.len() <= slot {
+                self.lines.resize_with(slot + 1, || None);
+            }
+            self.lines[slot] =
+                (stable && batch.vertices.len() <= MAX_VERTICES).then(|| NameTagLine {
+                    text: text.clone(),
+                    alpha,
+                    background,
+                    y,
+                    behind,
+                    vertices: batch.vertices.clone(),
+                });
+        }
+        behind
+    }
+}
 
 impl Game<'_> {
     /// A named name tag names the mob under the crosshair.
@@ -64,9 +162,10 @@ impl Game<'_> {
     /// The other players' models and names: the players a server sends.
     fn other_players(&self) -> Vec<(&Mob, String)> {
         let mut out = Vec::new();
+        let indices = first_mob_indices(&self.mobs);
         for (id, name) in self.remote_player_names() {
-            if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
-                out.push((m, name));
+            if let Some(&index) = indices.get(&id) {
+                out.push((&self.mobs[index], name));
             }
         }
         out
@@ -76,7 +175,7 @@ impl Game<'_> {
     /// camera entity (`LivingEntityRenderer.shouldShowName`).
     fn own_name_tag(&self) -> Option<(&Mob, String)> {
         if !self.settings.extras.own_name_tag
-            || self.camera_type.first_person()
+            || self.camera_type.is_first_person()
             || self.sleeping.is_some()
             || self.spectator()
             || self.own_invisible()
@@ -103,8 +202,19 @@ impl Game<'_> {
     }
     /// Each name tag this frame.
     fn name_tags(&self, camera: glam::DVec3, alpha: f64) -> Vec<NameTag> {
-        let hooks = !mod_api::__private::mods().is_empty();
-        let target = self.mob_hit().map(|(i, _)| self.mobs[i].id);
+        self.name_tags_with_hooks(camera, alpha, !mod_api::__private::mods().is_empty())
+    }
+    fn name_tags_with_hooks(&self, camera: glam::DVec3, alpha: f64, hooks: bool) -> Vec<NameTag> {
+        self.collect_name_tags(camera, alpha, hooks, None)
+    }
+    fn collect_name_tags(
+        &self,
+        camera: glam::DVec3,
+        alpha: f64,
+        hooks: bool,
+        frustum: Option<&horizon_client::gfx::Frustum>,
+    ) -> Vec<NameTag> {
+        let target = self.mob_hit().map(|(i, _, _)| self.mobs[i].id);
         let viewer = self.player_team();
         let mut tags = Vec::new();
         let players = self.other_players();
@@ -139,9 +249,7 @@ impl Game<'_> {
         let local_entity_id = self.remote.as_ref().map(|r| r.entity_id as u32);
         let ridden = collect_vehicle_ids(
             &self.mobs,
-            self.text_displays.values().filter_map(|d| d.vehicle),
-            self.armor_stands.iter().filter_map(|a| a.vehicle),
-            self.interactions.values().filter_map(|i| i.vehicle),
+            self.remote_vehicle_ids(),
             self.riding,
             local_entity_id,
         );
@@ -154,7 +262,16 @@ impl Game<'_> {
             // The name tag distance (64) is measured to the entity.
             let distance_sqr =
                 glam::DVec3::new(m.position.x, m.position.y, m.position.z).distance_squared(camera);
-            if distance_sqr >= 64.0 * 64.0 {
+            // Match the model's renderer-specific box, not the tag anchor: the
+            // name must survive when only the entity's feet are in view.
+            let (lo, hi) = super::entity_culling::cull_box(m, alpha);
+            let inflate = glam::DVec3::splat(0.5);
+            if !name_tag_in_view(
+                frustum,
+                distance_sqr,
+                (lo - camera - inflate).as_vec3(),
+                (hi - camera + inflate).as_vec3(),
+            ) {
                 continue;
             }
             // A player's scores and team go by name, a mob's by UUID.
@@ -298,7 +415,27 @@ impl Game<'_> {
             };
             let distance_sqr =
                 glam::DVec3::new(a.position.x, a.position.y, a.position.z).distance_squared(camera);
-            if distance_sqr >= 64.0 * 64.0 {
+            let position = a.render_position(alpha);
+            // Same dimensions and dragon-head growth as armor_stand_geometry.
+            let width = if a.marker {
+                0.0
+            } else if a.small {
+                0.25
+            } else {
+                0.5
+            };
+            let dragon = a.equipment[5]
+                .as_ref()
+                .is_some_and(|i| &*i.item == "minecraft:dragon_head");
+            let grow = if dragon { 1.0 } else { 0.5 };
+            let half = glam::DVec3::new(width / 2.0 + grow, grow, width / 2.0 + grow);
+            let origin = super::entity_culling::at(position) - camera;
+            if !name_tag_in_view(
+                frustum,
+                distance_sqr,
+                (origin - half).as_vec3(),
+                (origin + glam::DVec3::new(half.x, height + grow, half.z)).as_vec3(),
+            ) {
                 continue;
             }
             let team = self.mob_team(a.id);
@@ -366,7 +503,7 @@ impl Game<'_> {
             .then(|| self.frame_hit())
             .flatten()
             .filter(|(_, distance)| {
-                self.before_block(*distance) && self.mob_hit().is_none_or(|(_, d)| d > *distance)
+                self.before_block(*distance) && self.mob_hit().is_none_or(|(_, d, _)| d > *distance)
             })
             .map(|(index, _)| index);
         let frames = if hooks {
@@ -439,14 +576,21 @@ impl Game<'_> {
         // max((0.25 + 0.75) / 2, 0.5), as ARGB.color (the floor of 255 times it).
         const FADED: u32 = 0x7F;
         let mut patches = Vec::new();
-        for tag in self.name_tags(camera, alpha) {
+        let mut layouts = std::mem::take(&mut self.name_tag_layouts);
+        layouts.begin_frame(&self.gui.atlas);
+        for tag in self.collect_name_tags(
+            camera,
+            alpha,
+            !mod_api::__private::mods().is_empty(),
+            self.view_frustum.as_ref(),
+        ) {
             let o = tag.at - camera;
             // `gbuffers_entities` draws name tag text (2.3); a sneaking player's faded tag, on its
             // background, blends.
             if tag.discrete {
                 self.mark_translucent_entity(out.len(), "minecraft:name_tag");
                 let light = vertex_light(tag.light);
-                patches.extend(self.name_tag_quads(
+                patches.extend(self.cached_name_tag_quads(
                     o,
                     &tag.lines,
                     FADED,
@@ -455,6 +599,7 @@ impl Game<'_> {
                     light,
                     NAME_TAG_UNIT,
                     out,
+                    Some(&mut layouts),
                 ));
                 continue;
             }
@@ -462,7 +607,7 @@ impl Game<'_> {
             let lit = (tag.light >> 4).max(2) << 4 | (tag.light & 15).max(2);
             self.mark_entity(out.len(), "minecraft:name_tag");
             let light = vertex_light(lit);
-            patches.extend(self.name_tag_quads(
+            patches.extend(self.cached_name_tag_quads(
                 o,
                 &tag.lines,
                 0xFF,
@@ -471,9 +616,10 @@ impl Game<'_> {
                 light,
                 NAME_TAG_UNIT,
                 out,
+                Some(&mut layouts),
             ));
             // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
-            patches.extend(self.name_tag_quads(
+            patches.extend(self.cached_name_tag_quads(
                 o,
                 &tag.lines,
                 FADED,
@@ -482,8 +628,11 @@ impl Game<'_> {
                 0,
                 NAME_TAG_UNIT,
                 see_through,
+                Some(&mut layouts),
             ));
         }
+        layouts.end_frame();
+        self.name_tag_layouts = layouts;
         self.map_patches.extend(patches);
     }
     /// The lines of one name tag, `o` from the camera: the text at
@@ -502,6 +651,22 @@ impl Game<'_> {
         unit: f32,
         out: &mut Vec<Vertex>,
     ) -> Vec<horizon_client::font::Patch> {
+        self.cached_name_tag_quads(
+            o, lines, text_alpha, background, text_layer, light, unit, out, None,
+        )
+    }
+    fn cached_name_tag_quads(
+        &self,
+        o: glam::DVec3,
+        lines: &[(Text, f64)],
+        text_alpha: u32,
+        background: bool,
+        text_layer: u32,
+        light: u32,
+        unit: f32,
+        out: &mut Vec<Vertex>,
+        mut layouts: Option<&mut NameTagLayouts>,
+    ) -> Vec<horizon_client::font::Patch> {
         // Options.getBackgroundOpacity(0.25) black, as ARGB.color.
         const BACKGROUND: u32 = 0x3F00_0000;
         // The camera's facing (Camera.rotation()), turned round in third-person
@@ -509,7 +674,7 @@ impl Game<'_> {
         let (view_yaw, view_pitch) = match self.posed_rotation {
             // The frame's camera, already turned round in front view.
             Some(rotation) => rotation,
-            None if self.camera_type == super::perspective::CameraType::ThirdPersonFront => {
+            None if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront => {
                 (self.yaw + 180.0, -self.pitch)
             }
             None => (self.yaw, self.pitch),
@@ -518,7 +683,7 @@ impl Game<'_> {
         let right = forward.cross(glam::DVec3::Y).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
         let away = forward.as_vec3() * 0.002;
-        let mut batch = HudBatch::new([1, 1]);
+        let mut batch = HudBatch::scratch([1, 1]);
         for (text, lift) in lines {
             let o = (o + glam::DVec3::new(0.0, *lift, 0.0)).as_vec3();
             let (r, u) = (right.as_vec3() * unit, up.as_vec3() * unit);
@@ -532,13 +697,23 @@ impl Game<'_> {
             batch.vertices.clear();
             // Font.prepareText, as any text: bold, italic, fonts and each
             // glyph's own box (accented.png's are 12 pixels tall).
-            let behind = batch.name_tag(
-                &self.gui.atlas,
-                text,
-                y0,
-                text_alpha << 24 | 0xFF_FFFF,
-                if background { BACKGROUND } else { 0 },
-            );
+            let behind = match layouts.as_deref_mut() {
+                Some(layouts) => layouts.name_tag(
+                    &mut batch,
+                    &self.gui.atlas,
+                    text,
+                    y0,
+                    text_alpha,
+                    background,
+                ),
+                None => batch.name_tag(
+                    &self.gui.atlas,
+                    text,
+                    y0,
+                    text_alpha << 24 | 0xFF_FFFF,
+                    if background { BACKGROUND } else { 0 },
+                ),
+            };
             for (i, quad) in batch.vertices.as_chunks::<6>().0.iter().enumerate() {
                 let shift = if i * 6 < behind {
                     away
@@ -564,8 +739,29 @@ impl Game<'_> {
     }
 }
 
+/// Use the renderer's camera-relative clip test before measuring or emitting text.
+fn name_tag_in_view(
+    frustum: Option<&impl horizon_client::gfx::Cull>,
+    distance_sqr: f64,
+    min: glam::Vec3,
+    max: glam::Vec3,
+) -> bool {
+    distance_sqr < 64.0 * 64.0 && frustum.is_none_or(|view| view.intersects(min, max))
+}
+
+fn first_mob_indices(mobs: &[Mob]) -> std::collections::HashMap<u32, usize> {
+    let mut indices = std::collections::HashMap::with_capacity(mobs.len());
+    for (index, mob) in mobs.iter().enumerate() {
+        // Match iter().find even if a transient snapshot contains duplicate IDs.
+        indices.entry(mob.id).or_insert(index);
+    }
+    indices
+}
+
 /// Collect entity IDs of all vehicles: entities that have passengers
-/// (mobs, players, text displays, armor stands, or interactions riding them).
+/// (`passenger_vehicles`: what every entity the server sent rides, text displays,
+/// armor stands, item displays and interactions included; vanilla's `isVehicle` is
+/// any passenger at all).
 ///
 /// On multiplayer servers (e.g. `mcpvp.club`), server plugins hang custom nametags
 /// (ranks, prefixes, stats) over players using `TextDisplay` or `ArmorStand` passengers.
@@ -577,9 +773,7 @@ impl Game<'_> {
 /// is ridden and suppresses the duplicate tag (#9477).
 fn collect_vehicle_ids(
     mobs: &[Mob],
-    text_display_vehicles: impl IntoIterator<Item = u32>,
-    armor_stand_vehicles: impl IntoIterator<Item = u32>,
-    interaction_vehicles: impl IntoIterator<Item = u32>,
+    passenger_vehicles: impl IntoIterator<Item = u32>,
     local_riding: Option<u32>,
     local_entity_id: Option<u32>,
 ) -> std::collections::HashSet<u32> {
@@ -587,9 +781,7 @@ fn collect_vehicle_ids(
         .iter()
         .filter_map(|o| o.extra.mount)
         .chain(mobs.iter().filter_map(|m| m.extra.rider.map(|_| m.id)))
-        .chain(text_display_vehicles)
-        .chain(armor_stand_vehicles)
-        .chain(interaction_vehicles)
+        .chain(passenger_vehicles)
         .collect();
     if let Some(riding) = local_riding {
         ridden.insert(riding);
@@ -649,6 +841,202 @@ mod tests {
     use horizon_client::pose::Pose;
     use horizon_core::geometry::Vec3;
     use std::sync::Arc;
+
+    fn tag_font() -> HudAtlas {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "horizon-tag-cache-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let textures = root.join("assets/minecraft/textures/font");
+        std::fs::create_dir_all(root.join("assets/minecraft/font")).unwrap();
+        std::fs::create_dir_all(&textures).unwrap();
+        std::fs::write(root.join("assets/minecraft/font/default.json"),
+            r#"{"providers":[{"type":"bitmap","file":"minecraft:font/cache.png","ascent":7,"chars":["ab"]}]}"#).unwrap();
+        let file = std::fs::File::create(textures.join("cache.png")).unwrap();
+        let mut encoder = png::Encoder::new(file, 16, 8);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let pixels: Vec<u8> = (0..128)
+            .flat_map(|i| [255, 255, 255, if i % 8 < 4 { 255 } else { 0 }])
+            .collect();
+        writer.write_image_data(&pixels).unwrap();
+        drop(writer);
+        let mut atlas = HudAtlas::boot();
+        atlas.font = horizon_client::font::Font::load(
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            &Default::default(),
+            &[],
+            (1024, 1024),
+            (512, 512),
+            atlas.sprites["horizon/white"],
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        atlas
+    }
+
+    fn tag_bytes(
+        cache: &mut NameTagLayouts,
+        atlas: &HudAtlas,
+        text: &Text,
+        alpha: u32,
+        background: bool,
+    ) -> Vec<u8> {
+        cache.begin_frame(atlas);
+        let mut batch = HudBatch::scratch([1, 1]);
+        let behind = cache.name_tag(&mut batch, atlas, text, 0.0, alpha, background);
+        cache.end_frame();
+        let mut fresh = HudBatch::scratch([1, 1]);
+        assert_eq!(
+            behind,
+            fresh.name_tag(
+                atlas,
+                text,
+                0.0,
+                alpha << 24 | 0xFF_FFFF,
+                if background { 0x3F00_0000 } else { 0 }
+            )
+        );
+        let bytes: &[u8] = bytemuck::cast_slice(&batch.vertices);
+        assert_eq!(bytes, bytemuck::cast_slice::<_, u8>(&fresh.vertices));
+        bytes.to_vec()
+    }
+
+    #[test]
+    fn cached_tag_quads_follow_text_style_pass_and_font_changes() {
+        let mut atlas = tag_font();
+        let mut cache = NameTagLayouts::default();
+        let a = Text::literal("a");
+        let first = tag_bytes(&mut cache, &atlas, &a, 255, false);
+        assert!(!first.is_empty());
+        assert_eq!(tag_bytes(&mut cache, &atlas, &a, 255, false), first);
+        for text in [
+            Text::literal("b"),
+            a.clone().bold(),
+            Text::colored("a", 0x12AB34),
+        ] {
+            assert_ne!(tag_bytes(&mut cache, &atlas, &text, 255, false), first);
+            tag_bytes(&mut cache, &atlas, &text, 255, false);
+        }
+        assert_ne!(tag_bytes(&mut cache, &atlas, &a, 127, true), first);
+        tag_bytes(&mut cache, &atlas, &a, 127, true);
+        tag_bytes(&mut cache, &atlas, &a, 255, false);
+        // Reset and occupy the first glyph slot with b: a's old UV is now wrong.
+        atlas.font.reset_cache();
+        atlas.font.glyph('b');
+        assert_ne!(tag_bytes(&mut cache, &atlas, &a, 255, false), first);
+        // Font options may change without replacing the atlas.
+        atlas.font.uniform = true;
+        tag_bytes(&mut cache, &atlas, &a, 255, false);
+    }
+
+    #[test]
+    fn obfuscated_tag_glyphs_keep_animating_after_cache_warmup() {
+        let atlas = tag_font();
+        let mut cache = NameTagLayouts::default();
+        let text = Text::legacy("§kaaaaaaaaaaaaaaaa");
+        let mut images = std::collections::HashSet::new();
+        for seed in 0..8 {
+            cache.begin_frame(&atlas);
+            atlas.font.reseed(seed);
+            let mut batch = HudBatch::scratch([1, 1]);
+            cache.name_tag(&mut batch, &atlas, &text, 0.0, 255, false);
+            cache.end_frame();
+            let bytes = bytemuck::cast_slice::<_, u8>(&batch.vertices).to_vec();
+            atlas.font.reseed(seed);
+            let mut fresh = HudBatch::scratch([1, 1]);
+            fresh.name_tag(&atlas, &text, 0.0, u32::MAX, 0);
+            assert_eq!(bytes, bytemuck::cast_slice::<_, u8>(&fresh.vertices));
+            images.insert(bytes);
+        }
+        assert!(images.len() > 1, "the fixture must actually animate");
+    }
+
+    #[test]
+    fn inline_tag_objects_follow_live_sprite_updates() {
+        let mut atlas = HudAtlas::boot();
+        let mut sprite = atlas.sprites["horizon/white"];
+        atlas.sprites.insert("item/probe".into(), sprite);
+        let text = horizon_client::component::to_text(
+            &serde_json::json!({"object":"atlas", "sprite":"minecraft:item/probe"}),
+            &mut |_| Text::empty(),
+        );
+        let mut cache = NameTagLayouts::default();
+        let first = tag_bytes(&mut cache, &atlas, &text, 255, false);
+        assert!(!first.is_empty());
+        sprite.u0 += 0.1;
+        atlas.sprites.insert("item/probe".into(), sprite);
+        assert_ne!(tag_bytes(&mut cache, &atlas, &text, 255, false), first);
+    }
+
+    #[test]
+    fn name_tag_culling_keeps_intersecting_entity_boxes_within_distance() {
+        // A 90-degree camera looking down -Z, with near/far at 1/100.
+        struct View;
+        impl horizon_client::gfx::Cull for View {
+            fn intersects(&self, lo: glam::Vec3, hi: glam::Vec3) -> bool {
+                lo.z <= -1.0
+                    && hi.z >= -100.0
+                    && lo.x + lo.z <= 0.0
+                    && hi.x - lo.z >= 0.0
+                    && lo.y + lo.z <= 0.0
+                    && hi.y - lo.z >= 0.0
+            }
+            fn contains(&self, lo: glam::Vec3, hi: glam::Vec3) -> bool {
+                self.intersects(lo, hi)
+            }
+        }
+        // The head/anchor at y=12 is outside the top plane, but the
+        // entity's feet are inside: vanilla still submits its name.
+        assert!(name_tag_in_view(
+            Some(&View),
+            181.0,
+            glam::Vec3::new(-0.8, 8.5, -10.8),
+            glam::Vec3::new(0.8, 11.3, -9.2)
+        ));
+        for (offset, distance, expected) in [
+            ([0.0, 0.0, -10.0], 100.0, true),
+            ([0.0, 0.0, 10.0], 100.0, false),
+            ([12.0, 0.0, -10.0], 244.0, false),
+            ([0.0, 12.0, -10.0], 244.0, false),
+            ([0.0, 0.0, -65.0], 4225.0, false),
+            ([0.0, 0.0, -64.0], 4096.0, false),
+            ([0.0, 0.0, -63.0], 3969.0, true),
+        ] {
+            assert_eq!(
+                name_tag_in_view(
+                    Some(&View),
+                    distance,
+                    glam::Vec3::from_array(offset) - glam::Vec3::splat(0.5),
+                    glam::Vec3::from_array(offset) + glam::Vec3::splat(0.5)
+                ),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn name_tag_id_lookup_matches_scan_on_randomized_duplicate_lists() {
+        let mut seed = 4664_u32;
+        for len in [0, 1, 10, 150, 300] {
+            let mut mobs = Vec::new();
+            for _ in 0..len {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let mut mob = player_mob();
+                mob.id = seed % 80;
+                mobs.push(mob);
+            }
+            let indices = first_mob_indices(&mobs);
+            for id in 0..100 {
+                assert_eq!(
+                    indices.get(&id).copied(),
+                    mobs.iter().position(|m| m.id == id)
+                );
+            }
+        }
+    }
 
     /// The player model `perspective::player_type` builds from the prepared
     /// resources, without them: its box only needs the id and the pointer.
@@ -772,14 +1160,7 @@ mod tests {
         let mobs = vec![remote_player];
 
         // 1. TextDisplay riding remote player 42
-        let ridden = collect_vehicle_ids(
-            &mobs,
-            vec![42],
-            std::iter::empty(),
-            std::iter::empty(),
-            None,
-            Some(100),
-        );
+        let ridden = collect_vehicle_ids(&mobs, vec![42], None, Some(100));
         assert!(
             ridden.contains(&42),
             "remote player 42 is ridden by text display"
@@ -788,14 +1169,7 @@ mod tests {
         assert!(!ridden.contains(&0), "local model 0 has no passenger");
 
         // 2. ArmorStand riding local player 100 -> model 0 must be in ridden
-        let ridden_local = collect_vehicle_ids(
-            &mobs,
-            std::iter::empty(),
-            vec![100],
-            std::iter::empty(),
-            None,
-            Some(100),
-        );
+        let ridden_local = collect_vehicle_ids(&mobs, vec![100], None, Some(100));
         assert!(
             ridden_local.contains(&100),
             "local player 100 is ridden by armor stand"

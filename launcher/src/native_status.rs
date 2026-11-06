@@ -73,6 +73,8 @@ pub struct Build {
     /// It compiled another commit than its Nightly's, with no record of why: built before the
     /// launcher kept which mods pinned it ([`pinning`] reads them from the instance's mods).
     pub pinned_unknown: bool,
+    /// The mods turned on that it was built without, and why.
+    pub left_out: Vec<native_mods::LeftOut>,
 }
 
 impl Build {
@@ -90,6 +92,7 @@ impl Build {
             base: about.base,
             horizon: about.horizon,
             pinned_by: Vec::new(),
+            left_out: about.left_out,
         }
     }
 
@@ -155,12 +158,28 @@ pub fn bundles_on(home: &Path) -> Vec<horizon_mods::index::native::Bundle> {
         .collect()
 }
 
+/// Paths declared by a native package, in manifest order.
+pub fn declared_internals(manifest: &horizon_mods::Manifest) -> Vec<String> {
+    manifest
+        .native
+        .as_ref()
+        .map(|native| {
+            native
+                .internals
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// A native file not tracked by the registry/browser, including GitHub installs.
 #[derive(Clone)]
 pub struct Installed {
     pub file: String,
     pub id: String,
     pub version: String,
+    pub internals: Vec<String>,
     pub origin: Option<crate::github_mods::Origin>,
     /// The validated package icon, or the package error (the file remains removable).
     pub icon: Result<Option<Arc<horizon_mods::icon::Icon>>, String>,
@@ -184,10 +203,15 @@ pub fn untracked(home: &Path) -> Vec<Installed> {
             let origin = (path.file_stem()?.to_str()? == id)
                 .then(|| crate::github_mods::origin(home, &id))
                 .flatten();
+            let internals = package
+                .as_ref()
+                .map(|p| declared_internals(&p.manifest))
+                .unwrap_or_default();
             Some(Installed {
                 file,
                 id,
                 version,
+                internals,
                 origin,
                 icon: package.map(|p| p.icon.map(Arc::new)),
             })
@@ -234,9 +258,15 @@ pub fn in_mode(
     }
 }
 
+/// The mods a build tried: both those it holds and those it left out.
 fn parse_built(about: &serde_json::Value) -> Vec<Mod> {
     let mods = about["mods"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let left_out = about["left_out"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
     mods.iter()
+        .chain(left_out)
         .filter_map(|m| {
             Some((
                 m["id"].as_str()?.into(),
@@ -253,7 +283,18 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
-    for path in hmods(home)
+    let mut packages = hmods(home);
+    // A wasm mod's declarations also select a source build's internals table.
+    packages.extend(
+        fs::read_dir(home.join(horizon_mods::mod_list::DIR))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "hmod")),
+    );
+    packages.sort();
+    for path in packages
         .into_iter()
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
@@ -290,6 +331,18 @@ mod tests {
 
     fn d(id: &str, version: &str, digest: &str) -> Mod {
         (id.into(), version.into(), Some(digest.into()))
+    }
+
+    #[test]
+    fn regular_wasm_package_changes_invalidate_the_build_view_cache() {
+        let home = std::env::temp_dir().join(format!("wasm-build-view-{}", std::process::id()));
+        fs::create_dir_all(home.join(horizon_mods::mod_list::DIR)).unwrap();
+        let package = home.join(horizon_mods::mod_list::DIR).join("example.hmod");
+        fs::write(&package, b"a").unwrap();
+        let before = fingerprint(&home, None);
+        fs::write(&package, b"ab").unwrap();
+        assert_ne!(before, fingerprint(&home, None));
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
@@ -483,6 +536,17 @@ mod tests {
         });
         assert_eq!(parse_built(&about), [m("zoom", "2.1"), d("y", "1", "ab")]);
         assert!(parse_built(&serde_json::json!({})).is_empty());
+        let about = serde_json::json!({
+            "mods": [{"id": "zoom", "version": "2.1"}],
+            "left_out": [{"id": "hitbox_plus", "version": "1.3.0", "sha256": "aa", "why": "other-version"}],
+        });
+        let build = parse_built(&about);
+        let on = [m("zoom", "2.1"), d("hitbox_plus", "1.3.0", "aa")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::UpToDate);
+        let on = [m("zoom", "2.1"), m("hitbox_plus", "1.3.1")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::Outdated);
+        let on = [m("zoom", "2.1"), d("hitbox_plus", "1.3.0", "bb")];
+        assert_eq!(state(&on, Some(build.as_slice())), State::Outdated);
         assert_eq!(built("v0.1.0"), None, "not a native build");
     }
 

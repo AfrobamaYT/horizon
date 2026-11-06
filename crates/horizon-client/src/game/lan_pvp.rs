@@ -281,7 +281,10 @@ impl Game<'_> {
         let target = match victim {
             Victim::Guest(conn) => host.hub.guest(conn).and_then(|g| team_of(self, &g.name)),
         };
-        let refused = !(self.ui.rules.bool("pvp")
+        let refused = !(self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::PVP)
             && horizon_client::scoreboard::teams_allow_damage(target.as_ref(), attacker.as_ref()));
         let on_player = Hit::Entity {
             who: Who::Player,
@@ -362,7 +365,11 @@ impl Game<'_> {
                 g.combat.player_attacker = None;
                 let (strength, xd, zd) = s.knockback;
                 if hurt && strength > 0.0 {
-                    g.knock_back_player(f64::from(strength), xd, zd, PVP_SOURCE, &attack);
+                    if g.legacy_rules() {
+                        g.legacy_extra_knockback(f64::from(strength), (xd, zd));
+                    } else {
+                        g.knock_back_player(f64::from(strength), xd, zd, PVP_SOURCE, &attack);
+                    }
                 }
                 // Entity.igniteForSeconds on the victim: the fire timer only
                 // rises, and a fire-immune victim (no player is by type) is spared.
@@ -377,7 +384,12 @@ impl Game<'_> {
                 (hurt, thorns)
             })
         };
-        let (hurt, thorns) = if self.ui.rules.bool("pvp") && harm {
+        let (hurt, thorns) = if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::PVP)
+            && harm
+        {
             match victim {
                 Victim::Guest(conn) => self.guest_struck_by(conn, land).unwrap_or_default(),
             }
@@ -572,7 +584,10 @@ impl Game<'_> {
         for (victim, id, team) in victims {
             if sweep.skip == Some(id)
                 || horizon_client::scoreboard::teams_allied(team.as_ref(), sweep.team.as_ref())
-                || !self.ui.rules.bool("pvp")
+                || !self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::PVP)
             {
                 continue;
             }

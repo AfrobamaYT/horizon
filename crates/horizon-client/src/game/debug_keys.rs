@@ -67,9 +67,6 @@ impl Game<'_> {
     /// own handling. Returns true when it is used up (a debug combination,
     /// F3 itself, F3+Escape).
     pub(super) fn debug_key(&mut self, key: KeyCode, action: KeyAction) -> bool {
-        if self.title.is_some() {
-            return false;
-        }
         let Some(name) = keybinds::key_name(key) else {
             return false;
         };
@@ -556,7 +553,10 @@ impl Game<'_> {
     /// `LocalPlayer.isReducedDebugInfo`: the server's rule or the option.
     pub(super) fn reduced_debug_info(&self) -> bool {
         self.settings.reduced_debug_info
-            || self.ui.rules.bool("reduced_debug_info")
+            || self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::REDUCED_DEBUG_INFO)
             || self.remote.as_ref().is_some_and(|r| r.reduced_debug_info)
     }
     /// `DebugScreenEntryList.isCurrentlyEnabled` for an entry's path.
@@ -713,6 +713,9 @@ impl Game<'_> {
                 self.debug_charts.toggle_lightmap(&mut self.debug);
                 true
             }
+            // The debug options screen is not wired over the title screen yet:
+            // leave F6 unhandled there rather than half-open it.
+            DebugAction::DebugOptions if self.title.is_some() => false,
             DebugAction::DebugOptions => {
                 self.toggle_debug_options();
                 true
@@ -802,7 +805,7 @@ impl Game<'_> {
             "client"
         };
         if self.entity_targeted()
-            && let Some((index, _)) = self.mob_hit()
+            && let Some((index, _, _)) = self.mob_hit()
         {
             let (kind, position, id) = {
                 let m = &self.mobs[index];
@@ -1194,7 +1197,7 @@ impl Game<'_> {
             }
         }
         // The player's own, unless the camera is in its head.
-        if !self.camera_type.first_person()
+        if !self.camera_type.is_first_person()
             && let Some(p) = &self.player
         {
             let d = p.dimensions;

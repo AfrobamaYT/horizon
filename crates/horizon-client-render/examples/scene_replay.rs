@@ -179,7 +179,9 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let root = o.root.clone().unwrap_or_else(|| settings.resources.clone());
     let loading = Instant::now();
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     if AtlasCheck::of(&render) != settings.atlas {
         return Err(format!(
             "the block sprites at {} are not the ones the capture was made with (resource packs \
@@ -339,7 +341,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     }
     let loaded_ms = ms(loading.elapsed());
 
-    let hud = HudBatch::new([width, height]);
+    let hud = HudBatch::scratch([width, height]);
     let mut views = Vec::new();
     for &offset in &o.yaw_offsets {
         let mut frame = scene.frame(&hud);
@@ -562,7 +564,9 @@ fn remesh(
     let facts = BlockFacts::load(root, assets.registry)?;
     let visibility = models::load_visibility(root, assets.registry)?;
     let tables = MeshTables::new(assets, render, &facts, visibility)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let seed = world_seed(save).unwrap_or_else(|| {
         eprintln!(
             "scene_replay: no seed in {}, biome blending uses 0",

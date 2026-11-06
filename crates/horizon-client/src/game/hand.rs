@@ -263,7 +263,10 @@ impl Game<'_> {
     /// block within the block reach (`getHitEntitiesAlong`'s block result,
     /// kept by `filterHitResult`); `None` on a miss, where the plain pick
     /// decides.
-    fn attack_range_pick(&self, range: &serde_json::Value) -> Option<Option<(usize, f64)>> {
+    fn attack_range_pick(
+        &self,
+        range: &serde_json::Value,
+    ) -> Option<Option<(usize, f64, [f64; 3])>> {
         let eye = v3(self.eye_position()?);
         let look = v3(super::view_vector(self.yaw, self.pitch));
         let reach = attack_reach(range, self.creative);
@@ -283,7 +286,14 @@ impl Game<'_> {
         let movement = self.known_player_movement();
         let nearest = super::spear::hits_in_reach(&boxes, eye, look, movement, reach, clip)
             .into_iter()
-            .map(|(i, at)| (i, eye.distance_squared(at).sqrt()))
+            .map(|(i, at)| {
+                let feet = self.mobs[i].position;
+                (
+                    i,
+                    eye.distance_squared(at).sqrt(),
+                    super::interact_location(at, feet),
+                )
+            })
             .reduce(|a, b| if b.1 < a.1 { b } else { a });
         if nearest.is_some() {
             return Some(nearest);
@@ -373,7 +383,9 @@ impl Game<'_> {
         }
         Ok(())
     }
-    /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`.
+    /// `BlockBehaviour.getDestroyProgress` with `Player.getDestroySpeed`, whose
+    /// end asks the mods' `native_player_break_speed`. Every dig's progress comes from
+    /// here: single player's, a host's for each guest, a remote client's own.
     pub(super) fn destroy_progress(&mut self, pos: [i32; 3]) -> f32 {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         let facts = self.res.facts().get(state);
@@ -453,8 +465,7 @@ impl Game<'_> {
     /// (`getControlledVehicle`: its first passenger, on a server's client).
     pub(super) fn hands_busy(&self) -> bool {
         self.riding
-            .is_some_and(|id| self.boats.iter().any(|b| b.id == id))
-            && self.remote.as_ref().is_none_or(|r| r.first_passenger)
+            .is_some_and(|id| self.controls_boat(id) && self.boats.iter().any(|b| b.id == id))
             && [
                 winit::keyboard::KeyCode::KeyW,
                 winit::keyboard::KeyCode::KeyS,
@@ -462,7 +473,7 @@ impl Game<'_> {
                 winit::keyboard::KeyCode::KeyD,
             ]
             .iter()
-            .any(|k| self.keys.contains(k))
+            .any(|k| self.movement_key_held(*k))
     }
     /// `MultiPlayerGameMode.startUseItem`'s bookkeeping around the game's
     /// use: nothing starts while a block is being broken or the hands are
@@ -525,10 +536,11 @@ impl Game<'_> {
             changed[h] = !same;
         }
         let speed = self.main_hand_attack_speed();
-        let replace = self.heights.tick(
+        let replace = self.heights.tick_with(
             self.hands_busy(),
             self.hand_strength.swap_scale(1.0, speed),
             changed,
+            self.settings.extras.pvp.combat.legacy,
         );
         for h in 0..2 {
             if replace[h] {
@@ -974,10 +986,7 @@ mod tests {
         assert!(shows_held_stack(&sword, &worn, true));
         // Another component (an anvil's repair cost) differs.
         let mut named = worn.clone();
-        named.1.as_mut().unwrap().extra = Some(Box::new(horizon_client::item_data::StackData {
-            repair_cost: 1,
-            ..Default::default()
-        }));
+        named.1.as_mut().unwrap().data_mut().repair_cost = 1;
         assert!(!shows_held_stack(&sword, &named, true));
         // The main hand changing hotbar slot to an equal stack: instant; to
         // a different count: animation.

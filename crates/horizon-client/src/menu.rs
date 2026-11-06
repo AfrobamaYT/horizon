@@ -387,6 +387,7 @@ const OFFHAND: usize = 40;
 
 pub struct Menu {
     kind: Kind,
+    registry_id: Option<Box<str>>,
     slots: Vec<Slot>,
     containers: [Vec<Option<ItemStack>>; 4],
     grid_size: usize,
@@ -554,18 +555,9 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
-/// with the game's): container slot `slot` of the content mod menu type `menu`
-/// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-/// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-/// `may_place` and `max_stack` hold the type's own answer (false on one of its
-/// `results`, true elsewhere, and 99): change them for your own menu types.
-/// `max_stack` is kept to 1 to 99,
-/// and the item's own stack size still caps it. Asked on the server, for each
-/// click, drag and shift-click that puts an item in a slot, several times for
-/// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-/// holds the side, the registries and the settings of the resource generation;
-/// a `/reload` builds the next one.
+/// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
+/// The slot is its backing container index. The shared application bounds the
+/// final maximum.
 #[inline(always)]
 pub fn native_menu_slot_rules(
     context: &LoopContext,
@@ -576,6 +568,38 @@ pub fn native_menu_slot_rules(
     max_stack: &mut u32,
 ) {
     crate::native_client_hooks::menu_slot_rules(context, menu, slot, stack, may_place, max_stack);
+}
+
+/// Apply the scoped rule to a slot's own answers, then enforce its item cap.
+pub fn apply_menu_slot_rules(
+    context: &LoopContext,
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    mut may_place: bool,
+    mut max_stack: u32,
+    item_max: u32,
+) -> (bool, u32) {
+    native_menu_slot_rules(context, menu, slot, stack, &mut may_place, &mut max_stack);
+    (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
+}
+
+/// Vanilla quick-craft count for one slot, based on the original carried stack.
+pub(crate) fn quick_craft_count(
+    kind: u8,
+    source: u32,
+    slots: usize,
+    have: u32,
+    max: u32,
+    item_max: u32,
+) -> u32 {
+    let each = match kind {
+        0 => (source as f32 / slots as f32).floor() as u32,
+        1 => 1,
+        2 => item_max,
+        _ => source,
+    };
+    (each + have).min(max)
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -885,6 +909,10 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
+            registry_id: match kind {
+                Kind::Mod(kind) => Some(kind.id.into()),
+                _ => None,
+            },
             slots,
             containers,
             grid_size,
@@ -942,6 +970,17 @@ impl Menu {
 
     pub fn kind(&self) -> Kind {
         self.kind
+    }
+
+    /// Registry identity of this menu, or the mount sentinel for a mount menu.
+    /// Player inventory and the creative picker have no registered menu type.
+    pub fn registry_id(&self) -> Option<&str> {
+        self.registry_id.as_deref()
+    }
+
+    /// Set the identity obtained from the open window's menu registry.
+    pub fn set_registry_id(&mut self, id: Option<&str>) {
+        self.registry_id = id.map(Into::into);
     }
 
     /// `clickMenuButton`: the loom's pattern buttons and the stonecutter's
@@ -1533,18 +1572,7 @@ impl Menu {
     // ---- item helpers ----
 
     fn max_stack(env: &Env, stack: &ItemStack) -> u32 {
-        // `ItemStack.getMaxStackSize`: the stack's component, else the item's.
-        // A removed component falls back to the item (`!minecraft:max_stack_size`).
-        let patched = stack.data().and_then(|d| {
-            if d.other("!minecraft:max_stack_size").is_some() {
-                return None;
-            }
-            match d.other("minecraft:max_stack_size") {
-                Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
-                _ => None,
-            }
-        });
-        patched.unwrap_or_else(|| env.items.get(&stack.item).map_or(64, |i| i.max_stack))
+        item_max_stack(env.items, stack)
     }
 
     fn damageable(env: &Env, stack: &ItemStack) -> bool {
@@ -1553,7 +1581,7 @@ impl Menu {
 
     /// `ItemStack.isStackable`.
     fn stackable(env: &Env, stack: &ItemStack) -> bool {
-        Self::max_stack(env, stack) > 1 && !(Self::damageable(env, stack) && stack.damage > 0)
+        stackable(env.items, stack)
     }
 
     fn is_bucket(stack: &ItemStack) -> bool {
@@ -1567,6 +1595,15 @@ impl Menu {
     // ---- Slot ----
 
     fn may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
+        if self.slots[s].role == Role::Hidden {
+            return false;
+        }
+        let own = self.vanilla_may_place(env, s, stack);
+        self.slot_rules(env, s, stack, own, self.vanilla_slot_max(s, stack))
+            .0
+    }
+
+    fn vanilla_may_place(&self, env: &Env, s: usize, stack: &ItemStack) -> bool {
         match self.slots[s].role {
             Role::Plain | Role::CreativeDisplay => true,
             Role::Armor(eq) => env
@@ -1597,7 +1634,7 @@ impl Menu {
                         .is_some_and(|m| i.equip_allowed.as_ref().is_none_or(|a| a.contains(m)))
             }),
             Role::Shulker => fits_inside_container_items(stack),
-            Role::Mod | Role::ModResult => self.mod_slot(env, s, stack).0,
+            Role::Mod | Role::ModResult => self.slots[s].role == Role::Mod,
             Role::Hidden => false,
             Role::Fuel => Self::is_fuel(env, stack) || Self::is_bucket(stack),
             Role::Output | Role::CraftResult | Role::Inert => false,
@@ -1748,30 +1785,42 @@ impl Menu {
         partial
     }
 
-    /// A mod menu type's slot `s`: whether it takes `stack` (`Slot.mayPlace`:
-    /// anything but on a result) and how many it holds (`Slot.getMaxStackSize`),
-    /// then as the mods' hook says.
-    fn mod_slot(&self, env: &Env, s: usize, stack: &ItemStack) -> (bool, u32) {
-        let Kind::Mod(t) = self.kind else {
-            return (false, 0);
+    fn slot_rules(
+        &self,
+        env: &Env,
+        s: usize,
+        stack: &ItemStack,
+        own: bool,
+        max: u32,
+    ) -> (bool, u32) {
+        let Some(id) = self.registry_id() else {
+            return (own, max.min(Self::max_stack(env, stack)));
         };
-        let mut may_place = self.slots[s].role == Role::Mod;
-        let mut max_stack = CONTAINER_MAX;
-        let index = self.slots[s].index;
-        native_menu_slot_rules(
+        apply_menu_slot_rules(
             env.loop_context,
-            t.id,
-            index,
+            id,
+            self.slots[s].index,
             stack,
-            &mut may_place,
-            &mut max_stack,
-        );
-        (may_place, max_stack.clamp(1, CONTAINER_MAX))
+            own,
+            max,
+            Self::max_stack(env, stack),
+        )
     }
 
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
-        let own = match self.slots[s].role {
+        self.slot_rules(
+            env,
+            s,
+            stack,
+            self.vanilla_may_place(env, s, stack),
+            self.vanilla_slot_max(s, stack),
+        )
+        .1
+    }
+
+    fn vanilla_slot_max(&self, s: usize, stack: &ItemStack) -> u32 {
+        match self.slots[s].role {
             Role::Armor(_)
             | Role::MountEquip(_)
             | Role::Potion
@@ -1779,13 +1828,12 @@ impl Menu {
             | Role::BeaconPay => 1,
             // The lectern's bookAccess holds one.
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
-            Role::Fuel if Self::is_bucket(stack) => return 1,
-            Role::Mod | Role::ModResult => self.mod_slot(env, s, stack).1,
+            Role::Fuel if Self::is_bucket(stack) => 1,
+            Role::Mod | Role::ModResult => CONTAINER_MAX,
             // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
             // item reaches; a native mod's item may, and its own size is the cap.
             _ => u32::MAX,
-        };
-        own.min(Self::max_stack(env, stack))
+        }
     }
 
     /// `Container.setItem` (a grid change recomputes the result).
@@ -1996,6 +2044,14 @@ impl Menu {
         }
     }
 
+    /// A station's take sound, gated by its menu's `lastSoundTime`: once per
+    /// tick, so a shift-click that takes many results plays it once.
+    fn take_sound(&mut self, sound: &'static str) {
+        if !self.sounds.contains(&sound) {
+            self.sounds.push(sound);
+        }
+    }
+
     /// `ResultSlot.onTake` and the other `Slot.onTake` overrides.
     fn on_take(&mut self, env: &Env, s: usize, taken: &ItemStack) {
         if self.slots[s].role == Role::Output {
@@ -2031,7 +2087,7 @@ impl Menu {
             if self.remove(env, 0, 1).is_some() {
                 self.stone_setup_result(env, self.data[0]);
             }
-            self.sounds.push("minecraft:ui.stonecutter.take_result");
+            self.take_sound("minecraft:ui.stonecutter.take_result");
             return;
         }
         if self.slots[s].role == Role::GrindResult {
@@ -2104,8 +2160,7 @@ impl Menu {
             // onCraftedBy is the caller's (map_crafted).
             self.remove(env, 0, 1);
             self.remove(env, 1, 1);
-            self.sounds
-                .push("minecraft:ui.cartography_table.take_result");
+            self.take_sound("minecraft:ui.cartography_table.take_result");
             self.slot_changed(env, s);
             return;
         }
@@ -2116,7 +2171,7 @@ impl Menu {
             if self.containers[MAIN][0].is_none() || self.containers[MAIN][1].is_none() {
                 self.data[0] = -1;
             }
-            self.sounds.push("minecraft:ui.loom.take_result");
+            self.take_sound("minecraft:ui.loom.take_result");
             return;
         }
         if matches!(self.kind, Kind::CrafterBlock) && self.slots[s].container == MAIN {
@@ -2260,69 +2315,103 @@ impl Menu {
 
     /// `Inventory.getSlotWithRemainingSpace` (selected slot 0, offhand, rest).
     fn slot_with_space(&self, env: &Env, stack: &ItemStack) -> Option<usize> {
-        let inv = &self.containers[PLAYER];
-        [self.selected, OFFHAND]
-            .into_iter()
-            .chain(0..36)
-            .find(|&i| {
-                inv[i].as_ref().is_some_and(|have| {
-                    have.same_item_same_components(stack)
-                        && Self::stackable(env, have)
-                        && have.count < Self::max_stack(env, have)
-                })
-            })
-    }
-
-    /// `Inventory.addResource`: returns what did not fit.
-    fn add_resource(&mut self, env: &Env, stack: &ItemStack) -> u32 {
-        let slot = self.slot_with_space(env, stack).or_else(|| {
-            self.containers[PLAYER][..36]
-                .iter()
-                .position(Option::is_none)
-        });
-        let Some(slot) = slot else { return stack.count };
-        let cell = self.containers[PLAYER][slot].get_or_insert_with(|| {
-            let mut empty = stack.clone();
-            empty.count = 0;
-            empty
-        });
-        let room = Self::max_stack(env, cell).saturating_sub(cell.count);
-        let add = stack.count.min(room);
-        cell.count += add;
-        tidy(&mut self.containers[PLAYER][slot]);
-        stack.count - add
+        slot_with_space(&self.containers[PLAYER], self.selected, env.items, stack)
     }
 
     /// `Inventory.add(stack)`: the leftover stays in `stack`.
     fn inventory_add(&mut self, env: &Env, stack: &mut ItemStack) -> bool {
-        if stack.count == 0 {
-            return false;
+        inventory_add(
+            &mut self.containers[PLAYER],
+            self.selected,
+            self.creative,
+            env.items,
+            stack,
+        )
+    }
+}
+
+/// `ItemStack.getMaxStackSize`: the stack's component, else the item's; a removed
+/// component (`!minecraft:max_stack_size`) falls back to the item.
+pub(crate) fn item_max_stack(items: &Items, stack: &ItemStack) -> u32 {
+    let patched = stack.data().and_then(|d| {
+        if d.other("!minecraft:max_stack_size").is_some() {
+            return None;
         }
-        if Self::damageable(env, stack) && stack.damage > 0 {
-            if let Some(slot) = self.containers[PLAYER][..36]
-                .iter()
-                .position(Option::is_none)
-            {
-                self.containers[PLAYER][slot] = Some(stack.clone());
+        match d.other("minecraft:max_stack_size") {
+            Some(horizon_world::nbt::Tag::Int(n)) if (1..=99).contains(n) => Some(*n as u32),
+            _ => None,
+        }
+    });
+    patched.unwrap_or_else(|| items.get(&stack.item).map_or(64, |i| i.max_stack))
+}
+
+/// Whether a stack can merge in the player's inventory.
+fn stackable(items: &Items, stack: &ItemStack) -> bool {
+    item_max_stack(items, stack) > 1
+        && !(stack.damage > 0 && items.get(&stack.item).is_some_and(|i| i.max_damage > 0))
+}
+
+/// `Inventory.getSlotWithRemainingSpace`, preferring selected and offhand slots.
+fn slot_with_space(
+    inventory: &[Option<ItemStack>],
+    selected: usize,
+    items: &Items,
+    stack: &ItemStack,
+) -> Option<usize> {
+    [selected, OFFHAND].into_iter().chain(0..36).find(|&i| {
+        inventory[i].as_ref().is_some_and(|have| {
+            have.same_item_same_components(stack)
+                && stackable(items, have)
+                && have.count < item_max_stack(items, have)
+        })
+    })
+}
+
+/// `Inventory.add`; leaves any remainder in `stack`.
+pub(crate) fn inventory_add(
+    inventory: &mut [Option<ItemStack>],
+    selected: usize,
+    creative: bool,
+    items: &Items,
+    stack: &mut ItemStack,
+) -> bool {
+    if stack.count == 0 {
+        return false;
+    }
+    if items.get(&stack.item).is_some_and(|i| i.max_damage > 0) && stack.damage > 0 {
+        if let Some(slot) = inventory[..36].iter().position(Option::is_none) {
+            inventory[slot] = Some(stack.clone());
+            stack.count = 0;
+            return true;
+        }
+        if creative {
+            stack.count = 0;
+            return true;
+        }
+        return false;
+    }
+    loop {
+        let last = stack.count;
+        let slot = slot_with_space(inventory, selected, items, stack)
+            .or_else(|| inventory[..36].iter().position(Option::is_none));
+        if let Some(slot) = slot {
+            let cell = inventory[slot].get_or_insert_with(|| {
+                let mut empty = stack.clone();
+                empty.count = 0;
+                empty
+            });
+            let add = stack
+                .count
+                .min(item_max_stack(items, cell).saturating_sub(cell.count));
+            cell.count += add;
+            stack.count -= add;
+        }
+        if stack.count == 0 || stack.count >= last {
+            if stack.count == last && creative {
                 stack.count = 0;
                 return true;
             }
-            if self.creative {
-                stack.count = 0;
-                return true;
-            }
-            return false;
-        }
-        loop {
-            let last = stack.count;
-            stack.count = self.add_resource(env, stack);
-            if stack.count == 0 || stack.count >= last {
-                if stack.count == last && self.creative {
-                    stack.count = 0;
-                    return true;
-                }
-                return stack.count < last;
-            }
+            return stack.count < last;
         }
     }
 }
@@ -2379,10 +2468,21 @@ impl Menu {
                 // A mod menu's result (unless a mod's hook opens it) and a
                 // hidden slot get no top-up either, as a furnace's quick move
                 // never aims at its result.
-                let refuses = match self.slots[dest].role {
-                    Role::Hidden => true,
-                    Role::ModResult => !self.mod_slot(env, dest, stack).0,
-                    _ => false,
+                let refuses = if self.slots[dest].role == Role::Hidden {
+                    true
+                } else if let Some(id) = self.registry_id() {
+                    !apply_menu_slot_rules(
+                        env.loop_context,
+                        id,
+                        self.slots[dest].index,
+                        stack,
+                        self.slots[dest].role != Role::ModResult,
+                        CONTAINER_MAX,
+                        Self::max_stack(env, stack),
+                    )
+                    .0
+                } else {
+                    false
                 };
                 let max = match self.slot(dest) {
                     Some(target) if !refuses && target.same_item_same_components(stack) => {
@@ -2733,7 +2833,7 @@ impl Menu {
                     }
                 } else {
                     // One item into the empty item slot (setByPlayer).
-                    if self.containers[MAIN][0].is_some() {
+                    if self.containers[MAIN][0].is_some() || !self.may_place(env, 0, &stack) {
                         return None;
                     }
                     let single = ItemStack {
@@ -3028,14 +3128,14 @@ impl Menu {
                             let have = self.slot(s).map_or(0, |c| c.count);
                             let max =
                                 Self::max_stack(env, &source).min(self.slot_max(env, s, &source));
-                            let each = match self.quick_type {
-                                0 => (source.count as f32 / self.quick_slots.len() as f32).floor()
-                                    as u32,
-                                1 => 1,
-                                2 => Self::max_stack(env, &source),
-                                _ => source.count,
-                            };
-                            let new_count = (each + have).min(max);
+                            let new_count = quick_craft_count(
+                                self.quick_type as u8,
+                                source.count,
+                                self.quick_slots.len(),
+                                have,
+                                max,
+                                Self::max_stack(env, &source),
+                            );
                             remaining -= i64::from(new_count) - i64::from(have);
                             let mut placed = source.clone();
                             placed.count = new_count;
@@ -3273,6 +3373,10 @@ impl Menu {
     /// The SWAP branch of `doClick`.
     fn swap(&mut self, env: &Env, target: usize, button: usize) {
         let inv_slot = button;
+        let target_slot = self.slots[target];
+        if target_slot.container == PLAYER && target_slot.index == inv_slot {
+            return;
+        }
         let source = self.containers[PLAYER][inv_slot].clone();
         let target_stack = self.slot(target).cloned();
         if source.is_none() && target_stack.is_none() {
@@ -3689,6 +3793,59 @@ pub(crate) mod tests {
         let mut menu = Menu::new(kind);
         menu.creative = true;
         test(&env, &mut menu);
+    }
+
+    #[test]
+    fn menu_keeps_the_open_window_registry_identity() {
+        let mut menu = Menu::new(Kind::Chest(3));
+        assert_eq!(menu.registry_id(), None);
+        menu.set_registry_id(Some("minecraft:generic_9x3"));
+        assert_eq!(menu.registry_id(), Some("minecraft:generic_9x3"));
+        menu.set_registry_id(Some("example:chest"));
+        assert_eq!(menu.registry_id(), Some("example:chest"));
+        menu.set_registry_id(None);
+        assert_eq!(menu.registry_id(), None);
+    }
+
+    #[test]
+    fn inventory_add_respects_component_cap_and_remainder() {
+        with_menu(Kind::Inventory, |env, menu| {
+            menu.creative = false;
+            let mut item = ItemStack::new("minecraft:stone", 15);
+            item.data_mut().set_other(
+                "minecraft:max_stack_size",
+                Some(horizon_world::nbt::Tag::Int(16)),
+            );
+            menu.set_player_item(0, Some(item.clone()));
+            for i in 1..36 {
+                menu.set_player_item(i, stack("minecraft:dirt", 64));
+            }
+            item.count = 8;
+            menu.give(env, &mut item);
+            assert_eq!(menu.player_item(0).unwrap().count, 16);
+            assert_eq!(item.count, 7);
+        });
+    }
+
+    #[test]
+    fn swap_self_does_not_duplicate_and_container_slot_is_distinct() {
+        with_menu(Kind::Crafting, |env, menu| {
+            menu.set_player_item(0, stack("minecraft:stone", 8));
+            menu.click(env, 37, 0, Input::Swap).unwrap();
+            assert_eq!(menu.player_item(0).unwrap().count, 8);
+            let total: u32 = (0..menu.slot_count())
+                .filter_map(|s| menu.slot(s))
+                .map(|s| s.count)
+                .sum();
+            assert_eq!(total, 8);
+        });
+        with_menu(Kind::Chest(3), |env, menu| {
+            menu.set_slot(env, 0, stack("minecraft:dirt", 2));
+            menu.set_player_item(0, stack("minecraft:stone", 8));
+            menu.click(env, 0, 0, Input::Swap).unwrap();
+            assert_eq!(menu.slot(0).unwrap().count, 8);
+            assert_eq!(menu.player_item(0).unwrap().count, 2);
+        });
     }
 
     /// The Mouse Tweaks wheel's targets: vanilla's routing of one item.
@@ -4169,6 +4326,34 @@ pub(crate) mod tests {
         });
     }
 
+    /// `StonecutterMenu`'s `lastSoundTime`: a shift-click crafting a whole
+    /// stack plays the take sound once, not once per item.
+    #[test]
+    fn a_stonecutter_shift_click_plays_the_take_sound_once() {
+        with_menu(Kind::Stonecutter, |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 0, stack("granite", 60));
+            let polished = menu
+                .stone
+                .recipes
+                .iter()
+                .position(|&r| {
+                    &*env.station_recipes.stonecutting[r].result.item
+                        == "minecraft:polished_granite"
+                })
+                .expect("granite cuts into polished granite");
+            assert!(menu.button(env, polished as i32));
+            menu.click(env, 1, 0, Input::QuickMove).unwrap();
+            assert_eq!(menu.slot(0), None);
+            let made: u32 = (2..menu.slot_count())
+                .filter_map(|i| menu.slot(i))
+                .map(|s| s.count)
+                .sum();
+            assert_eq!(made, 60);
+            assert_eq!(menu.sounds, ["minecraft:ui.stonecutter.take_result"]);
+        });
+    }
+
     #[test]
     fn listener_safe_take_consumes_crafting_inputs() {
         with_menu(Kind::Crafting, |env, menu| {
@@ -4442,6 +4627,7 @@ pub(crate) mod tests {
             results: vec![],
         })));
         let mut menu = Menu::new(kind);
+        menu.set_registry_id(Some("test:rules"));
         let stack = ItemStack::new("minecraft:stone", 1);
         // A `/reload` builds the next context from the settings then on disk; the
         // next call sees it, and the one before it keeps its own.
@@ -4453,15 +4639,48 @@ pub(crate) mod tests {
         let before = load.loop_context(LoopSide::Server, []);
         assert_eq!(before.setting("rules_mod", "stack"), None);
         bare_env_in(&before, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 7)
+            );
         });
         std::fs::write(&file, "3").unwrap();
         let after = load.loop_context(LoopSide::Server, ["rules_mod"]);
         bare_env_in(&after, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 3));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 3)
+            );
+            // Slot 28 is hotbar 0 in this one-slot mod menu; both indices
+            // refer to inventory cell 0 and the rule caps that cell at three.
+            menu.set_player_item(0, Some(ItemStack::new("minecraft:stone", 8)));
+            menu.click(env, 28, 0, Input::Swap).unwrap();
+            assert_eq!(menu.player_item(0).unwrap().count, 8);
+            assert_eq!(
+                (0..menu.slot_count())
+                    .filter_map(|i| menu.slot(i))
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                8
+            );
+            // The container's index 0 is distinct, despite the same index.
+            menu.load_slot(0, Some(ItemStack::new("minecraft:dirt", 2)));
+            menu.click(env, 0, 0, Input::Swap).unwrap();
+            assert_eq!(menu.slot(0).unwrap().count, 3);
+            assert_eq!(menu.player_item(0).unwrap().count, 5);
+            assert_eq!(
+                (0..menu.slot_count())
+                    .filter_map(|i| menu.slot(i))
+                    .map(|s| s.count)
+                    .sum::<u32>(),
+                10
+            );
         });
         bare_env_in(&before, |env| {
-            assert_eq!(menu.mod_slot(env, 0, &stack), (true, 7));
+            assert_eq!(
+                menu.slot_rules(env, 0, &stack, true, CONTAINER_MAX),
+                (true, 7)
+            );
         });
         // The other loop hooks read the same context: before the reload the
         // setting is missing, after it every one sees it.

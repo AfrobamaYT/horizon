@@ -566,7 +566,7 @@ mod tests {
         // Animal.addAdditionalSaveData / readAdditionalSaveData: "InLove" (#1396).
         let mut m = rabbit();
         m.extra.in_love = 570;
-        let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None, None);
+        let tag = crate::entity_nbt::mob_to_nbt(&m, [0, 0, 0, 1], None, None, |_| None);
         assert_eq!(tag.get("InLove"), Some(&horizon_world::nbt::Tag::Int(570)));
         let types = HashMap::from([(m.kind.id.clone(), m.kind.clone())]);
         let back = crate::entity_nbt::mob_from_nbt(&tag, &types, 2, None).unwrap();
@@ -708,7 +708,11 @@ mod tests {
         m.horizontal_collision = true;
         near(f64::from(jump_power(&m, 1.0)), 0.5);
         m.attrs.jump_strength = 0.84;
-        m.extra.effects.push(("minecraft:jump_boost", 100, 1));
+        m.extra.effects.push(crate::mobs::StoredEffect::new(
+            "minecraft:jump_boost",
+            100,
+            1,
+        ));
         near(f64::from(jump_power(&m, 0.5)), 0.7);
         apply_jump(&mut m, 0.2);
         near(m.velocity.z, 0.1 / 3.25_f64.sqrt());

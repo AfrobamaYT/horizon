@@ -16,6 +16,10 @@ use wasmtime::component::{Component, Instance, Linker};
 
 use crate::wasm_refused::Refused;
 
+#[cfg(test)]
+#[path = "wasm_transport_tests.rs"]
+mod transport_tests;
+
 /// Why a linked group can't run, named for the Mods page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -147,6 +151,50 @@ impl Default for Budgets {
 // exhaustive: its fields are private
 pub struct State {
     limits: wasmtime::StoreLimits,
+    buffers: HashMap<std::any::TypeId, Box<dyn Any + Send>>,
+}
+
+impl State {
+    /// Reuses transport scratch owned by this store, including after a refused or trapped call.
+    /// Wasmtime's owned list bindings otherwise allocate a fresh host vector per crossing.
+    pub fn with_buffer<T: Default + Send + 'static, R>(
+        mut store: wasmtime::StoreContextMut<'_, Self>,
+        f: impl FnOnce(&mut T, wasmtime::StoreContextMut<'_, Self>) -> R,
+    ) -> R {
+        struct Scope<'a, T: Send + 'static> {
+            store: wasmtime::StoreContextMut<'a, State>,
+            buffer: Option<T>,
+        }
+        impl<T: Send + 'static> Drop for Scope<'_, T> {
+            fn drop(&mut self) {
+                *self
+                    .store
+                    .data_mut()
+                    .buffers
+                    .get_mut(&std::any::TypeId::of::<T>())
+                    .unwrap()
+                    .downcast_mut::<Option<T>>()
+                    .expect("scratch type matches its key") = self.buffer.take();
+            }
+        }
+        let buffer = store
+            .data_mut()
+            .buffers
+            .entry(std::any::TypeId::of::<T>())
+            .or_insert_with(|| Box::new(None::<T>))
+            .downcast_mut::<Option<T>>()
+            .expect("scratch type matches its key")
+            .take()
+            .unwrap_or_default();
+        let mut scope = Scope {
+            store,
+            buffer: Some(buffer),
+        };
+        f(
+            scope.buffer.as_mut().unwrap(),
+            wasmtime::AsContextMut::as_context_mut(&mut scope.store),
+        )
+    }
 }
 
 thread_local! {
@@ -468,6 +516,17 @@ impl NoAnswer for crate::Flow {
     }
 }
 
+struct CallScope {
+    frame: *mut Frame,
+    caller: Option<Arc<Running>>,
+}
+impl Drop for CallScope {
+    fn drop(&mut self) {
+        CURRENT.set(self.frame);
+        CALLER.set(self.caller.take());
+    }
+}
+
 impl Running {
     /// Runs one `call` with `frame`'s hosts, within its group's limits for it. A refused call
     /// or a trap answers `no_answer()`; a trap stops the whole group.
@@ -489,6 +548,10 @@ impl Running {
         self.group.budgets.arm(store, call);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
+        let scope = CallScope {
+            frame: previous,
+            caller,
+        };
         let released =
             std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
         let result = match released.is_empty() {
@@ -499,8 +562,7 @@ impl Running {
                 .call_release_handlers(store, released),
         }
         .and_then(|()| f(&self.exports, store));
-        CALLER.set(caller);
-        CURRENT.set(previous);
+        drop(scope);
         // Stopped before the group is let go, so no call waiting for it runs on.
         if result.is_err() {
             self.group.poisoned.store(true, Ordering::Relaxed);
@@ -790,14 +852,22 @@ pub fn instantiate(
     component: &Component,
     members: &[Member],
     budgets: Budgets,
+    imports: impl FnOnce(&mut Linker<State>),
 ) -> Result<Vec<Instantiated>, LoadError> {
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .expect("the game's own imports are defined once");
+    imports(&mut linker);
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
         .build();
-    let mut store = Store::new(engine, State { limits });
+    let mut store = Store::new(
+        engine,
+        State {
+            limits,
+            buffers: HashMap::new(),
+        },
+    );
     store.limiter(|state| &mut state.limits);
     budgets.arm(&mut store, Call::Load);
     let instance: Instance = linker
@@ -948,6 +1018,126 @@ mod glue {
 mod tests {
     use super::*;
 
+    #[test]
+    fn call_scope_restores_tls_on_unwind() {
+        let previous = CURRENT.get();
+        let mut frame = Frame::default();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _scope = CallScope {
+                frame: CURRENT.replace(&mut frame),
+                caller: CALLER.replace(None),
+            };
+            panic!("fixture unwind");
+        }));
+        assert!(result.is_err());
+        assert_eq!(CURRENT.get(), previous);
+        assert!(CALLER.take().is_none());
+    }
+
+    #[test]
+    fn recipe_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, Tag};
+        let mut recipe = Recipe::new(
+            "test:rule",
+            "minecraft:crafting_transmute",
+            Arc::new(serde_json::json!({"custom": 42})),
+        );
+        recipe.rule = Some(RecipeRule::Transmute {
+            input: Ingredient::of(vec!["test:input".into()]),
+            material: Ingredient::of(vec!["test:material".into()]),
+            min: 2,
+            max: 4,
+            add_count: true,
+            result: RecipeTemplate::new(
+                None,
+                3,
+                Some(Tag::compound([("!test:removed", Tag::Int(0))])),
+            ),
+        });
+        let output = glue::recipe_roundtrip(&recipe).unwrap();
+        assert_eq!(output.id, recipe.id);
+        assert_eq!(*output.json, *recipe.json);
+        let Some(RecipeRule::Transmute {
+            input,
+            material,
+            min,
+            max,
+            add_count,
+            result,
+        }) = output.rule
+        else {
+            panic!("wrong generated recipe rule")
+        };
+        assert_eq!(input.order, ["test:input"]);
+        assert_eq!(material.order, ["test:material"]);
+        assert_eq!((min, max, add_count), (2, 4, true));
+        assert_eq!((result.item, result.count), (None, 3));
+        assert!(matches!(
+            result.components.unwrap().get("!test:removed"),
+            Some(Tag::Int(0))
+        ));
+    }
+
+    #[test]
+    fn smithing_rule_generated_wire_roundtrip() {
+        use crate::{Ingredient, Recipe, RecipeRule, RecipeTemplate, RecipeTrimPattern, Tag};
+        let mut recipe = Recipe::new(
+            "test:smith",
+            "minecraft:smithing_transform",
+            Arc::new(serde_json::json!({})),
+        );
+        recipe.rule = Some(RecipeRule::SmithingTransform {
+            template: None,
+            base: Ingredient::of(vec!["test:base".into()]),
+            addition: None,
+            result: RecipeTemplate::new(
+                Some("test:result".into()),
+                2,
+                Some(Tag::compound([("test:patch", Tag::Int(7))])),
+            ),
+        });
+        let Some(RecipeRule::SmithingTransform {
+            template,
+            addition,
+            result,
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert!(template.is_none() && addition.is_none());
+        assert_eq!(result.count, 2);
+        assert_eq!(
+            result.components.unwrap().get("test:patch"),
+            Some(&Tag::Int(7))
+        );
+        recipe.rule = Some(RecipeRule::SmithingTrim {
+            template: Ingredient::of(vec![]),
+            base: Ingredient::of(vec![]),
+            addition: Ingredient::of(vec![]),
+            pattern: RecipeTrimPattern::Inline {
+                asset_id: "test:pattern".into(),
+                description: Tag::String("description".into()),
+                decal: true,
+            },
+        });
+        let Some(RecipeRule::SmithingTrim {
+            pattern:
+                RecipeTrimPattern::Inline {
+                    asset_id,
+                    description,
+                    decal,
+                },
+            ..
+        }) = glue::recipe_roundtrip(&recipe).unwrap().rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(asset_id, "test:pattern");
+        assert_eq!(description, Tag::String("description".into()));
+        assert!(decal);
+    }
+
     fn group(wait: Duration) -> Arc<Group> {
         let engine = wasmtime::Engine::default();
         let limits = wasmtime::StoreLimitsBuilder::new().build();
@@ -955,7 +1145,16 @@ mod tests {
             wait,
             ..Budgets::default()
         };
-        Arc::new(Group::new(Store::new(&engine, State { limits }), budgets))
+        Arc::new(Group::new(
+            Store::new(
+                &engine,
+                State {
+                    limits,
+                    buffers: HashMap::new(),
+                },
+            ),
+            budgets,
+        ))
     }
 
     #[test]
@@ -1055,3 +1254,7 @@ mod tests {
         assert_eq!(group.enter(Call::Hook).err(), Some(CallRefused::Stopped));
     }
 }
+
+#[cfg(test)]
+#[path = "wasm_key_tests.rs"]
+mod key_tests;

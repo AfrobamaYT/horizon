@@ -86,10 +86,24 @@ pub struct Native {
     pub game: String,
     pub horizon: String,
     pub mixins: String,
+    /// Game internals used by this mod, fingerprinted against its pinned build.
+    #[serde(default)]
+    pub internals: Vec<Internal>,
     #[serde(default)]
     pub injection: Vec<Injection>,
     #[serde(default)]
     pub module: Vec<Module>,
+}
+
+/// One declared game internal, as listed in the pinned game's `internals.json`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Internal {
+    pub path: String,
+    /// The catalog's member kind, required when several kinds share the path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub hash: String,
 }
 
 /// A support module merged into a game crate, forwarded as horizon-mixins'
@@ -121,6 +135,9 @@ pub struct Injection {
     pub helper: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trait_method: Option<String>,
+    /// A crate-root function of the target point's raw listener type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
     #[serde(default)]
     pub cancellable: bool,
     pub argument: Option<usize>,
@@ -243,8 +260,8 @@ pub(super) fn valid_mod_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
-/// One injection's own rules: a hook or a target, and a helper or a trait method that listens at
-/// a point as only a point's listener can.
+/// One injection's own rules: a hook or a target, and a source helper, trait method or raw
+/// function that listens at a point as only a point's listener can.
 fn check_injection(injection: &Injection) -> Result<(), String> {
     // Modules share horizon-mixins' one id space with injections.
     if injection.hook.is_some() == injection.target.is_some() {
@@ -252,9 +269,9 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
             "{MANIFEST}: injection needs exactly one hook or target"
         ));
     }
-    match (&injection.helper, &injection.trait_method) {
-        (Some(helper), None) if plain_path(helper) && source_file(helper) => {}
-        (None, Some(method))
+    match (&injection.helper, &injection.trait_method, &injection.raw) {
+        (Some(helper), None, None) if plain_path(helper) && source_file(helper) => {}
+        (None, Some(method), None) | (None, None, Some(method))
             if !method.is_empty()
                 && method
                     .bytes()
@@ -262,13 +279,13 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
                 && !method.as_bytes()[0].is_ascii_digit() => {}
         _ => {
             return Err(format!(
-                "{MANIFEST}: injection needs one source helper or trait_method"
+                "{MANIFEST}: injection needs exactly one source helper, trait_method or raw"
             ));
         }
     }
-    // A trait method listens at a point (`mod_points::Points`): at its head or
-    // return, with the point's own record, so nothing else of a mixin applies.
-    if injection.trait_method.is_some()
+    // Point listeners run at the head or return with the point's own types, so nothing
+    // else of a mixin applies.
+    if (injection.trait_method.is_some() || injection.raw.is_some())
         && (injection.hook.is_some()
             || !matches!(injection.kind, InjectionKind::Head | InjectionKind::Return)
             || injection.cancellable
@@ -282,23 +299,38 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
             || injection.result.is_some())
     {
         return Err(format!(
-            "{MANIFEST}: injection {}: a trait_method listens at the HEAD or RETURN of the point its `target` names, and takes the point's record: no `hook` (a hook is its own Hooks method), bindings, cancellable, argument, selector, ordinal, require, slice, variable or result (cancel through the record's `cancel`); use a helper for the rest",
+            "{MANIFEST}: injection {}: a trait_method or raw listener listens at the HEAD or RETURN of the point its `target` names, and takes the point's record: no `hook` (a hook is its own Hooks method), bindings, cancellable, argument, selector, ordinal, require, slice, variable or result (cancel through the record's `cancel`); use a helper for the rest",
             injection.id
         ));
     }
     Ok(())
 }
 
-impl Native {
-    /// The injections of a wasm mod's `[native]`, which holds nothing else.
-    fn points(native: toml::Value) -> Result<Vec<Injection>, toml::de::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Points {
-            #[serde(default)]
-            injection: Vec<Injection>,
+/// A wasm mod's internals and point listeners, without native build pins or source modules.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WasmNative {
+    #[serde(default)]
+    injection: Vec<Injection>,
+    #[serde(default)]
+    internals: Vec<Internal>,
+}
+
+impl Internal {
+    fn check_all(internals: &[Self]) -> Result<(), String> {
+        let mut paths = std::collections::HashSet::new();
+        for internal in internals {
+            if internal.path.is_empty()
+                || internal.hash.is_empty()
+                || internal.kind.as_ref().is_some_and(|kind| kind.is_empty())
+                || !paths.insert((&internal.path, &internal.kind))
+            {
+                return Err(format!(
+                    "{MANIFEST}: empty internal path, kind or hash, or duplicate internal path and kind"
+                ));
+            }
         }
-        Ok(native.try_into::<Points>()?.injection)
+        Ok(())
     }
 }
 
@@ -306,34 +338,44 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut table: toml::Table =
             toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        // A wasm mod's `[native]` holds only its injections: it pins no build, as it builds none.
-        let points = match (table.get("wasm"), table.get("native")) {
-            (Some(_), Some(toml::Value::Table(native)))
-                if native.keys().all(|key| key == "injection") =>
-            {
-                let native = table.remove("native").expect("just found");
-                Native::points(native).map_err(|e| format!("{MANIFEST}: {e}"))?
-            }
-            _ => Vec::new(),
+        // Wasm keeps the native declaration syntax, not its pins or source modules.
+        let declarations = if table.contains_key("wasm") {
+            table
+                .remove("native")
+                .map(|native| native.try_into::<WasmNative>())
+                .transpose()
+                .map_err(|e| format!("{MANIFEST}: {e}"))?
+                .unwrap_or_default()
+        } else {
+            WasmNative::default()
         };
         let mut m: Manifest = toml::Value::Table(table)
             .try_into()
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(wasm) = &mut m.wasm {
             let mut ids = std::collections::HashSet::new();
-            for injection in &points {
+            Internal::check_all(&declarations.internals)?;
+            for injection in &declarations.injection {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate injection id"));
                 }
-                if injection.trait_method.is_none() || injection.target.is_none() {
+                if (injection.trait_method.is_none() && injection.raw.is_none())
+                    || injection.target.is_none()
+                {
                     return Err(format!(
-                        "{MANIFEST}: injection {}: a wasm mod listens at points (a trait_method at a point's target); a mod that changes game code is a native mod",
+                        "{MANIFEST}: injection {}: a wasm mod listens at points (a trait_method or raw at a point's target); a mod that changes game code is a native mod",
                         injection.id
                     ));
                 }
                 check_injection(injection)?;
+                if injection.raw.is_some() && declarations.internals.is_empty() {
+                    return Err(format!(
+                        "{MANIFEST}: a wasm raw listener needs declared internals"
+                    ));
+                }
             }
-            wasm.points = points;
+            wasm.points = declarations.injection;
+            wasm.internals = declarations.internals;
         }
         if !valid_mod_id(&m.id) {
             return Err(format!(
@@ -355,12 +397,8 @@ impl Manifest {
                 m.id
             ));
         }
-        if m.native.is_none() && m.wasm.is_none() && !m.dependencies.is_empty() {
-            return Err(format!(
-                "{MANIFEST}: content mod dependencies are not supported yet"
-            ));
-        }
         if let Some(native) = &m.native {
+            Internal::check_all(&native.internals)?;
             let mut ids = std::collections::HashSet::new();
             for injection in &native.injection {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
@@ -1078,6 +1116,92 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn internal_kinds_distinguish_members_and_round_trip() {
+        let base = format!(
+            "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let declaration = "internals=[{path='Round::listening',kind='field',hash='1234'}, {path='Round::listening',kind='method',hash='5678'}]\n";
+        let manifest = Manifest::parse(&format!("{base}{declaration}")).unwrap();
+        let native = manifest.native.unwrap();
+        assert_eq!(native.internals[1].kind.as_deref(), Some("method"));
+        let text = toml::to_string(&native).unwrap();
+        assert_eq!(toml::from_str::<Native>(&text).unwrap(), native);
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind='field'")
+            ))
+            .is_err()
+        );
+        assert!(
+            Manifest::parse(&format!(
+                "{base}{}",
+                declaration.replace("kind='method'", "kind=''")
+            ))
+            .is_err()
+        );
+        let untyped = Internal {
+            path: "Game".into(),
+            kind: None,
+            hash: "1234".into(),
+        };
+        assert!(!toml::to_string(&untyped).unwrap().contains("kind"));
+    }
+
+    #[test]
+    fn declared_internals_and_raw_injections_have_one_explicit_form() {
+        let base = format!(
+            "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+            "a".repeat(40),
+            "b".repeat(40)
+        );
+        let injection = "[[native.injection]]\nid='count'\ntarget=\"horizon_client::game::Game<'_>::tick\"\nkind='HEAD'\n";
+        let text = format!(
+            "{base}internals=[{{path='horizon_client::game::Game',hash='1234'}}]\n{injection}raw='count'\n"
+        );
+        let manifest = Manifest::parse(&text).unwrap();
+        let native = manifest.native.unwrap();
+        assert_eq!(native.internals[0].path, "horizon_client::game::Game");
+        assert_eq!(native.injection[0].raw.as_deref(), Some("count"));
+        for keys in [
+            "",
+            "raw='count'\nhelper='src/a.rs'",
+            "raw='count'\ntrait_method='tick'",
+            "helper='src/a.rs'\ntrait_method='tick'",
+            "raw='count'\nhelper='src/a.rs'\ntrait_method='tick'",
+            "raw=''",
+            "raw='nested::count'",
+            "raw='0count'",
+        ] {
+            let error = Manifest::parse(&format!("{base}{injection}{keys}\n")).unwrap_err();
+            assert!(
+                error.contains("exactly one source helper, trait_method or raw"),
+                "{error}"
+            );
+        }
+        for bad in [
+            text.replace("kind='HEAD'", "kind='BEFORE_CALL'"),
+            text.replace("raw='count'", "raw='count'\ncancellable=true"),
+            text.replace(
+                "raw='count'",
+                "raw='count'\nbindings=[{name='a',ty='u8',value='a'}]",
+            ),
+            text.replace("target=", "hook="),
+            text.replace("hash='1234'", "hash=''"),
+            text.replace("path='horizon_client::game::Game'", "path=''"),
+            text.replace(
+                "hash='1234'}",
+                "hash='1234'},{path='horizon_client::game::Game',hash='5678'}",
+            ),
+        ] {
+            assert!(Manifest::parse(&bad).is_err(), "accepted {bad}");
+        }
+        Manifest::parse(&text.replace("kind='HEAD'", "kind='RETURN'")).unwrap();
+    }
+
+    #[test]
     fn native_modules_are_validated_like_injections() {
         let native = format!(
             "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
@@ -1124,14 +1248,11 @@ capabilities = ["registries"]
     }
 
     #[test]
-    fn dependencies_are_typed_and_content_dependencies_are_refused() {
+    fn dependencies_are_typed_for_content_and_code_mods() {
         let deps =
             "[dependencies]\ncreate = '^6.0'\naddon = { version = '^1.2', optional = true }\n";
-        assert!(
-            Manifest::parse(&format!("{EXAMPLE}{deps}"))
-                .unwrap_err()
-                .contains("not supported")
-        );
+        let content = Manifest::parse(&format!("{EXAMPLE}{deps}")).unwrap();
+        assert_eq!(content.dependencies.len(), 2);
         let native = format!(
             "[native]\ngame = '26.3'\nhorizon = '{}'\nmixins = '{}'\n",
             "a".repeat(40),
@@ -1292,7 +1413,11 @@ capabilities = ["registries"]
             "{text}\n[native]\ngame = \"g\"\nhorizon = \"{0}\"\nmixins = \"{0}\"\n",
             "a".repeat(40)
         );
-        assert!(Manifest::parse(&both).unwrap_err().contains("not both"));
+        assert!(
+            Manifest::parse(&both)
+                .unwrap_err()
+                .contains("unknown field")
+        );
     }
 
     #[test]
@@ -1323,7 +1448,46 @@ capabilities = ["registries"]
             "{wasm}\n[native]\ngame = \"g\"\nhorizon = \"{0}\"\nmixins = \"{0}\"\n\n[[native.injection]]\n{tick}",
             "a".repeat(40)
         );
-        assert!(Manifest::parse(&pinned).unwrap_err().contains("not both"));
+        assert!(
+            Manifest::parse(&pinned)
+                .unwrap_err()
+                .contains("unknown field")
+        );
+    }
+
+    #[test]
+    fn a_wasm_raw_listener_uses_the_native_internal_declaration_without_native_code() {
+        let wasm = format!(
+            "{}\n[wasm]\nsha512 = '{}'\ntoolchain = '1.99.1'\n",
+            EXAMPLE.trim_end(),
+            "0".repeat(128)
+        );
+        let native = "[native]\ninternals=[{path='Game::world',kind='field',hash='world-hash'}]\n";
+        let injection = "[[native.injection]]\nid='fell'\ntarget='Game::break_block'\nkind='HEAD'\nraw='fell'\n";
+        let parsed = Manifest::parse(&format!("{wasm}{native}{injection}")).unwrap();
+        assert!(parsed.native.is_none());
+        let declarations = parsed.wasm.unwrap();
+        assert_eq!(declarations.internals()[0].hash, "world-hash");
+        assert_eq!(declarations.points()[0].raw.as_deref(), Some("fell"));
+        for wrong in [
+            "internals=[{path='',hash='h'}]",
+            "internals=[{path='Game',hash=''}]",
+            "internals=[{path='Game',hash='h'}, {path='Game',hash='h'}]",
+            "module=[]",
+            "game='g'",
+            "horizon='pin'",
+            "mixins='pin'",
+        ] {
+            assert!(
+                Manifest::parse(&format!("{wasm}[native]\n{wrong}\n{injection}")).is_err(),
+                "{wrong}"
+            );
+        }
+        assert!(
+            Manifest::parse(&format!("{wasm}{injection}"))
+                .unwrap_err()
+                .contains("needs declared internals")
+        );
     }
 
     #[test]

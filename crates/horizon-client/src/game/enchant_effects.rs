@@ -11,6 +11,7 @@ use horizon_client::{
     enchant::{EffectContext, Enchantments, level_value},
     items::ItemStack,
     mobs::{Damage, DamageKind, Who},
+    projectiles::Projectile,
 };
 use horizon_core::{position::BlockPos, random::RandomSource};
 use horizon_world::{fluid::FluidKind, level::LevelAccess, registry::BlockStateId};
@@ -614,8 +615,8 @@ impl Game<'_> {
                 && let Some(name) = self
                     .native_server_players()
                     .into_iter()
-                    .find(|p| p.uuid == player)
-                    .map(|p| p.name)
+                    .find(|p| p.uuid() == player)
+                    .and_then(|p| self.native_player_name(p))
             {
                 self.native_player_item_mend(player, &name, &item, repaired, amount);
             }
@@ -675,17 +676,27 @@ impl Game<'_> {
             ) == 0.0;
         (f64::from(power), infinity)
     }
-    /// `EnchantmentHelper.onProjectileSpawned` ignite effects of the held bow
-    /// (flame): the seconds the new arrow burns for.
-    pub(super) fn bow_projectile_ignite(&mut self) -> Option<f32> {
-        let bow = self.held().cloned()?;
+    /// `EnchantmentHelper.onProjectileSpawned`, which `AbstractArrow`'s
+    /// constructor runs for every arrow fired from a weapon, bow or crossbow:
+    /// the weapon's `projectile_spawned` ignite effects (Flame) spawn the arrow
+    /// burning.
+    pub(super) fn ignite_spawned_arrow(&mut self, weapon: &ItemStack, arrow: &mut Projectile) {
+        if let Some(seconds) = self.projectile_spawned_ignite(weapon)
+            && let Some(a) = arrow.arrow.as_mut()
+        {
+            a.ignite_for_seconds(seconds);
+        }
+    }
+    /// The `projectile_spawned` ignite effects of `weapon` (Flame): the seconds
+    /// the new arrow burns for, the longest when several apply.
+    fn projectile_spawned_ignite(&mut self, weapon: &ItemStack) -> Option<f32> {
         let ctx = EffectContext {
             this: Some("minecraft:arrow"),
             items: Some(world_items!(self)),
             ..Default::default()
         };
         let mut ignite: Option<f32> = None;
-        for (id, level) in bow.all_enchantments().iter() {
+        for (id, level) in weapon.all_enchantments().iter() {
             let Some(def) = world_stations!(self).enchantments.get(id) else {
                 continue;
             };

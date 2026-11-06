@@ -159,7 +159,9 @@ fn encoding_fixture() -> horizon_client::Result<(BlockRegistry, Biomes)> {
             encoder.write_header()?.write_image_data(&[0, 128, 0])?;
         }
         std::fs::write(biomes.join("plains.json"), b"{}")?;
-        Biomes::load(&temp)
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            temp.to_path_buf(),
+        ))
     })();
     std::fs::remove_dir_all(&temp)?;
     Ok((registry, result?))

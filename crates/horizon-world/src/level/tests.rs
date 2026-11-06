@@ -2714,9 +2714,10 @@ fn a_level_can_answer_for_a_blocks_signal() {
     let stone = w.id("stone", &[]);
     w.set(source, gold);
     w.set(conductor, stone);
-    let read = |w: &mut World, pos| {
+    let read = |w: &World, pos| {
         w.f.behaviours
-            .best_neighbor_signal(&mut w.level, &mut w.ticks, pos)
+            .signals(&w.level, &w.ticks)
+            .best_neighbor_signal(pos)
     };
     assert_eq!(read(&mut w, beside), 0, "gold gives nothing by itself");
 
@@ -2758,7 +2759,8 @@ fn a_level_can_answer_for_a_blocks_comparator_output() {
             w.full_tick();
         }
         w.f.behaviours
-            .best_neighbor_signal(&mut w.level, &mut w.ticks, after)
+            .signals(&w.level, &w.ticks)
+            .best_neighbor_signal(after)
     };
     let gold = w.id("gold_block", &[]);
     w.level.analog.insert(block, 9);
@@ -3035,6 +3037,49 @@ fn dispenser_buckets_pick_up_and_empty() {
         false
     ));
     assert_eq!(w.name(at), "powder_snow[]");
+}
+
+#[test]
+fn a_bucket_replaces_a_bubble_column_and_breaks_a_flower() {
+    let mut w = world!();
+    let at = BlockPos::new(0, 10, 0);
+    let sound = "minecraft:item.bucket.empty";
+    let water = BucketContent::Fluid(crate::fluid::FluidKind::Water);
+    let pour = |w: &mut World| {
+        w.f.behaviours.bucket_empty(
+            &mut w.level,
+            &mut w.ticks,
+            at,
+            None,
+            water,
+            sound,
+            false,
+            false,
+        )
+    };
+    let broke = |w: &World| {
+        w.level.events.iter().any(|e| {
+            matches!(
+                e,
+                LevelEvent::GameEvent {
+                    event: "minecraft:block_destroy",
+                    ..
+                } | LevelEvent::LevelEvent { id: 2001, .. }
+            )
+        })
+    };
+    // `BlockState.liquid()` is true: the column is replaced, not broken.
+    w.put(at, w.id("bubble_column", &[("drag", "true")]));
+    w.level.events.clear();
+    assert_eq!(pour(&mut w), Some(at));
+    assert_eq!(w.name(at), "water[level=0]");
+    assert!(!broke(&w), "a bubble column is liquid()");
+    // A replaceable plant is not `liquid()`: the bucket breaks it first.
+    w.put(at, w.id("dandelion", &[]));
+    w.level.events.clear();
+    assert_eq!(pour(&mut w), Some(at));
+    assert_eq!(w.name(at), "water[level=0]");
+    assert!(broke(&w), "a flower is broken before the water goes in");
 }
 
 #[test]

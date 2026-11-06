@@ -1201,7 +1201,7 @@ impl Game<'_> {
         else {
             return true;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (ox, oy) = self.inventory_origin(&batch);
         let local = (self.cursor.0 - ox, self.cursor.1 - oy);
         let shift = self.has_shift_down();
@@ -1357,7 +1357,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let (_, oy) = self.inventory_origin(&HudBatch::new(size));
+        let (_, oy) = self.inventory_origin(&HudBatch::new(size, self.settings.gui_scale_inputs()));
         let y = self.cursor.1 - oy;
         // `StonecutterScreen.mouseDragged`.
         if let Some(s) = self.station.as_mut()
@@ -1583,15 +1583,7 @@ impl Game<'_> {
         // bundle contents component (including in the player's inventory).
         let mut tooltip_stack: Option<ItemStack> = None;
         {
-            let atlas = &self.gui.atlas;
-            batch.fill(
-                atlas,
-                0.0,
-                0.0,
-                batch.width,
-                batch.height,
-                rgba(16, 16, 16, 160),
-            );
+            self.render_transparent_background("station", batch);
         }
         let inventory_label = self.translate("container.inventory", "Inventory");
         if brewing {
@@ -2296,16 +2288,22 @@ impl Game<'_> {
             self.native_tooltip(stack, &mut own);
             lines.extend(own);
         }
+        // The component details, marked for the placements of the registered appenders.
+        let appenders = mod_api::__private::tooltip_appenders();
+        let mut details = horizon_client::item_tooltip::DetailMarks::new(!appenders.is_empty());
+        details.start("minecraft:tropical_fish/pattern", lines.len());
         // TropicalFish.Pattern.addToTooltip.
         for text in horizon_client::item_tooltip::tropical_fish_lines(stack, &display) {
             lines.push((text, gray));
         }
+        details.start("minecraft:instrument", lines.len());
         // InstrumentComponent.addToTooltip.
         if let Some(text) =
             horizon_client::item_tooltip::instrument_line(stack, &display, &translate)
         {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:map_id", lines.len());
         // MapId.addToTooltip: the saved data's lock and scale, when it is known.
         let map = stack
             .data()
@@ -2317,10 +2315,12 @@ impl Game<'_> {
         {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:bees", lines.len());
         // Bees.addToTooltip.
         if let Some(text) = horizon_client::item_tooltip::bees_line(stack, &display, &translate) {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:container", lines.len());
         // ItemContainerContents.addToTooltip.
         let hover_name = |s: &ItemStack| {
             s.custom_name()
@@ -2334,6 +2334,7 @@ impl Game<'_> {
                 push(&mut lines, text, u32::MAX);
             }
         }
+        details.start("minecraft:banner_patterns", lines.len());
         // BannerPatternLayers.addToTooltip: up to six layer names.
         if display.shows("minecraft:banner_patterns") {
             for layer in horizon_client::banner::tooltip_layers(stack).iter().take(6) {
@@ -2345,10 +2346,12 @@ impl Game<'_> {
                 );
             }
         }
+        details.start("minecraft:written_book_content", lines.len());
         // WrittenBookContent.addToTooltip.
         for text in horizon_client::item_tooltip::written_book_lines(stack, &display, &translate) {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:charged_projectiles", lines.len());
         // ChargedProjectiles.addToTooltip: each run of equal projectiles, then
         // the projectile's own details indented under it.
         if display.shows("minecraft:charged_projectiles") {
@@ -2398,10 +2401,12 @@ impl Game<'_> {
                 }
             }
         }
+        details.start("minecraft:fireworks", lines.len());
         // Fireworks / FireworkExplosion.addToTooltip.
         for text in horizon_client::item_tooltip::firework_lines(stack, &translate) {
             push(&mut lines, text, rgba(170, 170, 170, 255));
         }
+        details.start("minecraft:potion_contents", lines.len());
         if display.shows("minecraft:potion_contents")
             && (stack.item.ends_with("potion") || &*stack.item == "minecraft:tipped_arrow")
         {
@@ -2426,12 +2431,14 @@ impl Game<'_> {
                 push(&mut lines, text, c);
             }
         }
+        details.start("minecraft:jukebox_playable", lines.len());
         // JukeboxPlayable.addToTooltip.
         if let Some(text) =
             horizon_client::item_tooltip::jukebox_line(stack, item_info, &display, &translate)
         {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:trim", lines.len());
         if display.shows("minecraft:trim")
             && let Some((material, pattern)) = stack.data().and_then(|d| d.trim.clone())
         {
@@ -2449,6 +2456,7 @@ impl Game<'_> {
             push(&mut lines, format!(" {p}"), rgba(170, 170, 170, 255));
             push(&mut lines, format!(" {m}"), rgba(170, 170, 170, 255));
         }
+        details.start("minecraft:stored_enchantments", lines.len());
         if display.shows("minecraft:stored_enchantments") {
             for (text, curse) in e.tooltip(stack.stored_enchantments()) {
                 push(
@@ -2462,6 +2470,7 @@ impl Game<'_> {
                 );
             }
         }
+        details.start("minecraft:enchantments", lines.len());
         if display.shows("minecraft:enchantments") {
             for (text, curse) in e.tooltip(stack.enchantments()) {
                 push(
@@ -2475,6 +2484,7 @@ impl Game<'_> {
                 );
             }
         }
+        details.start("minecraft:dyed_color", lines.len());
         // DyedItemColor.addToTooltip.
         if let Some((text, italic)) =
             horizon_client::item_tooltip::dyed_line(stack, &display, advanced, &translate)
@@ -2482,6 +2492,7 @@ impl Game<'_> {
             let text = horizon_client::text::Text::legacy(&text);
             lines.push((if italic { text.italic() } else { text }, gray));
         }
+        details.start("minecraft:lore", lines.len());
         // ItemLore.addToTooltip: after the enchantments, before the attributes
         // (ItemStack.addDetailsToTooltip).
         if display.shows("minecraft:lore") {
@@ -2489,6 +2500,7 @@ impl Game<'_> {
                 lines.push((text, u32::MAX));
             }
         }
+        details.start("minecraft:attribute_modifiers", lines.len());
         if display.shows("minecraft:attribute_modifiers") {
             // The item's own modifiers, then its enchantments' for each slot
             // group (`ItemStack.forEachModifier`).
@@ -2527,18 +2539,21 @@ impl Game<'_> {
                 push(&mut lines, text, c);
             }
         }
+        details.start("minecraft:unbreakable", lines.len());
         // ItemStack.UNBREAKABLE_TOOLTIP.
         if let Some(text) =
             horizon_client::item_tooltip::unbreakable_line(stack, &display, &translate)
         {
             push(&mut lines, text, rgba(85, 85, 255, 255));
         }
+        details.start("minecraft:ominous_bottle_amplifier", lines.len());
         // OminousBottleAmplifier.addToTooltip.
         if let Some((text, c)) =
             horizon_client::item_tooltip::ominous_bottle_line(stack, &display, &translate)
         {
             push(&mut lines, text, c);
         }
+        details.start("minecraft:suspicious_stew_effects", lines.len());
         // SuspiciousStewEffects.addToTooltip: the creative flag, which vanilla
         // sets for the creative screen's own slots, as `name_visible` above.
         for (text, c) in
@@ -2546,10 +2561,12 @@ impl Game<'_> {
         {
             push(&mut lines, text, c);
         }
+        details.start("minecraft:block_state", lines.len());
         // BlockItemStateProperties.addToTooltip.
         if let Some(text) = horizon_client::item_tooltip::honey_line(stack, &display, &translate) {
             push(&mut lines, text, gray);
         }
+        details.start("minecraft:entity_data", lines.len());
         // TypedEntityData.addToTooltip: a spawn egg of a monster in Peaceful.
         if let Some(text) = horizon_client::item_tooltip::spawn_egg_peaceful_line(
             stack,
@@ -2564,6 +2581,7 @@ impl Game<'_> {
         ) {
             push(&mut lines, text, rgba(255, 85, 85, 255));
         }
+        details.start("minecraft:block_entity_data", lines.len());
         // Spawner.appendHoverText: what a spawner or trial spawner item spawns.
         if display.shows("minecraft:block_entity_data")
             && matches!(
@@ -2587,6 +2605,7 @@ impl Game<'_> {
                 }
             }
         }
+        details.end(lines.len());
         if display.shows("minecraft:damage")
             && let Some(info) = item_info
             && info.max_damage > 0
@@ -2652,6 +2671,27 @@ impl Game<'_> {
                 ));
             }
         }
+        // RegisterTooltipAppendersEvent: each registered appender's lines, where its placement puts them.
+        if !appenders.is_empty() {
+            let context = mod_api::TooltipAppendContext {
+                player: self.own_uuid(),
+                player_entity_id: self.own_entity_id(),
+                advanced,
+                creative,
+                nested,
+            };
+            horizon_client::item_tooltip::add_appender_lines(
+                &mut lines,
+                &details,
+                stack,
+                item_info,
+                self,
+                &context,
+                appenders
+                    .iter()
+                    .map(|p| (p.component(), p.placement(), p.enabled(), p.appender())),
+            );
+        }
         // ItemTooltipEvent, once the tooltip vanilla shows is complete.
         if shown {
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
@@ -2704,7 +2744,7 @@ impl Game<'_> {
         }
         let lines = Self::resolved(lines);
         let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(None, &lines, &[], (x, y), screen) else {
+        let Some(at) = self.tooltip_pre(batch, None, &lines, &[], (x, y), screen) else {
             return;
         };
         let atlas = &self.gui.atlas;
@@ -2716,6 +2756,7 @@ impl Game<'_> {
     /// point a mod moved it to, `None` when one cancelled it. Only built when a mod listens.
     pub(super) fn tooltip_pre(
         &self,
+        batch: &mut HudBatch,
         stack: Option<&ItemStack>,
         lines: &[(horizon_client::text::Text, u32)],
         images: &[TooltipImage],
@@ -2737,14 +2778,19 @@ impl Game<'_> {
         };
         let before = place;
         let mut cancel = false;
-        self.native_render_tooltip_pre(
+        let mut draw = super::mod_api_host::generated::GameDrawContext {
+            game: self,
+            surface: batch,
+        };
+        self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
+            draw: &mut draw,
             stack,
-            screen.0 as i32,
-            screen.1 as i32,
-            &elements,
-            &mut place,
-            &mut cancel,
-        );
+            screen_width: screen.0 as i32,
+            screen_height: screen.1 as i32,
+            elements: &elements,
+            place: &mut place,
+            cancel: &mut cancel,
+        });
         if cancel {
             return None;
         }
@@ -2903,7 +2949,7 @@ impl Game<'_> {
                 w.max(image.size[0])
             });
         let screen = (batch.width, batch.height);
-        let Some(at) = self.tooltip_pre(Some(stack), &lines, &images, (x, y), screen) else {
+        let Some(at) = self.tooltip_pre(batch, Some(stack), &lines, &images, (x, y), screen) else {
             return;
         };
         let atlas = &self.gui.atlas;
@@ -3344,7 +3390,8 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Mod {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.item_part("minecraft:stick", Lore);
+                let item = r.item_key("minecraft:stick");
+                r.item_part(item, Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
                 let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
@@ -3678,7 +3725,14 @@ mod cycling_tests {
                         event.place.x = 50;
                         event.place.y = 60;
                     }
-                    2 => return mod_api::Flow::Cancel,
+                    2 => {
+                        event.draw.gui_draw_item_with(
+                            &ItemStack::new("minecraft:diamond", 5),
+                            [16.0, 32.0],
+                            Some("7"),
+                        );
+                        return mod_api::Flow::Cancel;
+                    }
                     _ => {}
                 }
                 mod_api::Flow::Continue
@@ -3688,8 +3742,9 @@ mod cycling_tests {
         let mods: Mods = vec![ModEntry::new("pre", Box::new(Mod))].into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                let pre = |game: &super::Game<'_>| {
-                    game.tooltip_pre(None, &lines, &[], (10.6, 20.4), (320.0, 240.0))
+                let mut batch = HudBatch::scratch([320, 240]);
+                let mut pre = |game: &super::Game<'_>| {
+                    game.tooltip_pre(&mut batch, None, &lines, &[], (10.6, 20.4), (320.0, 240.0))
                 };
                 MODE.store(0, Ordering::Relaxed);
                 // Unmoved, the cursor's own fractional point stays.
@@ -3698,6 +3753,10 @@ mod cycling_tests {
                 assert_eq!(pre(game), Some((50.0, 60.0)));
                 MODE.store(2, Ordering::Relaxed);
                 assert_eq!(pre(game), None);
+                assert!(
+                    !batch.vertices.is_empty(),
+                    "custom drawing survives tooltip cancellation"
+                );
             });
         });
     }

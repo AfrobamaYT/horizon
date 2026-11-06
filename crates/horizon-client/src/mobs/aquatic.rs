@@ -464,16 +464,22 @@ pub fn hurt_server(m: &mut Mob) {
     set_dark_ticks(m, 100);
 }
 
+/// `GlowSquid.aiStep`: its positive dark timer runs after the parent step,
+/// including when NoAI skips server AI. This upkeep consumes no random draws.
+pub(super) fn glow_squid_dark_tick(m: &mut Mob) {
+    let ticks = dark_ticks(m);
+    if ticks > 0 {
+        set_dark_ticks(m, ticks - 1);
+    }
+}
+
 /// `GlowSquid.aiStep` after `super.aiStep()`: the dark timer counts down, and
 /// a `glow` particle appears at `getRandomX(0.6)`, `getRandomY()`,
 /// `getRandomZ(0.6)` (drawn in that order). A window that simulates the world
 /// and a client of a server both draw it, so the server's own `ai_step` pushes
 /// the event as well (as the nautilus bubbles do).
 fn glow_squid_ai_step(m: &mut Mob, events: &mut Vec<MobEvent>) {
-    let ticks = dark_ticks(m);
-    if ticks > 0 {
-        set_dark_ticks(m, ticks - 1);
-    }
+    glow_squid_dark_tick(m);
     let (w, h) = (f64::from(m.width()), f64::from(m.height()));
     let r = &mut m.random;
     let x = m.position.x + w * ((2.0 * r.next_double() - 1.0) * 0.6);
@@ -1248,6 +1254,7 @@ mod pufferfish_sting_tests {
             );
             let others = [target.seen(None)];
             let world = MobWorld {
+                goal_host: None,
                 others: &others,
                 ..w.clone()
             };
@@ -1396,6 +1403,7 @@ mod pufferfish_sting_tests {
                 let pig = make_mob(2, "minecraft:pig", Vec3::new(0.5, 64.0, 0.5));
                 let seen = [pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1423,6 +1431,7 @@ mod pufferfish_sting_tests {
                 let far_pig = make_mob(5, "minecraft:pig", Vec3::new(5.0, 64.0, 5.0));
                 let seen_far = [far_pig.seen(None)];
                 let world_far = MobWorld {
+                    goal_host: None,
                     others: &seen_far,
                     ..w.clone()
                 };
@@ -1445,6 +1454,7 @@ mod pufferfish_sting_tests {
                 invuln_pig.invulnerable_flag = true;
                 let seen = [invuln_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1477,6 +1487,7 @@ mod pufferfish_sting_tests {
                 cooldown_pig.last_hurt = 3.0; // Pufferfish deals 1 + 2 = 3.0 <= 3.0
                 let seen = [cooldown_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1510,6 +1521,7 @@ mod pufferfish_sting_tests {
                 let pig = make_mob(2, "minecraft:pig", Vec3::new(0.5, 64.0, 0.5));
                 let seen = [pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1531,12 +1543,12 @@ mod pufferfish_sting_tests {
                     "pig takes 1 + 2 = 3.0 damage (10 -> 7)"
                 );
                 assert_eq!(mobs[1].extra.effects.len(), 1);
-                assert_eq!(mobs[1].extra.effects[0].0, "minecraft:poison");
+                assert_eq!(mobs[1].extra.effects[0].id, "minecraft:poison");
                 assert_eq!(
-                    mobs[1].extra.effects[0].1, 120,
+                    mobs[1].extra.effects[0].duration, 120,
                     "poison starts at 120 ticks"
                 );
-                assert_eq!(mobs[1].extra.effects[0].2, 0, "poison amplifier 0");
+                assert_eq!(mobs[1].extra.effects[0].amplifier, 0, "poison amplifier 0");
                 assert!(
                     events.iter().any(
                         |e| matches!(e, MobEvent::Sound(s, ..) if *s == "entity.puffer_fish.sting")
@@ -1547,20 +1559,21 @@ mod pufferfish_sting_tests {
                 // World Tick 1 continued: Pig ticks later in the same level tick
                 let fish_seen = [mobs[0].seen(None)];
                 let world_for_pig = MobWorld {
+                    goal_host: None,
                     others: &fish_seen,
                     ..w.clone()
                 };
                 let mut pig_events = Vec::new();
                 mobs[1].tick(&world_for_pig, level, &mut pig_events);
                 assert_eq!(
-                    mobs[1].extra.effects[0].1, 119,
+                    mobs[1].extra.effects[0].duration, 119,
                     "poison duration decrements from 120 to 119 in same level tick"
                 );
 
                 // World Tick 2: Pig ticks on second level tick
                 mobs[1].tick(&world_for_pig, level, &mut pig_events);
                 assert_eq!(
-                    mobs[1].extra.effects[0].1, 118,
+                    mobs[1].extra.effects[0].duration, 118,
                     "poison duration decrements from 119 to 118 on second level tick"
                 );
             }
@@ -1575,6 +1588,7 @@ mod pufferfish_sting_tests {
                 noai_pig.no_ai = true;
                 let seen = [noai_pig.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1583,21 +1597,22 @@ mod pufferfish_sting_tests {
                 let mut mobs = vec![noai_fish, noai_pig];
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 7.0);
-                assert_eq!(mobs[1].extra.effects[0].1, 120);
+                assert_eq!(mobs[1].extra.effects[0].duration, 120);
                 let fish_seen = [mobs[0].seen(None)];
                 let world_for_pig = MobWorld {
+                    goal_host: None,
                     others: &fish_seen,
                     ..w.clone()
                 };
                 let mut pig_events = Vec::new();
                 mobs[1].tick(&world_for_pig, level, &mut pig_events);
                 assert_eq!(
-                    mobs[1].extra.effects[0].1, 119,
+                    mobs[1].extra.effects[0].duration, 119,
                     "NoAI pig decrements poison duration to 119 on tick 1"
                 );
                 mobs[1].tick(&world_for_pig, level, &mut pig_events);
                 assert_eq!(
-                    mobs[1].extra.effects[0].1, 118,
+                    mobs[1].extra.effects[0].duration, 118,
                     "NoAI pig decrements poison duration to 118 on tick 2"
                 );
 
@@ -1608,6 +1623,7 @@ mod pufferfish_sting_tests {
                 let pig_b = make_mob(3, "minecraft:pig", Vec3::new(0.4, 64.0, 0.5));
                 let seen = [pig_a.seen(None), pig_b.seen(None)];
                 let world = MobWorld {
+                    goal_host: None,
                     others: &seen,
                     ..w.clone()
                 };
@@ -1622,9 +1638,18 @@ mod pufferfish_sting_tests {
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 7.0, "pig A damaged");
                 assert_eq!(mobs[2].health, 7.0, "pig B damaged");
-                assert_eq!(mobs[1].extra.effects[0].1, 120, "pig A receives poison");
-                assert_eq!(mobs[2].extra.effects[0].1, 120, "pig B receives poison");
+                assert_eq!(
+                    mobs[1].extra.effects[0].duration, 120,
+                    "pig A receives poison"
+                );
+                assert_eq!(
+                    mobs[2].extra.effects[0].duration, 120,
+                    "pig B receives poison"
+                );
             }
         });
     }
 }
+
+#[cfg(test)]
+mod countdown_tests;

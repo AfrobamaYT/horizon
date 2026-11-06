@@ -31,6 +31,10 @@ impl Game<'_> {
     /// (`native_add_client_reload_listeners`), gated on the hook being
     /// listened to.
     pub(super) fn register_client_reload_listeners(&self) -> mod_api::ClientListenerRegistry {
+        let _reload = self
+            .mod_phase
+            .reloading()
+            .expect("client listener registration on its owning thread");
         let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
         if mod_api::__private::listened(HookId::AddClientReloadListeners) {
             self.native_add_client_reload_listeners(&mut listeners);
@@ -43,6 +47,8 @@ impl Game<'_> {
 /// [`StartupClientHost`] stands in, as NeoForge's construction-time event
 /// fires on a client whose resources are not loaded either.
 pub(super) fn register_startup_client_reload_listeners() -> mod_api::ClientListenerRegistry {
+    let phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
+    let _reload = phase.reloading().expect("initial client registration");
     let mut listeners = <mod_api::ClientListenerRegistry as mod_api::__private::game::ClientReloadListenersOrder>::new();
     if mod_api::__private::listened(HookId::AddClientReloadListeners) {
         mod_api::dispatch_add_client_reload_listeners(&StartupClientHost, &mut listeners);
@@ -54,10 +60,13 @@ pub(super) fn register_startup_client_reload_listeners() -> mod_api::ClientListe
 /// merged resource root the reload will publish; runs on the reload's worker,
 /// off the game-owning thread.
 pub(super) fn stage_client_reload(
-    root: &std::path::Path,
+    root: &horizon_assets::resource_source::ResourceSource,
     listeners: mod_api::ClientListenerRegistry,
+    entering: mod_api::__private::ModPhase,
 ) -> Result<Vec<PreparedClientReload>, ReloadStageError> {
-    let pack = DataPack::builtin(root);
+    let phase = mod_api::__private::PhaseOwner::scope(entering);
+    let _reload = phase.reloading().expect("client listener prepare");
+    let pack = DataPack::from_source("vanilla".into(), root.clone());
     let ordered = listeners.finish().map_err(ReloadStageError::Order)?;
     prepare_listeners(
         ordered,
@@ -71,6 +80,12 @@ pub(super) fn stage_client_reload(
 /// Applies the prepared listeners in order on the game-owning thread, after
 /// the rest of the staged pack is published and before the
 /// resources-reloaded notice.
-pub(super) fn apply_client_reload(prepared: Vec<PreparedClientReload>) {
+pub(super) fn apply_client_reload(
+    phase: &mod_api::__private::PhaseOwner,
+    prepared: Vec<PreparedClientReload>,
+) {
+    let _reload = phase
+        .reloading()
+        .expect("client apply on its owning thread");
     apply_listeners(prepared, "client_reload_apply", |()| {});
 }

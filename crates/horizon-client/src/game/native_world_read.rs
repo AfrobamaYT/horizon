@@ -6,11 +6,12 @@ use horizon_client::{
 };
 use horizon_world::{
     chunk::BlockState,
-    fluid::{FluidKind, FluidState},
+    fluid::{FluidKind, FluidState as EngineFluidState},
     level::Behaviours,
     registry::{BlockRegistry, BlockStateId},
 };
-use mod_api::{LevelRef, NativeLifecycleContext, TagRegistry};
+use mod_api::BlockKey;
+use mod_api::{FluidState, LevelRef, NativeLifecycleContext, TagRegistry, UnresolvedFluid};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]
@@ -25,12 +26,44 @@ pub(super) enum NativeBlockReadError {
     InvalidState,
 }
 
-/// Whether a block registry name belongs to a merged block tag. Namespaced names need no allocation.
-pub(super) fn block_in_tag(items: &Items, block: &str, tag: &str) -> bool {
-    items.block_in_tag(
-        &horizon_client::command::args::normalized(tag),
-        &horizon_client::command::args::normalized(block),
-    )
+thread_local! {
+    // Like the key-to-state mapping, this snapshot belongs to the thread resolving the world.
+    static BLOCK_TAGS: std::cell::RefCell<std::collections::HashMap<String, horizon_world::level::data::BlockSet>> = Default::default();
+}
+
+/// Bind the world's merged tags alongside its block mappings, including the resource-only case.
+/// Never cache on Items: its string tables also serve tools and client network snapshots.
+pub(super) fn resolve_block_tags(
+    items: &Items,
+    mut resolve: impl FnMut(&str) -> Option<horizon_world::level::states::BlockId>,
+) {
+    let tags = items
+        .block_tags
+        .iter()
+        .map(|(tag, members)| {
+            let mut set = horizon_world::level::data::BlockSet::default();
+            for name in members {
+                if let Some(block) = resolve(name) {
+                    set.insert(block);
+                }
+            }
+            (tag.clone(), set)
+        })
+        .collect();
+    BLOCK_TAGS.with(|snapshot| *snapshot.borrow_mut() = tags);
+}
+
+/// One numeric key mapping, one tag-name lookup and one bit test; no block name lookup.
+/// An unavailable owning-thread mapping is not a missing tag.
+pub(super) fn block_in_tag(block: BlockKey, tag: &str) -> Option<bool> {
+    let block = mod_api::__private::resolved_block(block)?.block;
+    let tag = horizon_client::command::args::normalized(tag);
+    Some(BLOCK_TAGS.with(|snapshot| {
+        snapshot
+            .borrow()
+            .get(tag.as_ref())
+            .is_some_and(|set| set.contains(block))
+    }))
 }
 
 /// `ItemStack.is(TagKey)` over the merged item tags. An empty stack tests `minecraft:air`.
@@ -49,7 +82,16 @@ pub(super) fn state_fluid(
     registry: &BlockRegistry,
     state: BlockStateId,
 ) -> Option<FluidState> {
-    registry.state(state).map(|_| behaviours.fluid(state))
+    registry.state(state)?;
+    api_fluid_state(behaviours.fluid(state))
+}
+
+/// Convert the engine's state using the load-owned kind-to-key mapping.
+pub(super) fn api_fluid_state(state: EngineFluidState) -> Option<FluidState> {
+    Some(mod_api::__private::engine_fluid_state(
+        mod_api::__private::world_fluid_key(state.kind())?,
+        state,
+    ))
 }
 
 /// `FluidState.is(TagKey)` over the merged fluid tags. The empty fluid is in none.
@@ -66,6 +108,11 @@ fn fluid_kind(fluid: &str) -> Option<FluidKind> {
 }
 
 impl Game<'_> {
+    /// The saved name for an engine-issued unresolved fluid.
+    pub(super) fn native_unresolved_fluid_id(&self, fluid: UnresolvedFluid) -> String {
+        mod_api::__private::unresolved_fluid_name(fluid)
+    }
+
     /// The merged tag tables, once the world has built them. None on a server's client, whose
     /// tags are not the server's, and before the world has loaded its tags (the world lock is
     /// installed after they are built).
@@ -74,10 +121,11 @@ impl Game<'_> {
             .then(|| self.items())
     }
 
-    /// Whether the block registry name is in the world's merged block tag. Unknown names or tags
-    /// return false; unavailable authoritative tags return None.
-    pub(super) fn native_block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
-        Some(block_in_tag(self.native_tag_items()?, block, tag))
+    /// Whether the resolved block is in the world's merged block tag. Unknown tags return false;
+    /// unavailable authoritative tags or owning-thread block mappings return None.
+    pub(super) fn native_block_in_tag(&self, block: BlockKey, tag: &str) -> Option<bool> {
+        self.native_tag_items()?;
+        block_in_tag(block, tag)
     }
 
     /// The members of a tag in vanilla's order (`HolderSet.Named` iteration: file order, nested
@@ -210,6 +258,87 @@ mod tests {
     use horizon_client::chunk::Chunk;
     use mod_api::LevelHost;
     use std::sync::Arc;
+
+    #[test]
+    fn fluid_state_conversion_preserves_source_and_empty_invariants() {
+        mod_api::__private::install(Default::default());
+        mod_api::__private::part_tests::register_game_keys([]);
+        for kind in FluidKind::ALL {
+            let engine =
+                EngineFluidState::new(kind, if kind == FluidKind::Empty { 0 } else { 8 }, true);
+            let api = api_fluid_state(engine).unwrap();
+            assert_eq!(api.is_empty(), kind == FluidKind::Empty);
+            assert_eq!(api.is_source(), engine.is_source());
+            assert_eq!(mod_api::__private::fluid_id(api.fluid), Some(kind.name()));
+        }
+        let source = api_fluid_state(EngineFluidState::new(FluidKind::Water, 8, true)).unwrap();
+        let flowing =
+            api_fluid_state(EngineFluidState::new(FluidKind::FlowingWater, 8, false)).unwrap();
+        assert!(source.falling && source.is_source());
+        assert_eq!(flowing.amount, 8);
+        assert!(!flowing.is_source());
+    }
+
+    #[test]
+    fn numeric_block_tags_rebind_the_merged_snapshot_without_changing_keys() {
+        use horizon_world::level::states::BlockId;
+        use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks};
+        mod_api::__private::install(Default::default());
+        part_tests::register_game_keys(["minecraft:stone".into(), "test:machine".into()]);
+        let stone = part_tests::block_key("stone");
+        let machine = part_tests::block_key("test:machine");
+        let mut items = Items::for_tests(Default::default());
+        items
+            .block_tags
+            .insert("test:machines".into(), ["test:machine".into()].into());
+        items.block_tags.insert(
+            "minecraft:base_stone_overworld".into(),
+            ["minecraft:stone".into()].into(),
+        );
+        for (stone_index, machine_index) in [(2, 71), (96, 5)] {
+            let resolve = |name: &str| match name {
+                "minecraft:stone" => Some(BlockId(stone_index)),
+                "test:machine" => Some(BlockId(machine_index)),
+                _ => None,
+            };
+            resolve_blocks(|name| {
+                Some(ResolvedBlock {
+                    block: resolve(name)?,
+                    default: BlockStateId(0),
+                    states: mod_api::BlockStateRange::new(BlockStateId(0), 1),
+                })
+            })
+            .unwrap();
+            resolve_block_tags(&items, resolve);
+            assert_eq!(block_in_tag(machine, "test:machines"), Some(true));
+            assert_eq!(block_in_tag(stone, "test:machines"), Some(false));
+            assert_eq!(block_in_tag(stone, "base_stone_overworld"), Some(true));
+            assert_eq!(
+                block_in_tag(machine, "minecraft:base_stone_overworld"),
+                Some(false)
+            );
+            assert_eq!(block_in_tag(machine, "test:missing"), Some(false));
+            assert_eq!(machine, part_tests::block_key("test:machine"));
+        }
+        // A replaced merged tag snapshot must discard previous membership, not union it.
+        items
+            .block_tags
+            .insert("test:machines".into(), ["minecraft:stone".into()].into());
+        resolve_block_tags(&items, |name| match name {
+            "minecraft:stone" => Some(BlockId(96)),
+            "test:machine" => Some(BlockId(5)),
+            _ => None,
+        });
+        assert_eq!(block_in_tag(machine, "test:machines"), Some(false));
+        assert_eq!(block_in_tag(stone, "test:machines"), Some(true));
+        // Valid key, no owning world: never answer false using another thread's tags.
+        assert_eq!(
+            std::thread::spawn(move || block_in_tag(stone, "test:machines"))
+                .join()
+                .unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn reads_only_loaded_in_bounds_states() {
@@ -351,29 +480,37 @@ mod tests {
             assert_eq!(game.native_state_outline(BlockStateId(u32::MAX)), None);
 
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "minecraft:base_stone_overworld"
+                ),
                 Some(true)
             );
             assert_eq!(
-                game.native_block_in_tag("stone", "base_stone_overworld"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("stone"),
+                    "base_stone_overworld"
+                ),
                 Some(true)
             );
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "minecraft:logs"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "minecraft:logs"
+                ),
                 Some(false)
             );
             assert_eq!(
-                game.native_block_in_tag("minecraft:stone", "nope:missing"),
-                Some(false)
-            );
-            assert_eq!(
-                game.native_block_in_tag("missing:unknown", "minecraft:logs"),
+                game.native_block_in_tag(
+                    mod_api::__private::part_tests::block_key("minecraft:stone"),
+                    "nope:missing"
+                ),
                 Some(false)
             );
 
             assert_eq!(
                 game.native_state_fluid_state(water),
-                Some(FluidState::WATER)
+                api_fluid_state(EngineFluidState::WATER)
             );
             assert_eq!(
                 game.native_fluid_in_tag("minecraft:water", "minecraft:water"),
@@ -385,7 +522,8 @@ mod tests {
                 Some(false)
             );
             assert_eq!(
-                game.native_state_fluid_state(lava).unwrap().kind().name(),
+                mod_api::__private::fluid_id(game.native_state_fluid_state(lava).unwrap().fluid)
+                    .unwrap(),
                 "minecraft:lava"
             );
             assert_eq!(
@@ -400,14 +538,17 @@ mod tests {
                 game.native_fluid_in_tag("minecraft:empty", "minecraft:water"),
                 Some(false)
             );
-            assert_eq!(game.native_state_fluid_state(slab), Some(FluidState::WATER));
+            assert_eq!(
+                game.native_state_fluid_state(slab),
+                api_fluid_state(EngineFluidState::WATER)
+            );
             assert_eq!(
                 game.native_state_fluid_state(dry_slab),
-                Some(FluidState::EMPTY)
+                api_fluid_state(EngineFluidState::EMPTY)
             );
             assert_eq!(
                 game.native_state_fluid_state(stone),
-                Some(FluidState::EMPTY)
+                api_fluid_state(EngineFluidState::EMPTY)
             );
             assert_eq!(game.native_state_fluid_state(BlockStateId(u32::MAX)), None);
 
@@ -419,38 +560,51 @@ mod tests {
             let chunks = game.world.chunks.len();
             assert_eq!(
                 game.native_level_fluid_state(level, [1, 64, 1]),
-                Some(FluidState::WATER)
+                api_fluid_state(EngineFluidState::WATER)
             );
             assert_eq!(
                 game.native_level_fluid_state(level, [2, 64, 1]),
-                Some(FluidState::EMPTY)
+                api_fluid_state(EngineFluidState::EMPTY)
             );
             assert_eq!(game.native_level_fluid_state(level, [16, 64, 1]), None);
             assert_eq!(game.native_level_fluid_state(level, [1, 4000, 1]), None);
             game.with_level(|_, host, _| {
                 // Not an authoritative level: tags are not the server's, so they read None.
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     None
                 );
                 assert_eq!(
                     host.fluid_in_tag("minecraft:water", "minecraft:water"),
                     None
                 );
-                assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
+                assert_eq!(
+                    host.fluid_state([1, 64, 1]),
+                    api_fluid_state(EngineFluidState::WATER)
+                );
             });
             game.options.dedicated = Some(Vec::new());
             let bounds = game.native_level_height(level).unwrap();
             let parsed = game.native_block_state_id("minecraft:oak_slab[waterlogged=true]");
-            let default = game.native_block_state_default("minecraft:oak_slab");
+            let default = game.native_block_state_default(
+                mod_api::__private::part_tests::block_key("minecraft:oak_slab"),
+            );
             game.with_level(|_, host, ticks| {
                 assert_eq!(
                     host.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(host.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    host.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(host.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(host.block_state_default("missing:unknown"), None);
+
                 let wrapped = super::super::mod_api_host::LevelTicks {
                     level: &*host,
                     ticks,
@@ -459,9 +613,14 @@ mod tests {
                     wrapped.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(wrapped.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    wrapped.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(wrapped.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(wrapped.block_state_default("missing:unknown"), None);
+
                 assert_eq!(host.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(
                     host.state_string(slab)
@@ -471,16 +630,28 @@ mod tests {
                 assert_eq!(host.state_string(BlockStateId(u32::MAX)), None);
                 assert_eq!((host.min_y(), host.height()), bounds);
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     Some(true)
                 );
                 assert_eq!(
-                    host.block_in_tag("minecraft:stone", "minecraft:logs"),
+                    host.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:logs"
+                    ),
                     Some(false)
                 );
-                assert_eq!(host.fluid_state([1, 64, 1]), Some(FluidState::WATER));
+                assert_eq!(
+                    host.fluid_state([1, 64, 1]),
+                    api_fluid_state(EngineFluidState::WATER)
+                );
                 assert_eq!(host.fluid_state([16, 64, 1]), None);
-                assert_eq!(host.state_fluid_state(slab), Some(FluidState::WATER));
+                assert_eq!(
+                    host.state_fluid_state(slab),
+                    api_fluid_state(EngineFluidState::WATER)
+                );
                 assert_eq!(
                     host.fluid_in_tag("minecraft:water", "minecraft:water"),
                     Some(true)
@@ -504,24 +675,28 @@ mod tests {
                     hit.block_state_id("minecraft:oak_slab[waterlogged=true]"),
                     parsed
                 );
-                assert_eq!(hit.block_state_default("minecraft:oak_slab"), default);
+                assert_eq!(
+                    hit.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:oak_slab"
+                    )),
+                    default
+                );
                 assert_eq!(hit.block_state_id("minecraft:oak_slab[bad=true]"), None);
-                assert_eq!(hit.block_state_default("missing:unknown"), None);
+
                 assert_eq!(hit.state_string(stone).as_deref(), Some("minecraft:stone"));
                 assert!(hit.state_string(slab).unwrap().contains("waterlogged=true"));
                 assert_eq!(hit.state_string(BlockStateId(u32::MAX)), None);
                 assert_eq!((hit.min_y(), hit.height()), bounds);
                 assert_eq!(
-                    hit.block_in_tag("minecraft:stone", "minecraft:base_stone_overworld"),
+                    hit.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:base_stone_overworld"
+                    ),
                     Some(true)
                 );
                 assert_eq!(
                     hit.fluid_in_tag("minecraft:water", "minecraft:water"),
                     Some(true)
-                );
-                assert_eq!(
-                    hit.block_in_tag("missing:unknown", "minecraft:logs"),
-                    Some(false)
                 );
             }
             {
@@ -535,8 +710,19 @@ mod tests {
                         &game.damage_hooks,
                     ));
                 assert_eq!(hit.block_state_id("minecraft:stone"), None);
-                assert_eq!(hit.block_state_default("minecraft:stone"), None);
-                assert_eq!(hit.block_in_tag("minecraft:stone", "minecraft:logs"), None);
+                assert_eq!(
+                    hit.block_state_default(mod_api::__private::part_tests::block_key(
+                        "minecraft:stone"
+                    )),
+                    None
+                );
+                assert_eq!(
+                    hit.block_in_tag(
+                        mod_api::__private::part_tests::block_key("minecraft:stone"),
+                        "minecraft:logs"
+                    ),
+                    None
+                );
                 assert_eq!(hit.fluid_in_tag("minecraft:water", "minecraft:water"), None);
             }
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");

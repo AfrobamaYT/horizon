@@ -68,13 +68,10 @@ pub(super) fn player_for(
     if m.extra.leash == Some(horizon_client::mobs::leash::Holder::Player)
         && let Some(holder) = m.extra.leash_player
     {
-        if host.is_some_and(|v| v.alive && !v.spectator && v.uuid == holder) {
+        if host.is_some_and(|v| v.uuid == holder) {
             return None;
         }
-        if let Some((conn, _)) = guests
-            .iter()
-            .find(|(_, v)| v.alive && !v.spectator && v.uuid == holder)
-        {
+        if let Some((conn, _)) = guests.iter().find(|(_, v)| v.uuid == holder) {
             return Some(*conn);
         }
     }
@@ -187,6 +184,25 @@ impl Game<'_> {
         views
     }
 
+    /// The guest `conn`'s real identity — the uuid its lent view carries and
+    /// its entity id — when the guest is a player the tick can name: a fake
+    /// guest resolves as none, as the write handle refuses it (#1077).
+    pub(super) fn guest_identity(&self, conn: u32) -> Option<([i32; 4], u32)> {
+        let guest = self
+            .lan
+            .as_ref()?
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.conn == conn)?;
+        if guest.is_fake() {
+            return None;
+        }
+        let uuid = horizon_client::lan::playerdata::uuid_ints(guest.uuid);
+        let id = u32::try_from(guest.entity_id).ok()?;
+        Some((uuid, id))
+    }
+
     /// Runs `f` as each guest in play here, for what strikes every player in
     /// an area (`Level.getEntities`), not only the window's own.
     pub(super) fn each_guest_hit(&mut self, f: impl FnMut(&mut Self)) {
@@ -237,7 +253,7 @@ impl Game<'_> {
         };
         host.hub
             .guests
-            .iter()
+            .simulation_iter()
             .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
             .map(|g| {
                 let b = g.bounds();
@@ -254,7 +270,7 @@ impl Game<'_> {
         out.extend(
             host.hub
                 .guests
-                .iter()
+                .simulation_iter()
                 .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
                 .filter_map(|g| host.play.get(&g.conn)?.hook.as_ref())
                 .map(|hook| (hook.bounds(), hook.applies_block_effects())),
@@ -391,7 +407,7 @@ impl Game<'_> {
         let guests = self
             .lan
             .iter()
-            .flat_map(|h| h.hub.guests.iter().filter(|g| h.hub.here(g)));
+            .flat_map(|h| h.hub.guests.simulation_iter().filter(|g| h.hub.here(g)));
         guests
             .filter(|g| g.loaded)
             .map(|g| {
@@ -463,6 +479,7 @@ mod tests {
             bounds: Aabb::new(Vec3::new(x, 64.0, 0.0), Vec3::new(x, 65.8, 0.0)),
             eye: [x, 65.62, 0.0],
             alive: true,
+            invulnerable: false,
             creative,
             sneaking: false,
             swimming: false,

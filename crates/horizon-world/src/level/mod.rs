@@ -124,6 +124,7 @@ pub mod removal;
 pub mod sculk;
 mod shapes;
 mod shelf;
+pub mod signal_access;
 mod signals;
 mod speleothem;
 mod survive;
@@ -287,6 +288,10 @@ pub enum LevelEvent {
         volume: f32,
         pitch: f32,
     },
+    /// A placed template's container whose data has a `LootTable`
+    /// (`RandomizableContainer.tryLoadLootTable`): the caller keeps the table
+    /// and rolls it, as for a container a command gives one.
+    ContainerLootTable { pos: BlockPos, tag: crate::nbt::Tag },
     /// `Block.dropResources(state, level, pos)`: the caller evaluates the
     /// block's loot table (no tool, no breaker) and pops the items.
     DropResources { pos: BlockPos, state: BlockStateId },
@@ -1498,7 +1503,7 @@ pub(crate) struct Sim<'a, L: LevelAccess + ?Sized> {
 /// and the block, shape and moving-piston reads its wire connections ask. `Sim`
 /// reads through one (`Sim::signals`), so a caller that holds the level shared, such
 /// as a mod's read, gets the game's own answer.
-pub struct Signals<'a, L: LevelAccess + ?Sized> {
+pub struct Signals<'a, L: signal_access::SignalAccess + ?Sized> {
     pub(crate) b: &'a Behaviours,
     pub(crate) level: &'a L,
     pub(crate) ticks: &'a Ticks,
@@ -1519,7 +1524,7 @@ impl<'a, L: LevelAccess + ?Sized> Sim<'a, L> {
 }
 impl Behaviours {
     /// `level` read through the game's `SignalGetter`, for a caller holding it shared.
-    pub fn signals<'a, L: LevelAccess + ?Sized>(
+    pub fn signals<'a, L: signal_access::SignalAccess + ?Sized>(
         &'a self,
         level: &'a L,
         ticks: &'a Ticks,

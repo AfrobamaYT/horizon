@@ -224,12 +224,6 @@ impl<'a> Split<'a> {
     /// Player `i`'s turn (0 = P1): its options file, and its own buttons and focus targets, which
     /// screens record while drawing and the control socket and the controller's cursor read.
     fn turn(&mut self, i: usize) {
-        if let Some(game) = self.game(i) {
-            horizon_client::hud::GUI_SCALE.store(
-                game.settings.gui_scale,
-                std::sync::atomic::Ordering::Relaxed,
-            );
-        }
         if i == self.turn {
             return;
         }
@@ -871,12 +865,18 @@ impl ApplicationHandler for Split<'_> {
 impl Game<'_> {
     /// Keyboard and mouse go to another player: release everything they held here.
     pub(super) fn release_keyboard_mouse(&mut self) {
+        // A routing handoff is not a real window key event (`InputEvent.Key`).
         self.physical_keys.clear();
-        // Only what the keyboard held: this player's pad keeps its presses.
-        for key in self
+        // Only what the keyboard held, and a script acting as it: this player's pad keeps its
+        // presses.
+        let mut released = self
             .keys
-            .release_source(horizon_client::held::Source::Keyboard)
-        {
+            .release_source(horizon_client::held::Source::Keyboard);
+        released.extend(
+            self.keys
+                .release_source(horizon_client::held::Source::Agent),
+        );
+        for key in released {
             if let Err(e) = self.mapped_key(
                 key,
                 false,
@@ -892,8 +892,11 @@ impl Game<'_> {
         }
         self.drag_button = None;
         self.modifiers = Default::default();
-        self.left = false;
-        self.right = false;
+        // A press this player's pad holds goes on, as for its keys.
+        self.left = self
+            .pad
+            .holds_action(&self.settings.controller, "key.attack");
+        self.right = self.pad.holds_action(&self.settings.controller, "key.use");
         self.inventory_mouse_release(false);
         self.inventory_mouse_release(true);
         self.inventory_pick_release();

@@ -133,9 +133,14 @@ pub(super) fn install_live_features(
     }
     let dir = options.resources.join("worldgen");
     let started = std::time::Instant::now();
-    let features = vanillagen::shared_data(&dir, pack.assets.registry)
-        .map_err(|e| e.to_string())
-        .and_then(|data| LiveFeatures::new(&data).map_err(|e| e.to_string()));
+    let features = vanillagen::shared_data_from(
+        &dir,
+        &Default::default(),
+        pack.assets.registry,
+        &pack.data_changes,
+    )
+    .map_err(|e| e.to_string())
+    .and_then(|data| LiveFeatures::new(&data).map_err(|e| e.to_string()));
     match features {
         Ok(Some(features)) => {
             res.behaviours().set_live_features(Arc::new(features));

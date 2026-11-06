@@ -1,9 +1,9 @@
 //! The one list of point listeners, and the slot table the points read. A native mod's
 //! `#[horizon_mod] impl Points` and the wasm runtime's proxies both [`register`] here while the game
-//! loads, and a native mod's raw listeners [`register_raw`]; the game then [`seal`]s the list, which
+//! loads, and raw listeners [`register_raw`]; the game then [`seal`]s the list, which
 //! sets [`POINTS`]. A firing slot walks the mods subscribed to that place, API listeners first and
-//! then raw ones, each in registration (dispatch) order, skipping any [`stop`]ped mod.
-use crate::{POINT_COUNT, PointId, Points};
+//! then raw ones, each in registration (dispatch) order, skipping disabled and [`stop`]ped mods.
+use crate::{POINT_COUNT, PointId, Points, SITE_COUNT, SiteId};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,9 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Each place's slot: set once, at the seal, where a mod listens. A point that nothing listens at
 /// costs one load of it.
 pub static POINTS: [AtomicBool; POINT_COUNT] = [const { AtomicBool::new(false) }; POINT_COUNT];
+/// Call-expression slots, using the same sealed raw-listener table as points.
+pub static SITES: [AtomicBool; SITE_COUNT] = [const { AtomicBool::new(false) }; SITE_COUNT];
 
 struct Listener {
     id: &'static str,
+    /// Resolved at the seal, so firing reads the owner's canonical enable flag without a scan.
+    mod_index: Option<usize>,
     /// The mod's `impl Points`, when it has one.
     points: Option<&'static dyn Points>,
     /// Set when the mod stopped (a trap in its wasm group, or the game giving up on it): its
@@ -21,22 +25,40 @@ struct Listener {
     stopped: AtomicBool,
 }
 
-/// A raw listener: a plain function of the mod's, whose type the generated `main` checked against
-/// the place's listener type before erasing it.
+/// How a slot calls a raw listener.
+#[derive(Clone, Copy)]
+pub enum RawKind {
+    /// A function of the place's listener type, cast back by the slot before calling it.
+    Typed(*const ()),
+    /// A runtime listener receiving the place index, receiver and raw record or return value.
+    ///
+    /// # Safety
+    ///
+    /// The caller must pass the registered place's index and valid pointers of that place's exact
+    /// receiver and raw record or return types, respecting their mutability, aliasing, ownership
+    /// and lifetime requirements for the call's duration. The receiver is null for a free or
+    /// associated function, and at a borrowed-return place. A shared receiver must not be written
+    /// to; its mutable pointer only erases the type, not its mutability.
+    Erased(unsafe fn(usize, *mut (), *mut ())),
+}
+
+// Function pointers: no data behind them, so they move between threads.
+unsafe impl Send for RawKind {}
+unsafe impl Sync for RawKind {}
+
+/// A raw listener in its place's list.
 #[derive(Clone, Copy)]
 struct Raw {
     listener: u32,
-    function: *const (),
+    kind: RawKind,
+    priority: i32,
+    injection: &'static str,
 }
-
-// A function pointer: no data behind it, so it moves between threads.
-unsafe impl Send for Raw {}
-unsafe impl Sync for Raw {}
 
 /// The list while mods load: registrations, and stops that came before the seal.
 struct Open {
     listeners: Vec<Listener>,
-    raw: Vec<(PointId, Raw)>,
+    raw: Vec<(usize, Raw)>,
     stopped: Vec<String>,
     /// Set once [`seal`] has taken the list: registering is refused from then on.
     sealing: bool,
@@ -101,6 +123,7 @@ fn listener(open: &mut Open, id: &'static str) -> usize {
         None => {
             open.listeners.push(Listener {
                 id,
+                mod_index: None,
                 points: None,
                 stopped: AtomicBool::new(false),
             });
@@ -122,13 +145,14 @@ pub fn register(id: &'static str, points: &'static dyn Points) -> Result<(), Reg
     Ok(())
 }
 
-/// A native mod's raw listener at one place: a function of the place's listener type, erased.
-/// Only [`RawListener::new`], which is `unsafe`, makes one, so safe code can't hand a slot a
-/// pointer it would call as a listener.
+/// A raw listener at one place: a native mod's typed function, or a runtime's erased callback.
+/// Both constructors are `unsafe`: the caller guarantees the slot's pointers are used correctly.
 pub struct RawListener {
     id: &'static str,
-    place: PointId,
-    function: *const (),
+    place: usize,
+    kind: RawKind,
+    priority: i32,
+    injection: &'static str,
 }
 
 impl RawListener {
@@ -142,8 +166,61 @@ impl RawListener {
     pub const unsafe fn new(id: &'static str, place: PointId, function: *const ()) -> Self {
         Self {
             id,
-            place,
-            function,
+            place: place as usize,
+            kind: RawKind::Typed(function),
+            priority: 0,
+            injection: "",
+        }
+    }
+
+    /// Mod `id`'s erased runtime listener `function` at `place`.
+    ///
+    /// The callback gets the place's index, the receiver and the raw record at a head or the
+    /// return value's place at a return (including `()` for a function with no explicit return
+    /// type). The receiver is null for a free or associated function. At a borrowed-return place
+    /// it is also null: only the value's place is passed, since the value may borrow the receiver.
+    /// A shared receiver is passed as a mutable pointer only to erase its type, not its mutability.
+    ///
+    /// # Safety
+    ///
+    /// Given the pointers guaranteed by [`RawKind::Erased`], `function` must interpret them using
+    /// `place`'s exact receiver and raw record or return types, respecting their mutability,
+    /// aliasing, ownership and lifetime requirements. The pointers and any references derived
+    /// from them must not escape the callback. In particular, a shared receiver must not be
+    /// written to.
+    pub const unsafe fn erased(
+        id: &'static str,
+        place: PointId,
+        function: unsafe fn(usize, *mut (), *mut ()),
+    ) -> Self {
+        Self {
+            id,
+            place: place as usize,
+            kind: RawKind::Erased(function),
+            priority: 0,
+            injection: "",
+        }
+    }
+
+    /// A typed call-site wrap listener, sorted by priority, mod id and injection id.
+    ///
+    /// # Safety
+    ///
+    /// `function` must have this site's exact generated listener type. Erased point callbacks
+    /// cannot register as site listeners: their signature has no original continuation.
+    pub const unsafe fn site(
+        id: &'static str,
+        place: SiteId,
+        priority: i32,
+        injection: &'static str,
+        function: *const (),
+    ) -> Self {
+        Self {
+            id,
+            place: POINT_COUNT + place as usize,
+            kind: RawKind::Typed(function),
+            priority,
+            injection,
         }
     }
 
@@ -153,7 +230,7 @@ impl RawListener {
     }
 }
 
-/// Registers a native mod's raw listener.
+/// Registers a raw listener, in the same order for native functions and erased callbacks.
 pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
     let mut open = open()?;
     let listener = listener(&mut open, raw.id) as u32;
@@ -161,7 +238,9 @@ pub fn register_raw(raw: &RawListener) -> Result<(), RegisterError> {
         raw.place,
         Raw {
             listener,
-            function: raw.function,
+            kind: raw.kind,
+            priority: raw.priority,
+            injection: raw.injection,
         },
     ));
     Ok(())
@@ -186,7 +265,7 @@ pub fn stop(id: &str) {
 pub fn seal() {
     // Takes the list under the lock, then asks each mod where it listens without it: a mod's
     // `subscribed` may call `stop` (or `register`, refused) without deadlocking.
-    let (listeners, raw_list) = {
+    let (mut listeners, raw_list) = {
         let mut open = lock();
         if open.sealing {
             return;
@@ -198,7 +277,8 @@ pub fn seal() {
         )
     };
     let mut places = vec![Vec::new(); POINT_COUNT];
-    for (index, listener) in listeners.iter().enumerate() {
+    for (index, listener) in listeners.iter_mut().enumerate() {
+        listener.mod_index = mod_api::__private::mod_index(listener.id);
         for place in listener
             .points
             .iter()
@@ -208,9 +288,21 @@ pub fn seal() {
             places[*place as usize].push(index as u32);
         }
     }
-    let mut raw = vec![Vec::new(); POINT_COUNT];
+    let mut raw = vec![Vec::new(); POINT_COUNT + SITE_COUNT];
     for (place, function) in raw_list {
-        raw[place as usize].push(function);
+        raw[place].push(function);
+    }
+    for site in &mut raw[POINT_COUNT..] {
+        site.sort_by(|a, b| {
+            b.priority
+                .cmp(&a.priority)
+                .then_with(|| {
+                    listeners[a.listener as usize]
+                        .id
+                        .cmp(listeners[b.listener as usize].id)
+                })
+                .then_with(|| a.injection.cmp(b.injection))
+        });
     }
     let open = lock();
     // Every stop so far, before the seal or while it ran, is in `stopped`; the next ones see
@@ -229,13 +321,53 @@ pub fn seal() {
         let listened = !sealed.places[index].is_empty() || !sealed.raw[index].is_empty();
         slot.store(listened, Ordering::Release);
     }
+    for (index, slot) in SITES.iter().enumerate() {
+        slot.store(
+            !sealed.raw[POINT_COUNT + index].is_empty(),
+            Ordering::Release,
+        );
+    }
+}
+
+fn active(listener: &Listener) -> bool {
+    !listener.stopped.load(Ordering::Acquire)
+        && listener
+            .mod_index
+            .is_none_or(mod_api::__private::mod_index_on)
+}
+
+/// Invoke the next enabled site listener under its mod guard. The generated typed slot recurses
+/// from the returned index, so the first listener is outermost, without allocating a chain.
+pub fn wrap<O>(
+    place: SiteId,
+    from: usize,
+    call: impl FnOnce(Option<(*const (), usize)>) -> O,
+) -> O {
+    if let Some(sealed) = SEALED.get() {
+        for (index, raw) in sealed.raw[POINT_COUNT + place as usize]
+            .iter()
+            .enumerate()
+            .skip(from)
+        {
+            let listener = &sealed.listeners[raw.listener as usize];
+            if !active(listener) {
+                continue;
+            }
+            let RawKind::Typed(function) = raw.kind else {
+                unreachable!("only typed listeners register at sites")
+            };
+            let _guard = mod_api::__private::enter(listener.id, raw.injection);
+            return call(Some((function, index + 1)));
+        }
+    }
+    call(None)
 }
 
 /// Runs `call` for the mod `listener` while it runs `name`, so a panic in it names the mod; a
-/// stopped mod is skipped.
+/// disabled or stopped mod is skipped.
 fn run(sealed: &Sealed, listener: u32, name: &'static str, call: impl FnOnce()) {
     let listener = &sealed.listeners[listener as usize];
-    if !listener.stopped.load(Ordering::Acquire) {
+    if active(listener) {
         let _guard = mod_api::__private::enter(listener.id, name);
         call();
     }
@@ -252,10 +384,10 @@ pub(crate) fn fire(place: PointId, name: &'static str, call: &mut dyn FnMut(&'st
     }
 }
 
-/// Runs the raw listeners at `place`, each through `call` with its erased function.
-pub(crate) fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(*const ())) {
+/// Runs the raw listeners at `place`, each through `call` with its kind and function.
+pub(crate) fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
     let Some(sealed) = SEALED.get() else { return };
     for raw in &sealed.raw[place as usize] {
-        run(sealed, raw.listener, name, || call(raw.function));
+        run(sealed, raw.listener, name, || call(raw.kind));
     }
 }

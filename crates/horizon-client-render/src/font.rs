@@ -8,16 +8,12 @@
 //! offsets), styled drawing and StringSplitter-style line wrapping.
 use crate::{
     hud::Rect,
+    resource_source::ResourceSource,
     text::{Span, Style, Text, legacy_format},
     zip::Zip,
 };
 use ab_glyph::{Font as _, ScaleFont as _};
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 /// `FontDescription.DEFAULT`.
 pub const DEFAULT: &str = "minecraft:default";
@@ -130,7 +126,7 @@ pub struct Font {
     sheets: HashMap<String, Rect>,
     missing: Glyph,
     white: Rect,
-    root: PathBuf,
+    source: ResourceSource,
     /// Atlas size and the reserved dynamic region (y, height).
     atlas: (u32, u32),
     region: (u32, u32),
@@ -199,8 +195,8 @@ fn parse_hex(text: &[u8], out: &mut HashMap<u32, HexGlyph>) {
         out.insert(codepoint, HexGlyph { rows, left, right });
     }
 }
-fn read_json(root: &Path, path: &str) -> Option<serde_json::Value> {
-    serde_json::from_slice(&std::fs::read(root.join(path)).ok()?).ok()
+fn read_json(source: &ResourceSource, path: &str) -> Option<serde_json::Value> {
+    serde_json::from_slice(&source.read(path).ok()?).ok()
 }
 fn resource_path(id: &str, folder: &str, ext: &str) -> String {
     let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
@@ -208,17 +204,22 @@ fn resource_path(id: &str, folder: &str, ext: &str) -> String {
 }
 /// Providers of a font definition with references expanded, in order, with
 /// their `filter` objects.
-fn providers(root: &Path, id: &str, depth: u32, out: &mut Vec<serde_json::Value>) {
+fn providers(source: &ResourceSource, id: &str, depth: u32, out: &mut Vec<serde_json::Value>) {
     if depth > 8 {
         return;
     }
-    let Some(def) = read_json(root, &resource_path(id, "font", ".json")) else {
+    let Some(def) = read_json(source, &resource_path(id, "font", ".json")) else {
         return;
     };
     for p in def["providers"].as_array().into_iter().flatten() {
         if p["type"] == "reference" {
             let mut nested = Vec::new();
-            providers(root, p["id"].as_str().unwrap_or(""), depth + 1, &mut nested);
+            providers(
+                source,
+                p["id"].as_str().unwrap_or(""),
+                depth + 1,
+                &mut nested,
+            );
             for mut n in nested {
                 // A reference's filter applies to everything it includes.
                 if let Some(f) = p["filter"].as_object() {
@@ -280,7 +281,7 @@ fn hex_advance(h: &HexGlyph) -> f32 {
 /// when the sheet is in it (`pixels` its RGBA), else from the sheet's own
 /// pixels, copied into the atlas when first drawn.
 fn load_bitmap(
-    root: &Path,
+    source: &ResourceSource,
     p: &serde_json::Value,
     sheets: &HashMap<String, Rect>,
     pixels: &[u8],
@@ -299,7 +300,11 @@ fn load_bitmap(
             let (w, h) = rect.texels(atlas);
             (w, h, None)
         }
-        None => match crate::hud::decode(&root.join(resource_path(file, "textures", ""))) {
+        None => match source
+            .read(&resource_path(file, "textures", ""))
+            .map_err(Into::into)
+            .and_then(|bytes| crate::hud::decode_bytes(&bytes))
+        {
             Ok((w, h, rgba)) => (w, h, Some(Arc::new((w, rgba)))),
             Err(_) => {
                 log::warn!("font sheet {file} could not be read");
@@ -382,9 +387,10 @@ fn load_bitmap(
 }
 /// `TrueTypeGlyphProviderDefinition.load`: a TrueType file (not CFF) under
 /// `font/`, its Unicode characters but the `skip` ones.
-fn load_true_type(root: &Path, p: &serde_json::Value) -> Option<TrueType> {
+fn load_true_type(source: &ResourceSource, p: &serde_json::Value) -> Option<TrueType> {
     let file = p["file"].as_str()?;
-    let data = std::fs::read(root.join(resource_path(file, "font", "")))
+    let data = source
+        .read(&resource_path(file, "font", ""))
         .map_err(|e| log::warn!("font file {file}: {e}"))
         .ok()?;
     // FT_Get_Font_Format must say TrueType: CFF outlines ("OTTO") are refused.
@@ -486,13 +492,13 @@ impl TrueType {
         )
     }
 }
-fn load_hex(root: &Path, p: &serde_json::Value) -> HashMap<u32, HexGlyph> {
+fn load_hex(source: &ResourceSource, p: &serde_json::Value) -> HashMap<u32, HexGlyph> {
     let mut glyphs = HashMap::new();
     let Some(file) = p["hex_file"].as_str() else {
         return glyphs;
     };
-    let path = root.join(resource_path(file, "", "").replace("//", "/"));
-    let Ok(zip) = Zip::open(&path) else {
+    let path = resource_path(file, "", "").replace("//", "/");
+    let Ok(zip) = source.read(&path).and_then(Zip::from_bytes) else {
         return glyphs;
     };
     let names: Vec<String> = zip
@@ -525,34 +531,17 @@ fn load_hex(root: &Path, p: &serde_json::Value) -> HashMap<u32, HexGlyph> {
     glyphs
 }
 /// The ids of every font definition (`font/**/*.json` of each namespace).
-fn font_ids(root: &Path) -> Vec<String> {
-    fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) {
-        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
-                walk(&path, &format!("{prefix}{name}/"), out);
-            } else if let Some(stem) = name.strip_suffix(".json") {
-                out.push(format!("{prefix}{stem}"));
-            }
-        }
-    }
-    let mut ids = Vec::new();
-    for ns in std::fs::read_dir(root.join("assets"))
+fn font_ids(source: &ResourceSource) -> Vec<String> {
+    source
+        .list_under("assets", &["font"])
         .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let ns = ns.file_name().to_string_lossy().into_owned();
-        walk(
-            &root.join("assets").join(&ns).join("font"),
-            &format!("{ns}:"),
-            &mut ids,
-        );
-    }
-    ids.sort();
-    ids
+        .filter_map(|file| {
+            let (namespace, path) = file.strip_prefix("assets/")?.split_once("/font/")?;
+            Some(format!("{namespace}:{}", path.strip_suffix(".json")?))
+        })
+        .collect()
 }
+
 impl Region {
     /// Place `w x h` pixels in the region (rows left to right); their atlas
     /// position, or none when it is full.
@@ -596,18 +585,18 @@ impl Font {
     /// Build from the atlas holding the bitmap font sheets (`sprites`, of
     /// `atlas` size) with `region` the reserved rows.
     pub fn load(
-        root: &Path,
+        source: &ResourceSource,
         sprites: &HashMap<String, Rect>,
         pixels: &[u8],
         atlas: (u32, u32),
         region: (u32, u32),
         white: Rect,
     ) -> Self {
-        Self::load_with(root, sprites, pixels, atlas, region, white, false)
+        Self::load_with(source, sprites, pixels, atlas, region, white, false)
     }
     /// A server measures text but never draws it. Decode bitmap sheets only
     /// to obtain advances, then release their pixels; never rasterize glyphs.
-    pub fn metrics(root: &Path) -> Self {
+    pub fn metrics(source: &ResourceSource) -> Self {
         let white = Rect {
             u0: 0.0,
             v0: 0.0,
@@ -616,10 +605,10 @@ impl Font {
             w: 1,
             h: 1,
         };
-        Self::load_with(root, &HashMap::new(), &[], (1, 1), (0, 0), white, true)
+        Self::load_with(source, &HashMap::new(), &[], (1, 1), (0, 0), white, true)
     }
     fn load_with(
-        root: &Path,
+        source: &ResourceSource,
         sprites: &HashMap<String, Rect>,
         pixels: &[u8],
         atlas: (u32, u32),
@@ -644,7 +633,7 @@ impl Font {
                 offset: 1.0,
             },
             white,
-            root: root.to_owned(),
+            source: source.clone(),
             atlas,
             region,
             metrics_only,
@@ -667,7 +656,7 @@ impl Font {
             japanese: false,
         };
         // FontManager.prepare: every font definition of the resources.
-        let mut ids = font_ids(root);
+        let mut ids = font_ids(source);
         ids.sort_by_key(|id| id != DEFAULT);
         let sets = ids
             .into_iter()
@@ -682,7 +671,7 @@ impl Font {
     /// `FontManager`: a font's providers with references expanded.
     fn load_set(&self, id: &str, pixels: &[u8]) -> FontSet {
         let mut all = Vec::new();
-        providers(&self.root, id, 0, &mut all);
+        providers(&self.source, id, 0, &mut all);
         let providers = all
             .iter()
             .filter_map(|p| match p["type"].as_str()? {
@@ -697,7 +686,7 @@ impl Font {
                 "bitmap" => Some(Provider::Bitmap(
                     Filter::of(p),
                     load_bitmap(
-                        &self.root,
+                        &self.source,
                         p,
                         &self.sheets,
                         pixels,
@@ -708,7 +697,7 @@ impl Font {
                 "unihex" => Some(Provider::Unihex(Filter::of(p), p.clone(), None)),
                 "ttf" => Some(Provider::TrueType(
                     Filter::of(p),
-                    Box::new(load_true_type(&self.root, p)?),
+                    Box::new(load_true_type(&self.source, p)?),
                 )),
                 _ => None,
             })
@@ -868,7 +857,7 @@ impl Font {
                     }
                 }
                 Provider::Unihex(filter, def, glyphs) if filter.passes(uniform, japanese) => {
-                    let glyphs = glyphs.get_or_insert_with(|| load_hex(&self.root, def));
+                    let glyphs = glyphs.get_or_insert_with(|| load_hex(&self.source, def));
                     if let Some(h) = glyphs.get(&u32::from(c)).copied()
                         && !(non_fishy && fishy_advance(hex_advance(&h)))
                     {
@@ -1026,7 +1015,7 @@ impl Font {
                     }
                 }
                 Provider::Unihex(filter, def, glyphs) if filter.passes(uniform, japanese) => {
-                    let glyphs = glyphs.get_or_insert_with(|| load_hex(&self.root, def));
+                    let glyphs = glyphs.get_or_insert_with(|| load_hex(&self.source, def));
                     if let Some(h) = glyphs.get(&u32::from(c)) {
                         return Some(hex_advance(h));
                     }
@@ -1343,6 +1332,7 @@ fn split_at(parts: &mut Vec<(Vec<char>, Style)>, at: usize, skip: usize, style: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
     #[test]
     fn unihex_rows_and_widths() {
         let mut out = HashMap::new();
@@ -1395,7 +1385,7 @@ mod tests {
     }
     fn load(root: &Path) -> Font {
         Font::load(
-            root,
+            &ResourceSource::directory(root.to_owned()),
             &HashMap::new(),
             &[],
             (4096, 1024),
@@ -1423,6 +1413,77 @@ mod tests {
     }
 
     #[test]
+    fn archive_fonts_keep_lazy_unihex_on_the_open_reload_snapshot() {
+        use std::io::{Cursor, Write};
+        let root =
+            std::env::temp_dir().join(format!("horizon-font-archive-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let write = |path: &Path, bits: &str| {
+            let mut unifont = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            unifont
+                .start_file("glyphs.hex", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            unifont
+                .write_all(format!("0041:{}\n", bits.repeat(16)).as_bytes())
+                .unwrap();
+            let unifont = unifont.finish().unwrap().into_inner();
+            let image = png(4, 8, |_, _| true);
+            let mut pack = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+            for (name, bytes) in [
+                ("assets/minecraft/font/default.json", br#"{"providers":[{"type":"reference","id":"demo:nested/bitmap"}]}"#.as_slice()),
+                ("assets/demo/font/nested/bitmap.json", br#"{"providers":[{"type":"bitmap","file":"demo:font/sheet.png","ascent":7,"chars":["a"]}]}"#),
+                ("assets/demo/font/hex.json", br#"{"providers":[{"type":"unihex","hex_file":"demo:font/unifont.zip"}]}"#),
+                ("assets/demo/font/type.json", br#"{"providers":[{"type":"ttf","file":"demo:mono.ttf","size":11}]}"#),
+                ("assets/demo/font/mono.ttf", horizon_theme::fonts::GEIST_MONO),
+                ("assets/demo/font/unifont.zip", unifont.as_slice()),
+                ("assets/demo/textures/font/sheet.png", image.as_slice()),
+            ] {
+                pack.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                pack.write_all(bytes).unwrap();
+            }
+            pack.finish().unwrap();
+        };
+        let jar = root.join("fonts.jar");
+        write(&jar, "FF");
+        let source = ResourceSource::archive(&jar).unwrap();
+        let font = Font::load(
+            &source,
+            &HashMap::new(),
+            &[],
+            (4096, 1024),
+            (512, 512),
+            white(),
+        );
+        let metrics = Font::metrics(&source);
+        let replacement = root.join("replacement.jar");
+        write(&replacement, "F0");
+        std::fs::rename(&jar, root.join("old.jar")).unwrap();
+        std::fs::rename(replacement, &jar).unwrap();
+        assert_eq!(
+            font.glyph('a').advance,
+            5.0,
+            "bitmap font reference in another namespace"
+        );
+        assert!(
+            font.glyph_in("demo:type", 'A').rect.is_some(),
+            "archive TrueType data"
+        );
+        assert_eq!(
+            font.glyph_in("demo:hex", 'A').advance,
+            5.0,
+            "first lazy read uses the old nested archive"
+        );
+        assert_eq!(metrics.glyph_in("demo:hex", 'A').advance, 5.0);
+        assert!(metrics.glyph_in("demo:hex", 'A').rect.is_none());
+        let reloaded_source = ResourceSource::archive(&jar).unwrap();
+        let reloaded = Font::metrics(&reloaded_source);
+        assert_eq!(reloaded.glyph_in("demo:hex", 'A').advance, 3.0);
+        assert!(!root.join("assets").exists());
+        drop((font, metrics, reloaded, source, reloaded_source));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn server_metrics_preserve_bitmap_true_type_and_unihex_advances() {
         let sheet = png(16, 8, |x, _| x < 2 || (8..14).contains(&x));
         let def = br#"{"providers":[{"type":"space","advances":{" ":4}},{"type":"bitmap","file":"minecraft:font/a.png","ascent":7,"chars":["ab"]}]}"#;
@@ -1440,7 +1501,7 @@ mod tests {
             ],
         );
         let rendered = load(&root);
-        let metrics = Font::metrics(&root);
+        let metrics = Font::metrics(&ResourceSource::directory(root.clone()));
         assert_eq!(metrics.width("a b"), 14.0);
         assert_eq!(metrics.width("§lab"), 12.0);
         let text = Text::literal("ab ab");
@@ -1737,7 +1798,14 @@ mod tests {
             ],
         );
         // A 10 wide atlas fits one 8 pixel glyph per row; the region two rows.
-        let font = Font::load(&root, &HashMap::new(), &[], (10, 64), (0, 8), white());
+        let font = Font::load(
+            &ResourceSource::directory(root.clone()),
+            &HashMap::new(),
+            &[],
+            (10, 64),
+            (0, 8),
+            white(),
+        );
         let _ = std::fs::remove_dir_all(&root);
         let epoch = font.epoch();
         let a = font.glyph('a');
@@ -1768,7 +1836,14 @@ mod tests {
                 ("assets/pack/textures/font/s.png", &sheet),
             ],
         );
-        let font = Font::load(&root, &HashMap::new(), &[], (10, 64), (0, 8), white());
+        let font = Font::load(
+            &ResourceSource::directory(root.clone()),
+            &HashMap::new(),
+            &[],
+            (10, 64),
+            (0, 8),
+            white(),
+        );
         let _ = std::fs::remove_dir_all(&root);
         let epoch = font.epoch();
         assert!(font.glyph('z').rect.is_none());

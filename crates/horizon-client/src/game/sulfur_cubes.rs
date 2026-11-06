@@ -8,6 +8,7 @@ use horizon_client::{
     mesher::Vertex,
     mobs::{Mob, Species, Who, sulfur_cube},
     projectiles::Projectile,
+    text::Text,
 };
 use horizon_core::position::BlockPos;
 
@@ -120,7 +121,13 @@ impl Game<'_> {
         }
         let explosive = sulfur_cube::archetype(m).is_some_and(|a| a.explosion.is_some());
         if explosive && matches!(item, "minecraft:flint_and_steel" | "minecraft:fire_charge") {
-            if !self.ui.rules.bool("tnt_explodes") {
+            if !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+            {
+                let message = Text::translate("block.minecraft.tnt.disabled", &[]);
+                self.send_overlay_message(message);
                 return false;
             }
             sulfur_cube::prime(&mut self.mobs[index], false);
@@ -129,6 +136,7 @@ impl Game<'_> {
             } else {
                 self.consume_held();
             }
+            self.award_stat("used", item, 1);
             return true;
         }
         if item == "minecraft:shears" && sulfur_cube::has_body(m) {
@@ -138,6 +146,10 @@ impl Game<'_> {
             self.mobs[index].extra.ints[3] = sulfur_cube::PICKUP_TIMER;
             self.sulfur_sound(index, "entity.sulfur_cube.eject");
             self.damage_held_tool();
+            // gameEvent(SHEAR, player).
+            let at = self.mobs[index].position;
+            let ctx = self.who_context(Some(Who::Player), None);
+            self.post_game_event("minecraft:shear", [at.x, at.y, at.z], ctx);
             // CriteriaTriggers.PLAYER_SHEARED_EQUIPMENT with the body block.
             if let Some(body) = sheared {
                 let target = self.mob_entity(&self.mobs[index]);
@@ -161,6 +173,10 @@ impl Game<'_> {
             self.mobs[index].extra.set_body_stack(held);
             self.consume_held();
             self.sulfur_sound(index, "entity.sulfur_cube.absorb");
+            // Entity.gameEvent(ENTITY_INTERACT): the cube is the source.
+            let (id, at) = (self.mobs[index].id, self.mobs[index].position);
+            let ctx = self.who_context(Some(Who::Mob(id)), None);
+            self.post_game_event("minecraft:entity_interact", [at.x, at.y, at.z], ctx);
             return true;
         }
         false
@@ -169,7 +185,11 @@ impl Game<'_> {
     /// or next to redstone power lights its fuse (`getBestOwnOrNeighbourSignal`;
     /// no block has an own signal, so the neighbour signal is all there is).
     pub(super) fn sulfur_cube_power_priming(&mut self) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         for i in 0..self.mobs.len() {
@@ -198,7 +218,12 @@ impl Game<'_> {
     /// `primeTime` asks), called after the hit's hurt, which the priming
     /// leaves as it is, so its knock and the fuse both go ahead.
     pub(super) fn burning_arrow_primes(&mut self, p: &Projectile, who: Who) {
-        if !p.arrow.as_ref().is_some_and(|a| a.on_fire()) || !self.ui.rules.bool("tnt_explodes") {
+        if !p.arrow.as_ref().is_some_and(|a| a.on_fire())
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         if let Who::Mob(id) = who
@@ -211,10 +236,13 @@ impl Game<'_> {
     /// `SulfurCubeSearchForItemsGoal` and `pickUpItem`: an adult with nothing
     /// inside hops to a block it can swallow within 8 and takes it in.
     pub(super) fn sulfur_cube_pickups(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::SulfurCube {
+            if m.species() != Species::SulfurCube || !self.creatures.ticked.contains(&m.id) {
                 continue;
             }
             if !m.alive() || m.is_baby() || sulfur_cube::has_body(m) || m.extra.ints[3] > 0 {

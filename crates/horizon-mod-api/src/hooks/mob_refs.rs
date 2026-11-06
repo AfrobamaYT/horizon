@@ -6,6 +6,23 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_ref"
     )]
     fn mob();
+    /// The current level's mob portal eligibility decision, including riders and mounts.
+    /// `Some(false)` means ineligible; `None` means a stale, parked or unavailable
+    /// handle, a client, or the separately modelled dragon. Does not load a level.
+    #[helper(
+        side = "both",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_can_use_portal"
+    )]
+    fn mob_can_use_portal();
+    /// The live leash holder, or `Unleashed` when no leash exists. `None` means the mob,
+    /// holder or saved holder is unavailable, stale or in a parked level.
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_leash_holder"
+    )]
+    fn mob_leash_holder();
     #[helper(
         side = "server",
         receiver = "mob",
@@ -66,4 +83,88 @@ pub trait Helpers {
         target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_baby"
     )]
     fn mob_set_baby();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_look_at"
+    )]
+    fn mob_look_at();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_jump"
+    )]
+    fn mob_jump();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_restrict_to"
+    )]
+    fn mob_restrict_to();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_restrict_center"
+    )]
+    fn mob_restrict_center();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_restrict_radius"
+    )]
+    fn mob_restrict_radius();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_has_restriction"
+    )]
+    fn mob_has_restriction();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_clear_restriction"
+    )]
+    fn mob_clear_restriction();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_is_within_restriction"
+    )]
+    fn mob_is_within_restriction();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_left_handed"
+    )]
+    fn mob_left_handed();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_left_handed"
+    )]
+    fn mob_set_left_handed();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_can_pick_up_loot"
+    )]
+    fn mob_can_pick_up_loot();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_can_pick_up_loot"
+    )]
+    fn mob_set_can_pick_up_loot();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_no_action_time"
+    )]
+    fn mob_no_action_time();
+    #[helper(
+        side = "server",
+        receiver = "mob",
+        target = "horizon_client::game::native_mob_refs::Game<'_>::native_mob_set_no_action_time"
+    )]
+    fn mob_set_no_action_time();
 }

@@ -153,7 +153,8 @@ impl LevelRef {
     /// (`Level.getCapability`): the first provider to answer, of those mods registered for its
     /// type `before_game`, the game's own, and the mods' others, each in registration order. None
     /// for a stale handle, and for a level not in place ([`LevelRef::in_place`]), whose block
-    /// entities the game doesn't write: no provider is asked for one.
+    /// entities the game doesn't write: no provider is asked for one. Disabled mods' providers
+    /// are skipped; re-enabling a mod makes its registrations available to the next lookup.
     pub fn capability<T: ?Sized + 'static>(
         self,
         host: &mut dyn ServerHost,
@@ -178,7 +179,7 @@ impl LevelRef {
         super::answered(
             super::ask_providers(
                 host,
-                |index| table.block_entity_provider(key.name, kind.as_ref()?.id(), index),
+                |index| table.block_entity_provider(key.name, kind?, index),
                 super::BlockProviderOf::get::<T>,
                 |provider, host| provider.provide(host, at),
                 |host| {

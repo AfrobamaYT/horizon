@@ -50,6 +50,10 @@ impl Game<'_> {
         &self,
         stack: &PackStack,
     ) -> Result<PreparedServerReload, ReloadStageError> {
+        let _reload = self
+            .mod_phase
+            .reloading()
+            .expect("server reload on its owning thread");
         horizon_client::mod_content::check_jars(
             &self.options.resources,
             &horizon_client::logging::game_home().join("jars"),
@@ -84,11 +88,16 @@ impl Game<'_> {
         prepared: PreparedServerReload,
         stack: &PackStack,
     ) {
+        let phase = self.mod_phase.clone();
+        let _reload = phase
+            .reloading()
+            .expect("server apply on its owning thread");
         apply_listeners(prepared.steps, "server_reload_apply", |store| {
             self.fns.store = *store;
             self.sync_function_registries(stack);
         });
         self.reload_resources = prepared.resources;
+        self.structure_templates.clear();
     }
     /// The retained server reload listeners of the last successful reload.
     pub(super) fn native_reload_resources(&self) -> &dyn ServerReloadResources {

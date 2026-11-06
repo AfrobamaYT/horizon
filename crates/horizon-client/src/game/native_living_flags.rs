@@ -19,21 +19,45 @@ use horizon_world::registry::BlockStateId;
 use mod_api::LivingRef;
 
 impl Game<'_> {
-    /// Whether the handle names the local player in place: the player the
-    /// game itself runs, not a guest's swapped-in turn (whose client holds
-    /// its own sleep). On a dedicated server every turn is a guest's.
-    fn native_living_local_player(&self, living: LivingRef) -> bool {
-        self.native_living_target(living) == Some(Target::Player) && self.lan_guest_swaps.is_empty()
+    /// Run a player sleep write in the authoritative body. An acting player's
+    /// hub record is displaced until its turn ends; only inactive guests enter
+    /// another turn, in the level already in place. Fake players never sleep.
+    pub(super) fn native_player_sleep_write(
+        &mut self,
+        target: Target,
+        write: impl FnOnce(&mut Self) -> bool,
+    ) -> bool {
+        match target {
+            Target::Player => !self.lan_acting_fake && write(self),
+            Target::Guest(conn) => {
+                let Some(gi) = self.guest_index(conn) else {
+                    return false;
+                };
+                // The entity resolver includes players in other levels, but a
+                // body swap does not swap the world a bed write would touch.
+                if self.lan.as_ref().unwrap().hub.guests[gi].dimension != self.dim.id() {
+                    return false;
+                }
+                self.as_guest_at(gi, conn, |game| !game.lan_acting_fake && write(game))
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
     }
 
     /// The ticks the entity has glided (`LivingEntity.getFallFlyingTicks`),
-    /// counted from 0 again the tick after the glide ends. The player in
-    /// place and a mob keep the count themselves. None for an armor stand
-    /// or the dragon.
+    /// counted from 0 again the tick after the glide ends. Players (including
+    /// inactive guests) and mobs read their own stored body counter. None
+    /// for an armor stand or the dragon.
     pub(super) fn native_living_gliding_ticks(&self, living: LivingRef) -> Option<i32> {
         match self.native_living_read_target(living)? {
             Target::Player => Some(self.player.as_ref()?.fall_fly_ticks),
-            Target::Guest(_) => Some(0),
+            Target::Guest(conn) => Some(
+                self.command_guest(conn)?
+                    .motion
+                    .as_ref()
+                    .map_or(0, |m| m.fall_fly_ticks),
+            ),
             Target::Mob(id) => Some(
                 self.mobs
                     .iter()
@@ -76,17 +100,11 @@ impl Game<'_> {
                 p.fall_flying = false;
                 true
             }
-            Some(Target::Guest(conn)) => {
-                let Some(g) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|h| h.hub.guests.iter_mut().find(|g| g.conn == conn))
-                else {
-                    return false;
-                };
-                g.fall_flying = false;
-                true
-            }
+            Some(Target::Guest(conn)) => self
+                .lan
+                .as_mut()
+                .and_then(|h| h.hub.update_guest(conn, |g| g.fall_flying = false))
+                .is_some(),
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                     return false;
@@ -136,31 +154,46 @@ impl Game<'_> {
     /// `LivingEntity.startSleeping`: the entity lies in the bed whose head
     /// `pos` names, with the effect the game's own sleep has. The player in
     /// place is moved onto the bed, put to sleep and occupies it; a
-    /// villager or wandering trader takes the bed the game's evening gives
-    /// it (an occupied bed leaves it standing). False for a guest, whose
-    /// client tucks itself in, another mob, an armor stand or the dragon.
+    /// villager or wandering trader takes a valid, unoccupied bed. Normal
+    /// integrated-owner, LAN and dedicated guests use their server body,
+    /// inside or outside their own turn, in the level in place. False for
+    /// a guest in another level, a fake player, another
+    /// mob, an armor stand or the dragon, or a bed without a sleep shape.
     pub(super) fn native_living_start_sleeping(
         &mut self,
         living: LivingRef,
         pos: [i32; 3],
     ) -> bool {
         match self.native_living_target(living) {
-            Some(Target::Player) if self.native_living_local_player(living) => self.lie_in_bed(pos),
+            Some(target @ (Target::Player | Target::Guest(_))) => {
+                self.native_player_sleep_write(target, |game| game.lie_in_bed(pos))
+            }
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
                     return false;
                 };
-                if !villager::sleeping(m) && m.extra.villager.is_none() {
-                    // Only a villager or a wandering trader has a bed to take.
+                if !matches!(
+                    m.species(),
+                    horizon_client::mobs::Species::Villager
+                        | horizon_client::mobs::Species::WanderingTrader
+                ) {
                     return false;
                 }
+                // The internal brain helper assumes its target is a bed. Validate
+                // the public target and its sleep shape before any mutation.
+                let Some(at) = self.sleeping_position(pos) else {
+                    return false;
+                };
                 let mut mobs = std::mem::take(&mut self.mobs);
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
-                let slept = mobs
-                    .iter_mut()
-                    .find(|m| m.id == id)
-                    .is_some_and(|m| villager::start_sleeping(m, pos, &w, &mut events));
+                let slept = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
+                    let slept = villager::start_sleeping(m, pos, &w, &mut events);
+                    if slept {
+                        m.position = at;
+                    }
+                    slept
+                });
                 self.mobs = mobs;
                 let _ = self.handle_mob_events(events);
                 slept
@@ -170,16 +203,19 @@ impl Game<'_> {
     }
     /// `LivingEntity.stopSleeping`: the sleeper stands up beside the bed, as
     /// the game's own waking does, with its pose and packets. True when the
-    /// entity slept; false for a guest, whose client stands itself up,
-    /// another mob, an armor stand or the dragon.
+    /// entity slept; false for a fake player, another mob, an armor stand
+    /// or the dragon. Normal server guests in the level in place use the
+    /// same wake-up path; guests in another level are refused.
     pub(super) fn native_living_stop_sleeping(&mut self, living: LivingRef) -> bool {
         match self.native_living_target(living) {
-            Some(Target::Player) if self.native_living_local_player(living) => {
-                let slept = self.sleeping.is_some();
-                if slept {
-                    self.wake_up();
-                }
-                slept
+            Some(target @ (Target::Player | Target::Guest(_))) => {
+                self.native_player_sleep_write(target, |game| {
+                    let slept = game.sleeping.is_some();
+                    if slept {
+                        game.wake_up();
+                    }
+                    slept
+                })
             }
             Some(Target::Mob(id)) => {
                 let Some(m) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
@@ -205,28 +241,43 @@ impl Game<'_> {
     /// the player sleeps in, without moving them; the next entity sync
     /// tells the players around they sleep there, as it tells them the
     /// game's own sleep. The villagers' beds belong to the evening's bed
-    /// path (`start_sleeping`). False for a guest, a mob, an armor stand or
-    /// the dragon.
+    /// path (`start_sleeping`). Normal server guests in the level in place
+    /// are supported; guests in another level, fake players, mobs, armor
+    /// stands and the dragon are refused. This only
+    /// changes the sleeping position/pose, not bed occupancy.
     pub(super) fn native_living_set_sleeping_pos(
         &mut self,
         living: LivingRef,
         pos: [i32; 3],
     ) -> bool {
-        if self.native_living_local_player(living) {
-            self.sleeping = Some(pos);
-            return true;
-        }
-        false
+        let Some(target) = self.native_living_target(living) else {
+            return false;
+        };
+        self.native_player_sleep_write(target, |game| {
+            game.sleeping = Some(pos);
+            if let Some(p) = game.player.as_mut() {
+                let _ = p.set_sleeping(true);
+            }
+            true
+        })
     }
     /// `LivingEntity.clearSleepingPos`: the player no longer names a bed, so
     /// `is_sleeping` is false and the next entity sync stands them up.
-    /// False for a guest, a mob, an armor stand or the dragon.
+    /// Normal server guests in the level in place are supported; guests in
+    /// another level, fake players, mobs, armor stands and the dragon are
+    /// refused. This does not run the wake-up animation
+    /// or move the player; use `stop_sleeping` to stand beside the bed.
     pub(super) fn native_living_clear_sleeping_pos(&mut self, living: LivingRef) -> bool {
-        if self.native_living_local_player(living) {
-            self.sleeping = None;
-            return true;
-        }
-        false
+        let Some(target) = self.native_living_target(living) else {
+            return false;
+        };
+        self.native_player_sleep_write(target, |game| {
+            game.sleeping = None;
+            if let Some(p) = game.player.as_mut() {
+                let _ = p.set_sleeping(false);
+            }
+            true
+        })
     }
     /// Whether the entity jumps (`LivingEntity.isJumping`; Paper's
     /// `LivingEntity#isJumping`): the player in place answers from their
@@ -264,35 +315,35 @@ impl Game<'_> {
     /// Whether the entity is on a climbable block this tick
     /// (`LivingEntity.onClimbable`; Paper's `LivingEntity#isClimbing`), by
     /// the block at its feet: a ladder, a vine, a scaffold or an open
-    /// trapdoor above a ladder. A spectator never climbs. None for an armor
-    /// stand or the dragon.
+    /// trapdoor above a ladder. A spectator never climbs; a gliding entity
+    /// ignores blocks tagged to glide through, such as vines. None for an
+    /// armor stand or the dragon.
     pub(super) fn native_living_is_climbing(&self, living: LivingRef) -> Option<bool> {
         let target = self.native_living_read_target(living)?;
-        let (position, spectator) = match target {
+        let (position, spectator, gliding) = match target {
             Target::Player => {
                 let p = self.player.as_ref()?;
-                (p.position, p.spectator)
+                (p.position, p.spectator, p.fall_flying)
             }
             Target::Guest(conn) => {
                 let g = self.command_guest(conn)?;
                 (
                     Vec3::new(g.position[0], g.position[1], g.position[2]),
                     g.spectator(),
+                    g.fall_flying,
                 )
             }
-            Target::Mob(id) => (
-                self.mobs
-                    .iter()
-                    .find(|m| m.id == id && !m.removed)?
-                    .position,
-                false,
-            ),
+            Target::Mob(id) => {
+                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
+                (m.position, false, m.extra.fall_flying)
+            }
             _ => return None,
         };
         let mut world = FlagClimbing {
             world: &self.world,
             position: BlockPos::containing(position),
             spectator,
+            gliding,
         };
         Some(climbing::on_climbable(&mut world, &self.motion.climbing).unwrap_or(false))
     }
@@ -321,6 +372,7 @@ struct FlagClimbing<'a> {
     world: &'a horizon_client::world::World,
     position: BlockPos,
     spectator: bool,
+    gliding: bool,
 }
 
 impl ClimbingWorld for FlagClimbing<'_> {
@@ -329,7 +381,7 @@ impl ClimbingWorld for FlagClimbing<'_> {
         Ok(self.spectator)
     }
     fn is_fall_flying(&mut self) -> Result<bool, Self::Error> {
-        Ok(false)
+        Ok(self.gliding)
     }
     fn block_position(&mut self) -> Result<BlockPos, Self::Error> {
         Ok(self.position)
@@ -357,16 +409,6 @@ mod tests {
         game.mobs
             .push(Mob::new(id, kind, Vec3::new(5.5, 64.0, 5.5), 0.0));
         game.native_living(game.native_entity(id).unwrap()).unwrap()
-    }
-
-    /// The player in place, standing at the block `[0, 64, 0]`'s feet.
-    fn standing_player(game: &mut Game<'_>) -> LivingRef {
-        use horizon_client::motion::PlayerMotion;
-        game.options.dedicated = Some(Vec::new());
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
-        game.lan_acting_uuid = Some(123);
-        game.lan_acting_entity = Some(20);
-        game.native_living(game.native_entity(20).unwrap()).unwrap()
     }
 
     #[test]
@@ -417,6 +459,7 @@ mod tests {
                 [1, 2, 3, 4],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -447,6 +490,7 @@ mod tests {
                 [5, 6, 7, 8],
                 None,
                 Some(game.pack.assets.registry),
+                |_| None,
             );
             let restored = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
@@ -467,72 +511,6 @@ mod tests {
             ));
             assert!(game.native_mob_ref(stale.entity()).is_none());
             assert_eq!(game.native_living_is_sleeping(stale), None);
-        });
-    }
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn player_flags_read_their_own_body_and_the_bed_takes_them() {
-        use horizon_world::chunk::BlockState;
-        with_game(|game| {
-            let player = standing_player(game);
-            let game = &mut *game;
-            game.world.chunks.insert(
-                (0, 0),
-                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
-            );
-            let registry = game.pack.assets.registry;
-            let ladder = registry.default_state("minecraft:ladder").unwrap();
-            // No climbable block under the player yet.
-            assert_eq!(game.native_living_is_climbing(player), Some(false));
-            game.world.set(0, 0, 0, ladder).unwrap();
-            assert_eq!(game.native_living_is_climbing(player), Some(true));
-            // The glide and jump flags live on the player's own body.
-            assert_eq!(game.native_living_gliding_ticks(player), Some(0));
-            game.player.as_mut().unwrap().fall_fly_ticks = 4;
-            assert_eq!(game.native_living_gliding_ticks(player), Some(4));
-            game.player.as_mut().unwrap().fall_fly_ticks = 0;
-            assert_eq!(game.native_living_is_gliding(player), Some(false));
-            game.player.as_mut().unwrap().fall_flying = true;
-            assert_eq!(game.native_living_is_gliding(player), Some(true));
-            assert!(game.native_living_stop_gliding(player));
-            assert!(!game.player.as_ref().unwrap().fall_flying);
-            assert_eq!(game.native_living_is_jumping(player), Some(false));
-            assert!(game.native_living_set_is_jumping(player, true));
-            assert!(game.player.as_ref().unwrap().jumping);
-            // No bed named, no sleep: the straw bed's head has no shape.
-            assert_eq!(game.native_living_is_sleeping(player), Some(false));
-            assert_eq!(game.native_living_sleeping_pos(player), None);
-            assert!(!game.native_living_start_sleeping(player, [5, 64, 5]));
-            // A bed's head takes the player, and waking stands them up.
-            let head = registry
-                .resolve(&BlockState {
-                    name: "minecraft:red_bed".into(),
-                    properties: [("facing", "north"), ("occupied", "false"), ("part", "head")]
-                        .into_iter()
-                        .map(|(k, v)| (k.into(), v.into()))
-                        .collect(),
-                })
-                .unwrap();
-            game.world.set(5, 64, 5, head).unwrap();
-            assert!(game.native_living_start_sleeping(player, [5, 64, 5]));
-            assert_eq!(game.native_living_is_sleeping(player), Some(true));
-            assert_eq!(game.native_living_sleeping_pos(player), Some([5, 64, 5]));
-            assert!(game.native_living_stop_sleeping(player));
-            assert_eq!(game.native_living_is_sleeping(player), Some(false));
-            assert_eq!(game.native_living_sleeping_pos(player), None);
-            // Setting and clearing the bed's name moves nothing.
-            assert!(game.native_living_set_sleeping_pos(player, [6, 64, 6]));
-            assert_eq!(game.native_living_is_sleeping(player), Some(true));
-            assert_eq!(game.native_living_sleeping_pos(player), Some([6, 64, 6]));
-            assert!(game.native_living_clear_sleeping_pos(player));
-            assert_eq!(game.native_living_is_sleeping(player), Some(false));
-            assert_eq!(game.native_living_sleeping_pos(player), None);
-            // A player is never a baby, and no mob handle names them, so
-            // every MobRef flag write refuses.
-            assert_eq!(game.native_living_baby(player), Some(false));
-            let player_mob = game.native_mob_ref(player.entity());
-            assert!(player_mob.is_none(), "a player is no mob");
         });
     }
 
@@ -574,7 +552,7 @@ mod tests {
                     .unwrap();
                     let m = &game.mobs[before];
                     assert!(m.persistent, "the join hook's write survives");
-                    assert!(m.no_ai && m.extra.age == -24000);
+                    assert!(m.no_ai && m.is_baby());
                 });
             },
         );
@@ -594,85 +572,673 @@ mod tests {
         });
     }
 
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_guests_flags_read_from_its_own_record() {
-        use super::super::lan::LanSettings;
-        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
+    fn guest_server(game: &mut Game<'_>, dedicated: bool, owner: bool) {
+        use super::super::{execution_role::ExecutionRole, lan::LanSettings};
+        use horizon_client::lan::{NetConfig, hub::HubConfig};
+        game.options.execution_role = if dedicated {
+            ExecutionRole::DedicatedServer
+        } else {
+            ExecutionRole::IntegratedServer
+        };
+        game.options.dedicated = dedicated.then(Vec::new);
+        let settings = LanSettings {
+            port: 0,
+            guest_commands: false,
+            force_game_mode: false,
+        };
+        let net = NetConfig {
+            listen: false,
+            announce: false,
+            lod_distance: 0,
+            ..NetConfig::lan(0, String::new(), 2)
+        };
+        let config = HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 2,
+            simulation_distance: 2,
+            dimension: game.dim.id().to_owned(),
+            allow_flight: true,
+            seed: 0,
+            max_players: 2,
+            integrated: !dedicated,
+            levels: game.level_shapes,
+        };
+        game.lan_host(settings, net, config).unwrap();
+        game.lan.as_mut().unwrap().hub.singleplayer_owner = owner.then_some(12);
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+    }
+
+    fn guest(
+        game: &mut Game<'_>,
+        conn: u32,
+    ) -> (
+        LivingRef,
+        std::sync::mpsc::Receiver<horizon_client::lan::Out>,
+    ) {
+        use horizon_client::lan::{Joined, PlayerSender, guest::Guest};
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{
             Arc,
             atomic::{AtomicI32, AtomicUsize},
         };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut g = Guest::new(
+            Joined {
+                conn,
+                uuid: u128::from(conn),
+                name: format!("guest{conn}"),
+                properties: Vec::new(),
+                info: ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
+            },
+            conn as i32,
+            [3.0, 64.0, 5.0],
+            10,
+        );
+        g.placed = true;
+        g.loaded = true;
+        g.loading = false;
+        g.load_timeout = 0;
+        g.dimension = game.dim.id().to_owned();
+        // The test client's initial column has already arrived, so the
+        // real tracker can pair the other guest and publish dirty flags.
+        g.sent_chunks.insert((0, 0));
+        game.lan.as_mut().unwrap().hub.guests.push(g);
+        let living = game
+            .native_living(game.native_entity(conn).unwrap())
+            .unwrap();
+        (living, rx)
+    }
+
+    fn bed(game: &mut Game<'_>, name: &str, pos: [i32; 3]) {
+        let head = game
+            .pack
+            .assets
+            .registry
+            .resolve(&horizon_world::chunk::BlockState {
+                name: name.into(),
+                properties: [("facing", "north"), ("occupied", "false"), ("part", "head")]
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
+            })
+            .unwrap();
+        game.world.set(pos[0], pos[1], pos[2], head).unwrap();
+        if name != "minecraft:straw_bed" {
+            let mut foot = game.pack.assets.registry.state(head).unwrap().clone();
+            foot.properties.insert("part".into(), "foot".into());
+            let foot = game.pack.assets.registry.id(&foot).unwrap();
+            game.world.set(pos[0], pos[1], pos[2] + 1, foot).unwrap();
+        }
+    }
+
+    fn sync_guests(game: &mut Game<'_>) {
+        use horizon_client::lan::hub::TickCtx;
+        let mut ctx = TickCtx {
+            world: &mut game.world,
+            entities: &[],
+            next_entity: &mut game.next_entity,
+            spawn: [0.0, 64.0, 0.0],
+            difficulty: 1,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: Some(game.collision),
+            border: &game.border,
+            streaming: None,
+        };
+        game.lan.as_mut().unwrap().hub.tick_level(&mut ctx);
+    }
+
+    fn packets(
+        rx: &std::sync::mpsc::Receiver<horizon_client::lan::Out>,
+    ) -> Vec<horizon_protocol::packets::play::Clientbound> {
+        use horizon_client::lan::Out;
+        use horizon_protocol::{buf::Reader, packets::play::Clientbound};
+        rx.try_iter()
+            .flat_map(|out| match out {
+                Out::Packet(body) => vec![body],
+                Out::Packets(bodies) => bodies,
+                _ => Vec::new(),
+            })
+            .map(|body| {
+                let mut r = Reader::new(&body);
+                let id = r.varint().unwrap();
+                Clientbound::decode(id, r.rest()).unwrap()
+            })
+            .collect()
+    }
+
+    fn has_bed_packet(
+        packets: &[horizon_protocol::packets::play::Clientbound],
+        bed: Option<[i32; 3]>,
+    ) -> bool {
+        use horizon_protocol::{entity_data::Value, packets::play::Clientbound as C};
+        packets.iter().any(|p| matches!(p, C::SetEntityData(p) if p.id == 12
+            && p.values.iter().any(|(index, _, v)| *index == 6 && matches!(v, Value::Id(pose) if *pose == if bed.is_some() { 2 } else { 0 }))
+            && p.values.iter().any(|(index, _, v)| *index == 14 && matches!(v, Value::OptPos(pos) if *pos == bed))))
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_normal_guest_sleep_writes_survive_turns_and_sync() {
+        use horizon_client::pose::Pose;
+        use horizon_protocol::packets::play::Clientbound as C;
+        // The integrated owner, a LAN guest, and a dedicated guest all act
+        // through the real enter/leave path, not a standalone window body.
+        for (dedicated, owner) in [(false, true), (false, false), (true, false)] {
+            with_game(|game| {
+                guest_server(game, dedicated, owner);
+                let (living, rx) = guest(game, 12);
+                // Outside the turn the client owns jump input. Only the
+                // active body exposes and accepts the controller's state.
+                assert_eq!(game.native_living_is_jumping(living), Some(false));
+                assert!(!game.native_living_set_is_jumping(living, true));
+                game.as_guest(12, |game| {
+                    assert_eq!(game.native_living_is_jumping(living), Some(false));
+                    assert!(game.native_living_set_is_jumping(living, true));
+                    assert!(game.player.as_ref().unwrap().jumping);
+                    assert_eq!(game.native_living_is_jumping(living), Some(true));
+                    assert!(game.native_living_set_is_jumping(living, false));
+                    assert!(!game.player.as_ref().unwrap().jumping);
+                    assert_eq!(game.native_living_is_jumping(living), Some(false));
+                })
+                .unwrap();
+                assert!(
+                    !game
+                        .command_guest(12)
+                        .unwrap()
+                        .motion
+                        .as_ref()
+                        .unwrap()
+                        .jumping
+                );
+                assert!(!game.native_living_set_is_jumping(living, false));
+                bed(game, "minecraft:red_bed", [5, 64, 5]);
+                let at = game.sleeping_position([5, 64, 5]).unwrap();
+                assert!(game.native_living_start_sleeping(living, [5, 64, 5]));
+                let g = game.command_guest(12).unwrap();
+                assert_eq!(g.position, [at.x, at.y, at.z]);
+                assert_eq!(g.motion.as_ref().unwrap().velocity, Vec3::ZERO);
+                assert_eq!(g.pose(), Pose::Sleeping);
+                assert_eq!(g.sleep_timer, 0);
+                assert_eq!(game.native_living_sleeping_pos(living), Some([5, 64, 5]));
+                assert_eq!(
+                    game.pack
+                        .assets
+                        .registry
+                        .state(game.world.block(5, 64, 5))
+                        .unwrap()
+                        .properties
+                        .get("occupied")
+                        .map(String::as_str),
+                    Some("true")
+                );
+                sync_guests(game);
+                let sent = packets(&rx);
+                assert!(has_bed_packet(&sent, Some([5, 64, 5])));
+                assert!(sent.iter().any(|p| matches!(p, C::PlayerPosition(_))));
+                game.as_guest(12, |game| {
+                    assert_eq!(game.native_living_is_sleeping(living), Some(true));
+                    assert!(game.native_living_stop_sleeping(living));
+                    assert_eq!(game.native_living_sleeping_pos(living), None);
+                    assert!(!game.player.as_ref().unwrap().sleeping);
+                })
+                .unwrap();
+                let g = game.command_guest(12).unwrap();
+                assert!(!g.sleeping && g.bed.is_none());
+                assert_eq!(g.sleep_timer, 100);
+                assert_eq!(g.pose(), Pose::Standing);
+                assert_ne!(g.position, [at.x, at.y, at.z]);
+                sync_guests(game);
+                let sent = packets(&rx);
+                assert!(has_bed_packet(&sent, None));
+                assert!(
+                    sent.iter()
+                        .any(|p| matches!(p, C::Animate(p) if p.id == 12 && p.action == 0))
+                );
+                assert!(sent.iter().any(|p| matches!(p, C::PlayerPosition(_))));
+                game.free_left_beds();
+                assert_eq!(
+                    game.pack
+                        .assets
+                        .registry
+                        .state(game.world.block(5, 64, 5))
+                        .unwrap()
+                        .properties
+                        .get("occupied")
+                        .map(String::as_str),
+                    Some("false")
+                );
+
+                let before = game.command_guest(12).unwrap().position;
+                // Raw set/clear change only the sleeping data/pose, not the
+                // position or occupancy. Exercise own-turn and outside writes.
+                game.as_guest(12, |game| {
+                    assert!(game.native_living_set_sleeping_pos(living, [6, 64, 6]));
+                })
+                .unwrap();
+                assert_eq!(game.command_guest(12).unwrap().position, before);
+                assert_eq!(game.command_guest(12).unwrap().pose(), Pose::Sleeping);
+                sync_guests(game);
+                assert!(has_bed_packet(&packets(&rx), Some([6, 64, 6])));
+                assert!(game.native_living_clear_sleeping_pos(living));
+                game.as_guest(12, |game| {
+                    assert_eq!(game.native_living_is_sleeping(living), Some(false));
+                    assert!(!game.player.as_ref().unwrap().sleeping);
+                })
+                .unwrap();
+                assert_eq!(game.command_guest(12).unwrap().position, before);
+                sync_guests(game);
+                let sent = packets(&rx);
+                assert!(has_bed_packet(&sent, None));
+                assert!(!sent.iter().any(|p| matches!(p, C::Animate(_))));
+                // The inverse entry points must have the same writeback:
+                // start/clear in the own turn and stop/set from outside.
+                game.as_guest(12, |game| {
+                    assert!(game.native_living_start_sleeping(living, [5, 64, 5]));
+                })
+                .unwrap();
+                assert!(game.native_living_stop_sleeping(living));
+                assert!(game.native_living_set_sleeping_pos(living, [6, 64, 6]));
+                game.as_guest(12, |game| {
+                    assert!(game.native_living_clear_sleeping_pos(living));
+                })
+                .unwrap();
+                game.wake_woken_guests();
+                assert_eq!(game.native_living_is_sleeping(living), Some(false));
+                assert_eq!(game.command_guest(12).unwrap().pose(), Pose::Standing);
+                game.free_left_beds();
+                assert_eq!(
+                    game.pack
+                        .assets
+                        .registry
+                        .state(game.world.block(5, 64, 5))
+                        .unwrap()
+                        .properties
+                        .get("occupied")
+                        .map(String::as_str),
+                    Some("false")
+                );
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_foreign_level_guest_sleep_writes_refuse_without_mutation() {
+        for sleeping in [false, true] {
+            for acting in [false, true] {
+                with_game(|game| {
+                    guest_server(game, true, false);
+                    let (outer, outer_rx) = guest(game, 12);
+                    let (foreign, foreign_rx) = guest(game, 13);
+                    bed(game, "minecraft:red_bed", [5, 64, 5]);
+                    bed(game, "minecraft:blue_bed", [7, 64, 7]);
+                    // Initialize a real body in its own turn before moving its
+                    // hub record to another level. Its bed coordinates also
+                    // name a real bed here, so a wrong-world write is visible.
+                    game.as_guest(13, |game| {
+                        if sleeping {
+                            assert!(game.native_living_set_sleeping_pos(foreign, [5, 64, 5]));
+                        }
+                        let p = game.player.as_mut().unwrap();
+                        p.velocity = Vec3::new(0.25, 0.5, -0.25);
+                        p.jumping = true;
+                        game.sleep_timer = 37;
+                    })
+                    .unwrap();
+                    // This world's bed is independent of the foreign sleeper;
+                    // no player-bed cleanup is pending from the fixture setup.
+                    game.set_bed_occupied([5, 64, 5], sleeping);
+                    game.lan
+                        .as_mut()
+                        .unwrap()
+                        .hub
+                        .update_guest(13, |guest| guest.dimension = "minecraft:the_nether".into())
+                        .unwrap();
+                    // Entity/living lookup intentionally still includes all
+                    // server players; the sleep write must own the refusal.
+                    assert_eq!(game.native_entity(13), Some(foreign.entity()));
+                    let _ = packets(&outer_rx);
+                    let _ = packets(&foreign_rx);
+                    let refuse = |game: &mut Game<'_>| {
+                        let foreign_before = SleepState::guest(game, 13);
+                        let outer_before = SleepState::acting(game);
+                        let outer_guest_before = SleepState::guest(game, 12);
+                        let foreign_bed = game.world.block(5, 64, 5);
+                        let outer_bed = game.world.block(7, 64, 7);
+                        let player_beds = game.player_beds.clone();
+                        for mutation in 0..4 {
+                            let changed = match mutation {
+                                0 => game.native_living_start_sleeping(foreign, [5, 64, 5]),
+                                1 => game.native_living_stop_sleeping(foreign),
+                                2 => game.native_living_set_sleeping_pos(foreign, [6, 64, 6]),
+                                3 => game.native_living_clear_sleeping_pos(foreign),
+                                _ => unreachable!(),
+                            };
+                            assert!(
+                                !changed,
+                                "mutation {mutation}, sleeping {sleeping}, acting {acting}"
+                            );
+                            // No wake marker or bed cleanup may be queued for
+                            // the current world by the refused foreign write.
+                            assert_eq!(game.player_beds, player_beds);
+                            assert_eq!(SleepState::guest(game, 13), foreign_before);
+                            assert_eq!(SleepState::acting(game), outer_before);
+                            assert_eq!(SleepState::guest(game, 12), outer_guest_before);
+                            assert_eq!(game.world.block(5, 64, 5), foreign_bed);
+                            assert_eq!(game.world.block(7, 64, 7), outer_bed);
+                            assert!(packets(&foreign_rx).is_empty());
+                            assert!(packets(&outer_rx).is_empty());
+                        }
+                    };
+                    if acting {
+                        game.as_guest(12, |game| {
+                            assert!(game.native_living_start_sleeping(outer, [7, 64, 7]));
+                            let _ = packets(&outer_rx);
+                            let _ = packets(&foreign_rx);
+                            refuse(game);
+                            assert_eq!(game.lan_acting, Some(12));
+                            assert!(!game.lan_acting_fake);
+                        })
+                        .unwrap();
+                    } else {
+                        refuse(game);
+                    }
+                    // Level cleanup runs after the actor's turn, not in it.
+                    let foreign_before = SleepState::guest(game, 13);
+                    let foreign_bed = game.world.block(5, 64, 5);
+                    let outer_bed = game.world.block(7, 64, 7);
+                    game.wake_woken_guests();
+                    game.free_left_beds();
+                    assert_eq!(SleepState::guest(game, 13), foreign_before);
+                    assert_eq!(game.world.block(5, 64, 5), foreign_bed);
+                    assert_eq!(game.world.block(7, 64, 7), outer_bed);
+                    assert!(game.lan_guest_swaps.is_empty());
+                    assert_eq!(game.dim, super::super::Dim::Overworld);
+                });
+            }
+        }
+    }
+
+    /// Observable body, bed and pending wake/teleport state of a sleep write.
+    #[derive(Debug, PartialEq)]
+    struct SleepState {
+        position: Option<Vec3>,
+        velocity: Option<Vec3>,
+        sleeping: bool,
+        jumping: Option<bool>,
+        bed: Option<[i32; 3]>,
+        timer: u32,
+        spawn: Option<Vec3>,
+        woke_from: Option<[i32; 3]>,
+        awaiting_teleport: Option<(i32, [f64; 3])>,
+        teleport_counter: i32,
+    }
+
+    impl SleepState {
+        fn acting(game: &Game<'_>) -> Self {
+            Self {
+                position: game.player.as_ref().map(|p| p.position),
+                velocity: game.player.as_ref().map(|p| p.velocity),
+                sleeping: game.player.as_ref().is_some_and(|p| p.sleeping),
+                jumping: game.player.as_ref().map(|p| p.jumping),
+                bed: game.sleeping,
+                timer: game.sleep_timer,
+                spawn: game.spawn,
+                woke_from: None,
+                awaiting_teleport: None,
+                teleport_counter: 0,
+            }
+        }
+
+        fn guest(game: &Game<'_>, conn: u32) -> Self {
+            let g = game.command_guest(conn).unwrap();
+            Self {
+                position: Some(Vec3::new(g.position[0], g.position[1], g.position[2])),
+                velocity: g.motion.as_ref().map(|p| p.velocity),
+                sleeping: g.sleeping,
+                jumping: g.motion.as_ref().map(|p| p.jumping),
+                bed: g.bed,
+                timer: g.sleep_timer,
+                spawn: g.spawn.map(|p| Vec3::new(p[0], p[1], p[2])),
+                woke_from: g.woke_from,
+                awaiting_teleport: g.awaiting_teleport,
+                teleport_counter: g.teleport_counter,
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_guest_glide_stop_survives_own_turn_and_vines() {
+        use horizon_client::pose::Pose;
         with_game(|game| {
-            let settings = LanSettings {
-                port: 0,
-                guest_commands: false,
-                force_game_mode: false,
-            };
-            let net = NetConfig {
-                listen: false,
-                announce: false,
-                lod_distance: 0,
-                ..NetConfig::lan(0, String::new(), 2)
-            };
-            let config = HubConfig {
-                default_game_mode: 0,
-                guest_commands: false,
-                force_game_mode: false,
-                hardcore: false,
-                view_distance: 2,
-                simulation_distance: 2,
-                dimension: game.dim.id().to_owned(),
-                allow_flight: true,
-                seed: 0,
-                max_players: 2,
-                integrated: true,
-                levels: game.level_shapes,
-            };
-            game.lan_host(settings, net, config).unwrap();
-            let (tx, _rx) = std::sync::mpsc::channel();
-            let mut guest = Guest::new(
-                Joined {
-                    conn: 12,
-                    uuid: 12,
-                    name: "guest12".into(),
-                    properties: Vec::new(),
-                    info: ClientInformation::new(8),
-                    brand: String::new(),
-                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
-                    latency: Arc::new(AtomicI32::new(0)),
-                    address: "127.0.0.1:1".parse().unwrap(),
-                    expected: false,
-                },
-                12,
-                [3.0, 64.0, 5.0],
-                10,
+            guest_server(game, false, true);
+            let (living, _rx) = guest(game, 12);
+            let (_observer, observer_rx) = guest(game, 13);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| guest.fall_flying = true)
+                .unwrap();
+            let vine = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:vine")
+                .unwrap();
+            game.world.set(3, 64, 5, vine).unwrap();
+            game.as_guest(12, |game| {
+                game.player.as_mut().unwrap().fall_fly_ticks = 9;
+                assert_eq!(game.native_living_is_climbing(living), Some(false));
+            })
+            .unwrap();
+            assert_eq!(game.native_living_gliding_ticks(living), Some(9));
+            assert_eq!(game.native_living_is_climbing(living), Some(false));
+            sync_guests(game);
+            let sent = packets(&observer_rx);
+            assert!(sent.iter().any(|p| matches!(p,
+                horizon_protocol::packets::play::Clientbound::SetEntityData(p)
+                if p.id == 12 && p.values.iter().any(|(i, _, v)| *i == 0
+                    && matches!(v, horizon_protocol::entity_data::Value::Byte(flags) if *flags & -128 != 0)))));
+            game.as_guest(12, |game| {
+                assert_eq!(game.native_living_gliding_ticks(living), Some(9));
+                assert!(game.native_living_stop_gliding(living));
+                assert_eq!(game.native_living_is_climbing(living), Some(true));
+            })
+            .unwrap();
+            let g = game.command_guest(12).unwrap();
+            assert!(!g.fall_flying);
+            assert_ne!(g.pose(), Pose::FallFlying);
+            assert_eq!(game.native_living_is_gliding(living), Some(false));
+            assert_eq!(game.native_living_is_climbing(living), Some(true));
+            sync_guests(game);
+            let sent = packets(&observer_rx);
+            assert!(sent.iter().any(|p| matches!(p,
+                horizon_protocol::packets::play::Clientbound::SetEntityData(p)
+                if p.id == 12 && p.values.iter().any(|(i, _, v)| *i == 0
+                    && matches!(v, horizon_protocol::entity_data::Value::Byte(flags) if *flags & -128 == 0)))));
+            game.as_guest(12, |game| {
+                assert_eq!(game.native_living_is_gliding(living), Some(false));
+                assert_eq!(game.native_living_gliding_ticks(living), Some(9));
+            })
+            .unwrap();
+            game.tick_guests();
+            assert_eq!(game.native_living_gliding_ticks(living), Some(0));
+            // A mob uses the same adapter with its own, not the player's flag.
+            let mob = cow(game, 20);
+            game.mobs[0].position = Vec3::new(3.0, 64.0, 5.0);
+            assert_eq!(game.native_living_is_climbing(mob), Some(true));
+            game.mobs[0].extra.fall_flying = true;
+            assert_eq!(game.native_living_is_climbing(mob), Some(false));
+            let ladder = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:ladder")
+                .unwrap();
+            game.world.set(3, 64, 5, ladder).unwrap();
+            assert_eq!(game.native_living_is_climbing(mob), Some(true));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_nested_guest_flags_restore_outer_and_refuse_fake_sleep() {
+        use horizon_client::{lan::guest::Guest, motion::PlayerMotion};
+        with_game(|game| {
+            guest_server(game, false, true);
+            let (outer, _rx) = guest(game, 12);
+            let (inner, _rx2) = guest(game, 13);
+            bed(game, "minecraft:red_bed", [5, 64, 5]);
+            let motion = PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+            let mut fake = Guest::connectionless(14, 14, "fake14".into(), 14, [0.0; 3], motion);
+            fake.dimension = game.dim.id().to_owned();
+            game.lan.as_mut().unwrap().hub.guests.push(fake);
+            let fake = game.native_living(game.native_entity(14).unwrap()).unwrap();
+            for conn in [12, 13, 14] {
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .update_guest(conn, |guest| guest.fall_flying = true)
+                    .unwrap();
+                game.as_guest(conn, |game| {
+                    game.player.as_mut().unwrap().fall_fly_ticks = conn as i32
+                })
+                .unwrap();
+            }
+            assert!(!game.native_living_start_sleeping(fake, [5, 64, 5]));
+            assert!(!game.native_living_stop_sleeping(fake));
+            assert!(!game.native_living_set_sleeping_pos(fake, [5, 64, 5]));
+            assert!(!game.native_living_clear_sleeping_pos(fake));
+            game.as_guest(12, |game| {
+                let outer_pos = game.player.as_ref().unwrap().position;
+                assert!(game.native_living_set_sleeping_pos(outer, [7, 64, 7]));
+                game.as_guest(14, |game| {
+                    assert!(game.lan_acting_fake);
+                    assert_eq!(game.native_living_gliding_ticks(outer), None);
+                    assert!(!game.native_living_stop_gliding(outer));
+                    assert!(!game.native_living_clear_sleeping_pos(outer));
+                    assert!(!game.native_living_start_sleeping(fake, [5, 64, 5]));
+                    assert!(!game.native_living_set_sleeping_pos(fake, [5, 64, 5]));
+                    assert!(!game.native_living_clear_sleeping_pos(fake));
+                    assert!(!game.native_living_stop_sleeping(fake));
+                    game.as_guest(13, |game| {
+                        assert!(!game.lan_acting_fake);
+                        assert!(game.native_living_stop_gliding(inner));
+                        assert!(game.native_living_start_sleeping(inner, [5, 64, 5]));
+                    })
+                    .unwrap();
+                    assert!(game.lan_acting_fake);
+                    assert_eq!(game.native_living_is_gliding(fake), Some(true));
+                    assert_eq!(game.native_living_gliding_ticks(fake), Some(14));
+                    assert!(game.native_living_stop_gliding(fake));
+                })
+                .unwrap();
+                assert!(!game.lan_acting_fake);
+                assert_eq!(game.native_living_is_gliding(outer), Some(true));
+                assert_eq!(game.native_living_gliding_ticks(outer), Some(12));
+                assert_eq!(game.native_living_sleeping_pos(outer), Some([7, 64, 7]));
+                assert_eq!(game.player.as_ref().unwrap().position, outer_pos);
+            })
+            .unwrap();
+            assert!(game.command_guest(12).unwrap().fall_flying);
+            assert!(!game.command_guest(13).unwrap().fall_flying);
+            assert!(!game.command_guest(14).unwrap().fall_flying);
+            assert_eq!(game.native_living_sleeping_pos(inner), Some([5, 64, 5]));
+            assert_eq!(game.native_living_is_sleeping(fake), Some(false));
+            assert!(game.lan_guest_swaps.is_empty());
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn living_flags_villager_sleep_rejects_invalid_beds_without_mutation() {
+        with_game(|game| {
+            guest_server(game, true, false);
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(20, kind, Vec3::new(3.0, 64.0, 5.0), 0.0));
+            let living = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            game.world.set(4, 64, 4, stone).unwrap();
+            bed(game, "minecraft:straw_bed", [6, 64, 6]); // no foot -> no sleep shape
+            for pos in [[5, 64, 5], [4, 64, 4], [1600, 64, 1600], [6, 64, 6]] {
+                let before = horizon_client::entity_nbt::mob_to_nbt(
+                    &game.mobs[0],
+                    [1, 2, 3, 4],
+                    None,
+                    Some(game.pack.assets.registry),
+                    |_| None,
+                );
+                assert!(!game.native_living_start_sleeping(living, pos), "{pos:?}");
+                assert_eq!(
+                    horizon_client::entity_nbt::mob_to_nbt(
+                        &game.mobs[0],
+                        [1, 2, 3, 4],
+                        None,
+                        Some(game.pack.assets.registry),
+                        |_| None
+                    ),
+                    before
+                );
+                assert_eq!(game.mobs[0].position, Vec3::new(3.0, 64.0, 5.0));
+                assert_eq!(game.native_living_sleeping_pos(living), None);
+            }
+            bed(game, "minecraft:red_bed", [5, 64, 5]);
+            assert!(game.native_living_start_sleeping(living, [5, 64, 5]));
+            assert_eq!(game.native_living_sleeping_pos(living), Some([5, 64, 5]));
+            assert_eq!(game.mobs[0].position, Vec3::new(5.5, 64.6875, 5.5));
+            assert_eq!(
+                game.pack
+                    .assets
+                    .registry
+                    .state(game.world.block(5, 64, 5))
+                    .unwrap()
+                    .properties
+                    .get("occupied")
+                    .map(String::as_str),
+                Some("true")
             );
-            guest.placed = true;
-            guest.fall_flying = true;
-            guest.sleeping = true;
-            guest.bed = Some([9, 64, 9]);
-            game.lan.as_mut().unwrap().hub.guests.push(guest);
-            let guest = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            let game = &mut *game;
-            assert_eq!(game.native_living_is_gliding(guest), Some(true));
-            assert_eq!(game.native_living_gliding_ticks(guest), Some(0));
-            assert_eq!(game.native_living_is_sleeping(guest), Some(true));
-            assert_eq!(game.native_living_sleeping_pos(guest), Some([9, 64, 9]));
-            // The glide flag writes to the guest's own swapped-in body.
-            assert!(game.native_living_stop_gliding(guest));
-            assert!(!game.lan.as_ref().unwrap().hub.guests[0].fall_flying);
-            // The guest's sleep is its client's; the server only reads it.
-            assert!(!game.native_living_start_sleeping(guest, [9, 64, 9]));
-            assert!(!game.native_living_stop_sleeping(guest));
-            assert!(!game.native_living_set_sleeping_pos(guest, [9, 64, 9]));
-            assert!(!game.native_living_clear_sleeping_pos(guest));
-            assert!(game.lan.as_ref().unwrap().hub.guests[0].sleeping);
-            assert_eq!(game.native_living_is_jumping(guest), Some(false));
-            assert!(!game.native_living_set_is_jumping(guest, true));
-            assert_eq!(game.native_living_baby(guest), Some(false));
-            assert!(game.native_mob_ref(guest.entity()).is_none());
+            assert!(game.native_living_stop_sleeping(living));
+            assert_eq!(game.native_living_sleeping_pos(living), None);
+            assert_eq!(
+                game.pack
+                    .assets
+                    .registry
+                    .state(game.world.block(5, 64, 5))
+                    .unwrap()
+                    .properties
+                    .get("occupied")
+                    .map(String::as_str),
+                Some("false")
+            );
         });
     }
 }

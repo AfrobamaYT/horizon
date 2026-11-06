@@ -2,6 +2,7 @@
 //! events (`CriteriaTriggers`), awarding with rewards, the toast and the
 //! chat announcement, and `players/advancements/<uuid>.json`.
 use super::{Dim, Game};
+use horizon_client::actions::Action;
 use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
     hud::{HudBatch, rgba},
@@ -19,6 +20,30 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+
+#[cfg(test)]
+mod progress_tests;
+
+/// Capture the owning progress without changing its dates or requirement semantics.
+fn progress_snapshot(a: &adv::Advancement, progress: &Progress) -> mod_api::AdvancementProgress {
+    let obtained = progress.criteria.get(&a.id);
+    mod_api::AdvancementProgress::new(
+        a.criteria
+            .iter()
+            .map(|criterion| {
+                mod_api::CriterionProgress::new(
+                    criterion.name.clone(),
+                    obtained
+                        .and_then(|criteria| criteria.get(&criterion.name))
+                        .cloned(),
+                )
+            })
+            .collect(),
+        a.requirements.clone(),
+        progress.counts(a).0 as u32,
+        progress.done(a),
+    )
+}
 
 pub(super) struct Toast {
     icon: String,
@@ -594,7 +619,7 @@ impl Game<'_> {
             on_fire: p.fire_ticks > 0,
             sneaking: p.pose == horizon_client::pose::Pose::Crouching,
             // Input.shift: the held key, as `BlockItem.place`'s sneaking reads it.
-            input_sneak: self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft),
+            input_sneak: self.keys.held(Action::Sneak),
             sprinting: p.sprinting,
             swimming: p.pose == horizon_client::pose::Pose::Swimming,
             flying: p.flying,
@@ -680,7 +705,9 @@ impl Game<'_> {
             let uuid = self.persist.uuids.get(&m.id).copied().unwrap_or_default();
             let raw = self.persist.raw.get(&m.id);
             let registry = Some(self.pack.assets.registry);
-            let mut tag = horizon_client::entity_nbt::mob_to_nbt(m, uuid, raw, registry);
+            let mut tag = horizon_client::entity_nbt::mob_to_nbt(m, uuid, raw, registry, |other| {
+                self.persist.uuid_of(other)
+            });
             let riders = passengers.iter().filter_map(|r| r.nbt.clone()).collect();
             super::persist::add_passengers(&mut tag, riders);
             tag
@@ -697,7 +724,8 @@ impl Game<'_> {
                 .extra
                 .effects
                 .iter()
-                .map(|&(id, duration, amplifier)| {
+                .map(|effect| {
+                    let (id, duration, amplifier) = (effect.id, effect.duration, effect.amplifier);
                     let id = horizon_client::brewing::namespaced(id);
                     (id.to_owned(), amplifier, duration)
                 })
@@ -759,7 +787,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             let criterion = &a.criteria[ci].name;
             if self.adv.progress.grant(&a.id, criterion, &date) {
-                self.advancement_progress(&a.id, criterion, NativeProgressType::Grant);
+                self.advancement_progress(a, criterion, NativeProgressType::Grant);
             }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
@@ -770,7 +798,7 @@ impl Game<'_> {
     /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
     fn advancement_progress(
         &mut self,
-        advancement: &str,
+        advancement: &adv::Advancement,
         criterion: &str,
         progress_type: NativeProgressType,
     ) {
@@ -782,16 +810,43 @@ impl Game<'_> {
             self.lan_acting_entity,
             self.lan_acting_name.clone(),
         ) {
+            let progress = progress_snapshot(advancement, &self.adv.progress);
             self.native_player_advancement_progress(
-                uuid,
-                entity_id as i32,
-                &name,
-                advancement,
-                criterion,
-                progress_type,
+                mod_api::__private::PlayerAdvancementProgressCall {
+                    player: uuid,
+                    player_entity_id: entity_id as i32,
+                    name: &name,
+                    advancement: &advancement.id,
+                    criterion,
+                    progress_type,
+                    progress: &progress,
+                },
             );
         }
     }
+    /// Lend the hub each guest turn's actual advancement storage, without
+    /// moving it back into a record while that turn is still active.
+    pub(super) fn with_advancement_hub<R>(
+        &mut self,
+        run: impl FnOnce(
+            &mut horizon_client::lan::hub::Hub,
+            &mut horizon_client::lan::hub::advancements::AdvancementOwners<'_>,
+        ) -> R,
+    ) -> Option<R> {
+        use horizon_client::lan::hub::advancements::{AdvancementOwners, AdvancementState};
+        let host = self.lan.as_mut()?;
+        let mut owners = AdvancementOwners::active(
+            &self.lan_guest_swaps,
+            AdvancementState {
+                progress: &mut self.adv.progress,
+                changed: &mut self.adv.changed,
+                unlocked: &mut self.adv.unlocked,
+                book: &mut self.level.recipe_book,
+            },
+        );
+        Some(run(&mut host.hub, &mut owners))
+    }
+
     /// Grant the hub's tick criteria one at a time: each hook sees the new
     /// progress before the completion's rewards and packets are applied.
     pub(super) fn run_native_advancement_grants(&mut self) {
@@ -803,36 +858,70 @@ impl Game<'_> {
             let mut fresh = Vec::new();
             for grant in &task.grants {
                 let Some(was_done) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|host| host.hub.grant_native_tick(&task, grant))
+                    .with_advancement_hub(|hub, owners| hub.grant_native_tick(&task, grant, owners))
+                    .flatten()
                 else {
                     continue;
                 };
                 fresh.push(grant.clone());
-                self.native_player_advancement_progress(
-                    task.player,
-                    task.entity_id,
-                    &task.name,
-                    &grant.advancement,
-                    &grant.criterion,
-                    NativeProgressType::Grant,
-                );
-                if let Some(host) = self.lan.as_mut() {
-                    host.hub.reward_native_tick(&task, grant, was_done);
+                if mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
+                    let definition = task
+                        .sync
+                        .advancements
+                        .definition(&grant.advancement)
+                        .expect("granted advancement");
+                    let progress = self
+                        .with_advancement_hub(|hub, owners| {
+                            hub.advancement_task_progress(&task, owners, |progress| {
+                                progress_snapshot(definition, progress)
+                            })
+                        })
+                        .flatten()
+                        .expect("granted task's progress");
+                    self.native_player_advancement_progress(
+                        mod_api::__private::PlayerAdvancementProgressCall {
+                            player: task.player,
+                            player_entity_id: task.entity_id,
+                            name: &task.name,
+                            advancement: &grant.advancement,
+                            criterion: &grant.criterion,
+                            progress_type: NativeProgressType::Grant,
+                            progress: &progress,
+                        },
+                    );
+                }
+                let definition = task
+                    .sync
+                    .advancements
+                    .definition(&grant.advancement)
+                    .expect("granted advancement");
+                let done = self
+                    .with_advancement_hub(|hub, owners| {
+                        hub.advancement_task_progress(&task, owners, |progress| {
+                            progress.done(definition)
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or(false);
+                if self.lan_acting == Some(task.conn) {
+                    if !was_done && done {
+                        self.award_definition(definition);
+                    }
+                } else {
+                    self.with_advancement_hub(|hub, owners| {
+                        hub.reward_native_tick(&task, grant, was_done, owners);
+                    });
                 }
             }
-            if let Some(host) = self.lan.as_mut() {
-                host.hub.finish_native_first_tick(&task, &fresh);
+            self.with_advancement_hub(|hub, owners| {
+                hub.finish_native_first_tick(&task, &fresh, owners);
+            });
+        }
+        self.with_advancement_hub(|hub, owners| {
+            if hub.native_reload_pending {
+                hub.finish_reload_resources(owners);
             }
-        }
-        if let Some(host) = self
-            .lan
-            .as_mut()
-            .filter(|host| host.hub.native_reload_pending)
-        {
-            host.hub.finish_reload_resources();
-        }
+        });
     }
     /// `PlayerAdvancements.progressChanged`, kept for a network player's client.
     fn progress_changed(&mut self, index: usize) {
@@ -957,7 +1046,13 @@ impl Game<'_> {
             return;
         }
         let tree = self.adv.tree.clone();
-        let a = &tree.list[index];
+        self.award_definition(&tree.list[index]);
+    }
+
+    fn award_definition(&mut self, a: &adv::Advancement) {
+        if self.lan_acting_fake {
+            return;
+        }
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
@@ -1005,7 +1100,12 @@ impl Game<'_> {
                     last_changed: 0,
                 });
             }
-            if d.announce && self.ui.rules.bool("show_advancement_messages") {
+            if d.announce
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::SHOW_ADVANCEMENT_MESSAGES)
+            {
                 let key = match d.frame {
                     Frame::Task => "chat.type.advancement.task",
                     Frame::Goal => "chat.type.advancement.goal",
@@ -2282,7 +2382,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
-                self.advancement_progress(&a.id, c, NativeProgressType::Grant);
+                self.advancement_progress(a, c, NativeProgressType::Grant);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -2300,11 +2400,11 @@ impl Game<'_> {
         let a = &tree.list[index];
         self.progress_changed(index);
         match criterion {
-            Some(c) => self.revoke_criterion(&a.id, c),
+            Some(c) => self.revoke_criterion(a, c),
             None => {
                 let mut any = false;
                 for c in &a.criteria {
-                    any |= self.revoke_criterion(&a.id, &c.name);
+                    any |= self.revoke_criterion(a, &c.name);
                 }
                 any
             }
@@ -2312,8 +2412,8 @@ impl Game<'_> {
     }
     /// `PlayerAdvancements.revoke(holder, criterion)`: the progress change and
     /// the hook for it.
-    fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
-        let revoked = self.adv.progress.revoke(advancement, criterion);
+    fn revoke_criterion(&mut self, advancement: &adv::Advancement, criterion: &str) -> bool {
+        let revoked = self.adv.progress.revoke(&advancement.id, criterion);
         if revoked {
             self.advancement_progress(advancement, criterion, NativeProgressType::Revoke);
         }
@@ -2527,7 +2627,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2547,7 +2647,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2574,7 +2676,14 @@ mod tests {
         let speed_two = serde_json::json!({"minecraft:speed": {"amplifier": 2}});
         assert!(!matches(&game, 32300, speed_two.clone()));
         game.mobs[0].add_effect_with("minecraft:speed", -1, 2, false, false);
-        assert_eq!(game.mobs[0].extra.effects, vec![("minecraft:speed", -1, 2)]);
+        assert_eq!(
+            game.mobs[0].extra.effects,
+            vec![horizon_client::mobs::StoredEffect::new(
+                "minecraft:speed",
+                -1,
+                2
+            )]
+        );
         assert_eq!(
             game.entity_view_of(Target::Mob(32300)).effects,
             vec![("minecraft:speed".to_owned(), 2, -1)]
@@ -2894,7 +3003,7 @@ mod structure_tag_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -2914,7 +3023,9 @@ mod structure_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2956,7 +3067,14 @@ mod structure_tag_tests {
         let settings = json!({"enabled": ["file/mypack"], "disabled": []});
         std::fs::write(dir.join("datapacks.json"), settings.to_string()).unwrap();
         game.world_root = dir.clone();
-        let stack = crate::game::functions::pack_stack(&dir, &root, false, &[]);
+        let stack = crate::game::functions::pack_stack(
+            &dir,
+            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.clone()),
+            &Default::default(),
+            false,
+            &[],
+        );
         let (tables, _) = game.build_world_tables(&stack, false).unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());

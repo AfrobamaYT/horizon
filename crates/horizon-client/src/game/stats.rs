@@ -119,15 +119,17 @@ impl Stats {
     }
     /// `ServerStatsCounter.parseLocal`: the counters of a stats file.
     pub(super) fn read(path: &Path) -> Self {
+        let json = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .unwrap_or_default();
+        Self::from_json(&json)
+    }
+    /// The counters of a stats file's JSON, or of a hand-over's record (`player-import`).
+    pub(super) fn from_json(json: &serde_json::Value) -> Self {
         let mut stats = Self {
             loaded: true,
             ..Self::default()
-        };
-        let Some(json) = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        else {
-            return stats;
         };
         if let Some(all) = json.get("stats").and_then(|s| s.as_object()) {
             for (ty, entries) in all {
@@ -377,9 +379,9 @@ impl Game<'_> {
     /// server thread's players are all hosted).
     pub(super) fn spawn_phantoms(&mut self) {
         let rules = &self.ui.rules;
-        if !rules.bool("spawn_mobs")
-            || !rules.bool("spawn_monsters")
-            || !rules.bool("spawn_phantoms")
+        if !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_PHANTOMS)
             || self.dim != Dim::Overworld
             || !self.has_custom_spawner(mod_api::SpawnerKind::Phantom)
         {
@@ -520,12 +522,9 @@ mod tests {
             game.player = None;
             game.world.day_time = 18000;
             let host = game.lan.as_mut().unwrap();
-            host.hub
-                .guests
-                .iter_mut()
-                .find(|g| g.uuid == 2)
-                .unwrap()
-                .position = [1000.0, 100.0, 0.0];
+            let guests = &mut host.hub.guests;
+            let index = guests.iter().position(|g| g.uuid == 2).unwrap();
+            guests.update(index, |g| g.position = [1000.0, 100.0, 0.0]);
             for guest in &host.hub.guests {
                 let mut play = super::super::lan_actions::GuestPlay::default();
                 play.stats.custom("time_since_rest", 200_000);

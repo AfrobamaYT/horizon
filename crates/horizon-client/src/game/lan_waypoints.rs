@@ -68,7 +68,10 @@ impl Game<'_> {
         }
         host.waypoint_dead
             .retain(|uuid| players.iter().any(|(_, p)| p.uuid == *uuid));
-        let locator_bar = self.ui.rules.bool("locator_bar");
+        let locator_bar = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::LOCATOR_BAR);
         let mut levels: Vec<String> = host.waypoints.keys().cloned().collect();
         for (level, _) in &players {
             if !levels.iter().any(|l| l == level) {

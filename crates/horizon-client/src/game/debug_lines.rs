@@ -6,7 +6,10 @@
 //! there, nothing or `??`.
 use super::Game;
 use horizon_client::{
-    debug_entries::ENTRIES, debug_overlay as overlay, debug_overlay::Displayer, java_text,
+    debug_entries::{self, ENTRIES},
+    debug_overlay as overlay,
+    debug_overlay::Displayer,
+    java_text,
 };
 use horizon_world::{
     heightmap::{HeightmapState, HeightmapType},
@@ -208,6 +211,14 @@ impl Game<'_> {
                 // has none of. The rest are renderers (debug_renderers.rs).
                 _ => {}
             }
+        }
+        // A native mod's entries come after vanilla's, in registration order.
+        for (group, lines) in debug_entries::mod_lines(
+            debug_entries::registered(),
+            |id| self.debug_entries.enabled(id, self.debug, reduced),
+            |id, lines| self.native_debug_entry_lines(id, lines),
+        ) {
+            d.group(debug_entries::group_key(group), lines);
         }
     }
 
@@ -499,7 +510,7 @@ impl Game<'_> {
         };
         offer(
             self.mob_hit()
-                .map(|(i, d)| (d, self.mobs[i].kind.id.to_string())),
+                .map(|(i, d, _)| (d, self.mobs[i].kind.id.to_string())),
         );
         offer(
             self.boat_hit()

@@ -10,6 +10,7 @@ pub(super) struct WorldRequest {
     pub seed: Option<i64>,
     pub creative: bool,
     pub create: Option<horizon_client::title::WorldOptions>,
+    pub rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
 }
 
 pub(super) struct PreparedWorld {
@@ -33,6 +34,7 @@ impl WorldRequest {
         seed: Option<i64>,
         creative: bool,
         create: Option<&horizon_client::title::WorldOptions>,
+        rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
     ) -> Result<Self> {
         Ok(Self {
             save_root: std::env::current_dir()?.join("saves").join(folder),
@@ -41,6 +43,7 @@ impl WorldRequest {
             seed,
             creative,
             create: create.cloned(),
+            rule_registry,
         })
     }
 
@@ -101,6 +104,7 @@ impl WorldRequest {
             seed,
             creative,
             create,
+            rule_registry,
         } = self;
         let name = name.as_deref();
         let create = create.as_ref();
@@ -150,7 +154,7 @@ impl WorldRequest {
                 .and_then(|t| t.get("data").cloned())
                 .map(|d| horizon_client::random_sequences::RandomSequences::from_nbt(&d))
                 .unwrap_or_default();
-        let existing = Level::read(&save_root);
+        let existing = Level::read_with_registry(&save_root, rule_registry.clone());
         let created = existing.is_none();
         let level = existing.unwrap_or_else(|| Level {
             name: name.unwrap_or(&folder).to_owned(),
@@ -166,6 +170,7 @@ impl WorldRequest {
             health: 20.0,
             food: 20,
             saturation: 5.0,
+            rule_registry,
             ..Level::default()
         });
         let mut level = level;
@@ -350,6 +355,7 @@ static PRELOAD: std::sync::Mutex<Preload> = std::sync::Mutex::new(Preload::Idle)
 pub(super) fn preload_world_data(
     on_world_screens: bool,
     resources: &std::path::Path,
+    data_source: &horizon_assets::resource_source::ResourceSource,
     registry: &'static horizon_world::registry::BlockRegistry,
     item_data: &Arc<ItemData>,
 ) {
@@ -358,15 +364,18 @@ pub(super) fn preload_world_data(
         Preload::Used => {}
         Preload::Idle if on_world_screens => {
             let resources = resources.to_owned();
+            let data_source = data_source.clone();
             let item_data = Arc::clone(item_data);
             let spawned = std::thread::Builder::new()
                 .name("World data preload".into())
                 .spawn(move || {
                     horizon_threads::behind_server();
                     // Errors are left for the world opening to report.
-                    if let Ok(data) = horizon_client::vanillagen::shared_data(
+                    if let Ok(data) = horizon_client::vanillagen::shared_data_from(
                         &resources.join("worldgen"),
+                        &Default::default(),
                         registry,
+                        &data_source,
                     ) {
                         // The Overworld's feature decoration, which every
                         // seed shares: about 140 ms off opening the world.
@@ -415,6 +424,7 @@ pub(super) fn preload_world_data(
 pub(super) fn preload_launch_world(
     folder: &str,
     resources: &std::path::Path,
+    data_source: &horizon_assets::resource_source::ResourceSource,
     registry: &'static horizon_world::registry::BlockRegistry,
     biomes: Arc<horizon_client::biome::Biomes>,
     item_data: Arc<ItemData>,
@@ -428,6 +438,7 @@ pub(super) fn preload_launch_world(
     };
     let world_root = dir.join("saves").join(folder);
     let resources = resources.to_owned();
+    let data_source = data_source.clone();
     let spawned = std::thread::Builder::new()
         .name("World data preload".into())
         .spawn(move || {
@@ -440,10 +451,11 @@ pub(super) fn preload_launch_world(
                 .unwrap_or_default();
             let (overrides, _) =
                 worldgen_overrides_of(&world_root, &resources, &biomes, &enabled_features);
-            if let Ok(data) = horizon_client::vanillagen::shared_data_with(
+            if let Ok(data) = horizon_client::vanillagen::shared_data_from(
                 &resources.join("worldgen"),
                 &overrides,
                 registry,
+                &data_source,
             ) {
                 let preset = horizon_client::save::WorldGen::preset(&world_root);
                 let _ = data.prepare_decoration(preset, "minecraft:overworld");
@@ -647,6 +659,7 @@ pub(super) fn make_streaming(
         horizon_client::save::dimension_dir(world_root, dim.id()),
         shape,
     );
+    save.enable_trusted_fluid_load();
     save.set_loot_source(loot.clone());
     let save = Arc::new(save);
     if dim == Dim::End {
@@ -666,6 +679,7 @@ pub(super) fn make_streaming(
     );
     let worldgen_dir = options.resources.join("worldgen");
     let terrain_resources = TerrainResources {
+        data: Some(&pack.data_changes),
         dir: &worldgen_dir,
         registry: pack.assets.registry,
         biomes: &biomes,
@@ -875,6 +889,59 @@ pub(super) fn make_streaming(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn creation_rule_selection_reaches_the_saved_world() {
+        use super::super::native_entity_refs::tests::with_game;
+        use horizon_client::gamerules::{GameRules, Rule, RuleRegistry, Value};
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry =
+            Arc::new(RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap());
+        let mut create = horizon_client::title::WorldOptions {
+            rules: GameRules::with_registry(registry.clone(), &[]),
+            ..Default::default()
+        };
+        assert!(create.rules.set("example:enabled", Value::Bool(false)));
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!("creation-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        with_game(|game| {
+            let request = WorldRequest {
+                save_root: dir.clone(),
+                folder: "test".into(),
+                name: Some("test".into()),
+                seed: Some(1),
+                creative: true,
+                create: Some(create.clone()),
+                rule_registry: registry.clone(),
+            };
+            assert!(Arc::ptr_eq(
+                request.create.as_ref().unwrap().rules.registry(),
+                &request.rule_registry
+            ));
+            game.load_world(request).unwrap();
+            assert_eq!(
+                game.ui.rules.get("example:enabled"),
+                Some(Value::Bool(false))
+            );
+            assert!(Arc::ptr_eq(&game.level.rule_registry, &registry));
+            game.save_game_with(true).unwrap();
+        });
+        assert_eq!(
+            GameRules::load_with_registry(&dir, &[], registry).get("example:enabled"),
+            Some(Value::Bool(false))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn worker_panics_reach_the_client() {

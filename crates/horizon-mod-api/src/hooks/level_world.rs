@@ -1,6 +1,15 @@
 //! The `level_world` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Helpers {
+    /// The dimension type's build range, logical height and sky properties from this
+    /// loaded server level, including parked levels. None for a stale handle, an
+    /// unavailable level or on a client. Does not load a level or allocate.
+    #[helper(
+        side = "both",
+        receiver = "level",
+        target = "horizon_client::game::native_level_world::Game<'_>::native_level_dimension_shape"
+    )]
+    fn level_dimension_shape();
     #[helper(
         side = "server",
         receiver = "level",
@@ -13,6 +22,13 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_world::Game<'_>::native_level_difficulty"
     )]
     fn level_difficulty();
+    /// Read a registered boolean game rule.
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_level_world::Game<'_>::native_level_game_rule_bool"
+    )]
+    fn level_game_rule_bool();
     #[helper(
         side = "server",
         receiver = "level",

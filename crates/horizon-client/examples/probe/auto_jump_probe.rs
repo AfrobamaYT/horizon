@@ -31,7 +31,9 @@ pub fn main() -> Result<()> {
     };
     let root = PathBuf::from(root);
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let mut scene = World::test_scene(&assets, &render, 1)?;
     let binding = collisions::load(&root, assets.registry)?;
     let resources = MotionResources::load(&root, &assets)?;

@@ -492,7 +492,7 @@ mod tests {
             lines: vec![],
             width: 10.0,
         };
-        let mut batch = crate::hud::HudBatch::new([1, 1]);
+        let mut batch = crate::hud::HudBatch::scratch([1, 1]);
         batch.quad(
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             [[0.0; 2]; 4],

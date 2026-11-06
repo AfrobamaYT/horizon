@@ -35,6 +35,7 @@ wasmtime = { version = "50", optional = true, default-features = false, features
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dev-dependencies]
+wat = "1.261"
 # `Items::for_tests` for the fluid ingredient unit tests.
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 

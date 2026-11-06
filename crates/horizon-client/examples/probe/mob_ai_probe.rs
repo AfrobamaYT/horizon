@@ -220,6 +220,7 @@ fn goal_name(m: &Mob, name: &str) -> String {
         "RandomSwimming" => "RandomSwimmingGoal",
         "LookAtPlayer" => "LookAtPlayerGoal",
         "RandomLookAround" => "RandomLookAroundGoal",
+        "SpearUse" => "SpearUseGoal",
         "HurtByTarget" => "HurtByTargetGoal",
         "NearestTarget" => "NearestAttackableTargetGoal",
         "Panic" => "PanicGoal",
@@ -282,11 +283,8 @@ fn villager_flag(m: &mut Mob, flag: &str) {
         .unwrap_or_else(|| panic!("unknown mob flag {flag}"));
     match k {
         "profession" => {
-            let p = horizon_client::mobs::render::PROFESSIONS
-                .iter()
-                .position(|p| *p == v)
-                .expect("profession");
-            villager::set_profession(m, p as u8);
+            let p = villager::profession_index(v).expect("profession");
+            villager::set_profession(m, p);
         }
         "level" => m.extra.villager_level = v.parse().unwrap(),
         "xp" => {
@@ -431,7 +429,7 @@ fn villager_events(
                 child.persistent = true;
                 // The flat world is all plains (type 0).
                 child.extra.variant = variant.unwrap_or(0);
-                child.extra.variant2 = villager::NONE;
+                child.extra.profession = Default::default();
                 child.extra.age = -24000;
                 child.extra.bed = Some(bed);
                 let seed = spawn_seed(index);
@@ -840,7 +838,7 @@ fn villager(m: &Mob) -> String {
     };
     let mut s = format!(
         "prof {} lvl {} xp {} food {} age {} inv {} gossip {} rep {} sleep {}",
-        horizon_client::mobs::render::PROFESSIONS[m.extra.variant2 as usize % 15],
+        villager::profession(m.extra.profession.index().unwrap_or(0)).id,
         m.extra.villager_level.max(1),
         villager::xp(m),
         e.map_or(0, |e| e.food_level),
@@ -887,7 +885,10 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let motion = horizon_client::motion::MotionResources::load(root, &assets)?;
-    let data = MobData::load(root, &facts);
+    let data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let types = MobTypes::load(root)?;
     // The types a bee leaving its hive is loaded with (EntityType.loadEntityRecursive).
     let arc_types: HashMap<String, Arc<MobType>> = types
@@ -895,7 +896,9 @@ pub fn main() -> horizon_client::Result<()> {
         .iter()
         .map(|(k, v)| (k.clone(), Arc::new(v.clone())))
         .collect();
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     let tables = LightTables::load(root, registry, &facts)?;
@@ -1124,6 +1127,7 @@ pub fn main() -> horizon_client::Result<()> {
                 ),
                 eye: [p[0], p[1] + f64::from(1.62_f32), p[2]],
                 alive: true,
+                invulnerable: false,
                 creative: s.creative,
                 sneaking: false,
                 swimming: false,
@@ -1173,6 +1177,7 @@ pub fn main() -> horizon_client::Result<()> {
             };
             ($snapshot:expr, $grid:expr) => {
                 MobWorld {
+                    goal_host: None,
                     teams: Default::default(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,
@@ -1184,6 +1189,8 @@ pub fn main() -> horizon_client::Result<()> {
                     suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
+                    // The probe lends no goal view: no identity to capture.
+                    player_identity: None,
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
@@ -1461,7 +1468,13 @@ pub fn main() -> horizon_client::Result<()> {
                     else {
                         continue;
                     };
-                    let tag = horizon_client::entity_nbt::mob_to_nbt(&mobs[i], [0; 4], None, None);
+                    let tag = horizon_client::entity_nbt::mob_to_nbt(
+                        &mobs[i],
+                        [0; 4],
+                        None,
+                        None,
+                        |_| None,
+                    );
                     let flower = horizon_client::mobs::bee::get(&mobs[i]).and_then(|b| b.flower);
                     let mut honey = Vec::new();
                     let stored = {

@@ -21,6 +21,13 @@ when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `
 keep its own server config in `serverconfig/` ([native mods](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
 8c838a6b381b93150deaeed2057acd1
 
+For a client HUD's session information, use the read-only
+`ClientHost::client_session()` service and the local `PlayerRef`'s
+`block_breaking` and `ambient_mood` reads rather than raw injections. Missing
+sessions, external display names and memory addresses remain explicit optional
+values; all counters stay local. See [client session and local-player status](../reference/hook-notes.md#client-session-and-local-player-status)
+for their exact availability and frame-time semantics.
+
 `native_compute_fov_modifier(player, base, modifier)` runs on the client each tick for the local player's FOV scale, after vanilla effects and before zoom and camera easing. `player` contains the calculation inputs and `base` is the original scale. Non-finite modifiers or values outside 0.01..=10 fall back to `base`. It does not affect a spectator camera on a mob.
 
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
@@ -32,13 +39,96 @@ For the rare case the API does not cover, raw injections change the game's Rust 
 using [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon).
 An injection is an escape hatch; request a typed hook for the behavior it needs.
 
-Native mods are native code with the player's rights, not sandboxed. They are always on in the launcher: there is no
-switch. The first install shows a trust notice, and every build waits behind a red warning; the registry lists one only
-after a review (its later releases are checked by machine); and they play in a game of their own, built for the
-instance they are installed in.
+Native mods are native code with the player's rights, not sandboxed. The first install shows a trust notice,
+and every build waits behind a red warning; the registry lists one only after a review (its later releases are
+checked by machine). They play in a game of their own, built for the instance they are installed in.
+
+Options > Mods can pause a loaded code mod without rebuilding. Native and wasm mods use the same switch:
+subsequent hooks, render hooks, Parts, slot listeners and capability-provider lookups skip the disabled owner's
+registrations. Re-enabling resumes those registrations without re-registering them. This pauses dispatch, not
+unloads code or undoes earlier world changes; a trapped wasm group stays stopped even if its switch is turned
+back on. Content-mod selection stays frozen while a world is open, including on a browser project page. A browser
+install that finishes after a world opens waits until the world closes before activating its content.
 
 Villager handles preserve the full signed integer level (at least 1), including values above the
 five vanilla trade tiers. Higher levels use the master badge and do not gain further vanilla trades.
+
+## Server services and player handles
+
+Server hooks reach commands through `host.commands()`: `run_command(line)` uses
+console permission level 4 and the existing console command path, while
+`feedback(text)` answers the current command source. `host.messages()` provides
+`broadcast(text)` (including the broadcast hook and server log) and
+`text_allowed(text)` (the server chat filter).
+
+`host.players().server_players()` returns `Vec<PlayerRef>` in connection order;
+`host.players().acting_player()` returns the optional `PlayerRef` whose state is
+swapped in for this hook. The online list includes connected players even during
+nested player turns; a displaced body's reads still refuse where they did before.
+`host.players().player_by_name(name)` finds a connected real player by account
+name, case-insensitively, or returns `None`; it does not match nicknames or fake
+players. `host.levels().list_levels()` returns loaded server level handles in
+vanilla dimension order, or an empty list before a server world opens. Both
+services are available through `&dyn ServerHost` and do not mutate the world.
+Read identity through `player.uuid()`, `player.name(host)`,
+`player.permission_level(host)` and `player.address(host)`. The address is the
+connection IP without a port (the forwarded address behind a Velocity proxy),
+empty for an acting player with no known connection. Name, permission and address
+reads retain connected identities during displacement and refuse stale handles.
+Use the entity and living handles for world-state reads.
+No snapshot of event data is returned by these services.
+
+Send to one player with `player.tell(host, text)`, `action_bar(host, text)` or
+`tab_list(host, header, footer)`. `set_nickname(host, nickname)`,
+`set_sleep_ignored(host, ignored)` and `hide(host, permission)` keep their existing
+server behavior. Messaging reaches the acting player and other connected players,
+including displaced online records; it refuses stale or disconnected identities.
+Vanish state is stored by UUID and can be changed with a retained handle after
+disconnection, until its world epoch closes. It cannot target arbitrary offline
+UUIDs; retain the handle value, not the borrowed service. Nickname and sleep
+writes still require an online player. The settings survive reconnects.
+
+These small services exist only on `ServerHost`, not `Host`, `ClientHost` or a
+restricted level host. Native and wasm mods use the same calls: service methods
+are generated imports, and acquiring a service just reborrows the current call's
+frame resource. Block and fluid scheduling stays on `LevelTicksHost`, and
+`tick_stats()` stays on `ServerHost`.
+
+## Typed server commands
+
+Register each server usage with `register_commands` and `NativeCommand`. The
+`perform_command` and `perform_console_command` events carry a `CommandInvocation`,
+not a raw line to split. Match its `literals` to your command path, then read named
+values through `command.argument(name)` and `CommandArgumentValue`. An integer is
+already an `i32`; a player argument is a live `PlayerRef`, not selector text.
+Return `Flow::Cancel` when your listener handles the command.
+
+The server parses and checks permissions before resolving arguments or calling a
+listener. Omitted optional arguments are absent, including an omitted optional
+player: they do not silently select the source player. A present player argument
+must select exactly one online player; missing players or invalid input produce
+command feedback without calling the listener. Word and greedy text arguments
+are strings, numbers are finite doubles, booleans are typed, and item arguments
+are component-bearing stacks of one item. Block positions are resolved and floored
+from the source's world, relative or local coordinates without loading chunks.
+A player's source is their position and rotation. The console has no source
+entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
+cannot resolve there. Both hooks receive the same owned data, on native and wasm.
+
+## Observing advancement progress
+
+Subscribe to `player_advancement_progress` to inspect the whole advancement immediately after
+one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
+includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
+`None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
+and `done` is the game's completion result. A player-issued `/reload` mutates and snapshots
+the acting player's live progress, including during a nested turn. For a suspended outer
+player, reload grants still use the displaced hub record; full owner-correct reload awards
+for suspended and inactive players remain tracked in #1240.
+
+Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
+cannot change the player's progress and is not updated by subsequent events. No-op grants and
+revokes do not fire. The snapshot uses the same plain-data bindings in native and wasm mods.
 
 ## Filtering toast notifications
 
@@ -82,9 +172,16 @@ or a cross-release compatibility range.
 
 Hooks are declared in Rust now, not in JSON: a hook or helper author adds a `#[hook(...)]` (or `#[helper(...)]`)
 declaration, with its `///` doc, to a file under `crates/horizon-mod-api/src/hooks/` (a new file for a new area, named
-for it, plus one `mod` line for it in `hooks/mod.rs`, in name order). `native-hooks.json` and
+for it). The generator discovers these files without a shared module list. `native-hooks.json` and
 `tools/native-hook-fragments/` are retired, and a file there fails the build. Collection updates
 the catalog, not a global API number, source comments or documentation histories.
+
+Hand-written API types have a selected public surface in `crates/horizon-mod-api/src/exports/<area>.rs`:
+module declarations and re-exports stay in their source area's fragment. Engine-only re-exports sit in a
+separate section of the same fragment and keep their existing paths. The generator discovers all fragments
+and includes each section at its original scope. A new hand-written area adds one fragment, while
+catalog-generated hook types need no export-list edit. Do not add declarations or re-export lists to
+`lib.rs`.
 
 ## Runtime packages and identity
 
@@ -101,7 +198,7 @@ a content package cannot shadow a compiled mod's id.
 Move the executable, prepared resources and canonical package directory together. The copied
 projects retain their flat manifest, crate, assets and data. The game's mod list and crash details
 use its embedded inventory, including code-only mods. Display names and descriptions come from the
-validated manifests; `NativeMod.title` and `NativeMod.description` are removed.
+validated manifests; Controls bindings are declared through `Registrar::register_key_mapping`, not a separate `NativeMod` metadata hook.
 
 `native-mods.json` is provenance and rebuild status, not game identity, authentication, announcements
 or startup input. The launcher retains it for build/status displays. The separate `horizon-server`
@@ -151,6 +248,33 @@ and code mods; the scaffold does not create one.
 Raw injections belong in the same manifest as `[[native.injection]]` tables. The decision ladder, the fields and the
 forms are in the modding book: [Injections](../injections.md).
 
+### Dimension shape
+
+`LevelRef::dimension_shape` reads the loaded server level's build range, logical height,
+skylight and ceiling from its dimension shape. It accepts `&dyn Host`, including when the
+level is parked, and returns `None` for a stale or unavailable level or on a client. It does
+not load a level or allocate.
+
+### Raid handles
+
+Raid handles returned by `LevelRef::raid`, `raid_at` and `raids` resolve their
+own loaded server level even while another dimension is in place. Raid reads,
+omen-level writes and `stop` do not swap levels. Raider lists and living health
+come from that level's mobs; raid ids are local to a level. A closed level, an
+earlier world epoch or a client refuses the handle. Entity handles in a parked
+raid's member list keep their identity; their ordinary entity operations still
+require the entity's level to be in place.
+
+### Tool transformation previews
+
+`LevelRef::block_transform` previews a tool against a loaded block in the server level in place.
+Pass the live player, hand, stack, position and hit; the owned result describes the new state,
+relative durability cost, sound, loot and particle. The call does not apply the result. It fires
+`block_tool_modification` with `ToolUse::simulated` set to `true`: listeners must not change the
+level during a simulation. A stale or unavailable player or level, unloaded position, invalid face,
+or tool with no transformation returns `None`. The real action fires the same hook with
+`simulated` set to `false`.
+
 ### Named hook points
 
 The declarations under `crates/horizon-mod-api/src/hooks/` name each hook point and the version of its contract (signature,
@@ -162,7 +286,7 @@ contract is never changed, its `mod_api` entry (the trait method's contract) inc
 a version. New parameters before the out-parameter, with the old ones kept in name and order, keep the version: a
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
-catalog and the hook points' sources (`native_hooks.rs`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
+catalog and the hook points' sources (`native_hooks/`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
 
 ### State flags on the living handles
 
@@ -171,19 +295,50 @@ the state flags sit where vanilla keeps them: the ones `LivingEntity` owns read 
 `Mob` owns through `MobRef`. Reads take the shared host, writes the server one; a stale handle or a kind the game keeps
 no such state for reads `None` and writes `false`, as every handle does.
 
-Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of the player in place or a
+Through `LivingRef`: the glide (`is_gliding`, `gliding_ticks`, `stop_gliding`), the sleep of a server player or a
 villager (`is_sleeping`, `sleeping_pos`, `start_sleeping`, `stop_sleeping`, `set_sleeping_pos`, `clear_sleeping_pos`),
 the jump of the player in place (`is_jumping`, `set_is_jumping`), climbing (`is_climbing`, the same `onClimbable`
-movement uses) and the baby read (`baby`). The sleep writes are the local player's own: a guest's client tucks itself
-in, so a guest's window refuses, and on a dedicated server every turn is a guest's. The wake stands the sleeper up
-beside the bed, exactly as the game's own waking does, and `set_sleeping_pos` moves nothing - it names the bed, the
-next entity sync tells the players around.
+movement uses, including the gliding exclusion for vines) and the baby read (`baby`). Server player sleep writes
+work for the integrated owner, LAN guests and dedicated-server guests in the level in place, both inside and
+outside their own turn; guests in another dimension and fake players refuse all four sleep writes without
+mutation. A suspended outer actor is unavailable during a nested turn. Glide counters and stops follow the
+same authoritative body across turns. These reads do not add client tracked-entity coverage.
 
-Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`),
-`set_baby` (`Mob.setBaby`: a full day of growing up, saved as `Age` where the kind saves an age), and the persistence
-pair `persistence_required`/`set_persistence_required` plus `requires_custom_persistence`
-(`Mob.isPersistenceRequired` and kin: vanilla gives the setter no way back). A `/summon` and a spawn egg set their
-flags before the entity-join hook runs, so a mod's own write in that hook is what stays.
+`start_sleeping` requires a bed with an available sleep shape before changing any state (a villager also refuses an
+occupied bed). It moves the sleeper onto that shape and occupies the bed. `stop_sleeping` stands the sleeper up
+beside the bed with the normal wake animation, teleport and pose sync; the usual level pass frees a player's bed.
+`set_sleeping_pos` and `clear_sleeping_pos` only change a player's sleeping position/pose, without moving them,
+occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
+Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
+
+`EntityRef::portal_cooldown` takes `&dyn Host` and reads the remaining portal cooldown in ticks from the
+server's portal state: a player's own (the acting player inside its turn and other players outside it), and the
+level's for mobs, items, experience orbs, boats, minecarts, primed TNT, falling blocks, arrows and the thrown items
+and fireballs a chunk saves, fireworks and tridents; an ender pearl's comes from End gateways only. Zero means no
+cooldown; `None` means a kind with no portal cooldown (armor stands, wind charges, the separately modelled dragon and
+others), a client, or a stale, parked or otherwise unavailable handle. The read does not load levels.
+
+`MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
+
+`MobRef::leash_holder` takes `&dyn ServerHost` and reads the live mob leash. `MobLeashHolder::Unleashed`
+is a definite absence; `Entity` holds an existing entity handle for a player, mob or boat, and `Knot` holds
+fence coordinates. `None` means the mob or holder is unavailable, the level is parked, or a saved holder has
+not resolved; this read neither loads a level nor changes the leash.
+
+Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
+`set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
+baby age (`-48000` for a sniffer, otherwise `-24000`) or become adults at `0`, including the age-boundary
+attribute, navigation and AI changes. Their age is saved as `Age` where the kind saves one. Non-ageable babies,
+such as zombies and piglins, keep their non-growing baby state instead. A species with no baby form refuses
+`set_baby` without changing anything. Neither `set_baby` nor `set_no_ai` changes `PersistenceRequired`.
+
+The persistence pair `persistence_required`/`set_persistence_required` reads and sets `Mob.isPersistenceRequired`;
+vanilla gives that setter no way back. `requires_custom_persistence` is a separate despawn predicate
+(`Mob.requiresCustomPersistence` and its species overrides): passengers, leashes and species-specific reasons
+such as an enderman carrying a block. It is independent of `PersistenceRequired` and `NoAI`, not an alias for
+either flag. The separately modeled dragon has no such predicate and answers `None` to this query, even though
+its persistence flag can be read and set. A `/summon` and a spawn egg set their flags before the entity-join hook
+runs, so a mod's own write in that hook is what stays.
 
 ### Client effect interpolation
 
@@ -226,6 +381,14 @@ package in the staged lock against Horizon's: name, version, source and checksum
 workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
 stops the build; the game still builds with `--locked`.
 
+Crates included only for mods are listed as optional dependencies in
+`crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with
+`minimal-rust` and `rustls-tls-ring`, no default features), `redis` 1 (blocking,
+no default features), `tungstenite` 0.30 (websockets over a stream the mod opens,
+no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
+add their dependencies to the lock without building them into the game. A feature
+that introduces a dependency not listed there is refused.
+
 ### Conditional data
 
 A data file that carries NeoForge's `neoforge:conditions` loads only when every condition holds, and is
@@ -235,6 +398,20 @@ over them) all answer the gate; `mod_loaded` asks which mods' data is in the roo
 and the content mods that are on. `neoforge:true`, `not`, `and` and `or` combine; a condition the game
 does not know leaves the file out, so a future shape fails closed. Tags, loot tables and advancements
 do not answer the gate yet.
+
+### Reading recipe rules
+
+`recipes_of_type` returns the loaded recipes after pack overrides. Shaped,
+shapeless and cooking recipes expose their resolved ingredients and fixed
+results. Stonecutting, smithing and special crafting recipes expose a typed
+`RecipeRule` instead, including resolved ingredient roles. A smithing or
+special rule's result depends on its inputs: its template is not a fixed
+stack. Use `LevelRef::craft` for the actual output and remainders of a
+crafting grid. Smithing transform's template and addition ingredients can be
+absent, requiring empty slots. Trim patterns are either registry references or
+inline definitions. Result templates retain their count and component patch;
+stonecutting exposes the complete fixed output. A mod-defined recipe type
+retains its original `json`. Look up recipes again after a data reload.
 
 ### Recipe filters
 
@@ -517,7 +694,11 @@ trusting native code is the player's decision, never an agent's.
 4. **Stage.** The projects are copied first, so the build and its key use that copy whatever happens to the
    folder meanwhile. For raw injections the launcher writes `horizon-mixin.toml` and runs `horizon-mixins apply`.
    It stages the mod crates and generated executable, copying only changed files into `native/stage/`,
-   so Cargo, which goes by file times, recompiles only the crates the mods touch. Registry dependencies
+   so Cargo, which goes by file times, recompiles only the crates the mods touch.
+   Each file written gets the current time, never the archive's (the commit's) or the copy's original: on
+   Windows and macOS a copy keeps it, and a file older than the last build reads as already compiled, so
+   switching Nightlies linked the previous one's crates (horizon-rust/horizon#10421). A stage from before
+   that fix is written again once (`native/stage.stamped` marks it). Registry dependencies
    are checked against Horizon's `Cargo.lock` ([The mod's crate](#the-mods-crate)).
 5. **Compile**: `cargo build --locked --profile <fast|release> [--config ...] [--features horizon-client/mods] -p
    horizon-native-game`, into `native/target/`, with one of three build modes:
@@ -532,7 +713,7 @@ trusting native code is the player's decision, never an agent's.
    the prebuilt game, a hammer for a full game build (its menu names the reason), a check when the game already has
    the mod. A build under way shows its stage and can be cancelled.
 
-   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks.rs` compiled
+   With Developer, an edit to a function the machine sample's mixin injects into `game/native_hooks/` compiled
    about 6× faster than with Balanced, and a tick took up to about twice as long. `dev` lowers only `horizon-client`, so an edit in another workspace
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with Balanced. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
@@ -754,9 +935,13 @@ Point a server at it:
     horizon-server --dir SERVER restart
 
 Updates do not rebuild a pinned `engine.path`: build a new export folder, set `engine.path` to it, restart, and keep
-the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path, and there
-is no supervisor-to-engine inventory query or managed native rebuild/update workflow yet (remaining work in
-horizon-rust/horizon#6304). Configuration mod matching is implemented as described above.
+the old folder for manual rollback. The supervisor does not auto-update or rebuild a pinned engine path
+(remaining work in horizon-rust/horizon#6304). To inspect the running server, its authenticated
+[`GET /api/v1/mods`](../../../api/server.md) queries the engine's canonical `LoadedMods` inventory:
+`mods` lists loaded native, wasm and content package ids and versions in inventory order.
+`provenance` separately reports the configured program's build record, which may differ and is never
+used as an inventory fallback. A stopped or unreachable engine returns HTTP 409, not an empty list.
+Configuration mod matching is implemented as described above.
 Native mods run unsandboxed: only build code you have read and trust.
 `--trust-native-code` records the operator's decision; an agent must not supply that consent.
 

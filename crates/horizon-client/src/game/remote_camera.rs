@@ -105,7 +105,7 @@ impl Game<'_> {
     /// The entity under a spectator's crosshair (`Minecraft.hitResult` as an
     /// `EntityHitResult`): the nearest mob or object before any block.
     pub(super) fn spectator_click_target(&self) -> Option<i32> {
-        let mob = self.mob_hit().map(|(i, d)| (self.mobs[i].id as i32, d));
+        let mob = self.mob_hit().map(|(i, d, _)| (self.mobs[i].id as i32, d));
         let object = self.remote_object_hit(false).map(|h| (h.id, h.distance));
         [mob, object]
             .into_iter()
@@ -116,7 +116,7 @@ impl Game<'_> {
     }
     /// `LevelRenderer`: the camera entity is not drawn from its own eyes.
     pub(super) fn hides_as_camera(&self, id: u32) -> bool {
-        self.camera_type.first_person() && self.remote_camera_id() == Some(id)
+        self.camera_type.is_first_person() && self.remote_camera_id() == Some(id)
     }
 }
 

@@ -489,7 +489,10 @@ mod tests {
         mod_api::__private::install(mods.clone());
         mod_api::__private::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let root = super::super::mods::content_root(&base, &Default::default()).unwrap();
+        let root = super::super::mods::content_root(&base, &Default::default())
+            .unwrap()
+            .prepared()
+            .to_path_buf();
         with_game_at(root, |game| {
             game.options.dedicated = Some(Vec::new());
             game.world
@@ -550,9 +553,7 @@ mod tests {
             // the parse, where the data's type is checked, is what runs.
             game.build_registries();
             game.ui.registries.permission = 4;
-            let commands = horizon_client::command::vanilla::game_dispatcher_with_features(
-                &game.level.enabled_features,
-            );
+            let commands = game.ui.dispatcher.0.clone();
             let give = |kind: &str| {
                 let command =
                     format!("give @s {CRATE}[block_entity_data={{id:\"{kind}\",Amount:7}}]");

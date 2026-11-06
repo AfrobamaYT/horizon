@@ -66,9 +66,11 @@ fn side(host: &HostSide<'_>) -> LogicalSide {
 impl Hooks for Observer {
     fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
         for block in ["minecraft:lever", "minecraft:stone", "minecraft:campfire"] {
-            r.block_part(block, self.clone());
+            let block_key = r.block_key(block);
+            r.block_part(block_key, self.clone());
         }
         for item in ["minecraft:stick", "minecraft:shield"] {
+            let item = r.item_key(item);
             r.item_part(item, self.clone());
         }
     }

@@ -43,8 +43,9 @@ extra_mod = { version = "^2", optional = true }
 ```
 
 Requirements use Cargo semver syntax and are checked against each installed mod's `horizon-mod.toml`
-`version`, not its Cargo package version. The dependent and every installed dependency need a code crate.
-Nonempty dependencies on content-only mods are not supported yet.
+`version`, not its Cargo package version. Content-only mods use these declarations to validate their
+requirements and load their layers after dependencies. Code dependencies additionally require API packages
+for the dependent and every installed dependency.
 Missing required dependencies, incompatible versions and cycles stop the build with the mods named.
 An absent optional dependency is permitted; an installed optional dependency must match its requirement.
 
@@ -66,6 +67,57 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
+
+### Load phases and access
+
+Native and wasm hooks share the installed dependency-ordered mod slice, including registration,
+config loading and reload-listener registration. The shared resolver keeps bundle-order ties,
+checks present optional dependencies too, and refuses cycles for both build targets. Content-only
+packages stay after code in the loaded-mod inventory; listener-specific edges still use `ReloadOrder`.
+
+Each owning thread progresses through `Packages → Registration → Setup → Config → World`.
+
+| Phase | Available access |
+| --- | --- |
+| Packages | Package discovery; no game Host operations. |
+| Registration | Declarations through `RegistrationContext`; no Host. |
+| Setup | Client setup reads, published asset/data queries and registry/settings/mod-list reads; no world handles or transactions. |
+| Config | Settings reads and the existing mod-scoped `ConfigFiles` service; no world handles, transactions or other game operations. |
+| Reloading | Published asset/data queries, registry facts, settings and mod-list reads, listener registration, and existing `DataLoadContext` callbacks; no world handles or transactions. |
+| World | The owning game's side-typed `ServerHost` or `ClientHost`. |
+
+Registration runs once: `register`, `component_types`, `blocks`, `items` and `standalone_models`
+receive only `RegistrationContext`. Client setup runs once after the initial asset apply. The
+window's Client/Common configs load once immediately after client setup and before title,
+connection, input, render or ordinary tick callbacks. This includes pack-error recovery: the failed
+selection is cleared and saved during initialization, but its options screen opens only after Config
+completes. A title-screen callback is already in World: world-handle constructors can return `None`,
+rather than being forbidden in Setup. A dedicated
+server loads Common once before its first world; Server configs load and unload per world.
+A second world does not repeat registration or client setup. Config loading can read settings and
+use the existing scoped `ConfigFiles` service to read or save its own config files. World handles,
+transactions and other game operations panic with `Config` in the diagnostic.
+Config file polling is not a phase transition, and Server config unloading leaves the World phase.
+
+Every data or asset reload enters `Reloading`, including listener registration, prepare, apply and
+the reload completion notice. Initial loads can nest in Setup; runtime reloads nest in World.
+Returning, including after a failed prepare, restores the entering phase. Published asset/data
+queries are classified in the catalog (`resource_read`), not granted by helper-name exceptions.
+They read the currently published generation, not pending prepare output: completion callbacks can
+refresh sprite and recipe caches after apply, including on first world open, without gaining world
+handles or transactions. Their rustdoc names their load-phase availability. Server listener
+registration retains `&dyn Host`, restricted to these published facts, registry facts, settings and
+mod-list queries; callbacks already taking `DataLoadContext` keep that context. Neither permits
+opening a world handle or transaction. The first client registration and prepare run on the loader
+thread; later registration runs on the render thread, prepare on its worker, and apply on the owning
+game thread. Startup's empty client Host is not an extra permission.
+
+The game alone advances phases. An illegal or wrong-thread advance is refused before dispatch;
+a forbidden mod call panics naming the phase, rather than returning a Result a listener could ignore.
+There is no separate common-setup, load-complete or intermod event: registration and the first server
+reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
+and dependencies express intermod ordering. Load complete is the edge after initial Config and before
+`server_about_to_start`, not a hook.
 
 The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
 The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
@@ -132,9 +184,11 @@ and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded 
 (`LevelReader.enabledFeatures`, a borrowed `FeatureFlags<'_>`). Neither allocates.
 None of them loads a chunk. Light above the build height reads as full sky and below it as
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
-so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_name, tag)`,
+so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
-`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+`state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
+`FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
@@ -191,10 +245,52 @@ impl BlockPart for Gauge {
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-        r.block_part("minecraft:stone", Gauge);
+        let stone = r.block_key("minecraft:stone");
+        r.block_part(stone, Gauge);
     }
 }
 ```
+
+`Registrar::block_key(id)` and `Registrar::effect_key(id)` request registry entries, not new
+content. Declare them in `register`, retain the returned `BlockKey` or `EffectKey` in the
+mod or Part, and reuse them for registry operations. Requests are canonicalized (a bare id
+uses `minecraft:`), deduplicated across mods and checked after every mod's content is known.
+An unknown entry refuses the load with the requesting mod and canonical id, even if the
+key was never attached to a Part. A later mod may supply the requested entry.
+
+Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
+returns an owned canonical `String` through the generated read backend for diagnostics; it
+requires a game-backed host and an invalid slot is a boundary error, not an empty name.
+Normal operations use the slot's resolved numeric mapping instead of looking up its name.
+Block reload rebinds that mapping without changing the key's identity or canonical name;
+a refused rebind clears the old mapping. Effect registration is process-owned and fixed
+until restart, matching the engine's effect registry.
+
+Block tag membership is bound from the same merged item/block tag snapshot at world load and
+reload, including worlds without pack overrides. A read maps the slot to a numeric block id,
+looks up the tag name and tests a `BlockSet` bit; it never resolves the block's name. A fully
+namespaced tag needs no allocation (a bare tag adds `minecraft:`). Binding visits each merged
+block-tag member once, resolves its default state and inserts its numeric block id; it replaces
+the previous snapshot rather than accumulating membership. No membership work is added to ticks
+that do not call this read. Tags and block mappings belong to their resolving thread; missing
+authoritative context or an unavailable mapping returns `None`, not a stale membership result.
+
+`host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
+`host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
+`schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by
+`block_state_id`, tag names and existing fluid operation arguments remain strings for now.
+
+Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
+`key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
+name-backed mod tanks, but not into vanilla buckets or cauldrons.
+
+`NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
+application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
+uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
+carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment effect-component
+names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
+and remain strings, as do labels and tags.
 
 A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
 naming the thing it is about, is a method on that scope's trait only: `BlockPart`, `BlockEntityPart` (a
@@ -203,7 +299,8 @@ no `Hooks` method: a thing without parts is never asked, and the game asks the p
 order, through the hook's contract, so a `Cancel` or a replacement skips the parts after it. Where NeoForge fires
 a bus event at that moment, the event is a hook of its own on `Hooks`, asked first for every thing, and its cancel
 skips the parts: a mod reacting to its own blocks uses a part, one reacting to every block the event. A part's kind is its type: the same kind twice on one
-thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
+thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
+the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
 `BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
@@ -250,10 +347,11 @@ block hooks) by block. The factory is a `BlockEntityPart` method, not a global `
 
 `r.block_entity_type_key("other:press")` looks up another mod's type, and
 `r.block_entity_type_key("minecraft:chest")` looks up a vanilla type. Both return the same opaque
-`BlockEntityTypeKey` as the declaration builder: equality and hashing use the type ID, not its blocks.
-The final registry checks these requests at load and refuses unknown IDs, naming the requesting mod
-and type. Use a canonical type ID, not a block ID (`minecraft:shulker_box`, not
-`minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
+`BlockEntityTypeKey` as the declaration builder: equality and hashing use the shared load-owned
+registration slot, not the type's blocks. Bare names use the `minecraft:` namespace. The final
+registry resolves requests after all declarations and refuses unknown IDs, naming the requesting mod
+and type. `key.id(host)` reads the canonical name for diagnostics; a key retains its identity until
+restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:red_shulker_box`). `BlockEntityRef::kind(host)` returns `Option<BlockEntityTypeKey>`.
 `living.hurt_and_break(host, slot, amount)` changes equipped durability on the server; negative amounts repair. It returns the pre-shrink stack only on break, and `None` when nothing breaks or the entity or slot is unavailable. Creative players' equipment is exempt. The operation does not fire equip effects.
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
@@ -262,6 +360,13 @@ false for a missing or stale block entity, data the entity cannot load, or an un
 Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
 native types and returns `BlockEntityPartError::VanillaType` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.
+
+For an item-specific Part, request its canonical registry key once in `register`:
+`let stick = r.item_key("minecraft:stick"); r.item_part(stick, Sharp);`. Bare names use the
+`minecraft:` namespace. Requests may refer to content declared later; the final item registry refuses
+unknown IDs with the requesting mod. `ItemKey` equality uses its load-owned slot, and `key.id(host)`
+reads its canonical diagnostic name. Item capability registration and item helpers still use strings;
+their migration is a separate change.
 
 `r.block_part_tag("minecraft:logs", Rotates)` and `r.item_part_tag("minecraft:axes", Sharp)` attach a part to
 every member of a tag (its name without `#`). Each game resolves them against its own tags when its world
@@ -370,6 +475,10 @@ host.transaction(|host, tx| {
 })
 ```
 
+Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
+transaction, their statistic award (including `player_stat_award`), sound and overflow
+item toss/spawn wait until the outermost successful commit; an abort emits none of them.
+
 #### Entity energy and fluids
 
 `entity.capability(host, &ENTITY_ENERGY, side)` and `entity.capability(host, &ENTITY_FLUIDS, side)` reach a mod's
@@ -424,6 +533,12 @@ Stale/replaced/respawned menus, spectators, non-client hosts and the creative in
 Inventory reads and direct server-side item transactions keep their existing contracts; a click does
 not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
 input action rather than submitting every render/tick. Diverges from upstream: new helper.
+
+`menu.close(host)` closes the menu's screen as Escape does and tells the server (`ContainerClose`);
+it returns `false` while that screen is not open, so the inventory menu closes only while the inventory
+screen shows. `menu.click_button(host, button)` presses one of the open menu's buttons
+(`ContainerButtonClick`, as a loom's pattern list does), for input the screen's own
+buttons don't take; the server's menu decides what it does, and the inventory menu has none.
 
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
@@ -558,11 +673,52 @@ each other's handlers. So the game refuses that at startup, naming both mods and
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
 
+### Entity parts and mob goals
+
+`r.entity_part("minecraft:zombie", ZombieGoals)` attaches an `EntityPart` to one entity type, a mod's
+own or vanilla's. Its single method `register_goals` runs at every `Mob` construction of that type —
+spawned or loaded, the moment vanilla's `registerGoals` fan-out ends — and the goals it adds join the
+mob's two selectors beside the species' own, with the same priorities, flag locks and interruption:
+
+```rust
+struct ZombieGoals;
+#[mod_api::horizon_part]
+impl EntityPart for ZombieGoals {
+    fn register_goals(&self, goals: &mut GoalRegistrar<'_>) {
+        // goals.mob().id() is "minecraft:zombie": branch as per-species code does.
+        goals.add_goal(7, Stare::default());
+        goals.add_target_goal(3, Remember::default());
+    }
+}
+```
+
+`goals.add_goal(priority, goal)` and `goals.add_target_goal(priority, goal)` are `GoalSelector.addGoal`
+on the mob's two selectors; `GoalFlags` claims MOVE, LOOK, JUMP and TARGET as vanilla's `Goal.Flag`
+does, and a higher priority (a lower number) interrupts a running goal holding the same flag. A goal
+object is per mob, built fresh at every construction, and its state is never saved: a goal that needs
+memory across loads keeps it in attachments. A mob whose type has no part, or a game with no entity
+parts at all, pays nothing — the wrapper and the tick's read view exist only where a mod goal runs.
+
+A `Goal` reads and writes through its `GoalContext`: `mob()` is a fresh handle of the mob it runs on,
+`host()` the tick's read view, `random()` the mob's own random (`mob.getRandom()`, so a mod's draws
+keep the mob's stream in shape). The read view answers the ticking mob itself directly, the player the
+tick sees, and every other entity from the tick's snapshot — a `getEntities` of the moment the mob
+list was taken out — so a read the snapshot does not carry (a mob's gear or effects, its species id)
+answers `None`, and the handle docs mark the reads that carry the snapshot rule. Writes apply to the
+mob itself through the engine's own paths: `move_to(pos, speed)` and `stop_navigation()`
+(`PathNavigation`), `look_at(pos)` (`LookControl`), `jump()`, and `set_target(Option<LivingRef>)`
+(`Mob.setTarget`, with the write handle's rules: a brain-backed species refuses, as do foxes,
+endermen and zombified piglins, whose setter side effects are not modeled). Writes to other entities
+are not part of a goal; the write handles a `ServerHost` takes do not exist in a goal tick.
+
+Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
+`attach_entity_part` note), so `r.entity_part` is absent from a wasm build.
+
 ### Block-state facts
 
 A `BlockStateId` is a registry value, not a live object, so the facts about one that need no world are a small
 read-only service on any host, both sides: `host.block_states()` (import `HostBlockStates`). Each reads the game's own
-tables and allocates nothing:
+tables. Fact queries and matching allocate nothing; `definition` copies the property data for the caller:
 
 | Method | Vanilla |
 |---|---|
@@ -571,6 +727,10 @@ tables and allocates nothing:
 | `sound(state) -> Option<BlockSoundType>` | `BlockState.getSoundType()`: volume, pitch and the break, step, place, hit and fall events |
 | `has_block_entity(state) -> Option<bool>` | `BlockState.hasBlockEntity()` |
 | `states_of(block) -> Option<BlockStateRange>` | `StateDefinition.getPossibleStates`, as the block's consecutive ids |
+| `definition(block)` | Property names and legal serialized values |
+| `matches(state, block, constraints)` | Partial property match with typed invalid-property and invalid-value errors |
+
+Use `StateConstraint` for each partial constraint; `StateMatchError` identifies an invalid property or value by index. `StateProperty` describes a property's legal values. These types are shared by state-definition services.
 
 None for an unknown state or block, and on a host with no game behind it (a mod's test double).
 
@@ -664,7 +824,7 @@ assert_eq!(count.load(Ordering::Relaxed), 1);
 ```
 
 If a `Host` method returns a game value a test can't build, a double can return `None` instead, as with
-`acting_player() -> Option<NativeServerPlayer>`. If the dispatch function itself takes an unconstructible value,
+`Players::acting_player() -> Option<PlayerRef>`. If the dispatch function itself takes an unconstructible value,
 such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
 hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
 
@@ -674,8 +834,11 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
-that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
+Put that function in `crates/horizon-client/src/game/native_hooks/<area>.rs`, matching the declaration's
+area filename. The build discovers these modules automatically; do not add a module list entry. Shared
+support lives in `shared.rs`; `fire.rs` includes generated dispatch entry points, not hook implementations.
+That command only replaces the placeholder in its owning area file with the `dispatch_<hook>` call; commit
+that source change and the declaration. Fills are idempotent; rerun the command after a failed write. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
 is needed after a merge. Every hook needs a `mod_api` entry: the build fails naming any hook without one. A hook that stands in for a
@@ -710,6 +873,11 @@ Every host is an `AttachmentStore` (and `host.attachments()` gives it): the type
 stand on its few erased ones, so they work the same in a native mod and a wasm mod. A
 value keeps its own Rust type, shared: reading one clones it out, and copying a holder's
 data copies no value.
+
+`AttachmentHolder` keeps an existing typed handle when a system needs to store a holder
+identity: `Entity`, `Player`, `BlockEntity`, `Chunk` or `Level`. It is `Copy`, does not keep
+anything loaded, and follows each handle's ordinary stale-world and unload rules. Unlike
+the storage-relative `Holder`, it carries the handle's world scope.
 
 ```rust
 use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
@@ -786,7 +954,7 @@ receiver and documentation; a helper without `self` (`config_files`) takes
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
 plain remainder stack, or `None` when there is none or the item is unknown. Horizon
 currently stores only the remainder item id, not a template's count or components.
-`host.block_item("minecraft:stone")` returns its item registry name; an unknown block
+`host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
 A helper's `receiver` also exposes it on that handle. Receivers come from public

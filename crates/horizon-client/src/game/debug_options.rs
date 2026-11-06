@@ -47,7 +47,7 @@ impl DebugOptionsUi {
 /// One list row (`AbstractOptionEntry`).
 enum Row {
     Category(Category),
-    Option(&'static Entry),
+    Option(Entry),
 }
 
 /// `OptionList.updateSearch`: a category row before each category's entries.
@@ -481,6 +481,14 @@ impl Game<'_> {
             self.debug_options_type(text);
         }
     }
+    /// One character off the search box, for the controller's on-screen keyboard.
+    pub(super) fn debug_options_backspace(&mut self) {
+        if let Some(s) = &mut self.debug_options
+            && s.search.focused
+        {
+            s.search.key(KeyCode::Backspace, false, false);
+        }
+    }
     /// Characters typed into the search box (`EditBox.charTyped`).
     pub(super) fn debug_options_type(&mut self, typed: &str) {
         let allowed: String = typed
@@ -526,7 +534,8 @@ fn debug_options_interrupts(screen: Screen, playing_overlay: bool) -> bool {
         | Screen::BlockEditor
         | Screen::Dead
         | Screen::Win
-        | Screen::DebugOptions => false,
+        | Screen::DebugOptions
+        | Screen::HudEditor => false,
     }
 }
 

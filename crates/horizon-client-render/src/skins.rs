@@ -237,6 +237,7 @@ pub struct Resolver {
     done: std::sync::mpsc::Receiver<(NameOrId, Option<ResolvedProfile>)>,
     send: std::sync::mpsc::Sender<(NameOrId, Option<ResolvedProfile>)>,
     last_sweep: std::time::Instant,
+    heads: HeadProfiles,
 }
 struct Entry {
     touched: std::time::Instant,
@@ -304,6 +305,7 @@ impl Resolver {
             done,
             send,
             last_sweep: std::time::Instant::now(),
+            heads: HeadProfiles::default(),
         }
     }
     /// `CacheBuilder.expireAfterAccess` with `maximumSize`.
@@ -465,6 +467,64 @@ pub fn dynamic_nbt(profile: &horizon_world::nbt::Tag) -> Option<NameOrId> {
     }
 }
 
+const MAX_HEAD_PROFILES: usize = 4096;
+
+#[derive(Debug, PartialEq)]
+struct HeadProfile {
+    info: ProfileInfo,
+    skin: Option<(String, String)>,
+}
+
+fn prepare_head(profile: &serde_json::Value) -> HeadProfile {
+    let info = parse_profile(profile);
+    let skin = info.textures.as_ref().and_then(|(value, signature)| {
+        let url = unpack(value, *signature, &TEXTURE_URIS).skin?;
+        let location = skin_location(&texture_hash(&url)?);
+        Some((url, location))
+    });
+    HeadProfile { info, skin }
+}
+
+#[derive(Default)]
+struct HeadProfiles {
+    entries: std::collections::HashMap<serde_json::Value, std::sync::Arc<HeadProfile>>,
+    nbt: std::collections::HashMap<horizon_world::nbt::Tag, std::sync::Arc<serde_json::Value>>,
+    resolved: [std::collections::HashMap<String, std::sync::Arc<HeadProfile>>; 2],
+}
+
+impl HeadProfiles {
+    fn get(&mut self, profile: &serde_json::Value) -> std::sync::Arc<HeadProfile> {
+        if let Some(parsed) = self.entries.get(profile) {
+            return parsed.clone();
+        }
+        if self.entries.len() >= MAX_HEAD_PROFILES {
+            self.entries.clear();
+        }
+        let parsed = std::sync::Arc::new(prepare_head(profile));
+        self.entries.insert(profile.clone(), parsed.clone());
+        parsed
+    }
+}
+
+impl Resolver {
+    /// Cache by NBT value rather than address: equipment can be replaced or
+    /// mutated in place, and neither must leave a stale profile behind.
+    pub fn head_profile_nbt(
+        &mut self,
+        profile: &horizon_world::nbt::Tag,
+    ) -> std::sync::Arc<serde_json::Value> {
+        if let Some(json) = self.heads.nbt.get(profile) {
+            return json.clone();
+        }
+        if self.heads.nbt.len() >= MAX_HEAD_PROFILES {
+            self.heads.nbt.clear();
+        }
+        let json = std::sync::Arc::new(crate::scoreboard::tag_to_json(profile));
+        self.heads.nbt.insert(profile.clone(), json.clone());
+        json
+    }
+}
+
 /// `PlayerSkinRenderCache.getOrDefault` for a head: the resolved skin once
 /// its texture is in the atlas (`atlas`), else `partialProfile`'s default.
 pub fn head_skin(
@@ -478,32 +538,54 @@ pub fn head_skin(
     {
         return sprite;
     }
-    let p = parse_profile(profile);
-    let property = p.textures.or_else(|| {
-        let key = p.dynamic.as_ref()?;
+    let p = resolver.heads.get(profile);
+    // Dynamic resolution is deliberately not cached: pending answers and the
+    // resolver's expiring service results must still advance on every draw.
+    let resolved = p.info.dynamic.as_ref().and_then(|key| {
+        if p.info.textures.is_some() {
+            return None;
+        }
         match resolver.state(key) {
-            Resolve::Done(Some(profile)) => profile.textures(),
+            Resolve::Done(Some(profile)) => {
+                let (_, value, signature) = profile
+                    .properties
+                    .iter()
+                    .find(|(n, _, _)| n == "textures")?;
+                let cache = &mut resolver.heads.resolved[usize::from(signature.is_some())];
+                if let Some(parsed) = cache.get(value) {
+                    return Some(parsed.clone());
+                }
+                if cache.len() >= MAX_HEAD_PROFILES {
+                    cache.clear();
+                }
+                let property = if signature.is_some() {
+                    serde_json::json!({"name": "textures", "value": value, "signature": ""})
+                } else {
+                    serde_json::json!({"name": "textures", "value": value})
+                };
+                let parsed = std::sync::Arc::new(prepare_head(
+                    &serde_json::json!({"properties": [property]}),
+                ));
+                cache.insert(value.clone(), parsed.clone());
+                Some(parsed)
+            }
             _ => None,
         }
     });
-    if let Some((value, signature)) = property
-        && let Some(url) = unpack(&value, signature, &TEXTURE_URIS).skin
-        && let Some(hash) = texture_hash(&url)
-    {
-        let location = skin_location(&hash);
-        match downloads.state(Kind::Skin, &url) {
-            Download::Ready if atlas(&location) => {
-                downloads.drawn(&location);
-                return location;
+    if let Some((url, location)) = resolved.as_deref().unwrap_or(&p).skin.as_ref() {
+        match downloads.state(Kind::Skin, url) {
+            Download::Ready if atlas(location) => {
+                downloads.drawn(location);
+                return location.clone();
             }
             // Its slot was evicted: offer the image again.
             Download::Ready => {
-                downloads.again(&location);
+                downloads.again(location);
             }
             _ => {}
         }
     }
-    crate::tab_list::default_skin(p.id).to_owned()
+    crate::tab_list::default_skin(p.info.id).to_owned()
 }
 
 /// `PlayerSkin.Patch.apply` for a head: the sprite of a profile's `texture`
@@ -810,7 +892,7 @@ pub struct Downloader {
     /// Skins and capes drawn from the atlas since `take_drawn`.
     drawn: std::collections::HashSet<String>,
     /// The resource packs' root, where a profile's `texture` patch is read.
-    resource_root: std::path::PathBuf,
+    resource_root: horizon_assets::resource_source::ResourceSource,
     /// How each `patch/` texture of the resource packs loaded, by location.
     resources: std::collections::HashMap<String, Download>,
     /// When each failed texture download was last tried, so it can be retried:
@@ -847,7 +929,9 @@ impl Downloader {
             images: Default::default(),
             image_order: Default::default(),
             drawn: Default::default(),
-            resource_root: Default::default(),
+            resource_root: horizon_assets::resource_source::ResourceSource::indexed(
+                Default::default(),
+            ),
             resources: Default::default(),
             failed: Default::default(),
             retry_after: std::time::Duration::from_secs(60),
@@ -855,11 +939,16 @@ impl Downloader {
     }
     /// The resource packs changed (or were first loaded) at `root`: patch
     /// textures load again from there.
-    pub fn set_resource_root(&mut self, root: std::path::PathBuf) {
-        for location in std::mem::take(&mut self.resources).into_keys() {
-            self.images.remove(&location);
-            self.image_order.retain(|l| *l != location);
-        }
+    pub fn set_resource_root(&mut self, root: horizon_assets::resource_source::ResourceSource) {
+        let previous = std::mem::take(&mut self.resources);
+        self.images
+            .retain(|location, _| !previous.contains_key(location));
+        self.image_order
+            .retain(|location| !previous.contains_key(location));
+        self.queued
+            .retain(|location| !previous.contains_key(location));
+        self.ready
+            .retain(|(location, _)| !previous.contains_key(location));
         self.resource_root = root;
     }
     /// `ClientAsset.ResourceTexture`: loads `<namespace>:textures/<path>.png`
@@ -875,10 +964,9 @@ impl Downloader {
             }
             None => {}
         }
-        let file = self
+        let image = self
             .resource_root
-            .join(format!("assets/{namespace}/textures/{path}.png"));
-        let image = std::fs::read(file)
+            .read(&format!("assets/{namespace}/textures/{path}.png"))
             .ok()
             .and_then(|b| crate::hud::decode_bytes(&b).ok())
             .and_then(|(w, h, rgba)| resample_64(w, h, &rgba));
@@ -1137,6 +1225,80 @@ pub fn sha1(data: &[u8]) -> [u8; 20] {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn head_profile_cache_matches_uncached_and_is_bounded() {
+        use base64::Engine;
+        let mut cache = super::HeadProfiles::default();
+        for (url, slim) in [
+            ("https://textures.minecraft.net/texture/abc", false),
+            ("https://textures.minecraft.net/texture/abc", true),
+            ("https://evil.example/texture/abc", false),
+        ] {
+            let payload = serde_json::json!({"textures": {
+                "SKIN": {"url": url, "metadata": {"model": if slim { "slim" } else { "classic" }}},
+                "CAPE": {"url": "http://textures.minecraft.net/texture/cape"}
+            }});
+            let value = base64::engine::general_purpose::STANDARD.encode(payload.to_string());
+            for signed in [false, true] {
+                let mut property = serde_json::json!({"name": "textures", "value": value});
+                if signed {
+                    property["signature"] = serde_json::Value::Null;
+                }
+                let profile = serde_json::json!({"properties": [property]});
+                let parsed = cache.get(&profile);
+                assert_eq!(*parsed, super::prepare_head(&profile));
+                let textures = super::unpack(
+                    &value,
+                    if signed {
+                        super::Signature::Signed
+                    } else {
+                        super::Signature::Unsigned
+                    },
+                    &super::TEXTURE_URIS,
+                );
+                assert_eq!(textures.slim, slim && !url.contains("evil"));
+                assert_eq!(textures.cape.is_some(), !url.contains("evil"));
+                assert_eq!(parsed.skin.is_some(), !url.contains("evil"));
+                assert!(std::sync::Arc::ptr_eq(&parsed, &cache.get(&profile)));
+            }
+        }
+        for profile in [
+            serde_json::json!({"properties": [{"name": "textures", "value": "!bad"}]}),
+            serde_json::json!({"name": "Notch"}),
+            serde_json::json!({}),
+        ] {
+            let parsed = cache.get(&profile);
+            assert_eq!(*parsed, super::prepare_head(&profile));
+            assert!(parsed.skin.is_none());
+            assert!(std::sync::Arc::ptr_eq(&parsed, &cache.get(&profile)));
+        }
+        cache.entries.clear();
+        for i in 0..super::MAX_HEAD_PROFILES {
+            cache.get(&serde_json::json!({"id": i}));
+        }
+        assert_eq!(cache.entries.len(), super::MAX_HEAD_PROFILES);
+        cache.get(&serde_json::json!({}));
+        assert_eq!(cache.entries.len(), 1);
+    }
+
+    #[test]
+    fn head_profile_nbt_cache_tracks_value_changes() {
+        let mut resolver = super::Resolver::new();
+        let mut tag = horizon_world::nbt::Tag::String("Notch".into());
+        let first = resolver.head_profile_nbt(&tag);
+        assert_eq!(*first, crate::scoreboard::tag_to_json(&tag));
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &resolver.head_profile_nbt(&tag)
+        ));
+        tag = horizon_world::nbt::Tag::String("Alex".into());
+        assert_eq!(*resolver.head_profile_nbt(&tag), serde_json::json!("Alex"));
+        for i in 0..super::MAX_HEAD_PROFILES {
+            resolver.head_profile_nbt(&horizon_world::nbt::Tag::Int(i as i32));
+        }
+        assert!(resolver.heads.nbt.len() < super::MAX_HEAD_PROFILES);
+    }
+
     /// A profile's `texture` names a pack texture, never a file outside the
     /// packs: bad characters and `..` segments draw nothing.
     #[test]
@@ -1602,6 +1764,45 @@ mod tests {
         writer.write_image_data(&rgba).unwrap();
         writer.finish().unwrap();
         out
+    }
+
+    #[test]
+    fn resource_reload_replaces_pixels_and_drops_queued_old_generation_images() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = |color| {
+            ResourceSource::indexed(std::collections::BTreeMap::from([(
+                "assets/example/textures/player.png".into(),
+                Resource::bytes(png(color)),
+            )]))
+        };
+        let cache = std::env::temp_dir().join(format!(
+            "horizon-resource-skin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut downloads = super::Downloader::new(cache.clone());
+        downloads.set_resource_root(source([255, 0, 0, 255]));
+        downloads.resource("patch/player", "example", "player");
+        assert_eq!(
+            &downloads.image("patch/player").unwrap()[..4],
+            [255, 0, 0, 255]
+        );
+        assert_eq!(downloads.ready.len(), 1);
+        downloads.set_resource_root(source([0, 0, 255, 255]));
+        assert!(downloads.image("patch/player").is_none());
+        assert!(downloads.ready.is_empty());
+        assert!(!downloads.queued.contains("patch/player"));
+        downloads.resource("patch/player", "example", "player");
+        let ready = downloads.take_ready();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(&ready[0].1[..4], [0, 0, 255, 255]);
+        assert!(
+            !cache.exists(),
+            "resource images never enter the URL download cache"
+        );
     }
 
     /// A downloaded body reaches the disk cache only if it decodes; a broken

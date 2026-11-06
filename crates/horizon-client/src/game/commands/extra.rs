@@ -4,6 +4,7 @@
 //! `/fetchprofile`, `/publish`, `/unpublish`, `/debug`, `/jfr` and
 //! `/version`, with vanilla's feedback and failures.
 use super::{Arg, Context, Game, R, Target, err};
+use horizon_client::actions::Action;
 use horizon_client::{
     command::CommandError,
     skins::{NameOrId, Resolve, ResolvedProfile},
@@ -292,8 +293,7 @@ impl Game<'_> {
             self.set_camera(None);
             return;
         }
-        let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft)
-            && self.screen == super::Screen::Playing;
+        let sneaking = self.keys.held(Action::Sneak) && self.screen == super::Screen::Playing;
         match self.target_position(t) {
             Some(p) if !sneaking => {
                 let rot = self.target_rotation(t);
@@ -581,14 +581,17 @@ impl Game<'_> {
             _ => return false,
         };
         match conn {
-            Some(conn) => {
-                let Some(g) = self.lan.as_mut().and_then(|h| h.hub.guest_mut(conn)) else {
-                    return false;
-                };
-                let changed = change(&mut g.post_effects);
-                g.post_effects_dirty |= changed;
-                changed
-            }
+            Some(conn) => self
+                .lan
+                .as_mut()
+                .and_then(|h| {
+                    h.hub.update_guest(conn, |g| {
+                        let changed = change(&mut g.post_effects);
+                        g.post_effects_dirty |= changed;
+                        changed
+                    })
+                })
+                .unwrap_or(false),
             None => change(&mut self.cmds.post_effects),
         }
     }

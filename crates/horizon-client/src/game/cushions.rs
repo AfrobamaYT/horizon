@@ -7,11 +7,11 @@
 //! only an entity whose `Pos` is the click point's height. Placement uses
 //! outline bounds, collision shapes and suffocation predicates.
 use super::{Game, Hit, InteractTarget, Keys, entity_culling::default_range, ray_box};
+use horizon_client::actions::Action;
 use horizon_client::entities::{Cushion, dye_index};
 use horizon_client::items::ItemStack;
 use horizon_client::mobs::anim::Poses;
 use horizon_core::geometry::{Aabb, Vec3};
-use winit::keyboard::KeyCode;
 
 /// `Direction.fromYRot(yaw).toYRot()`: the nearest 90 degree step.
 pub(crate) fn snap_yaw(yaw: f32) -> f32 {
@@ -273,6 +273,7 @@ impl Game<'_> {
             position.z.floor() as i32,
         ];
         self.cushions.push(Cushion {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id,
             position,
@@ -326,7 +327,7 @@ impl Game<'_> {
             return false;
         }
         // isSecondaryUseActive.
-        if self.keys.contains(&KeyCode::ShiftLeft) {
+        if self.keys.held(Action::Sneak) {
             return false;
         }
         let id = self.cushions[i].id;
@@ -396,7 +397,12 @@ impl Game<'_> {
             1.0,
         );
         self.cushion_break_particles(&c);
-        if !self.ui.rules.bool("entity_drops") || (by_player && self.creative) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || (by_player && self.creative)
+        {
             return;
         }
         let stack = c.item_stack_with_data();
@@ -615,6 +621,7 @@ mod tests {
     #[test]
     fn a_named_cushion_drops_with_its_name() {
         let c = Cushion {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: 1,
             position: Vec3::ZERO,

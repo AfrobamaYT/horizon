@@ -3,7 +3,7 @@
 //! `onSyncedDataUpdated`): what a client draws from it rather than from its
 //! own simulation, which a client of a server doesn't run.
 use super::Game;
-use horizon_client::mobs::render::{PROFESSIONS, VILLAGER_TYPES};
+use horizon_client::mobs::render::VILLAGER_TYPES;
 use horizon_client::mobs::{
     Mob, Species, Who, armadillo, bat, bee, camel, creaking, drops, equine, finalize, illusioner,
     panda, phantom, raider, sniffer, sync, tame, zombie_villager,
@@ -485,8 +485,13 @@ fn villager_data(m: &mut Mob, data: &[i32], builtin: &Builtin) {
     if let Some(t) = index("minecraft:villager_type", kind, &VILLAGER_TYPES) {
         m.extra.variant = t;
     }
-    if let Some(p) = index("minecraft:villager_profession", profession, &PROFESSIONS) {
-        m.extra.variant2 = p;
+    if let Some(p) = builtin
+        .get("minecraft:villager_profession")
+        .and_then(|r| r.name(profession))
+        .and_then(|name| name.strip_prefix("minecraft:"))
+        .and_then(horizon_client::mobs::villager::profession_index)
+    {
+        m.extra.profession = horizon_client::mobs::villager::ProfessionState::from_index(p);
     }
     m.extra.villager_level = level.max(1);
 }
@@ -1269,7 +1274,9 @@ mod tests {
         let name = |m: &Mob| {
             (
                 VILLAGER_TYPES[m.extra.variant as usize],
-                PROFESSIONS[m.extra.variant2 as usize],
+                horizon_client::mobs::villager::profession_table().entries()
+                    [m.extra.profession.index().unwrap_or(0) as usize]
+                    .id,
                 m.extra.villager_level,
             )
         };

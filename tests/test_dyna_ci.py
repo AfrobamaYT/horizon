@@ -2,12 +2,16 @@
 import hashlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+BASH = shutil.which("bash")
+POSIX_BASH = BASH is not None and not (
+    os.name == "nt" and os.path.dirname(os.path.normcase(BASH)).endswith(os.path.normcase(r"\system32")))
 
 
 class DynaRoutingTests(unittest.TestCase):
@@ -16,6 +20,7 @@ class DynaRoutingTests(unittest.TestCase):
                    LEASE=str(int(time.time()) + 3600) if lease is None else lease)
         return subprocess.check_output(["bash", ROOT / "tools/ci/dyna_ci_runner.sh"], env=env, text=True).strip()
 
+    @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_only_allowed_events_and_same_repository(self):
         for event in ("push", "workflow_dispatch", "pull_request"):
             self.assertEqual(self.route(event), "self_hosted=true", event)
@@ -23,11 +28,13 @@ class DynaRoutingTests(unittest.TestCase):
             self.assertEqual(self.route(event), "self_hosted=false", event)
         self.assertEqual(self.route("pull_request", same_repo="false"), "self_hosted=false")
 
+    @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_switch_and_lease_fail_closed(self):
         self.assertEqual(self.route("push", enabled="false"), "self_hosted=false")
         for lease in ("", "bad", "0"):
             self.assertEqual(self.route("push", lease=lease), "self_hosted=false")
 
+    @unittest.skipIf(os.name == "nt", "the script installs dependencies on Dyna's Ubuntu runner")
     def test_cached_dependencies_export_persistent_paths(self):
         script = ROOT / "tools/ci/dyna_ci_deps.sh"
         with tempfile.TemporaryDirectory() as directory:
@@ -56,10 +63,10 @@ class DynaRoutingTests(unittest.TestCase):
         for item in ("vars.DYNA_CI_SELF_HOSTED", "vars.DYNA_CI_POOL_UNTIL", "github.event_name",
                      "github.event.pull_request.head.repo.full_name == github.repository", "dyna_ci_runner.sh"):
             self.assertIn(item, route)
-        for name in ("verify", "launcher"):
+        for name, label in (("verify", "dyna-large"), ("launcher", "dyna-medium")):
             block = blocks[name]
             self.assertIn("needs: changes", block)
-            self.assertIn("needs.changes.outputs.self_hosted == 'true' && 'dyna-medium'", block)
+            self.assertIn(f"needs.changes.outputs.self_hosted == 'true' && '{label}'", block)
             self.assertNotIn("secrets.", block)
             self.assertNotIn("permissions:", block)
         self.assertIn("runs-on: ubuntu-latest", blocks["pool-watch"])

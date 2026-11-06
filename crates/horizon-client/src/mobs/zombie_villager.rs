@@ -64,7 +64,7 @@ pub fn start_converting(
     events: &mut Vec<MobEvent>,
 ) {
     villager::ext_mut(m).cure = Some(Cure { time, starter });
-    m.retain_effects(|e| e.0 != "minecraft:weakness");
+    m.retain_effects(|e| e.id != "minecraft:weakness");
     // Strength amplifier: min(difficulty id - 1, 0), always 0 with monsters.
     m.add_effect("minecraft:strength", time, 0);
     events.push(MobEvent::EntityEvent {
@@ -201,9 +201,15 @@ mod tests {
         let registry = assets.registry;
         let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = super::super::MobData::load(&root, &facts);
+        let data = super::super::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
         let types = super::super::MobTypes::load(&root).unwrap();
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
@@ -220,6 +226,7 @@ mod tests {
         let world = crate::world::World::new(air, 0);
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
@@ -231,6 +238,7 @@ mod tests {
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
@@ -325,7 +333,11 @@ mod tests {
                 })
             );
             assert!(!m.has_effect("minecraft:weakness"));
-            assert!(m.extra.effects.contains(&("minecraft:strength", 4000, 0)));
+            assert!(m.extra.effects.contains(&crate::mobs::StoredEffect::new(
+                "minecraft:strength",
+                4000,
+                0
+            )));
             assert_eq!(events.len(), 1);
             let MobEvent::EntityEvent { mob, event, at } = events[0] else {
                 panic!("Starting a cure must broadcast an entity event");

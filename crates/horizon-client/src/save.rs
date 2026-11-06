@@ -475,42 +475,6 @@ pub struct SaveTables {
     /// The POI type and its max tickets of each state (`PoiTypes`).
     poi: Vec<Option<(&'static str, i32)>>,
 }
-/// `PoiTypes.register`: the POI type of a block state and its max tickets.
-pub fn poi_type(state: &horizon_world::chunk::BlockState) -> Option<(&'static str, i32)> {
-    let name = state.name.strip_prefix("minecraft:")?;
-    Some(match name {
-        "blast_furnace" => ("minecraft:armorer", 1),
-        "smoker" => ("minecraft:butcher", 1),
-        "cartography_table" => ("minecraft:cartographer", 1),
-        "brewing_stand" => ("minecraft:cleric", 1),
-        "composter" => ("minecraft:farmer", 1),
-        "barrel" => ("minecraft:fisherman", 1),
-        "fletching_table" => ("minecraft:fletcher", 1),
-        "cauldron" | "lava_cauldron" | "water_cauldron" | "powder_snow_cauldron" => {
-            ("minecraft:leatherworker", 1)
-        }
-        "lectern" => ("minecraft:librarian", 1),
-        "stonecutter" => ("minecraft:mason", 1),
-        "loom" => ("minecraft:shepherd", 1),
-        "smithing_table" => ("minecraft:toolsmith", 1),
-        "grindstone" => ("minecraft:weaponsmith", 1),
-        "bell" => ("minecraft:meeting", 32),
-        "beehive" => ("minecraft:beehive", 0),
-        "bee_nest" => ("minecraft:bee_nest", 0),
-        "nether_portal" => ("minecraft:nether_portal", 0),
-        "lodestone" => ("minecraft:lodestone", 0),
-        "test_instance_block" => ("minecraft:test_instance", 0),
-        // PoiTypes.BEDS is the sixteen colours: no straw bed.
-        bed if bed.ends_with("_bed") && bed != "straw_bed" => {
-            if state.properties.get("part").map(String::as_str) != Some("head") {
-                return None;
-            }
-            ("minecraft:home", 1)
-        }
-        rod if rod.ends_with("lightning_rod") => ("minecraft:lightning_rod", 0),
-        _ => return None,
-    })
-}
 impl SaveTables {
     pub fn new(assets: &crate::assets::Assets) -> Self {
         let registry = assets.registry;
@@ -539,7 +503,11 @@ impl SaveTables {
             heightmaps: assets.properties.clone(),
             air: registry.default_state("minecraft:air").map_or(0, |s| s.0),
             poi: (0..registry.len())
-                .map(|id| registry.state(BlockStateId(id as u32)).and_then(poi_type))
+                .map(|id| {
+                    registry
+                        .state(BlockStateId(id as u32))
+                        .and_then(horizon_world::poi::poi_type)
+                })
                 .collect(),
         }
     }
@@ -2210,10 +2178,14 @@ fn compress_records(
     records: &[((i32, i32), &Record)],
     timestamp: u32,
 ) -> Vec<std::io::Result<Option<ChunkRecord>>> {
+    // `RegionFile.getVersion`: the version `region-file-compression` selected
+    // (`RegionFileVersion.getSelected`), zlib unless a dedicated server said
+    // otherwise.
+    let compression = Compression::selected();
     let compress = |record: &Record| {
         record
             .tag()
-            .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::saved()))
+            .map(|tag| ChunkRecord::from_nbt(&tag, compression, timestamp, Limits::saved()))
             .transpose()
     };
     let helpers = horizon_threads::worker_count()
@@ -2480,6 +2452,7 @@ pub struct SaveDir {
     /// Set by `Persistent` before the first load.
     pub tables: OnceLock<Arc<SaveTables>>,
     loot: crate::structure_blocks::LootSnapshot,
+    trusted_fluid_load: bool,
     /// The dimension's skylight and height, from its folder name.
     pub shape: LevelShape,
     /// Which chunks each region file holds, for far terrain (`lod_saved`).
@@ -2490,6 +2463,20 @@ pub struct SaveDir {
     /// What older chunks are upgraded with, found on the first one read.
     datafix_context: OnceLock<Option<DatafixContext>>,
 }
+fn intern_saved_fluids(root: &NamedTag) {
+    if let Some(Tag::List(entities)) = root.tag.get("block_entities") {
+        for entity in entities {
+            if let Some(Tag::List(tanks)) = entity.get("fluids") {
+                for tank in tanks {
+                    if let Some(Tag::String(id)) = tank.get("Fluid") {
+                        mod_api::__private::intern_unresolved_fluid(&id.to_string_lossy());
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn mod_ticket_to_nbt(ticket: &ModTicket, controller: &str) -> Tag {
     let owner = match ticket.owner {
         TicketOwner::Block(pos) => ("block", Tag::IntArray(pos.to_vec())),
@@ -2628,11 +2615,16 @@ impl SaveDir {
             outstanding: Default::default(),
             tables: OnceLock::new(),
             loot: Default::default(),
+            trusted_fluid_load: false,
             shape,
             lod_regions: Default::default(),
             lod_decoded: Default::default(),
             datafix_context: OnceLock::new(),
         }
+    }
+    /// Mark this as a server-owned world save, not a remote cache.
+    pub fn enable_trusted_fluid_load(&mut self) {
+        self.trusted_fluid_load = true;
     }
     /// Share the world's loot snapshot with this dimension's chunk readers.
     pub fn set_loot_source(&mut self, loot: crate::structure_blocks::LootSnapshot) {
@@ -2856,7 +2848,15 @@ impl SaveDir {
             Folder::Poi => &self.poi_regions,
         };
         match read_region_record(&self.root, cache, folder, x, z) {
-            Ok(record) => record,
+            Ok(record) => {
+                if self.trusted_fluid_load
+                    && folder == "region"
+                    && let Some(root) = &record
+                {
+                    intern_saved_fluids(root);
+                }
+                record
+            }
             Err(e) => {
                 crate::chunk_io::report_load_failure(&self.root, x, z, &e);
                 None
@@ -3341,6 +3341,50 @@ fn back_up_unreadable_player(path: &Path) {
 }
 /// Write a gzip NBT file the way vanilla does (`<name>_new`, keep `_old`).
 pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
+    write_dat_as(path, tag, false)
+}
+
+/// [`write_dat`], synced to the disk: the new file before it is renamed into place, and the
+/// folder after, so a power loss leaves the old file or the new one. A hand-over's commit
+/// point (`player-confirm`) replies only once its files are.
+pub fn write_dat_durable(path: &Path, tag: Tag) -> Result<()> {
+    write_dat_as(path, tag, true)
+}
+
+/// `bytes` written to `path` through `<name>_new` and a rename, synced to the disk as
+/// [`write_dat_durable`] syncs: never a half-written file in place.
+pub fn write_durable(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("data");
+    let temporary = path.with_file_name(format!("{file}_new"));
+    write_synced(&temporary, bytes)?;
+    fs::rename(&temporary, path)?;
+    sync_folder(path)?;
+    Ok(())
+}
+
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// The folder of `path` synced, so that a rename into it is on the disk (POSIX; Windows has
+/// no folder handle to sync, and its rename is journaled by NTFS).
+fn sync_folder(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        fs::File::open(dir)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+fn write_dat_as(path: &Path, tag: Tag, durable: bool) -> Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -3358,7 +3402,11 @@ pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
         .and_then(|n| n.to_str())
         .unwrap_or("data.dat");
     let temporary = path.with_file_name(format!("{file}_new"));
-    fs::write(&temporary, compressed)?;
+    if durable {
+        write_synced(&temporary, &compressed)?;
+    } else {
+        fs::write(&temporary, compressed)?;
+    }
     if path.exists() {
         let old = match file.strip_suffix(".dat") {
             Some(stem) => path.with_file_name(format!("{stem}.dat_old")),
@@ -3368,6 +3416,9 @@ pub fn write_dat(path: &Path, tag: Tag) -> Result<()> {
         fs::rename(path, old).map_err(|e| format!("{}: {e}", path.display()))?;
     }
     fs::rename(temporary, path)?;
+    if durable {
+        sync_folder(path)?;
+    }
     Ok(())
 }
 /// `SavedDataStorage`: `{data: ..., DataVersion}` under `data/minecraft/`.
@@ -3465,82 +3516,6 @@ pub(crate) fn read_doubles<const N: usize>(tag: Option<&Tag>) -> Option<[f64; N]
         _ => None,
     }
 }
-
-/// Default game rules of a new 26.3 world (`data/minecraft/game_rules.dat`).
-const GAME_RULES: [(&str, i32); 58] = [
-    ("spawn_wandering_traders", 1),
-    ("block_drops", 1),
-    ("reduced_debug_info", 0),
-    ("show_death_messages", 1),
-    ("spawner_blocks_work", 1),
-    ("spawn_monsters", 1),
-    ("tnt_explodes", 1),
-    ("player_movement_check", 1),
-    ("immediate_respawn", 0),
-    ("block_explosion_drop_decay", 1),
-    ("spread_vines", 1),
-    ("max_entity_cramming", 24),
-    ("forgive_dead_players", 1),
-    ("fall_damage", 1),
-    ("send_command_feedback", 1),
-    ("global_sound_events", 1),
-    ("elytra_movement_check", 1),
-    ("fire_spread_radius_around_player", 128),
-    ("freeze_damage", 1),
-    ("mob_explosion_drop_decay", 1),
-    ("natural_health_regeneration", 1),
-    ("players_nether_portal_default_delay", 80),
-    ("mob_drops", 1),
-    ("log_admin_commands", 1),
-    ("mob_griefing", 1),
-    ("spawn_mobs", 1),
-    ("pvp", 1),
-    ("spectators_generate_chunks", 1),
-    ("max_command_sequence_length", 65536),
-    ("players_nether_portal_creative_delay", 0),
-    ("players_sleeping_percentage", 100),
-    ("advance_weather", 1),
-    ("max_block_modifications", 32768),
-    ("max_command_forks", 65536),
-    ("drowning_damage", 1),
-    ("command_block_output", 1),
-    ("locator_bar", 1),
-    ("show_advancement_messages", 1),
-    ("respawn_radius", 10),
-    ("raids", 1),
-    ("spawn_phantoms", 1),
-    ("max_snow_accumulation_height", 1),
-    ("limited_crafting", 0),
-    ("allow_entering_nether_using_portals", 1),
-    ("lava_source_conversion", 0),
-    ("tnt_explosion_drop_decay", 0),
-    ("universal_anger", 0),
-    ("keep_inventory", 0),
-    ("spawn_patrols", 1),
-    ("random_tick_speed", 3),
-    ("fire_damage", 1),
-    ("entity_drops", 1),
-    ("advance_time", 1),
-    ("command_blocks_work", 1),
-    ("spawn_wardens", 1),
-    ("water_source_conversion", 1),
-    ("projectiles_can_break_blocks", 1),
-    ("ender_pearls_vanish_on_death", 1),
-];
-/// Integer-valued rules; the others are booleans stored as bytes.
-const INT_RULES: [&str; 11] = [
-    "max_snow_accumulation_height",
-    "random_tick_speed",
-    "max_entity_cramming",
-    "fire_spread_radius_around_player",
-    "players_nether_portal_default_delay",
-    "max_command_sequence_length",
-    "players_nether_portal_creative_delay",
-    "players_sleeping_percentage",
-    "max_block_modifications",
-    "max_command_forks",
-    "respawn_radius",
-];
 
 /// The world presets of 26.3's `worldgen/world_preset` that the create
 /// screen offers, in the order of `WorldPresetTags.NORMAL`.
@@ -3906,6 +3881,8 @@ pub struct Level {
     pub enabled_features: std::sync::Arc<[String]>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
+    /// Definitions used by this world session.
+    pub rule_registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
     pub player_uuid: Option<[i32; 4]>,
     pub selected_slot: i32,
     pub motion: [f64; 3],
@@ -3964,7 +3941,19 @@ impl Level {
         self.game_rules
             .get(name)
             .copied()
-            .or_else(|| GAME_RULES.iter().find(|(n, _)| *n == name).map(|(_, v)| *v))
+            .or_else(|| {
+                self.rule_registry
+                    .rule(name)
+                    .and_then(|rule| self.game_rules.get(&rule.name).copied())
+            })
+            .or_else(|| {
+                self.rule_registry
+                    .rule(name)
+                    .map(|rule| match rule.default {
+                        crate::gamerules::Value::Bool(value) => i32::from(value),
+                        crate::gamerules::Value::Int(value) => value,
+                    })
+            })
             .unwrap_or(0)
     }
     /// The saved game mode id.
@@ -3976,17 +3965,29 @@ impl Level {
         }
     }
     pub fn read(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?)
+        Self::read_root(dir, read_level_dat(dir)?, Default::default())
+    }
+    /// Load a world using its session rule definitions.
+    pub fn read_with_registry(
+        dir: &Path,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
+        Self::read_root(dir, read_level_dat(dir)?, registry)
     }
     /// `read` from level.dat alone, without the level.dat_old fallback: what
     /// `LevelStorageSource.readLevelSummary` reads for the world list.
     pub fn read_summary(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_dat(&dir.join("level.dat"))?)
+        Self::read_root(dir, read_dat(&dir.join("level.dat"))?, Default::default())
     }
-    fn read_root(dir: &Path, root: Tag) -> Option<Self> {
+    fn read_root(
+        dir: &Path,
+        root: Tag,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
         let data = root.get("Data")?;
         let n = |t: Option<&Tag>| number(t).unwrap_or(0);
         let mut level = Self {
+            rule_registry: registry,
             name: text(data.get("LevelName")).unwrap_or_else(|| "World".into()),
             creative: n(data.get("GameType")) == 1,
             game_mode: n(data.get("GameType")) as i32,
@@ -4038,15 +4039,28 @@ impl Level {
             };
             level.data_packs = Some((ids("Enabled"), ids("Disabled")));
         }
-        let mut rules: BTreeMap<String, i32> = GAME_RULES
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), *v))
+        let registry = level.rule_registry.clone();
+        let mut rules: BTreeMap<String, i32> = registry
+            .available_rules(false)
+            .map(|rule| {
+                (
+                    rule.name.to_owned(),
+                    match rule.default {
+                        crate::gamerules::Value::Bool(value) => i32::from(value),
+                        crate::gamerules::Value::Int(value) => value,
+                    },
+                )
+            })
             .collect();
         let saved_rules = read_saved_data(dir, "game_rules");
         if let Some(Tag::Compound(map)) = &saved_rules {
             for (k, v) in map {
                 let name = k.to_string_lossy();
-                let name = name.strip_prefix("minecraft:").unwrap_or(&name).to_owned();
+                let name = if name.contains(':') {
+                    name
+                } else {
+                    format!("minecraft:{name}")
+                };
                 if let Some(v) = number(Some(v)) {
                     rules.insert(name, v as i32);
                 }
@@ -4054,7 +4068,8 @@ impl Level {
         }
         // GameRules(enabledFeatures, map) removes disabled experimental rules
         // and supplies their defaults when enabled but absent from saved data.
-        let minecart_rule = &crate::gamerules::MAX_MINECART_SPEED;
+        let registry = level.rule_registry.clone();
+        let minecart_rule = registry.rule("max_minecart_speed").expect("vanilla rule");
         if level
             .enabled_features
             .iter()
@@ -4070,7 +4085,7 @@ impl Level {
                 *value = default;
             }
         } else {
-            rules.remove(minecart_rule.name);
+            rules.remove(&minecart_rule.name);
         }
         level.game_rules = rules;
         // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
@@ -4760,37 +4775,56 @@ impl Level {
             write_world_gen_settings(dir, self.seed, WorldGen::default())?;
         }
         if !saved_data_path(dir, "game_rules").exists() || !self.game_rules.is_empty() {
-            // Only rules vanilla knows: an unknown key makes it reject the file.
-            let mut rules = Tag::Compound(Compound::new());
-            for (name, default) in GAME_RULES {
-                let value = self.game_rules.get(name).copied().unwrap_or(default);
-                let tag = if INT_RULES.contains(&name) {
-                    Tag::Int(value)
-                } else {
-                    Tag::Byte(i8::from(value != 0))
+            // Preserve other namespaces even when their mod is not currently loaded.
+            let mut rules = match read_saved_data(dir, "game_rules") {
+                Some(Tag::Compound(entries)) => Tag::Compound(
+                    entries
+                        .into_iter()
+                        .filter(|(key, _)| {
+                            key.to_string().is_ok_and(|s| {
+                                s.split_once(':').is_some_and(|(ns, _)| ns != "minecraft")
+                            })
+                        })
+                        .collect(),
+                ),
+                _ => Tag::Compound(Compound::new()),
+            };
+            let registry = &self.rule_registry;
+            for rule in registry.available_rules(
+                self.enabled_features
+                    .iter()
+                    .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS),
+            ) {
+                let tag = match rule.default {
+                    crate::gamerules::Value::Bool(default) => Tag::Byte(i8::from(
+                        self.game_rules
+                            .get(&rule.name)
+                            .copied()
+                            .unwrap_or(i32::from(default))
+                            != 0,
+                    )),
+                    crate::gamerules::Value::Int(default) => {
+                        Tag::Int(self.game_rules.get(&rule.name).copied().unwrap_or(default))
+                    }
                 };
-                put(&mut rules, &format!("minecraft:{name}"), tag);
+                put(&mut rules, &rule.name.clone(), tag);
             }
             if self
                 .enabled_features
                 .iter()
                 .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS)
             {
-                let rule = &crate::gamerules::MAX_MINECART_SPEED;
+                let rule = registry.rule("max_minecart_speed").expect("vanilla rule");
                 let crate::gamerules::Value::Int(default) = rule.default else {
                     unreachable!()
                 };
                 let value = self
                     .game_rules
-                    .get(rule.name)
+                    .get(&rule.name)
                     .copied()
                     .filter(|v| (rule.min..=rule.max).contains(v))
                     .unwrap_or(default);
-                put(
-                    &mut rules,
-                    &format!("minecraft:{}", rule.name),
-                    Tag::Int(value),
-                );
+                put(&mut rules, &rule.name.clone(), Tag::Int(value));
             }
             write_saved_data(dir, "game_rules", rules)?;
         }
@@ -5403,6 +5437,47 @@ mod tests {
     use crate::mobs::spawner::SpawnDataExt;
 
     #[test]
+    fn registered_rule_survives_level_save_and_absence() {
+        use crate::gamerules::{Rule, RuleRegistry, Value};
+        let dir = std::env::temp_dir().join(format!("horizon-mod-rule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry = std::sync::Arc::new(
+            RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap(),
+        );
+        let mut level = super::Level {
+            rule_registry: registry.clone(),
+            ..Default::default()
+        };
+        level.game_rules.insert("example:enabled".into(), 0);
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("example:enabled"),
+            Some(&super::Tag::Byte(0))
+        );
+        let mut absent = super::Level::read(&dir).unwrap();
+        absent.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("example:enabled"),
+            Some(&super::Tag::Byte(0))
+        );
+        let mut returned = super::Level::read_with_registry(&dir, registry).unwrap();
+        assert_eq!(returned.game_rules.get("example:enabled"), Some(&0));
+        returned.write(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_server_falls_back_to_level_dat_old_and_restores_it() {
         let world = std::env::temp_dir().join(format!("horizon-dat-old-{}", std::process::id()));
         let _ = fs::remove_dir_all(&world);
@@ -5506,7 +5581,12 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let bell = assets.registry.default_state("minecraft:bell").unwrap().0;
         let dir = std::env::temp_dir().join(format!("horizon-poi-save-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -5612,7 +5692,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let key = AttachmentType {
             namespace: "test",
             name: "counter",
@@ -5677,7 +5760,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let chest = assets.registry.default_state("minecraft:chest").unwrap();
         let mut slots = vec![None; 27];
@@ -5755,7 +5841,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         // To The Max's Overworld: -64..2032, 131 sections.
@@ -5810,7 +5899,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let tables = SaveTables::new(&assets);
         let rack = assets
             .registry
@@ -5869,7 +5961,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         let mut lit = Chunk::empty(4, -7);
         lit.set(1, 70, 2, stone.0);
@@ -5901,7 +5996,10 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Biomes::load(&root).expect("biomes");
+        let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .expect("biomes");
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         let water = assets.registry.default_state("minecraft:water").unwrap();
         let sand = assets.registry.default_state("minecraft:sand").unwrap();
@@ -6228,6 +6326,39 @@ mod tests {
         assert_eq!(share_out(0, 4, squares, || true), Vec::<usize>::new());
     }
 
+    /// `RegionFile.getVersion` writes a chunk with the version
+    /// `region-file-compression` selected: `compress_records` asks
+    /// `Compression::selected()` for every record it encodes, so a server told
+    /// to write lz4, gzip or uncompressed regions does
+    /// (`RegionFileVersion.configure`).
+    #[test]
+    fn a_chunk_is_written_with_the_selected_region_version() {
+        use super::{Record, compress_records};
+        let tag = Arc::new(NamedTag {
+            name: "".into(),
+            tag: Tag::compound([("xPos", Tag::Int(3))]),
+        });
+        let records = [((3, 4), Record::Tag(Arc::clone(&tag)))];
+        let refs: Vec<_> = records.iter().map(|(k, r)| (*k, r)).collect();
+        for name in ["none", "lz4", "gzip", "deflate"] {
+            assert!(Compression::configure(name), "{name}");
+            let written = compress_records(&refs, 99)
+                .pop()
+                .expect("one record")
+                .expect("an encoded record")
+                .expect("a chunk, not a deletion");
+            assert_eq!(
+                written.compression,
+                Compression::selected(),
+                "written with {name}"
+            );
+            // The bytes are that codec's, and read back as the chunk.
+            assert_eq!(written.nbt(Limits::default()).unwrap(), *tag);
+        }
+        // Leave the default behind for the rest of this process's tests.
+        assert!(Compression::configure("deflate"));
+    }
+
     #[test]
     fn records_compressed_on_helpers_match_one_thread_in_order() {
         use super::{Record, compress_records};
@@ -6254,7 +6385,9 @@ mod tests {
         for ((_, record), got) in records.iter().zip(compressed) {
             let want = record
                 .tag()
-                .map(|t| ChunkRecord::from_nbt(&t, Compression::Zlib, 1234, Limits::default()))
+                .map(|t| {
+                    ChunkRecord::from_nbt(&t, Compression::selected(), 1234, Limits::default())
+                })
                 .transpose()
                 .unwrap();
             let got = got.unwrap();
@@ -6849,6 +6982,51 @@ mod tests {
     use crate::chunk::{MIN_Y, SECTIONS};
 
     #[test]
+    fn only_server_disk_records_intern_saved_fluid_names() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-fluid-source-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mut save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);
+        save.enable_trusted_fluid_load();
+        let record = |id: &str| NamedTag {
+            name: "".into(),
+            tag: Tag::compound([(
+                "block_entities",
+                Tag::List(vec![Tag::compound([(
+                    "fluids",
+                    Tag::List(vec![Tag::compound([("Fluid", Tag::String(id.into()))])]),
+                )])]),
+            )]),
+        };
+        let disk = "fixture:trusted_saved_fluid";
+        let live = "fixture:untrusted_pending_fluid";
+        fs::create_dir_all(root.join("region")).unwrap();
+        let mut region = RegionFile::open_writable(save.region_path("region", 0, 0), true).unwrap();
+        region
+            .write(
+                ChunkPos::new(0, 0),
+                &ChunkRecord::from_nbt(&record(disk), Compression::Zlib, 0, Limits::saved())
+                    .unwrap(),
+            )
+            .unwrap();
+        drop(region);
+        save.read_record_raw("region", 0, 0).unwrap();
+        assert!(mod_api::__private::lookup_unresolved_fluid(disk).is_some());
+        let oversized = format!("fixture:{}", "x".repeat(257));
+        let original = record(&oversized);
+        intern_saved_fluids(&original);
+        assert!(mod_api::__private::lookup_unresolved_fluid(&oversized).is_none());
+        assert_eq!(original, record(&oversized));
+        save.pending.lock().unwrap().insert(
+            (Folder::Region, 1, 0),
+            (0, Record::Tag(Arc::new(record(live)))),
+        );
+        save.read_record_raw("region", 1, 0).unwrap();
+        assert!(mod_api::__private::lookup_unresolved_fluid(live).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn end_gateway_block_entity_round_trips() {
         use crate::containers::{BlockEntity, EndGateway};
         let plain = BlockEntity::for_block("minecraft:end_gateway").expect("gateway");
@@ -7325,7 +7503,9 @@ mod tests {
         };
         level.weather.raining = true;
         level.weather.rain_time = 500;
-        level.game_rules.insert("keep_inventory".into(), 1);
+        level
+            .game_rules
+            .insert("minecraft:keep_inventory".into(), 1);
         level.write(&dir).unwrap();
         let back = Level::read(&dir).unwrap();
         assert_eq!(back.name, "Test");
@@ -7547,6 +7727,152 @@ mod tests {
         let read = super::Level::read(&dir).unwrap();
         assert_eq!(read.game_rules, rules.by_name());
         assert_eq!(read.game_rule("advance_time"), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn level_save_rule_files_round_trip_without_byte_changes() {
+        for absent_mod in [false, true] {
+            let dir = std::env::temp_dir().join(format!(
+                "horizon-rule-file-roundtrip-{}-{absent_mod}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            let mut level = super::Level::default();
+            level.write(&dir).unwrap();
+            if absent_mod {
+                let mut data = super::read_saved_data(&dir, "game_rules").unwrap();
+                super::put(&mut data, "absent:rule", super::Tag::Long(42));
+                super::write_saved_data(&dir, "game_rules", data).unwrap();
+            }
+            let mut before_level = super::read_dat(&dir.join("level.dat")).unwrap();
+            let path = super::saved_data_path(&dir, "game_rules");
+            let before_rules = std::fs::read(&path).unwrap();
+            super::Level::read(&dir).unwrap().write(&dir).unwrap();
+            let mut after_level = super::read_dat(&dir.join("level.dat")).unwrap();
+            for level in [&mut before_level, &mut after_level] {
+                if let super::Tag::Compound(root) = level
+                    && let Some(super::Tag::Compound(data)) = root.get_mut(&"Data".into())
+                {
+                    data.remove(&"LastPlayed".into());
+                }
+            }
+            assert_eq!(after_level, before_level);
+            assert_eq!(std::fs::read(path).unwrap(), before_rules);
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn level_read_retains_the_session_registry() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-level-registry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let second = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let mut level = super::Level {
+            rule_registry: first.clone(),
+            ..Default::default()
+        };
+        level.write(&dir).unwrap();
+        let loaded = super::Level::read_with_registry(&dir, first.clone()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&loaded.rule_registry, &first));
+        let next = super::Level::read_with_registry(&dir, second.clone()).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(
+            &loaded.rule_registry,
+            &next.rule_registry
+        ));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn level_saved_rules_have_vanilla_keys_types_and_defaults() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-rule-defaults-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut level = super::Level::default();
+        level.write(&dir).unwrap();
+        let super::Tag::Compound(rules) = super::read_saved_data(&dir, "game_rules").unwrap()
+        else {
+            panic!("rule compound")
+        };
+        assert_eq!(rules.len(), 58);
+        assert!(
+            rules
+                .keys()
+                .all(|key| key.to_string().unwrap().starts_with("minecraft:"))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:random_tick_speed".into()),
+            Some(&super::Tag::Int(3))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:keep_inventory".into()),
+            Some(&super::Tag::Byte(0))
+        );
+        assert_eq!(
+            rules.get(&"minecraft:max_snow_accumulation_height".into()),
+            Some(&super::Tag::Int(1))
+        );
+        assert!(!rules.contains_key(&"minecraft:max_minecart_speed".into()));
+        level.enabled_features = [crate::gamerules::MINECART_IMPROVEMENTS.to_owned()].into();
+        level.game_rules =
+            crate::gamerules::GameRules::with_features(&level.enabled_features).by_name();
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("minecraft:max_minecart_speed"),
+            Some(&super::Tag::Int(8))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_bare_saved_rules_load_under_canonical_keys() {
+        let dir = std::env::temp_dir().join(format!("horizon-rule-legacy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        super::Level::default().write(&dir).unwrap();
+        super::write_saved_data(
+            &dir,
+            "game_rules",
+            super::Tag::compound([
+                ("keep_inventory", super::Tag::Byte(1)),
+                ("random_tick_speed", super::Tag::Int(7)),
+            ]),
+        )
+        .unwrap();
+        let level = super::Level::read(&dir).unwrap();
+        assert_eq!(level.game_rules.get("minecraft:keep_inventory"), Some(&1));
+        assert_eq!(
+            level.game_rules.get("minecraft:random_tick_speed"),
+            Some(&7)
+        );
+        assert!(!level.game_rules.contains_key("keep_inventory"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn level_save_preserves_absent_mod_rules() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-gamerules-unknown-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut level = super::Level::default();
+        level.write(&dir).unwrap();
+        super::write_saved_data(
+            &dir,
+            "game_rules",
+            super::Tag::compound([("absent:rule", super::Tag::Long(42))]),
+        )
+        .unwrap();
+        level.game_rules.insert("minecraft:advance_time".into(), 0);
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("absent:rule"),
+            Some(&super::Tag::Long(42))
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -8018,7 +8344,10 @@ mod tests {
         if let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") {
             let root = PathBuf::from(root);
             let assets = crate::assets::Assets::load(&root).expect("assets");
-            let biomes = Biomes::load(&root).expect("biomes");
+            let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes");
             let grass = assets
                 .registry
                 .default_state("minecraft:short_grass")
@@ -8194,7 +8523,12 @@ mod tests {
         };
         let root = PathBuf::from(root);
         let assets = crate::assets::Assets::load(&root).expect("assets");
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let facts = crate::blocks::BlockFacts::load(&root, assets.registry).expect("facts");
         let dir = std::env::temp_dir().join(format!("horizon-bobby-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -8307,7 +8641,12 @@ mod tests {
         let resources = PathBuf::from(resources);
         let cache = PathBuf::from(cache);
         let assets = crate::assets::Assets::load(&resources).expect("assets");
-        let biomes = Arc::new(Biomes::load(&resources).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                resources.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let facts = crate::blocks::BlockFacts::load(&resources, assets.registry).expect("facts");
         let registry = assets.registry;
         let levels = [
@@ -8533,7 +8872,12 @@ mod far_census {
             .map(|n| n.trim().parse().unwrap())
             .collect();
         let assets = Arc::new(crate::assets::Assets::load(&root).expect("assets"));
-        let biomes = Arc::new(Biomes::load(&root).expect("biomes"));
+        let biomes = Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .expect("biomes"),
+        );
         let registry = assets.registry;
         let item_data = crate::test_resources::item_data(
             &root,
@@ -8543,6 +8887,7 @@ mod far_census {
         let terrain = Arc::new(
             crate::vanillagen::VanillaTerrain::new(
                 crate::vanillagen::TerrainResources {
+                    data: None,
                     dir: &root.join("worldgen"),
                     registry,
                     biomes: &biomes,

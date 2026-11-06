@@ -11,11 +11,14 @@
 
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Where the mod API is going](concepts/design.md)
+- [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 
 # How-to
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Game rule categories](how-to/game-rule-categories.md)
+- [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
 - [Slowing or boosting entities on a block](how-to/movement-factors.md)
 - [Building to `mod.wasm`](how-to/wasm-mods.md)
@@ -24,9 +27,11 @@
 
 # Reference
 
+- [NeoForge data files](reference/neoforge-data.md)
 - [The manifest and the package](reference/manifest.md)
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
+- [Legacy native hook API history (frozen)](reference/native-api-history.md)
 - [Hook notes](reference/hook-notes.md)
 
 # For agents

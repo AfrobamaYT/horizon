@@ -79,11 +79,11 @@ fn level_event_excludes_its_source_even_during_another_guests_turn() {
             uuid: 12,
             saved: None,
         });
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             let (tx, rx) = std::sync::mpsc::channel();
             guest.sender = PlayerSender::new(tx, Arc::default());
             receivers.push(rx);
-        }
+        });
         game.audio.capture = Some(Vec::new());
         game.as_guest(13, |game| {
             game.lan_record_events(&[LevelEvent::LevelEvent {
@@ -132,8 +132,11 @@ fn another_guest_and_online_players_are_visible_during_a_turn() {
         game.as_guest(12, |game| {
             assert_eq!(rider.position(game), Some([3.0, 64.0, 5.0]));
             let online = game.native_server_players();
-            assert_eq!(online.iter().map(|p| p.uuid).collect::<Vec<_>>(), [12, 13]);
-            assert_eq!(online[1].position, [3.0, 64.0, 5.0]);
+            assert_eq!(
+                online.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
+                [12, 13]
+            );
+            assert_eq!(online[1].entity().position(game).unwrap(), [3.0, 64.0, 5.0]);
         })
         .unwrap();
     });
@@ -162,9 +165,8 @@ fn another_guests_menu_and_push_work_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         game.as_guest(12, |game| {
             assert!(game.native_menu_ref(a).is_none());
             assert_eq!(a_menu.slot_count(game), None);
@@ -251,17 +253,16 @@ fn another_guests_services_work_during_a_turn() {
         tree.by_id.insert("turns:probe".into(), 0);
         tree.by_trigger.insert("turns:probe".into(), vec![(0, 0)]);
         game.adv.tree = Arc::new(tree);
-        for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+        game.lan.as_mut().unwrap().hub.guests.update_all(|guest| {
             guest.advancements_loaded = true;
-        }
+        });
         let stone = ItemStack::new("minecraft:stone", 4);
         game.lan
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .inventory[0] = Some(stone.clone());
+            .update_guest(13, |guest| guest.inventory[0] = Some(stone.clone()))
+            .unwrap();
         let a = game.native_player_ref(12).unwrap();
         let b = game.native_player_ref(13).unwrap();
         game.as_guest(12, |game| {
@@ -387,9 +388,15 @@ fn nested_guest_turns_restore_each_equipment_store() {
                 "minecraft:leather_horse_armor",
             ),
         ] {
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-            guest.equipment[BODY] = stack(body);
-            guest.equipment[SADDLE] = stack(saddle);
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(conn, |guest| {
+                    guest.equipment[BODY] = stack(body);
+                    guest.equipment[SADDLE] = stack(saddle);
+                })
+                .unwrap();
         }
         game.as_guest(12, |game| {
             assert_eq!(game.equipment[BODY], stack("minecraft:golden_horse_armor"));
@@ -466,9 +473,8 @@ fn another_guest_follows_a_vehicle_teleported_during_a_turn() {
             .as_mut()
             .unwrap()
             .hub
-            .guest_mut(13)
-            .unwrap()
-            .vehicle = Some(42);
+            .update_guest(13, |guest| guest.vehicle = Some(42))
+            .unwrap();
         let horse = game.res.mob_types().get("minecraft:horse").unwrap().clone();
         game.mobs
             .push(Mob::new(42, horse, Vec3::new(3.0, 64.0, 5.0), 0.0));
@@ -514,15 +520,20 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(13)
-                .unwrap()
-                .vehicle = vehicle;
+                .update_guest(13, |guest| guest.vehicle = vehicle)
+                .unwrap();
             if vehicle.is_some() {
                 game.guest_boarded(13, None);
             }
             let (tx, rx) = std::sync::mpsc::channel();
-            game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap().sender =
-                PlayerSender::new(tx, Arc::default());
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |guest| {
+                    guest.sender = PlayerSender::new(tx, Arc::default())
+                })
+                .unwrap();
             game.as_guest(13, |game| {
                 // The body left by a passenger transition, before the guest
                 // turn publishes it back to the hub and the connection.
@@ -563,6 +574,272 @@ fn a_mounted_guests_turn_publishes_its_teleport_without_dismounting() {
                 );
             }
         }
+    });
+}
+
+/// The split services retain connected identities even while another player's
+/// body is swapped in, and still queue acting-player messages after the hook.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn server_services_preserve_identity_and_message_delivery() {
+    use horizon_protocol::packets::play::Clientbound as C;
+    use mod_api::{ServerHost, Text};
+    with_guests(|game| {
+        let guests = &mut game.lan.as_mut().unwrap().hub.guests;
+        guests.update(0, |g| {
+            g.permission = 3;
+            g.game_mode = 1;
+            g.address = "192.0.2.12:25565".parse().unwrap();
+        });
+        guests.update(1, |g| {
+            g.permission = 1;
+            g.address = "[2001:db8::13]:25566".parse().unwrap();
+        });
+        let players = game.players().server_players();
+        assert_eq!(
+            players.iter().map(|p| p.uuid()).collect::<Vec<_>>(),
+            [12, 13]
+        );
+        let a = players[0];
+        let b = players[1];
+        let host: &dyn ServerHost = game;
+        assert_eq!(host.players().player_by_name("GUEST12"), Some(a));
+        assert_eq!(host.players().player_by_name("missing"), None);
+        assert!(game.players().acting_player().is_none());
+        assert_eq!(a.name(game).as_deref(), Some("guest12"));
+        assert_eq!(a.permission_level(game), Some(3));
+        assert_eq!(b.permission_level(game), Some(1));
+        assert_eq!(a.can_use_game_master_blocks(game), Some(true));
+        assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+        assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+        let stale = mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(
+                mod_api::NativeWorldEpoch::new(a.entity().epoch().get() + 1),
+                a.entity().id(),
+            ),
+            a.uuid(),
+        );
+        let wrong_entity = mod_api::__private::game::player_ref(b.entity(), a.uuid());
+        let wrong_uuid = mod_api::__private::game::player_ref(a.entity(), 99);
+        for invalid in [stale, wrong_entity, wrong_uuid] {
+            assert_eq!(invalid.address(game), None);
+            assert_eq!(invalid.permission_level(game), None);
+        }
+        assert!(game.commands().run_command("list"));
+        game.chat_capture = Some(Vec::new());
+        game.commands().feedback(Text::literal("command answer"));
+        assert_eq!(
+            game.chat_capture.take().unwrap()[0].plain(),
+            "command answer"
+        );
+        assert_eq!(game.messages().text_allowed("message"), Some(true));
+        game.as_guest(12, |game| {
+            assert_eq!(game.players().acting_player(), Some(a));
+            assert_eq!(game.players().server_players(), players);
+            assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+            assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+            assert_eq!(a.permission_level(game), Some(3));
+            assert_eq!(b.permission_level(game), Some(1));
+            assert_eq!(a.can_use_game_master_blocks(game), Some(true));
+            // Acting permissions come from the swapped state, not a parked record.
+            game.ui.registries.permission = 1;
+            assert_eq!(a.permission_level(game), Some(1));
+            assert_eq!(a.can_use_game_master_blocks(game), Some(false));
+            game.ui.registries.permission = 3;
+            assert!(a.tell(game, Text::literal("chat")));
+            assert!(a.action_bar(game, Text::literal("overlay")));
+            assert!(a.tab_list(game, &Text::literal("header"), &Text::literal("footer")));
+            let packets = &game.guest_packets;
+            assert!(matches!(&packets[packets.len() - 3], C::SystemChat(p) if !p.overlay));
+            assert!(matches!(&packets[packets.len() - 2], C::SystemChat(p) if p.overlay));
+            assert!(matches!(&packets[packets.len() - 1], C::TabList(_)));
+            assert!(b.tell(game, Text::literal("other player")));
+            assert!(b.set_nickname(game, Some("B")));
+            assert!(b.set_sleep_ignored(game, true));
+            game.as_guest(13, |game| {
+                assert_eq!(game.players().acting_player(), Some(b));
+                assert_eq!(game.players().server_players(), players);
+                assert_eq!(a.name(game).as_deref(), Some("guest12"));
+                assert_eq!(a.permission_level(game), Some(3));
+                assert_eq!(b.permission_level(game), Some(1));
+                assert_eq!(a.address(game).as_deref(), Some("192.0.2.12"));
+                assert_eq!(b.address(game).as_deref(), Some("2001:db8::13"));
+                assert_eq!(a.game_mode(game), None, "body remains displaced");
+                assert_eq!(a.can_use_game_master_blocks(game), None);
+                for invalid in [stale, wrong_entity, wrong_uuid] {
+                    assert_eq!(invalid.address(game), None);
+                    assert_eq!(invalid.permission_level(game), None);
+                }
+                assert!(a.tell(game, Text::literal("displaced but connected")));
+            })
+            .unwrap();
+        })
+        .unwrap();
+        // Vanish is UUID-persistent, not a live-body operation.
+        game.lan.as_mut().unwrap().hub.guests.clear();
+        assert!(a.hide(game, Some(2)));
+        assert_eq!(game.lan.as_ref().unwrap().hub.hidden.get(&12), Some(&2));
+        assert!(!a.tell(game, Text::literal("offline")));
+        assert!(!a.set_nickname(game, Some("offline")));
+        assert!(!a.set_sleep_ignored(game, true));
+        assert_eq!(a.address(game), None);
+        assert_eq!(a.permission_level(game), None);
+        assert!(!stale.hide(game, None));
+        assert_eq!(stale.name(game), None);
+    });
+}
+
+/// Permission reads keep the existing owner and fake-player contracts, not
+/// just the connected-player list that the services enumerate.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn canonical_permissions_preserve_owner_and_fake_player_reads() {
+    use horizon_client::motion::PlayerMotion;
+    use mod_api::{GameMode, ServerHost};
+
+    with_guests(|game| {
+        let _serving = super::integrated::tests::install_serving(game, false);
+        game.level.player_uuid = Some([0, 0, 0, 99]);
+        let mut body = PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
+        body.entity_id = 99;
+        game.player = Some(body);
+        game.set_mode(horizon_client::command::args::GameMode::Creative);
+        let owner = game.native_player_ref(99).unwrap();
+        for (allow, permission) in [(false, 0), (true, 4)] {
+            game.set_allow_commands(allow);
+            assert_eq!(owner.permission_level(game), Some(permission));
+            assert_eq!(owner.can_use_game_master_blocks(game), Some(allow));
+        }
+        game.set_mode(horizon_client::command::args::GameMode::Survival);
+        assert_eq!(owner.permission_level(game), Some(4));
+        assert_eq!(owner.can_use_game_master_blocks(game), Some(false));
+
+        game.next_entity = 100;
+        let level = game.native_level(game.dim.id()).unwrap();
+        let fake = game.native_fake_player(level, 1234, "machine").unwrap();
+        assert!(!game.players().server_players().contains(&fake));
+        assert_eq!(game.players().player_by_name("machine"), None);
+        assert_eq!(fake.permission_level(game), Some(0));
+        assert_eq!(
+            fake.address(game),
+            None,
+            "no connection outside an acting turn"
+        );
+        assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        assert!(fake.set_game_mode(game, GameMode::Creative));
+        assert_eq!(fake.permission_level(game), Some(0));
+        assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        let conn = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == fake.uuid())
+            .unwrap()
+            .conn;
+        game.as_guest(conn, |game| {
+            assert_eq!(fake.permission_level(game), Some(0));
+            assert_eq!(
+                fake.address(game).as_deref(),
+                Some(""),
+                "unknown acting address"
+            );
+            assert_eq!(fake.can_use_game_master_blocks(game), Some(false));
+        })
+        .unwrap();
+        assert!(game.native_player_remove_fake(fake));
+        assert_eq!(fake.permission_level(game), None);
+        assert_eq!(fake.address(game), None);
+    });
+}
+
+/// The UUIDs of the players in the level, checked against the full reader.
+fn level_uuids(game: &super::Game<'_>) -> Vec<u128> {
+    let uuids: Vec<u128> = game.level_player_uuids().collect();
+    let players: Vec<u128> = game.level_players().iter().map(|p| p.uuid).collect();
+    assert_eq!(uuids, players, "both enumerations select the same players");
+    uuids
+}
+
+/// The host in place, with a body and UUID 99.
+fn place_host(game: &mut super::Game<'_>) {
+    let mut body =
+        horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(0.0, 64.0, 0.0)).unwrap();
+    body.entity_id = 99;
+    game.player = Some(body);
+    game.level.player_uuid = Some([0, 0, 0, 99]);
+}
+
+/// A turn lists the acting player once, under their own UUID and with their
+/// live body. The host's body is displaced for the turn, so it is not listed.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_name_each_body_once_during_turns() {
+    with_guests(|game| {
+        place_host(game);
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+        game.as_guest(12, |game| {
+            assert_eq!(level_uuids(game), [12, 13]);
+            assert_eq!(game.player_view().unwrap().uuid, [0, 0, 0, 12]);
+            game.player.as_mut().unwrap().position.x = 40.0;
+            assert_eq!(game.level_players()[0].position.x, 40.0);
+            game.as_guest(13, |game| {
+                assert_eq!(level_uuids(game), [13, 12]);
+                assert!(game.as_guest(12, |_| ()).is_none());
+            })
+            .unwrap();
+            assert_eq!(level_uuids(game), [12, 13]);
+        })
+        .unwrap();
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_exclude_guests_in_other_levels() {
+    with_guests(|game| {
+        place_host(game);
+        let host = game.lan.as_mut().unwrap();
+        let elsewhere = host.hub.guests.connection_index(13).unwrap();
+        host.hub.guests.update(elsewhere, |guest| {
+            guest.dimension = "minecraft:the_nether".to_owned();
+        });
+        assert_eq!(level_uuids(game), [99, 12]);
+        game.as_guest(12, |game| assert_eq!(level_uuids(game), [12]))
+            .unwrap();
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn level_players_exclude_fake_players() {
+    with_guests(|game| {
+        let _serving = super::integrated::tests::install_serving(game, false);
+        place_host(game);
+        game.next_entity = 100;
+        let level = game.native_level(game.dim.id()).unwrap();
+        let fake = game.native_fake_player(level, 1234, "machine").unwrap();
+        let conn = game
+            .lan
+            .as_ref()
+            .unwrap()
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.uuid == fake.uuid())
+            .unwrap()
+            .conn;
+        assert_eq!(level_uuids(game), [99, 12, 13]);
+        game.as_guest(conn, |game| {
+            assert_eq!(level_uuids(game), [12, 13]);
+            game.as_guest(12, |game| assert_eq!(level_uuids(game), [12, 13]))
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(level_uuids(game), [99, 12, 13]);
     });
 }
 
@@ -621,11 +898,11 @@ fn tick_advancement_notice_precedes_recipe_reward() {
         );
         let reload = std::env::var("HORIZON_ADVANCEMENT_ORDER_CHILD").as_deref() == Ok("reload");
         let host = game.lan.as_mut().unwrap();
-        for guest in &mut host.hub.guests {
+        host.hub.guests.update_all(|guest| {
             guest.advancements_loaded = reload;
-        }
+        });
         host.hub.mods_loaded = reload;
-        host.hub.reload_resources(Arc::new(sync));
+        game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
         if reload {
             game.run_native_advancement_grants();
         } else {

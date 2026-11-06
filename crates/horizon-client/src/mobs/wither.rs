@@ -470,7 +470,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
                     volume: 1.0,
                     spread: 0.0,
                 });
-                super::after_break(events, m.id, start);
+                super::after_break(events, w.asks_living_destroy_block, m.id, start);
             }
         }
     }
@@ -546,6 +546,60 @@ pub fn scale(m: &Mob, alpha: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The break sound waits for the game's verdict only when a listener can
+    /// cancel the break: an installed mod that does not listen leaves it plain.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn break_sound_defers_only_for_a_destroy_listener() {
+        use std::sync::Arc;
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            world
+                .chunks
+                .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+            world
+                .set(0, 64, 0, registry.default_state("minecraft:stone").unwrap())
+                .unwrap();
+        };
+        assert!(super::super::world::with_built_test_world(
+            &[],
+            build,
+            |world, types| {
+                let kind = Arc::new(types.types.get("minecraft:wither").unwrap().clone());
+                let mut world = world.clone();
+                for asks in [false, true] {
+                    world.asks_living_destroy_block = asks;
+                    let mut m = Mob::new(1, kind.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0);
+                    m.extra.counter = 0;
+                    m.extra.counter2 = 1;
+                    let mut events = Vec::new();
+                    custom_server_ai_step(&mut m, &world, &mut events);
+                    assert!(events.iter().any(|e| matches!(
+                        e,
+                        MobEvent::BreakBlock {
+                            pos: [0, 64, 0],
+                            ..
+                        }
+                    )));
+                    let plain = events.iter().any(|e| {
+                        matches!(
+                            e,
+                            MobEvent::LevelEventSound {
+                                sound: "entity.wither.break_block",
+                                ..
+                            }
+                        )
+                    });
+                    let deferred = events.iter().any(|e| matches!(
+                        e,
+                        MobEvent::IfBroke { mob: 1, effects, .. }
+                            if matches!(effects.as_slice(), [MobEvent::LevelEventSound { sound: "entity.wither.break_block", .. }])
+                    ));
+                    assert_eq!((plain, deferred), (!asks, asks), "asks: {asks}");
+                }
+            }
+        ));
+    }
     #[test]
     fn head_rotlerp_keeps_negative_angles_unwrapped() {
         assert_eq!(head_rotlerp(-5.0, -20.0, 40.0), -20.0);

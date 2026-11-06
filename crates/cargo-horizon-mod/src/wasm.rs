@@ -158,6 +158,32 @@ fn cargo_member(
 ) -> Result<Vec<u8>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = pinned("cargo");
+    command
+        .env_remove("HORIZON_MOD_INTERNALS_MANIFEST")
+        .env_remove("HORIZON_MOD_INTERNALS_CATALOG");
+    if role == "member" {
+        let text = std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| e.to_string())?;
+        let manifest: toml_edit::DocumentMut =
+            text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
+        if manifest
+            .get("native")
+            .and_then(|n| n.get("internals"))
+            .is_some_and(|i| {
+                i.as_array().is_some_and(|a| !a.is_empty())
+                    || i.as_array_of_tables().is_some_and(|a| !a.is_empty())
+            })
+        {
+            command.env(
+                "HORIZON_MOD_INTERNALS_MANIFEST",
+                std::path::absolute(root.join(MANIFEST)).map_err(|e| e.to_string())?,
+            );
+            command.env(
+                "HORIZON_MOD_INTERNALS_CATALOG",
+                std::path::absolute(crate::internals::wasm_catalog(root)?)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+    }
     command.args(["rustc", "--lib", "--crate-type", "cdylib"]);
     if !features.is_empty() {
         command.args(["--features", &features.join(",")]);
@@ -335,11 +361,15 @@ pub fn build(root: &Path) -> Result<(), String> {
     let text = std::fs::read_to_string(&manifest_path).map_err(|e| format!("{MANIFEST}: {e}"))?;
     let mut manifest: toml_edit::DocumentMut =
         text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
-    // A wasm mod's `[native]` lists only the points it listens at (`[[native.injection]]`).
+    // A wasm mod's `[native]` holds only declarations, never native code or build pins.
     if manifest
         .get("native")
         .and_then(toml_edit::Item::as_table_like)
-        .is_some_and(|native| native.iter().any(|(key, _)| key != "injection"))
+        .is_some_and(|native| {
+            native
+                .iter()
+                .any(|(key, _)| !matches!(key, "injection" | "internals"))
+        })
     {
         return Err(format!(
             "{MANIFEST}: a [native] mod builds through the launcher, not --wasm"

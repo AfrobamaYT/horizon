@@ -12,7 +12,7 @@ use mod_api::__private::game::*;
 pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
-    command::{ArgType, Dispatcher},
+    command::{Arg, ArgType, Context, Dispatcher},
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     motion::PlayerMotion,
     text::Text,
@@ -154,14 +154,15 @@ fn usage_nodes(usage: &str) -> Result<Vec<(String, Value, bool)>, String> {
 
 /// Native mods' commands as a root in the commands report's format
 /// (`lan::commands`, which sends each player what their level allows), and
-/// each command's level: the lowest of its usages. A node is runnable where
-/// only optional arguments follow it. A command vanilla has (`vanilla`
+/// each command's traversal level: the lowest of its usages. A node is runnable where
+/// only optional arguments follow it, at the lowest level of those executable usages.
+/// A command vanilla has (`vanilla`
 /// answers) or a usage that doesn't parse is left out, with why.
 pub(super) fn command_tree(
     commands: &[NativeCommand],
     vanilla: impl Fn(&str) -> bool,
 ) -> (Value, HashMap<String, u8>, Vec<String>) {
-    let mut root = Map::new();
+    let mut root: Map<String, Value> = Map::new();
     let mut levels: HashMap<String, u8> = HashMap::new();
     let mut problems = Vec::new();
     for command in commands {
@@ -176,6 +177,32 @@ pub(super) fn command_tree(
             problems.push(format!("`{}`: vanilla has /{}", command.usage, nodes[0].0));
             continue;
         }
+        // A rejected usage must not open an earlier executable prefix or lower its level.
+        let mut children = &root;
+        let mut conflict = None;
+        for (name, node, _) in &nodes {
+            let Some(entry) = children.get(name) else {
+                break;
+            };
+            // `word` and `text` share a parser; their properties tell them apart.
+            if entry["type"] != node["type"]
+                || entry["parser"] != node["parser"]
+                || entry["properties"] != node["properties"]
+            {
+                conflict = Some(name);
+                break;
+            }
+            children = entry["children"]
+                .as_object()
+                .expect("working tree children");
+        }
+        if let Some(name) = conflict {
+            problems.push(format!(
+                "`{}`: `{name}` is another kind in an earlier usage",
+                command.usage
+            ));
+            continue;
+        }
         let mut children = &mut root;
         for (i, (name, node, _)) in nodes.iter().enumerate() {
             let runnable = nodes.get(i + 1).is_none_or(|n| n.2);
@@ -185,19 +212,13 @@ pub(super) fn command_tree(
                 n["level"] = 4.into();
                 n
             });
-            // `word` and `text` share a parser; their properties tell them apart.
-            if entry["type"] != node["type"]
-                || entry["parser"] != node["parser"]
-                || entry["properties"] != node["properties"]
-            {
-                problems.push(format!(
-                    "`{}`: `{name}` is another kind in an earlier usage",
-                    command.usage
-                ));
-                break;
-            }
             if runnable {
                 entry["executable"] = true.into();
+                let level = entry["execution_level"]
+                    .as_u64()
+                    .unwrap_or(4)
+                    .min(command.level.into());
+                entry["execution_level"] = level.into();
             }
             let level = entry["level"]
                 .as_u64()
@@ -281,6 +302,12 @@ pub(super) fn register_dispatcher(
             dispatcher.requires(id, level);
             if node["executable"] == true {
                 dispatcher.executes(id, handler);
+                dispatcher.requires_execution(
+                    id,
+                    node["execution_level"]
+                        .as_u64()
+                        .expect("runnable usage level") as u8,
+                );
             }
             if let Some(children) = node["children"].as_object() {
                 add(dispatcher, id, children, handler);
@@ -531,25 +558,27 @@ impl Game<'_> {
         }
         let mut state = ScopedPlayerState::new(self.motion, setup)?;
         let host = self.lan.as_mut().expect("validated fake's host");
-        state.swap(&mut host.hub.guests[gi]);
+        host.hub.guests.update(gi, |guest| state.swap(guest));
         let play = host.play.insert(conn, Default::default());
         let outcome = self.perform_fake_action(gi, conn, action);
         let host = self.lan.as_mut().expect("guest turns retain the host");
-        let guest = &mut host.hub.guests[gi];
-        let held = guest
-            .inventory
-            .get_mut(guest.selected)
-            .and_then(Option::take)
-            .filter(|s| s.count > 0);
-        let other = guest
-            .inventory
-            .iter_mut()
-            .chain([&mut guest.offhand, &mut guest.carried])
-            .chain(guest.armor.iter_mut())
-            .filter_map(Option::take)
-            .filter(|s| s.count > 0)
-            .collect();
-        state.swap(guest);
+        let (held, other) = host.hub.guests.update(gi, |guest| {
+            let held = guest
+                .inventory
+                .get_mut(guest.selected)
+                .and_then(Option::take)
+                .filter(|s| s.count > 0);
+            let other = guest
+                .inventory
+                .iter_mut()
+                .chain([&mut guest.offhand, &mut guest.carried])
+                .chain(guest.armor.iter_mut())
+                .filter_map(Option::take)
+                .filter(|s| s.count > 0)
+                .collect();
+            state.swap(guest);
+            (held, other)
+        });
         host.play.remove(&conn);
         if let Some(play) = play {
             host.play.insert(conn, play);
@@ -566,11 +595,12 @@ impl Game<'_> {
             return Err(ActionRefused::Stale);
         }
         let found = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().enumerate().find(|(_, g)| {
-                g.placed
-                    && g.uuid == player.fields().uuid
-                    && g.entity_id as u32 == player.fields().entity.id()
-            })
+            let index = host
+                .hub
+                .guests
+                .identity_index(player.fields().uuid, player.fields().entity.id())?;
+            let guest = host.hub.guests.get(index)?;
+            guest.placed.then_some((index, guest))
         });
         let (gi, conn) = match found {
             Some((gi, g)) if g.is_fake() => (gi, g.conn),
@@ -756,7 +786,7 @@ impl Game<'_> {
             ));
         }
         if let Some(guest) = self.lan.as_ref().and_then(|host| {
-            host.hub.guests.iter().find(|guest| {
+            host.hub.guests.simulation_iter().find(|guest| {
                 guest.placed
                     && guest.participates_online()
                     && guest.uuid == uuid
@@ -853,20 +883,22 @@ impl Game<'_> {
         {
             return Some(read);
         }
-        let guest = self.lan.as_ref()?.hub.guests.iter().find(|guest| {
-            guest.placed
-                && guest.is_fake()
-                && guest.uuid == player.fields().uuid
-                && guest.entity_id as u32 == player.fields().entity.id()
-                && !self.lan_guest_swaps.contains(&guest.conn)
-        })?;
+        let guests = &self.lan.as_ref()?.hub.guests;
+        let guest = guests
+            .get(guests.identity_index(player.fields().uuid, player.fields().entity.id())?)?;
+        if !guest.placed || !guest.is_fake() || self.lan_guest_swaps.contains(&guest.conn) {
+            return None;
+        }
         Some(PlayerRead::Guest(guest))
     }
 
     /// `ServerPlayerGameMode.getGameModeForPlayer`; Paper `HumanEntity#getGameMode`.
     /// None for stale, offline or unavailable players (including displaced outer players).
     pub(super) fn native_player_game_mode(&self, player: PlayerRef) -> Option<GameMode> {
-        GameMode::from_id(self.player_read_both(player)?.mode())
+        match self.player_read_both(player)? {
+            PlayerRead::Acting { .. } => Some(self.mode),
+            PlayerRead::Guest(guest) => GameMode::from_id(guest.game_mode),
+        }
     }
 
     /// Changes a player's game mode as `ServerPlayer.setGameMode` and
@@ -883,7 +915,7 @@ impl Game<'_> {
         }
         let mut changed = false;
         self.native_as_player_handle(player, |game| {
-            changed = game.set_game_mode(super::game_mode::mode_from_id(mode.id()));
+            changed = game.set_game_mode(mode);
         }) && changed
     }
 
@@ -970,37 +1002,91 @@ impl Game<'_> {
 
     /// The players on this server, in the order they joined. Empty on a
     /// client and in a world nobody else can join.
-    pub(super) fn native_server_players(&self) -> Vec<NativeServerPlayer> {
+    pub(super) fn native_server_players(&self) -> Vec<PlayerRef> {
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return Vec::new();
+        };
         let Some(host) = &self.lan else {
             return Vec::new();
         };
+        // Construct from the online records, not the live-body resolver: outer
+        // players remain connected while their bodies are displaced by a turn.
         host.hub
             .online_players()
             .map(|g| {
-                NativeServerPlayer::from(mod_api::__private::built::NativeServerPlayer {
-                    uuid: g.uuid,
-                    name: g.name.clone(),
-                    permission: g.permission,
-                    dimension: g.dimension.clone(),
-                    position: g.position,
-                    game_mode: g.game_mode,
-                    health: g.health,
-                    yaw: g.yaw,
-                    pitch: g.pitch,
-                    entity_id: g.entity_id,
-                    address: g.address.ip().to_string(),
-                })
+                mod_api::__private::game::player_ref(
+                    mod_api::EntityRef::new(epoch, g.entity_id as u32),
+                    g.uuid,
+                )
             })
             .collect()
     }
+
+    /// Find a connected player by their account name, case-insensitively.
+    pub(super) fn native_player_by_name(&self, name: &str) -> Option<PlayerRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let player = self
+            .lan
+            .as_ref()?
+            .hub
+            .online_players()
+            .find(|player| player.name.eq_ignore_ascii_case(name))?;
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, player.entity_id as u32),
+            player.uuid,
+        ))
+    }
+
+    /// A connected player's record, including one displaced by a nested turn.
+    pub(super) fn online_player_record(&self, player: PlayerRef) -> Option<&Guest> {
+        (self.native_lifecycle.epoch()? == player.entity().epoch()).then_some(())?;
+        self.lan
+            .as_ref()?
+            .hub
+            .online_players()
+            .find(|g| g.uuid == player.uuid() && g.entity_id as u32 == player.entity().id())
+    }
+
+    /// The stable name of a connected or acting player. None for a stale or
+    /// unavailable player; displaced online players retain their identity.
+    pub(super) fn native_player_name(&self, player: PlayerRef) -> Option<String> {
+        if self.native_acting_player() == Some(player) {
+            return self.lan_acting_name.clone();
+        }
+        Some(self.online_player_record(player)?.name.clone())
+    }
+
+    /// The IP address the player connects from, without the port (behind a
+    /// Velocity proxy, the address the proxy forwards). Displaced connected
+    /// players keep their address; an acting player with no known connection
+    /// has an empty address. None for a stale or unavailable player.
+    pub(super) fn native_player_address(&self, player: PlayerRef) -> Option<String> {
+        if let Some(guest) = self.online_player_record(player) {
+            return Some(guest.address.ip().to_string());
+        }
+        (self.native_acting_player() == Some(player)).then(String::new)
+    }
+
+    /// Validate identity without requiring a live body: sending to an online
+    /// displaced player still works, as it did through the UUID send path.
+    fn message_player_uuid(&self, player: PlayerRef) -> Option<u128> {
+        (self.native_acting_player() == Some(player) || self.online_player_record(player).is_some())
+            .then_some(player.uuid())
+    }
     /// A system line in that player's chat, also inside a player's hook for
     /// the acting player; false when they aren't on.
-    pub(super) fn native_tell(&mut self, uuid: u128, line: Text) -> bool {
+    pub(super) fn native_player_tell(&mut self, player: PlayerRef, line: Text) -> bool {
+        let Some(uuid) = self.message_player_uuid(player) else {
+            return false;
+        };
         self.native_send(uuid, system_chat(&line))
     }
     /// A line over that player's hotbar (the action bar), also inside a
     /// player's hook for the acting player; false when they aren't on.
-    pub(super) fn native_action_bar(&mut self, uuid: u128, line: Text) -> bool {
+    pub(super) fn native_player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
+        let Some(uuid) = self.message_player_uuid(player) else {
+            return false;
+        };
         let packet = C::SystemChat(play::SystemChat {
             content: component_nbt(&line.component()),
             overlay: true,
@@ -1077,7 +1163,15 @@ impl Game<'_> {
     /// The lines over and under that player's list of players (Tab):
     /// `ClientboundTabListPacket`, an empty text for none. False when they
     /// aren't on.
-    pub(super) fn native_tab_list(&mut self, uuid: u128, header: &Text, footer: &Text) -> bool {
+    pub(super) fn native_player_tab_list(
+        &mut self,
+        player: PlayerRef,
+        header: &Text,
+        footer: &Text,
+    ) -> bool {
+        let Some(uuid) = self.message_player_uuid(player) else {
+            return false;
+        };
         let packet = C::TabList(play::TabList {
             header: component_nbt(&header.component()),
             footer: component_nbt(&footer.component()),
@@ -1098,9 +1192,16 @@ impl Game<'_> {
     /// ignored player who isn't in bed is left out of the players the night
     /// needs asleep, as a spectator is (an away-from-keyboard mod). Kept
     /// until a mod sets it back or the server stops, also if they leave and
-    /// come back. Only where no player's state is swapped in, as
-    /// `native_run_command`; false there and when they aren't on.
-    pub(super) fn native_sleep_ignored(&mut self, uuid: u128, ignored: bool) -> bool {
+    /// come back. False when the server list is unavailable, the handle is
+    /// stale or the player isn't online.
+    pub(super) fn native_player_set_sleep_ignored(
+        &mut self,
+        player: PlayerRef,
+        ignored: bool,
+    ) -> bool {
+        let Some(uuid) = self.message_player_uuid(player) else {
+            return false;
+        };
         let Some(host) = &mut self.lan else {
             return false;
         };
@@ -1119,11 +1220,15 @@ impl Game<'_> {
     /// lose them from the Tab list and the world (their client stops
     /// tracking the player, as it does a spectator), and don't read their
     /// joining or leaving; players of `level` or more still see them, and
-    /// a player made an operator meanwhile sees them again. By UUID: kept
-    /// for a player who is off (who joins hidden), until a mod sets it again
-    /// or the server stops. Works anywhere on a server, inside a player's
-    /// hook too; false on a client and in a world nobody else can join.
-    pub(super) fn native_hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
+    /// a player made an operator meanwhile sees them again. Kept by UUID, even
+    /// after this handle disconnects (the player rejoins hidden), until a mod sets it again
+    /// or the server stops. Works inside a player's hook too; false for a stale
+    /// world epoch, on a client and in a world nobody else can join.
+    pub(super) fn native_player_hide(&mut self, player: PlayerRef, level: Option<u8>) -> bool {
+        if self.native_lifecycle.epoch() != Some(player.entity().epoch()) {
+            return false;
+        }
+        let uuid = player.uuid();
         let Some(host) = &mut self.lan else {
             return false;
         };
@@ -1138,10 +1243,17 @@ impl Game<'_> {
     /// again. Hovering the shown name gives the real one, which stays in the
     /// log, commands, selectors and the server's events. Kept until a mod
     /// sets it again or the server stops (also if they leave and come back).
-    /// Plain text: the mod checks it (`native_text_allowed`, its length,
-    /// other players' names). Only where no player's state is swapped in,
-    /// as `native_run_command`; false there and when they aren't on.
-    pub(super) fn native_set_nickname(&mut self, uuid: u128, nickname: Option<&str>) -> bool {
+    /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
+    /// other players' names). False when the server list is unavailable,
+    /// the handle is stale or the player isn't online.
+    pub(super) fn native_player_set_nickname(
+        &mut self,
+        player: PlayerRef,
+        nickname: Option<&str>,
+    ) -> bool {
+        let Some(uuid) = self.message_player_uuid(player) else {
+            return false;
+        };
         let Some(host) = &mut self.lan else {
             return false;
         };
@@ -1209,32 +1321,13 @@ impl Game<'_> {
     /// swapped in (`native_perform_command`, `native_right_click_block`,
     /// `native_use_on`, `native_break_block`...): None outside such a
     /// hook.
-    pub(super) fn native_acting_player(&self) -> Option<NativeServerPlayer> {
-        let p = self.player.as_ref()?;
-        Some(NativeServerPlayer::from(
-            mod_api::__private::built::NativeServerPlayer {
-                uuid: self.lan_acting_uuid?,
-                name: self.lan_acting_name.clone()?,
-                permission: self.lan_acting_permission?,
-                dimension: self.dim.id().to_owned(),
-                position: [p.position.x, p.position.y, p.position.z],
-                game_mode: self.mode_id(),
-                health: p.health.health(),
-                yaw: p.yaw,
-                pitch: p.pitch,
-                entity_id: self.native_acting_entity() as i32,
-                address: self
-                    .lan
-                    .as_ref()
-                    .and_then(|host| {
-                        host.hub
-                            .guests
-                            .iter()
-                            .find(|g| Some(g.uuid) == self.lan_acting_uuid)
-                    })
-                    .map(|g| g.address.ip().to_string())
-                    .unwrap_or_default(),
-            },
+    pub(super) fn native_acting_player(&self) -> Option<PlayerRef> {
+        self.player.as_ref()?;
+        self.lan_acting_name.as_ref()?;
+        self.lan_acting_permission?;
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(self.native_lifecycle.epoch()?, self.native_acting_entity()),
+            self.lan_acting_uuid?,
         ))
     }
     /// Runs `line` (no slash) as the server's console does: permission
@@ -1422,9 +1515,7 @@ impl Game<'_> {
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let vanilla = horizon_client::command::vanilla::game_dispatcher_with_features(
-            &self.level.enabled_features,
-        );
+        let vanilla = self.ui.dispatcher.0.clone();
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -1488,8 +1579,10 @@ impl Game<'_> {
                     g.native_player_commands_sent(uuid, &name, &mut kept);
                 });
             }
-            if let Some(g) = self.lan.as_mut().and_then(|host| host.hub.guest_mut(conn)) {
-                g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+            if let Some(host) = self.lan.as_mut() {
+                let _ = host.hub.update_guest(conn, |g| {
+                    g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+                });
             }
         }
     }
@@ -1506,31 +1599,78 @@ impl Game<'_> {
         }
     }
 
-    /// The level a guest needs for a mod's command (`line`, without its
-    /// slash), when a mod registered it.
+    /// The traversal level of a mod's root (`line`, without its slash), when registered.
+    /// The parsed executable node enforces its own usage level separately.
     pub(super) fn native_command_level(host: &LanHost, line: &str) -> Option<u8> {
         let name = line.split(' ').next().unwrap_or_default();
         host.native_commands.as_ref()?.levels.get(name).copied()
     }
 
-    /// Parse a registered command using the source's permission before dispatching it.
-    fn native_command_valid(&mut self, line: &str, permission: u8) -> bool {
-        let Some(commands) = self
+    /// Parse once with the source's permission, then resolve its typed arguments.
+    /// A denied or malformed invocation never reaches argument resolution or listeners.
+    fn native_command_input(
+        &mut self,
+        line: &str,
+        permission: u8,
+    ) -> Option<mod_api::CommandInvocation> {
+        let commands = self
             .lan
             .as_ref()
-            .and_then(|host| host.native_commands.as_ref())
-        else {
-            return false;
-        };
-        let dispatcher = commands.dispatcher.clone();
+            .and_then(|host| host.native_commands.as_ref())?;
         let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
-        let parse = dispatcher.parse(line, &self.ui.registries);
+        let parse = commands.dispatcher.parse(line, &self.ui.registries);
         self.ui.registries.permission = previous;
         if let Err(error) = parse.executable() {
             self.syntax_failure(&error, line);
-            return false;
+            return None;
         }
-        true
+        match self.resolve_native_command(parse.context) {
+            Ok(command) => Some(command),
+            Err(error) => {
+                self.syntax_failure(&error, line);
+                None
+            }
+        }
+    }
+
+    /// Convert the native tree's validated argument kinds using vanilla's source-aware paths.
+    fn resolve_native_command(
+        &mut self,
+        context: Context,
+    ) -> Result<mod_api::CommandInvocation, horizon_client::command::CommandError> {
+        use super::commands::{Target, err};
+        use mod_api::{CommandArgument, CommandArgumentValue as Value, CommandInvocation};
+        let mut arguments = Vec::with_capacity(context.args.len());
+        for argument in context.args {
+            let value = match argument.value {
+                Arg::Str(value) => Value::String(value),
+                Arg::Int(value) => Value::Integer(value),
+                Arg::Double(value) => Value::Number(value),
+                Arg::Bool(value) => Value::Boolean(value),
+                Arg::Entity(selector) => {
+                    let targets = self.resolve_entity_argument(&selector, true)?;
+                    let [target] = targets.as_slice() else {
+                        return Err(err("argument.entity.toomany", &[]));
+                    };
+                    let player = match target {
+                        Target::Player => self.native_acting_player(),
+                        Target::Guest(conn) => self
+                            .command_guest(*conn)
+                            .and_then(|guest| self.native_player_ref(guest.uuid)),
+                        _ => None,
+                    }
+                    .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
+                    Value::Player(player)
+                }
+                Arg::Coords(coordinates) => {
+                    Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
+                }
+                Arg::Item(input) => Value::Item(self.command_item_stack(&input, 1)?),
+                _ => unreachable!("the native tree contains only registered native argument kinds"),
+            };
+            arguments.push(CommandArgument::new(argument.name, value));
+        }
+        Ok(CommandInvocation::new(context.literals, arguments))
     }
 
     /// A guest's command for the mods, inside their swap
@@ -1558,11 +1698,11 @@ impl Game<'_> {
             entity_id: g.entity_id,
             address: g.address.ip().to_string(),
         });
-        if !self.native_command_valid(line, permission) {
+        let Some(command) = self.native_command_input(line, permission) else {
             return true;
-        }
+        };
         let mut ran = false;
-        self.native_perform_command(&player, line, &mut ran);
+        self.native_perform_command(&player, &command, &mut ran);
         if !ran {
             // Registered, but no mod took it: vanilla's unknown command.
             self.native_feedback(
@@ -1586,17 +1726,25 @@ impl Game<'_> {
         if Self::native_command_level(host, line).is_none() {
             return false;
         }
-        if !self.native_command_valid(line, 4) {
-            return true;
-        }
-        let mut ran = false;
-        self.native_perform_console_command(line, &mut ran);
-        if !ran {
-            self.native_feedback(
-                Text::translate("command.unknown.command", &[])
-                    .with_color(horizon_client::text::RED),
-            );
-        }
+        self.as_console_in_overworld(|game| {
+            let previous = game
+                .command_source
+                .replace(super::commands::execute::Source {
+                    silent: false,
+                    ..game.server_source()
+                });
+            if let Some(command) = game.native_command_input(line, 4) {
+                let mut ran = false;
+                game.native_perform_console_command(&command, &mut ran);
+                if !ran {
+                    game.native_feedback(
+                        Text::translate("command.unknown.command", &[])
+                            .with_color(horizon_client::text::RED),
+                    );
+                }
+            }
+            game.command_source = previous;
+        });
         true
     }
 }
@@ -2109,6 +2257,387 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_typed_commands_reach_listeners_after_parse_and_source_resolution() {
+        use mod_api::{CommandArgumentValue as Value, CommandInvocation};
+        struct Commands(Arc<Mutex<Vec<(bool, CommandInvocation)>>>);
+        impl Commands {
+            fn record(&self, console: bool, command: &CommandInvocation) {
+                if command.literals == ["typed", "give"] {
+                    let Some(Value::Integer(amount)) = command.argument("amount") else {
+                        panic!("listener must receive an integer")
+                    };
+                    let Some(Value::Player(player)) = command.argument("who") else {
+                        panic!("listener must receive a resolved player")
+                    };
+                    assert_ne!(*amount, 0);
+                    assert_ne!(player.uuid(), 0);
+                }
+                self.0.lock().unwrap().push((console, command.clone()));
+            }
+        }
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Commands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                event.commands.extend([
+                    NativeCommand::new("typed give <who:player> <amount:integer> [message:text]"),
+                    NativeCommand::new("typed data <word:word> <number:number> <enabled:boolean> <item:item> <pos:block_pos>"),
+                    NativeCommand::new("typed opt [value:integer]"),
+                    NativeCommand::new("typed repeat <value:player> <value:integer>"),
+                    NativeCommand::op("protected <who:player>", 4),
+                ]);
+            }
+            fn perform_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::PerformCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.record(false, event.command);
+                mod_api::Flow::Cancel
+            }
+            fn perform_console_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::PerformConsoleCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.record(true, event.command);
+                mod_api::Flow::Cancel
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "typed_commands",
+                Box::new(Commands(heard.clone())),
+            )]
+            .into(),
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.build_registries();
+                    game.register_native_commands();
+                    let other = game.native_player_ref(13).unwrap();
+                    let acting = game.native_player_ref(12).unwrap();
+                    game.as_guest(12, |game| {
+                        for line in [
+                            "typed give guest13 nope",
+                            "typed give guest13",
+                            "typed give missing 7",
+                            "typed give @a 7",
+                            "typed data word 1 maybe stone ~ ~ ~",
+                            "typed data word NaN true stone ~ ~ ~",
+                            "typed data word 1 true does_not_exist ~ ~ ~",
+                            "typed opt 1 extra",
+                        ] {
+                            assert!(game.perform_native_command(12, 4, line), "{line}");
+                        }
+                        let random = game.world.random.state();
+                        assert!(!game.perform_native_command(12, 0, "protected @r"));
+                        assert_eq!(game.world.random.state(), random, "denied selectors must not resolve");
+                        assert!(heard.lock().unwrap().is_empty(), "failed input must not reach listeners");
+                        for line in [
+                            "typed give guest13 37 hello typed world",
+                            "typed give @s -4",
+                            "typed opt",
+                            "typed opt 9",
+                            "typed data word -1.25 true stone[minecraft:custom_name='\"Rock\"'] ~1 ~2 ~-3",
+                            "typed data word 2 false dirt ^0 ^0 ^0",
+                        ] {
+                            assert!(game.perform_native_command(12, 4, line), "{line}");
+                        }
+                    }).unwrap();
+                    game.spawn = Some(horizon_core::geometry::Vec3::new(10.5, 70.0, -2.5));
+                    game.yaw = 45.0;
+                    game.pitch = 30.0;
+                    for (line, key) in [
+                        ("typed give guest13 nope", "parsing.int.expected"),
+                        ("typed give missing 1", "argument.entity.notfound.player"),
+                    ] {
+                        game.chat_capture = Some(Vec::new());
+                        assert!(game.perform_native_console_command(line));
+                        let output = game.chat_capture.take().unwrap();
+                        assert_eq!(
+                            output[0].plain(),
+                            Text::translate(key, &[]).plain(),
+                            "{line}"
+                        );
+                    }
+                    assert!(game.perform_native_console_command("typed give @s 1"));
+                    assert_eq!(
+                        heard.lock().unwrap().len(),
+                        6,
+                        "console has no source player"
+                    );
+                    assert!(game.perform_native_console_command("typed give guest13 11"));
+                    assert!(
+                        game.perform_native_console_command(
+                            "typed data console 3 true dirt ~1 ~2 ~3"
+                        )
+                    );
+                    assert!(game.perform_native_console_command(
+                        "typed data console 3 true dirt ^0.5 ^0.5 ^0.5"
+                    ));
+                    assert!(game.perform_native_console_command("typed repeat guest13 3"));
+                    assert!(game.command_source.is_none(), "console source restored");
+                    let heard = heard.lock().unwrap();
+                    assert_eq!(heard.len(), 10);
+                    let first = &heard[0].1;
+                    assert_eq!(first.literals, ["typed", "give"]);
+                    assert_eq!(first.argument("who"), Some(&Value::Player(other)));
+                    assert_eq!(first.argument("amount"), Some(&Value::Integer(37)));
+                    assert_eq!(
+                        first.argument("message"),
+                        Some(&Value::String("hello typed world".into()))
+                    );
+                    assert_eq!(heard[1].1.argument("who"), Some(&Value::Player(acting)));
+                    assert_eq!(heard[1].1.argument("amount"), Some(&Value::Integer(-4)));
+                    assert!(heard[1].1.argument("message").is_none());
+                    assert!(heard[2].1.arguments.is_empty());
+                    assert_eq!(heard[3].1.argument("value"), Some(&Value::Integer(9)));
+                    let data = &heard[4].1;
+                    assert_eq!(data.argument("word"), Some(&Value::String("word".into())));
+                    assert_eq!(data.argument("number"), Some(&Value::Number(-1.25)));
+                    assert_eq!(data.argument("enabled"), Some(&Value::Boolean(true)));
+                    assert_eq!(data.argument("pos"), Some(&Value::BlockPos([4, 66, 2])));
+                    let Some(Value::Item(item)) = data.argument("item") else {
+                        panic!("typed item")
+                    };
+                    assert_eq!(&*item.item, "minecraft:stone");
+                    assert_eq!(item.count, 1);
+                    assert!(item.extra.is_some(), "command components retained");
+                    assert_eq!(heard[5].1.argument("enabled"), Some(&Value::Boolean(false)));
+                    assert_eq!(
+                        heard[5].1.argument("pos"),
+                        Some(&Value::BlockPos([3, 64, 5]))
+                    );
+                    assert!(heard[..6].iter().all(|(console, _)| !console));
+                    assert!(heard[6..].iter().all(|(console, _)| *console));
+                    assert_eq!(heard[6].1.argument("who"), Some(&Value::Player(other)));
+                    assert_eq!(heard[6].1.argument("amount"), Some(&Value::Integer(11)));
+                    assert_eq!(
+                        heard[7].1.argument("pos"),
+                        Some(&Value::BlockPos([11, 72, 0]))
+                    );
+                    assert_eq!(
+                        heard[8].1.argument("pos"),
+                        Some(&Value::BlockPos([10, 70, -3]))
+                    );
+                    assert_eq!(heard[9].1.arguments[0].value, Value::Player(other));
+                    assert_eq!(heard[9].1.argument("value"), Some(&Value::Integer(3)));
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_unauthorized_commands_never_reach_the_listener() {
+        struct Commands(Arc<Mutex<Vec<mod_api::CommandInvocation>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Commands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                event.commands.extend([
+                    NativeCommand::op("foo [value:integer]", 4),
+                    NativeCommand::new("foo bar"),
+                    NativeCommand::op("choice <a:integer>", 4),
+                    NativeCommand::new("choice <a:integer> bar"),
+                    NativeCommand::new("choice <b:word>"),
+                ]);
+            }
+            fn perform_command(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::PerformCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                self.0.lock().unwrap().push(event.command.clone());
+                mod_api::Flow::Cancel
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![mod_api::ModEntry::new(
+            "commands",
+            Box::new(Commands(heard.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                super::super::native_item_places::tests::open_to_lan(game);
+                game.register_native_commands();
+                game.lan.as_mut().unwrap().hub.guests.push(player_guest());
+                for line in ["foo", "foo 7", "foo nope"] {
+                    assert!(game.perform_native_command(1, 0, line));
+                }
+                assert!(
+                    heard.lock().unwrap().is_empty(),
+                    "denied usages must not call a mod"
+                );
+                assert!(game.perform_native_command(1, 0, "foo bar"));
+                assert!(game.perform_native_command(1, 4, "foo"));
+                assert!(game.perform_native_command(1, 4, "foo 7"));
+                for line in ["choice 7", "choice 7 bar", "choice text"] {
+                    assert!(game.perform_native_command(1, 0, line));
+                }
+                let heard = heard.lock().unwrap();
+                assert_eq!(heard.len(), 6);
+                assert_eq!(heard[0].literals, ["foo", "bar"]);
+                assert_eq!(heard[1].literals, ["foo"]);
+                assert!(heard[1].arguments.is_empty());
+                assert_eq!(heard[2].literals, ["foo"]);
+                assert_eq!(
+                    heard[2].argument("value"),
+                    Some(&mod_api::CommandArgumentValue::Integer(7))
+                );
+                assert_eq!(heard[3].literals, ["choice"]);
+                assert!(heard[3].argument("a").is_none());
+                assert_eq!(
+                    heard[3].argument("b"),
+                    Some(&mod_api::CommandArgumentValue::String("7".into()))
+                );
+                assert_eq!(heard[4].literals, ["choice", "bar"]);
+                assert_eq!(
+                    heard[4].argument("a"),
+                    Some(&mod_api::CommandArgumentValue::Integer(7))
+                );
+                assert_eq!(heard[5].literals, ["choice"]);
+                assert_eq!(
+                    heard[5].argument("b"),
+                    Some(&mod_api::CommandArgumentValue::String("text".into()))
+                );
+            });
+        });
+    }
+
+    #[test]
+    fn native_executable_permissions_do_not_follow_public_descendants() {
+        for optional in [false, true] {
+            for reverse in [false, true] {
+                let admin = if optional {
+                    "foo [value:integer]"
+                } else {
+                    "foo"
+                };
+                let mut commands = vec![NativeCommand::op(admin, 4), NativeCommand::new("foo bar")];
+                if reverse {
+                    commands.reverse();
+                }
+                let (tree, _, problems) = tree(&commands);
+                assert!(problems.is_empty(), "{problems:?}");
+                let mut dispatcher = Dispatcher::new();
+                register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+                for permission in 0..=4 {
+                    let registries = horizon_client::command::Registries {
+                        permission,
+                        ..Default::default()
+                    };
+                    for line in ["foo", "foo bar", "foo 7"] {
+                        let allowed =
+                            line == "foo bar" || permission == 4 && (line == "foo" || optional);
+                        assert_eq!(
+                            dispatcher.parse(line, &registries).executable().is_ok(),
+                            allowed,
+                            "{commands:?}, level {permission}, {line}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_public_prefixes_do_not_open_admin_children() {
+        for reverse in [false, true] {
+            let mut commands = vec![NativeCommand::new("foo"), NativeCommand::op("foo bar", 4)];
+            if reverse {
+                commands.reverse();
+            }
+            let (tree, _, problems) = tree(&commands);
+            assert!(problems.is_empty(), "{problems:?}");
+            let mut dispatcher = Dispatcher::new();
+            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+            for permission in 0..=4 {
+                let registries = horizon_client::command::Registries {
+                    permission,
+                    ..Default::default()
+                };
+                assert!(dispatcher.parse("foo", &registries).executable().is_ok());
+                assert_eq!(
+                    dispatcher
+                        .parse("foo bar", &registries)
+                        .executable()
+                        .is_ok(),
+                    permission == 4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_shared_executable_prefix_takes_its_lowest_usage_level() {
+        for reverse in [false, true] {
+            let mut commands = vec![
+                NativeCommand::op("foo [value:integer]", 4),
+                NativeCommand::op("foo", 2),
+            ];
+            if reverse {
+                commands.reverse();
+            }
+            let (tree, _, problems) = tree(&commands);
+            assert!(problems.is_empty(), "{problems:?}");
+            let mut dispatcher = Dispatcher::new();
+            register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+            for permission in 0..=4 {
+                let registries = horizon_client::command::Registries {
+                    permission,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    dispatcher.parse("foo", &registries).executable().is_ok(),
+                    permission >= 2
+                );
+                assert_eq!(
+                    dispatcher.parse("foo 7", &registries).executable().is_ok(),
+                    permission == 4
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn native_rejected_usage_cannot_open_an_executable_prefix() {
+        let (tree, _, problems) = tree(&[
+            NativeCommand::op("foo <value:integer>", 4),
+            NativeCommand::new("foo [value:word]"),
+        ]);
+        assert_eq!(problems.len(), 1);
+        let mut dispatcher = Dispatcher::new();
+        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
+        for permission in 0..=4 {
+            let registries = horizon_client::command::Registries {
+                permission,
+                ..Default::default()
+            };
+            assert!(dispatcher.parse("foo", &registries).executable().is_err());
+            assert!(
+                dispatcher
+                    .parse("foo hello", &registries)
+                    .executable()
+                    .is_err()
+            );
+            assert_eq!(
+                dispatcher.parse("foo 7", &registries).executable().is_ok(),
+                permission == 4
+            );
+        }
+    }
+
+    #[test]
     fn a_command_takes_its_lowest_level() {
         let (t, levels, _) = tree(&[
             NativeCommand::new("warp [name:word]"),
@@ -2183,12 +2712,12 @@ mod fake_action_tests {
                 .conn
         };
         let (fake, real) = (conn(2), conn(1));
-        for g in host.hub.guests.iter_mut() {
+        host.hub.guests.update_all(|g| {
             g.position = [0.5, 64.0, 0.5];
             g.game_mode = mode;
             g.abilities.update_for_mode(mode);
             g.inventory[g.selected] = item.map(|i| ItemStack::new(i, 1));
-        }
+        });
         (player, fake, real)
     }
 
@@ -2317,9 +2846,8 @@ mod fake_action_tests {
                         .as_mut()
                         .unwrap()
                         .hub
-                        .guest_mut(fake_conn)
-                        .unwrap()
-                        .sneaking = sneaking;
+                        .update_guest(fake_conn, |guest| guest.sneaking = sneaking)
+                        .unwrap();
                     assert_eq!(
                         game.native_player_perform_action(player, interact),
                         Ok(ActionOutcome::Consumed)
@@ -2371,9 +2899,8 @@ mod fake_action_tests {
                 .as_mut()
                 .unwrap()
                 .hub
-                .guest_mut(real_conn)
-                .unwrap()
-                .position = [0.5, 64.0, 0.5];
+                .update_guest(real_conn, |guest| guest.position = [0.5, 64.0, 0.5])
+                .unwrap();
             assert_eq!(
                 game.guest_interact(real_conn, gi, 6110, Hand::Main, [2.5, 64.5, 0.5]),
                 Ok(true),
@@ -2570,9 +3097,9 @@ mod fake_action_tests {
         // empties when used, by its ray from the eyes (looking straight down here).
         with_game(|game| {
             let (player, ..) = fake(game, Some("minecraft:water_bucket"), 0);
-            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                 g.pitch = 90.0;
-            }
+            });
             assert_eq!(
                 game.native_player_perform_action(player, on_top([1, 63, 0])),
                 Ok(ActionOutcome::Passed)
@@ -2632,15 +3159,21 @@ mod fake_action_tests {
         use mod_api::PlayerActionSetup;
         super::super::native_entity_refs::tests::with_game(|game| {
             let (player, conn, _) = fake(game, Some("minecraft:diamond"), 1);
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(conn).unwrap();
-            guest.yaw = 31.0;
-            guest.pitch = 12.0;
-            guest.selected = 3;
-            guest.inventory[3] = Some(ItemStack::new("minecraft:emerald", 4));
-            guest.offhand = Some(ItemStack::new("minecraft:apple", 2));
-            guest.sneaking = true;
-            guest.previous_game_mode = Some(3);
-            guest.motion.as_mut().unwrap().shift_key_down = true;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(conn, |guest| {
+                    guest.yaw = 31.0;
+                    guest.pitch = 12.0;
+                    guest.selected = 3;
+                    guest.inventory[3] = Some(ItemStack::new("minecraft:emerald", 4));
+                    guest.offhand = Some(ItemStack::new("minecraft:apple", 2));
+                    guest.sneaking = true;
+                    guest.previous_game_mode = Some(3);
+                    guest.motion.as_mut().unwrap().shift_key_down = true;
+                })
+                .unwrap();
             game.lan
                 .as_mut()
                 .unwrap()
@@ -2937,9 +3470,9 @@ mod fake_action_tests {
         use super::super::native_entity_refs::tests::with_game;
         with_game(|game| {
             let (player, fake_conn, _) = fake(game, None, 0);
-            for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                 g.yaw = -90.0;
-            }
+            });
             // A fist does 1 (the attack damage attribute's base), scaled by the attack strength
             // of a player that hasn't waited (`getAttackStrengthScale(0.5)`: 0.5 of a 5-tick
             // delay, 0.1, so 0.2 + 0.1² × 0.8 = 0.208), then by a zombie's 2 armour
@@ -3017,15 +3550,9 @@ mod fake_action_tests {
                 Some("minecraft:bedrock")
             );
             place(game, [3, 64, 3], "minecraft:stone");
-            game.lan
-                .as_mut()
-                .unwrap()
-                .hub
-                .guests
-                .iter_mut()
-                .for_each(|g| {
-                    g.position = [-6.5, 64.0, -6.5];
-                });
+            game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
+                g.position = [-6.5, 64.0, -6.5];
+            });
             assert_eq!(
                 game.native_player_perform_action(
                     player,
@@ -3223,10 +3750,10 @@ mod fake_action_tests {
                                 .unwrap(),
                         );
                     }
-                    for g in game.lan.as_mut().unwrap().hub.guests.iter_mut() {
+                    game.lan.as_mut().unwrap().hub.guests.update_all(|g| {
                         g.position = [0.5, 64.0, 0.5];
                         g.yaw = -90.0;
-                    }
+                    });
                     let target = zombie(game, 5000, [2.0, 64.0, 0.5]);
                     let stone = game
                         .pack
@@ -3255,8 +3782,13 @@ mod fake_action_tests {
                             assert_eq!(outcome, Ok(expected));
                         }
                     }
-                    let per_tick = start.elapsed() / ticks;
-                    let per_action = per_tick / count as u32;
+                    let elapsed = start.elapsed();
+                    let per_tick = elapsed / ticks;
+                    let per_action = elapsed / (ticks * players.len() as u32);
+                    eprintln!(
+                        "fake_action kind={kind:?} players={count} ns_per_action={}",
+                        per_action.as_nanos()
+                    );
                     println!(
                         "{kind:?}, {count} fakes: {per_tick:?} a tick, {per_action:?} an action"
                     );

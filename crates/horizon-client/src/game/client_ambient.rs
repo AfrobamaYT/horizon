@@ -295,8 +295,8 @@ impl Game<'_> {
                     .extra
                     .effects
                     .iter()
-                    .filter(|e| !m.extra.hidden_effects.contains(&e.0))
-                    .filter_map(|e| effect_particle(e.0, m.extra.ambient_effects.contains(&e.0)))
+                    .filter(|e| !m.extra.hidden_effects.contains(&e.id))
+                    .filter_map(|e| effect_particle(e.id, m.extra.ambient_effects.contains(&e.id)))
                     .collect();
                 swirl(
                     &mut self.particles,
@@ -366,7 +366,7 @@ mod sprint_handle_tests {
             let root =
                 std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
             let client_resources = super::super::load_resources(
-                root.clone(),
+                horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
                 None,
                 &root,
                 &super::super::Settings::default(),

@@ -15,7 +15,7 @@ use horizon_client::{
         data::MobData,
         finalize::{self, Attr, Ctx, FinalizeLevel, SpawnData, SpawnRegistries},
         gear,
-        render::{DYE_NAMES, PROFESSIONS, VILLAGER_TYPES},
+        render::{DYE_NAMES, VILLAGER_TYPES},
         spawn_rules::Reason,
         spawning::LocalDifficulty,
     },
@@ -237,7 +237,7 @@ fn variant(m: &Mob, regs: &SpawnRegistries, v: &mut Vec<String>) {
         S::Villager => v.push(format!(
             "minecraft:{}/minecraft:{}/{}",
             VILLAGER_TYPES[m.extra.variant as usize % 7],
-            PROFESSIONS[m.extra.variant2 as usize % PROFESSIONS.len()],
+            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id,
             m.extra.villager_level.max(1)
         )),
         S::ZombieVillager => v.push(format!(
@@ -364,7 +364,7 @@ fn describe(m: &Mob, all: &[Mob], regs: &SpawnRegistries) -> String {
         .extra
         .effects
         .iter()
-        .map(|(e, d, a)| format!("{e}:{a}:{d}"))
+        .map(|effect| format!("{}:{}:{}", effect.id, effect.amplifier, effect.duration))
         .collect();
     fx.sort();
     t.push(format!(
@@ -412,7 +412,10 @@ pub fn main() -> horizon_client::Result<()> {
     let halloween = args.get(4).is_some_and(|h| h == "true");
     let assets = Assets::load(root)?;
     let facts = BlockFacts::load(root, assets.registry)?;
-    let mob_data = MobData::load(root, &facts);
+    let mob_data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     let enchantments = Enchantments::load(root, &defaults);

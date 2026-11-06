@@ -218,7 +218,7 @@ impl Game<'_> {
     /// The camera's yaw and pitch as `DisplayRenderer` reads them (the
     /// front view turns around).
     fn display_camera_angles(&self) -> [f32; 2] {
-        if self.camera_type == super::perspective::CameraType::ThirdPersonFront {
+        if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
             [self.yaw + 180.0, -self.pitch]
         } else {
             [self.yaw, self.pitch]
@@ -369,7 +369,7 @@ impl Game<'_> {
             if !matrix.is_finite() {
                 continue;
             }
-            let mut batch = HudBatch::new([1, 1]);
+            let mut batch = HudBatch::scratch([1, 1]);
             text_display::draw(&mut batch, &self.gui.atlas, &d, lines, background);
             let light = Self::display_light(&self.world, &d, position);
             // Font.DisplayMode: SEE_THROUGH over everything, else POLYGON_OFFSET.

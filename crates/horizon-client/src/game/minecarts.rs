@@ -5,6 +5,7 @@
 //! furnace and TNT variants, saving, and `AbstractMinecartRenderer`'s old
 //! rail-following render with the display block.
 use super::{Game, Hit, InteractTarget, Keys, entity::Entity};
+use horizon_client::actions::Action;
 use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     blocks::Fluid,
@@ -585,6 +586,7 @@ impl Game<'_> {
         // turns nearly all of them away: it is tested first, before a mob's
         // pushable state, and only the boxes kept are collected.
         let close = |b: &Aabb| b.intersects(near);
+        let reach = self.vehicle_mob_reach();
         let mut boxes: Vec<Aabb> = self
             .carts
             .iter()
@@ -600,10 +602,12 @@ impl Game<'_> {
             .chain(
                 self.mobs
                     .iter()
-                    .filter(|m| !m.removed && m.extra.mount != Some(c.id))
+                    .filter(|m| reach.is_none_or(|r| r.may_meet(m, near)))
                     .map(|m| (m, m.bounds()))
                     .filter(|(m, b)| {
                         close(b)
+                            && !m.removed
+                            && m.extra.mount != Some(c.id)
                             && (m.pushable()
                                 || m.species() == horizon_client::mobs::Species::Shulker
                                     && m.alive())
@@ -891,7 +895,11 @@ impl Game<'_> {
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
     /// every cart alike (`cart_max_speed` cuts a furnace minecart's).
     fn max_speed_new(&self, c: &Minecart) -> f64 {
-        f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
+        f64::from(
+            self.ui
+                .rules
+                .int_at(horizon_client::gamerules::vanilla::MAX_MINECART_SPEED),
+        ) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
     }
     /// `AbstractMinecart.getRedstoneDirection` (over the old port's
@@ -1483,7 +1491,11 @@ impl Game<'_> {
     /// (`EntityEvent.TNT_PRIME`, 70) and `SoundEvents.TNT_PRIMED`. A client
     /// that receives 70 only sets the fuse (`handleEntityEvent`).
     pub(super) fn prime_cart(&mut self, c: &mut Minecart) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         c.fuse = 80;
@@ -1508,7 +1520,11 @@ impl Game<'_> {
         }
     }
     fn explode_cart(&mut self, c: &Minecart, speed_sqr: f64) {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             return;
         }
         let speed = speed_sqr.sqrt().min(5.0);
@@ -1523,7 +1539,8 @@ impl Game<'_> {
         self.release_vehicle_container(c.id);
         self.carts.retain(|x| x.id != c.id);
         // ExplosionInteraction.TNT: the tnt_explosion_drop_decay rule.
-        let interaction = self.destroy_type("tnt_explosion_drop_decay");
+        let interaction =
+            self.destroy_type(horizon_client::gamerules::vanilla::TNT_EXPLOSION_DROP_DECAY);
         // MinecartTNT.isPrimed (fuse > -1): a cart that ran into a wall or
         // fell unprimed blows rails up like any blast.
         self.combat.rail_proof_blast = c.fuse >= 0;
@@ -1769,17 +1786,17 @@ impl Game<'_> {
     }
     /// `positionRider` for the mobs in minecarts: each sits on the cart's
     /// passenger attachment, less its own vehicle attachment.
-    pub(super) fn seat_cart_mobs(&mut self) {
+    pub(super) fn seat_cart_mobs(&mut self, riding: &super::passengers::Riders) {
         for i in 0..self.carts.len() {
             let id = self.carts[i].id;
+            let Some(js) = riding.get(&id) else {
+                continue;
+            };
             let (pos, prev) = (self.carts[i].position, self.carts[i].previous);
-            let seats: Vec<(usize, f64)> = self
-                .mobs
+            let seats: Vec<(usize, f64)> = js
                 .iter()
-                .enumerate()
-                .filter(|(_, m)| m.extra.mount == Some(id))
                 // Minecart's box is 0.98 wide.
-                .map(|(j, m)| (j, riders::vehicle_attachment(m, 0.98)))
+                .map(|&j| (j, riders::vehicle_attachment(&self.mobs[j], 0.98)))
                 .collect();
             for (j, offset) in seats {
                 let m = &mut self.mobs[j];
@@ -1810,6 +1827,11 @@ impl Game<'_> {
     }
     /// Every cart but the ridden one (which ticks with its rider).
     pub(super) fn tick_carts(&mut self) {
+        self.vehicles_ticking(true);
+        self.tick_carts_now();
+        self.vehicles_ticking(false);
+    }
+    fn tick_carts_now(&mut self) {
         self.push_carts();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
@@ -2178,7 +2200,7 @@ impl Game<'_> {
         if target.is_none() && !self.before_block(d) {
             return false;
         }
-        let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft);
+        let sneaking = self.keys.held(Action::Sneak);
         let held = self.held().cloned();
         match self.carts[i].kind {
             CartKind::Rideable => {
@@ -2428,7 +2450,11 @@ impl Game<'_> {
                 self.carts.insert(i, c);
             } else {
                 let at = [c.position.x, c.position.y, c.position.z];
-                if self.ui.rules.bool("entity_drops") {
+                if self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+                {
                     for s in c.items.iter().flatten() {
                         self.spawn_item(s.clone(), at, [0.0, 0.1, 0.0], 10);
                     }
@@ -2486,65 +2512,19 @@ impl Game<'_> {
         tint: impl Fn(i32) -> Option<u32>,
         out: &mut Vec<Vertex>,
     ) {
-        let mut normals = horizon_client::item_render::FaceNormals::new(m);
-        for model in models {
-            for face in &model.faces {
-                let Some(s) = self
+        let faces = models.into_iter().flat_map(|model| {
+            model.faces.iter().filter_map(|face| {
+                let sprite = self
                     .pack
                     .layer_names
                     .get(&face.layer)
-                    .and_then(|n| self.gui.atlas.sprites.get(n))
-                else {
-                    continue;
-                };
-                use horizon_assets::model::Direction as D;
-                let shade: u32 = match face.quad.facing {
-                    D::Up => 255,
-                    D::Down => 127,
-                    D::North | D::South => 204,
-                    D::West | D::East => 153,
-                };
-                let mut color = if diffuse {
-                    u32::MAX
-                } else {
-                    0xFF00_0000 | shade << 16 | shade << 8 | shade
-                };
-                if let Some(t) = tint(face.quad.tint_index) {
-                    color = horizon_client::hud_layout::multiply(
-                        color,
-                        horizon_client::mobs::render::abgr(t),
-                    );
-                }
-                let normal = if diffuse {
-                    let n = normals.face(face.quad.facing);
-                    let n = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
-                    [n[0], n[1], n[2], 127]
-                } else {
-                    [0; 4]
-                };
-                let light = light(&face.quad);
-                let light = if diffuse {
-                    let emission = u32::from(face.quad.light_emission) * 16;
-                    (light & 0xFF) | (light >> 8 & 0xFF).max(emission) << 8
-                } else {
-                    light
-                };
-                for k in 0..4 {
-                    let p = face.quad.positions[k];
-                    let uv = face.quad.uv[k];
-                    out.push(Vertex {
-                        normal,
-                        pos: m.transform_point3(glam::Vec3::from_array(p)).to_array(),
-                        uv: [s.u0 + uv[0] * (s.u1 - s.u0), s.v0 + uv[1] * (s.v1 - s.v0)],
-                        layer: 0,
-                        color,
-                        light,
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
-        }
+                    .and_then(|name| self.gui.atlas.sprites.get(name))?;
+                Some((&face.quad, *sprite))
+            })
+        });
+        emit_model_faces(faces, m, light, diffuse, tint, out);
     }
+
     /// The block the cart shows: `None` for air (`AbstractMinecartRenderer`
     /// draws and stretches its culling box only for a non-air state).
     fn display_state(&self, c: &Minecart) -> Option<BlockStateId> {
@@ -2973,6 +2953,71 @@ fn furnace_speed(c: &Minecart, base: f64) -> f64 {
     }
 }
 
+/// Shared transform, shading and light path for block-state and prepared standalone faces.
+pub(super) fn emit_model_faces<'a>(
+    faces: impl IntoIterator<
+        Item = (
+            &'a horizon_assets::bake::ModelQuad,
+            horizon_client::hud::Rect,
+        ),
+    >,
+    m: glam::Mat4,
+    light: impl Fn(&horizon_assets::bake::ModelQuad) -> u32,
+    diffuse: bool,
+    tint: impl Fn(i32) -> Option<u32>,
+    out: &mut Vec<Vertex>,
+) {
+    use horizon_assets::model::Direction as D;
+    let mut normals = horizon_client::item_render::FaceNormals::new(m);
+    for (quad, s) in faces {
+        let shade: u32 = match quad.facing {
+            D::Up => 255,
+            D::Down => 127,
+            D::North | D::South => 204,
+            D::West | D::East => 153,
+        };
+        let mut color = if diffuse {
+            u32::MAX
+        } else {
+            0xFF00_0000 | shade << 16 | shade << 8 | shade
+        };
+        if let Some(t) = tint(quad.tint_index) {
+            color =
+                horizon_client::hud_layout::multiply(color, horizon_client::mobs::render::abgr(t));
+        }
+        let normal = if diffuse {
+            let n = normals
+                .face(quad.facing)
+                .to_array()
+                .map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
+            [n[0], n[1], n[2], 127]
+        } else {
+            [0; 4]
+        };
+        let light = light(quad);
+        let light = if diffuse {
+            let emission = u32::from(quad.light_emission) * 16;
+            (light & 0xFF) | (light >> 8 & 0xFF).max(emission) << 8
+        } else {
+            light
+        };
+        for k in 0..4 {
+            let uv = quad.uv[k];
+            out.push(Vertex {
+                normal,
+                pos: m
+                    .transform_point3(glam::Vec3::from_array(quad.positions[k]))
+                    .to_array(),
+                uv: [s.u0 + uv[0] * (s.u1 - s.u0), s.v0 + uv[1] * (s.v1 - s.v0)],
+                layer: 0,
+                color,
+                light,
+                glint_uv: [0.0, 0.0],
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// `NewMinecartBehavior` caps the first track step with
@@ -2987,7 +3032,11 @@ mod tests {
             game.level.enabled_features = features.into();
             game.ui.rules =
                 horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
-            let rule = f64::from(game.ui.rules.int("max_minecart_speed")) / 20.0;
+            let rule = f64::from(
+                game.ui
+                    .rules
+                    .int_at(horizon_client::gamerules::vanilla::MAX_MINECART_SPEED),
+            ) / 20.0;
             assert_eq!(rule, 0.4);
             game.world.chunks.insert(
                 (0, 0),

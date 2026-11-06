@@ -36,15 +36,9 @@ fn world_attachments(
     let Holder::Chunk([x, z]) = holder else {
         return Err(AttachmentError::MissingHolder);
     };
-    let chunk = world
-        .chunks
-        .get_mut(&(x, z))
-        .ok_or(AttachmentError::MissingHolder)?;
-    let chunk = std::sync::Arc::make_mut(chunk);
-    let extras = std::sync::Arc::make_mut(chunk.saved.get_or_insert_with(Default::default));
-    attachment_compound(extras.root.get(&ATTACHMENTS_KEY.into()))?;
+    let map = world.chunks.attachments_mut(&(x, z))?;
     world.modified.insert((x, z));
-    Ok(&mut extras.attachments)
+    Ok(map)
 }
 
 impl Game<'_> {
@@ -173,8 +167,8 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
         super::native_block_states::parse(self.block_registries, self.registry, name)
     }
-    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
-        super::native_block_states::default_state(self.registry, block)
+    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
+        Some(mod_api::__private::resolved_block(block)?.default)
     }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
         horizon_world::level::LevelAccess::block_state(self, BlockPos::new(pos[0], pos[1], pos[2]))
@@ -193,9 +187,11 @@ impl mod_api::LevelHost for super::GameLevel<'_> {
     fn height(&self) -> i32 {
         self.world.shape.height
     }
-    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
-        self.native_authoritative
-            .then(|| super::native_world_read::block_in_tag(self.items, block, tag))
+    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
+        if !self.native_authoritative {
+            return None;
+        }
+        super::native_world_read::block_in_tag(block, tag)
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
         self.native_authoritative
@@ -285,16 +281,13 @@ impl mod_api::LevelHost for super::native_hooks::HitLevel<'_> {
     fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
         super::native_block_states::parse(self.0.block_registries()?, self.0.registry(), name)
     }
-    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
         self.0.block_registries()?;
-        super::native_block_states::default_state(self.0.registry(), block)
+        Some(mod_api::__private::resolved_block(block)?.default)
     }
-    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
-        Some(super::native_world_read::block_in_tag(
-            self.0.tags()?,
-            block,
-            tag,
-        ))
+    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
+        self.0.tags()?;
+        super::native_world_read::block_in_tag(block, tag)
     }
     fn fluid_in_tag(&self, fluid: &str, tag: &str) -> Option<bool> {
         Some(super::native_world_read::fluid_in_tag(
@@ -364,7 +357,7 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
         mod_api::LevelHost::block_state_id(&*self.level, name)
     }
-    fn block_state_default(&self, block: &str) -> Option<BlockStateId> {
+    fn block_state_default(&self, block: mod_api::BlockKey) -> Option<BlockStateId> {
         mod_api::LevelHost::block_state_default(&*self.level, block)
     }
     fn block_state(&self, pos: [i32; 3]) -> BlockStateId {
@@ -382,7 +375,7 @@ impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::Lev
     fn height(&self) -> i32 {
         mod_api::LevelHost::height(&*self.level)
     }
-    fn block_in_tag(&self, block: &str, tag: &str) -> Option<bool> {
+    fn block_in_tag(&self, block: mod_api::BlockKey, tag: &str) -> Option<bool> {
         mod_api::LevelHost::block_in_tag(&*self.level, block, tag)
     }
     fn item_stack_in_tag(&self, stack: &mod_api::ItemStack, tag: &str) -> Option<bool> {
@@ -437,7 +430,7 @@ impl<'a: 'b, 'b> mod_api::LevelRandomHost for LevelTicks<'b, &mut super::GameLev
 impl<'a: 'b, 'b, L: std::ops::Deref<Target = super::GameLevel<'a>>> mod_api::LevelTicksHost
     for LevelTicks<'b, L>
 {
-    fn schedule_block_tick(&mut self, pos: [i32; 3], block: &str, delay: i32) -> bool {
+    fn schedule_block_tick(&mut self, pos: [i32; 3], block: mod_api::BlockKey, delay: i32) -> bool {
         self.level
             .native_schedule_block_tick(self.ticks, pos, block, delay)
     }

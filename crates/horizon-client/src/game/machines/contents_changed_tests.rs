@@ -108,7 +108,8 @@ impl Hooks for Observed {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         // An unbacked vehicle coordinate would select air if it were dispatched as a block.
         for block in ["minecraft:air", "minecraft:chest", "minecraft:crafter"] {
-            r.block_part(block, self.clone());
+            let block_key = r.block_key(block);
+            r.block_part(block_key, self.clone());
         }
         let kind = r.block_entity_type("depot").blocks(&[DEPOT]).build();
         r.block_entity_part(&kind, self.changes.clone()).unwrap();
@@ -143,7 +144,10 @@ fn with_changes(
     mod_api::__private::install(mods.clone());
     mod_api::__private::install_parts(&mods).unwrap();
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-    let root = crate::game::mods::content_root(&base, &Default::default()).unwrap();
+    let root = crate::game::mods::content_root(&base, &Default::default())
+        .unwrap()
+        .prepared()
+        .to_path_buf();
     with_game_at(root, |game| {
         game.options.dedicated = Some(Vec::new());
         game.world

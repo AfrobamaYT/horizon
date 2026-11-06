@@ -13,17 +13,31 @@ use horizon_core::{
 /// A baked frame model: (corners in block units, unit UVs, sprite) per quad.
 pub(super) type FrameModel = Vec<([[f32; 3]; 4], [[f32; 2]; 4], String)>;
 
+/// Item-frame variants prepared together for one resource generation.
+pub(super) fn bake_frames(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> [FrameModel; 4] {
+    [
+        "item_frame",
+        "glow_item_frame",
+        "item_frame_map",
+        "glow_item_frame_map",
+    ]
+    .map(|name| bake_frame(source, name))
+}
+
 /// Bake `block/<name>` (item_frame / glow_item_frame) from the resources.
-pub(super) fn bake_frame(root: &std::path::Path, name: &str) -> FrameModel {
+pub(super) fn bake_frame(
+    root: &horizon_assets::resource_source::ResourceSource,
+    name: &str,
+) -> FrameModel {
     let mut models = std::collections::BTreeMap::new();
     let mut pending = vec![format!("minecraft:block/{name}")];
     while let Some(model) = pending.pop() {
         let Some((ns, path)) = model.split_once(':') else {
             continue;
         };
-        let Ok(text) =
-            std::fs::read_to_string(root.join(format!("assets/{ns}/models/{path}.json")))
-        else {
+        let Ok(text) = root.read_to_string(&format!("assets/{ns}/models/{path}.json")) else {
             continue;
         };
         let Ok(m) = CuboidModel::from_json(&text) else {
@@ -198,6 +212,7 @@ impl Game<'_> {
             return true;
         }
         let frame = ItemFrame {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: self.next_entity + 1,
             pos,
@@ -299,7 +314,7 @@ impl Game<'_> {
             let Some(held) = self.held().cloned() else {
                 return false;
             };
-            self.item_frames[i].item = Some(ItemStack { count: 1, ..held });
+            self.item_frames[i].set_item(Some(held));
             action = "put";
             self.audio
                 .play(&sound(&self.item_frames[i], "add_item"), Some(at), 1.0, 1.0);
@@ -390,6 +405,21 @@ impl Game<'_> {
         }
         true
     }
+    /// `ItemFrame.setItem(stack, true)`: keeps one item, plays the add sound
+    /// for a non-empty stack and updates the comparators.
+    pub(super) fn set_frame_item(&mut self, i: usize, stack: Option<ItemStack>) {
+        let f = &mut self.item_frames[i];
+        f.set_item(stack);
+        let (pos, filled) = (f.pos, f.item.is_some());
+        if filled {
+            let (name, at) = (
+                sound(&self.item_frames[i], "add_item"),
+                center(&self.item_frames[i]),
+            );
+            self.audio.play(&name, Some(at), 1.0, 1.0);
+        }
+        self.frame_output_changed(pos);
+    }
     /// `ItemFrame.setItem` / `setRotation`: `updateNeighbourForOutputSignal`, so
     /// the comparators reading the frame take its new signal.
     fn frame_output_changed(&mut self, pos: [i32; 3]) {
@@ -401,10 +431,20 @@ impl Game<'_> {
         // The framed map forgets the frame, except when the drops are off and
         // something caused the break (`removeFramedMap` runs only for a null
         // `causedBy` then).
-        if self.ui.rules.bool("entity_drops") || !by_player {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || !by_player
+        {
             self.remove_framed_map(f);
         }
-        if !self.ui.rules.bool("entity_drops") || (by_player && self.creative) {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+            || (by_player && self.creative)
+        {
             return;
         }
         let c = center(f);
@@ -704,5 +744,19 @@ impl Game<'_> {
                 self.cull_entity_vertices(out, entity_start);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    #[test]
+    fn frame_model_reads_resolved_resources_without_files() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("assets/minecraft/models/block/item_frame.json".into(), Resource::bytes(br##"{"textures":{"x":"example:block/frame"},"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"north":{"texture":"#x"}}}]}"##.to_vec())),
+        ]));
+        let model = super::bake_frame(&source, "item_frame");
+        assert_eq!(model.len(), 1);
+        assert_eq!(model[0].2, "example:block/frame");
     }
 }

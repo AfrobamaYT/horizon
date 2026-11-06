@@ -22,7 +22,10 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 impl Game<'_> {
     /// `Mob.aiStep`'s looting block, once per mob per tick.
     pub(super) fn tick_mob_looting(&mut self) {
-        let griefing = self.ui.rules.bool("mob_griefing");
+        let griefing = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING);
         if self.dropped.is_empty() || (!griefing && !self.grief_hooked()) {
             return;
         }
@@ -32,19 +35,24 @@ impl Game<'_> {
             if !m.can_pick_up_loot()
                 || !m.alive()
                 || m.removed
+                || !self.creatures.ticked.contains(&m.id)
                 || !self.entity_grief(m.id, griefing)
             {
                 continue;
             }
             // `Mob.ITEM_PICKUP_REACH`.
             let reach = m.bounds().inflate(Vec3::new(1.0, 0.0, 1.0));
-            if !near.may_meet(&self.dropped, self.next_entity, reach) {
+            let mut scan = near.scan(&self.dropped, self.next_entity, reach);
+            if scan.is_empty() {
                 continue;
             }
             let (species, baby, passenger) = (m.species(), m.is_baby(), m.extra.passenger);
             let mut j = 0;
-            while j < self.dropped.len() {
-                let e = &self.dropped[j];
+            loop {
+                j = scan.next_from(j, self.dropped.len());
+                let Some(e) = self.dropped.get(j) else {
+                    break;
+                };
                 if e.pickup_delay > 0 || !reach.intersects(e.bounds()) {
                     j += 1;
                     continue;
@@ -75,6 +83,7 @@ impl Game<'_> {
                 e.stack.count -= taken;
                 if e.stack.count == 0 {
                     self.remove_dropped(j);
+                    scan.removed(j);
                 } else {
                     j += 1;
                 }
@@ -137,8 +146,22 @@ impl Game<'_> {
         if species == Species::Drowned && &*current == "minecraft:nautilus_shell" {
             return false;
         }
+        let new = self.stack_facts(m, stack, slot);
+        let worn = self.stack_facts(m, &worn_stack, slot);
+        let preferred = equip::preferred_weapon_tag(species).map(|tag| {
+            (
+                self.items().item_in_tag(tag, &stack.item),
+                self.items().item_in_tag(tag, &current),
+            )
+        });
+        equip::can_replace_current_item(&new, Some(&worn), slot, preferred)
+    }
+
+    /// The numbers `Mob.compareArmor` and `compareWeapons` read off `stack`
+    /// in `slot` for the mob `m`.
+    pub(super) fn stack_facts(&self, m: &Mob, stack: &ItemStack, slot: Slot) -> Facts {
         let (armor, toughness, attack) = self.attributes(m, stack, slot);
-        let new = Facts {
+        Facts {
             armor,
             armor_toughness: toughness,
             attack_damage: attack,
@@ -148,26 +171,7 @@ impl Game<'_> {
             prevents_armor_change: world_stations!(self)
                 .enchantments
                 .prevents_armor_change(stack),
-        };
-        let (armor, toughness, attack) = self.attributes(m, &worn_stack, slot);
-        let worn = Facts {
-            armor,
-            armor_toughness: toughness,
-            attack_damage: attack,
-            enchantments: worn_stack.enchantments().len(),
-            damage: worn_stack.damage as i32,
-            custom_name: worn_stack.custom_name().is_some(),
-            prevents_armor_change: world_stations!(self)
-                .enchantments
-                .prevents_armor_change(&worn_stack),
-        };
-        let preferred = equip::preferred_weapon_tag(species).map(|tag| {
-            (
-                self.items().item_in_tag(tag, &stack.item),
-                self.items().item_in_tag(tag, &current),
-            )
-        });
-        equip::can_replace_current_item(&new, Some(&worn), slot, preferred)
+        }
     }
 
     /// `Mob.getApproximateAttributeWith` for `stack` in `slot`: each

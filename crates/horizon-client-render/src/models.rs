@@ -75,7 +75,7 @@ pub struct PreparedModels {
     pub states: Vec<Value>,
 }
 pub fn prepare(
-    root: &Path,
+    root: &crate::resource_source::ResourceRoot,
     registry: &BlockRegistry,
     sprites: &mut Sprites,
 ) -> Result<PreparedModels> {
@@ -87,13 +87,13 @@ pub fn prepare(
     )
 }
 pub(crate) fn prepare_with_models(
-    root: &Path,
+    root: &crate::resource_source::ResourceRoot,
     registry: &BlockRegistry,
     sprites: &mut Sprites,
     models: &crate::model_library::ParsedModels,
 ) -> Result<PreparedModels> {
     let facts: std::collections::BTreeMap<String, Value> =
-        serde_json::from_slice(&std::fs::read(root.join("model-states.json"))?)?;
+        horizon_world::json_file::read(&root.prepared().join("model-states.json"))?;
     let blocks: Vec<&str> = facts
         .keys()
         .filter(|name| registry.default_state(name).is_some())
@@ -101,11 +101,18 @@ pub(crate) fn prepare_with_models(
         .collect();
     let mut catalog = {
         let _step = crate::spans::startup::step("core.bake_states");
-        StateModels::from_facts_with_models(root, registry, &blocks, sprites, &facts, models)?
+        StateModels::from_facts_with_models(
+            root.source(),
+            registry,
+            &blocks,
+            sprites,
+            &facts,
+            models,
+        )?
     };
     {
         let _step = crate::spans::startup::step("core.bake_standalone");
-        catalog.bake_standalone(root, sprites, models, standalone())?;
+        catalog.bake_standalone(root.source(), sprites, models, standalone())?;
     }
     let mut placements = Vec::new();
     let mut states = Vec::new();
@@ -158,11 +165,11 @@ pub fn load_visibility(
         collision::CachedCollisionRegistry,
         registry::BlockTableFile,
     };
-    use std::{collections::BTreeMap, fs};
+    use std::collections::BTreeMap;
     let file = BlockTableFile::open(&root.join("occlusion.nbt"), registry)?;
     let occlusion = CachedCollisionRegistry::from_table(file.table("occlusion")?)?;
     let raw: BTreeMap<String, Value> =
-        serde_json::from_slice(&fs::read(root.join("render-definitions.json"))?)?;
+        horizon_world::json_file::read(&root.join("render-definitions.json"))?;
     let definitions = raw
         .into_iter()
         .map(|(name, v)| {

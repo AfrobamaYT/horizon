@@ -137,11 +137,13 @@ impl Game<'_> {
                     Target::Guest(conn) => Some(conn),
                     _ => None,
                 };
-                let Some(g) = conn.and_then(|conn| self.lan.as_mut()?.hub.guest_mut(conn)) else {
-                    return false;
-                };
-                g.head_yaw = yaw;
-                true
+                conn.and_then(|conn| {
+                    self.lan
+                        .as_mut()?
+                        .hub
+                        .update_guest(conn, |g| g.head_yaw = yaw)
+                })
+                .is_some()
             }
             _ => false,
         }
@@ -174,29 +176,37 @@ impl Game<'_> {
                 Target::Guest(conn) => Some(conn),
                 _ => None,
             };
-            let Some(g) = conn.and_then(|conn| self.lan.as_mut()?.hub.guest_mut(conn)) else {
+            let Some(conn) = conn else {
                 return false;
             };
-            let motion = if matches!(target, Target::Player) {
-                self.player.as_mut()
-            } else {
-                g.motion.as_deref_mut()
-            };
-            let Some(motion) = motion else {
+            let Some(host) = self.lan.as_mut() else {
                 return false;
             };
-            let v = motion.velocity;
-            motion.velocity = Vec3::new(v.x + delta[0], v.y + delta[1], v.z + delta[2]);
-            let v = motion.velocity;
-            g.send(
-                &horizon_protocol::packets::play::Clientbound::SetEntityMotion(
-                    horizon_protocol::packets::play::SetEntityMotion {
-                        id: g.entity_id,
-                        velocity: [v.x, v.y, v.z],
-                    },
-                ),
-            );
-            return true;
+            return host
+                .hub
+                .update_guest(conn, |g| {
+                    let motion = if matches!(target, Target::Player) {
+                        self.player.as_mut()
+                    } else {
+                        g.motion.as_deref_mut()
+                    };
+                    let Some(motion) = motion else {
+                        return false;
+                    };
+                    let v = motion.velocity;
+                    motion.velocity = Vec3::new(v.x + delta[0], v.y + delta[1], v.z + delta[2]);
+                    let v = motion.velocity;
+                    g.send(
+                        &horizon_protocol::packets::play::Clientbound::SetEntityMotion(
+                            horizon_protocol::packets::play::SetEntityMotion {
+                                id: g.entity_id,
+                                velocity: [v.x, v.y, v.z],
+                            },
+                        ),
+                    );
+                    true
+                })
+                .unwrap_or(false);
         }
         let Some(h) = self.native_walk_entity(entity.id()) else {
             return false;
@@ -287,6 +297,7 @@ mod tests {
             assert_eq!(marker.head_yaw(game), Some(0.0));
             assert!(!marker.set_head_yaw(game, 10.0));
             game.paintings.push(horizon_client::entities::Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id: 15,
                 pos: [0, 64, 0],

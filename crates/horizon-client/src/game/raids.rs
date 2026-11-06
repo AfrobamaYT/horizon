@@ -52,7 +52,24 @@ struct Siege {
     spot: [i32; 3],
 }
 
+/// A level's living raid members, in mob-list order.
+pub(super) fn members(mobs: &[Mob], id: i32) -> impl Iterator<Item = &Mob> {
+    mobs.iter().filter(move |m| {
+        m.alive() && !m.removed && raider::state(m).is_some_and(|s| s.raid_id == Some(id))
+    })
+}
+
 impl Raiding {
+    pub(super) fn raids(&self, dimension: &str) -> Option<&Raids> {
+        self.loaded
+            .filter(|dim| dim.id() == dimension)
+            .map(|_| &self.raids)
+    }
+    pub(super) fn raids_mut(&mut self, dimension: &str) -> Option<&mut Raids> {
+        self.loaded
+            .filter(|dim| dim.id() == dimension)
+            .map(|_| &mut self.raids)
+    }
     /// Exchange the level-held parts (`ServerLevel.getRaids`) with another
     /// level's (game/levels.rs).
     pub(super) fn swap_level(&mut self, other: &mut Self) {
@@ -185,7 +202,11 @@ impl SpawnLevel for PatrolCx<'_, '_, '_> {
 }
 impl PatrolLevel for PatrolCx<'_, '_, '_> {
     fn spawn_patrols(&self) -> bool {
-        self.level.game.ui.rules.bool("spawn_patrols")
+        self.level
+            .game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_PATROLS)
     }
     fn bright_outside(&self) -> bool {
         self.level.game.dim == Dim::Overworld && self.level.game.sky_darken() < 4
@@ -434,9 +455,16 @@ impl Game<'_> {
     /// `Raids.createOrExtendRaid`: not for spectators, with the `raids` rule
     /// and where raids may start; the raid centres on the occupied village
     /// points of interest within 64 blocks.
-    fn create_or_extend_raid(&mut self, at: [i32; 3], amplifier: Option<i32>) -> Option<i32> {
+    pub(super) fn create_or_extend_raid(
+        &mut self,
+        at: [i32; 3],
+        amplifier: Option<i32>,
+    ) -> Option<i32> {
         if self.spectator()
-            || !self.ui.rules.bool("raids")
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::RAIDS)
             || !self.gameplay_attribute(horizon_client::patrol::CAN_START_RAID, at)
         {
             return None;
@@ -452,13 +480,19 @@ impl Game<'_> {
         if triggered {
             self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
-            self.native_raid_state_change(id, center, "triggered");
+            if let Some(level) = self.native_level(self.dim.id()) {
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    center,
+                    "triggered",
+                );
+            }
         }
         Some(id)
     }
     /// The raids of the level in place, once they are read (`read_raids`).
     pub(super) fn raids_in_place(&self) -> Option<&Raids> {
-        (self.raiding.loaded == Some(self.dim)).then_some(&self.raiding.raids)
+        self.raiding.raids(self.dim.id())
     }
     /// `ServerLevel.getRaidAt`.
     pub(super) fn raiding_nearby(&self, at: [i32; 3]) -> Option<i32> {
@@ -480,19 +514,14 @@ impl Game<'_> {
         true
     }
     pub(super) fn raid_command_stop(&mut self, id: i32) {
-        if let Some(r) = self.raiding.raids.get_mut(id) {
-            r.stop();
-            let center = r.center;
-            self.native_raid_state_change(id, center, "stopped");
+        if let Some(center) = self.raiding.raids.stop(id)
+            && let Some(level) = self.native_level(self.dim.id())
+        {
+            self.native_raid_state_change(mod_api::RaidRef::new(level, id), center, "stopped");
         }
     }
     pub(super) fn raid_set_omen(&mut self, id: i32, level: i32) -> i32 {
-        let Some(r) = self.raiding.raids.get_mut(id) else {
-            return 0;
-        };
-        let before = std::mem::replace(&mut r.omen_level, level);
-        self.raiding.raids.dirty = true;
-        before
+        self.raiding.raids.set_omen_level(id, level).unwrap_or(0)
     }
     pub(super) fn raid_glow(&mut self, id: i32) {
         for m in &mut self.mobs {
@@ -519,9 +548,7 @@ impl Game<'_> {
     }
     /// A raid's members (`groupRaiderMap`): the living raiders it counts.
     pub(super) fn raid_members(&self, id: i32) -> impl Iterator<Item = &Mob> {
-        self.mobs.iter().filter(move |m| {
-            m.alive() && !m.removed && raider::state(m).is_some_and(|s| s.raid_id == Some(id))
-        })
+        members(&self.mobs, id)
     }
     /// `getHealthOfLivingRaiders`, leaving out one raider.
     fn raid_living_health(&self, id: i32, except: Option<u32>) -> f32 {
@@ -642,14 +669,25 @@ impl Game<'_> {
                 centers: &centers,
             };
             let members = |id: i32| infos.get(&id).cloned().unwrap_or_default();
-            raids.tick(&lvl, self.ui.rules.bool("raids"), &members)
+            raids.tick(
+                &lvl,
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::RAIDS),
+                &members,
+            )
         };
         self.raiding.raids = raids;
         for (id, (old, _)) in old_states {
             if let Some(r) = self.raiding.raids.get(id)
                 && r.status != old
+                && let Some(level) = self.native_level(self.dim.id())
             {
-                self.native_raid_state_change(id, r.center, r.status.name());
+                self.native_raid_state_change(
+                    mod_api::RaidRef::new(level, id),
+                    r.center,
+                    r.status.name(),
+                );
             }
         }
         for (id, action) in actions {
@@ -1242,14 +1280,19 @@ impl Game<'_> {
     /// bed or bell a villager has taken): `PoiManager.isVillageCenter`.
     pub(super) fn village_centers(&self) -> HashSet<(i32, i32, i32)> {
         let mut out = HashSet::new();
+        let world = self.mob_world_base(&[]);
         for m in &self.mobs {
             if m.species() != Species::Villager || !m.alive() {
                 continue;
             }
-            for p in [m.extra.home, m.extra.bed, m.extra.meeting]
-                .into_iter()
-                .flatten()
-            {
+            // A remembered HOME is no longer an occupied village POI once its
+            // loaded bed head disappears. An unavailable chunk remains unknown.
+            let bed = m.extra.bed.filter(|&[x, y, z]| {
+                !self.world.loaded(x, z)
+                    || horizon_client::mobs::villager_brain::poi_at(&world, x, y, z)
+                        == Some(horizon_world::poi::PoiType::Home)
+            });
+            for p in [m.extra.home, bed, m.extra.meeting].into_iter().flatten() {
                 out.insert(section(p));
             }
         }
@@ -1283,7 +1326,14 @@ impl Game<'_> {
                 game.world.day_time,
             )
         };
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         let mut random = std::mem::replace(
             &mut self.world.random,
             horizon_core::random::LegacyRandom::new(0),
@@ -1324,7 +1374,14 @@ impl Game<'_> {
         if self.dim != Dim::Overworld {
             return;
         }
-        let enemies = self.ui.rules.bool("spawn_mobs") && self.ui.rules.bool("spawn_monsters");
+        let enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         if self.sky_darken() < 4 || !enemies {
             self.raiding.siege.tonight = false;
             self.raiding.siege.set_up = false;
@@ -1539,3 +1596,95 @@ mod tests {
         assert_eq!(section([-1, -17, 15]), (-1, -2, 0));
     }
 }
+
+impl Game<'_> {
+    /// Read-only command-harness observation of the existing raid state and inputs.
+    pub(in crate::game) fn raid_fixture_state(
+        &self,
+        op: &serde_json::Value,
+    ) -> horizon_client::Result<serde_json::Value> {
+        use serde_json::json;
+        let id = op["id"].as_i64().ok_or("raid observation: missing id")? as i32;
+        let mut state = json!({"id":id,"present":self.raiding.raids.get(id).is_some()});
+        if let Some(r) = self.raiding.raids.get(id) {
+            state["status"] = json!(r.status.name());
+            state["started"] = json!(r.started);
+            state["active"] = json!(r.active);
+            state["groups_spawned"] = json!(r.groups_spawned);
+            state["center"] = json!(r.center);
+            // Observe the production answer; never substitute a corrected POI test here.
+            state["village"] = json!(Self::is_village(&self.village_centers(), r.center));
+            if op["members"].as_bool() == Some(true) {
+                state["member_present"] = json!(self.raid_members(id).next().is_some());
+            }
+        }
+        let observe = |m: &Mob| -> horizon_client::Result<serde_json::Value> {
+            let uuid = self
+                .persist
+                .uuids
+                .get(&m.id)
+                .copied()
+                .ok_or("raid observation: actor UUID is not registered")?;
+            let tag = horizon_client::entity_nbt::mob_to_nbt(
+                m,
+                uuid,
+                self.persist.raw.get(&m.id),
+                Some(self.pack.assets.registry),
+                |other| self.persist.uuid_of(other),
+            );
+            Ok(json!({"uuid":uuid,"type":m.kind.id,"health":m.health,
+                "pos":[m.position.x,m.position.y,m.position.z],"noai":m.no_ai,
+                "home":m.extra.bed.map(|p| p.to_vec()).unwrap_or_default(),
+                "raid_id":raider::state(m).and_then(|s|s.raid_id).unwrap_or(-1),
+                "nbt":horizon_client::snbt::to_snbt(&tag)}))
+        };
+        let actors = self
+            .raid_members(id)
+            .map(observe)
+            .collect::<horizon_client::Result<Vec<_>>>()?;
+        let mut villagers = Vec::new();
+        for uuid in op["villagers"]
+            .as_array()
+            .ok_or("raid observation: missing villagers")?
+        {
+            let uuid = u128::from_str_radix(
+                &uuid
+                    .as_str()
+                    .ok_or("raid observation: invalid UUID")?
+                    .replace('-', ""),
+                16,
+            )?;
+            let Some(super::commands::Target::Mob(id)) = self.target_by_uuid(uuid) else {
+                return Err("raid observation: villager UUID missing/wrong type".into());
+            };
+            let m = self
+                .mobs
+                .iter()
+                .find(|m| m.id == id && m.species() == Species::Villager)
+                .ok_or("raid observation: actor is not a villager")?;
+            villagers.push(observe(m)?);
+        }
+        let pos: [i32; 3] =
+            std::array::from_fn(|i| op["poi"][i].as_i64().unwrap_or(i64::MIN) as i32);
+        let loaded = self.world.loaded(pos[0], pos[2]);
+        let live_poi = loaded.then(|| {
+            let w = self.mob_world_base(&[]);
+            format!(
+                "{:?}",
+                horizon_client::mobs::villager_brain::poi_at(&w, pos[0], pos[1], pos[2])
+            )
+        });
+        eprintln!(
+            "raid input raw: {}",
+            json!({"label":op["label"],"id":id,"loaded":loaded,
+            "live_poi":live_poi,"claimed_pois":self.village_pois(),
+            "raid_nbt":horizon_client::snbt::to_snbt(&self.raiding.raids.to_nbt()),
+            "actors":actors,"villagers":villagers})
+        );
+        Ok(state)
+    }
+}
+
+#[cfg(test)]
+#[path = "raids/tests/bed_loss.rs"]
+mod bed_loss_tests;

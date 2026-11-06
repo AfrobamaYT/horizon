@@ -122,7 +122,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_changed"
     )]
     fn block_changed();
     /// An authoritative server is about to deliver `neighborChanged`.
@@ -136,7 +136,7 @@ pub trait Hooks {
         scope = "block",
         key = "state",
         version = 2,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_neighbor_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_neighbor_changed"
     )]
     fn neighbor_changed();
     /// An authoritative server's `ServerLevel.tickChunk` is about to
@@ -154,7 +154,7 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_random_tick"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_random_tick"
     )]
     fn random_tick();
     /// An authoritative server's `ServerLevel.tickBlock` is about to run a
@@ -169,7 +169,7 @@ pub trait Hooks {
         out = "handled",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_tick_block"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_tick_block"
     )]
     fn tick_block();
     /// An authoritative server is about to compute the state the block
@@ -191,7 +191,7 @@ pub trait Hooks {
         out = "new",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_update_shape"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_update_shape"
     )]
     fn update_shape(
         dimension: LevelDimension,
@@ -229,10 +229,7 @@ pub trait Hooks {
     /// The minimap a native mod shows: set `minimap` when it is none yet.
     #[hook(side = "client", contract = "replace", out = "minimap")]
     fn minimap();
-    /// Options > Mods lists the native mods: push yours.
-    #[hook(side = "both", contract = "collect", out = "mods")]
-    fn mods();
-    /// The buttons of mod `mod_id`'s settings page, under its keys: push
+    /// The buttons of mod `mod_id`'s settings page: push
     /// their labels when it is yours. Asked again each time the page opens
     /// and after each click.
     #[hook(side = "both", contract = "collect", out = "buttons")]
@@ -255,7 +252,7 @@ pub trait Hooks {
         out = "entity",
         scope = "block_entity",
         key = "block",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_entity"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_entity"
     )]
     fn block_entity();
     /// Whether block `block`'s block entity ticks (`EntityBlock.getTicker`):
@@ -379,14 +376,18 @@ pub trait Hooks {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out.
+    /// name vanilla has is left out. Each executable usage keeps its own
+    /// permission level; a lower-level child only opens traversal through a
+    /// shared prefix, not execution of that prefix.
     #[hook(side = "server", contract = "collect", out = "commands")]
     fn register_commands();
     /// A player's command on the server (`Commands.performCommand`),
-    /// without its slash, for a command a mod registered and the player's
-    /// level allows: set `ran` when it is yours. The player's state is
+    /// parsed into `command` with typed, source-resolved arguments, for a command
+    /// a mod registered and the player's level allows: set `ran` when it is yours.
+    /// Missing optional arguments are absent; parsing or resolution failures never
+    /// reach listeners. The player's state is
     /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `native_feedback` answers them. A single player's
+    /// read that player; `host.commands().feedback()` answers them. A single player's
     /// owner console (`horizon-ctl command`) reaches it too, as the owner at
     /// level 4.
     #[hook(side = "server", contract = "cancel", out = "ran")]
@@ -508,7 +509,7 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "canceled",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_spread"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_spread"
     )]
     fn block_spread();
     /// On an authoritative server, the piston at `piston` is about to push
@@ -525,7 +526,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "PistonEvent.Pre",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_pre"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_piston_pre"
     )]
     fn piston_pre(
         dimension: LevelDimension,
@@ -547,7 +548,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "PistonEvent.Post",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_piston_post"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_piston_post"
     )]
     fn piston_post();
     /// An explosion at `center` in `dimension` (`minecraft:overworld`) is
@@ -559,7 +560,7 @@ pub trait Hooks {
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
     /// and the bucket does nothing. Server-side, for every player of the
-    /// world (`native_acting_player` says who).
+    /// world (`host.players().acting_player()` says who).
     #[hook(side = "server", contract = "cancel", out = "canceled")]
     fn fill_bucket();
     /// A player attacks the entity `entity` (`Entity.getId`) of type `kind`
@@ -567,7 +568,7 @@ pub trait Hooks {
     /// at `pos`: `ServerGamePacketListenerImpl.handleInteract`'s attack, once
     /// in reach, where `Player.attack` starts. Set `canceled` and the blow
     /// does nothing (no damage, no knockback, the frame keeps its item).
-    /// Server-side, for every player of the world (`native_acting_player`
+    /// Server-side, for every player of the world (`host.players().acting_player()`
     /// says who).
     #[hook(side = "server", contract = "cancel", out = "canceled")]
     fn attack_entity();
@@ -647,7 +648,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_signal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_signal"
     )]
     fn block_signal();
     /// `BlockState.isSignalSource`: set `source` for a block of yours that
@@ -658,7 +659,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_signal_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_signal_source"
     )]
     fn is_signal_source();
     /// The player-health HUD rows, once a frame the HUD draws them
@@ -752,7 +753,7 @@ pub trait Hooks {
         out = "canceled",
         host = "level",
         neoforge = "LivingIncomingDamageEvent",
-        target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_incoming_damage"
+        target = "horizon_client::game::native_hooks::base::HitLevel<'_>::native_living_incoming_damage"
     )]
     fn living_incoming_damage(
         entity: i32,
@@ -787,16 +788,16 @@ pub trait Hooks {
     #[hook(side = "server", contract = "replace", out = "fluids", host = "read")]
     fn block_entity_fluids();
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
-    /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
+    /// `effect` (an `EffectKey` for `ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
     /// the ticks left (the entity's tick count when infinite). Set `apply`
     /// and `native_apply_effect_tick` follows. Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn should_apply_effect_tick_this_tick();
-    /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
+    /// `MobEffect.applyEffectTick`: the content mod's resolved `EffectKey` `effect` acts on
     /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
     /// effect ends now, before it counts down. `entity` is a mob's
-    /// `Entity.getId`, None for a player (`native_acting_player` says who).
+    /// `Entity.getId`, None for a player (`host.players().acting_player()` says who).
     /// It runs inside the entity's tick: a mob's world borrows the game
     /// there, so the game is read-only, and it does not hold the ticking
     /// mobs, nor the player's effects. `holder` identifies the holder; Host
@@ -805,7 +806,7 @@ pub trait Hooks {
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn apply_effect_tick(
-        effect: &str,
+        effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
         amplifier: i32,
@@ -853,14 +854,14 @@ pub trait Hooks {
     fn chunk_unload();
     /// `player` (`name`) joined the game (NeoForge's
     /// `PlayerLoggedInEvent`): placed in the world and listed in
-    /// `native_server_players`, so `native_net_send_to_player` reaches them.
+    /// `host.players().server_players()`, so `native_net_send_to_player` reaches them.
     /// Once a join, with no player's state swapped in. Server-side.
     #[hook(side = "server", contract = "listen")]
     fn player_logged_in();
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
     /// any path: a lost connection, a kick, the server stopping or failing.
     /// Once for each player `native_player_logged_in` told of. They've already
-    /// left `native_server_players`, except when the server stops, which tells
+    /// left `host.players().server_players()`, except when the server stops, which tells
     /// before it saves, with them still listed and able to get a last message.
     /// Server-side.
     #[hook(side = "server", contract = "listen")]
@@ -897,7 +898,7 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_has_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_has_analog_output"
     )]
     fn has_analog_output();
     /// `BlockState.getAnalogOutputSignal`: the signal a comparator reads from
@@ -918,7 +919,7 @@ pub trait Hooks {
         out = "output",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_analog_output"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_analog_output"
     )]
     fn analog_output();
     /// Register namespaced NBT component types before content loads.
@@ -977,7 +978,7 @@ pub trait Hooks {
         out = "survives",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_can_survive"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_can_survive"
     )]
     fn can_survive();
     /// On an authoritative server, `VegetationBlock.mayPlaceOn` for the
@@ -993,7 +994,7 @@ pub trait Hooks {
         out = "may",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_may_place_on"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_may_place_on"
     )]
     fn may_place_on();
     /// Draw the mod block entity at `pos`, of block `block`
@@ -1050,7 +1051,7 @@ pub trait Hooks {
         out = "valid",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_valid_bonemeal_target"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_valid_bonemeal_target"
     )]
     fn is_valid_bonemeal_target();
     /// `BonemealableBlock.isBonemealSuccess` for a block that answered
@@ -1065,7 +1066,7 @@ pub trait Hooks {
         out = "success",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_is_bonemeal_success"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_is_bonemeal_success"
     )]
     fn is_bonemeal_success();
     /// `BonemealableBlock.performBonemeal` for a block that answered
@@ -1079,7 +1080,7 @@ pub trait Hooks {
         contract = "listen",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_perform_bonemeal"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_perform_bonemeal"
     )]
     fn perform_bonemeal();
     /// `Block.stepOn` for a mod block, on its authoritative server level.
@@ -1149,7 +1150,8 @@ pub trait Hooks {
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns
     /// `Some(Some(state))` to choose a state, `Some(None)` to refuse, or
-    /// `None` to leave the answer to the next mod or vanilla.
+    /// `None` to leave the answer to the next mod or vanilla. Changes to the event's fluid
+    /// copy are mod-provided data forwarded to later Parts, never consumed by the engine.
     /// Authoritative servers only.
     #[hook(
         side = "server",
@@ -1157,7 +1159,7 @@ pub trait Hooks {
         out = "answer",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_state_for_placement"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_state_for_placement"
     )]
     fn state_for_placement();
     /// A `minecraft:post_attack` effect of a mod's own kind, on a mob a
@@ -1294,7 +1296,9 @@ pub trait Hooks {
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not
-    /// (`client_setup` is the once-only moment after the initial load).
+    /// (`client_setup` is the once-only moment after the initial load). Runs in
+    /// Reloading: published asset/data queries may refresh caches, but world
+    /// handles and transactions remain unavailable.
     #[hook(side = "client", contract = "listen")]
     fn client_resources_reloaded();
     /// Append an item's custom decorations after its default bar, cooldown and count.
@@ -1329,13 +1333,11 @@ pub trait Hooks {
         host = "read"
     )]
     fn use_duration();
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, for first- and third-person
+    /// rendering. `animation` arrives with the item's vanilla answer; mods may
+    /// change it. A `Spear` override on an item without kinetic data is refused
+    /// as `None`. Asked on the client when each render consumer updates; answer
+    /// from the stack alone.
     #[hook(side = "client", contract = "listen", scope = "item", key = "stack")]
     fn use_animation();
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
@@ -1348,7 +1350,7 @@ pub trait Hooks {
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
     /// ticks (`native_use_duration`'s answer). `entity` is a mob's
-    /// `Entity.getId`, None for a player (`native_acting_player` says who);
+    /// `Entity.getId`, None for a player (`host.players().acting_player()` says who);
     /// only players fire it so far. Change `duration` (consumables, potions,
     /// spyglasses and mods' items count to it; below 0 refuses the use, and
     /// 0 runs it out on its first tick, as `native_living_entity_use_item_tick`
@@ -1418,7 +1420,7 @@ pub trait Hooks {
     /// `canceled` to stop it: nothing runs and nothing is answered but the
     /// lines pushed to `replies`, which go to the player as system chat.
     /// No player's state is swapped in and the server's player list is busy
-    /// with this one, so `native_tell` and the other helpers that take a UUID
+    /// with this one, so `PlayerRef::tell` and the other player helpers
     /// reach nobody here: answer through `replies`. Once for each command a
     /// player sends, on a server, and for each line of a quiet command batch
     /// (`horizon:quiet_commands`, whose replies are dropped). A command the
@@ -1434,10 +1436,13 @@ pub trait Hooks {
     fn player_command();
     /// A command a mod registered, typed on the dedicated server's console
     /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
-    /// when it is yours. There is no player: the source is the console, at
-    /// permission level 4, so `native_acting_player` is None and the
-    /// player-only helpers give nothing; `native_feedback` answers on the
+    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
+    /// typed arguments: set `ran` when it is yours. Relative coordinates and
+    /// selectors use the console at the Overworld spawn, with zero rotation.
+    /// Missing optional arguments are absent; invalid input never reaches listeners.
+    /// There is no player: the source is the console, at
+    /// permission level 4, so `host.players().acting_player()` is None and the
+    /// player-only helpers give nothing; `host.commands().feedback()` answers on the
     /// console. A name no mod registered goes to vanilla's dispatcher as
     /// before.
     #[hook(side = "server", contract = "cancel", out = "ran")]
@@ -1536,7 +1541,9 @@ pub trait Hooks {
     /// players were sent the new data. The place to
     /// drop caches derived from the data and to rebind what depends on it.
     /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
+    /// connected to a server never fires it. Runs in Reloading: published
+    /// asset/data queries can rebind caches, including on first open; world
+    /// handles and transactions remain unavailable.
     #[hook(side = "server", contract = "listen")]
     fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
@@ -1781,7 +1788,7 @@ pub trait Hooks {
         out = "canceled",
         host = "level",
         neoforge = "LivingKnockBackEvent",
-        target = "horizon_client::game::native_hooks::HitLevel<'_>::native_living_knockback"
+        target = "horizon_client::game::native_hooks::base::HitLevel<'_>::native_living_knockback"
     )]
     fn living_knockback(
         entity: i32,
@@ -1817,20 +1824,15 @@ pub trait Hooks {
         cancellable = true
     )]
     fn experience_orb_merge();
-    /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/*.rs`
-    /// with the game's): container slot `slot` of the content mod menu type `menu`
-    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
-    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
-    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
-    /// `results`, true elsewhere, and 99): change them for your own menu types.
-    /// `max_stack` is kept to 1 to 99,
-    /// and the item's own stack size still caps it. Asked on the server, for each
-    /// click, drag and shift-click that puts an item in a slot, several times for
-    /// one shift-click: answer from `stack` and `context` alone, and fast. `context`
-    /// holds the side, the registries and the settings of the resource generation;
-    /// a `/reload` builds the next one.
+    /// Slot placement and stack limits for registered vanilla and mod menus;
+    /// mounts use `horizon:mount_inventory`, while player inventory and the
+    /// creative picker have no registered type. `slot` is the backing index,
+    /// including player inventory slots. The slot's own answers arrive first;
+    /// the maximum is bounded to 1–99 and the item limit. Refusal also prevents
+    /// quick-move top-ups. Runs in the restricted context on server and client
+    /// prediction; answer from the stack and context alone, and fast.
     #[hook(
-        side = "server",
+        side = "both",
         contract = "listen",
         scope = "menu",
         key = "menu",
@@ -2369,7 +2371,7 @@ pub trait Hooks {
     /// afterwards). Rewrite `lines` (made four lines again) and that is what
     /// the sign gets, without a second look from the chat filter, or set
     /// `cancel` and the sign keeps its old text. With the player's state
-    /// swapped in, so `native_tell` and the helpers that act on the player
+    /// swapped in, so `PlayerRef::tell` and the helpers that act on the player
     /// reach them. Once for each update a player sends on a server. Not told:
     /// the host's own editing of a sign on a LAN or single-player world
     /// (the editor writes into their world directly), and the sign changes
@@ -2448,7 +2450,7 @@ pub trait Hooks {
     /// A player's client started (`flying`) or stopped flying (vanilla's
     /// `handlePlayerAbilities`, which honours it only for a player who may
     /// fly: creative or spectator), heard once for each change, on a server,
-    /// with the player's state swapped in, so `native_tell` and the other
+    /// with the player's state swapped in, so `PlayerRef::tell` and the other
     /// helpers reach them. The player is already flying or not as asked, as
     /// vanilla leaves them; set `cancel` to refuse it: they keep the state
     /// they had and the server sends their abilities back, as vanilla does
@@ -2503,7 +2505,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BellRingEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_bell_ring"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_bell_ring"
     )]
     fn bell_ring();
     /// A server guest's block-breaking animation changed to `progress` at
@@ -2522,7 +2524,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockBurnEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_burn"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_burn"
     )]
     fn block_burn();
     /// A block finished cooking `item` into `result` at `pos`.
@@ -2559,7 +2561,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_fade"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_fade"
     )]
     fn block_fade();
     /// A dispenser at `pos` failed to dispense `item`. Server-side.
@@ -2577,7 +2579,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_form"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_form"
     )]
     fn block_form();
     /// On an authoritative server, fire is about to be placed at `pos` by
@@ -2590,7 +2592,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's BlockIgniteEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_block_ignite"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_block_ignite"
     )]
     fn block_ignite();
     /// A guest's block inventory lock check at `pos`. `locked` is the
@@ -2669,7 +2671,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_cauldron_level_changed"
     )]
     fn cauldron_level_changed(
         dimension: LevelDimension,
@@ -2689,7 +2691,7 @@ pub trait Hooks {
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. The player's state is swapped in
-    /// (`native_acting_player`). Foxes are not heard. Diverges from upstream: renamed from
+    /// (`host.players().acting_player()`). Foxes are not heard. Diverges from upstream: renamed from
     /// `chorus_fruit_teleport`.
     #[hook(
         side = "server",
@@ -2764,7 +2766,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_dragon_egg_form"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
     fn dragon_egg_form();
     /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in.
@@ -2783,7 +2785,7 @@ pub trait Hooks {
     /// `damage` (0 or less: none). Canceling
     /// keeps the player where they are: no endermite roll, no teleport, no
     /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`native_acting_player`). The hit itself is
+    /// state is swapped in (`host.players().acting_player()`). The hit itself is
     /// heard by `native_projectile_impact`.
     #[hook(
         side = "server",
@@ -2970,7 +2972,7 @@ pub trait Hooks {
         out = "odds",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fire_odds"
     )]
     fn fire_odds();
     /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
@@ -2984,7 +2986,7 @@ pub trait Hooks {
         out = "smoke",
         scope = "block",
         key = "state",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_smoke_source"
     )]
     fn smoke_source();
     /// A firework rocket completed its explosion effects.
@@ -3003,7 +3005,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_level_change"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fluid_level_change"
     )]
     fn fluid_level_change();
     /// The frame rate this window is about to be held to: Max Framerate after the
@@ -3064,7 +3066,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_hopper_pickup_item"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_hopper_pickup_item"
     )]
     fn hopper_pickup_item();
     /// A recipe ingredient of a mod's own kind: the entry named a type in a
@@ -3167,7 +3169,7 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)",
         paper = "LeavesDecayEvent",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_leaves_decay"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_leaves_decay"
     )]
     fn leaves_decay();
     /// A server lightning bolt is about to be created. `cause` is `weather`,
@@ -3202,7 +3204,7 @@ pub trait Hooks {
     /// longer valid, nor during a drag.
     /// Asked once per click, where vanilla asks `quickMoveStack` again while
     /// it keeps moving the same item. The player's state is swapped in, so
-    /// `native_acting_player` names them; `entity` is out of the world
+    /// `host.players().acting_player()` names them; `entity` is out of the world
     /// during the call, as in `native_menu_button`.
     #[hook(
         side = "server",
@@ -3222,7 +3224,7 @@ pub trait Hooks {
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
         cancellable = true,
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_moisture_change"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_moisture_change"
     )]
     fn moisture_change();
     /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled.
@@ -3266,7 +3268,7 @@ pub trait Hooks {
     /// empties `minecraft:water`): where `BucketItem.use` has found the block
     /// the fluid goes into and the player may build there, right before it is
     /// placed. Set `cancel` and nothing is poured and the bucket stays full.
-    /// The player's state is swapped in, so `native_tell` answers them. Only
+    /// The player's state is swapped in, so `PlayerRef::tell` answers them. Only
     /// for guests of a server. `native_fill_bucket` hears this click too (and
     /// the filling one) without the player and the fluid. Not heard: a
     /// dispenser, a cauldron, and a fluid a block places itself.
@@ -3289,7 +3291,7 @@ pub trait Hooks {
     /// spectator) and before the menu that was open closes. Set `cancel` and
     /// nothing opens: the open menu stays as it was and the click is spent.
     /// The player's state is swapped in for the call, as for
-    /// `native_perform_command`, so `native_acting_player`, `native_tell` and
+    /// `native_perform_command`, so `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
@@ -3310,8 +3312,8 @@ pub trait Hooks {
     /// packet passed vanilla's checks (a creative player, a real slot, a valid
     /// stack) and before the slot changes or the stack drops. Set `cancel`
     /// and the packet is ignored. The player's state is swapped in for the
-    /// call, as for `native_perform_command`, so `native_acting_player`,
-    /// `native_tell` and the item helpers reach them. Not heard: stacks a
+    /// call, as for `native_perform_command`, so `host.players().acting_player()`,
+    /// `PlayerRef::tell` and the item helpers reach them. Not heard: stacks a
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
     #[hook(
@@ -3329,8 +3331,8 @@ pub trait Hooks {
     /// included. Heard once for the change a player's turn made as a whole, so
     /// two changes in one tick arrive as one. Not heard: the full food bar a
     /// respawn gives, the food a player joins with and the host of a LAN
-    /// world. The player's state is swapped in, so `native_acting_player`,
-    /// `native_tell` and the item helpers reach them. On a server.
+    /// world. The player's state is swapped in, so `host.players().acting_player()`,
+    /// `PlayerRef::tell` and the item helpers reach them. On a server.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -3341,7 +3343,7 @@ pub trait Hooks {
     /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
     /// a painting (`minecraft:painting`), `kind` its entity type and `pos` the
     /// block it hangs in, is about to break: a server player's hit
-    /// (`player`, their state swapped in, so `native_tell` answers them), a
+    /// (`player`, their state swapped in, so `PlayerRef::tell` answers them), a
     /// blast, or the wall it hangs on gone (`player` None for both). Where
     /// `BlockAttachedEntity.hurtServer` and its survival check would kill
     /// it, before anything drops or sounds. Set `cancel` and it stays, as it
@@ -3363,7 +3365,7 @@ pub trait Hooks {
     /// `HangingEntityItem.useOn` and `LeadItem.useOn` create it, once it is
     /// known to fit and before anything is placed or used up. Set `cancel`
     /// and nothing is placed: the item stays in the player's hand. The
-    /// player's state is swapped in, so `native_tell` answers them. Only for
+    /// player's state is swapped in, so `PlayerRef::tell` answers them. Only for
     /// guests of a server; `/summon`, a dispenser and the game's own player
     /// are not heard, nor is a lead tied to a mob or a boat.
     #[hook(
@@ -3381,7 +3383,7 @@ pub trait Hooks {
     /// is not heard for a creative player's tools (they take no wear) nor when
     /// Unbreaking already saved the item, nor for the wear of a mob's armour or
     /// of a tool a dispenser uses, nor the host of a LAN world. The player's
-    /// state is swapped in, so `native_acting_player`, `native_tell` and the
+    /// state is swapped in, so `host.players().acting_player()`, `PlayerRef::tell` and the
     /// item helpers reach them. Once for each wear, on a server.
     #[hook(
         side = "server",
@@ -3399,8 +3401,8 @@ pub trait Hooks {
     /// death's is placed for good (a bed or anchor, or the world spawn's
     /// free column, after the fallback when a respawn block was gone). The
     /// level of `to` is the one in place, and the player's state is swapped
-    /// in, as for `native_perform_command`: `native_acting_player`,
-    /// `native_tell`, the item helpers and the rest reach them. Heard for:
+    /// in, as for `native_perform_command`: `host.players().acting_player()`,
+    /// `PlayerRef::tell`, the item helpers and the rest reach them. Heard for:
     /// Nether and End portals (also riding a vehicle, and leaving the End as
     /// its winner), `/execute in ... run tp` and any other command that
     /// teleports a player into another level, and the death respawn. Not
@@ -3437,7 +3439,7 @@ pub trait Hooks {
     /// highlights it. This hides the command from the client only: the
     /// server still runs a typed one, `native_player_command` stops it.
     /// For a player who is already on, their state is swapped in and the
-    /// helpers (`native_tell`...) work; for one who is joining it is not, and
+    /// helpers (`PlayerRef::tell`...) work; for one who is joining it is not, and
     /// their client has no world to tell yet. The tree the hub sends again by
     /// itself (after a respawn or a change of level) keeps the last answer
     /// and does not ask again; the integrated server's owner is not asked
@@ -3466,7 +3468,7 @@ pub trait Hooks {
     /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
     /// takes no wear. The bobber ending by itself (too far, the rod put
     /// away, the owner dying), nor the host of a LAN world's rod. The
-    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// player's state is swapped in, so `host.players().acting_player()`, `PlayerRef::tell`
     /// and the item helpers reach them. Once for each cast, bite and reel-in,
     /// on a server.
     #[hook(
@@ -3485,13 +3487,13 @@ pub trait Hooks {
     )]
     fn player_flower_pot_manipulate();
     /// A server player's game mode is about to change (NeoForge's
-    /// `PlayerChangeGameModeEvent`): from `from` to `to` (0 survival, 1
-    /// creative, 2 adventure, 3 spectator, as `NativeServerPlayer`'s
-    /// `game_mode`), `player` being the UUID and `name` the name. Heard for
+    /// `PlayerChangeGameModeEvent`): from `from` to `to`, both the shared
+    /// `GameMode` used by commands and `PlayerRef`. `player` is the UUID and
+    /// `name` the name. Heard for
     /// the `/gamemode` command, the F3+F4 switcher's packet and a hardcore
     /// world's respawn into spectator, once for each change to a different
-    /// mode; not for the world's default mode a player joins with. Set
-    /// `cancel` and the player keeps their mode (nothing is sent, the
+    /// mode; not for the world's default mode a player joins with. Return
+    /// `Flow::Cancel` and the player keeps their mode (nothing is sent, the
     /// command counts it as no change). For a change the game makes inside
     /// a player's turn their state is swapped in; for the hardcore respawn
     /// it is not.
@@ -3556,7 +3558,7 @@ pub trait Hooks {
     /// join message, `native_player_logged_in`) happens. Once for each player
     /// who joins, on a server. The player is not placed yet and their client
     /// has no world to show a message in, so no player's state is swapped in
-    /// and `native_tell` reaches nobody: the refusal `reason` is the answer.
+    /// and `PlayerRef::tell` reaches nobody: the refusal `reason` is the answer.
     /// The checks that need no mod (name, whitelist, bans, a full server,
     /// the proxy's forwarding) refuse earlier, on the connection, and this
     /// hook does not hear those players.
@@ -3596,7 +3598,7 @@ pub trait Hooks {
     /// changes. It cannot be stopped, and it hears what the client asks, not
     /// what the server does: a sprint that ends by itself (a hit's knockback,
     /// hunger, a wall) is not reported. The player's state is swapped in, so
-    /// the helpers and `native_tell` work. Once for each change, on a server.
+    /// the helpers and `PlayerRef::tell` work. Once for each change, on a server.
     #[hook(side = "server", contract = "listen")]
     fn player_sprint();
     /// `player` (`name`) pressed the swap-hands key: heard before the main and
@@ -3605,7 +3607,7 @@ pub trait Hooks {
     /// `PlayerSwapHandItemsEvent`), not for a spectator. Set `cancel` to keep
     /// the items where they are: the player's client, which swapped them at
     /// once, gets its slots back. The player's state is swapped in, so
-    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// `host.players().acting_player()`, `PlayerRef::tell` and the item helpers reach them.
     /// Once for each press, on a server. Not heard: the same swap made in an
     /// open inventory (hovering a slot and pressing the key, a menu click) and
     /// the host of a LAN world.
@@ -3631,7 +3633,7 @@ pub trait Hooks {
     /// has reached the player's state and their client (an inter-level
     /// teleport: when the new level is entered, before it has loaded around
     /// them), so it cannot stop it. The player's state is swapped in, so the
-    /// helpers that read the acting player and `native_tell` work. Once for
+    /// helpers that read the acting player and `PlayerRef::tell` work. Once for
     /// each teleported player, on a server. Ender pearls and chorus fruit
     /// have their own hooks; a spectator's teleport menu is not heard yet;
     /// portals and respawns are not teleports here.
@@ -3648,7 +3650,7 @@ pub trait Hooks {
     /// effects apply. Listen only: whether the totem saves is decided inside
     /// the health state machine, before a mod is asked, so a mod cannot veto
     /// it from here. The player's state is swapped in, so
-    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// `host.players().acting_player()`, `PlayerRef::tell` and the item helpers reach them.
     /// Once for each totem, on a server; the host of a LAN world's totem is
     /// not heard.
     #[hook(
@@ -3662,7 +3664,7 @@ pub trait Hooks {
     /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
     /// downloaded, 5 invalid URL, 6 failed reload, 7 discarded. Heard when the
     /// packet arrives, after the server has handled it; it cannot be stopped.
-    /// The player's state is swapped in, so the helpers and `native_tell`
+    /// The player's state is swapped in, so the helpers and `PlayerRef::tell`
     /// work. The pack a dedicated server offers in the configuration
     /// (`resource-pack` in `server.properties`) is answered before the
     /// player has joined, and those answers are not heard. Once for each
@@ -3679,7 +3681,7 @@ pub trait Hooks {
     /// TNT at `pos` is about to be lit (primed): a flint and steel or a fire
     /// charge on it, fire burning it, a redstone signal, an arrow, or a
     /// dispenser's flint and steel or TNT item. `player` is the server player
-    /// whose click lit it, with their state swapped in (so `native_tell`
+    /// whose click lit it, with their state swapped in (so `PlayerRef::tell`
     /// answers them), None when no player is behind it (fire, redstone, an
     /// arrow, a dispenser). Set `cancel` and it is not primed: a TNT block
     /// stays where it is (one that fire or a signal had already taken out is
@@ -3726,7 +3728,7 @@ pub trait Hooks {
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
     /// server player, whose state is then swapped in (as for
-    /// `native_perform_command`: `native_acting_player`, `native_tell` and
+    /// `native_perform_command`: `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them; `player` is their UUID), and for one a
     /// server player rode and left, until it has stood still for ten
     /// seconds (`player` is none, nobody is swapped in). It only hears.
@@ -3761,15 +3763,26 @@ pub trait Hooks {
     fn player_advancement_done();
     /// A criterion of a server player's advancement was granted or revoked, after its progress changed
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
-    /// The full advancement progress is
-    /// not yet exposed (tracked on #29).
+    /// `progress` is an owned snapshot of every criterion (including its stored grant date),
+    /// the requirement groups and their completion at this exact mutation. It belongs to
+    /// the mutated progress, including first-tick and reload grants queued by the server hub.
+    /// During a nested player turn, a suspended player's hub record may contain displaced
+    /// progress. A listener may retain a clone; later mutations do not change the snapshot.
     #[hook(
         side = "server",
         contract = "listen",
         neoforge = "AdvancementEvent.AdvancementProgressEvent",
         cancellable = false
     )]
-    fn player_advancement_progress();
+    fn player_advancement_progress(
+        player: u128,
+        player_entity_id: i32,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+        progress_type: NativeProgressType,
+        progress: &AdvancementProgress,
+    );
     /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side.
     #[hook(
         side = "server",
@@ -3820,8 +3833,8 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)"
     )]
     fn player_bundle_item_select();
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is an `Option<EffectKey>`; None means no effect. Server-side.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4076,7 +4089,9 @@ pub trait Hooks {
     fn player_shield_disable();
     /// A statistic is about to be awarded to a server player, before its count and scoreboard criteria
     /// change. `stat_type` and `stat` are ids such as `minecraft:mined` and `minecraft:stone`, and
-    /// `value` the amount. Set `cancel` to award nothing. Server-side.
+    /// `value` the amount. Set `cancel` to award nothing. Server-side. Ordinary interactions
+    /// fire at vanilla's award point; inside a transaction, the award and this hook wait until
+    /// the outermost successful commit, after tentative world and inventory writes.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -4225,8 +4240,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn raid_spawn_wave();
-    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`).
+    /// A server raid at `pos` changed to `state` (`triggered`, `victory`,
+    /// `loss` or `stopped`). `raid` identifies its owning level, including a
+    /// parked level. A terminal raid already removed from storage cannot be read.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4268,7 +4284,7 @@ pub trait Hooks {
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event)",
-        target = "horizon_client::game::native_hooks::GameLevel<'_>::native_sponge_absorb"
+        target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_sponge_absorb"
     )]
     fn sponge_absorb();
     /// A guest asked to complete `command`; `suggestions` may be added to or
@@ -4327,7 +4343,7 @@ pub trait Hooks {
     /// `special_price_diff`, `price_multiplier`, `xp`. The change stands: the
     /// next click and the offers sent to the player see it. Not asked for a
     /// trade window without a trader. The player's state is swapped in
-    /// (`native_acting_player`). Server-side. Version 2: was a listen hook
+    /// (`host.players().acting_player()`). Server-side. Version 2: was a listen hook
     /// returning the offer read-only; now collects the live offer as `out`
     /// (the moment upstream's separate `merchant_offer_traded` covered).
     #[hook(
@@ -4528,24 +4544,59 @@ pub trait Helpers {
     fn summon();
     #[helper(
         side = "server",
+        service = "players",
         target = "horizon_client::game::native_server::Game<'_>::native_server_players"
     )]
     fn server_players();
+    /// Find a connected real player by account name, ignoring ASCII case.
+    /// Returns None when no player matches; fake players and nicknames are excluded.
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_tell"
+        service = "players",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_by_name"
     )]
-    fn tell();
+    fn player_by_name();
+    /// Enumerate loaded server levels in overworld, nether, end order.
+    /// Returns an empty list before a server world is open.
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_action_bar"
+        service = "levels",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_list_levels"
     )]
-    fn action_bar();
+    fn list_levels();
+    /// The connection IP without its port (the forwarded address behind a Velocity proxy),
+    /// including displaced connected players. Empty for an acting player with no known
+    /// connection; None for a stale or unavailable player.
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_tab_list"
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_address"
     )]
-    fn tab_list();
+    fn player_address();
+    #[helper(
+        side = "server",
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_name"
+    )]
+    fn player_name();
+    #[helper(
+        side = "server",
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_tell"
+    )]
+    fn player_tell();
+    #[helper(
+        side = "server",
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_action_bar"
+    )]
+    fn player_action_bar();
+    #[helper(
+        side = "server",
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_tab_list"
+    )]
+    fn player_tab_list();
     #[helper(
         side = "server",
         target = "horizon_client::game::native_server::Game<'_>::native_tick_stats"
@@ -4553,36 +4604,43 @@ pub trait Helpers {
     fn tick_stats();
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_sleep_ignored"
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_set_sleep_ignored"
     )]
-    fn sleep_ignored();
+    fn player_set_sleep_ignored();
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_set_nickname"
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_set_nickname"
     )]
-    fn set_nickname();
+    fn player_set_nickname();
     #[helper(
         side = "server",
+        service = "messages",
         target = "horizon_client::game::native_server::Game<'_>::native_text_allowed"
     )]
     fn text_allowed();
     #[helper(
         side = "server",
+        service = "messages",
         target = "horizon_client::game::native_server::Game<'_>::native_broadcast"
     )]
     fn broadcast();
     #[helper(
         side = "server",
+        service = "commands",
         target = "horizon_client::game::native_server::Game<'_>::native_feedback"
     )]
     fn feedback();
     #[helper(
         side = "server",
+        service = "players",
         target = "horizon_client::game::native_server::Game<'_>::native_acting_player"
     )]
     fn acting_player();
     #[helper(
         side = "server",
+        service = "commands",
         target = "horizon_client::game::native_server::Game<'_>::native_run_command"
     )]
     fn run_command();
@@ -4724,11 +4782,11 @@ pub trait Helpers {
     fn config_files();
     #[helper(side = "client")]
     fn panel_items();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipes_of_type();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_ingredient();
-    #[helper(side = "both")]
+    #[helper(side = "both", resource_read = true)]
     fn recipe_result();
     #[helper(side = "both")]
     fn known_recipes();
@@ -4773,9 +4831,10 @@ pub trait Helpers {
     fn dimension();
     #[helper(
         side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_hide_player"
+        receiver = "player",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_hide"
     )]
-    fn hide_player();
+    fn player_hide();
     #[helper(side = "client")]
     fn item_stack();
     #[helper(side = "client")]

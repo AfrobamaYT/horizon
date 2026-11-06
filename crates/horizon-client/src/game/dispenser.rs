@@ -1409,7 +1409,12 @@ impl Game<'_> {
         if let Some(i) = cube {
             // primeTime(false): the fuse is lit only while TNT explodes; the
             // ignition counts either way.
-            if self.ui.rules.bool("tnt_explodes") && sulfur_cube::prime(&mut self.mobs[i], false) {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+                && sulfur_cube::prime(&mut self.mobs[i], false)
+            {
                 let m = &mut self.mobs[i];
                 let (at, id) = (m.position, m.id);
                 let mut events = Vec::new();
@@ -1446,7 +1451,12 @@ impl Game<'_> {
                 None,
             );
         } else if &*name == "minecraft:tnt" {
-            if self.ui.rules.bool("tnt_explodes") && self.tnt_prime_allowed(target_pos) {
+            if self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+                && self.tnt_prime_allowed(target_pos)
+            {
                 self.spawn_primed_tnt(target_pos, false, None, None);
                 self.with_level(|b, level, ticks| b.remove_block(level, ticks, target_pos, false));
                 self.process_level_events()?;
@@ -1504,7 +1514,11 @@ impl Game<'_> {
         Ok((left, if grown { CLICK } else { FAIL }))
     }
     fn dispense_tnt(&mut self, pos: Pos, facing: Direction, stack: ItemStack) -> Dispensed {
-        if !self.ui.rules.bool("tnt_explodes") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::TNT_EXPLODES)
+        {
             set_success("tnt", false);
             return (Some(stack), FAIL);
         }

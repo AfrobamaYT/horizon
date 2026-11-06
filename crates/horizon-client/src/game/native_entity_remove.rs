@@ -97,7 +97,7 @@ impl Game<'_> {
                 .extra
                 .effects
                 .iter()
-                .map(|e| e.0.trim_start_matches("minecraft:"))
+                .map(|e| e.id.trim_start_matches("minecraft:"))
                 .collect();
             let (bounds, mut random) = (m.bounds(), m.random.clone());
             self.effects_on_death(&names, bounds, false, Some(id), Some(&mut random));
@@ -305,6 +305,7 @@ mod tests {
         with_game(|game| {
             for (id, glow, facing) in [(12, false, 5), (13, true, 4)] {
                 game.item_frames.push(ItemFrame {
+                    attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id,
                     pos: [0, 64, 0],
@@ -320,6 +321,7 @@ mod tests {
                 });
             }
             game.paintings.push(Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id: 14,
                 pos: [0, 64, 0],

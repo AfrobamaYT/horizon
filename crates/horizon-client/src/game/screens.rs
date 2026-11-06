@@ -36,7 +36,9 @@ impl Screen {
             | Self::Dead
             | Self::CommandBlock
             | Self::BlockEditor
-            | Self::Mod => false,
+            | Self::Mod
+            // The HUD editor shows the HUD it moves.
+            | Self::HudEditor => false,
             // WinScreen.extractBackground: the poem fills the screen with the End portal, the
             // credits alone blur. Game::menu_blur knows which one rolls.
             Self::Win => false,
@@ -270,6 +272,7 @@ impl Game<'_> {
             };
             let action = match id {
                 0 => Some(horizon_client::widgets::Action::Back),
+                1 => Some(horizon_client::widgets::Action::Options),
                 2 => Some(horizon_client::widgets::Action::Exit),
                 _ => None,
             };
@@ -402,7 +405,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size);
+            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
             (b.width, b.height)
         };
         let links = !self.server_links().is_empty();
@@ -451,7 +454,7 @@ impl Game<'_> {
                 .renderer
                 .as_ref()
                 .map_or([1, 1], |r| [r.config.width, r.config.height]);
-            let b = HudBatch::new(size);
+            let b = HudBatch::new(size, self.settings.gui_scale_inputs());
             (b.width, b.height)
         };
         let links = !self.server_links().is_empty();
@@ -722,7 +725,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let hit = death_buttons(b.width, b.height, self.level.hardcore)
             .into_iter()
             .find(|d| ui::hovered(self.cursor, d.0, d.1, 200.0, 20.0))

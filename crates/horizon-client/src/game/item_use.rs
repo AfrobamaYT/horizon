@@ -12,7 +12,78 @@ use horizon_client::{
 };
 use horizon_world::consumable::UseAnimation;
 
+#[derive(Clone, Copy)]
+pub(super) enum ItemUseState {
+    Spear(horizon_client::spear::UseTiming),
+    Other(UseAnimation),
+}
+
+impl ItemUseState {
+    pub(super) fn animation(self) -> UseAnimation {
+        match self {
+            Self::Spear(_) => UseAnimation::Spear,
+            Self::Other(animation) => animation,
+        }
+    }
+}
+
 impl Game<'_> {
+    /// Resolve an item's animation once for the caller's rendering decision.
+    pub(super) fn item_use_animation(&self, stack: &ItemStack) -> UseAnimation {
+        self.item_use_state(stack).animation()
+    }
+
+    /// Select the animation and its already decoded spear timing together,
+    /// before firing the scoped override. No stack view is built per frame.
+    pub(super) fn item_use_state(&self, stack: &ItemStack) -> ItemUseState {
+        let info = self.items().get(&stack.item);
+        let kinetic =
+            horizon_client::spear::UseTiming::of_stack(stack, info.and_then(|i| i.kinetic_timing));
+        let fixed = match &*stack.item {
+            "minecraft:bow" => Some(UseAnimation::Bow),
+            "minecraft:crossbow" => Some(UseAnimation::Crossbow),
+            "minecraft:trident" => Some(UseAnimation::Trident),
+            "minecraft:brush" => Some(UseAnimation::Brush),
+            "minecraft:spyglass" => Some(UseAnimation::Spyglass),
+            "minecraft:goat_horn" => Some(UseAnimation::TootHorn),
+            _ if info.is_some_and(|i| i.bundle) => Some(UseAnimation::Bundle),
+            _ => None,
+        };
+        let data = stack.data();
+        let mut animation = fixed.unwrap_or_else(|| {
+            let consumable = data.and_then(|d| d.other("minecraft:consumable"));
+            if let Some(component) = consumable {
+                let name = component.get("animation");
+                use horizon_world::nbt::Tag;
+                if let Some(Tag::String(name)) = name {
+                    horizon_items::use_animation::animation_name(name.0.iter().copied())
+                } else {
+                    UseAnimation::Eat
+                }
+            } else if data.is_none_or(|d| d.other("!minecraft:consumable").is_none())
+                && let Some(consumable) = info.and_then(|i| i.consumable.as_ref())
+            {
+                consumable.animation
+            } else if data.is_some_and(|d| d.other("minecraft:blocks_attacks").is_some())
+                || (data.is_none_or(|d| d.other("!minecraft:blocks_attacks").is_none())
+                    && info.is_some_and(|i| i.blocks_attacks.is_some()))
+            {
+                UseAnimation::Block
+            } else if kinetic.is_some() {
+                UseAnimation::Spear
+            } else {
+                UseAnimation::None
+            }
+        });
+        self.native_use_animation(stack, &mut animation);
+        // A spear pose needs the effective stack's kinetic data, even when a
+        // scoped use_animation override requested it.
+        if animation == UseAnimation::Spear {
+            return kinetic.map_or(ItemUseState::Other(UseAnimation::None), ItemUseState::Spear);
+        }
+        ItemUseState::Other(animation)
+    }
+
     /// `LivingEntity.startUsingItem` for the acting player's hand: nothing
     /// when a use runs already or the hand is empty. The use lasts
     /// `getUseDuration` ticks, which mods may change or refuse
@@ -32,6 +103,9 @@ impl Game<'_> {
         self.using = Some((self.held_slot(), 0));
         self.use_duration = duration;
         self.use_ticks_set = ticks_set;
+        // `LivingEntity.startUsingItem`: `causeUseVibration(ITEM_INTERACT_START)`
+        // when the use effects of the stack ask for interaction vibrations.
+        self.use_vibration(&stack, "minecraft:item_interact_start");
         // A new charge hears the crossbow's loading sounds again
         // (`game/crossbow.rs`).
         self.crossbow_sounds = [false; 2];
@@ -100,7 +174,7 @@ impl Game<'_> {
         // a potion is drunk (no last tick of its own: a mod's tick ran it out).
         if self.finish_drinking(slot, stack) {
             self.use_item_finished(stack);
-            self.use_vibration(stack);
+            self.use_vibration(stack, "minecraft:item_interact_finish");
             return;
         }
         self.using = None;
@@ -113,7 +187,7 @@ impl Game<'_> {
         }
         self.use_item_finished(stack);
         // `LivingEntity.completeUsingItem` ends with `stopUsingItem`.
-        self.use_vibration(stack);
+        self.use_vibration(stack, "minecraft:item_interact_finish");
     }
     /// `LivingEntityUseItemEvent.Finish` after `finishUsingItem` of `stack`
     /// (no ticks left): the hand holds what a mod made the result.
@@ -311,6 +385,201 @@ mod tests {
     use horizon_world::consumable::UseAnimation;
 
     #[test]
+    #[ignore = "needs prepared resources"]
+    fn patched_bow_keeps_vanilla_animation_without_listener() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            use UseAnimation::*;
+            for (id, expected) in [
+                ("minecraft:bread", Eat),
+                ("minecraft:milk_bucket", Drink),
+                ("minecraft:shield", Block),
+                ("minecraft:bow", Bow),
+                ("minecraft:crossbow", Crossbow),
+                ("minecraft:trident", Trident),
+                ("minecraft:spyglass", Spyglass),
+                ("minecraft:goat_horn", TootHorn),
+                ("minecraft:brush", Brush),
+                ("minecraft:bundle", Bundle),
+                ("minecraft:iron_spear", Spear),
+                ("minecraft:stick", None),
+            ] {
+                assert_eq!(
+                    game.item_use_animation(&horizon_client::items::ItemStack::new(id, 1)),
+                    expected,
+                    "{id}"
+                );
+            }
+            let mut bow = horizon_client::items::ItemStack::new("minecraft:bow", 1);
+            bow.data_mut().set_other(
+                "minecraft:consumable",
+                Some(horizon_world::nbt::Tag::compound([(
+                    "animation",
+                    horizon_world::nbt::Tag::String("drink".into()),
+                )])),
+            );
+            assert_eq!(game.item_use_animation(&bow), UseAnimation::Bow);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_animation_dispatches_vanilla_parts_and_refuses_invalid_spears() {
+        use mod_api::{ClientHost, Hooks, ItemPart, ModEntry, Mods, Registrar, UseAnimationEvent};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Clone)]
+        struct Part(Arc<AtomicUsize>);
+        #[mod_api::horizon_part]
+        impl ItemPart for Part {
+            fn use_animation(&self, _: &dyn ClientHost, event: &mut UseAnimationEvent<'_>) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                let expected = match &*event.stack.item {
+                    "minecraft:bow" => UseAnimation::Bow,
+                    "minecraft:crossbow" => UseAnimation::Crossbow,
+                    "minecraft:trident" => UseAnimation::Trident,
+                    "minecraft:brush" => UseAnimation::Brush,
+                    "minecraft:wooden_spear"
+                        if event
+                            .stack
+                            .data()
+                            .is_none_or(|d| d.other("!minecraft:kinetic_weapon").is_none()) =>
+                    {
+                        UseAnimation::Spear
+                    }
+                    "minecraft:stick"
+                        if event
+                            .stack
+                            .data()
+                            .is_some_and(|d| d.other("minecraft:kinetic_weapon").is_some()) =>
+                    {
+                        UseAnimation::Spear
+                    }
+                    _ => UseAnimation::None,
+                };
+                assert_eq!(*event.animation, expected);
+                *event.animation = if &*event.stack.item == "minecraft:stick"
+                    || event
+                        .stack
+                        .data()
+                        .is_some_and(|d| d.other("!minecraft:kinetic_weapon").is_some())
+                {
+                    UseAnimation::Spear
+                } else {
+                    UseAnimation::Drink
+                };
+            }
+        }
+        struct Mod(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                for id in [
+                    "minecraft:bow",
+                    "minecraft:crossbow",
+                    "minecraft:trident",
+                    "minecraft:brush",
+                    "minecraft:wooden_spear",
+                    "minecraft:stick",
+                ] {
+                    let item = r.item_key(id);
+                    r.item_part(item, Part(self.0.clone()));
+                }
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mods: Mods = vec![ModEntry::new("animation", Box::new(Mod(calls.clone())))].into();
+        mod_api::__private::install_parts(&mods).unwrap();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                for id in [
+                    "minecraft:bow",
+                    "minecraft:crossbow",
+                    "minecraft:trident",
+                    "minecraft:brush",
+                    "minecraft:wooden_spear",
+                ] {
+                    assert_eq!(
+                        game.item_use_animation(&horizon_client::items::ItemStack::new(id, 1)),
+                        UseAnimation::Drink
+                    );
+                }
+                assert_eq!(
+                    game.item_use_animation(&horizon_client::items::ItemStack::new(
+                        "minecraft:stick",
+                        1
+                    )),
+                    UseAnimation::None
+                );
+                let mut patched = horizon_client::items::ItemStack::new("minecraft:bow", 1);
+                patched.data_mut().set_other(
+                    "minecraft:consumable",
+                    Some(horizon_world::nbt::Tag::compound([(
+                        "animation",
+                        horizon_world::nbt::Tag::String("drink".into()),
+                    )])),
+                );
+                assert_eq!(game.item_use_animation(&patched), UseAnimation::Drink);
+                use horizon_world::nbt::Tag;
+                let mut kinetic_stick = horizon_client::items::ItemStack::new("minecraft:stick", 1);
+                kinetic_stick.data_mut().set_other(
+                    "minecraft:kinetic_weapon",
+                    Some(Tag::compound([("delay_ticks", Tag::Int(30))])),
+                );
+                assert!(matches!(
+                    game.item_use_state(&kinetic_stick),
+                    super::ItemUseState::Spear(_)
+                ));
+                let mut removed =
+                    horizon_client::items::ItemStack::new("minecraft:wooden_spear", 1);
+                removed.data_mut().set_other(
+                    "!minecraft:kinetic_weapon",
+                    Some(Tag::Compound(Default::default())),
+                );
+                assert_eq!(game.item_use_animation(&removed), UseAnimation::None);
+                assert_eq!(calls.load(Ordering::Relaxed), 9);
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        horizon_core::geometry::Vec3::ZERO,
+                    )
+                    .unwrap(),
+                );
+                game.inventory[game.selected] =
+                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
+                game.using = Some((game.selected, 0));
+                game.tick_player_model();
+                assert_eq!(
+                    game.player_model.as_ref().unwrap().extra.use_animation,
+                    UseAnimation::Drink
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 10);
+                game.visible_hands[0].1 = game.inventory[game.selected].clone();
+                game.use_duration = 72_000;
+                let (overridden, _) = game.hand_geometry(0.0);
+                assert_eq!(calls.load(Ordering::Relaxed), 11);
+                // A scoped spear override on a component-patched ordinary item
+                // must reach hand geometry without the old whitelist panic.
+                game.inventory[game.selected] = Some(kinetic_stick);
+                game.visible_hands[0].1 = game.inventory[game.selected].clone();
+                let (kinetic_geometry, _) = game.hand_geometry(0.0);
+                assert!(!kinetic_geometry.is_empty());
+                game.inventory[game.selected] =
+                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
+                game.visible_hands[0].1 = game.inventory[game.selected].clone();
+                mod_api::__private::install_parts(&[]).unwrap();
+                game.resolve_parts().unwrap();
+                let (vanilla, _) = game.hand_geometry(0.0);
+                assert!(!overridden.is_empty());
+                assert_eq!(overridden.len(), vanilla.len());
+                assert!(overridden.iter().zip(&vanilla).any(|(a, b)| a.pos != b.pos));
+            });
+        });
+    }
+
+    #[test]
     fn a_use_runs_out_on_its_last_tick() {
         // a 32 tick food: ticks 0 to 30 go on, the 32nd tick finishes it.
         assert_eq!(count_down(0, 32), Some(1));
@@ -467,5 +736,91 @@ mod tests {
         ] {
             assert!(matches!(pose(animation), ItemPose::Using));
         }
+    }
+}
+
+#[cfg(test)]
+mod interact_vibration_tests {
+    use super::*;
+
+    /// Runs `f` on a windowless game built from the prepared resources with
+    /// `held` in the main hand and returns the game events it posted;
+    /// `None` without the resources.
+    fn with_game(held: &str, f: impl FnOnce(&mut Game<'_>)) -> Option<Vec<String>> {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES")?);
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::new(10.5, 64.0, -3.25),
+            )
+            .unwrap(),
+        );
+        *game.held_mut() = Some(ItemStack::new(held, 1));
+        crate::game::dispense_fixture::start_recording();
+        f(&mut game);
+        Some(crate::game::dispense_fixture::stop_recording())
+    }
+
+    /// `LivingEntity.startUsingItem` ends with
+    /// `this.useItem.causeUseVibration(this, GameEvent.ITEM_INTERACT_START)`,
+    /// and `ItemStack.causeUseVibration` posts only when the stack's use effects
+    /// ask for interaction vibrations (the default). `stopUsingItem` posts the
+    /// finish the same way, which Horizon already did, so a use is a pair of
+    /// vibrations and an item that turns them off is neither.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_use_start_is_an_item_interact_start_vibration() {
+        let bow = || ItemStack::new("minecraft:bow", 1);
+        let Some(lines) = with_game("minecraft:bow", |game| {
+            assert!(game.start_using_item(), "the bow's use starts");
+            game.stop_using_item(&bow());
+        }) else {
+            return;
+        };
+        assert_eq!(
+            lines,
+            vec![
+                "G 10,64,-4 minecraft:item_interact_start".to_owned(),
+                "G 10,64,-4 minecraft:item_interact_finish".to_owned(),
+            ]
+        );
+        // A spear's use effects set `interact_vibrations` false: no vibration.
+        let spear = || ItemStack::new("minecraft:iron_spear", 1);
+        let Some(lines) = with_game("minecraft:iron_spear", |game| {
+            assert!(game.start_using_item(), "the spear's use starts");
+            game.stop_using_item(&spear());
+        }) else {
+            return;
+        };
+        assert!(lines.is_empty(), "{lines:?}");
     }
 }

@@ -112,6 +112,8 @@ pub(super) struct Mods {
     pub(super) native_state: std::cell::RefCell<Option<(String, native_status::State)>>,
     /// Each native mod's route under the chosen build mode, and what it was read for.
     pub(super) native_routes: std::cell::RefCell<Option<(String, native_mods::Routes)>>,
+    /// Installed wasm declarations, reread only when the instance's files or enable list change.
+    wasm_internals: std::cell::RefCell<Option<(String, bool)>>,
     /// The mod whose route menu is open.
     pub(super) route_open: Option<String>,
     native_files: std::cell::RefCell<Option<(String, Vec<native_status::Installed>)>>,
@@ -196,6 +198,7 @@ impl Mods {
             native_notice: None,
             native_state: Default::default(),
             native_routes: Default::default(),
+            wasm_internals: Default::default(),
             route_open: None,
             native_files: Default::default(),
             updates: HashMap::new(),
@@ -412,8 +415,14 @@ impl Launcher {
             }
         }
         // `HORIZON_LAUNCHER_PROJECT=<slug>` (with `HORIZON_LAUNCHER_PAGE=mods`): opens that
-        // project's page once a search finds it, for screenshots.
-        if self.mods.browse.open.is_none() {
+        // project's page once a search finds it, for screenshots. Once per run, kept in a flag
+        // rather than by removing the variable: `remove_var` races `getenv` on the download, check
+        // and keyring threads running by now (unsound, and `unsafe` from edition 2024).
+        static PROJECT_OPENED: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        if self.mods.browse.open.is_none()
+            && !PROJECT_OPENED.load(std::sync::atomic::Ordering::Relaxed)
+        {
             if let Ok(want) = std::env::var("HORIZON_LAUNCHER_PROJECT") {
                 if let Some(p) = self
                     .mods
@@ -422,7 +431,7 @@ impl Launcher {
                     .find(|p| p.id == want || p.slug == want)
                     .cloned()
                 {
-                    std::env::remove_var("HORIZON_LAUNCHER_PROJECT");
+                    PROJECT_OPENED.store(true, std::sync::atomic::Ordering::Relaxed);
                     self.mods_open(p);
                 }
             }
@@ -549,6 +558,11 @@ impl Launcher {
     /// in a Java instance, renames its file.
     pub(super) fn mods_switch(&mut self, e: &installed::Entry) {
         let home = self.mods.home();
+        // An update holds the folder: the window doesn't wait for it.
+        let Some(_lock) = browser::try_lock_home(&home) else {
+            self.mods.message = Some(Err(tr("Wait for the current operation to finish.").into()));
+            return;
+        };
         if self.mods.java.is_some() {
             let on = !java_instance::is_on(&home, e);
             self.mods.message = Some(java_instance::set_on(&home, e, on).map(|()| {
@@ -1011,6 +1025,12 @@ impl Launcher {
     /// The project `id` leaves the selected instance now; what happened, for the page's notice.
     pub(super) fn mods_remove(&mut self, id: &str) -> Result<String, String> {
         let home = self.mods.home();
+        let Some(_lock) = browser::try_lock_home(&home) else {
+            let busy: Result<String, String> =
+                Err(tr("Wait for the current operation to finish.").into());
+            self.mods.message = Some(busy.clone());
+            return busy;
+        };
         let removed = match self.mods.java {
             Some(_) => java_instance::remove(&home, id),
             None => installed::remove(&home, id),
@@ -1348,15 +1368,36 @@ impl Launcher {
         } else {
             Vec::new()
         };
-        if entries.is_empty() && native_entries.is_empty() {
+        let wasm_internals = if self.mods.java.is_none() && kind == PackKind::Mod {
+            let home = self.mods.home();
+            let key = native_status::fingerprint(&home, None);
+            let mut cached = self.mods.wasm_internals.borrow_mut();
+            if cached.as_ref().is_none_or(|(old, _)| *old != key) {
+                *cached = Some((key, native_mods::has_wasm_internals(&home)));
+            }
+            cached.as_ref().is_some_and(|(_, declares)| *declares)
+        } else {
+            false
+        };
+        if entries.is_empty() && native_entries.is_empty() && !wasm_internals {
             return None;
         }
         let busy = self.mods.busy.is_some();
-        let native = !native_entries.is_empty()
+        let native = wasm_internals
+            || !native_entries.is_empty()
             || self.mods.java.is_none()
                 && entries
                     .iter()
                     .any(|e| native_status::is_native_file(&e.file));
+        let left_out = native
+            .then(|| {
+                self.selected_instance()
+                    .and_then(|instance| self.version_of(instance))
+                    .and_then(|version| self.native_build_of(version))
+            })
+            .flatten()
+            .map(|build| build.left_out)
+            .unwrap_or_default();
         let instance = self.selected_instance().map(|i| i.name.clone());
         let row = |i: usize| {
             if i >= entries.len() {
@@ -1544,6 +1585,11 @@ impl Launcher {
                         .children(update_all),
                 )
                 .children(native.then(|| self.native_build(cx)).flatten())
+                .children(
+                    left_out
+                        .iter()
+                        .map(|left| div().text_color(t.warn).child(left.label())),
+                )
                 .child(list),
         )
     }

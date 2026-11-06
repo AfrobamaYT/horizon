@@ -49,7 +49,7 @@ pub struct GamePoint {
     /// Its record's shape, as a wasm mod's listener and the game check it
     /// ([`point_shape::Shape::wire_shape`]).
     #[serde(skip)]
-    wire_shape: String,
+    pub(crate) wire_shape: String,
 }
 
 /// A source file of the game's crates, with its module path and the `cfg`s it is compiled under.
@@ -70,11 +70,13 @@ pub(crate) fn conditions(attrs: &[syn::Attribute]) -> Vec<String> {
         .collect()
 }
 
-/// Whether `attrs` hold `#[cfg(test)]`: compiled only into tests.
+/// Whether an item is compiled only into tests, explicitly or by `#[test]`/`#[bench]`.
 pub(crate) fn test_only(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        attr.path().is_ident("cfg")
-            && matches!(attr.parse_args::<syn::Meta>(), Ok(syn::Meta::Path(path)) if path.is_ident("test"))
+        attr.path().is_ident("test")
+            || attr.path().is_ident("bench")
+            || (attr.path().is_ident("cfg")
+                && matches!(attr.parse_args::<syn::Meta>(), Ok(syn::Meta::Path(path)) if path.is_ident("test")))
     })
 }
 
@@ -86,7 +88,7 @@ type Pending = (String, PathBuf, PathBuf, Vec<String>);
 /// module behind a `cfg` is left out with everything under it (the points: functions every build
 /// compiles); without, it is kept with its conditions (the internals, listed with the builds they
 /// exist in). Test-only modules are always left out.
-fn module_files(
+pub(crate) fn module_files(
     module: String,
     path: PathBuf,
     dir: PathBuf,
@@ -189,7 +191,7 @@ pub(crate) fn game_files(src: &Path, every_build: bool) -> Result<Vec<GameFile>,
 }
 
 /// The crate `krate`'s package folder and library root, from its manifest.
-fn crate_root(root: &Path, krate: &str) -> Result<(PathBuf, PathBuf), String> {
+pub(crate) fn crate_root(root: &Path, krate: &str) -> Result<(PathBuf, PathBuf), String> {
     let package = root.join("crates").join(krate.replace('_', "-"));
     let manifest = package.join("Cargo.toml");
     let text = fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
@@ -212,7 +214,7 @@ fn crate_files(root: &Path, krate: &str) -> Result<Vec<GameFile>, String> {
 
 /// The crates the points' own crate is built on (`horizon-mod-points` and everything under it), by
 /// library name: their functions can't be points, since their slots would have to reach up to it.
-fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
+pub(crate) fn below_points(root: &Path) -> Result<std::collections::BTreeSet<String>, String> {
     let mut seen = std::collections::BTreeSet::from(["horizon_mod_points".to_owned()]);
     let mut pending = vec![root.join("crates/horizon-mod-points")];
     while let Some(package) = pending.pop() {
@@ -259,7 +261,7 @@ fn listed(root: &Path) -> Result<Vec<(usize, String)>, String> {
 const LIST: &str = "crates/horizon-mod-api-gen/points.txt";
 
 /// A path without generic arguments or spaces, as listed paths and found ones are compared.
-fn plain_path(path: &str) -> String {
+pub(crate) fn plain_path(path: &str) -> String {
     let mut out = String::new();
     let mut depth = 0;
     for c in path.chars() {
@@ -298,15 +300,16 @@ fn gated(attrs: &[syn::Attribute]) -> bool {
 }
 
 /// A point's function, as found in a parsed file.
-struct Found<'a> {
-    module: String,
+pub(crate) struct Found<'a> {
+    pub(crate) module: String,
     attrs: &'a [syn::Attribute],
     vis: &'a syn::Visibility,
-    sig: &'a syn::Signature,
+    pub(crate) sig: &'a syn::Signature,
+    pub(crate) body: &'a syn::Block,
     /// The `impl`'s type and generics; none for a free function.
     owner: Option<(&'a Type, &'a syn::Generics)>,
     /// Where the item that holds it ends: the `impl` block, or the function. Its raw types go there.
-    end: proc_macro2::LineColumn,
+    pub(crate) end: proc_macro2::LineColumn,
 }
 
 impl Found<'_> {
@@ -319,7 +322,7 @@ impl Found<'_> {
     }
 
     /// Its path in its crate, as an injection's `target` names it.
-    fn target(&self) -> String {
+    pub(crate) fn target(&self) -> String {
         match self.owner {
             Some((ty, _)) => format!("{}::{}::{}", self.module, owner(ty), self.sig.ident),
             None => format!("{}::{}", self.module, self.sig.ident),
@@ -382,7 +385,7 @@ impl Found<'_> {
 }
 
 /// `r#type` as `type`.
-fn unraw(ident: &syn::Ident) -> String {
+pub(crate) fn unraw(ident: &syn::Ident) -> String {
     ident.to_string().trim_start_matches("r#").to_owned()
 }
 
@@ -419,7 +422,7 @@ fn owner(ty: &Type) -> String {
 /// eligible function of its inherent `impl`s (a `Game` method only with a `&self`/`&mut self`
 /// receiver) and its free functions; elsewhere, those `keep` admits. Inline modules every build
 /// compiles count too.
-fn file_points<'a>(
+pub(crate) fn file_points<'a>(
     module: &str,
     items: &'a [Item],
     keep: &dyn Fn(&Found<'_>) -> bool,
@@ -441,6 +444,7 @@ fn file_points<'a>(
                     attrs: &function.attrs,
                     vis: &function.vis,
                     sig: &function.sig,
+                    body: &function.block,
                     owner: None,
                     end: function.block.brace_token.span.close().end(),
                 };
@@ -464,6 +468,7 @@ fn file_points<'a>(
                             attrs: &method.attrs,
                             vis: &method.vis,
                             sig: &method.sig,
+                            body: &method.block,
                             owner: Some((&block.self_ty, &block.generics)),
                             end: block.brace_token.span.close().end(),
                         };
@@ -657,7 +662,7 @@ pub struct Staged {
 }
 
 /// The byte offset of `at` in `source`, whose line starts are `lines`.
-fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
+pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn) -> usize {
     let line = lines[at.line - 1];
     source[line..]
         .char_indices()
@@ -746,11 +751,18 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
             packages.insert(package.clone());
         }
     }
-    // The two dependencies each lower crate gets, also written into the lock file's entry for
-    // it, so a `--locked` build of the staged copy accepts them.
+    dependencies(root, packages)?;
+    Ok(staged)
+}
+
+/// Give listed lower-crate points and sites their staged dependencies, including the lock file.
+pub(crate) fn dependencies(
+    root: &Path,
+    packages: std::collections::BTreeSet<PathBuf>,
+) -> Result<(), String> {
     const ADDED: [&str; 2] = ["horizon-mod-points", "horizon-mod-api-macros"];
     if packages.is_empty() {
-        return Ok(staged);
+        return Ok(());
     }
     let lock_path = root.join("Cargo.lock");
     // A Windows checkout has CRLF line endings; Cargo reads either, and the entries match on LF.
@@ -791,7 +803,7 @@ pub fn stage(root: &Path) -> Result<Staged, String> {
         .map_err(|e| format!("{}: {e}", manifest.display()))?;
     }
     fs::write(&lock_path, lock).map_err(|e| format!("{}: {e}", lock_path.display()))?;
-    Ok(staged)
+    Ok(())
 }
 
 /// `lock` with `added` in the dependency list of the package `name`, kept in the lock file's
@@ -906,7 +918,7 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         }
         /// A wasm mod's listeners as the game's `Points`: every place forwarded with its record.
         #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-        impl Points for crate::wire::Forwarded {
+        impl<F: crate::wire::Forward + ?Sized> Points for crate::wire::Forwarded<F> {
             fn subscribed(&self) -> &'static [Option<PointId>] {
                 self.0.subscribed()
             }
@@ -1001,6 +1013,87 @@ mod tests {
         assert!(!at_return("fn view(&self) -> View<'_> {}"));
         // A `'static` return borrows nothing from the receiver.
         assert!(at_return("fn jab(&self) -> Option<&'static str> {}"));
+    }
+
+    #[test]
+    fn declared_raw_places_read_and_write_the_live_head_and_return() {
+        use crate::crossing::tests::internal;
+        for (receiver, writable) in [("&mut self", true), ("&self", false)] {
+            let sig: syn::Signature =
+                syn::parse_str(&format!("fn change({receiver}, pos: [i32; 3]) -> f32")).unwrap();
+            let shape = point_shape::shape(quote!(name = "change", raw), &sig).unwrap();
+            let point = GamePoint {
+                name: "change".into(),
+                target: "horizon_client::Game::change".into(),
+                side: "none",
+                host: "none",
+                record: "Change".into(),
+                args: Vec::new(),
+                returns: "result",
+                at_return: true,
+                raw: true,
+                listener: Some("horizon_client::__ChangeListener".into()),
+                return_listener: None,
+                record_item: String::new(),
+                api: std::array::from_fn(|_| String::new()),
+                wire_shape: shape.wire_shape(),
+            };
+            let mut game = internal("horizon_client::Game", "struct", "struct Game { x: u8 }");
+            game.hash = "game-layout".into();
+            let mut change = internal(
+                "horizon_client::Game::change",
+                "method",
+                &sig.to_token_stream().to_string(),
+            );
+            change.hash = "change-signature".into();
+            let (code, counts) = crate::internals_table::table_with_points(
+                &[game, change],
+                std::slice::from_ref(&point.target),
+                std::slice::from_ref(&point),
+            );
+            assert_eq!(counts.skipped, 0);
+            let raw = shape.raw_items(&sig, Some(&syn::parse_quote!(Game)), None);
+            let declarations = format!(
+                r#"
+            pub struct Game {{ x: u8 }}
+            impl Game {{ fn change({receiver}, _pos: [i32; 3]) -> f32 {{ self.x as f32 }} }}
+            pub enum PointId {{ Change, ChangeReturn }}
+            const RECEIVER_WRITABLE: bool = {writable};
+            {raw}
+        "#
+            );
+            crate::internals_table::tests::run_fixture(
+                &code,
+                &declarations,
+                r#"
+            assert_eq!(__internals::TABLE.types.iter().find(|t| t.path == "horizon_client::Game").unwrap().hash, "game-layout");
+            assert_eq!(__internals::TABLE.thunks[0].hash, "change-signature");
+            let head = &__internals::TABLE.places[0];
+            assert_eq!(head.place, PointId::Change as usize);
+            assert!(head.receiver.is_some());
+            assert_eq!(head.receiver_writable, RECEIVER_WRITABLE);
+            let walk = __internals::TABLE.types[head.record as usize].node;
+            let mut pos = [1, 2, 3];
+            let mut result = None::<f32>;
+            let mut record = __ChangeRaw { pos: &mut pos, result: &mut result };
+            unsafe {
+                let ptr = &raw mut record as *mut ();
+                assert!(walk(ptr, false, Op::Set(0, Value::Seq(vec![Value::S(4); 3]))).is_err());
+                assert_eq!(walk(ptr, true, Op::Set(0, Value::Seq(vec![Value::S(4); 3]))), Ok(Reply::Done));
+                assert_eq!(walk(ptr, true, Op::Set(1, Value::Var(1, vec![Value::F(0.5)]))), Ok(Reply::Done));
+            }
+            assert_eq!(pos, [4; 3]);
+            assert_eq!(result, Some(0.5));
+            let back = &__internals::TABLE.places[1];
+            assert_eq!(back.place, PointId::ChangeReturn as usize);
+            assert_eq!(back.receiver_writable, RECEIVER_WRITABLE);
+            let walk = __internals::TABLE.types[back.record as usize].node;
+            let mut result = 2.0f32;
+            unsafe { assert_eq!(walk(&raw mut result as *mut (), true, Op::Set(0, Value::F(3.0))), Ok(Reply::Done)); }
+            assert_eq!(result, 3.0);
+        "#,
+            );
+        }
     }
 
     #[test]

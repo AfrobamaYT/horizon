@@ -152,6 +152,7 @@ impl Game<'_> {
             hit.pos[2] + hit.face[2],
         ];
         let mut candidate = Painting {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: self.next_entity.wrapping_add(1),
             pos,
@@ -198,6 +199,7 @@ impl Game<'_> {
         ];
         self.next_entity += 1;
         let mut candidate = Painting {
+            attachment_lifetime: Default::default(),
             join: Default::default(),
             id: self.next_entity,
             pos,
@@ -307,7 +309,11 @@ impl Game<'_> {
             (lo[2] + hi[2]) / 2.0,
         ];
         self.world.modified.insert((p.pos[0] >> 4, p.pos[2] >> 4));
-        if !self.ui.rules.bool("entity_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+        {
             return true;
         }
         self.audio

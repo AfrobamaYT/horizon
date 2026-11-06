@@ -41,12 +41,27 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_immune"
     )]
     fn entity_fire_immune();
+    /// Remaining fire ticks for players, mobs, armor stands and item entities.
+    /// Returns `None` for other kinds and unavailable or stale handles; zero is a
+    /// valid value. Negative values retain the entity's fire immunity countdown.
     #[helper(
         side = "server",
         receiver = "entity",
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_fire_ticks"
     )]
     fn entity_fire_ticks();
+    /// Remaining portal cooldown in ticks (`Entity.getPortalCooldown`) for players and
+    /// the kinds that go through portals: mobs, items, experience orbs, boats, minecarts,
+    /// primed TNT, falling blocks, arrows and the thrown items and fireballs a chunk saves,
+    /// ender pearls (End gateways only), fireworks and tridents. Zero is a valid value.
+    /// Returns `None` for other kinds (among them armor stands, wind charges and the ender
+    /// dragon), on a client, and for unavailable or stale handles.
+    #[helper(
+        side = "server",
+        receiver = "entity",
+        target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_portal_cooldown"
+    )]
+    fn entity_portal_cooldown();
     #[helper(
         side = "server",
         receiver = "entity",
@@ -107,6 +122,16 @@ pub trait Helpers {
         target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_ticks_frozen"
     )]
     fn entity_ticks_frozen();
+    /// Ticks the entity has lived (`Entity.tickCount`) for mobs, item entities,
+    /// experience orbs and minecarts. Returns `None` for other kinds and
+    /// unavailable or stale handles. This is not an ageable mob's growth age or an
+    /// item's despawn age.
+    #[helper(
+        side = "server",
+        receiver = "entity",
+        target = "horizon_client::game::native_entity_state::Game<'_>::native_entity_tick_count"
+    )]
+    fn entity_tick_count();
     #[helper(
         side = "server",
         receiver = "entity",

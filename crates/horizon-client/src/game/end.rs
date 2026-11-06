@@ -451,6 +451,7 @@ impl Game<'_> {
                 p.position.y = top;
             }
         }
+        self.award_stat("used", "minecraft:ender_eye", 1);
         self.consume_held();
         self.swing_arm();
         // EnderEyeItem.useOn emits this event for all nearby players.
@@ -458,13 +459,15 @@ impl Game<'_> {
         if let Some(c) = self.portal_ring_center(hit.pos) {
             for dz in -1..=1 {
                 for dx in -1..=1 {
-                    self.set_state_named(
-                        [c[0] + dx, c[1], c[2] + dz],
-                        "minecraft:end_portal",
-                        &[],
-                    )?;
+                    let p = [c[0] + dx, c[1], c[2] + dz];
+                    let at = BlockPos::new(p[0], p[1], p[2]);
+                    self.with_level(|b, level, ticks| {
+                        b.destroy_block(level, ticks, at, true);
+                    });
+                    self.set_state_named(p, "minecraft:end_portal", &[])?;
                 }
             }
+            self.process_level_events()?;
             // EnderEyeItem.useOn: global level event 1038 (END_PORTAL_SPAWN),
             // heard by every player (vanilla places it at the frame's corner
             // + (1, 0, 1); only its direction matters).
@@ -1443,6 +1446,12 @@ impl Game<'_> {
         self.as_guest(conn, |g| g.trigger_enter_block(state));
     }
 
+    /// `Entity.getPortalCooldown` of an ender pearl: only an End gateway gives
+    /// it one (zero when it has none).
+    pub(super) fn pearl_portal_cooldown(&self, id: u32) -> i32 {
+        self.end.gateways.get(&id).map_or(0, |t| t.cooldown())
+    }
+
     /// `Entity.handlePortal` for the entities in an End gateway: they go
     /// through to the gateway's exit, where they wait for its chunks.
     pub(super) fn handle_end_gateway_portals(&mut self) {
@@ -1735,6 +1744,27 @@ mod tests {
             exit_target(exit, false, |e| [e[0], e[1] + 11, e[2]]),
             [8, 111, 0]
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_pearl_reads_the_portal_cooldown_its_end_gateway_gave_it() {
+        use super::super::native_entity_refs::tests::with_game;
+
+        with_game(|game| {
+            game.add_projectile(Projectile::new(
+                ProjectileKind::EnderPearl,
+                Vec3::ZERO,
+                None,
+            ));
+            let id = game.creatures.projectiles[0].id;
+            let pearl = game.native_entity(id).unwrap();
+            assert_eq!(pearl.portal_cooldown(game), Some(0));
+            let traveller = game.end.gateways.entry(id).or_default();
+            traveller.enter(BlockPos::new(0, 64, 0));
+            assert!(traveller.travel(true).is_some());
+            assert_eq!(pearl.portal_cooldown(game), Some(300));
+        });
     }
 
     #[test]

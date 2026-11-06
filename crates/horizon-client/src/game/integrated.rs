@@ -64,6 +64,8 @@ struct Flags {
     /// `options.entityDistanceScaling` (an `f32`'s bits), which
     /// `IntegratedServer.getScaledTrackingDistance` reads on every call.
     entity_distance: AtomicU32,
+    /// The PvP page's legacy combat rules, which the server's hits follow from the next tick.
+    legacy_rules: AtomicBool,
     /// `MinecraftServer.isCurrentlySaving`: the server is autosaving.
     saving: AtomicBool,
     /// Splitscreen players joined through memory (offline uuids): let in although the world is
@@ -96,6 +98,7 @@ pub(super) struct Integrated {
     tasks: Sender<Task>,
     /// The world's name (`level.dat`'s `LevelName`), for the pause menu.
     pub world_name: String,
+    pub rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
 }
 impl Integrated {
     /// Queue every change, even if the currently published tree still has the requested state:
@@ -103,8 +106,11 @@ impl Integrated {
     fn queue_pregen_option(&self, enabled: bool) {
         let _ = self.tasks.send(Box::new(move |g| {
             use horizon_client::command::vanilla;
-            if vanilla::game_dispatcher().find("pregen").is_some() != enabled {
+            if g.ui.dispatcher.0.find("pregen").is_some() != enabled {
                 vanilla::set_horizon_commands(enabled);
+                g.ui.dispatcher = super::chat::SessionDispatcher(std::sync::Arc::new(
+                    vanilla::session_dispatcher(&g.level.rule_registry, &g.level.enabled_features),
+                ));
                 g.resend_commands_filtered();
             }
         }));
@@ -200,6 +206,10 @@ impl Integrated {
             .entity_distance
             .store(entity.to_bits(), Ordering::Relaxed);
     }
+    /// The window's legacy combat rules option, for the server's hits.
+    pub fn set_legacy_rules(&self, on: bool) {
+        self.flags.legacy_rules.store(on, Ordering::Relaxed);
+    }
     /// `IntegratedServer.getPort` while `isPublished`.
     pub fn published(&self) -> Option<u16> {
         Some(self.flags.published.load(Ordering::Relaxed)).filter(|&p| p != 0)
@@ -233,6 +243,11 @@ impl Integrated {
             }
             Err(RecvTimeoutError::Disconnected) => None,
         }
+    }
+    /// `execute`: run `f` on the server thread between two ticks, without
+    /// waiting for it. False once the server has stopped.
+    pub fn post(&self, f: impl FnOnce(&mut Game<'_>) + Send + 'static) -> bool {
+        self.tasks.send(Box::new(f)).is_ok()
     }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {
@@ -328,6 +343,7 @@ pub(super) struct Starting {
 /// The world to open and the player who owns it.
 struct Launch {
     folder: String,
+    rule_registry: Arc<horizon_client::gamerules::RuleRegistry>,
     name: Option<String>,
     seed: Option<i64>,
     creative: bool,
@@ -384,8 +400,6 @@ impl Game<'_> {
         creative: bool,
         create: Option<&WorldOptions>,
     ) -> Result<()> {
-        // The window's mod configs before the server's, as on NeoForge.
-        self.native_configs_client_start();
         self.client_logging_out();
         horizon_client::command::vanilla::set_horizon_commands(
             self.options.pregen || self.settings.extras.pregen,
@@ -395,7 +409,12 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(|| self.options.player_name(), |a| a.name.clone());
         let new_world = create.is_some();
+        let rule_registry = create.map_or_else(
+            || Arc::new(mod_api::__private::game_rule_registry()),
+            |options| options.rules.registry().clone(),
+        );
         let launch = Launch {
+            rule_registry: rule_registry.clone(),
             folder: folder.to_owned(),
             name: name.map(str::to_owned),
             seed,
@@ -458,6 +477,9 @@ impl Game<'_> {
         flags
             .entity_distance
             .store(settings.entity_distance.to_bits(), Ordering::Relaxed);
+        flags
+            .legacy_rules
+            .store(settings.extras.pvp.combat.rules, Ordering::Relaxed);
         let (ready_tx, ready) = channel();
         let (tasks, server_tasks) = channel();
         let server_flags = flags.clone();
@@ -487,6 +509,7 @@ impl Game<'_> {
             thread: Some(thread),
             tasks,
             world_name: String::new(),
+            rule_registry,
         };
         self.integrated_starting = Some(Starting {
             handle,
@@ -766,7 +789,7 @@ impl Game<'_> {
         let saved = Box::new(self.level.clone());
         // IntegratedServer runs the server mods; the window the client mods.
         startup::time("server.start_mods", || self.start_mods());
-        self.refresh_loop_context();
+        self.refresh_loop_context()?;
         // Math.max(2, options.renderDistance): past vanilla's 32 when the
         // window's render distance is (Horizon's options go to 64).
         let view_distance = self.settings.render_distance.max(2);
@@ -1046,11 +1069,12 @@ impl Game<'_> {
         true
     }
     /// IntegratedServer.tickServer: the server follows the window's render
-    /// and simulation distances when they change.
+    /// and simulation distances when they change (and Horizon's legacy combat rules).
     fn follow_distances(&mut self, flags: &Flags) {
         // IntegratedServer.getScaledTrackingDistance reads the option each time.
         self.settings.entity_distance =
             f32::from_bits(flags.entity_distance.load(Ordering::Relaxed));
+        self.settings.extras.pvp.combat.rules = flags.legacy_rules.load(Ordering::Relaxed);
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -1197,6 +1221,7 @@ fn serve(
         launch.seed,
         launch.creative,
         launch.create.as_ref(),
+        launch.rule_registry.clone(),
     )
     .and_then(|request| {
         WorldLoader::start(
@@ -1251,6 +1276,14 @@ impl Game<'_> {
             .spawn(move || {
                 let run = || -> Result<()> {
                     let mut server = server_game(&res, pack, options, settings)?;
+                    // The oracle supplies an already-open synthetic world rather
+                    // than running the normal config and startup lifecycle.
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::Config)?;
+                    server
+                        .mod_phase
+                        .advance(mod_api::__private::ModPhase::World)?;
                     match fixture {
                         ComponentHarness::Dispenser(spec) => server.dispense_fixture(&spec),
                         ComponentHarness::Sculk(spec) => server.sculk_fixture(&spec),
@@ -1270,8 +1303,8 @@ fn server_game(
     options: Options,
     settings: Settings,
 ) -> Result<Game<'_>> {
-    let gui = UiResources::server(&options.resources)?;
-    let audio = Audio::silent(&options.resources);
+    let gui = UiResources::server(&pack.source)?;
+    let audio = Audio::silent(&pack.source);
     Game::new(res, pack, gui, options, settings, audio, None)
 }
 
@@ -1316,6 +1349,72 @@ pub(super) mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn integrated_rules_screen_shares_server_session_registry() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let registry = Arc::new(horizon_client::gamerules::RuleRegistry::with_categories(&[
+                "example:machines".into(),
+            ]));
+            let request =
+                WorldRequest::new("test", None, None, true, None, registry.clone()).unwrap();
+            let (tasks, _receiver) = channel();
+            game.integrated = Some(Integrated {
+                flags: Arc::new(Flags::default()),
+                thread: None,
+                tasks,
+                world_name: "test".into(),
+                rule_registry: registry.clone(),
+            });
+            assert!(Arc::ptr_eq(
+                &request.rule_registry,
+                &game.integrated.as_ref().unwrap().rule_registry
+            ));
+            assert!(game.test_open_remote_rules(Vec::new()));
+            assert!(
+                request
+                    .rule_registry
+                    .categories()
+                    .contains(&"example:machines".to_owned())
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_session_identifies_only_its_own_integrated_server() {
+        use mod_api::ClientHost;
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _pipe = super::super::native_client_session::tests::logged_client(game);
+            let (tasks, _waiting_server) = channel();
+            game.integrated = Some(Integrated {
+                flags: Arc::new(Flags::default()),
+                thread: None,
+                tasks,
+                world_name: "First world".into(),
+                rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
+            });
+            let local = game.client_session().client_server().unwrap();
+            assert!(local.integrated_local);
+            assert_eq!(local.name.as_deref(), Some("First world"));
+            assert_eq!(local.address, None);
+            game.integrated.as_mut().unwrap().world_name = "Renamed world".into();
+            assert_eq!(
+                game.client_session()
+                    .client_server()
+                    .unwrap()
+                    .name
+                    .as_deref(),
+                Some("Renamed world")
+            );
+            game.integrated.take();
+            let guest = game.client_session().client_server().unwrap();
+            assert!(!guest.integrated_local);
+            assert_eq!(guest.name, None);
+            assert_eq!(guest.address, None);
+        });
+    }
+
+    #[test]
     fn pregen_toggle_back_is_queued_while_server_is_busy() {
         let (tasks, waiting_server) = channel();
         let server = Integrated {
@@ -1323,6 +1422,7 @@ pub(super) mod tests {
             thread: None,
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         // The receiver deliberately does not run either task between the updates. In particular,
         // the dispatcher can still show the old value when the owner toggles back.
@@ -1372,6 +1472,7 @@ pub(super) mod tests {
             thread: Some(std::thread::spawn(move || wait.recv().unwrap())),
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         server.request_stop();
         assert!(flags.stop.load(Ordering::Relaxed));
@@ -1392,6 +1493,7 @@ pub(super) mod tests {
             })),
             tasks,
             world_name: String::new(),
+            rule_registry: Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
         };
         assert_eq!(server.stop().unwrap_err().to_string(), "disk write failed");
     }

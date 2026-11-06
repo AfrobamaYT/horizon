@@ -55,7 +55,12 @@ impl Game<'_> {
         }
         let at = spill::pop_position(&mut self.world.random, pos);
         // Block.popResource's private overload checks these after the draws.
-        if !self.stack_spawns(&stack) || !self.ui.rules.bool("block_drops") {
+        if !self.stack_spawns(&stack)
+            || !self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return None;
         }
         self.spawn_level_item(level, stack, at, dispenser::new_item_motion(), 10)
@@ -163,7 +168,7 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -183,7 +188,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -326,6 +333,7 @@ mod tests {
                 let orb = |id, x, value, ticks| {
                     let p = Vec3::new(x, 70.0, 0.5);
                     ExperienceOrb {
+                        attachment_lifetime: Default::default(),
                         rotation: [0.0, 0.0],
                         join: Default::default(),
                         id,

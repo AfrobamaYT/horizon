@@ -4,6 +4,7 @@
 //! the default pose, the hit wobble and humanoid armor layers.
 use super::entity::Entity;
 use super::{Game, InteractTarget};
+use horizon_assets::resource_source::ResourceSource;
 use horizon_client::{
     Result,
     cit::{Hand, Kind, Rule},
@@ -19,7 +20,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 /// Velocity `AbstractMinecart.push` adds: the cart, and a quarter on the stand.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -93,11 +94,11 @@ pub(super) struct ArmorStandAssets {
     pub trim_overrides: HashMap<String, Vec<TrimOverride>>,
     pub trims: TrimRegistry,
     /// The resources the trim textures are made from.
-    pub root: PathBuf,
+    pub root: ResourceSource,
 }
 impl ArmorStandAssets {
     pub fn load(
-        root: &std::path::Path,
+        root: &ResourceSource,
         document: Option<&horizon_client::mobs::EntityModelDocument>,
     ) -> Self {
         let load = |key: &str| document.and_then(|document| document.model(key));
@@ -123,21 +124,19 @@ impl ArmorStandAssets {
         }
         let mut equipment = HashMap::new();
         let mut trim_overrides = HashMap::new();
-        // EquipmentAssetManager reads every namespace: vanilla's and the content mods'.
-        let namespaces = std::iter::once("minecraft".to_owned())
-            .chain(horizon_client::mod_content::namespaces(root));
-        for namespace in namespaces {
-            let Ok(entries) = std::fs::read_dir(root.join(format!("assets/{namespace}/equipment")))
-            else {
-                continue;
-            };
-            for e in entries.flatten() {
-                let path = e.path();
-                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+        // EquipmentAssetManager reads resolved resources in every namespace.
+        for namespace in root.namespaces("assets") {
+            let prefix = format!("assets/{namespace}/equipment/");
+            for path in root.list(&prefix) {
+                let Some(name) = path
+                    .strip_prefix(&prefix)
+                    .and_then(|path| path.strip_suffix(".json"))
+                else {
                     continue;
                 };
-                let Ok(v) =
-                    std::fs::read(&path).map(|b| serde_json::from_slice::<serde_json::Value>(&b))
+                let Ok(v) = root
+                    .read(&path)
+                    .map(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes))
                 else {
                     continue;
                 };
@@ -184,8 +183,8 @@ impl ArmorStandAssets {
         }
     }
     /// Trim data of reloaded resources (the models stay).
-    pub fn reload_trims(&mut self, root: &std::path::Path) {
-        let fresh = Self::load(root, None);
+    pub fn apply_resources(&mut self, fresh: Self) {
+        self.equipment = fresh.equipment;
         self.trim_overrides = fresh.trim_overrides;
         self.trims = fresh.trims;
         self.root = fresh.root;
@@ -909,7 +908,9 @@ impl Game<'_> {
             if in_water {
                 a.enchantment_fall_distance = 0.0;
             } else {
-                a.enchantment_fall_distance += (a.previous.y - a.position.y).max(0.0);
+                // Entity.checkFallDamage narrows each movement before adding to the double.
+                a.enchantment_fall_distance +=
+                    f64::from((a.previous.y - a.position.y).max(0.0) as f32);
             }
             let landed = a.on_ground && a.enchantment_fall_distance > 0.0;
             if a.on_ground {
@@ -1027,7 +1028,10 @@ impl Game<'_> {
                 .state(self.world.block(p.x, p.y, p.z))
                 .is_some_and(|s| s.name == "minecraft:turtle_egg");
             if egg
-                && self.ui.rules.bool("mob_griefing")
+                && self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
                 && self.world.random.next_int_bound(chance).unwrap_or(1) == 0
             {
                 self.crack_turtle_egg([p.x, p.y, p.z])?;
@@ -1133,12 +1137,13 @@ impl Game<'_> {
                 )
                 * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
                 * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
-            let light = self.world.light(
-                at.x.floor() as i32,
-                (at.y + 0.5).floor() as i32,
-                at.z.floor() as i32,
-            );
-            let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
+            // `EntityRenderer.getPackedLightCoords`: the block
+            // `ArmorStand.getLightProbePosition` gives - the brightest cell of a
+            // marker's own box, else the stand's eye - at 15 block light while
+            // it burns.
+            let probe = a.light_probe(alpha, |x, y, z| self.world.light(x, y, z));
+            let light = self.world.light(probe[0], probe[1], probe[2]);
+            let packed = a.render_light(light);
             let skinned = if skinning {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
@@ -1652,8 +1657,8 @@ impl Game<'_> {
                 .extra
                 .as_deref()
                 .and_then(|d| d.other.iter().find(|(k, _)| k == "minecraft:profile"))
-                .map(|(_, t)| horizon_client::scoreboard::tag_to_json(t))
-                .unwrap_or(serde_json::Value::Null);
+                .map(|(_, t)| self.skin_profiles.borrow_mut().head_profile_nbt(t))
+                .unwrap_or_else(|| std::sync::Arc::new(serde_json::Value::Null));
             self.pack.item_renderer.submit_special(
                 &special,
                 &profile,

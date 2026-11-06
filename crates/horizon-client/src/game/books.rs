@@ -409,12 +409,12 @@ impl Game<'_> {
         // A cancelled edit leaves the client's own copy of the book: forget
         // what was sent so the next broadcast resends the server's stack.
         if cancelled == Some(true)
-            && let Some(g) = self
-                .lan
-                .as_mut()
-                .and_then(|host| host.hub.guests.iter_mut().find(|g| g.conn == conn))
+            && let Some(host) = self.lan.as_mut()
         {
-            g.menu_sent[menu_slot] = None;
+            let _ = host
+                .hub
+                .guests
+                .update_connection(conn, |g| g.menu_sent[menu_slot] = None);
         }
     }
     pub(super) fn book_key(&mut self, event: &KeyEvent) {
@@ -914,7 +914,7 @@ impl Game<'_> {
     /// with the player's inventory, and the screen follows the block entity.
     fn lectern_button(&mut self, key: (i32, i32, i32), id: i32) {
         if self.remote.is_some() {
-            let _ = self.native_click_menu_button(id);
+            let _ = self.remote_button_click(id);
             return;
         }
         let Some(mut menu) = self.lectern_menu(key) else {
@@ -1082,6 +1082,7 @@ impl Game<'_> {
             return None;
         };
         let mut menu = Menu::new(Kind::Lectern);
+        menu.set_registry_id(Some("minecraft:lectern"));
         menu.set_slot(&self.menu_env(), 0, l.book.clone());
         menu.data[0] = l.page;
         Some(menu)
@@ -1138,7 +1139,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn book_click(&mut self, size: [u32; 2]) {
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (w, left) = (b.width, ((b.width - 192.0) / 2.0).floor());
         let (mx, my) = self.cursor;
         // MouseHandler: a click within 250 ms of the last one on this screen is a double click.
@@ -1218,11 +1219,11 @@ impl Game<'_> {
     pub(super) fn draw_book(&self, batch: &mut HudBatch) {
         let Some(book) = &self.book else { return };
         let atlas = &self.gui.atlas;
-        let (w, h) = (batch.width, batch.height);
+        let w = batch.width;
         let (mx, my) = self.cursor;
         let hover =
             |x: f32, y: f32, bw: f32, bh: f32| mx >= x && my >= y && mx < x + bw && my < y + bh;
-        batch.fill(atlas, 0.0, 0.0, w, h, rgba(16, 16, 16, 160));
+        self.render_transparent_background("book", batch);
         let left = ((w - 192.0) / 2.0).floor();
         let top = 2.0;
         if let Some(mut r) = atlas.sprites.get("gui/book").copied() {

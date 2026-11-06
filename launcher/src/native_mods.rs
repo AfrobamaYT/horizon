@@ -24,14 +24,21 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use horizon_mods::dependencies;
+
 mod api;
 mod crates;
-mod dependencies;
 mod diagnostics;
 mod inject;
 mod inject_cache;
+mod internals;
+mod internals_sync;
+mod isolate;
 mod package;
 mod prebuilt;
+mod wasm_internals;
+
+pub use isolate::LeftOut;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -537,6 +544,18 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     result
 }
 
+/// Dispatch Cargo's discovery-only rustc wrapper before normal launcher startup.
+pub fn internals_rustc_wrapper() -> Option<i32> {
+    internals_sync::rustc_wrapper()
+}
+
+/// Discover used internals without installing a game or changing an instance.
+pub fn sync_internals(
+    folder: &Path,
+) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+    internals_sync::check(folder).map_err(|error| error.to_string())
+}
+
 pub const DEFAULT_CACHE_GIB: u64 = 30;
 
 fn cache_error(error: crate::native_cache::Error) -> String {
@@ -619,12 +638,13 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
         }
         count += 1;
     }
-    if count == 0 {
+    if count == 0 && wasm_internals::installed(Some(home))?.is_empty() {
         return Err(format!(
             "No native mod is turned on in {}: install one from the Mods page first.",
             home.join(INSTALLED).display()
         ));
     }
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -695,14 +715,14 @@ impl Bundle {
     }
 
     /// Whether horizon-mixins changes the game's source for it: a helper injection or a module.
-    /// A `trait_method` injection listens at a point instead ([`inject`]).
+    /// A `trait_method` or `raw` injection listens at a point instead ([`inject`]).
     fn needs_mixins(&self) -> bool {
         !self.native().module.is_empty()
             || self
                 .native()
                 .injection
                 .iter()
-                .any(|injection| injection.trait_method.is_none())
+                .any(|injection| injection.helper.is_some())
     }
 }
 
@@ -778,6 +798,20 @@ impl Injection {
 
 /// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    let found = scan_bundles(folder)?;
+    if found.is_empty() {
+        return Err(format!(
+            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
+            folder.display()
+        ));
+    }
+    Ok(found)
+}
+
+fn scan_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    if !folder.exists() {
+        return Ok(Vec::new());
+    }
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
     }
@@ -791,12 +825,6 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     let mut found = Vec::new();
     for dir in dirs {
         found.extend(bundle_in(&dir)?);
-    }
-    if found.is_empty() {
-        return Err(format!(
-            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
-            folder.display()
-        ));
     }
     Ok(found)
 }
@@ -1127,6 +1155,8 @@ pub struct About {
     pub horizon: String,
     /// What it compiles: the game or the headless engine a server runs.
     pub target: Target,
+    /// The mods turned on that it was built without, and why.
+    pub left_out: Vec<LeftOut>,
 }
 
 /// What installed native build `version` was made from; None for any other version.
@@ -1150,6 +1180,12 @@ fn about_in(dir: &Path) -> Option<About> {
             Some("client") => Target::Client,
             _ => return None,
         },
+        left_out: json["left_out"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(LeftOut::from_json)
+            .collect(),
     })
 }
 
@@ -1319,6 +1355,8 @@ pub enum Step {
     /// The mods compile against the prebuilt game.
     PrebuiltMods,
     Install,
+    /// This mod was left out of the build.
+    LeftOut(LeftOut),
     /// The build ended: seconds it took.
     Done {
         secs: u64,
@@ -1368,6 +1406,7 @@ impl Step {
             | Self::CachedMixins
             | Self::Plan(..)
             | Self::Crates
+            | Self::LeftOut(_)
             | Self::PrebuiltGame(_) => (Stage::Prepare, None),
             Self::Compile { done, total, .. } => (
                 Stage::Compile,
@@ -1428,6 +1467,7 @@ impl Step {
                 ),
             },
             Self::Install => tr("Installing the build").into(),
+            Self::LeftOut(left) => left.label(),
             Self::Done {
                 secs,
                 profile,
@@ -1448,29 +1488,41 @@ impl Step {
 /// An error ends with its first `error` lines and the last lines: a failed build script's output
 /// alone could push the line naming its crate out of the last ones.
 fn run(cmd: Command, what: &str, line: impl FnMut(&str)) -> Result<(), String> {
-    run_with_compiler(cmd, what, line, None)
+    run_checked(cmd, what, line, None).map_err(|e| e.error)
 }
 
-fn run_with_compiler(
+/// A failed command, with diagnostic ownership for build isolation.
+struct Ran {
+    error: String,
+    tail: String,
+    owners: Vec<String>,
+}
+
+fn run_checked(
     mut cmd: Command,
     what: &str,
     mut line: impl FnMut(&str),
     compiler: Option<diagnostics::Compiler<'_>>,
-) -> Result<(), String> {
+) -> Result<(), Ran> {
+    let ran = |error: String| Ran {
+        error,
+        tail: String::new(),
+        owners: Vec::new(),
+    };
     let mut log = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_path())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| ran(e.to_string()))?;
     if CANCEL.load(Ordering::Relaxed) {
-        return Err(CANCELLED.into());
+        return Err(ran(CANCELLED.into()));
     }
     let _ = writeln!(log, "$ {cmd:?}");
     let stdout = if compiler.is_some() {
         cmd.stdout(Stdio::piped());
-        Some(log.try_clone().map_err(|e| e.to_string())?)
+        Some(log.try_clone().map_err(|e| ran(e.to_string()))?)
     } else {
-        cmd.stdout(log.try_clone().map_err(|e| e.to_string())?);
+        cmd.stdout(log.try_clone().map_err(|e| ran(e.to_string()))?);
         None
     };
     #[cfg(unix)]
@@ -1478,7 +1530,7 @@ fn run_with_compiler(
     let mut child = cmd
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| app_control(format!("Could not start {what}: {e}")))?;
+        .map_err(|e| ran(app_control(format!("Could not start {what}: {e}"))))?;
     let finished = Arc::new(AtomicBool::new(false));
     let watcher = {
         let (pid, finished) = (child.id(), finished.clone());
@@ -1525,17 +1577,27 @@ fn run_with_compiler(
             .unwrap_or_default();
         if CANCEL.load(Ordering::Relaxed) {
             let _ = writeln!(log, "Build cancelled.");
-            return Err(CANCELLED.into());
+            return Err(ran(CANCELLED.into()));
         }
-        let status = status.map_err(|e| e.to_string())?;
+        let status = status.map_err(|e| ran(e.to_string()))?;
         if status.success() {
             return Ok(());
         }
         let tail: Vec<String> = tail.into();
-        let error = messages.explain(failure(what, &status.to_string(), &errors, &tail));
-        Err(match blocked {
-            true => with_app_control(error),
-            false => app_control(error),
+        let owners = messages.owners();
+        let error = diagnostics::with_internals_hint(messages.explain(failure(
+            what,
+            &status.to_string(),
+            &errors,
+            &tail,
+        )));
+        Err(Ran {
+            error: match blocked {
+                true => with_app_control(error),
+                false => app_control(error),
+            },
+            tail: tail.join("\n"),
+            owners,
         })
     })
 }
@@ -1748,7 +1810,9 @@ fn lock_crates(
         fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let horizon = crates::downloaded(&read(source)?)?;
-    let staged = crates::downloaded(&read(stage)?)?;
+    let staged_lock = read(stage)?;
+    crates::check_game_graph(stage, &staged_lock)?;
+    let staged = crates::downloaded(&staged_lock)?;
     let api_ids: Vec<&str> = mods.iter().map(|m| m.manifest.id.as_str()).collect();
     if let Some(why) = crates::refused(&horizon, Some(&staged), wanted, &api_ids) {
         return Err(why);
@@ -1773,7 +1837,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        backend::REPO
+        horizon_mods::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -1812,7 +1876,10 @@ pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<Pa
 }
 
 /// Makes `to` hold `from`'s files, writing only those that changed, so Cargo, which goes by file
-/// times, recompiles only what the mods changed.
+/// times, recompiles only what the mods changed. A file written gets the current time, not
+/// `from`'s: a copy keeps the original's time on Windows and macOS, and an unpacked source has
+/// its commit's, which can be older than the last build. Cargo would take that file for one it
+/// already compiled and link the older crate (#10421).
 fn sync(from: &Path, to: &Path) -> Result<(), String> {
     let new = files(from)?;
     let old = if to.is_dir() { files(to)? } else { Vec::new() };
@@ -1820,7 +1887,10 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         let target = to.join(name);
         if fs::read(&target).ok() != fs::read(path).ok() {
             fs::create_dir_all(target.parent().unwrap_or(to)).map_err(|e| e.to_string())?;
-            fs::copy(path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+            fs::copy(path, &target)
+                .and_then(|_| fs::File::options().write(true).open(&target))
+                .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+                .map_err(|e| format!("{}: {e}", target.display()))?;
         }
     }
     for (name, path) in old {
@@ -1829,6 +1899,24 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Marks a `stage/` whose files all got the time they were written ([`sync`]).
+const STAGE_STAMPED: &str = "stage.stamped";
+
+/// The stage the compiler reads, in `root`. One written before #10421 can hold files with their
+/// commit's time over crates compiled from another commit: it is written again, once, so each of
+/// its files is newer than what `target/` holds.
+fn stage_dir(root: &Path) -> Result<PathBuf, String> {
+    let stage = root.join("stage");
+    let stamped = root.join(STAGE_STAMPED);
+    if !stamped.exists() {
+        if stage.exists() {
+            fs::remove_dir_all(&stage).map_err(|e| format!("{}: {e}", stage.display()))?;
+        }
+        fs::write(&stamped, "").map_err(|e| format!("{}: {e}", stamped.display()))?;
+    }
+    Ok(stage)
 }
 
 /// Copy a bundle without its API package's Cargo build output.
@@ -1866,6 +1954,66 @@ struct Built {
     profile: Profile,
     /// How long the whole build took.
     secs: u64,
+    /// The mods turned on that it was built without.
+    left_out: Vec<LeftOut>,
+}
+
+/// Why [`pipeline`] stopped.
+enum Failed {
+    /// These mods stopped it (`error` says how), while `compiling` or before: it can run again
+    /// without them.
+    Mods {
+        left: Vec<LeftOut>,
+        error: String,
+        compiling: bool,
+    },
+    /// Every mod was left out.
+    Nothing,
+    Other(String),
+}
+
+impl From<String> for Failed {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<Failed> for String {
+    fn from(failed: Failed) -> Self {
+        match failed {
+            Failed::Mods { error, .. } | Failed::Other(error) => error,
+            Failed::Nothing => String::new(),
+        }
+    }
+}
+
+/// Isolation and jar-download choices for an explicit build.
+#[derive(Default)]
+struct BuildOptions<'a> {
+    allow_jar_downloads: bool,
+    skip: &'a [LeftOut],
+    isolate: bool,
+    /// The instance whose installed wasm mods choose the game's internals table; none leaves the
+    /// committed empty table.
+    home: Option<&'a Path>,
+}
+
+/// Whether an instance needs a source table even without any native code mods.
+pub fn has_wasm_internals(home: &Path) -> bool {
+    wasm_internals::installed(Some(home)).is_ok_and(|declared| !declared.is_empty())
+}
+
+/// Resolve the two inputs to the source pipeline before preparing or building the game.
+fn build_inputs(
+    folder: &Path,
+    home: Option<&Path>,
+) -> Result<(Vec<Bundle>, wasm_internals::Declarations), Failed> {
+    let mods = scan_bundles(folder)?;
+    let declared = wasm_internals::installed(home)?;
+    if mods.is_empty() && declared.is_empty() {
+        return Err(Failed::Nothing);
+    }
+    Ok((mods, declared))
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -1875,7 +2023,9 @@ struct Built {
 /// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
 /// the profile and the target). A build already made is used again. A mod pinned to another
 /// Horizon revision is refused: the error starts with [`MISMATCH`] and names the mismatched pins.
-/// Building never changes a mod's Horizon pin to match the installed game.
+/// Building never changes a mod's Horizon pin to match the installed game. Isolation leaves out
+/// only a mod blamed by mixin or compiler diagnostics and its required dependents; servers refuse
+/// failures without leaving anything out.
 /// Nothing of the player's outside the launcher's data is touched: no instance is edited and
 /// no version selected here.
 fn pipeline(
@@ -1883,16 +2033,16 @@ fn pipeline(
     folder: &Path,
     profile: Profile,
     target: Target,
-    allow_jar_downloads: bool,
+    options: BuildOptions<'_>,
     progress: &impl Fn(Step),
-) -> Result<Built, String> {
+) -> Result<Built, Failed> {
     let started = std::time::Instant::now();
     let built_on = about(base);
     if is_native(base) && built_on.is_none() {
         return Err(trf(
             "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
             &[("version", base)],
-        ));
+        ).into());
     }
     backend::need_prepared(base)?;
     let platform = platform_for_game(base)?;
@@ -1901,7 +2051,7 @@ fn pipeline(
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
     let _ = fs::remove_dir_all(&incoming);
-    let found = bundles(folder)?;
+    let (found, wasm_internals) = build_inputs(folder, options.home)?;
     // #6490: said before anything runs, so a build that fails later still
     // shows them.
     for warning in warn_conflicts(&found) {
@@ -1912,7 +2062,7 @@ fn pipeline(
     let mut ids = std::collections::HashSet::new();
     for b in &found {
         if !ids.insert(&b.manifest.id) {
-            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id));
+            return Err(format!("Duplicate native mod id {:?}.", b.manifest.id).into());
         }
         copy_bundle(b, &incoming.join(&b.manifest.id))?;
     }
@@ -1931,6 +2081,23 @@ fn pipeline(
         .iter()
         .map(|bundle| dependencies::from_manifest(&bundle.manifest.dependencies))
         .collect();
+    // The cache identifies every requested input, including a mod left out after a failure:
+    // replacing its files must retry it rather than reuse a build that excluded the old copy.
+    let requested = mods.clone();
+    let pairs: Vec<(&Bundle, &[dependencies::Dependency])> = mods
+        .iter()
+        .zip(&declared)
+        .map(|(b, d)| (b, d.as_slice()))
+        .collect();
+    let left_out = isolate::with_dependents(options.skip, &pairs);
+    let (mods, declared): (Vec<Bundle>, Vec<Vec<dependencies::Dependency>>) = mods
+        .into_iter()
+        .zip(declared)
+        .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
+        .unzip();
+    if mods.is_empty() && wasm_internals.is_empty() {
+        return Err(Failed::Nothing);
+    }
     let inputs: Vec<_> = mods
         .iter()
         .zip(&declared)
@@ -1948,6 +2115,25 @@ fn pipeline(
         .map(api::Project::read)
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
+    for bundle in &ordered {
+        let native = bundle.native();
+        if !native.internals.is_empty() {
+            let paths = native
+                .internals
+                .iter()
+                .map(|internal| internal.path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            append_log(&trf(
+                "{mod} uses {count} game internals: {paths}",
+                &[
+                    ("mod", &bundle.manifest.id),
+                    ("count", &native.internals.len().to_string()),
+                    ("paths", &paths),
+                ],
+            ))?;
+        }
+    }
     let point_injections: Vec<_> = ordered
         .iter()
         .flat_map(|bundle| inject::of(&bundle.manifest))
@@ -1958,7 +2144,7 @@ fn pipeline(
     };
     let other = mismatch(&mods, &revision);
     if let Some(list) = &other {
-        return Err(format!("{MISMATCH}{list}; rebuild against this game."));
+        return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
     }
     if target == Target::Server {
         let jars = horizon_mods::manifest::collect_jar_requirements(
@@ -1969,7 +2155,7 @@ fn pipeline(
         crate::jars::prepare(
             &backend::game_home(),
             &jars,
-            crate::jars::Permission::headless(allow_jar_downloads),
+            crate::jars::Permission::headless(options.allow_jar_downloads),
         )
         .map_err(|error| error.to_string())?;
     }
@@ -1990,14 +2176,17 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(
-        &revision,
-        &mixins,
-        profile,
-        target,
-        platform.cache_key(),
-        &mods,
-    )?;
+    let version = wasm_internals::version(
+        version_for(
+            &revision,
+            &mixins,
+            profile,
+            target,
+            platform.cache_key(),
+            &requested,
+        )?,
+        &wasm_internals,
+    );
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -2008,7 +2197,7 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists {
+    let prebuilt = if exists || !wasm_internals.is_empty() {
         None
     } else {
         let game = match prebuilt::refusal(&projects, profile) {
@@ -2040,6 +2229,13 @@ fn pipeline(
         plan: plan.clone(),
         profile,
         secs: 0,
+        left_out: if exists {
+            about(&version)
+                .map(|about| about.left_out)
+                .unwrap_or_default()
+        } else {
+            left_out.clone()
+        },
     };
     let about = |route: &str| {
         serde_json::json!({
@@ -2049,6 +2245,11 @@ fn pipeline(
             "rust": rust_toolchain::VERSION,
             "profile": profile.name(),
             "route": route,
+            "left_out": left_out.iter().map(|left| {
+                let mut json = left.to_json();
+                json["sha256"] = serde_json::json!(digests.get(&left.id).cloned().flatten());
+                json
+            }).collect::<Vec<_>>(),
             "target": target.name(),
             "rust_target": platform.target,
             "secs": started.elapsed().as_secs(),
@@ -2056,6 +2257,10 @@ fn pipeline(
                 "id": m.manifest.id,
                 "version": m.manifest.version,
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
+                "internals": m.native().internals,
+                "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
+                    "id": injection.id, "target": injection.target, "kind": injection.kind,
+                })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
     };
@@ -2119,14 +2324,26 @@ fn pipeline(
                 let mixin_input = real.join("mixins.incoming");
                 stage_mixins(&ordered, &mixin_input)?;
                 progress(Step::Mixins);
-                let result = run(
+                let result = run_checked(
                     apply(&rust, &tool, &source, &mixin_input, &fresh),
                     "horizon-mixins",
                     |_| {},
+                    None,
                 );
                 let _ = fs::remove_dir_all(&mixin_input);
-                result.map_err(blame)?;
-                let parent = snapshot.parent().ok_or("invalid cache path")?;
+                if let Err(ran) = result {
+                    check_cancelled()?;
+                    let error = blame(ran.error);
+                    return Err(match isolate::from_mixins(&ran.tail, &ordered) {
+                        Some(culprit) if options.isolate => Failed::Mods {
+                            left: vec![culprit],
+                            error,
+                            compiling: false,
+                        },
+                        _ => Failed::Other(error),
+                    });
+                }
+                let parent = snapshot.parent().ok_or("invalid cache path".to_owned())?;
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 let partial = parent.join(format!(".{key}.partial"));
                 let _ = fs::remove_dir_all(&partial);
@@ -2155,6 +2372,7 @@ fn pipeline(
         .arg(&listed)
         .arg(real.join("internals.json"))
         .env("CARGO_TARGET_DIR", real.join("target"));
+        wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
         run(pass, "Marking the game's injection points", |_| {})?;
         inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
         if !mods.is_empty() {
@@ -2163,7 +2381,11 @@ fn pipeline(
             fetch.arg("--locked");
             run(fetch, "Downloading Horizon's crates", |_| {})?;
         }
-        let has_api = api::stage(&fresh, &projects, &declared, &resolution)?;
+        let catalog = internals::Catalog::read(&real)?;
+        let has_api = api::stage(&fresh, &projects, &declared, &resolution, &catalog)?;
+        for project in &projects {
+            catalog.log_raw(&project.bundle.manifest)?;
+        }
         let paths = mods
             .iter()
             .map(|bundle| {
@@ -2186,7 +2408,7 @@ fn pipeline(
             run(metadata, "Resolving trait mod crates", |_| {})?;
         }
         // Absolute: the compiler runs from elsewhere (`compile`).
-        let stage = real.join("stage");
+        let stage = stage_dir(&real)?;
         sync(&fresh, &stage)?;
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
@@ -2203,7 +2425,7 @@ fn pipeline(
             .iter()
             .map(|m| (m.manifest.id.clone(), m.manifest.version.clone()))
             .collect();
-        run_with_compiler(
+        run_checked(
             compile(
                 &rust,
                 &stage,
@@ -2245,7 +2467,20 @@ fn pipeline(
                 mods: &identities,
             }),
         )
-        .map_err(|e| blame(crates::locked(e)))?;
+        .map_err(|ran| {
+            let error = blame(crates::locked(ran.error));
+            if CANCEL.load(Ordering::Relaxed) {
+                return Failed::Other(CANCELLED.into());
+            }
+            match isolate::from_compiler(&ran.owners, &mods) {
+                left if options.isolate && !left.is_empty() => Failed::Mods {
+                    left,
+                    error,
+                    compiling: true,
+                },
+                _ => Failed::Other(error),
+            }
+        })?;
         check_cancelled()?;
         let binary = target_dir.join(compiled.cargo().0).join(backend::CLIENT);
         if let Some(expected) = platform.machine {
@@ -2259,7 +2494,8 @@ fn pipeline(
                 return Err(architecture_mismatch(
                     &format!("PE machine 0x{expected:04x}"),
                     &format!("PE machine 0x{actual:04x}"),
-                ));
+                )
+                .into());
             }
         }
         save_record(target, profile, platform.cache_key(), &now);
@@ -2282,6 +2518,63 @@ fn pipeline(
     Ok(built)
 }
 
+/// How many times a build compiles again without the mods the compiler's errors were traced to:
+/// each costs a compile, where a mod that doesn't apply costs only horizon-mixins' run.
+const COMPILE_RETRIES: usize = 3;
+
+/// Runs `pipeline` until it builds, each time without the mods that stopped it before (they
+/// are said with `progress` as they are left out, and those needing them once it built). The
+/// error, when it can't, starts with the mods already left out.
+fn isolated(
+    mut pipeline: impl FnMut(&[LeftOut]) -> Result<Built, Failed>,
+    progress: &impl Fn(Step),
+) -> Result<Built, String> {
+    let mut skip: Vec<LeftOut> = Vec::new();
+    let mut compiles = 0;
+    let mut last = String::new();
+    let said = |skip: &[LeftOut], error: String| {
+        let labels: Vec<String> = skip.iter().map(LeftOut::label).collect();
+        match labels.is_empty() {
+            true => error,
+            false => format!("{}\n\n{error}", labels.join("\n")),
+        }
+    };
+    loop {
+        match pipeline(&skip) {
+            Ok(built) => {
+                for left in built.left_out.iter().filter(|l| !skip.contains(l)) {
+                    log_warning(&left.label());
+                    progress(Step::LeftOut(left.clone()));
+                }
+                return Ok(built);
+            }
+            Err(Failed::Mods {
+                left,
+                error,
+                compiling,
+            }) => {
+                compiles += usize::from(compiling);
+                let new: Vec<LeftOut> = left
+                    .into_iter()
+                    .filter(|l| !skip.iter().any(|s| s.id == l.id))
+                    .collect();
+                if new.is_empty() || compiles > COMPILE_RETRIES {
+                    return Err(said(&skip, error));
+                }
+                for left in new {
+                    log_warning(&left.label());
+                    progress(Step::LeftOut(left.clone()));
+                    skip.push(left);
+                }
+                last = error;
+            }
+            Err(Failed::Nothing) => return Err(said(&skip, last)),
+            Err(Failed::Other(error)) if error == CANCELLED => return Err(error),
+            Err(Failed::Other(error)) => return Err(said(&skip, error)),
+        }
+    }
+}
+
 /// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
 /// and points `instance` at the build, the default one included. Returns the build's version; a
@@ -2300,7 +2593,24 @@ pub fn build(
         return Err(error);
     }
     logged(|| {
-        let built = pipeline(base, folder, profile, Target::Client, false, &progress)?;
+        let built = isolated(
+            |skip| {
+                pipeline(
+                    base,
+                    folder,
+                    profile,
+                    Target::Client,
+                    BuildOptions {
+                        skip,
+                        isolate: true,
+                        home: Some(&instance.home),
+                        ..BuildOptions::default()
+                    },
+                    &progress,
+                )
+            },
+            &progress,
+        )?;
         check_cancelled()?;
         instances::edit(&instance.id, |meta| {
             meta.version = Some(built.version.clone())
@@ -2365,9 +2675,13 @@ pub fn build_server(
             folder,
             profile,
             Target::Server,
-            allow_jar_downloads,
+            BuildOptions {
+                allow_jar_downloads,
+                ..BuildOptions::default()
+            },
             &progress,
-        )?;
+        )
+        .map_err(String::from)?;
         export(&Target::Server.directory(&built.version), &output)?;
         // Exports are independent; keep only the newest cached server builds.
         let cached = root().join("server-builds");
@@ -2597,6 +2911,59 @@ mod tests {
     pub(super) static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
+
+    #[test]
+    fn isolation_keeps_cancellation_exact_after_a_retry() {
+        let _guard = LOG_TEST.lock().unwrap();
+        let mut attempts = 0;
+        let result = isolated(
+            |skip| {
+                attempts += 1;
+                if skip.is_empty() {
+                    return Err(Failed::Mods {
+                        left: vec![LeftOut {
+                            id: "broken".into(),
+                            version: "1.0.0".into(),
+                            why: isolate::Why::OtherVersion,
+                        }],
+                        error: "compiler failure".into(),
+                        compiling: true,
+                    });
+                }
+                assert_eq!(skip[0].id, "broken");
+                Err(Failed::Other(CANCELLED.into()))
+            },
+            &|_| {},
+        );
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn isolation_bounds_recompiles_and_keeps_the_failure() {
+        let _guard = LOG_TEST.lock().unwrap();
+        let mut attempts = 0;
+        let result = isolated(
+            |skip| {
+                attempts += 1;
+                assert_eq!(skip.len(), attempts - 1);
+                Err(Failed::Mods {
+                    left: vec![LeftOut {
+                        id: format!("broken_{attempts}"),
+                        version: "1.0.0".into(),
+                        why: isolate::Why::OtherVersion,
+                    }],
+                    error: "compiler failure".into(),
+                    compiling: true,
+                })
+            },
+            &|_| {},
+        );
+        let error = result.unwrap_err();
+        assert_eq!(attempts, COMPILE_RETRIES + 1);
+        assert!(error.contains("broken_1 was left out"), "{error}");
+        assert!(error.ends_with("compiler failure"), "{error}");
+    }
 
     #[test]
     fn pe_machine_reads_the_architecture_after_validating_both_headers() {
@@ -2978,9 +3345,9 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let scoped =
-            "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects";
+            "horizon_client::game::native_hooks::pre_remove_side_effects::GameLevel<'_>::native_pre_remove_side_effects";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -3004,7 +3371,7 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -3613,9 +3980,10 @@ mod tests {
             Path::new("missing-mod-folder"),
             Profile::Developer,
             Target::Client,
-            false,
+            BuildOptions::default(),
             &|_| panic!("invalid records must not start a build"),
-        ) else {
+        )
+        .map_err(String::from) else {
             panic!("invalid build must be refused");
         };
         assert!(error.contains("native-mods.json record"), "{error}");
@@ -4031,6 +4399,64 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(to.join("src/b.rs")).unwrap(), "b2");
         assert!(!to.join("gone.rs").exists());
+    }
+
+    /// #10421: a Nightly's source carries its commit's time, older than a build made since on
+    /// another Nightly. Its changed files must reach the stage newer than that build, or Cargo
+    /// keeps the old crate.
+    #[test]
+    fn a_changed_file_is_newer_than_the_last_build_even_from_an_older_source() {
+        use std::time::{Duration, SystemTime};
+        let (from, to) = (dir("sync-old-from"), dir("sync-old-to"));
+        let commit = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        fs::create_dir_all(from.join("crates/horizon-core/src")).unwrap();
+        let file = from.join("crates/horizon-core/src/storage.rs");
+        fs::write(&file, "pub fn unpack_into() {}").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(commit)
+            .unwrap();
+        fs::create_dir_all(to.join("crates/horizon-core/src")).unwrap();
+        fs::write(
+            to.join("crates/horizon-core/src/storage.rs"),
+            "pub fn unpack() {}",
+        )
+        .unwrap();
+        // The older Nightly's build: Cargo records when it started.
+        let built = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        sync(&from, &to).unwrap();
+        let staged = to.join("crates/horizon-core/src/storage.rs");
+        assert_eq!(
+            fs::read_to_string(&staged).unwrap(),
+            "pub fn unpack_into() {}"
+        );
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        // A file new to the stage too.
+        fs::remove_dir_all(&to).unwrap();
+        sync(&from, &to).unwrap();
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        fs::remove_dir_all(from).unwrap();
+        fs::remove_dir_all(to).unwrap();
+    }
+
+    /// A stage from before #10421 may hold old times over newer content: it is made again once,
+    /// and kept on every later build.
+    #[test]
+    fn a_stage_from_before_the_time_fix_is_written_again_once() {
+        let root = dir("stage-stamped");
+        fs::create_dir_all(root.join("stage/src")).unwrap();
+        fs::write(root.join("stage/src/lib.rs"), "old").unwrap();
+        let stage = stage_dir(&root).unwrap();
+        assert_eq!(stage, root.join("stage"));
+        assert!(!stage.exists());
+        fs::create_dir_all(stage.join("src")).unwrap();
+        fs::write(stage.join("src/lib.rs"), "new").unwrap();
+        stage_dir(&root).unwrap();
+        assert_eq!(fs::read_to_string(stage.join("src/lib.rs")).unwrap(), "new");
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// levzzz5154's decision (2026-10-29): a rebuild stays on the Horizon the instance plays;

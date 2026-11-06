@@ -111,16 +111,20 @@ pub struct Names {
     map: HashMap<String, String>,
 }
 impl Names {
-    pub fn load(root: &Path) -> Self {
+    pub fn load(root: &horizon_assets::resource_source::ResourceSource) -> Self {
         let read = |namespace: &str| {
-            fs::read(root.join(format!("assets/{namespace}/lang/en_us.json")))
+            root.read(&format!("assets/{namespace}/lang/en_us.json"))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
                 .unwrap_or_default()
         };
         let mut map = read("minecraft");
         // Content mods' names (docs/modpacks.md); none in a vanilla root.
-        for namespace in crate::mod_content::namespaces(root) {
+        for namespace in root
+            .namespaces("assets")
+            .into_iter()
+            .filter(|ns| ns != "minecraft")
+        {
             map.extend(read(&namespace));
         }
         Self { map }
@@ -469,6 +473,11 @@ impl Creative {
     pub fn tab(&self) -> &Tab {
         &self.tabs[self.selected.min(self.tabs.len() - 1)]
     }
+    /// The search tab's index (`CreativeModeTabs.searchTab`), the tab the chat
+    /// key opens while another one is shown.
+    pub fn search_tab(&self) -> Option<usize> {
+        self.tabs.iter().position(|t| t.search)
+    }
     /// selectTab: a different tab empties the search box; the scrollbar goes to the top.
     /// A tab on another page shows that page.
     pub fn select(&mut self, tab: usize) {
@@ -482,10 +491,13 @@ impl Creative {
             self.page = t.page;
         }
         self.scroll = 0.0;
-        if self.tab().search {
-            self.search.focused = true;
+        // The search box is shown, focused and impossible to unfocus only on
+        // its own tab; another tab hides it and takes the focus away.
+        let search = self.tab().search;
+        if search {
             self.search.reset_blink();
         }
+        self.search.focused = search;
     }
     /// How many pages of tabs there are (1 without mods' tabs).
     pub fn pages(&self) -> u32 {
@@ -1444,6 +1456,22 @@ mod tests {
         }
     }
 
+    /// `CreativeModeInventoryScreen.keyPressed`: from a tab that is not the
+    /// search, the chat key selects `CreativeModeTabs.searchTab`, which focuses
+    /// the search box and empties the query the other tab left.
+    #[test]
+    fn the_chat_key_opens_the_search_tab() {
+        let mut c = creative(0);
+        c.search.set_value("anvil");
+        let tab = c.search_tab().expect("the fixture has a search tab");
+        assert!(c.tabs[tab].search);
+        assert!(!c.tab().search);
+        c.select(tab);
+        assert!(c.tab().search);
+        assert!(c.search.focused);
+        assert_eq!(c.search.value, "", "another tab empties the query");
+    }
+
     #[test]
     fn search_matches_vanilla_trees() {
         let c = creative(0);
@@ -1542,6 +1570,26 @@ mod tests {
         assert!(!c.scrolling);
     }
 
+    /// `CreativeModeInventoryScreen.selectTab`: the search box is focused on
+    /// its own tab and loses the focus when another tab is shown (and, hidden,
+    /// is no longer the field a key types into).
+    #[test]
+    fn the_search_box_loses_the_focus_with_its_tab() {
+        let mut c = creative(0);
+        let search = c
+            .tabs
+            .iter()
+            .position(|t| t.search)
+            .expect("the fixture has a search tab");
+        c.select(search);
+        assert!(c.search.focused);
+        c.select(0);
+        assert!(!c.search.focused, "another tab takes the focus away");
+        assert!(!c.tab().search);
+        c.select(search);
+        assert!(c.search.focused, "and the search tab takes it back");
+    }
+
     #[test]
     fn creative_tab_titles_have_vanilla_keys() {
         assert_eq!(
@@ -1629,5 +1677,19 @@ mod tests {
         assert!(!Creative::tab_wants_hand(&b, false, (169.0, 140.0)));
         assert!(Creative::tab_wants_hand(&b, false, (170.0, 140.0)));
         assert!(!Creative::tab_wants_hand(&b, false, (180.0, 132.0)));
+    }
+}
+
+#[cfg(test)]
+mod source_name_tests {
+    #[test]
+    fn item_names_read_selected_namespace_resources_without_files() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([(
+            "assets/reader/lang/en_us.json".into(),
+            Resource::bytes(br#"{"item.reader.widget":"Selected widget"}"#.to_vec()),
+        )]));
+        let names = super::Names::load(&source);
+        assert_eq!(names.item("reader:widget"), "Selected widget");
     }
 }

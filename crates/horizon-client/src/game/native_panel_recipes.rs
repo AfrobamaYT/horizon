@@ -301,10 +301,15 @@ struct Well {
 
 impl Well {
     fn new(fluid: &mod_api::FluidStack) -> Self {
-        let look = horizon_client::mod_content::fluid_look(&fluid.fluid);
-        let tint = fluid_tint(&fluid.fluid, look.as_ref().and_then(|l| l.tint));
+        let id = mod_api::__private::fluid_identity_name(fluid.fluid);
+        let look = horizon_client::mod_content::fluid_look(&id);
+        let tint = fluid_tint(&id, look.as_ref().and_then(|l| l.tint));
         let amount = format!("{} mB", fluid.amount);
-        let name = fluid_name(&fluid.fluid);
+        let name = if fluid.key().is_some() {
+            fluid_name(&id)
+        } else {
+            horizon_client::lang::get("horizon.fluid.unknown")
+        };
         Self {
             sprite: look.and_then(|l| l.sprite),
             tint,
@@ -654,7 +659,7 @@ impl Game<'_> {
         let sprite = well
             .sprite
             .as_deref()
-            .and_then(|s| self.native_sprite_size(batch, s).map(|size| (s, size)));
+            .and_then(|s| self.gui_sprite_pixels(s).map(|size| (s, size)));
         match sprite {
             Some((name, size)) => {
                 self.native_sprite(
@@ -839,7 +844,11 @@ mod tests {
     }
 
     fn fluid(amount: u32) -> Well {
-        Well::new(&mod_api::FluidStack::new("minecraft:water", amount))
+        mod_api::__private::part_tests::game_thread();
+        Well::new(&mod_api::FluidStack::new(
+            mod_api::__private::fluid_key("minecraft:water").unwrap(),
+            amount,
+        ))
     }
 
     /// Inputs past the grid continue in rows under it, and the block grows with them.
@@ -918,13 +927,29 @@ mod tests {
         assert!(shown.block(72.0) >= action.1 + 12.0);
     }
 
+    #[test]
+    fn an_unresolved_fluid_uses_the_unknown_label() {
+        let handle = mod_api::__private::intern_unresolved_fluid("missing:panel_fluid").unwrap();
+        let well = Well::new(&mod_api::FluidStack {
+            fluid: mod_api::FluidIdentity::Unresolved(handle),
+            amount: 250,
+            components: None,
+        });
+        assert!(well.label.contains("250 mB"));
+        assert!(!well.label.contains("Panel Fluid"));
+    }
+
     /// A well's texts are made once: its amount and its name, which falls back
     /// to the prettified path.
     #[test]
     fn a_well_names_its_fluid_and_amount() {
-        let well = Well::new(&mod_api::FluidStack::new("ruby:formic_acid", 250));
+        mod_api::__private::part_tests::game_thread();
+        let well = Well::new(&mod_api::FluidStack::new(
+            mod_api::__private::fluid_key("test:potion").unwrap(),
+            250,
+        ));
         assert_eq!(well.amount, "250 mB");
-        assert_eq!(well.label, "Formic Acid 250 mB");
+        assert_eq!(well.label, "Potion 250 mB");
         assert_eq!(well.tint, 0xFF9A9A9A);
     }
 

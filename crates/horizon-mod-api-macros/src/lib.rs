@@ -6,6 +6,48 @@ use syn::{
     punctuated::Punctuated,
 };
 
+/// The staged call site's typed boundary. Only generated source invokes this macro.
+#[proc_macro]
+pub fn site(input: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(input with Punctuated::<syn::Expr, Token![,]>::parse_terminated);
+    let args: Vec<_> = args.iter().collect();
+    let [
+        wrap,
+        place,
+        listener,
+        recv_ty,
+        record,
+        output,
+        receiver,
+        args,
+        original,
+    ] = args.as_slice()
+    else {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "expected fresh wrap name, site types, receiver, args and original",
+        )
+        .to_compile_error()
+        .into();
+    };
+    quote! {{
+        fn #wrap<'g>(__at: usize, __receiver: #recv_ty<'g, '_>, __args: &mut #record,
+            __original: &mut dyn FnMut(#recv_ty<'g, '_>, &mut #record) -> #output) -> #output {
+            ::mod_points::__private::wrap(::mod_points::SiteId::#place, __at, |__entry| {
+                match __entry {
+                    Some((__pointer, __next)) => {
+                        // SAFETY: registration checks this exact site's listener type.
+                        let __listener: #listener = unsafe { ::std::mem::transmute(__pointer) };
+                        __listener(__receiver, __args, &mut |__recv, __args| #wrap(__next, __recv, __args, __original))
+                    }
+                    None => __original(__receiver, __args),
+                }
+            })
+        }
+        #wrap(0, #receiver, &mut #args, &mut #original)
+    }}.into()
+}
+
 /// Keep only attributes that can gate a method, including nested `cfg_attr`s.
 fn cfg_meta(meta: &Meta) -> Option<Meta> {
     if meta.path().is_ident("cfg") {
@@ -59,6 +101,9 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         "BlockEntityPart" => (false, Some("block_entity_subscribed")),
         "ItemPart" => (false, Some("item_subscribed")),
         "MenuPart" => (false, Some("menu_subscribed")),
+        // Entity parts carry no scoped hook yet (#1077): `register_goals` is
+        // not one, so its subscriptions stay empty whatever it overrides.
+        "EntityPart" => (false, Some("entity_subscribed_empty")),
         _ => {
             return syn::Error::new_spanned(name, "expected a hook or part trait")
                 .into_compile_error()
@@ -95,9 +140,19 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         format_ident!("hook_ids")
     };
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
-    let subscribed = syn::parse_quote! {
-        fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
-            &[#(#(#cfgs)* mod_api::#ids::#methods),*]
+    let subscribed = if subscribed_name == "entity_subscribed_empty" {
+        // Entity parts (arismoko/horizon#1077): no scoped hook exists for them
+        // yet, so `register_goals` cannot be mistaken for one.
+        syn::parse_quote! {
+            fn entity_subscribed(&self) -> &'static [Option<mod_api::HookId>] {
+                &[]
+            }
+        }
+    } else {
+        syn::parse_quote! {
+            fn #subscribed_name(&self) -> &'static [Option<mod_api::#id>] {
+                &[#(#(#cfgs)* mod_api::#ids::#methods),*]
+            }
         }
     };
     implementation.items.push(subscribed);
@@ -391,6 +446,11 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         (point_shape::Receiver::Shared, _) => (quote!(self,), quote!(self.#inner)),
         (point_shape::Receiver::Mut, _) => (quote!(&mut *self,), quote!(self.#inner)),
     };
+    let erased_receiver = match shape.receiver {
+        point_shape::Receiver::None => quote!(::std::ptr::null_mut()),
+        point_shape::Receiver::Shared => quote!(self as *const Self as *mut ()),
+        point_shape::Receiver::Mut => quote!(&mut *self as *mut Self as *mut ()),
+    };
     // What the API listeners get before their record: the shape's host, if it has one.
     let host = match (shape.receiver, shape.side) {
         (_, None) => quote!(),
@@ -459,12 +519,25 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 mod_points::__private::fire_raw(
                     mod_points::PointId::#variant,
                     #name,
-                    // SAFETY: the generated `main` registered only functions of this point's
-                    // listener type here, checked by a typed `let` before erasing them.
-                    &mut |__function| unsafe {
-                        ::std::mem::transmute::<*const (), #listener>(__function)(
-                            #receiver &mut #raw_record,
-                        )
+                    &mut |__kind| match __kind {
+                        mod_points::__private::RawKind::Typed(__function) => {
+                            // SAFETY: registration guarantees this point's listener type.
+                            unsafe {
+                                ::std::mem::transmute::<*const (), #listener>(__function)(
+                                    #receiver &mut #raw_record,
+                                )
+                            }
+                        }
+                        mod_points::__private::RawKind::Erased(__function) => {
+                            // SAFETY: this slot supplies its exact receiver and raw record types.
+                            unsafe {
+                                __function(
+                                    mod_points::PointId::#variant as usize,
+                                    #erased_receiver,
+                                    &mut #raw_record as *mut _ as *mut (),
+                                )
+                            }
+                        }
                     },
                 );
                 #(#repack)*
@@ -532,10 +605,10 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         };
         let raw = shape.raw.then(|| {
             let listener = shape.raw_return_listener();
-            let receiver = if shape.borrowed_return {
-                quote!()
+            let (receiver, erased_receiver) = if shape.borrowed_return {
+                (quote!(), quote!(::std::ptr::null_mut()))
             } else {
-                receiver.clone()
+                (receiver.clone(), erased_receiver.clone())
             };
             let value = match &function.sig.output {
                 syn::ReturnType::Type(..) => quote!(&mut __result),
@@ -547,9 +620,25 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 mod_points::__private::fire_raw(
                     mod_points::PointId::#variant,
                     #name,
-                    // SAFETY: as at the head, with this place's return listener type.
-                    &mut |__function| unsafe {
-                        ::std::mem::transmute::<*const (), #listener>(__function)(#receiver #value)
+                    &mut |__kind| match __kind {
+                        mod_points::__private::RawKind::Typed(__function) => {
+                            // SAFETY: registration guarantees this place's return listener type.
+                            unsafe {
+                                ::std::mem::transmute::<*const (), #listener>(__function)(
+                                    #receiver #value
+                                )
+                            }
+                        }
+                        mod_points::__private::RawKind::Erased(__function) => {
+                            // SAFETY: this slot supplies its exact receiver and return types.
+                            unsafe {
+                                __function(
+                                    mod_points::PointId::#variant as usize,
+                                    #erased_receiver,
+                                    &mut __result as *mut _ as *mut (),
+                                )
+                            }
+                        }
                     },
                 );
             }
@@ -634,16 +723,68 @@ impl syn::parse::Parse for IfInstalled {
     }
 }
 
-/// `#[wasm(via = Form)]` on a `mod_api` type, or on the `pub use` that exports another crate's:
-/// the type crosses to wasm mods as `Form`, through `From<&Type> for Form` and
-/// `TryFrom<Form> for Type`, which live with the type. The bindings generator reads the
-/// attribute; this checks the two conversions exist.
+/// Declares how a plain-data type crosses the generated wasm interface.
+///
+/// `#[wasm(via = Form)]` on a type or its re-export checks `From<&Type> for Form`
+/// and `TryFrom<Form> for Type`. `#[wasm(host_constructor = method)]` on an owned
+/// tuple struct makes incoming host lifts call that checked constructor with the
+/// lifted fields instead of constructing the tuple directly. It returns `Result<Self, E>`
+/// with a displayable refusal. Guest lifts remain structural: the host owns validation.
 #[proc_macro_attribute]
 pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let item = parse_macro_input!(input as syn::Item);
-    let via = match syn::parse::<WasmVia>(attribute) {
-        Ok(via) => via.form,
-        Err(e) => return e.to_compile_error().into(),
+    let rule = parse_macro_input!(attribute as WasmRule);
+    if let WasmRule::HostConstructor(constructor) = rule {
+        let syn::Item::Struct(record) = &item else {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        };
+        let syn::Fields::Unnamed(fields) = &record.fields else {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        };
+        if !record.generics.params.is_empty() {
+            return syn::Error::new_spanned(
+                item,
+                "host_constructor requires an owned tuple struct",
+            )
+            .to_compile_error()
+            .into();
+        }
+        let ty = &record.ident;
+        let params: Vec<_> = fields
+            .unnamed
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let name = format_ident!("p{i}");
+                let ty = &field.ty;
+                quote!(#name: #ty)
+            })
+            .collect();
+        let args: Vec<_> = (0..params.len()).map(|i| format_ident!("p{i}")).collect();
+        return quote! {
+            #item
+            const _: () = {
+                fn checked_constructor(#(#params),*) -> ::core::result::Result<#ty, ::std::string::String> {
+                    #ty::#constructor(#(#args),*).map_err(|error| error.to_string())
+                }
+                let _ = #ty::#constructor;
+                let _ = checked_constructor;
+            };
+        }
+        .into();
+    }
+    let WasmRule::Via(via) = rule else {
+        unreachable!()
     };
     let ty = match &item {
         syn::Item::Struct(item) => item.ident.clone(),
@@ -676,21 +817,24 @@ pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
-/// `via = Form`.
-struct WasmVia {
-    form: syn::Type,
+/// The single conversion rule on a type declaration.
+enum WasmRule {
+    Via(syn::Type),
+    HostConstructor(syn::Ident),
 }
 
-impl syn::parse::Parse for WasmVia {
+impl syn::parse::Parse for WasmRule {
     fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
         let key: syn::Ident = input.parse()?;
-        if key != "via" {
-            return Err(syn::Error::new(key.span(), "expected `via = Form`"));
-        }
         input.parse::<syn::Token![=]>()?;
-        Ok(Self {
-            form: input.parse()?,
-        })
+        match key.to_string().as_str() {
+            "via" => Ok(Self::Via(input.parse()?)),
+            "host_constructor" => Ok(Self::HostConstructor(input.parse()?)),
+            _ => Err(syn::Error::new(
+                key.span(),
+                "expected via or host_constructor",
+            )),
+        }
     }
 }
 

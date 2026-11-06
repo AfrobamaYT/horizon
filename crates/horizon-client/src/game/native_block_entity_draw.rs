@@ -19,9 +19,50 @@ use horizon_client::{
     hud::Rect,
     items::ItemStack,
     mesher::Vertex,
+    mobs::model_layers,
     text::Text,
 };
 use horizon_world::registry::BlockStateId;
+use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
+
+/// Atlas placements for standalone faces, indexed by their existing model slot.
+/// Geometry remains in the generation's baked catalog and is not duplicated.
+pub(super) struct StandaloneSprites {
+    generation: u64,
+    slots: Vec<Option<Vec<Option<Rect>>>>,
+}
+
+impl StandaloneSprites {
+    pub(super) fn new(pack: &super::PackResources, gui: &super::UiResources) -> Self {
+        let catalog = &pack.render.model_catalog;
+        let mut slots = Vec::new();
+        for slot in catalog.standalone_slots() {
+            let index = slot as usize;
+            if slots.len() <= index {
+                slots.resize_with(index + 1, || None);
+            }
+
+            let faces = &catalog
+                .model_by_slot(slot)
+                .expect("standalone slot exists")
+                .faces;
+            let sprites = faces
+                .iter()
+                .map(|face| {
+                    pack.layer_names
+                        .get(&face.layer)
+                        .and_then(|name| gui.atlas.sprites.get(name))
+                        .copied()
+                })
+                .collect();
+            slots[index] = Some(sprites);
+        }
+        Self {
+            generation: pack.render.generation,
+            slots,
+        }
+    }
+}
 
 /// `BlockEntityRenderer.getViewDistance`'s default, in blocks.
 const VIEW_DISTANCE: f64 = 64.0;
@@ -811,27 +852,99 @@ impl Game<'_> {
         true
     }
 
-    /// Draws standalone model `model` (`mymod:block/shaft_half`, one a mod
-    /// named in `native_standalone_models`) under `draw`'s pose, as
-    /// `native_draw_block` draws a block's: unturned, from the block's lower
-    /// north-west corner, lit by `draw.light`. Its faces with a tint index
-    /// are multiplied by the 0xRRGGBB `tint` (0xFFFFFF for none), the
-    /// others drawn as they are. False when the model isn't baked: not
-    /// named, missing from the resources, or on a side that draws nothing.
+    /// Resolve a registered standalone model once in `client_setup` and again in
+    /// `client_resources_reloaded`, not each frame. Resource-pack overrides and other
+    /// namespaces use the normal shared model store; no resource is read or baked here.
+    pub(super) fn native_model(&self, id: &Identifier) -> Result<ModelRef, ModelError> {
+        self.pack.render.model(id)
+    }
+
+    /// Draws the resolved standalone model under `draw`'s pose: unturned, from
+    /// the block's lower north-west corner, lit by `draw.light`. Faces with a tint
+    /// index are multiplied by 0xRRGGBB `tint` (0xFFFFFF for none), others unchanged.
+    /// A stale generation or absent slot returns an error without appending geometry.
     pub(super) fn native_draw_model(
         &self,
         draw: &mut BlockEntityDraw,
-        model: &str,
+        model: ModelRef,
+        tint: u32,
+    ) -> Result<(), ModelError> {
+        use mod_api::__private::game::Fields;
+        let baked = self.pack.render.resolve_model(model)?;
+        let fields = model.fields();
+        if fields.generation != self.standalone_sprites.generation {
+            return Err(ModelError::StaleModel);
+        }
+        let sprites = self
+            .standalone_sprites
+            .slots
+            .get(fields.slot as usize)
+            .and_then(Option::as_ref)
+            .ok_or(ModelError::UnknownModel)?;
+        let faces = baked
+            .faces
+            .iter()
+            .zip(sprites)
+            .filter_map(|(face, sprite)| sprite.map(|sprite| (&face.quad, sprite)));
+        let light = draw.light;
+        super::minecarts::emit_model_faces(
+            faces,
+            draw.pose(),
+            |_| light,
+            true,
+            |index| (index >= 0).then_some(tint & 0xFF_FFFF),
+            &mut draw.vertices,
+        );
+        Ok(())
+    }
+
+    /// Draws model part `part` and the parts under it under `draw`'s pose, as
+    /// vanilla's `ModelPart.render` does: each part moved to its place (in
+    /// texels, 16 to a block), turned about z, then y, then x, and scaled,
+    /// its faces textured from `sprite` (`mymod:entity/golem`, a content
+    /// mod's `assets/mymod/textures/entity/golem.png`, or vanilla's
+    /// `entity/zombie/zombie`) times the 0xRRGGBB `tint`. A part that isn't
+    /// `visible` draws nothing, one that skips drawing (`skip_draw`) only its
+    /// children. A mob's model is built in the model's own frame (+y down,
+    /// its front towards -z, its feet 24 texels down): in `native_mob_submit`,
+    /// `draw.scale([1.0, -1.0, -1.0])` then `draw.translate([0.0, -1.501,
+    /// 0.0])` first, as `LivingEntityRenderer` does. False for an unknown
+    /// sprite. API @API:model_layers@.
+    pub(super) fn native_draw_model_part(
+        &self,
+        draw: &mut BlockEntityDraw,
+        part: &ModelPart,
+        sprite: &str,
         tint: u32,
     ) -> bool {
-        let Some(baked) = self.pack.render.model_catalog.standalone(model) else {
+        let Some(rect) = self.gui.atlas.sprites.get(sprite).copied() else {
             return false;
         };
-        let pose = draw.pose();
-        let light = draw.light;
-        let tint = |index: i32| (index >= 0).then_some(tint & 0xFF_FFFF);
-        self.baked_model_vertices([baked], pose, |_| light, true, tint, &mut draw.vertices);
+        draw_model_part(draw, part, rect, tint);
         true
+    }
+
+    /// Entity model layer `layer` baked into its `ModelPart` tree, each part
+    /// at its pose, as `EntityModelSet.bakeLayer` bakes it: one a native mod
+    /// registered (`native_layer_definitions`), or vanilla's, by the name
+    /// `entity-models.json` gives it (`minecraft:zombie#main`,
+    /// `minecraft:player#main`). The tree is the caller's own copy: bake it
+    /// once, as a renderer does, and set its parts' poses each frame. None
+    /// for a layer neither has. A vanilla layer no mob has (a player's, a
+    /// chest's) is read from the resources each call, so slow. API
+    /// @API:model_layers@.
+    pub(super) fn native_bake_layer(&self, layer: &str) -> Option<ModelPart> {
+        if let Some(definition) = model_layers::registered(layer) {
+            return Some(definition.bake_root());
+        }
+        let key = layer.strip_prefix("minecraft:")?;
+        if let Some(part) = self.res.mob_types().values().find_map(|t| t.layer(key)) {
+            return Some(model_layers::from_part(part));
+        }
+        let models = horizon_client::mobs::EntityModelDocument::load(&self.vanilla_root()).ok()?;
+        models
+            .model(layer)
+            .map(|part| model_layers::from_part(&part))
     }
 
     /// Draws `stack` under `draw`'s pose as an item is drawn in the world
@@ -890,6 +1003,45 @@ impl Game<'_> {
     }
 }
 
+/// `ModelPart.render`: `part`'s faces under its own pose
+/// (`translateAndRotate`), then its children under theirs.
+fn draw_model_part(draw: &mut BlockEntityDraw, part: &ModelPart, sprite: Rect, tint: u32) {
+    if !part.visible || (part.is_empty() && part.children().next().is_none()) {
+        return;
+    }
+    draw.push();
+    draw.apply(part_transform(part));
+    if !part.skip_draw {
+        for polygon in &part.polygons {
+            let corners = polygon.vertices.map(|v| v.pos.map(|c| c / 16.0));
+            let uv = polygon.vertices.map(|v| [v.u, v.v]);
+            draw.quad(corners, uv, sprite, tint);
+        }
+    }
+    for (_, child) in part.children() {
+        draw_model_part(draw, child, sprite, tint);
+    }
+    draw.pop();
+}
+
+/// `ModelPart.translateAndRotate`: to the part's place in blocks, turned
+/// about z, then y, then x (`rotationZYX`), then scaled.
+fn part_transform(part: &ModelPart) -> Mat4 {
+    let mut m = Mat4::from_translation(Vec3::new(part.x, part.y, part.z) / 16.0);
+    if part.x_rot != 0.0 || part.y_rot != 0.0 || part.z_rot != 0.0 {
+        m *= Mat4::from_quat(Quat::from_euler(
+            glam::EulerRot::ZYX,
+            part.z_rot,
+            part.y_rot,
+            part.x_rot,
+        ));
+    }
+    if part.x_scale != 1.0 || part.y_scale != 1.0 || part.z_scale != 1.0 {
+        m *= Mat4::from_scale(Vec3::new(part.x_scale, part.y_scale, part.z_scale));
+    }
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -922,19 +1074,179 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_trait_mod_draws_only_the_standalone_models_it_named() {
+    fn resolved_model_draws_and_resource_replacement_invalidates_it() {
         use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
-        use mod_api::BlockEntityDrawContext;
+        use mod_api::{BlockEntityDrawContext, ClientHost};
 
-        super::super::native_entity_refs::tests::with_game(|game| {
+        horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let id = Identifier::parse("minecraft:block/grass_block").unwrap();
+            let model = game.render_assets().model(&id).unwrap();
+            for phase in [
+                mod_api::__private::ModPhase::Setup,
+                mod_api::__private::ModPhase::Reloading,
+            ] {
+                let _scope = mod_api::__private::PhaseOwner::scope(phase);
+                assert_eq!(game.render_assets().model(&id), Ok(model));
+            }
+            assert_eq!(
+                game.render_assets()
+                    .model(&Identifier::parse("mymod:block/absent").unwrap()),
+                Err(ModelError::UnknownModel)
+            );
             let mut surface = draw();
+            surface.poses.push(Mat4::from_scale_rotation_translation(
+                Vec3::new(2.0, 0.5, 1.5),
+                Quat::from_rotation_y(0.7) * Quat::from_rotation_x(0.3),
+                Vec3::new(8.0, -4.0, 3.0),
+            ));
+            surface.light = 0x7030;
+            // Compare the consumer with the existing shared emitter, under the same pose,
+            // tint, atlas and light: handle resolution must not change any vertex bytes.
+            let mut expected = Vec::new();
+            game.baked_model_vertices(
+                [game
+                    .pack
+                    .render
+                    .model_catalog
+                    .standalone("minecraft:block/grass_block")
+                    .unwrap()],
+                surface.pose(),
+                |_| surface.light,
+                true,
+                |index| (index >= 0).then_some(0x123456),
+                &mut expected,
+            );
+            assert!(!expected.is_empty());
             let mut drawn = GameBlockEntityDrawContext {
                 game,
                 surface: &mut surface,
             };
-            // No mod named it in `standalone_models`, so nothing baked it.
-            assert!(!drawn.model("mymod:block/shaft_half", 0xFFFFFF));
-            assert!(surface.vertices.is_empty());
+            assert_eq!(drawn.model(model, 0x123456), Ok(()));
+            let bytes = |vertices: &[Vertex]| bytemuck::cast_slice::<_, u8>(vertices).to_vec();
+            assert_eq!(bytes(&surface.vertices), bytes(&expected));
+            assert!(surface.vertices.iter().all(|v| v.light == 0x7030));
+            // An explicitly emissive tinted face and its untinted twin exercise both
+            // branches independently of the vanilla grass model's current contents.
+            let source = game.pack.render.resolve_model(model).unwrap();
+            let face = &source.faces[0];
+            let sprite = game
+                .pack
+                .layer_names
+                .get(&face.layer)
+                .and_then(|name| game.gui.atlas.sprites.get(name))
+                .copied()
+                .unwrap();
+            let mut tinted = face.quad.clone();
+            tinted.tint_index = 0;
+            tinted.light_emission = 12;
+            let mut plain = tinted.clone();
+            plain.tint_index = -1;
+            let mut emitted = Vec::new();
+            super::super::minecarts::emit_model_faces(
+                [(&tinted, sprite), (&plain, sprite)],
+                Mat4::IDENTITY,
+                |_| 0x2030,
+                true,
+                |index| (index >= 0).then_some(0x123456),
+                &mut emitted,
+            );
+            assert_eq!(emitted.len(), 8);
+            assert!(emitted.iter().all(|v| v.light == 0xC030));
+            assert!(emitted[..4].iter().all(|v| v.color == 0xFF563412));
+            assert!(emitted[4..].iter().all(|v| v.color == u32::MAX));
+
+            // Same content and emitter on each side; this times CPU work only.
+            let mut scratch = Vec::with_capacity(expected.len());
+            let rounds = 20_000;
+            let start = std::time::Instant::now();
+            for _ in 0..rounds {
+                scratch.clear();
+                game.baked_model_vertices(
+                    [source],
+                    surface.pose(),
+                    |_| surface.light,
+                    true,
+                    |index| (index >= 0).then_some(0x123456),
+                    &mut scratch,
+                );
+                std::hint::black_box(&scratch);
+            }
+            let before_time = start.elapsed();
+            let start = std::time::Instant::now();
+            for _ in 0..rounds {
+                surface.vertices.clear();
+                game.native_draw_model(&mut surface, model, 0x123456)
+                    .unwrap();
+                std::hint::black_box(&surface.vertices);
+            }
+            eprintln!(
+                "CPU model {rounds} draws: lookup {before_time:?}, prepared {:?}",
+                start.elapsed()
+            );
+            let before = bytes(&surface.vertices);
+            let invalid =
+                mod_api::__private::built::model_ref(game.pack.render.generation, u32::MAX);
+            assert_eq!(
+                game.native_draw_model(&mut surface, invalid, 0xFFFFFF),
+                Err(ModelError::UnknownModel)
+            );
+            assert_eq!(bytes(&surface.vertices), before);
+
+            // A failed resource build never publishes a replacement, so the handle remains valid.
+            let missing = game.options.resources.join("absent-model-test-root");
+            let listeners = game.register_client_reload_listeners();
+            assert!(
+                super::super::packs::stage_pack(
+                    &missing,
+                    &[],
+                    &[],
+                    &game.mods,
+                    listeners,
+                    &game.pack.assets,
+                    &game.res,
+                    &game.pack.context,
+                    false,
+                    false,
+                    &super::super::Progress::new(),
+                )
+                .is_err()
+            );
+            assert_eq!(
+                game.native_draw_model(&mut surface, model, 0x123456),
+                Ok(())
+            );
+            let before = bytes(&surface.vertices);
+            // Identical texture bytes still produce a new model generation.
+            let old_generation = game.pack.render.generation;
+            let listeners = game.register_client_reload_listeners();
+            let staged = super::super::packs::stage_pack(
+                &game.options.resources,
+                &[],
+                &[],
+                &game.mods,
+                listeners,
+                &game.pack.assets,
+                &game.res,
+                &game.pack.context,
+                false,
+                false,
+                &super::super::Progress::new(),
+            )
+            .unwrap();
+            game.apply_staged_pack(staged).unwrap();
+            assert_ne!(game.pack.render.generation, old_generation);
+            assert_eq!(
+                game.native_draw_model(&mut surface, model, 0x123456),
+                Err(ModelError::StaleModel)
+            );
+            assert_eq!(bytes(&surface.vertices), before);
+            let fresh = game.render_assets().model(&id).unwrap();
+            assert_ne!(fresh, model);
+            assert_eq!(
+                game.native_draw_model(&mut surface, fresh, 0x123456),
+                Ok(())
+            );
         });
     }
 
@@ -980,7 +1292,12 @@ mod tests {
 
         super::super::native_entity_refs::tests::with_game(|game| {
             // The server fixture only measures fonts; this test needs drawable glyphs.
-            game.gui.atlas = horizon_client::hud::HudAtlas::build(&game.options.resources).unwrap();
+            game.gui.atlas = horizon_client::hud::HudAtlas::build(
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    game.options.resources.to_path_buf(),
+                ),
+            )
+            .unwrap();
             let mut surface = draw();
             let mut drawn = GameBlockEntityDrawContext {
                 game,
@@ -1079,6 +1396,71 @@ mod tests {
         d.scale([2.0, 2.0, 2.0]);
         let p = d.pose().transform_point3(Vec3::ONE);
         assert_eq!(p, Vec3::new(12.0, 4.0, 2.0));
+    }
+
+    /// An arm a block east of the frame's origin, turned a quarter about z,
+    /// with a hand a block below its pivot: `translateAndRotate` turns each
+    /// part about its own pivot, then moves it, and a child goes with its
+    /// parent. Expected corners are worked out by hand from JOML's
+    /// `rotationZYX` (a right-handed quarter turn takes +x to +y).
+    #[test]
+    fn a_model_part_draws_turned_about_its_pivot_and_carries_its_children() {
+        use horizon_core::geometry::Direction as Face;
+        use mod_api::{CubeListBuilder, LayerDefinition, MeshDefinition, PartPose};
+        let mut mesh = MeshDefinition::new();
+        let root = mesh.root();
+        let cube = |face| CubeListBuilder::create().add_box_faces([0.0; 3], [16.0; 3], &[face]);
+        let arm = mesh.add_or_replace_child(
+            root,
+            "arm",
+            cube(Face::South),
+            PartPose::offset_and_rotation(16.0, 0.0, 0.0, 0.0, 0.0, std::f32::consts::FRAC_PI_2),
+        );
+        mesh.add_or_replace_child(
+            arm,
+            "hand",
+            cube(Face::North),
+            PartPose::offset(0.0, 16.0, 0.0),
+        );
+        let mut model = LayerDefinition::create(mesh, 64, 64).bake_root();
+        let drawn = |model: &ModelPart| {
+            let mut d = draw();
+            draw_model_part(&mut d, model, sprite(), 0xFF_FFFF);
+            d.into_vertices()
+        };
+        let near = |v: &Vertex, at: [f32; 3]| {
+            assert!(
+                Vec3::from(v.pos).abs_diff_eq(Vec3::from(at), 1e-5),
+                "{:?} not {at:?}",
+                v.pos
+            );
+        };
+
+        let all = drawn(&model);
+        assert_eq!(all.len(), 8);
+        // The arm's south face, (0, 0, 1) (1, 0, 1) (1, 1, 1) (0, 1, 1) in
+        // its frame, turned and moved a block east, then the frame's 10.
+        for (v, at) in all.iter().zip([
+            [11.0, 0.0, 1.0],
+            [11.0, 1.0, 1.0],
+            [10.0, 1.0, 1.0],
+            [10.0, 0.0, 1.0],
+        ]) {
+            near(v, at);
+        }
+        // Its net's last strip, 48 to 64 across and 16 to 32 down, in the sprite.
+        assert_eq!(all[0].uv, [0.75, 0.3125]);
+        // The hand's north face starts at its (1, 0, 0), the arm's (1, 1, 0).
+        near(&all[4], [10.0, 1.0, 0.0]);
+        near(&all[5], [10.0, 0.0, 0.0]);
+
+        let arm = model.get_child_mut("arm").unwrap();
+        arm.skip_draw = true;
+        let hand_only = drawn(&model);
+        assert_eq!(hand_only.len(), 4);
+        near(&hand_only[0], [10.0, 1.0, 0.0]);
+        model.get_child_mut("arm").unwrap().visible = false;
+        assert!(drawn(&model).is_empty());
     }
 
     #[test]

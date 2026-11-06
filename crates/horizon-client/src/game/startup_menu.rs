@@ -45,8 +45,14 @@ pub(super) struct StartupMenu {
     key_synthetic: bool,
     /// The screen the keyboard's focus is on (`key_screen`).
     key_screen: u64,
+    /// The screen (`Self::key_screen`) the title's click focus belongs to:
+    /// another one in front drops it, as `Gui.setScreen` drops the focus of
+    /// the screen it leaves (`Screen.clearFocus`).
+    focus_screen: u64,
     pub pending: Option<PendingWorldEntry>,
     pub reload_packs: bool,
+    /// Browse mods' worker (`mod_browser`).
+    mod_jobs: super::mod_browser::Jobs,
 }
 
 impl StartupMenu {
@@ -84,9 +90,13 @@ impl StartupMenu {
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf, settings: &Settings) {
-        horizon_client::ui::load_metadata(&root);
+        horizon_client::ui::load_metadata(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        );
         horizon_client::lang::set(horizon_client::lang::Language::load(
-            &[&root],
+            &[&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )],
             &settings.language,
         ));
         self.root = root;
@@ -106,15 +116,27 @@ impl StartupMenu {
     }
 
     pub(super) fn handoff(&mut self, game: &mut Game<'_>) {
+        let registry = Arc::new(mod_api::__private::game_rule_registry());
+        if let Some(PendingWorldEntry::Local {
+            create: Some(options),
+            ..
+        }) = &mut self.pending
+        {
+            options.rules.rebind_registry(registry.clone());
+        }
+        if let Some(title) = &mut self.title {
+            title.set_rule_registry(registry);
+        }
         // The startup menu's title is the game's from here: its hooks fire now.
         match self.title.take() {
             Some(title) => {
                 let title = title.with_user(|| game.options.player_name());
-                game.show_title(title);
+                game.show_title_with_registry(title);
             }
             None => game.title = None,
         }
         game.pending_entry = self.pending.take();
+        game.mod_jobs = std::mem::take(&mut self.mod_jobs);
         game.cursor = self.cursor;
         game.modifiers = self.modifiers;
         game.physical_keys = std::mem::take(&mut self.physical_keys);
@@ -354,7 +376,8 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
-    let mod_sources = options.mods.clone();
+    let mut mod_sources = options.mods.clone();
+    mod_sources.capture_code_switches(&settings.mods.disabled);
     let world = launch_world(options).map(str::to_owned);
     let role = options.execution_role;
     let progress = progress.clone();
@@ -422,14 +445,26 @@ impl Loading {
                 }
             }
         }
+        self.drive_menu_mod_browser();
         self.restart_menu_resources()
+    }
+    /// The startup menu's Browse mods, as `Game::drive_mod_browser`.
+    fn drive_menu_mod_browser(&mut self) {
+        let menu = &mut self.menu;
+        if menu.mod_jobs.poll(
+            &mut menu.options.mod_browser,
+            &mut self.settings.mods,
+            false,
+        ) {
+            self.settings.save(&Game::options_path());
+        }
     }
     pub(super) fn apply_menu_settings(&mut self) {
         if let Some(renderer) = &mut self.renderer {
             renderer.gamma = self.settings.gamma;
             renderer.set_present_mode(self.settings.vsync, self.settings.horizon.present_mode);
         }
-        horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+
         super::narrator::sync(&self.settings);
         if let Some(gui) = &mut self.gui {
             gui.atlas.font.uniform = self.settings.force_unicode;
@@ -463,7 +498,7 @@ impl Loading {
     }
 
     fn update_menu_cursor(&mut self) {
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         self.menu.cursor = (
             self.menu.pointer.0 as f32 / batch.scale,
             self.menu.pointer.1 as f32 / batch.scale,
@@ -502,7 +537,9 @@ impl Loading {
 
     fn open_menu_options(&mut self, page: Page) {
         self.menu.options.open_at(false, page);
-        self.menu.options.languages = horizon_client::lang::available(&[&self.menu.root]);
+        self.menu.options.languages = horizon_client::lang::available(&[
+            &horizon_assets::resource_source::ResourceSource::directory(self.menu.root.clone()),
+        ]);
         self.menu.options.pack_infos = packs::pack_infos(&self.vanilla_root, &[]);
         self.menu.options.pack_selection = self.settings.resource_packs.clone();
         self.menu.options.pack_screen = None;
@@ -527,7 +564,9 @@ impl Loading {
                 }
                 Event::Language(code) => {
                     horizon_client::lang::set(horizon_client::lang::Language::load(
-                        &[&self.menu.root],
+                        &[&horizon_assets::resource_source::ResourceSource::directory(
+                            self.menu.root.clone(),
+                        )],
                         &code,
                     ));
                     self.save_menu_settings();
@@ -564,6 +603,15 @@ impl Loading {
                     let _ = std::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }
+                Event::BrowseMods => {
+                    let ui = &mut self.menu.options.mod_browser;
+                    self.menu.mod_jobs.browse(ui, Game::game_dir());
+                }
+                Event::InstallMod(id) => {
+                    let ui = &mut self.menu.options.mod_browser;
+                    self.menu.mod_jobs.install(ui, Game::game_dir(), id);
+                }
+                Event::OpenModPage(url) => packs::open_uri(&url),
                 Event::ListShaderPacks => {
                     self.settings.shader_packs =
                         horizon_client::shader_pack_list::scan(&Game::shader_packs_dir());
@@ -599,7 +647,9 @@ impl Loading {
                         );
                         let screen = horizon_client::win_screen::WinScreen::new(
                             false,
-                            &self.menu.root,
+                            &horizon_assets::resource_source::ResourceSource::directory(
+                                self.menu.root.clone(),
+                            ),
                             &name,
                             &gui.atlas.font,
                         );
@@ -617,7 +667,8 @@ impl Loading {
                     super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
                 }
                 // Mods' settings pages open only in a running game.
-                Event::NativeSettings(_) | Event::NativeButton(..) => {}
+                // The HUD editor needs a world: its button is inactive here.
+                Event::NativeSettings(_) | Event::NativeButton(..) | Event::HudEditor => {}
                 // The startup menu runs before the game opens a control socket,
                 // and before its sound engine (no clicks, no volume previews,
                 // and no music tracks to list or play).
@@ -683,7 +734,7 @@ impl Loading {
 
     fn menu_options_click(&mut self, drag: bool, right: bool) {
         let size = self.menu_size();
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let Some(gui) = &self.gui else { return };
         self.menu.options.shift = self.menu.modifiers.shift_key();
         let events = self.menu.options.click(
@@ -773,7 +824,7 @@ impl Loading {
 
     /// What the keyboard can focus on the screen last drawn.
     fn menu_key_targets(&self) -> Vec<Target> {
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         key_focus::keyboard_targets(
             key_focus::on_screen(key_focus::drawn_targets(), (batch.width, batch.height)),
             false,
@@ -825,7 +876,7 @@ impl Loading {
         } else {
             (false, false)
         };
-        let batch = HudBatch::new(self.menu_size());
+        let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
         let ctx = key_focus::Context {
             slider_edit,
             typing,
@@ -911,7 +962,7 @@ impl Loading {
         match target.kind {
             Kind::Field => self.menu_key_click(event_loop, key_focus::field_click(target.rect)),
             Kind::Row if !self.menu.options_open => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let Some(title) = &mut self.menu.title {
                     title.focus_world_row(target.center(), (batch.width, batch.height));
                 }
@@ -1048,13 +1099,14 @@ impl Loading {
                         .renderer
                         .as_ref()
                         .map_or([1280, 720], |r| [r.config.width, r.config.height]);
-                    let b = HudBatch::new(size);
+                    let b = HudBatch::new(size, self.settings.gui_scale_inputs());
                     title.drag(self.menu.cursor, (b.width, b.height));
                     title.drag_field(&self.gui.as_ref().unwrap().atlas, self.menu.cursor.0);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } if self.menu.options_open => {
                 if state == ElementState::Pressed && self.menu.options.selected_key.is_some() {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                     let events = self.menu.options.bind_mouse(&mut self.settings, button);
                     self.menu_option_events(events);
                 } else if matches!(button, MouseButton::Left | MouseButton::Right) {
@@ -1073,7 +1125,7 @@ impl Loading {
                 button: MouseButton::Left,
                 ..
             } => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let (Some(title), Some(gui)) = (&mut self.menu.title, &self.gui) {
                     if state == ElementState::Released {
                         title.release();
@@ -1106,7 +1158,7 @@ impl Loading {
                 button: MouseButton::Middle,
                 ..
             } => {
-                let batch = HudBatch::new(self.menu_size());
+                let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                 if let Some(title) = &mut self.menu.title {
                     title.select_world_at(
                         self.menu.cursor.0,
@@ -1126,7 +1178,7 @@ impl Loading {
                     raw
                 } * self.settings.mouse_wheel_sensitivity;
                 let size = self.menu_size();
-                let batch = HudBatch::new(size);
+                let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
                 if self.menu.options_open {
                     let events = self.menu.options.wheel(
                         &mut self.settings,
@@ -1138,6 +1190,15 @@ impl Loading {
                     self.menu_option_events(events);
                 } else if let Some(title) = &mut self.menu.title {
                     title.scroll_worlds(amount, self.menu.cursor, (batch.width, batch.height));
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Released && self.menu.options_open =>
+            {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
+                    let events = self.menu.options.key_released(&mut self.settings, key);
+                    self.menu_option_events(events);
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
@@ -1154,6 +1215,7 @@ impl Loading {
                             .shortcut(atlas, s, &mut self.menu.clipboard)
                     });
                     if !handled && let PhysicalKey::Code(key) = event.physical_key {
+                        self.menu.options.modifiers = glfw_modifiers(self.menu.modifiers);
                         let events = self.menu.options.key(
                             &mut self.settings,
                             atlas,
@@ -1163,7 +1225,7 @@ impl Loading {
                         self.menu_option_events(events);
                     }
                 } else {
-                    let batch = HudBatch::new(self.menu_size());
+                    let batch = HudBatch::new(self.menu_size(), self.settings.gui_scale_inputs());
                     let action = self.menu.title_key(&event, (batch.width, batch.height));
                     self.menu_action(event_loop, action);
                 }
@@ -1181,6 +1243,16 @@ impl Loading {
             horizon_client::ui_theme::draw_boot(&self.boot, batch, &logs);
             return;
         };
+        // `Gui.setScreen` clears the focus of the screen it leaves
+        // (`Screen.clearFocus`): the title behind the options, and the one
+        // that comes back, start with no button highlighted.
+        let screen = self.menu.key_screen();
+        if super::pad_menu::another_screen_is_front(&mut self.menu.focus_screen, screen) {
+            self.menu.options.clear_click_focus();
+            if let Some(title) = self.menu.title.as_mut() {
+                title.focused_button = None;
+            }
+        }
         if self.menu.pending.is_some() {
             horizon_client::level_loading::draw_loading_overlay(
                 batch,
@@ -1284,7 +1356,10 @@ mod tests {
 
     fn gui(root: &std::path::Path) -> UiResources {
         UiResources {
-            atlas: HudAtlas::fonts(root).unwrap(),
+            atlas: HudAtlas::fonts(&horizon_assets::resource_source::ResourceSource::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::colour([
                 96, 110, 111, 255,
             ])),
@@ -1316,6 +1391,103 @@ mod tests {
             menu: StartupMenu::default(),
             error: None,
         }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn queued_creation_is_reconciled_at_handoff() {
+        use horizon_client::gamerules::Value;
+        use mod_api::{Hooks, Registrar, RegistrationContext};
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl Hooks for Mod {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                registrar.game_rule_category("machines").unwrap();
+                registrar
+                    .game_rule_bool("enabled", "example:machines", true)
+                    .unwrap();
+            }
+        }
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("example", Box::new(Mod))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                let saves = std::env::temp_dir()
+                    .join(format!("horizon-startup-rules-{}", std::process::id()));
+                let _ = std::fs::remove_dir_all(&saves);
+                let mut title = Title::new(saves, &game.options.resources);
+                title.enter_singleplayer();
+                let Action::Create { mut options, .. } = title.create_action() else {
+                    panic!("creation")
+                };
+                options.rules.set("keep_inventory", Value::Bool(true));
+                let mut menu = StartupMenu {
+                    title: Some(title),
+                    pending: Some(PendingWorldEntry::Local {
+                        folder: "test".into(),
+                        name: None,
+                        seed: Some(1),
+                        creative: true,
+                        create: Some(Box::new(options)),
+                    }),
+                    ..Default::default()
+                };
+                menu.handoff(game);
+                let Some(PendingWorldEntry::Local {
+                    create: Some(options),
+                    ..
+                }) = &game.pending_entry
+                else {
+                    panic!("pending")
+                };
+                assert_eq!(
+                    options.rules.get("example:enabled"),
+                    Some(Value::Bool(true))
+                );
+                assert_eq!(options.rules.get("keep_inventory"), Some(Value::Bool(true)));
+                let request = super::super::world_loading::WorldRequest::new(
+                    "test",
+                    None,
+                    None,
+                    true,
+                    Some(options),
+                    options.rules.registry().clone(),
+                )
+                .unwrap();
+                assert!(Arc::ptr_eq(
+                    &request.rule_registry,
+                    options.rules.registry()
+                ));
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn live_gui_scale_uses_the_current_owner() {
+        let (_, receiver) = std::sync::mpsc::channel();
+        let mut first = loading(receiver);
+        let (_, receiver) = std::sync::mpsc::channel();
+        let mut second = loading(receiver);
+        first.settings.gui_scale = 3;
+        second.settings.gui_scale = 3;
+        second.settings.force_unicode = true;
+        let view = |owner: &Loading| {
+            let batch = HudBatch::new([960, 720], owner.settings.gui_scale_inputs());
+            (batch.scale, batch.width, batch.height)
+        };
+        assert_eq!(view(&first), (3.0, 320.0, 240.0));
+        assert_eq!(view(&second), (4.0, 240.0, 180.0));
+        super::super::native_entity_refs::tests::with_game(|server| {
+            server.settings.gui_scale = 1;
+            server.apply_ui_settings();
+            assert_eq!(view(&first), (3.0, 320.0, 240.0));
+            assert_eq!(view(&second), (4.0, 240.0, 180.0));
+        });
+        first.settings.force_unicode = true;
+        first.menu.pointer = (400.0, 200.0);
+        first.apply_menu_settings();
+        assert_eq!(view(&first), (4.0, 240.0, 180.0));
+        assert_eq!(first.menu.cursor, (100.0, 50.0));
     }
 
     #[test]
@@ -1377,7 +1549,7 @@ mod tests {
             name: Some(name), seed: Some(42), creative: true, create: Some(_), ..
         }) if name == "My world")
         );
-        let mut batch = HudBatch::new([1280, 720]);
+        let mut batch = HudBatch::scratch([1280, 720]);
         loading.draw_menu(&mut batch);
         assert!(
             !batch.vertices.is_empty(),
