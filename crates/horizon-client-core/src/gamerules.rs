@@ -140,8 +140,14 @@ pub const MINECART_IMPROVEMENTS: &str = "minecraft:minecart_improvements";
 pub struct RuleRegistry {
     rules: Vec<Rule>,
 }
+impl Default for RuleRegistry {
+    fn default() -> Self {
+        Self::vanilla()
+    }
+}
 impl RuleRegistry {
-    fn vanilla() -> Self {
+    /// Create a fresh vanilla-backed registry for a session.
+    pub fn vanilla() -> Self {
         Self {
             rules: RULES
                 .iter()

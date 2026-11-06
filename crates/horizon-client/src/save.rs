@@ -3881,6 +3881,8 @@ pub struct Level {
     pub enabled_features: std::sync::Arc<[String]>,
     /// Game rule values by name without namespace (`keep_inventory`, ...).
     pub game_rules: BTreeMap<String, i32>,
+    /// Definitions used by this world session.
+    pub rule_registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
     pub player_uuid: Option<[i32; 4]>,
     pub selected_slot: i32,
     pub motion: [f64; 3],
@@ -3940,7 +3942,7 @@ impl Level {
             .get(name)
             .copied()
             .or_else(|| {
-                crate::gamerules::rule_registry()
+                self.rule_registry
                     .rule(name)
                     .map(|rule| match rule.default {
                         crate::gamerules::Value::Bool(value) => i32::from(value),
@@ -3958,17 +3960,29 @@ impl Level {
         }
     }
     pub fn read(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_level_dat(dir)?)
+        Self::read_root(dir, read_level_dat(dir)?, Default::default())
+    }
+    /// Load a world using its session rule definitions.
+    pub fn read_with_registry(
+        dir: &Path,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
+        Self::read_root(dir, read_level_dat(dir)?, registry)
     }
     /// `read` from level.dat alone, without the level.dat_old fallback: what
     /// `LevelStorageSource.readLevelSummary` reads for the world list.
     pub fn read_summary(dir: &Path) -> Option<Self> {
-        Self::read_root(dir, read_dat(&dir.join("level.dat"))?)
+        Self::read_root(dir, read_dat(&dir.join("level.dat"))?, Default::default())
     }
-    fn read_root(dir: &Path, root: Tag) -> Option<Self> {
+    fn read_root(
+        dir: &Path,
+        root: Tag,
+        registry: std::sync::Arc<crate::gamerules::RuleRegistry>,
+    ) -> Option<Self> {
         let data = root.get("Data")?;
         let n = |t: Option<&Tag>| number(t).unwrap_or(0);
         let mut level = Self {
+            rule_registry: registry,
             name: text(data.get("LevelName")).unwrap_or_else(|| "World".into()),
             creative: n(data.get("GameType")) == 1,
             game_mode: n(data.get("GameType")) as i32,
@@ -4020,7 +4034,7 @@ impl Level {
             };
             level.data_packs = Some((ids("Enabled"), ids("Disabled")));
         }
-        let registry = crate::gamerules::rule_registry();
+        let registry = level.rule_registry.clone();
         let mut rules: BTreeMap<String, i32> = registry
             .available_rules(false)
             .map(|rule| {
@@ -4045,7 +4059,7 @@ impl Level {
         }
         // GameRules(enabledFeatures, map) removes disabled experimental rules
         // and supplies their defaults when enabled but absent from saved data.
-        let registry = crate::gamerules::rule_registry();
+        let registry = level.rule_registry.clone();
         let minecart_rule = registry.rule("max_minecart_speed").expect("vanilla rule");
         if level
             .enabled_features
@@ -4766,7 +4780,7 @@ impl Level {
                 ),
                 _ => Tag::Compound(Compound::new()),
             };
-            let registry = crate::gamerules::rule_registry();
+            let registry = &self.rule_registry;
             for rule in registry.available_rules(false) {
                 let tag = match rule.default {
                     crate::gamerules::Value::Bool(default) => Tag::Byte(i8::from(
@@ -7592,6 +7606,28 @@ mod tests {
             assert_eq!(std::fs::read(path).unwrap(), before_rules);
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    #[test]
+    fn level_read_retains_the_session_registry() {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-level-registry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let second = std::sync::Arc::new(crate::gamerules::RuleRegistry::vanilla());
+        let mut level = super::Level {
+            rule_registry: first.clone(),
+            ..Default::default()
+        };
+        level.write(&dir).unwrap();
+        let loaded = super::Level::read_with_registry(&dir, first.clone()).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&loaded.rule_registry, &first));
+        let next = super::Level::read_with_registry(&dir, second.clone()).unwrap();
+        assert!(!std::sync::Arc::ptr_eq(
+            &loaded.rule_registry,
+            &next.rule_registry
+        ));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
