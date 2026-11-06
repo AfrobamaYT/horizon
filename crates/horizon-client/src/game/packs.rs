@@ -389,7 +389,7 @@ impl Game<'_> {
             ui_metadata,
             language,
         } = staged;
-        let context = self.prepare_loop_context(&root)?;
+        let loop_context = self.prepare_loop_context(&root)?;
         let standalone_sprites =
             super::native_block_entity_draw::StandaloneSprites::new(&pack, &gui);
         // Keep the working GPU resources, and hand its window surface over.
@@ -543,7 +543,7 @@ impl Game<'_> {
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
-        self.install_loop_context(context);
+        self.install_loop_context(loop_context);
         self.native_client_resources_reloaded();
         Ok(())
     }
