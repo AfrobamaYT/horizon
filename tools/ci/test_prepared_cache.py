@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import tempfile
 import time
@@ -23,10 +24,12 @@ class PreparedCacheTest(unittest.TestCase):
             (source / "horizon-client/26.3/extra").write_text("shared")
             (source / "horizon-client/26.3/generated").write_text("old")
             (work / "research-lock.json").write_text('{"version": "26.3"}')
+            (work / "tools").mkdir()
+            shutil.copyfile(ROOT / "tools/prepare_output.py", work / "tools/prepare_output.py")
             target = work / "target/release"
             target.mkdir(parents=True)
             prepare = target / "horizon-prepare"
-            prepare.write_text('#!/bin/sh\nmkdir -p .local/horizon-client/26.3 .local/datagen\nprintf new > .local/horizon-client/26.3/generated\n')
+            prepare.write_text('#!/bin/sh\nmkdir -p .local/horizon-client/26.3 .local/datagen\nprintf new > .local/horizon-client/26.3/generated\nprintf "{}" > .local/horizon-client/26.3/horizon-resources.json\n')
             prepare.chmod(0o755)
             binary = work / "bin"
             binary.mkdir()
@@ -35,13 +38,17 @@ class PreparedCacheTest(unittest.TestCase):
             cargo.chmod(0o755)
             env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", HORIZON_DYNA_CACHE="true",
                        HORIZON_PREPARED_CACHE=str(cache), HORIZON_SHARED_SOURCE=str(source),
-                       HORIZON_PREPARE_KEY="fixture", RUNNER_TEMP=str(tmp), CARGO_TARGET_DIR=str(work / "target"))
+                       HORIZON_PREPARE_KEY="fixture", HORIZON_PREPARE_EXPORT_DIGEST=str(tmp / "export.digest"),
+                       RUNNER_TEMP=str(tmp), CARGO_TARGET_DIR=str(work / "target"))
             def run():
                 return subprocess.run(["bash", SCRIPT], cwd=work, env=env, text=True,
                                       capture_output=True, check=True).stdout
             self.assertIn("prepared key fixture stale", run())
             self.assertEqual((work / ".local/horizon-client/26.3/extra").read_text(), "shared")
             self.assertEqual((work / ".local/horizon-client/26.3/generated").read_text(), "new")
+            seeded = subprocess.check_output(["python3", ROOT / "tools/prepare_output.py", "digest",
+                                              work / ".local/horizon-client/26.3"], text=True).strip()
+            self.assertNotEqual((tmp / "export.digest").read_text().strip(), seeded)
             self.assertTrue(run().startswith("prepared key fixture fresh\n"))
             lock = cache / "prepared/.lock-file"
             holder = subprocess.Popen(["bash", "-c", 'exec 9>"$1"; flock 9; echo locked; exec sleep 60', "holder", str(lock)],

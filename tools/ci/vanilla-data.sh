@@ -105,6 +105,10 @@ if [ ! -f "$prepared/.entries" ]; then
   LC_ALL=C comm -13 <(echo "$before") <(ls -1A .local | LC_ALL=C sort) > "$RUNNER_TEMP/prepared-entries"
   while read -r name; do mv ".local/$name" "$prepared/$name"; done < "$RUNNER_TEMP/prepared-entries"
   if [ "$dyna" = true ]; then
+    # Optional dispatch-only measurement before shared extras can affect the output.
+    if [ -n "${HORIZON_PREPARE_EXPORT_DIGEST:-}" ]; then
+      python3 tools/prepare_output.py digest "$prepared/horizon-client/$version" > "$HORIZON_PREPARE_EXPORT_DIGEST" 2> "$RUNNER_TEMP/export-digest.log" || { echo "::error::export digest unavailable"; exit 1; }
+    fi
     # Preserve launcher-provided extras without overwriting this checkout's generated files.
     cp -Rn --reflink=auto "$source/horizon-client/$version/." "$prepared/horizon-client/$version/"
   fi
