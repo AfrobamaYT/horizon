@@ -305,6 +305,7 @@ mod tests {
         with_game(|game| {
             for (id, glow, facing) in [(12, false, 5), (13, true, 4)] {
                 game.item_frames.push(ItemFrame {
+                    attachment_lifetime: Default::default(),
                     join: Default::default(),
                     id,
                     pos: [0, 64, 0],
@@ -320,6 +321,7 @@ mod tests {
                 });
             }
             game.paintings.push(Painting {
+                attachment_lifetime: Default::default(),
                 join: Default::default(),
                 id: 14,
                 pos: [0, 64, 0],

@@ -1,6 +1,6 @@
 //! Navigation helpers for native mod mob handles.
 use super::{Game, commands::Target};
-use mod_api::MobRef;
+use mod_api::{MobRef, PathType};
 
 /// The numbers a mod hands a mob's navigation (`moveTo(x, y, z, speed)`): a
 /// finite speed, and finite coordinates small enough for the pathfinder's
@@ -76,6 +76,46 @@ impl Game<'_> {
             return None;
         };
         Some(self.mobs.iter().find(|m| m.id == id)?.ai.nav.speed_modifier)
+    }
+
+    /// `Mob.getPathfindingMalus`: what a node of `kind` costs this mob's
+    /// pathfinder — its own override, else the kind's default (a negative
+    /// malus closes the kind). None for a stale or unavailable mob, the
+    /// dragon, or on a client.
+    pub(super) fn native_mob_pathfinding_malus(&self, mob: MobRef, kind: PathType) -> Option<f32> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(
+            self.mobs
+                .iter()
+                .find(|m| m.id == id && !m.removed)?
+                .malus(kind),
+        )
+    }
+
+    /// `Mob.setPathfindingMalus`: what the mob's next paths cost through
+    /// `kind` (negative closes it, as the species' own overrides do); not
+    /// saved, as in vanilla, so a reload or conversion keeps the species'
+    /// own. False for a malus that is not finite, a stale or unavailable mob,
+    /// the dragon, or on a client.
+    pub(super) fn native_mob_set_pathfinding_malus(
+        &mut self,
+        mob: MobRef,
+        kind: PathType,
+        malus: f32,
+    ) -> bool {
+        if !malus.is_finite() {
+            return false;
+        }
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id && !m.removed)
+            .map(|m| m.set_malus(kind, malus))
+            .is_some()
     }
 
     /// `PathNavigation.setSpeedModifier`: sets the multiplier the current

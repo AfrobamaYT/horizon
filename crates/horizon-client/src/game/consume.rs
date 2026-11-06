@@ -136,7 +136,7 @@ impl Game<'_> {
     }
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: down to the first
     /// block entities can teleport onto, inside the border, in a loaded chunk.
-    fn random_teleport(&mut self, target: Vec3, avoid: &str) -> bool {
+    pub(super) fn random_teleport(&mut self, target: Vec3, avoid: Option<&str>) -> bool {
         let [min_x, min_z, max_x, max_z] = self.border.bounds();
         // WorldBorder.clampVec3ToBound (Mth.clamp, 1.0E-5F inside the far edge).
         let clamp = |v: f64, low: f64, high: f64| if v < low { low } else { v.min(high) };
@@ -163,9 +163,9 @@ impl Game<'_> {
         &mut self,
         at: Vec3,
         ground: horizon_world::registry::BlockStateId,
-        avoid: &str,
+        avoid: Option<&str>,
     ) -> bool {
-        if self.state_in_tag(avoid, ground) {
+        if avoid.is_some_and(|tag| self.state_in_tag(tag, ground)) {
             return false;
         }
         let entities = self.player_entity_collisions();
@@ -200,7 +200,10 @@ impl Game<'_> {
         let liquid = states
             .iter()
             .any(|&s| self.res.facts().get(s).fluid != horizon_client::blocks::Fluid::None);
-        if !free || liquid || states.iter().any(|&s| self.state_in_tag(avoid, s)) {
+        if !free
+            || liquid
+            || avoid.is_some_and(|tag| states.iter().any(|&s| self.state_in_tag(tag, s)))
+        {
             return false;
         }
         if let Some(p) = self.player.as_mut() {
@@ -414,7 +417,7 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
     fn random_teleport(&mut self, target: Vec3) -> Result<bool, Infallible> {
         Ok(self
             .0
-            .random_teleport(target, "minecraft:consumable_does_not_teleport_to"))
+            .random_teleport(target, Some("minecraft:consumable_does_not_teleport_to")))
     }
     fn teleport_event(&mut self, _: Dim, old: Vec3) -> Result<(), Infallible> {
         let ctx = self.0.who_context(Some(Who::Player), None);
