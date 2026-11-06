@@ -541,7 +541,12 @@ mod tests {
             assert_eq!(cow.leash_holder(game), Some(MobLeashHolder::Unleashed));
             let motion =
                 horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
-            game.lan.as_mut().unwrap().hub.guest_mut(20).unwrap().motion = Some(Box::new(motion));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(20, |guest| guest.motion = Some(Box::new(motion)))
+                .unwrap();
             game.as_guest(20, |game| {
                 assert!(game.interact_leash(0, "minecraft:lead"));
                 assert_eq!(
@@ -870,12 +875,36 @@ mod tests {
             assert!(mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), Some(player));
             assert_eq!(game.lan.as_ref().unwrap().mob_players.get(&12), Some(&1));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 1;
+            {
+                let value = 1;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(mob.target(game), None);
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
-            game.lan.as_mut().unwrap().hub.guests[0].game_mode = 0;
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = "minecraft:the_nether".into();
+            {
+                let value = 0;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.game_mode = value);
+            }
+            {
+                let value = "minecraft:the_nether".into();
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             assert!(!mob.set_target(game, Some(player)));
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
             game.lan.as_mut().unwrap().mob_players.clear();

@@ -624,11 +624,19 @@ mod tests {
             game.world
                 .block_entities
                 .insert((0, 64, 0), BlockEntity::Chest(vec![None; 27]));
-            let guest = &mut game.lan.as_mut().unwrap().hub.guests[0];
-            let dimension =
-                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned());
+            let dimension = game.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                std::mem::replace(&mut guest.dimension, "minecraft:the_nether".to_owned())
+            });
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].dimension = dimension;
+            {
+                let value = dimension;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |guest| guest.dimension = value);
+            }
             let host = game.lan.take();
             assert!(!player.open_menu(game, chest));
             assert_eq!(game.open_block_menu(12, (0, 64, 0)), MenuOpen::Refused);
@@ -646,10 +654,25 @@ mod tests {
             assert!(chest.set_lock(game, Some(stick_lock.clone())));
             assert_eq!(chest.lock(game), Some(stick_lock));
             assert!(!player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
-                Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+            {
+                let value = Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
             assert!(player.open_menu(game, chest));
-            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = None;
+            {
+                let value = None;
+                game.lan
+                    .as_mut()
+                    .unwrap()
+                    .hub
+                    .guests
+                    .update(0, |g| g.inventory[0] = value);
+            }
             assert!(chest.set_lock(game, None));
             assert!(player.open_menu(game, chest));
             assert!(player.open_menu(game, furnace));

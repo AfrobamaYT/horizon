@@ -652,6 +652,7 @@ pub(super) fn make_streaming(
         horizon_client::save::dimension_dir(world_root, dim.id()),
         shape,
     );
+    save.enable_trusted_fluid_load();
     save.set_loot_source(loot.clone());
     let save = Arc::new(save);
     if dim == Dim::End {

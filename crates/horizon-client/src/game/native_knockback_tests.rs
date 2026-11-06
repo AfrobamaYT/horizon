@@ -358,16 +358,29 @@ fn a_guest_blow_on_a_guest_names_the_attacker_and_the_sword() {
     .into();
     mod_api::testing::with_mods(mods, || {
         super::native_guest_turn_tests::with_guests(|game| {
-            let guest = game.lan.as_mut().unwrap().hub.guest_mut(12).unwrap();
-            guest.inventory[guest.selected] = Some(ItemStack::new("minecraft:iron_sword", 1));
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |guest| {
+                    guest.inventory[guest.selected] =
+                        Some(ItemStack::new("minecraft:iron_sword", 1));
+                })
+                .unwrap();
             let mut victim =
                 horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(3.0, 64.0, 5.0))
                     .unwrap();
             victim.entity_id = 13;
-            let victim_guest = game.lan.as_mut().unwrap().hub.guest_mut(13).unwrap();
-            victim_guest.motion = Some(Box::new(victim));
-            // The guest has finished loading in.
-            victim_guest.load_timeout = 0;
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(13, |victim_guest| {
+                    victim_guest.motion = Some(Box::new(victim));
+                    // The guest has finished loading in.
+                    victim_guest.load_timeout = 0;
+                })
+                .unwrap();
             // A fresh body is a creative one: change the mode away and back so the survival
             // abilities apply to it.
             game.as_guest(13, |g| {
