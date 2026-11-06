@@ -1969,7 +1969,7 @@ mod tests {
             game.world.block_entities.insert(
                 (1, 64, 1),
                 BlockEntity::CommandBlock(Box::new(CommandBlock {
-                    command: "origin".into(),
+                    command: "execute in minecraft:the_nether run origin".into(),
                     condition_met: true,
                     ..Default::default()
                 })),
