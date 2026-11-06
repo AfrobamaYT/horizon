@@ -333,7 +333,11 @@ impl Game<'_> {
                 "commands.warden_spawn_tracker.clear.success.single"
             }
         };
-        if self.ui.rules.bool("send_command_feedback") {
+        if self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SEND_COMMAND_FEEDBACK)
+        {
             self.system_message(Text::translate(
                 key,
                 &[Text::literal(super::chat::PLAYER_NAME)],

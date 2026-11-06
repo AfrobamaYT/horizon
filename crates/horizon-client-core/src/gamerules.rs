@@ -205,6 +205,20 @@ pub mod vanilla {
     pub const ADVANCE_WEATHER: RuleIndex = vanilla_index("advance_weather");
     /// The `spawn_phantoms` rule.
     pub const SPAWN_PHANTOMS: RuleIndex = vanilla_index("spawn_phantoms");
+    /// The `command_block_output` rule.
+    pub const COMMAND_BLOCK_OUTPUT: RuleIndex = vanilla_index("command_block_output");
+    /// The `command_blocks_work` rule.
+    pub const COMMAND_BLOCKS_WORK: RuleIndex = vanilla_index("command_blocks_work");
+    /// The `log_admin_commands` rule.
+    pub const LOG_ADMIN_COMMANDS: RuleIndex = vanilla_index("log_admin_commands");
+    /// The `max_block_modifications` rule.
+    pub const MAX_BLOCK_MODIFICATIONS: RuleIndex = vanilla_index("max_block_modifications");
+    /// The `max_command_forks` rule.
+    pub const MAX_COMMAND_FORKS: RuleIndex = vanilla_index("max_command_forks");
+    /// The `max_command_sequence_length` rule.
+    pub const MAX_COMMAND_SEQUENCE_LENGTH: RuleIndex = vanilla_index("max_command_sequence_length");
+    /// The `send_command_feedback` rule.
+    pub const SEND_COMMAND_FEEDBACK: RuleIndex = vanilla_index("send_command_feedback");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.
