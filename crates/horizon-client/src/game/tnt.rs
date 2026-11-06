@@ -1173,7 +1173,7 @@ mod tests {
         }
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1194,7 +1194,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
