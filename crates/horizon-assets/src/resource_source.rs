@@ -23,9 +23,9 @@ enum Storage {
 
 /// A winning resource keeps its source alive; merged resources keep only their
 /// derived bytes. Reading an archive entry remains lazy after pack resolution.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Resource(ResourceStorage);
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ResourceStorage {
     File {
         source: ResourceSource,
@@ -50,28 +50,73 @@ impl Resource {
 
 /// A folder or an open zip/jar, with the same relative-name lookup and listing.
 /// Clones share the open archive; construct a new source for a resource reload.
+/// Equality and hashing identify that generation, rather than comparing file contents.
 #[derive(Clone)]
 pub struct ResourceSource(Arc<Storage>);
+impl PartialEq for ResourceSource {
+    fn eq(&self, other: &Self) -> bool {
+        self.same_generation(other)
+    }
+}
+impl Eq for ResourceSource {}
+impl Hash for ResourceSource {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
+impl std::fmt::Debug for ResourceSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match self.0.as_ref() {
+            Storage::Directory(_) => "Directory",
+            Storage::Archive(_) => "Archive",
+            Storage::Prefix { .. } => "Prefix",
+            Storage::Index(_) => "Index",
+        };
+        f.debug_tuple("ResourceSource").field(&kind).finish()
+    }
+}
 
 /// Prepared registry tables, resource reads and disposable loader caches have
 /// separate locations. Archive resources never acquire a filesystem pathname.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResourceRoot(Arc<Root>);
+#[derive(Debug)]
 struct Root {
     prepared: PathBuf,
     cache: PathBuf,
     source: ResourceSource,
+    data: ResourceSource,
+    data_changes: ResourceSource,
 }
 impl ResourceRoot {
     pub fn directory(path: PathBuf) -> Self {
         Self::new(path.clone(), path.clone(), ResourceSource::directory(path))
     }
     pub fn new(prepared: PathBuf, cache: PathBuf, source: ResourceSource) -> Self {
+        let data = ResourceSource::directory(prepared.clone());
         Self(Arc::new(Root {
             prepared,
             cache,
             source,
+            data,
+            data_changes: ResourceSource::default(),
         }))
+    }
+    /// Passive server data is independent of the client's selected asset packs.
+    pub fn with_data(self, data: ResourceSource, data_changes: ResourceSource) -> Self {
+        Self(Arc::new(Root {
+            prepared: self.0.prepared.clone(),
+            cache: self.0.cache.clone(),
+            source: self.0.source.clone(),
+            data,
+            data_changes,
+        }))
+    }
+    pub fn data_changes(&self) -> &ResourceSource {
+        &self.0.data_changes
+    }
+    pub fn data(&self) -> &ResourceSource {
+        &self.0.data
     }
     pub fn prepared(&self) -> &Path {
         &self.0.prepared

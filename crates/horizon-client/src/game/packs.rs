@@ -59,12 +59,18 @@ pub fn startup_root(
     selected: &[String],
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
-) -> horizon_client::Result<PathBuf> {
+) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let all = packs::discover(vanilla, &packs_dir());
     let mut enabled = packs::enabled(&all, selected);
     enabled.extend_from_slice(server);
     let base = super::mods::content_root(vanilla, mod_sources)?;
-    Ok(packs::resource_root(&base, &enabled, &cache_dir())?)
+    let source = packs::resources(base.source().clone(), &enabled)?;
+    Ok(horizon_assets::resource_source::ResourceRoot::new(
+        base.prepared().to_path_buf(),
+        cache_dir(),
+        source,
+    )
+    .with_data(base.data().clone(), base.data_changes().clone()))
 }
 fn info(p: &Pack) -> PackInfo {
     let built_in = !p.id.starts_with("file/");
@@ -378,6 +384,7 @@ impl Game<'_> {
             block_entity_shapes,
             waypoint_styles,
             armor_stand_assets,
+            frame_models,
             sounds,
             ui_metadata,
             language,
@@ -422,6 +429,12 @@ impl Game<'_> {
             }
         };
         // Everything loaded: switch over.
+        [
+            self.frame_model,
+            self.glow_frame_model,
+            self.map_frame_model,
+            self.glow_map_frame_model,
+        ] = frame_models;
         self.waypoint_styles = waypoint_styles;
         self.armor_stand_assets.apply_resources(armor_stand_assets);
         self.random_tick_sections.clear();
@@ -549,13 +562,9 @@ pub(super) fn stage_pack(
     japanese: bool,
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
-    let root = startup_root(vanilla_root, selected, server, mod_sources)?;
-    let source = horizon_assets::resource_source::ResourceSource::directory(root.clone());
-    let resource_root = horizon_assets::resource_source::ResourceRoot::new(
-        root.clone(),
-        cache_dir(),
-        source.clone(),
-    );
+    let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
+    let root = resource_root.prepared().to_path_buf();
+    let source = resource_root.source().clone();
     progress.set(1);
     // The mod listeners prepare against the merged root before the heavy
     // staging builds run: a listener that fails aborts the reload without the
@@ -614,6 +623,7 @@ pub(super) fn stage_pack(
     let block_entity_shapes = res.block_entity_render().shapes_for(&source);
     let waypoint_styles = horizon_client::locator_bar::WaypointStyles::load(&source);
     let armor_stand_assets = super::armor_stands::ArmorStandAssets::load(&source, None);
+    let frame_models = super::frames::bake_frames(&source);
     progress.set(3);
     Ok(StagedPack {
         root,
@@ -625,6 +635,7 @@ pub(super) fn stage_pack(
         block_entity_shapes,
         waypoint_styles,
         armor_stand_assets,
+        frame_models,
         sounds,
         ui_metadata,
         language,
@@ -637,6 +648,7 @@ pub(super) struct StagedPack {
     pub root: PathBuf,
     pub waypoint_styles: horizon_client::locator_bar::WaypointStyles,
     pub armor_stand_assets: super::armor_stands::ArmorStandAssets,
+    pub frame_models: [super::frames::FrameModel; 4],
     /// The mod reload listeners' prepared applies, run when the rest of the
     /// staged pack is published.
     pub client_applies: Vec<super::client_reload::PreparedClientReload>,
@@ -801,17 +813,40 @@ mod tests {
             br#"{"pack":{"description":"test","pack_format":97}}"#,
         )
         .unwrap();
+        {
+            use std::io::Write;
+            let mut archive =
+                zip::ZipWriter::new(fs::File::create(dir.join("packs/override.zip")).unwrap());
+            for name in ["pack.mcmeta", asset] {
+                archive
+                    .start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                archive
+                    .write_all(&fs::read(pack_dir.join(name)).unwrap())
+                    .unwrap();
+            }
+            archive.finish().unwrap();
+            fs::remove_dir_all(&pack_dir).unwrap();
+        }
         let mut sources = super::super::mods::ModsState {
             dev: vec![mod_dir],
             ..Default::default()
         };
         sources.select(&std::env::current_dir().unwrap(), &Default::default());
         let without_pack = startup_root(&vanilla, &[], &[], &sources).unwrap();
-        assert_eq!(fs::read(without_pack.join(asset)).unwrap(), b"mod");
+        assert_eq!(without_pack.source().read(asset).unwrap(), b"mod");
         let pack = packs::folder(&dir.join("packs"), packs::RESOURCE_FORMAT);
         assert_eq!(pack.len(), 1);
         let with_pack = startup_root(&vanilla, &[], &pack, &sources).unwrap();
-        assert_eq!(fs::read(with_pack.join(asset)).unwrap(), b"pack");
+        assert_eq!(with_pack.source().read(asset).unwrap(), b"pack");
+        // The selected archive changes resource lookup without materializing
+        // its override beside generated tables.
+        assert_eq!(with_pack.prepared(), without_pack.prepared());
+        assert_ne!(
+            fs::read(with_pack.prepared().join(asset)).ok().as_deref(),
+            Some(b"pack".as_slice())
+        );
+        assert!(!pack_dir.exists());
         fs::remove_dir_all(dir).unwrap();
     }
 

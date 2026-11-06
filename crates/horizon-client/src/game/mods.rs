@@ -170,7 +170,7 @@ fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
 /// process.
 pub(super) struct ContentOverlay {
     /// The root with the mods' content merged in.
-    pub(super) root: std::path::PathBuf,
+    pub(super) root: horizon_assets::resource_source::ResourceRoot,
     /// The accepted content mods, in overlay order.
     pub(super) mods: Vec<horizon_client::mod_content::ContentMod>,
     /// The protocol entries of the accepted mods.
@@ -340,7 +340,9 @@ pub(super) fn content_overlay(
         })
         .collect();
     horizon_mods::dependencies::resolve_content(&loaded).map_err(|error| error.to_string())?;
-    let root = mod_content::resource_root(root, jar_store, &mods, &here.join(".horizon-cache"))?;
+    let cache = here.join(".horizon-cache");
+    let prepared = mod_content::resource_root(root, jar_store, &mods, &cache)?;
+    let root = mod_content::resolved_resources(root, prepared, jar_store, &mods, cache)?;
     Ok(ContentOverlay {
         root,
         mods,
@@ -355,18 +357,18 @@ pub(super) fn content_overlay(
 pub(super) fn content_root(
     root: &std::path::Path,
     sources: &ModsState,
-) -> horizon_client::Result<std::path::PathBuf> {
+) -> horizon_client::Result<horizon_assets::resource_source::ResourceRoot> {
     let jar_store = horizon_client::logging::game_home().join("jars");
     let overlay = content_overlay(root, sources, &jar_store)?;
-    register_block_entity_types(&overlay.root, &overlay.mods)?;
+    register_block_entity_types(overlay.root.prepared(), &overlay.mods)?;
     if overlay.announce {
         horizon_protocol::mod_list::set_local(overlay.announced);
     }
-    if overlay.root != root {
+    if overlay.root.prepared() != root {
         log::info!(
             "Horizon: content from {} mod(s) in {}",
             overlay.mods.len(),
-            overlay.root.display()
+            overlay.root.prepared().display()
         );
     }
     register_mob_effects(&overlay.mods);
@@ -721,12 +723,16 @@ impl Game<'_> {
             return;
         }
         let root = self.options.resources.clone();
+        let data_source = self.pack.data_source.clone();
+        let data_changes = self.pack.data_changes.clone();
         let enabled = self.applied_mods();
         let selected = self.mods.selected.clone();
         let refused = self.mods.refused.clone();
         let reload = move |g: &mut Game<'_>| {
             let at = std::time::Instant::now();
             g.options.resources = root;
+            g.pack.data_source = data_source;
+            g.pack.data_changes = data_changes;
             g.settings.mods.enabled = enabled.clone();
             g.mods.applied = Some(enabled);
             g.mods.selected = selected;
@@ -1122,7 +1128,7 @@ mod tests {
         };
         let enabled = std::collections::BTreeSet::from(["plain".to_owned()]);
         sources.select(&here, &enabled);
-        assert_eq!(content_root(&base, &sources).unwrap(), base);
+        assert_eq!(content_root(&base, &sources).unwrap().prepared(), base);
         let local = horizon_protocol::mod_list::local();
         let ids: Vec<_> = local.iter().map(|m| m.id.as_str()).collect();
         if mode.as_deref() == Some("compiled") {
@@ -1211,7 +1217,7 @@ mod tests {
             ..Default::default()
         };
         let overlay = content_overlay(&base, &content, &store).unwrap();
-        assert_eq!(overlay.root, base);
+        assert_eq!(overlay.root.prepared(), base);
         assert_eq!(
             overlay
                 .mods

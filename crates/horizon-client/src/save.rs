@@ -8635,6 +8635,7 @@ mod far_census {
         let terrain = Arc::new(
             crate::vanillagen::VanillaTerrain::new(
                 crate::vanillagen::TerrainResources {
+                    data: None,
                     dir: &root.join("worldgen"),
                     registry,
                     biomes: &biomes,

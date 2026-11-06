@@ -748,6 +748,7 @@ mod tests {
         )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -1068,6 +1069,7 @@ mod tests {
         )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -1150,6 +1152,7 @@ mod tests {
         )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -1242,6 +1245,7 @@ mod tests {
         )?;
         let item_data = crate::test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

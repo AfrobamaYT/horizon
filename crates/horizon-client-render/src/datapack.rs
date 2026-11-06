@@ -23,6 +23,9 @@ impl DataPack {
     pub fn from_source(id: String, source: ResourceSource) -> Self {
         Self { id, source }
     }
+    pub fn source(&self) -> &ResourceSource {
+        &self.source
+    }
     /// Every file path under `prefix` (relative to the pack root).
     pub fn list(&self, prefix: &str) -> Vec<String> {
         self.source.list(prefix)
@@ -317,7 +320,15 @@ pub fn install(dir: &Path, world: &Path, selected: &[String]) -> Result<(), Stri
     std::fs::create_dir_all(&target).map_err(|e| err(&target, e))?;
     let mut disabled = Vec::new();
     for pack in crate::packs::folder(dir, horizon_core::version::DATA_PACK_FORMAT) {
-        let (crate::packs::Source::Dir(from) | crate::packs::Source::Zip(from)) = &pack.source;
+        let from = match &pack.source {
+            crate::packs::Source::Dir(from) | crate::packs::Source::Zip(from) => from,
+            crate::packs::Source::Opened(_) => {
+                return Err(format!(
+                    "{}: an open resource layer cannot be installed as a file pack",
+                    pack.id
+                ));
+            }
+        };
         copy(from, &target.join(pack.id.trim_start_matches("file/")))?;
         if !selected.contains(&pack.id) {
             disabled.push(pack.id);
@@ -852,6 +863,17 @@ pub fn worldgen_overrides(
     let mut warnings = Vec::new();
     for pack in packs {
         for file in pack.list_kinds(&overrides::PACK_KINDS) {
+            if let Some((namespace, path)) = file
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once("/structure/"))
+                .and_then(|(ns, path)| Some((ns, path.strip_suffix(".nbt")?)))
+            {
+                out.set_template(
+                    format!("{namespace}:{path}"),
+                    horizon_assets::resource_source::Resource::file(pack.source.clone(), file),
+                );
+                continue;
+            }
             let read = || String::from_utf8(pack.read(&file)?).ok();
             match out.add_file(&pack.id, &file, read) {
                 PackFile::Read | PackFile::Other => {}
@@ -872,6 +894,136 @@ pub fn worldgen_overrides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structure_templates_read_archive_generations_without_extraction() {
+        use horizon_world::{
+            nbt::{Limits, NamedTag},
+            registry::BlockRegistry,
+            worldgen::structure::{StateTransforms, StructureResources},
+        };
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("horizon-template-source-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let scratch = Scratch(root);
+        let archive = scratch.0.join("templates.jar");
+        let write_archive = |width| {
+            let tag = Tag::compound([
+                (
+                    "size",
+                    Tag::List(vec![Tag::Int(width), Tag::Int(3), Tag::Int(4)]),
+                ),
+                (
+                    "palette",
+                    Tag::List(vec![Tag::compound([(
+                        "Name",
+                        Tag::String("minecraft:stone".into()),
+                    )])]),
+                ),
+                (
+                    "blocks",
+                    Tag::List(vec![Tag::compound([
+                        (
+                            "pos",
+                            Tag::List(vec![Tag::Int(1), Tag::Int(0), Tag::Int(1)]),
+                        ),
+                        ("state", Tag::Int(0)),
+                    ])]),
+                ),
+                ("entities", Tag::List(Vec::new())),
+            ]);
+            let bytes = horizon_world::nbt::write_named(
+                &NamedTag {
+                    name: "".into(),
+                    tag,
+                },
+                Limits::templates(),
+            )
+            .unwrap();
+            let mut gzip =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            gzip.write_all(&bytes).unwrap();
+            let temporary = scratch.0.join("replacement.jar");
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&temporary).unwrap());
+            zip.start_file(
+                "data/example/structure/nested/piece.nbt",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+            zip.write_all(&gzip.finish().unwrap()).unwrap();
+            zip.finish().unwrap();
+            std::fs::rename(temporary, &archive).unwrap();
+        };
+        write_archive(2);
+        let old =
+            DataPack::from_source("passive".into(), ResourceSource::archive(&archive).unwrap());
+        let (before, warnings) = worldgen_overrides(&[&old], |_| true);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        write_archive(5);
+        let new =
+            DataPack::from_source("passive".into(), ResourceSource::archive(&archive).unwrap());
+        let (after, warnings) = worldgen_overrides(&[&new], |_| true);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_ne!(
+            before, after,
+            "a reopened archive invalidates the generator cache"
+        );
+        let registry = Box::leak(Box::new(
+            BlockRegistry::from_nbt(&Tag::compound([
+                ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
+                (
+                    "states",
+                    Tag::List(vec![
+                        Tag::compound([("id", Tag::String("minecraft:air".into()))]),
+                        Tag::compound([("id", Tag::String("minecraft:stone".into()))]),
+                    ]),
+                ),
+                (
+                    "defaults",
+                    Tag::compound([
+                        ("minecraft:air", Tag::Int(0)),
+                        ("minecraft:stone", Tag::Int(1)),
+                    ]),
+                ),
+            ]))
+            .unwrap(),
+        ));
+        let manager = |overrides: &WorldgenOverrides| {
+            let transforms = StateTransforms::from_json(
+                r#"{"rotate":[[0,0,0],[1,1,1]],"mirror":[[0,0],[1,1]],"full_block":[false,true]}"#,
+                2,
+            )
+            .unwrap();
+            StructureResources::new(
+                registry,
+                transforms,
+                &scratch.0.join("unpacked-templates"),
+                BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .with_templates(overrides.templates().clone())
+        };
+        // Neither generation has read its NBT yet; the old one must still
+        // read from the reader retained before the archive was replaced.
+        let first = manager(&before).template("example:nested/piece").unwrap();
+        let second = manager(&after).template("example:nested/piece").unwrap();
+        assert_eq!(first.size, [2, 3, 4]);
+        assert_eq!(second.size, [5, 3, 4]);
+        let blocks = second.palettes()[0].blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].pos, [1, 0, 1]);
+        assert_eq!(blocks[0].state.0, 1);
+        assert!(!scratch.0.join("data").exists());
+        assert!(!scratch.0.join("unpacked-templates").exists());
+    }
 
     #[test]
     fn data_map_files_are_content_files_keyed_by_map_namespace_and_registry() {

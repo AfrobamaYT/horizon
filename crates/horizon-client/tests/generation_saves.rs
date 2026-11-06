@@ -380,6 +380,7 @@ fn saved_proto_chunks_restore_exactly() {
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -519,6 +520,7 @@ fn saved_proto_block_entities_keep_their_id() {
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

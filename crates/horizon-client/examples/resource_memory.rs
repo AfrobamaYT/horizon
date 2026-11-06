@@ -147,6 +147,7 @@ fn main() -> Result<()> {
     step("motion");
     let terrain = VanillaTerrain::new(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

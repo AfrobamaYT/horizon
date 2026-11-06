@@ -2578,6 +2578,8 @@ impl UiResources {
 #[derive(Clone)]
 pub struct PackResources {
     source: horizon_assets::resource_source::ResourceSource,
+    data_source: horizon_assets::resource_source::ResourceSource,
+    data_changes: horizon_assets::resource_source::ResourceSource,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2668,6 +2670,8 @@ impl PackResources {
             render,
             item_renderer: Arc::new(item_renderer),
             source: root.source().clone(),
+            data_source: root.data().clone(),
+            data_changes: root.data_changes().clone(),
             names: Arc::new(Names::load(root.source())),
             clouds: Arc::new(load_clouds(root.source())),
             forcefield: Arc::new(load_forcefield(root.source())),
@@ -21386,12 +21390,18 @@ impl GameCpuResources {
         let root = resources.prepared();
         let document = horizon_client::mobs::EntityModelDocument::load(root).ok();
         let model = |key| document.as_ref().and_then(|document| document.model(key));
+        let [
+            frame_model,
+            glow_frame_model,
+            map_frame_model,
+            glow_map_frame_model,
+        ] = frames::bake_frames(resources.source());
         Ok(Self {
             painting_variants: paintings::PaintingVariants::load(root),
-            frame_model: frames::bake_frame(resources.source(), "item_frame"),
-            glow_frame_model: frames::bake_frame(resources.source(), "glow_item_frame"),
-            map_frame_model: frames::bake_frame(resources.source(), "item_frame_map"),
-            glow_map_frame_model: frames::bake_frame(resources.source(), "glow_item_frame_map"),
+            frame_model,
+            glow_frame_model,
+            map_frame_model,
+            glow_map_frame_model,
             armor_stand_assets: armor_stands::ArmorStandAssets::load(
                 resources.source(),
                 document.as_ref(),
@@ -21508,6 +21518,7 @@ impl Game<'_> {
         world_loading::preload_world_data(
             on_world_screens,
             &self.options.resources,
+            &self.pack.data_changes,
             self.pack.assets.registry,
             &self.res.core.item_data,
         );
@@ -21563,12 +21574,18 @@ impl Game<'_> {
                     )
                 })
                 .unwrap_or_default();
+            let data_source = self.pack.data_changes.clone();
             self.creation_job = std::thread::Builder::new()
                 .name("world-creation".into())
                 .spawn(move || {
-                    horizon_client::vanillagen::shared_data_with(&dir, &overrides, registry)
-                        .map(|_| ())
-                        .map_err(|e| e.to_string())
+                    horizon_client::vanillagen::shared_data_from(
+                        &dir,
+                        &overrides,
+                        registry,
+                        &data_source,
+                    )
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
                 })
                 .ok();
             return;
@@ -22186,6 +22203,7 @@ fn load_core(
                     world_loading::preload_launch_world(
                         folder,
                         root,
+                        resources.data_changes(),
                         registry,
                         biomes.clone(),
                         item_data.clone(),
@@ -22280,7 +22298,7 @@ fn gameplay_tables(
 /// the launch opens, whose data is preloaded meanwhile.
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
-    mut root: PathBuf,
+    mut resolved: horizon_assets::resource_source::ResourceRoot,
     launch_world: Option<&str>,
     vanilla_root: &std::path::Path,
     settings: &Settings,
@@ -22290,6 +22308,7 @@ fn load_resources(
     progress: &Progress,
     publish: &mut dyn FnMut(UiResources, &std::path::Path),
 ) -> Result<Loaded> {
+    let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
@@ -22328,8 +22347,8 @@ fn load_resources(
             Some(ui)
         }
     };
+    let mut can_rollback = true;
     let (core, loaded_gui, resolved) = loop {
-        let resolved = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
         let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, "core", || {
                 // A failed pack starts core again from the game's own
@@ -22343,11 +22362,10 @@ fn load_resources(
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
             (ui, core.join())
         });
-        let packs = root != vanilla_root;
         let failure = match (ui, core) {
             (Ok(gui), Ok(Ok(core))) => break (core, gui, resolved),
-            (Err(e), _) if packs => e.to_string(),
-            (_, Ok(Err(e))) if packs => e,
+            (Err(e), _) if can_rollback => e.to_string(),
+            (_, Ok(Err(e))) if can_rollback => e,
             (_, Ok(Err(e))) => {
                 return Err(format!(
                     "{e}\nPrepare resources with the launcher, or: horizon-prepare --prepare"
@@ -22361,7 +22379,9 @@ fn load_resources(
             "Horizon: resource packs failed to load ({failure}); using the default resources"
         );
         pack_error = Some(failure);
+        can_rollback = false;
         root = vanilla_root.to_path_buf();
+        resolved = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let CoreTables {
@@ -22388,6 +22408,7 @@ fn load_resources(
         world_loading::preload_launch_world(
             folder,
             &root,
+            resolved.data_changes(),
             assets.registry,
             biomes.clone(),
             item_data.clone(),
@@ -22612,7 +22633,15 @@ fn load_world_rest(
     let biomes = resources.biomes();
     let threads = resources.threads();
     let registry = assets.registry;
-    let overlay = &horizon_world::loot::PackOverlay::NONE;
+    let content = horizon_client::datapack::DataPack::from_source(
+        "horizon-content".into(),
+        resource_root.data_changes().clone(),
+    );
+    let files = horizon_client::datapack::DataStore::load(&[&content])
+        .files
+        .into_iter()
+        .collect::<Vec<_>>();
+    let overlay = &horizon_world::loot::PackOverlay { files: &files };
     progress.set(6);
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
@@ -23877,7 +23906,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         return run_loading(options, early_settings, vanilla_root, None, started);
     }
     let mut pack_error = None;
-    options.resources = packs::startup_root(
+    let selected_root = packs::startup_root(
         &vanilla_root,
         &early_settings.resource_packs,
         &[],
@@ -23889,7 +23918,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
         mods::content_root(&vanilla_root, &options.mods)
     })?;
     let mut loaded = load_resources(
-        options.resources.clone(),
+        selected_root,
         launch_world(&options),
         &vanilla_root,
         &early_settings,
@@ -24294,6 +24323,8 @@ mod tests {
             let stack = super::functions::pack_stack(
                 &game.world_root,
                 &game.options.resources,
+                &game.pack.data_source,
+                &game.pack.data_changes,
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
             );

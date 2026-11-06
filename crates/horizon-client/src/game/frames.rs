@@ -13,6 +13,19 @@ use horizon_core::{
 /// A baked frame model: (corners in block units, unit UVs, sprite) per quad.
 pub(super) type FrameModel = Vec<([[f32; 3]; 4], [[f32; 2]; 4], String)>;
 
+/// Item-frame variants prepared together for one resource generation.
+pub(super) fn bake_frames(
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> [FrameModel; 4] {
+    [
+        "item_frame",
+        "glow_item_frame",
+        "item_frame_map",
+        "glow_item_frame_map",
+    ]
+    .map(|name| bake_frame(source, name))
+}
+
 /// Bake `block/<name>` (item_frame / glow_item_frame) from the resources.
 pub(super) fn bake_frame(
     root: &horizon_assets::resource_source::ResourceSource,

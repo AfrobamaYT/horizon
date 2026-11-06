@@ -296,6 +296,7 @@ fn main() -> Result<(), Error> {
     });
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
     let terrain_resources = horizon_client::vanillagen::TerrainResources {
+        data: None,
         dir: &root.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,

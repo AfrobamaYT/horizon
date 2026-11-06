@@ -461,6 +461,7 @@ mod tests {
         let item_data =
             crate::test_resources::item_data(root, DataLoadOrigin::ServerDataLoad).unwrap();
         let terrain_resources = crate::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

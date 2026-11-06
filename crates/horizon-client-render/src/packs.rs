@@ -22,6 +22,7 @@ pub const RESOURCE_FORMAT: (i64, i64) = horizon_core::version::RESOURCE_PACK_FOR
 pub enum Source {
     Dir(PathBuf),
     Zip(PathBuf),
+    Opened(crate::resource_source::ResourceSource),
 }
 impl Source {
     /// Open this layer once for a load/reload, sharing it across resource reads.
@@ -31,6 +32,7 @@ impl Source {
                 root.clone(),
             )),
             Self::Zip(path) => crate::resource_source::ResourceSource::archive(path),
+            Self::Opened(source) => Ok(source.clone()),
         }
     }
 }
@@ -573,7 +575,7 @@ fn pack_files(
         for inner in source.list("assets/") {
             let path = match &pack.source {
                 Source::Dir(directory) => Some(directory.join(&root).join(&inner)),
-                Source::Zip(_) => None,
+                Source::Zip(_) | Source::Opened(_) => None,
             };
             out.insert(inner.clone(), (path, source.clone(), inner));
         }

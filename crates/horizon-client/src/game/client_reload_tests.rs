@@ -314,6 +314,21 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
     )
     .unwrap();
 
+    // Only the archive remains when loading starts.
+    {
+        use std::io::Write;
+        let path = dir.join("packs/override.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for name in ["pack.mcmeta", asset] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(&std::fs::read(pack_dir.join(name)).unwrap())
+                .unwrap();
+        }
+        zip.finish().unwrap();
+        std::fs::remove_dir_all(&pack_dir).unwrap();
+    }
+
     struct HatListener {
         live: Arc<Mutex<Vec<String>>>,
         reject: Arc<AtomicBool>,
@@ -422,17 +437,13 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
                 )
                 .unwrap()
                 .root;
-                horizon_client::packs::resource_root(&base, packs, &crate::game::packs::cache_dir())
-                    .unwrap()
+                horizon_client::packs::resources(base.source().clone(), packs).unwrap()
             };
             // The mod's packaged asset over nothing, with the real root's own
             // assets in the same view.
             let root = merged(&[]);
-            let prepared = stage_client_reload(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                game.register_client_reload_listeners(),
-            )
-            .unwrap();
+            let prepared =
+                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
             assert!(live.lock().unwrap().is_empty(), "nothing published yet");
             apply_client_reload(prepared);
             assert_eq!(live.lock().unwrap().as_slice(), ["mod"]);
@@ -447,20 +458,15 @@ fn client_reload_reads_real_assets_with_pack_overrides() {
             );
             assert_eq!(packs.len(), 1);
             let root = merged(&packs);
-            let prepared = stage_client_reload(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                game.register_client_reload_listeners(),
-            )
-            .unwrap();
+            let prepared =
+                stage_client_reload(&root, game.register_client_reload_listeners()).unwrap();
             apply_client_reload(prepared);
             assert_eq!(live.lock().unwrap().as_slice(), ["mod", "pack"]);
             // A rejected prepare aborts the reload and keeps the previous state.
             reject.store(true, Ordering::Relaxed);
             let root = merged(&[]);
-            let Err(error) = stage_client_reload(
-                &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
-                game.register_client_reload_listeners(),
-            ) else {
+            let Err(error) = stage_client_reload(&root, game.register_client_reload_listeners())
+            else {
                 panic!("a failing listener stops the whole reload")
             };
             assert!(error.to_string().contains("client_test:hats"));
