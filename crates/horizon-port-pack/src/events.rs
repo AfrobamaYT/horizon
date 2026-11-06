@@ -1,6 +1,6 @@
 //! `events <jar or folder>`: the NeoForge events a mod listens to and the
-//! capabilities it uses, looked up in the hook catalog. `native-hooks.json`
-//! names each hook's NeoForge counterpart (docs/native-hooks-neoforge.md);
+//! capabilities it uses, looked up in the hook catalog. The Rust hook declarations
+//! name each hook's NeoForge counterpart; the generator exports them at build time;
 //! this reads a jar's class files (`classes`: `@SubscribeEvent` methods,
 //! method references and lambdas that take one event, `Capabilities` fields)
 //! and finds the hooks for each name. Over a folder of jars it ranks the
@@ -16,7 +16,7 @@ use std::{
 };
 
 /// The hook catalog this build was made from.
-pub const CATALOG: &str = include_str!("../../../native-hooks.json");
+pub const CATALOG: &str = include_str!(concat!(env!("OUT_DIR"), "/hook-counterparts.json"));
 
 /// Names NeoForge changed after 1.21.1, which packs such as ATM10 still use
 /// (NeoForge's documentation for both versions): a name the catalog lacks is

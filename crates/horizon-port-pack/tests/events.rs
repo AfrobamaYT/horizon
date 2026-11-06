@@ -194,6 +194,15 @@ fn the_built_in_catalog_parses() {
         panic!("LivingDeathEvent has no hook");
     };
     assert!(hooks.contains(&"living_death".to_owned()), "{hooks:?}");
+    for (counterpart, hook) in [
+        ("AnvilUpdateEvent", "anvil_update"),
+        ("RenderTooltipEvent.Pre", "render_tooltip_pre"),
+    ] {
+        let (Status::Hooked(hooks), None) = c.status(counterpart) else {
+            panic!("{counterpart} has no hook");
+        };
+        assert_eq!(hooks, [hook]);
+    }
 }
 
 #[test]

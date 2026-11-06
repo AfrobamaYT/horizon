@@ -370,15 +370,17 @@ Nether Structures are Partly; Sodium and GeckoLib don't run (Mixins, renderers, 
 Fabric API doesn't run (its id has a dash, which content mods can't use). A check takes 0.2 s to
 3 s, and 24 s for Compressed Blocks (18 MB, 9,360 recipes, writing the carry dominates).
 
-`events <jar or folder> [--hooks <native-hooks.json>]` reads the same class files for the NeoForge
+`events <jar or folder> [--hooks <hook-counterparts.json>]` reads the same class files for the NeoForge
 events a mod listens to and the capabilities it uses. A listener is an `@SubscribeEvent` method's
 parameter, or a method reference or lambda that takes one event
 (`NeoForge.EVENT_BUS.addListener(this::onTick)`). It looks each name up in the hook catalog's
-`neoforge` names ([native-hooks-neoforge.md](native-hooks-neoforge.md)). Over a folder of jars it
-ranks the names by how many mods use them. Each name gets one of four answers:
+`neoforge` names, generated at build time from the Rust hook declarations (see the
+[hook notes](https://arismoko.github.io/horizon/reference/hook-notes.html)). An optional JSON
+file with `hooks` entries containing `name` and `neoforge` can replace those labels for a report.
+Over a folder of jars it ranks the names by how many mods use them. Each name gets one of four answers:
 
 - a hook;
-- another phase's hook (`player_tick` for `PlayerTickEvent.Pre`);
+- another phase's hook (`player_tick_post` for `PlayerTickEvent.Pre` when only Post is listed);
 - a hook whose label says why it isn't quite the counterpart;
 - none.
 
@@ -387,8 +389,8 @@ Names NeoForge changed after 1.21.1 (`Capabilities.ItemHandler`, `Capabilities.E
 code: it says where a port starts, for a human to check.
 
 On ATM10's 498 jars (2026-11-05, 8 s), 416 of 497 mods listen to events or use capabilities: 6,616
-uses of 326 names. Main's catalog had a hook for 23% of those uses, and 43% once #9924 labelled 32
-core hooks. The most used names with no hook are mod setup and registration
+uses of 326 names. Upstream's catalog at that date had a hook for 23% of those uses, and 43% once
+horizon-rust/horizon#9924 labelled 32 core hooks. The most used names with no hook are mod setup and registration
 (`FMLClientSetupEvent` 208 mods, `RegisterPayloadHandlersEvent` 180,
 `RegisterCapabilitiesEvent` 162, `RegisterMenuScreensEvent` 143), which a Horizon mod does its own
 way. After those come `ClientTickEvent.Post` and `.Pre` (95, 46), `RenderLevelStageEvent` (81) and
