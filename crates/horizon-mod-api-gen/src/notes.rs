@@ -1,8 +1,8 @@
 //! `docs/modding/src/reference/hook-notes.md` from each declaration's `notes` attribute.
 //!
 //! A hook or helper carries its prose on its own declaration, so two PRs that add different
-//! hooks never edit the same page. `cargo run -p xtask -- mod-api notes` writes the page; the
-//! generator's tests fail when the checked-in page is stale.
+//! hooks never edit the same page. The book preprocessor uses `cargo run -p xtask -- mod-api notes`
+//! to render the chapter in memory; no generated Markdown is committed.
 use crate::catalog::Catalog;
 use std::path::Path;
 
@@ -47,14 +47,45 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn the_checked_in_page_matches_the_declarations() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let page = super::generate(&root).unwrap();
-        let path = root.join("docs/modding/src/reference/hook-notes.md");
-        let checked_in = std::fs::read_to_string(&path).unwrap();
+    fn renders_general_hook_and_helper_notes_without_a_checked_in_page() {
+        let source = r###"
+            trait Notes {
+                #[notes = "## General"]
+                fn general();
+            }
+            trait Hooks {
+                /// Test hook.
+                #[hook(side = "server", contract = "listen")]
+                #[notes = "## Hook\n\nFirst."]
+                #[notes = "Second."]
+                fn example();
+                /// Hook with no extra prose.
+                #[hook(side = "server", contract = "listen")]
+                fn no_notes();
+            }
+            trait Helpers {
+                #[helper(side = "server")]
+                #[notes = "## Helper\n\nLast.\n\n"]
+                fn helper();
+            }
+        "###;
+        let catalog = crate::catalog::Catalog::parse(&[("test.rs".into(), source.into())]).unwrap();
         assert_eq!(
-            checked_in, page,
-            "run `cargo run -p xtask -- mod-api notes`"
+            super::render(&catalog),
+            "# Hook notes\n\n## General\n\n## Hook\n\nFirst.\n\nSecond.\n\n## Helper\n\nLast.\n"
         );
+    }
+
+    #[test]
+    fn the_checkout_renders_without_writing_a_source_page() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = root.join("docs/modding/src/reference/hook-notes.md");
+        assert!(
+            !path.exists(),
+            "generated book pages must not be checked in"
+        );
+        let page = super::generate(&root).unwrap();
+        assert!(page.contains("## Counterparts"));
+        assert!(!path.exists(), "rendering must not write into book sources");
     }
 }

@@ -15,13 +15,12 @@ pub fn run() -> Result<(), String> {
     horizon_mod_api_gen::fill_hooks(&checkout()?)
 }
 
-/// Writes `docs/modding/src/reference/hook-notes.md` from the declarations' notes.
+/// Prints the hook-notes chapter for the book preprocessor, without writing a source file.
 pub fn notes() -> Result<(), String> {
-    let root = checkout()?;
-    let path = root.join("docs/modding/src/reference/hook-notes.md");
-    let page = horizon_mod_api_gen::generate_hook_notes(&root)?;
-    std::fs::write(&path, page).map_err(|e| format!("{}: {e}", path.display()))?;
-    println!("wrote {}", path.display());
+    print!(
+        "{}",
+        horizon_mod_api_gen::generate_hook_notes(&checkout()?)?
+    );
     Ok(())
 }
 
