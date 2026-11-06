@@ -355,6 +355,17 @@ mod tests {
             let water = host.fluid_key("minecraft:water").unwrap();
             let flowing = host.fluid_key("minecraft:flowing_water").unwrap();
             let service = host.fluid_states();
+            for phase in [
+                mod_api::__private::ModPhase::Setup,
+                mod_api::__private::ModPhase::Reloading,
+            ] {
+                let _scope = mod_api::__private::PhaseOwner::scope(phase);
+                assert!(matches!(
+                    service.definition(water),
+                    Some(FluidDefinition::World { .. })
+                ));
+                assert_eq!(service.validate(water, &[]), Ok(()));
+            }
             let tank = host.fluid_key("horizon:definition_test").unwrap();
             assert_eq!(service.definition(tank), Some(FluidDefinition::TankOnly));
             assert_eq!(
