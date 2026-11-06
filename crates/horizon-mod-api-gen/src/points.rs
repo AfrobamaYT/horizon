@@ -1036,8 +1036,8 @@ mod tests {
             change.hash = "change-signature".into();
             let (code, counts) = crate::internals_table::table_with_points(
                 &[game, change],
-                &[point.target.clone()],
-                &[point],
+                std::slice::from_ref(&point.target),
+                std::slice::from_ref(&point),
             );
             assert_eq!(counts.skipped, 0);
             let raw = shape.raw_items(&sig, Some(&syn::parse_quote!(Game)), None);
