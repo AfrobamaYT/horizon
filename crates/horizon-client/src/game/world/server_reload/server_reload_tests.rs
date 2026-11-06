@@ -99,7 +99,7 @@ fn build_mod_resources(
     jar_store: &Path,
     mods: &[horizon_client::mod_content::ContentMod],
     prepared: &Path,
-    inventory: &horizon_mods::enabled::EnabledMods,
+    inventory: &horizon_mod_package::enabled::EnabledMods,
 ) -> horizon_assets::resource_source::ResourceRoot {
     horizon_client::mod_content::build(base, jar_store, mods, prepared, inventory).unwrap();
     let resolved = horizon_client::mod_content::resolved_resources(
@@ -125,9 +125,9 @@ fn install_mod_resources(
 ) {
     // The real loader publishes admission and resource views together. An
     // inventory reload must see the package that supplied this fixture root.
-    game.mods.selected = vec![horizon_mods::selection::SelectedPackage {
+    game.mods.selected = vec![horizon_mod_package::selection::SelectedPackage {
         path: package.to_owned(),
-        package: horizon_mods::Package::read(package).unwrap(),
+        package: horizon_mod_package::Package::read(package).unwrap(),
     }]
     .into();
     game.options.resources = root.prepared().to_owned();
@@ -271,8 +271,9 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
         assert!(status.success());
         return;
     };
-    let jar = horizon_mods::manifest::JarRef::new("original".into(), "1".into(), "a".repeat(128))
-        .unwrap();
+    let jar =
+        horizon_mod_package::manifest::JarRef::new("original".into(), "1".into(), "a".repeat(128))
+            .unwrap();
     let jar_file = jar.cache_path(&horizon_client::logging::game_home().join("jars"));
     std::fs::create_dir_all(jar_file.parent().unwrap()).unwrap();
     let mut zip = zip::ZipWriter::new(std::fs::File::create(&jar_file).unwrap());
@@ -291,10 +292,12 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
     let package = root.join("reload_test.hmod");
     write(
         &package,
-        horizon_mods::Package::write_files(&manifest, &[]).unwrap(),
+        horizon_mod_package::Package::write_files(&manifest, &[]).unwrap(),
     );
-    let package_manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
+    let package_manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let content = horizon_mod_package::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let resources = build_mod_resources(
@@ -306,9 +309,9 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             jars: vec![jar.clone()],
         }],
         &resources,
-        &horizon_mods::enabled::EnabledMods::new([(
+        &horizon_mod_package::enabled::EnabledMods::new([(
             "reload_test".into(),
-            horizon_mods::Side::Both,
+            horizon_mod_package::Side::Both,
         )]),
     );
     let world = root.join("world");
@@ -330,7 +333,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             .reload_datapacks(true, &game.level.enabled_features.clone())
             .err()
             .unwrap();
-        let ReloadStageError::OriginalJars(horizon_mods::manifest::JarInputsError::Missing(
+        let ReloadStageError::OriginalJars(horizon_mod_package::manifest::JarInputsError::Missing(
             missing,
         )) = error
         else {
@@ -364,14 +367,16 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
     let package = root.join("reload_test.hmod");
     write(
         &package,
-        horizon_mods::Package::write_files(
+        horizon_mod_package::Package::write_files(
             manifest,
             &[("data/reload_test/machines/value.json", b"1")],
         )
         .unwrap(),
     );
-    let package_manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
+    let package_manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let content = horizon_mod_package::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let resources = build_mod_resources(
@@ -383,9 +388,9 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             jars: Vec::new(),
         }],
         &resources,
-        &horizon_mods::enabled::EnabledMods::new([(
+        &horizon_mod_package::enabled::EnabledMods::new([(
             "reload_test".into(),
-            horizon_mods::Side::Both,
+            horizon_mod_package::Side::Both,
         )]),
     );
     let world = root.join("world");
@@ -541,14 +546,16 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
     let package = root.join("reload_test.hmod");
     write(
         &package,
-        horizon_mods::Package::write_files(
+        horizon_mod_package::Package::write_files(
             manifest,
             &[("data/reload_test/machines/bar.json", b"\"good\"")],
         )
         .unwrap(),
     );
-    let package_manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
+    let package_manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let content = horizon_mod_package::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let resources = build_mod_resources(
@@ -560,9 +567,9 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
             jars: Vec::new(),
         }],
         &resources,
-        &horizon_mods::enabled::EnabledMods::new([(
+        &horizon_mod_package::enabled::EnabledMods::new([(
             "reload_test".into(),
-            horizon_mods::Side::Both,
+            horizon_mod_package::Side::Both,
         )]),
     );
     let world = root.join("world");
@@ -740,14 +747,16 @@ fn server_reload_retains_listeners_for_other_hooks() {
     let package = root.join("reload_test.hmod");
     write(
         &package,
-        horizon_mods::Package::write_files(
+        horizon_mod_package::Package::write_files(
             manifest,
             &[("data/reload_test/machines/value.json", b"1")],
         )
         .unwrap(),
     );
-    let package_manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let content = horizon_mods::Content::read(&package, &package_manifest).unwrap();
+    let package_manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let content = horizon_mod_package::Content::read(&package, &package_manifest).unwrap();
     let resources = root.join("resources");
     let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let resources = build_mod_resources(
@@ -759,9 +768,9 @@ fn server_reload_retains_listeners_for_other_hooks() {
             jars: Vec::new(),
         }],
         &resources,
-        &horizon_mods::enabled::EnabledMods::new([(
+        &horizon_mod_package::enabled::EnabledMods::new([(
             "reload_test".into(),
-            horizon_mods::Side::Both,
+            horizon_mod_package::Side::Both,
         )]),
     );
     let world = root.join("world");
