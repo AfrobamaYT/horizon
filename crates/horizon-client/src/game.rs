@@ -253,6 +253,7 @@ mod native_components;
 mod native_config_files;
 mod native_configs;
 mod native_criteria;
+mod native_custom_geometry;
 #[cfg(test)]
 mod native_damage_tests;
 mod native_data_maps;
@@ -263,6 +264,7 @@ mod native_entity_data;
 mod native_entity_invulnerable;
 mod native_entity_motion;
 mod native_entity_moves;
+mod native_entity_physics;
 mod native_entity_refs;
 mod native_entity_remove;
 mod native_entity_riding;
@@ -3078,6 +3080,7 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -3804,7 +3807,7 @@ struct Game<'a> {
     adv_ui: advancements_screen::AdvUi,
     /// The Server Links screens' state (game/server_links.rs).
     links_ui: server_links::LinksUi,
-    camera_type: perspective::CameraType,
+    camera_type: horizon_client::camera::CameraType,
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
@@ -3967,12 +3970,17 @@ fn level_can_have_weather(sky_light: bool, has_ceiling: bool, is_end: bool) -> b
 }
 /// `Camera.setRotation` (`rotationYXZ(π - yaw, -pitch, 0)`) for the player's
 /// view, turned round in third-person front view (`Camera.setup`).
-fn camera_rotation(camera_type: perspective::CameraType, yaw: f32, pitch: f32) -> glam::Quat {
-    let (view_yaw, view_pitch) = if camera_type == perspective::CameraType::ThirdPersonFront {
-        (yaw + 180.0, -pitch)
-    } else {
-        (yaw, pitch)
-    };
+fn camera_rotation(
+    camera_type: horizon_client::camera::CameraType,
+    yaw: f32,
+    pitch: f32,
+) -> glam::Quat {
+    let (view_yaw, view_pitch) =
+        if camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
+            (yaw + 180.0, -pitch)
+        } else {
+            (yaw, pitch)
+        };
     glam::Quat::from_euler(
         glam::EulerRot::YXZ,
         std::f32::consts::PI - view_yaw.to_radians(),
@@ -5468,6 +5476,29 @@ impl Game<'_> {
             );
         });
         self.process_level_events()
+    }
+    /// `BlockState.canSurvive(level, pos)` for `state` at `pos` in the level in
+    /// place: the rule a placement checks before `level_set` (a sapling on
+    /// grass, a torch on a wall), with a mod block's own `native_can_survive`
+    /// hook. False for an invalid state, an unloaded or out-of-height
+    /// position, and on a client.
+    ///
+    /// This is the non-closure equivalent of `with_level(|b, level, ticks|
+    /// b.can_survive(level, ticks, pos, state))`, for a wasm mod whose
+    /// internals view cannot send a closure.
+    // A wasm mod's staged internals table calls this; nothing in Horizon does.
+    #[allow(dead_code)]
+    fn level_can_survive(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
+        if !self.is_logical_server()
+            || !self.world.loaded(pos[0], pos[2])
+            || !self.world.shape.contains_y(pos[1])
+            || self.pack.assets.registry.state(state).is_none()
+        {
+            return false;
+        }
+        self.with_level(|b, level, ticks| {
+            b.can_survive(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]), state)
+        })
     }
     fn attack_block(&mut self, pos: [i32; 3]) -> Result<()> {
         let note = self.with_level(|b, level, ticks| {
@@ -9874,7 +9905,7 @@ impl Game<'_> {
             let strength = self.hand_strength.scale(0.0, self.main_hand_attack_speed());
             // The 3D crosshair (F3) takes the 2D one's place.
             // Hud.extractCrosshair: a spectator only sees it over something to open.
-            if self.camera_type.first_person()
+            if self.camera_type.is_first_person()
                 && (!spectator || self.spectator_crosshair())
                 && !self.debug_crosshair()
             {
@@ -12236,7 +12267,9 @@ impl Game<'_> {
     pub(super) fn camera_orientation(&self) -> glam::Quat {
         match self.posed_rotation {
             // The frame's camera, already turned round in front view.
-            Some((yaw, pitch)) => camera_rotation(perspective::CameraType::FirstPerson, yaw, pitch),
+            Some((yaw, pitch)) => {
+                camera_rotation(horizon_client::camera::CameraType::FirstPerson, yaw, pitch)
+            }
             None => camera_rotation(self.camera_type, self.yaw, self.pitch),
         }
     }
@@ -12274,7 +12307,7 @@ impl Game<'_> {
         // One scan for both passes that draw them (block entities below and the
         // overlay near the end of this function).
         let cracks = self.cracks(camera);
-        let fire_yaw = if self.camera_type == perspective::CameraType::ThirdPersonFront {
+        let fire_yaw = if self.camera_type == horizon_client::camera::CameraType::ThirdPersonFront {
             self.yaw + 180.0
         } else {
             self.yaw
@@ -15848,7 +15881,7 @@ impl Game<'_> {
         if self.spectator()
             || self.ui.hide_gui
             || self.sleeping.is_some()
-            || !self.camera_type.first_person()
+            || !self.camera_type.is_first_person()
             || self
                 .player
                 .as_ref()
@@ -17832,7 +17865,7 @@ impl Game<'_> {
         let mut crosshair = horizon_client::gizmos::Gizmos::default();
         if debug_crosshair_drawn(
             self.debug_crosshair(),
-            self.camera_type.first_person(),
+            self.camera_type.is_first_person(),
             self.ui.hide_gui,
             self.shows_panorama(),
         ) {
@@ -18092,6 +18125,21 @@ impl Game<'_> {
         if !title {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
+        let mut world_geometry = self.world_geometry.take().expect("view storage");
+        let white = self.gui.atlas.sprites["horizon/white"];
+        world_geometry.reset(
+            camera.to_array(),
+            view,
+            [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5],
+        );
+        if !title {
+            let view = mod_api::WorldRenderView::new(
+                camera.to_array(),
+                alpha as f32,
+                self.world.game_time,
+            );
+            self.native_submit_custom_geometry(&view, &mut world_geometry);
+        }
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -18204,7 +18252,7 @@ impl Game<'_> {
             },
             additive: &additive,
             see_through: &see_through,
-            world_primitives: Default::default(),
+            world_primitives: world_geometry.batch(),
             shadow_only: &shadow_only,
             celestial: if self.settings.horizon.sky || title {
                 &celestial
@@ -18278,6 +18326,7 @@ impl Game<'_> {
         self.frame_drawn = matches!(result, Ok(true));
         // Restore storage even when rendering fails (for example, a lost surface).
         self.entity_vertices = entities;
+        self.world_geometry = Some(world_geometry);
         *self.entity_spans.get_mut() = entity_spans;
         *self.entity_motion.get_mut() = entity_motion;
         *self.glowing_vertices.get_mut() = glowing;
@@ -21382,6 +21431,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            world_geometry: Some(Default::default()),
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
@@ -24463,6 +24513,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
+    mods::register_range_select_item_model_properties(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not
