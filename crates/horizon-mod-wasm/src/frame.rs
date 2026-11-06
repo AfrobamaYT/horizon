@@ -493,6 +493,7 @@ pub(crate) mod tests {
     pub(crate) static TABLE: Table = Table {
         types: &TYPES,
         thunks: &THUNKS,
+        native_only: &[],
         places: &[],
         members: &[
             Member {

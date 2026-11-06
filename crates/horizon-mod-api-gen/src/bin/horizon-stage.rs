@@ -6,9 +6,8 @@ use std::{
 };
 
 /// One file per mod; sorting and deduplication make the union independent of directory order.
-fn declarations(root: &Path) -> Result<Vec<String>, String> {
-    let directory = root.join("crates/horizon-mod-api-gen/wasm-internals");
-    let files = match std::fs::read_dir(&directory) {
+fn declarations(directory: &Path) -> Result<Vec<String>, String> {
+    let files = match std::fs::read_dir(directory) {
         Ok(files) => files,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(format!("{}: {error}", directory.display())),
@@ -38,11 +37,52 @@ fn with_internals_table(source: &str) -> String {
     source.replace("#![forbid(unsafe_code)]", "#![deny(unsafe_code)]")
 }
 
+/// Daily prebuilt builds use the checkout's declarations. A launcher build supplies only the
+/// installed mods' directory, or `None` to leave the committed empty table untouched.
+fn stage_table(
+    root: &Path,
+    entries: &[horizon_mod_api_gen::internals::Internal],
+    points: &[horizon_mod_api_gen::points::GamePoint],
+    directory: Option<&Path>,
+) -> Result<(), String> {
+    let Some(directory) = directory else {
+        return Ok(());
+    };
+    let declared = declarations(directory)?;
+    let (table, counts) =
+        horizon_mod_api_gen::internals_table::table_with_points(entries, &declared, points);
+    let lib = root.join("crates/horizon-client/src/lib.rs");
+    let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
+    std::fs::write(&lib, with_internals_table(&text))
+        .map_err(|e| format!("{}: {e}", lib.display()))?;
+    let module = root.join("crates/horizon-client/src/__internals.rs");
+    std::fs::write(&module, table).map_err(|e| format!("{}: {e}", module.display()))?;
+    println!(
+        "internals table: {} types, {} thunks from {} declared paths ({} skipped)",
+        counts.types, counts.thunks, counts.declared, counts.skipped
+    );
+    for (path, reason) in &counts.refused {
+        println!("internals table: skipped {path}: {reason}");
+    }
+    Ok(())
+}
+
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    let [root, list, internals] = &args[..] else {
-        eprintln!("usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON");
-        std::process::exit(2);
+    let usage = || {
+        eprintln!(
+            "usage: horizon-stage ROOT POINTS_JSON INTERNALS_JSON [--wasm-internals DIRECTORY | --no-wasm-internals]"
+        );
+        std::process::exit(2)
+    };
+    let [root, list, internals, options @ ..] = &args[..] else {
+        usage()
+    };
+    let directory = match options {
+        [] => Some(root.join("crates/horizon-mod-api-gen/wasm-internals")),
+        [flag] if flag == "--no-wasm-internals" => None,
+        [flag, directory] if flag == "--wasm-internals" => Some(directory.clone()),
+        _ => usage(),
     };
     // Internals first, so the manifest lists the game's own items and not the points' raw types.
     let staged = horizon_mod_api_gen::internals::widen(root).and_then(|widened| {
@@ -50,26 +90,8 @@ fn main() {
         std::fs::write(internals, text + "\n")
             .map_err(|e| format!("{}: {e}", internals.display()))?;
         // The table a wasm mod reaches the internals through, at the game crate's root.
-        let declared = declarations(root)?;
         let points = horizon_mod_api_gen::points::game_points(root)?;
-        let (table, counts) = horizon_mod_api_gen::internals_table::table_with_points(
-            &widened.entries,
-            &declared,
-            &points,
-        );
-        let lib = root.join("crates/horizon-client/src/lib.rs");
-        let text = std::fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
-        std::fs::write(&lib, with_internals_table(&text))
-            .map_err(|e| format!("{}: {e}", lib.display()))?;
-        let module = root.join("crates/horizon-client/src/__internals.rs");
-        std::fs::write(&module, table).map_err(|e| format!("{}: {e}", module.display()))?;
-        println!(
-            "internals table: {} types, {} thunks from {} declared paths ({} skipped)",
-            counts.types, counts.thunks, counts.declared, counts.skipped
-        );
-        for (path, reason) in &counts.refused {
-            println!("internals table: skipped {path}: {reason}");
-        }
+        stage_table(root, &widened.entries, &points, directory.as_deref())?;
         let staged = horizon_mod_api_gen::points::stage(root)?;
         let text = serde_json::to_string_pretty(&points).map_err(|e| e.to_string())?;
         std::fs::write(list, text + "\n").map_err(|e| format!("{}: {e}", list.display()))?;
@@ -110,8 +132,8 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../target")
             .join(format!("wasm-declarations-{}", std::process::id()));
-        assert!(declarations(&root).unwrap().is_empty());
         let directory = root.join("crates/horizon-mod-api-gen/wasm-internals");
+        assert!(declarations(&directory).unwrap().is_empty());
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
             directory.join("first.txt"),
@@ -120,7 +142,38 @@ mod tests {
         .unwrap();
         std::fs::write(directory.join("second.txt"), "a\nb\n").unwrap();
         std::fs::write(directory.join("README.md"), "not a path").unwrap();
-        assert_eq!(declarations(&root).unwrap(), ["a", "b", "z"]);
+        assert_eq!(declarations(&directory).unwrap(), ["a", "b", "z"]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_from_source_build_keeps_the_stub_unless_a_directory_is_supplied() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("wasm-table-gate-{}", std::process::id()));
+        let game = root.join("crates/horizon-client/src");
+        std::fs::create_dir_all(&game).unwrap();
+        let stub = "pub static TABLE: I::Table = I::Table::EMPTY;\n";
+        std::fs::write(game.join("__internals.rs"), stub).unwrap();
+        std::fs::write(game.join("lib.rs"), "#![forbid(unsafe_code)]\n").unwrap();
+        stage_table(&root, &[], &[], None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(game.join("__internals.rs")).unwrap(),
+            stub
+        );
+        assert_eq!(
+            std::fs::read_to_string(game.join("lib.rs")).unwrap(),
+            "#![forbid(unsafe_code)]\n"
+        );
+        let directory = root.join("installed");
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = "horizon_core::random::hash::seed_from_hash";
+        std::fs::write(directory.join("example.txt"), path).unwrap();
+        stage_table(&root, &[], &[], Some(&directory)).unwrap();
+        let generated = std::fs::read_to_string(game.join("__internals.rs")).unwrap();
+        assert_ne!(generated, stub);
+        assert!(generated.contains("native_only"));
+        assert!(generated.contains(path));
         std::fs::remove_dir_all(root).unwrap();
     }
 

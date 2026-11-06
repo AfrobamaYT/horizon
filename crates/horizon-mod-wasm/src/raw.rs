@@ -75,10 +75,21 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         return Ok(None);
     }
     let table = crate::INTERNALS.get().copied().unwrap_or(&Table::EMPTY);
+    for path in wasm.internals().iter().map(|i| i.path.as_str()).chain(
+        wasm.points()
+            .iter()
+            .filter(|i| i.raw.is_some())
+            .filter_map(|i| i.target.as_deref()),
+    ) {
+        if table.native_only.contains(&path) {
+            return Err(Refusal::missing_internal(table, &manifest.id, path));
+        }
+    }
     if table.types.is_empty()
         && table.thunks.is_empty()
         && table.members.is_empty()
         && table.places.is_empty()
+        && table.native_only.is_empty()
     {
         return Err(Refusal::NoInternalsTable);
     }
@@ -154,13 +165,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
             .places
             .iter()
             .position(|p| p.place == place && p.target == TARGETS[place])
-            .ok_or_else(|| Refusal::MissingInternal {
-                path: TARGETS[place].into(),
-                file: format!(
-                    "crates/horizon-mod-api-gen/wasm-internals/{}.txt",
-                    manifest.id
-                ),
-            })?;
+            .ok_or_else(|| Refusal::missing_internal(table, &manifest.id, TARGETS[place]))?;
         let entry = &table.places[descriptor];
         if entry.hash != shape {
             return Err(Refusal::ChangedInternal {
@@ -299,6 +304,7 @@ mod tests {
             }],
             thunks: &[],
             members: &[],
+            native_only: &[],
             places: &[Place {
                 place: mod_points::PointId::Tick as usize,
                 target: "fixture",

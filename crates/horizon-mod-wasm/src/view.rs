@@ -27,10 +27,17 @@ pub fn resolve(
     if declared.is_empty() {
         return Ok(Vec::new());
     }
+    if let Some(&(path, _)) = declared
+        .iter()
+        .find(|(path, _)| table.native_only.contains(path))
+    {
+        return Err(crate::Refusal::missing_internal(table, mod_id, path));
+    }
     if table.types.is_empty()
         && table.thunks.is_empty()
         && table.places.is_empty()
         && table.members.is_empty()
+        && table.native_only.is_empty()
     {
         return Err(crate::Refusal::NoInternalsTable);
     }
@@ -96,10 +103,7 @@ pub fn resolve(
             Err(if present {
                 crate::Refusal::ChangedInternal { path: path.into() }
             } else {
-                crate::Refusal::MissingInternal {
-                    path: path.into(),
-                    file: format!("crates/horizon-mod-api-gen/wasm-internals/{mod_id}.txt"),
-                }
+                crate::Refusal::missing_internal(table, mod_id, path)
             })
         })
         .collect()
@@ -440,6 +444,7 @@ mod tests {
             }],
             places: &[],
             members: &[],
+            native_only: &[],
         };
         // SAFETY: the test has no game roots; its thunk only checks the import's refusal.
         let frame = unsafe { Frame::new(&TABLE, vec![]) };
@@ -487,6 +492,32 @@ mod tests {
     }
 
     #[test]
+    fn native_only_refusal_names_the_path_even_with_no_generated_entries() {
+        let table = Table {
+            native_only: &["GPU::draw"],
+            ..Table::EMPTY
+        };
+        let refusal = resolve(&table, "test", &[("GPU::draw", "hash")]).unwrap_err();
+        assert_eq!(
+            refusal,
+            crate::Refusal::MissingInternal {
+                path: "GPU::draw".into(),
+                file: "crates/horizon-mod-api-gen/wasm-internals/test.txt".into(),
+                native_only: true,
+            }
+        );
+        assert_eq!(refusal.to_string(), "native only: GPU::draw");
+        assert_eq!(
+            resolve(&table, "test", &[("Game::unlisted", "hash")]),
+            Err(crate::Refusal::MissingInternal {
+                path: "Game::unlisted".into(),
+                file: "crates/horizon-mod-api-gen/wasm-internals/test.txt".into(),
+                native_only: false,
+            })
+        );
+    }
+
+    #[test]
     fn declared_paths_resolve_by_path_then_hash() {
         assert_eq!(
             resolve(
@@ -507,7 +538,8 @@ mod tests {
                 resolve(&TABLE, "test", &[(path, "")]),
                 Err(crate::Refusal::MissingInternal {
                     path: path.into(),
-                    file: "crates/horizon-mod-api-gen/wasm-internals/test.txt".into()
+                    file: "crates/horizon-mod-api-gen/wasm-internals/test.txt".into(),
+                    native_only: false,
                 })
             );
         }

@@ -1206,6 +1206,14 @@ pub(crate) fn guest_codecs(rule: &Rule, shapes: &[Shape]) -> TokenStream {
     quote!(#(#items)* #(#impls)*)
 }
 
+fn native_only() -> Vec<&'static str> {
+    include_str!("../native-only.txt")
+        .lines()
+        .map(|line| line.split('#').next().unwrap_or_default().trim())
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
 /// Shared layout reach and callable validation for the game's table and the mod's view.
 pub(crate) struct Selected<'a> {
     pub(crate) selection: Selection,
@@ -1222,6 +1230,7 @@ pub(crate) fn select<'a>(
     rule: &Rule,
     hashes: &HashMap<String, (&str, &str)>,
 ) -> Selected<'a> {
+    let native_only = native_only();
     let mut counts = Counts {
         declared: declared.len(),
         ..Counts::default()
@@ -1231,6 +1240,10 @@ pub(crate) fn select<'a>(
     let mut members = Vec::new();
     let mut exposed = HashSet::new();
     for path in declared {
+        if native_only.contains(&path) {
+            counts.refused.insert(path.into(), "native only");
+            continue;
+        }
         let entries: Vec<_> = internals.iter().filter(|i| i.path == path).collect();
         if !entries.iter().any(|i| i.cfg.is_empty()) {
             counts.refused.insert(
@@ -1374,6 +1387,7 @@ pub fn table_with_points(
         .collect();
     let rule = Rule::new(internals);
     let declared: BTreeSet<_> = declared.iter().map(String::as_str).collect();
+    let native_only = native_only();
     let Selected {
         selection,
         mut counts,
@@ -1431,6 +1445,7 @@ pub fn table_with_points(
             thunks: &[#(#thunks)*],
             places: &[#(#places)*],
             members: &[#(#members)*],
+            native_only: &[#(#native_only),*],
         };
     };
     (code.to_string(), counts)
@@ -1515,6 +1530,42 @@ pub(crate) mod tests {
             }
         "#,
         );
+    }
+
+    #[test]
+    fn native_only_targets_are_refused_even_when_the_signature_can_cross() {
+        let path = "horizon_core::random::hash::seed_from_hash";
+        let entry = internal(path, "fn", "fn seed_from_hash(name: &str) -> u64");
+        let (code, counts) = table(&[entry], &[path.into()]);
+        assert_eq!(counts.refused.get(path), Some(&"native only"));
+        assert_eq!(counts.thunks, 0);
+        assert_eq!(counts.types, 0);
+        let module: syn::File = syn::parse_str(&code).unwrap();
+        let table = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Static(item) if item.ident == "TABLE" => Some(item),
+                _ => None,
+            })
+            .unwrap();
+        let syn::Expr::Struct(table) = &*table.expr else {
+            panic!("a table")
+        };
+        let native_only = table
+            .fields
+            .iter()
+            .find(|field| {
+                field.member == syn::Member::Named(syn::parse_str("native_only").unwrap())
+            })
+            .unwrap();
+        let syn::Expr::Reference(paths) = &native_only.expr else {
+            panic!("static paths")
+        };
+        let syn::Expr::Array(paths) = &*paths.expr else {
+            panic!("paths")
+        };
+        assert!(paths.elems.iter().any(|value| matches!(value, syn::Expr::Lit(syn::ExprLit {lit: syn::Lit::Str(value), ..}) if value.value() == path)));
     }
 
     #[test]

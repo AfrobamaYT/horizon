@@ -132,6 +132,8 @@ pub struct Table {
     pub thunks: &'static [Thunk],
     pub places: &'static [Place],
     pub members: &'static [Member],
+    /// Paths that must remain native, even when a mod declares them.
+    pub native_only: &'static [&'static str],
 }
 
 impl Table {
@@ -141,6 +143,7 @@ impl Table {
         thunks: &[],
         places: &[],
         members: &[],
+        native_only: &[],
     };
 }
 
