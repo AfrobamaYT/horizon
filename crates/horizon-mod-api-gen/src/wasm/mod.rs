@@ -28,6 +28,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "LevelWriteHost",
     "ConfigFiles",
     "Commands",
+    "Levels",
     "Messages",
     "Players",
     "ClientSession",
@@ -51,6 +52,7 @@ pub(super) const IMPORTS: &[&str] = &[
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
     ("Commands", "server_host_mut", "Ok(h.commands())"),
+    ("Levels", "server_host", "Ok(h.levels())"),
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
     ("ClientSession", "client_host", "Ok(h.client_session())"),

@@ -4545,6 +4545,22 @@ pub trait Helpers {
         target = "horizon_client::game::native_server::Game<'_>::native_server_players"
     )]
     fn server_players();
+    /// Find a connected real player by account name, ignoring ASCII case.
+    /// Returns None when no player matches; fake players and nicknames are excluded.
+    #[helper(
+        side = "server",
+        service = "players",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_by_name"
+    )]
+    fn player_by_name();
+    /// Enumerate loaded server levels in overworld, nether, end order.
+    /// Returns an empty list before a server world is open.
+    #[helper(
+        side = "server",
+        service = "levels",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_list_levels"
+    )]
+    fn list_levels();
     /// The connection IP without its port (the forwarded address behind a Velocity proxy),
     /// including displaced connected players. Empty for an acting player with no known
     /// connection; None for a stale or unavailable player.
