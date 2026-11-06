@@ -24816,20 +24816,6 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn client_camera_entity_is_the_player_without_a_server_camera() {
-        use mod_api::ClientHost;
-        super::native_entity_refs::tests::with_client_game(|game| {
-            let camera = (game as &dyn ClientHost).camera_entity();
-            assert_eq!(
-                camera.map(|entity| entity.id()),
-                Some(game.own_entity_id() as u32),
-                "the player's own view follows the player"
-            );
-        });
-    }
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_modifier_snapshot_tracks_focus_loss() {
         use mod_api::ClientHost;
         use winit::{event_loop::ControlFlow, keyboard::ModifiersState};

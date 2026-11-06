@@ -459,7 +459,8 @@ pub struct ClientChatOptions {
     pub colors: bool,
     /// Whether links in chat are clickable.
     pub links: bool,
-    /// Opacity of the chat background, 0 to 1.
+    /// Raw `chatOpacity` preference, 0 to 1; text opacity is `value * 0.9 + 0.1`.
+    /// Background opacity is [`ClientGuiOptions::text_background_opacity`].
     pub opacity: f32,
     /// Chat scale.
     pub scale: f32,

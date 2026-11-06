@@ -13099,6 +13099,123 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_camera_entity_is_the_player_without_a_server_camera() {
+        use super::super::{
+            Game, native_entity_refs::tests::with_client_game, native_lifecycle::NativeLifecycle,
+        };
+        use horizon_client::{level_loading::Reason, motion::PlayerMotion, title::Title};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use mod_api::ClientHost;
+
+        with_client_game(|game| {
+            let camera = |game: &Game<'_>| (game as &dyn ClientHost).camera_entity();
+            assert!(camera(game).is_none(), "the fixture has no player");
+            game.native_lifecycle = NativeLifecycle::default();
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "CameraReadTest").unwrap();
+            let mut spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 3,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            assert!(camera(game).is_none(), "a level alone has no player");
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let local = camera(game).unwrap();
+            assert_eq!(
+                local.id(),
+                7,
+                "use the remote identity, not PlayerMotion's default"
+            );
+            assert_eq!(local.position(game), Some([0.0; 3]));
+
+            let pig = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:pig")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 31,
+                uuid: 9,
+                kind: pig,
+                position: [10.0, 64.0, 12.0],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 0,
+                head_yaw: 0,
+                data: 0,
+            }))
+            .unwrap();
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 31 }))
+                .unwrap();
+            let attached = camera(game).unwrap();
+            assert_eq!(attached.id(), 31);
+            assert_eq!(attached.position(game), Some([10.0, 64.0, 12.0]));
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 99 }))
+                .unwrap();
+            assert_eq!(
+                camera(game),
+                Some(attached),
+                "unknown packet targets are ignored"
+            );
+            game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![31] }))
+                .unwrap();
+            assert_eq!(
+                camera(game).unwrap().position(game),
+                None,
+                "a removed target cannot be read"
+            );
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 7 }))
+                .unwrap();
+            assert_eq!(camera(game), Some(local));
+
+            game.title = Some(Title::new(game.save.root.clone(), &game.options.resources));
+            assert!(
+                camera(game).is_none(),
+                "the title screen has no camera entity"
+            );
+            game.title = None;
+            assert_eq!(camera(game), Some(local));
+
+            spawn.dimension = "test:other_overworld".into();
+            game.handle_packet(C::Respawn(play::Respawn { spawn, keep: 0 }))
+                .unwrap();
+            assert!(
+                camera(game).is_none(),
+                "replacement waits for its new player"
+            );
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let fresh = camera(game).unwrap();
+            assert_eq!(fresh.id(), local.id());
+            assert_ne!(fresh.epoch(), local.epoch());
+            assert_eq!(local.position(game), None, "old level handles stay stale");
+            assert_eq!(fresh.position(game), Some([0.0; 3]));
+            game.client_logging_out();
+            assert!(camera(game).is_none());
+            assert_eq!(fresh.position(game), None);
+        });
+    }
+
     /// The local player's own state reads answer on a client from what the
     /// server sent it (`LocalPlayer`); another player reads None there.
     #[test]
