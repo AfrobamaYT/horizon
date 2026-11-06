@@ -26,7 +26,7 @@ use horizon_client::{
     command::{
         Arg, CommandError, Context, Reader,
         args::{BlockInput, Coordinates, GameMode, ItemInput, Selector, Sort},
-        vanilla::{self, DIFFICULTIES},
+        vanilla::DIFFICULTIES,
     },
     gamerules::{self, Value},
     items::ItemStack,
@@ -219,7 +219,7 @@ impl Game<'_> {
     /// Commands.performCommand for a line without its slash. A client mod's
     /// `command` hook is the caller's: this also runs on a server.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let parse = d.parse(command, &self.ui.registries);
         let result = match parse.executable() {
             Err(e) => {
@@ -1231,7 +1231,7 @@ impl Game<'_> {
         }
     }
     fn cmd_help(&mut self, ctx: &Context) -> R<i32> {
-        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
+        let d = self.ui.dispatcher.0.clone();
         let level = self.ui.registries.permission;
         match ctx.get("command") {
             None => {
@@ -2903,6 +2903,18 @@ impl Game<'_> {
         horizon_client::save::consume_container_loot(&mut extras, key);
         chunk.saved = Some(std::sync::Arc::new(extras));
         self.world.modified.insert((key.0 >> 4, key.2 >> 4));
+        // `ChestBlock.getMenuProvider` unpacks both halves of a double chest:
+        // the other half's table, if it still holds one, rolls too. The own roll
+        // is consumed above, so the partner's call does not come back here.
+        if let Some((other, _)) = self.chest_partner(key) {
+            let other_name = self
+                .res
+                .facts()
+                .get(self.world.block(other.0, other.1, other.2))
+                .name
+                .to_string();
+            self.unpack_opened_loot(other, &other_name);
+        }
     }
     /// RandomizableContainer.tryLoadLootTable for a tag a command gives a
     /// container (`setblock`, `data`): an empty container with a `LootTable`
@@ -3394,8 +3406,8 @@ impl Game<'_> {
         value: Value,
         actor: Option<&mod_api::GameRuleActor<'_>>,
     ) {
-        if self.ui.rules.set(rule.name, value) {
-            self.game_rule_changed(rule.name, value, actor);
+        if self.ui.rules.set(&rule.name, value) {
+            self.game_rule_changed(&rule.name, value, actor);
         }
         self.sync_rules();
         if self.options.dedicated.is_some() {
@@ -3417,10 +3429,10 @@ impl Game<'_> {
         let Some(name) = ctx.literals.get(1).cloned() else {
             return Ok(0);
         };
-        let Some(rule) = gamerules::rule(&name) else {
+        let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
-        let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
+        let current = self.ui.rules.get(&rule.name).unwrap_or(rule.default);
         let value = match ctx.get("value") {
             Some(Arg::Bool(b)) => Value::Bool(*b),
             Some(Arg::Int(i)) => Value::Int(*i),
@@ -3451,7 +3463,7 @@ impl Game<'_> {
             }),
             _ => None,
         };
-        self.set_game_rule(rule, value, actor.as_ref());
+        self.set_game_rule(&rule, value, actor.as_ref());
         self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),
@@ -3819,7 +3831,7 @@ impl Game<'_> {
     /// `PoiTypes`: the point of interest type of a block state.
     fn poi_type(&self, state: horizon_world::registry::BlockStateId) -> Option<&'static str> {
         let s = self.pack.assets.registry.state(state)?;
-        horizon_client::save::poi_type(s).map(|(kind, _)| kind)
+        horizon_world::poi::poi_type(s).map(|(kind, _)| kind)
     }
     /// `LocateCommand.locatePoi`: `PoiManager.findClosestWithType` within
     /// 256 blocks of the source, over the loaded chunks.

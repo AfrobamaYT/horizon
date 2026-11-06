@@ -362,7 +362,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         let cursor = self.cursor;
         let shift = self.has_shift_down();
         let alt = self.keys.raw(&KeyCode::AltLeft);
@@ -464,7 +464,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map_or([1, 1], |r| [r.config.width, r.config.height]);
-        let b = HudBatch::new(size);
+        let b = HudBatch::new(size, self.settings.gui_scale_inputs());
         match key {
             KeyCode::Escape => {
                 let outcome = self

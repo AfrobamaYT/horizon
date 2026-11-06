@@ -277,6 +277,7 @@ impl Game<'_> {
             known_recipes: Some(&g.recipe_book),
         };
         let mut menu = Menu::new(Kind::Merchant);
+        menu.set_registry_id(Some("minecraft:merchant"));
         if let Some(host) = self.lan.as_ref() {
             let g = &host.hub.guests[gi];
             for i in 0..36 {

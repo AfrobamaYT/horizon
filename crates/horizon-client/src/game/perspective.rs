@@ -487,11 +487,7 @@ impl Game<'_> {
         let use_animation = self
             .using
             .and_then(|(slot, _)| self.stack_in(slot))
-            .and_then(|stack| self.items().get(&stack.item))
-            .map_or_else(
-                Default::default,
-                horizon_client::first_person::item_use_animation,
-            );
+            .map_or_else(Default::default, |stack| self.item_use_animation(stack));
         let held_arm_pose = self.held_arm_poses(
             self.own_entity_id() as u32,
             [self.selected, super::shield::OFFHAND_SLOT].map(|slot| self.stack_in(slot)),

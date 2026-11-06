@@ -335,6 +335,7 @@ struct Installed {
     registry_keys: super::registry_keys::Requests,
     effects: OnceLock<super::registry_keys::Effects>,
     resolved_block_entity_types: OnceLock<super::registry_keys::Names>,
+    fluids: OnceLock<super::registry_keys::Names>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -369,6 +370,11 @@ pub(crate) fn with_registering_keys<T>(
 pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effects> {
     static EMPTY: OnceLock<super::registry_keys::Effects> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.effects)
+}
+
+pub(crate) fn resolved_fluids() -> &'static OnceLock<super::registry_keys::Names> {
+    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+    installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 
 pub(crate) fn resolved_block_entity_types() -> &'static OnceLock<super::registry_keys::Names> {
@@ -886,6 +892,10 @@ pub trait Registrar {
     fn block_key(&mut self, id: &str) -> super::BlockKey;
     /// Request an effect by canonical registry id. All mods' declarations are checked at load.
     fn effect_key(&mut self, id: &str) -> super::EffectKey;
+    /// Request a fluid by canonical registry id, checked when the registry loads.
+    fn fluid_key(&mut self, id: &str) -> super::FluidKey;
+    /// Declare a tank-only fluid in this mod's namespace and return its key.
+    fn declare_fluid(&mut self, path: &str) -> super::FluidKey;
     /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
     /// reach it through `block_entity_type`.
     fn declare_block_entity_type(
@@ -1392,6 +1402,44 @@ impl Registrar for PartRegistrar {
         }
     }
 
+    fn fluid_key(&mut self, id: &str) -> super::FluidKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .fluids
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::FluidKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::FluidKey(u32::MAX)
+            }
+        }
+    }
+
+    fn declare_fluid(&mut self, path: &str) -> super::FluidKey {
+        let id = format!("{}:{path}", self.mod_id);
+        if path.contains(':') || !horizon_mods::content::namespaced_id(&id) {
+            self.refused.push(format!(
+                "mod {}: invalid fluid declaration {id:?}",
+                self.mod_id
+            ));
+            return super::FluidKey(u32::MAX);
+        }
+        let previous = self
+            .registry_keys
+            .borrow_mut()
+            .declared_fluids
+            .insert(id.clone(), self.mod_id);
+        if let Some(other) = previous {
+            self.refused.push(format!(
+                "fluid {id} declared by both {other} and {}",
+                self.mod_id
+            ));
+        }
+        self.fluid_key(&id)
+    }
+
     fn declare_block_entity_type(
         &mut self,
         path: &str,
@@ -1617,6 +1665,7 @@ fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
             .unwrap_or_else(|_| unreachable!("registration scope has ended"))
             .into_inner(),
         effects: registrar.effects,
+        fluids: OnceLock::new(),
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
         hook_bits: Vec::new(),
@@ -1728,6 +1777,57 @@ pub mod tests {
         }
         #[cfg_attr(test, cfg(any()))]
         fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
+    }
+
+    #[test]
+    fn invalid_and_duplicate_fluid_declarations_are_refused() {
+        let mut registrar = super::PartRegistrar::new("maker");
+        registrar.declare_fluid("wrong:namespace");
+        registrar.declare_fluid("chocolate");
+        registrar.declare_fluid("chocolate");
+        assert_eq!(registrar.refused.len(), 2);
+        assert!(registrar.refused[0].contains("maker"));
+        assert!(registrar.refused[1].contains("maker:chocolate"));
+    }
+
+    #[test]
+    fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
+        use crate::registry_keys::{fluid_id, fluid_key, resolve_fluids};
+        struct Request;
+        #[mod_api::__subscriptions]
+        impl Hooks for Request {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                assert_eq!(r.fluid_key("water"), r.fluid_key("minecraft:water"));
+                r.fluid_key("maker:chocolate");
+            }
+        }
+        struct Declare;
+        #[mod_api::__subscriptions]
+        impl Hooks for Declare {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.declare_fluid("chocolate");
+            }
+        }
+        let mods: Mods = vec![
+            ModEntry::new("reader", Box::new(Request)),
+            ModEntry::new("maker", Box::new(Declare)),
+        ]
+        .into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        let error = resolve_fluids(&[]).unwrap_err();
+        assert_eq!(
+            error,
+            vec![crate::UnknownFluid {
+                mod_id: "reader",
+                id: "minecraft:water".to_owned()
+            }]
+        );
+        resolve_fluids(&["minecraft:water"]).unwrap();
+        let chocolate = fluid_key("maker:chocolate").unwrap();
+        assert_eq!(fluid_id(chocolate), Some("maker:chocolate"));
+        assert_eq!(FluidKey::from_slot(chocolate.0), Ok(chocolate));
+        assert!(fluid_key("missing:fluid").is_none());
     }
 
     #[test]

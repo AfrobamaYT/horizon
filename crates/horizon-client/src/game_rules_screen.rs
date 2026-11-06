@@ -6,7 +6,7 @@
 use crate::{
     confirm_screen::Confirm,
     font::Font,
-    gamerules::{self, GameRules, Rule, Value},
+    gamerules::{GameRules, Rule, Value},
     hud::{HudAtlas, HudBatch},
     lang,
     text::{Style, Text, named_color},
@@ -160,7 +160,7 @@ impl RulesScreen {
                 let mut b = EditBox::new(0.0, 0.0, 44.0, 20.0);
                 b.focused = false;
                 b.set_value(
-                    &match rules.get(r.name) {
+                    &match rules.get(&r.name) {
                         Some(Value::Int(value)) => value,
                         _ => 0,
                     }
@@ -190,16 +190,16 @@ impl RulesScreen {
         for r in self.values.available_rules() {
             let key = name_key(r);
             let description = format!("{key}.description");
-            let matches = has(r.name)
+            let matches = has(&r.name)
                 || has(&lang::get(&key))
-                || has(&lang::get(&category_key(r.category)))
+                || has(&lang::get(&category_key(&r.category)))
                 || (lang::has(&description) && has(&lang::get(&description)));
             if !matches {
                 continue;
             }
             match categories.iter_mut().find(|(c, _)| *c == r.category) {
                 Some((_, rules)) => rules.push(r),
-                None => categories.push((r.category, vec![r])),
+                None => categories.push((&r.category, vec![r])),
             }
         }
         // By the categories' ids, then the rules' description ids.
@@ -240,16 +240,18 @@ impl RulesScreen {
     }
     /// An invalid number disables Done (markInvalid).
     fn invalid(&self) -> bool {
-        self.numbers
-            .iter()
-            .any(|(name, b)| gamerules::rule(name).is_none_or(|r| parse(r, &b.value).is_none()))
+        self.numbers.iter().any(|(name, b)| {
+            self.values
+                .rule(name)
+                .is_none_or(|r| parse(r, &b.value).is_none())
+        })
     }
     fn changes(&self) -> Vec<(String, Value)> {
         self.values
             .available_rules()
             .filter_map(|r| {
-                let value = self.values.get(r.name)?;
-                (Some(value) != self.initial.get(r.name)).then_some((r.name.to_owned(), value))
+                let value = self.values.get(&r.name)?;
+                (Some(value) != self.initial.get(&r.name)).then_some((r.name.to_owned(), value))
             })
             .collect()
     }
@@ -313,10 +315,10 @@ impl RulesScreen {
             self.scroll.amount = 0.0;
             return;
         };
-        let Some(r) = gamerules::rule(&name) else {
+        let Some(r) = self.values.rule(&name).cloned() else {
             return;
         };
-        let value = self.number(&name).map(|b| parse(r, &b.value));
+        let value = self.number(&name).map(|b| parse(&r, &b.value));
         if let Some(Some(v)) = value {
             self.values.set(&name, Value::Int(v));
         }
@@ -386,18 +388,18 @@ impl RulesScreen {
         let Row::Rule(ref name) = rows[i] else {
             return None;
         };
-        let r = gamerules::rule(name).expect("row rule exists");
+        let r = self.values.rule(name).expect("row rule exists").clone();
         if !on(control_x(w), self.row_top(i) + 2.0, 44.0, 20.0) {
             return None;
         }
         self.unfocus();
         match r.default {
             Value::Bool(_) => {
-                let on = matches!(self.values.get(r.name), Some(Value::Bool(true)));
-                self.values.set(r.name, Value::Bool(!on));
+                let on = matches!(self.values.get(&r.name), Some(Value::Bool(true)));
+                self.values.set(&r.name, Value::Bool(!on));
             }
             Value::Int(_) => {
-                if let Some(b) = self.number(r.name) {
+                if let Some(b) = self.number(&r.name) {
                     b.focused = true;
                     b.reset_blink();
                     b.click(atlas, cursor.0, false, false);
@@ -425,7 +427,7 @@ impl RulesScreen {
         }
         let rows = self.rows();
         self.hovered(rows.len(), cursor, size).is_some_and(|i| {
-            matches!(&rows[i], Row::Rule(name) if gamerules::rule(name).is_some_and(|r| matches!(r.default, Value::Bool(_))))
+            matches!(&rows[i], Row::Rule(name) if self.values.rule(name).is_some_and(|r| matches!(r.default, Value::Bool(_))))
                 && ui::hovered(cursor, control_x(w), self.row_top(i) + 2.0, 44.0, 20.0)
         })
     }
@@ -506,8 +508,8 @@ impl RulesScreen {
                     });
                 }
                 Row::Rule(id) => {
-                    let r = gamerules::rule(id).expect("row rule exists");
-                    let name = lines(&atlas.font, &Text::translate(&name_key(r), &[]), 170.0);
+                    let r = self.values.rule(id).expect("row rule exists").clone();
+                    let name = lines(&atlas.font, &Text::translate(&name_key(&r), &[]), 170.0);
                     match name.as_slice() {
                         [one] => {
                             batch.text_styled(atlas, one, cx, cy + 5.0, u32::MAX, true);
@@ -521,14 +523,14 @@ impl RulesScreen {
                     let hover = hovered == Some(i) && ui::hovered(cursor, x, cy, 44.0, 20.0);
                     match r.default {
                         Value::Bool(_) => {
-                            let key = if matches!(self.values.get(r.name), Some(Value::Bool(true)))
+                            let key = if matches!(self.values.get(&r.name), Some(Value::Bool(true)))
                             {
                                 "options.on"
                             } else {
                                 "options.off"
                             };
                             let label = Text::translate(key, &[]);
-                            let value = matches!(self.values.get(r.name), Some(Value::Bool(true)));
+                            let value = matches!(self.values.get(&r.name), Some(Value::Bool(true)));
                             ui::button_as(
                                 batch,
                                 atlas,
@@ -540,21 +542,24 @@ impl RulesScreen {
                                 true,
                                 hover,
                                 |rect| {
-                                    bool_narration(r, value, rect)
+                                    bool_narration(&r, value, rect)
                                         .key(crate::widgets::key_of(&("game_rules", r.name)))
                                         .child_of(list, i)
                                 },
                             );
                         }
                         Value::Int(_) => {
-                            if let Some(b) = self.number(r.name) {
+                            if let Some(b) = self.number(&r.name) {
                                 b.x = x;
                                 b.y = cy;
                                 // IntegerRuleEntry's box: the rule's name, its
                                 // description and default, a line each.
                                 if crate::widgets::narrating() {
-                                    b.message =
-                                        format!("{}\n{}\n", lang::get(&name_key(r)), narration(r));
+                                    b.message = format!(
+                                        "{}\n{}\n",
+                                        lang::get(&name_key(&r)),
+                                        narration(&r)
+                                    );
                                 }
                                 b.draw(batch, atlas, None);
                                 crate::widgets::last_narratable(|n| {
@@ -628,9 +633,9 @@ impl RulesScreen {
         }
         // The hovered rule's tooltip: its id, description and default.
         if let Some(Row::Rule(id)) = hovered.map(|i| &rows[i]) {
-            let r = gamerules::rule(id).expect("row rule exists");
-            let mut tip = vec![Text::literal(r.name).with_color(yellow())];
-            let description = format!("{}.description", name_key(r));
+            let r = self.values.rule(id).expect("row rule exists").clone();
+            let mut tip = vec![Text::literal(&r.name).with_color(yellow())];
+            let description = format!("{}.description", name_key(&r));
             if lang::has(&description) {
                 tip.extend(lines(
                     &atlas.font,
@@ -654,14 +659,15 @@ impl RulesScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gamerules::RULES;
+    use crate::gamerules;
 
     #[test]
     fn a_switch_narrates_its_name_value_description_and_next_value() {
         use crate::screen_narrator::translate as tr;
         use crate::widgets::What;
-        let r = RULES
-            .iter()
+        let registry = gamerules::rule_registry();
+        let r = registry
+            .available_rules(false)
             .find(|r| matches!(r.default, Value::Bool(_)))
             .unwrap();
         let n = bool_narration(r, true, [0.0; 4]);
@@ -695,22 +701,31 @@ mod tests {
 
     #[test]
     fn numbers_parse_like_brigadier_within_the_rule() {
-        let r = gamerules::rule("max_snow_accumulation_height").unwrap();
-        assert_eq!(parse(r, "8"), Some(8));
-        assert_eq!(parse(r, "9"), None);
-        assert_eq!(parse(r, "-1"), None);
+        let r = gamerules::rule_registry()
+            .rule("max_snow_accumulation_height")
+            .unwrap()
+            .clone();
+        assert_eq!(parse(&r, "8"), Some(8));
+        assert_eq!(parse(&r, "9"), None);
+        assert_eq!(parse(&r, "-1"), None);
         for s in ["", "+3", " 3", "3 ", "3.0", "x"] {
-            assert_eq!(parse(r, s), None, "{s:?}");
+            assert_eq!(parse(&r, s), None, "{s:?}");
         }
-        let r = gamerules::rule("fire_spread_radius_around_player").unwrap();
-        assert_eq!(parse(r, "-1"), Some(-1));
+        let r = gamerules::rule_registry()
+            .rule("fire_spread_radius_around_player")
+            .unwrap()
+            .clone();
+        assert_eq!(parse(&r, "-1"), Some(-1));
     }
 
     #[test]
     fn rows_group_categories_and_rules_by_description_id() {
         let s = RulesScreen::new(&GameRules::default());
         let rows = s.rows();
-        assert_eq!(rows.len(), RULES.len() + 7);
+        assert_eq!(
+            rows.len(),
+            gamerules::rule_registry().available_rules(false).count() + 7
+        );
         assert_eq!(rows[0], Row::Category("chat".to_owned()));
         let categories: Vec<_> = rows
             .iter()

@@ -1129,7 +1129,10 @@ impl Game<'_> {
             return self.screen_view_now();
         };
         let renderer = self.renderer.as_ref()?;
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         Some(NativeScreenView::from(
             mod_api::__private::built::NativeScreenView {
                 id,
@@ -1266,7 +1269,10 @@ impl Game<'_> {
     fn screen_change_view(&self, screen: Screen) -> NativeScreenView<'_> {
         let rect = match &self.renderer {
             Some(renderer) => self.screen_rect(
-                &HudBatch::new([renderer.config.width, renderer.config.height]),
+                &HudBatch::new(
+                    [renderer.config.width, renderer.config.height],
+                    self.settings.gui_scale_inputs(),
+                ),
                 screen,
             ),
             None => [0.0; 4],
@@ -2914,6 +2920,24 @@ impl Game<'_> {
     /// Once a client tick, after the window's tick ran (`ClientTickEvent.Post`).
     pub(super) fn native_client_tick_post(&mut self) {
         self.fire_client_tick_post();
+    }
+    /// The milliseconds a client tick lasts at this frame's clock advance
+    /// (`Minecraft.getTickTargetMillis`), as a mod's `tick_target_millis` leaves it. An answer
+    /// that is not a finite number above zero keeps the clock's own.
+    pub(super) fn tick_target_millis(&self) -> f32 {
+        let vanilla = self.clock.tick_target_millis();
+        let mut millis = vanilla;
+        self.native_tick_target_millis(&mut millis);
+        if millis.is_finite() && millis > 0.0 {
+            millis
+        } else {
+            vanilla
+        }
+    }
+    /// The milliseconds a client tick lasts (`Minecraft.getTickTargetMillis`): `millis` comes
+    /// in as the clock's, and a mod may set another.
+    pub(super) fn native_tick_target_millis(&self, millis: &mut f32) {
+        self.fire_tick_target_millis(millis);
     }
     /// Before an eligible targeted block's selection outline is built.
     /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
@@ -4630,7 +4654,10 @@ impl Game<'_> {
             return None;
         }
         let renderer = self.renderer.as_ref()?;
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         if self.screen != Screen::Playing {
             return Some(self.screen_view(&batch, self.screen));
         }
@@ -7529,13 +7556,10 @@ impl Game<'_> {
     pub(super) fn native_use_duration(&self, stack: &ItemStack, duration: &mut i32) {
         self.fire_use_duration(stack, duration);
     }
-    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
-    /// `animation` arrives with its consumable's (`eat`, `drink`), else
-    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
-    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
-    /// Asked each frame the hand draws an item in use, for an item with no
-    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
-    /// theirs). Client-side.
+    /// `Item.getUseAnimation` of `stack` in use, with the item's vanilla
+    /// answer as the starting animation. Asked on the client each first-person
+    /// frame and each local or remote player model tick. A spear override is
+    /// refused if the item has no kinetic data.
     pub(super) fn native_use_animation(&self, stack: &ItemStack, animation: &mut UseAnimation) {
         self.fire_use_animation(stack, animation);
     }
@@ -9903,7 +9927,7 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map(|r| [r.config.width, r.config.height])?;
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let slot = self.slot_at(&batch, self.cursor.0, self.cursor.1)?;
         Some(self.slot_view(slot)?.item.to_string())
     }
@@ -10534,7 +10558,10 @@ impl Game<'_> {
         let Some(renderer) = self.renderer.as_ref() else {
             return Vec::new();
         };
-        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        let batch = HudBatch::new(
+            [renderer.config.width, renderer.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let mut areas = self.screen_own_exclusion(&batch);
         self.native_screen_exclusion_areas(&view, &mut areas);
         areas.retain(|a| a.iter().all(|v| v.is_finite()) && a[2] > 0.0 && a[3] > 0.0);
@@ -11962,7 +11989,10 @@ impl Game<'_> {
     fn native_screen_at(&self) -> Option<(String, Vec<i32>, [f32; 2])> {
         let s = self.shown_native_screen()?;
         let r = self.renderer.as_ref()?;
-        let batch = HudBatch::new([r.config.width, r.config.height]);
+        let batch = HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        );
         let (ox, oy) = self.inventory_origin(&batch);
         let at = [self.cursor.0 - ox, self.cursor.1 - oy];
         Some((s.block.clone(), s.data.clone(), at))
@@ -15260,5 +15290,63 @@ mod customize_chat_overlay_tests {
                 assert!(seen[1].2, "focused");
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tick_target_millis_tests {
+    use mod_api::{ClientHost, Hooks, ModEntry, TickTargetMillisEvent, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// A "timer": logs vanilla's tick length and answers `answer(millis)`.
+    struct Timer(Arc<Mutex<Vec<f32>>>, fn(f32) -> f32);
+    #[mod_api::__subscriptions]
+    impl Hooks for Timer {
+        fn tick_target_millis(&self, _: &dyn ClientHost, event: &mut TickTargetMillisEvent) {
+            self.0.lock().unwrap().push(event.millis);
+            event.millis = (self.1)(event.millis);
+        }
+    }
+
+    fn with_timer(answer: fn(f32) -> f32, check: impl FnOnce(&mut super::Game<'_>)) -> Vec<f32> {
+        let seen = Arc::default();
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "timer",
+            Box::new(Timer(Arc::clone(&seen), answer)),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                check(game);
+            });
+        });
+        seen.lock().unwrap().clone()
+    }
+
+    /// `Minecraft.getTickTargetMillis`: the mod gets the clock's tick length, the `/tick rate`
+    /// included, and its answer paces the client; an answer that is not a positive number keeps
+    /// vanilla's, and without a listener the length is vanilla's.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_sets_how_long_a_client_tick_lasts() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            assert_eq!(game.tick_target_millis(), 50.0);
+        });
+        let seen = with_timer(
+            |millis| millis / 2.0,
+            |game| {
+                assert_eq!(game.tick_target_millis(), 25.0);
+                game.clock.set_rate(10.0);
+                assert_eq!(game.tick_target_millis(), 50.0);
+            },
+        );
+        assert_eq!(seen, [50.0, 100.0]);
+        let broken: [fn(f32) -> f32; 4] = [|_| f32::NAN, |_| 0.0, |_| -5.0, |_| f32::INFINITY];
+        for broken in broken {
+            let seen = with_timer(broken, |game| assert_eq!(game.tick_target_millis(), 50.0));
+            assert_eq!(seen, [50.0]);
+        }
     }
 }

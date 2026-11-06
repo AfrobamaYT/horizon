@@ -553,9 +553,7 @@ mod tests {
             // the parse, where the data's type is checked, is what runs.
             game.build_registries();
             game.ui.registries.permission = 4;
-            let commands = horizon_client::command::vanilla::game_dispatcher_with_features(
-                &game.level.enabled_features,
-            );
+            let commands = game.ui.dispatcher.0.clone();
             let give = |kind: &str| {
                 let command =
                     format!("give @s {CRATE}[block_entity_data={{id:\"{kind}\",Amount:7}}]");

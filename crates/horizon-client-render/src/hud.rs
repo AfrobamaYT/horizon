@@ -1081,28 +1081,15 @@ impl HudAtlas {
         for folder in folders {
             walk(root, &format!("{textures}/{folder}"), &mut files);
         }
-        let namespaces = root
-            .read(horizon_items::content_namespaces::MARKER)
-            .map(|bytes| horizon_items::content_namespaces::decode_namespaces(&bytes))
-            .unwrap_or_default();
-        for folder in ["entity", "mob_effect"] {
-            if folders.contains(&folder) {
-                for namespace in &namespaces {
-                    walk(
-                        root,
-                        &format!("assets/{namespace}/textures/{folder}"),
-                        &mut files,
-                    );
-                }
-            }
-        }
+        // Native and content resources may use any namespace in the resolved pack.
         for namespace in root
             .namespaces("assets")
             .into_iter()
             .filter(|namespace| namespace != "minecraft")
         {
-            for folder in ["particle", "gui"] {
-                if (folder == "particle" && folders.contains(&"particle"))
+            for folder in ["entity", "mob_effect", "particle", "gui"] {
+                if ((folder == "entity" || folder == "mob_effect") && folders.contains(&folder))
+                    || (folder == "particle" && folders.contains(&"particle"))
                     || (folder == "gui" && full)
                 {
                     walk(
@@ -1501,9 +1488,13 @@ fn clip_polygon(poly: &[HudVertex], axis: usize, limit: f32, keep_below: bool) -
     }
     out
 }
-/// The GUI Scale option (0 = auto).
-pub static GUI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-pub static GUI_UNICODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Scale inputs for one view, copied from its owner's settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GuiScale {
+    pub requested: u32,
+    pub unicode: bool,
+}
+
 /// One frame of overlay geometry in GUI pixels.
 pub struct HudBatch {
     pub vertices: Vec<HudVertex>,
@@ -1562,12 +1553,9 @@ pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
 impl HudBatch {
     /// Window.calculateScale: the largest scale keeping >= 320x240 GUI pixels,
     /// capped by the GUI Scale option (0 = auto).
-    pub fn new(window: [u32; 2]) -> Self {
-        let gui = horizon_client_input::window::GuiSize::new(
-            window,
-            GUI_SCALE.load(std::sync::atomic::Ordering::Relaxed),
-            GUI_UNICODE.load(std::sync::atomic::Ordering::Relaxed),
-        );
+    pub fn new(window: [u32; 2], inputs: GuiScale) -> Self {
+        let gui =
+            horizon_client_input::window::GuiSize::new(window, inputs.requested, inputs.unicode);
         Self::with_gui_size(gui)
     }
     /// An offscreen or test batch, independent of the active view's settings.
@@ -3727,6 +3715,22 @@ mod tests {
         let static_badge = atlas.sprites["gui/sprites/icon/static_badge"];
         assert_eq!(static_badge.texels((atlas.width, atlas.height)), (16, 32));
     }
+    #[test]
+    fn arbitrary_namespace_entity_textures_are_packed_without_content_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-atlas-entity-namespace-{}",
+            std::process::id()
+        ));
+        let file =
+            root.join("assets/example/textures/entity/villager/profession/nested/engineer.png");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        write_strip(&file, 16, 16, &[[12, 34, 56, 255]], None);
+        let atlas = HudAtlas::build(&root).unwrap();
+        let rect = atlas.sprites["example:entity/villager/profession/nested/engineer"];
+        assert_eq!(texel_at(&atlas, rect, 0, 0), [12, 34, 56, 255]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// A resource root with one plain item texture and these CIT files (relative path, contents).
     fn cit_root(name: &str, files: &[(&str, &str)]) -> PathBuf {
         let root =

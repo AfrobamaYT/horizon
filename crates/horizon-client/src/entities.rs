@@ -1740,6 +1740,11 @@ pub struct ItemFrame {
     pub custom_name: Option<horizon_world::nbt::Tag>,
 }
 impl ItemFrame {
+    /// `ItemFrame.setItem`: the adopted stack holds one item. The caller owns
+    /// the old map association, sounds and neighbour updates.
+    pub fn set_item(&mut self, item: Option<ItemStack>) {
+        self.item = item.map(|stack| ItemStack { count: 1, ..stack });
+    }
     pub fn step(&self) -> [i32; 3] {
         [
             [0, -1, 0],

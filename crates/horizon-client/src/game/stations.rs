@@ -1201,7 +1201,7 @@ impl Game<'_> {
         else {
             return true;
         };
-        let batch = HudBatch::new(size);
+        let batch = HudBatch::new(size, self.settings.gui_scale_inputs());
         let (ox, oy) = self.inventory_origin(&batch);
         let local = (self.cursor.0 - ox, self.cursor.1 - oy);
         let shift = self.has_shift_down();
@@ -1357,7 +1357,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let (_, oy) = self.inventory_origin(&HudBatch::new(size));
+        let (_, oy) = self.inventory_origin(&HudBatch::new(size, self.settings.gui_scale_inputs()));
         let y = self.cursor.1 - oy;
         // `StonecutterScreen.mouseDragged`.
         if let Some(s) = self.station.as_mut()
