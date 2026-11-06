@@ -85,7 +85,7 @@ pub(super) struct Parked {
     lan_states: horizon_client::lan::entity::States,
     /// Only the per-level parts of these are used (`swap_level`).
     anims: BlockEntityAnims,
-    raiding: Raiding,
+    pub(super) raiding: Raiding,
     sculk: SculkState,
     creaking: CreakingState,
     /// Natural spawning's candidate cache: each level keeps its own players' squares.
@@ -186,6 +186,20 @@ impl Levels {
     /// The level not in place, in `dim`.
     pub(super) fn parked_mut(&mut self, dim: Dim) -> Option<&mut Parked> {
         self.parked.get_mut(&dim)
+    }
+
+    /// A parked level by its exact dimension identity, without swapping it in.
+    pub(super) fn parked_of(&self, dimension: &str) -> Option<&Parked> {
+        self.parked
+            .iter()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| level)
+    }
+    pub(super) fn parked_mut_of(&mut self, dimension: &str) -> Option<&mut Parked> {
+        self.parked
+            .iter_mut()
+            .find(|(dim, _)| dim.id() == dimension)
+            .map(|(_, level)| level)
     }
 
     /// The entities of a parked level, counted as `Game::entity_count` counts the one in place.
