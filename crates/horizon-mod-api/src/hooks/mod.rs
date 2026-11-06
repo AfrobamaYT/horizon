@@ -167,6 +167,7 @@ mod item_smelted;
 mod item_stacked_on_other;
 mod item_tooltip;
 mod item_toss;
+mod key_mapping_pre;
 mod left_click_empty;
 mod level_block_writes;
 mod level_craft;
