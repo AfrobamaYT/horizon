@@ -1247,6 +1247,7 @@ mod tests {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .current_dir(std::env::temp_dir())
                 .args([
                     "--exact",
                     "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
@@ -1328,6 +1329,7 @@ mod tests {
             // Inventory and content registries are process-wide, as in a real startup.
             for mode in ["compiled", "vanilla"] {
                 let status = std::process::Command::new(std::env::current_exe().unwrap())
+                    .current_dir(std::env::temp_dir())
                     .args(["--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
                     .env(MODE, mode).status().unwrap();
                 assert!(status.success());
@@ -1392,6 +1394,7 @@ mod tests {
         if std::env::var_os(MODE).is_none() {
             // Native declarations, like the real startup, belong to one process.
             let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .current_dir(std::env::temp_dir())
                 .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
                 .env(MODE, "1").status().unwrap();
             assert!(status.success());

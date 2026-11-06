@@ -1326,6 +1326,7 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use mod_api::prelude::*;
 
     /// Observe both teardownPublishedState and the dropped server task queue.
     pub(in crate::game) fn install_serving(
@@ -1383,7 +1384,6 @@ pub(super) mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn client_session_identifies_only_its_own_integrated_server() {
-        use mod_api::ClientHost;
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _pipe = super::super::native_client_session::tests::logged_client(game);
             let (tasks, _waiting_server) = channel();
