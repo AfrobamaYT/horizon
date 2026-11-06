@@ -207,7 +207,7 @@ fn internals_accesses_against_native() {
     }
     mod_points::__private::seal();
     let mut report = String::from(
-        "### Internals imports against native\n\nMedian of 9 batches after warm-up. Reads and calls use 256 accesses per call, with the zero-access call subtracted before division. Set uses one write and one apply per call (5,000 calls per batch), not coalesced repeated writes. Handle read includes field then get. Native accesses are black-boxed per iteration.\n\n| Access | Wasm ns | Native ns |\n| --- | ---: | ---: |\n",
+        "### Internals imports against native\n\nMedian of 9 batches after warm-up. Reads and calls use 256 accesses per call, with the zero-access call subtracted before division. Set uses one write and one apply per call (5,000 calls per batch), not coalesced repeated writes. Handle read includes field then get. Native accesses are black-boxed per iteration and measured in batches of 256 for timer resolution; each native write applies immediately.\n\n| Access | Wasm ns | Native ns |\n| --- | ---: | ---: |\n",
     );
     for mode in ["get", "handle", "set", "call"] {
         let count = if mode == "set" { 1 } else { 256 };
@@ -217,7 +217,7 @@ fn internals_accesses_against_native() {
             native(mode, count),
             "{mode}: committed values and result"
         );
-        let measure = |call: fn(&str, i64) -> (Game, String)| {
+        let measure = |call: fn(&str, i64) -> (Game, String), count: i64, calls| {
             let base = super::timed(calls, || {
                 std::hint::black_box(call(mode, 0));
             });
@@ -228,8 +228,8 @@ fn internals_accesses_against_native() {
         };
         report.push_str(&format!(
             "| {mode} | {:.2} | {:.2} |\n",
-            measure(wasm),
-            measure(native)
+            measure(wasm, count, calls),
+            measure(native, 256, 100)
         ));
     }
     assert_eq!(
