@@ -806,6 +806,18 @@ impl Game<'_> {
             self.persist.unknown.entry(key).or_default().push(tag);
         }
     }
+    pub(super) fn warn_missing_profession(&mut self, mob: &horizon_client::mobs::Mob) {
+        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) =
+            &mob.extra.profession
+            && self.missing_professions.insert(id.clone())
+        {
+            log::warn!(
+                "Unknown villager profession {id} at {:?}; preserving its saved identity",
+                mob.position
+            );
+        }
+    }
+
     /// A saved mob and, under `Passengers`, the mobs riding it.
     pub(super) fn load_mob(&mut self, tag: Tag, mount: Option<u32>) -> Option<u32> {
         let uuid = entity_nbt::uuid(&tag);
@@ -827,14 +839,7 @@ impl Game<'_> {
             self.next_entity,
             Some(self.pack.assets.registry),
         )?;
-        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) = &m.extra.profession
-            && self.missing_professions.insert(id.clone())
-        {
-            log::warn!(
-                "Unknown villager profession {id} at {:?}; preserving its saved identity",
-                m.position
-            );
-        }
+        self.warn_missing_profession(&m);
         if horizon_client::mobs::camel::is_camel(m.species()) {
             horizon_client::mobs::camel::finish_load(&mut m, self.world.game_time);
         }

@@ -339,6 +339,8 @@ impl Game<'_> {
                     Some(self.pack.assets.registry),
                 )
                 .ok_or_else(stale)?;
+                self.warn_missing_profession(&new);
+                let unresolved = new.extra.profession.index().is_none();
                 if let Some(slot) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // LivingEntity.readAdditionalSaveData only replaces a decoded
                     // Brain. Keep the Allay's modeled LIKED_PLAYER when the
@@ -373,6 +375,9 @@ impl Game<'_> {
                             self.world.game_time,
                         );
                     }
+                }
+                if unresolved {
+                    self.close_opaque_merchant(id);
                 }
             }
             Target::Other(id) => {

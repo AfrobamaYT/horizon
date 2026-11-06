@@ -335,10 +335,13 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return;
         };
+        m.extra.flag2 = false;
+        if session.villager && m.extra.profession.index().is_none() {
+            return;
+        }
         if session.villager {
             m.extra.villager_level = session.level.max(1);
         }
-        m.extra.flag2 = false;
         m.random = session.random.clone();
         m.ambient_timer = session.ambient_sound_time;
         let trade = m.extra.trade.get_or_insert_default();
