@@ -496,6 +496,7 @@ pub(crate) fn with_resource_test_world(
         suffocation: &suffocation,
         data: &data,
         player: None,
+        player_identity: None,
         controlling_player_movement: None,
         nearest_player: None,
         others,
