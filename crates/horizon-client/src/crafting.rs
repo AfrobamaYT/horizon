@@ -2391,7 +2391,11 @@ mod tests {
                 ),
                 named(
                     "transmute",
-                    r#"{"type":"minecraft:crafting_transmute","input":"minecraft:stone","material":"minecraft:stick","material_count":{"min":2,"max":4},"add_material_count_to_result":true,"result":{"id":"minecraft:diamond","count":2}}"#,
+                    r#"{"type":"minecraft:crafting_transmute","input":"minecraft:stone","material":"minecraft:stick","material_count":{"min":2,"max":4},"add_material_count_to_result":true,"result":{"id":"minecraft:diamond","count":2,"components":{"minecraft:damage":0,"!minecraft:custom_name":{}}}}"#,
+                ),
+                named(
+                    "trim",
+                    r#"{"type":"minecraft:smithing_trim","template":"minecraft:stick","base":"minecraft:stone","addition":"minecraft:iron_ingot","pattern":"minecraft:coast"}"#,
                 ),
                 named("custom", r#"{"type":"example:machine","value":42}"#),
             ],
@@ -2432,6 +2436,22 @@ mod tests {
         };
         assert_eq!((*min, *max, *add_count), (2, 4, true));
         assert_eq!(result.item.as_deref(), Some("minecraft:diamond"));
+        let patch = result
+            .components
+            .as_ref()
+            .expect("component patch retained");
+        assert!(patch.get("minecraft:damage").is_some());
+        assert!(patch.get("!minecraft:custom_name").is_some());
+        let trim = &recipes.by_type["minecraft:smithing_trim"][0];
+        let Some(mod_api::RecipeRule::SmithingTrim {
+            pattern, addition, ..
+        }) = &trim.rule
+        else {
+            panic!("missing smithing trim rule")
+        };
+        assert_eq!(pattern, "minecraft:coast");
+        assert_eq!(addition.order, ["minecraft:iron_ingot"]);
+        assert!(trim.results.is_empty());
         assert!(
             transmute.results.is_empty(),
             "grid-dependent output is not fixed"
