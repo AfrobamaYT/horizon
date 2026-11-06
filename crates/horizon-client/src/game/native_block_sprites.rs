@@ -4,7 +4,7 @@ use super::Game;
 use horizon_client::block_sprites::{BlockSprites, Lookup, SpriteRef};
 use horizon_core::geometry::Direction;
 use horizon_world::registry::BlockStateId;
-use mod_api::BlockFaceTexture;
+use mod_api::{AtlasRegion, BlockFaceTexture, Identifier};
 
 #[allow(dead_code)]
 impl Game<'_> {
@@ -57,6 +57,17 @@ impl Game<'_> {
     pub(super) fn native_block_sprites_version(&self) -> u64 {
         self.pack.context.render.generation
     }
+    /// For a client mod: where GUI sprite `sprite` lies in the GUI atlas and its size, none for one the atlas lacks
+    /// (a server's metrics-only atlas lacks them all). The atlas names vanilla's sprites by path alone
+    /// (`gui/sprites/container/slot`) and a mod's with its namespace (`mymod:gui/panel`).
+    pub(super) fn native_gui_sprite(&self, sprite: &Identifier) -> Option<AtlasRegion> {
+        let r = if sprite.namespace() == "minecraft" {
+            self.gui.atlas.sprites.get(sprite.path())
+        } else {
+            self.gui.atlas.sprites.get(&sprite.to_string())
+        }?;
+        Some(AtlasRegion::new([r.u0, r.v0, r.u1, r.v1], [r.w, r.h]))
+    }
     fn native_sprite_lookup(&self) -> Lookup<'_> {
         // (no renderer, no arrays: every layer counts as array 0's)
         let split = self
@@ -64,5 +75,97 @@ impl Game<'_> {
             .as_ref()
             .map_or(u32::MAX, |r| r.sprite_split());
         Lookup::new(&self.pack.context, split)
+    }
+}
+
+#[cfg(test)]
+mod texture_atlas_stitched_tests {
+    use mod_api::{
+        AtlasRegion, ClientHost, Hooks, Identifier, ModEntry, SpriteRef, TextureAtlas,
+        TextureAtlasStitchedEvent, testing::with_mods,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// What the mod kept: each atlas it heard, and one sprite of each, looked up once there.
+    #[derive(Default)]
+    struct Kept {
+        atlases: Vec<TextureAtlas>,
+        stone: Option<SpriteRef>,
+        slot: Option<AtlasRegion>,
+    }
+    struct Keeper(Arc<Mutex<Kept>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Keeper {
+        fn texture_atlas_stitched(
+            &self,
+            host: &mut dyn ClientHost,
+            event: &mut TextureAtlasStitchedEvent,
+        ) {
+            let mut kept = self.0.lock().unwrap();
+            kept.atlases.push(event.atlas);
+            match event.atlas {
+                TextureAtlas::Blocks => {
+                    kept.stone = host.texture_sprites(&["minecraft:block/stone"])[0];
+                }
+                TextureAtlas::Gui => kept.slot = host.gui_sprite(&id("gui/sprites/container/slot")),
+                _ => {}
+            }
+        }
+    }
+
+    fn id(text: &str) -> Identifier {
+        Identifier::parse(text).unwrap()
+    }
+
+    /// `TextureAtlasStitchedEvent`: the mod hears the blocks' atlas and then the GUI's, finds a
+    /// sprite of each, and hears both again after a resource reload.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_finds_its_sprites_each_time_an_atlas_is_stitched() {
+        let kept = Arc::new(Mutex::new(Kept::default()));
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("keeper", Box::new(Keeper(Arc::clone(&kept))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_client_game(|game| {
+                // The first load, as `run` fires it before `client_setup`.
+                game.texture_atlases_stitched();
+                {
+                    let kept = kept.lock().unwrap();
+                    assert_eq!(kept.atlases, [TextureAtlas::Blocks, TextureAtlas::Gui]);
+                    assert!(kept.stone.is_some(), "stone is in the block arrays");
+                    let slot = kept.slot.expect("the slot sprite is in the GUI atlas");
+                    assert_eq!(slot.size, [18, 18], "the slot's own pixels");
+                    let [u0, v0, u1, v1] = slot.uv;
+                    assert!(0.0 <= u0 && u0 < u1 && u1 <= 1.0, "{:?}", slot.uv);
+                    assert!(0.0 <= v0 && v0 < v1 && v1 <= 1.0, "{:?}", slot.uv);
+                }
+                // A mod's namespace is part of the name; one the atlas lacks is none.
+                assert_eq!(
+                    game.native_gui_sprite(&id("mymod:gui/sprites/container/slot")),
+                    None
+                );
+                assert_eq!(game.native_gui_sprite(&id("gui/no_such_sprite")), None);
+                // F3+T: the reload stages on a worker and applies here.
+                kept.lock().unwrap().atlases.clear();
+                game.spawn_pack_reload(super::super::packs::ReloadKind::Selection)
+                    .unwrap();
+                let started = std::time::Instant::now();
+                while game.pack_reload.is_some() {
+                    assert!(
+                        started.elapsed().as_secs() < 300,
+                        "the reload never finished"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    game.drive_pack_reload();
+                }
+                let kept = kept.lock().unwrap();
+                assert_eq!(kept.atlases, [TextureAtlas::Blocks, TextureAtlas::Gui]);
+                assert_eq!(
+                    kept.slot.map(|s| s.size),
+                    Some([18, 18]),
+                    "looked up again in the new atlas"
+                );
+            });
+        });
     }
 }

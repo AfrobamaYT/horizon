@@ -35,6 +35,66 @@ fn entity_shader() -> String {
     crate::overlay::wgsl_constants() + include_str!("entity.wgsl")
 }
 
+/// Constructs the entity shader pipelines shared by the renderer and its pixel tests.
+fn entity_pipeline_factory<'a>(
+    kept: &'a reuse::On<'a>,
+    entity_layout: &'a wgpu::PipelineLayout,
+    cloud_layout: &'a wgpu::PipelineLayout,
+    entity_shader: &'a wgpu::ShaderModule,
+    entity_vertex: &'a [Option<wgpu::VertexBufferLayout<'a>>],
+    frame_format: wgpu::TextureFormat,
+) -> impl Fn(
+    &str,
+    Option<wgpu::Face>,
+    bool,
+    wgpu::CompareFunction,
+    wgpu::DepthBiasState,
+    wgpu::BlendState,
+    bool,
+    &str,
+    wgpu::ColorWrites,
+) -> wgpu::RenderPipeline
++ Copy
++ 'a {
+    #[allow(clippy::too_many_arguments)]
+    move |label, cull_mode, depth_write, compare, bias, blend, clouds, fragment, write_mask| {
+        kept.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(if clouds { cloud_layout } else { entity_layout }),
+            vertex: wgpu::VertexState {
+                module: entity_shader,
+                entry_point: Some(if clouds { "vs_cloud" } else { "vs_entity" }),
+                compilation_options: Default::default(),
+                buffers: entity_vertex,
+            },
+            primitive: wgpu::PrimitiveState {
+                cull_mode,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(depth_write),
+                depth_compare: Some(compare),
+                stencil: Default::default(),
+                bias,
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: entity_shader,
+                entry_point: Some(fragment),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: frame_format,
+                    blend: Some(blend),
+                    write_mask,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+}
+
 /// The static block-entity vertex entry point shares entity shading but lives
 /// in its own source file and pipeline.
 fn static_entity_shader() -> String {
@@ -45,6 +105,9 @@ fn static_entity_shader() -> String {
 mod crumbling_tests;
 mod entity_batch;
 mod entity_outline;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod entity_pixel_test;
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -3571,55 +3634,14 @@ impl Renderer {
                 attributes: &static_entity_origin_attributes,
             }),
         ];
-        #[allow(clippy::too_many_arguments)]
-        let entity_pipeline_with = |label,
-                                    cull_mode,
-                                    depth_write,
-                                    compare,
-                                    bias,
-                                    blend,
-                                    clouds,
-                                    fragment: &str,
-                                    write_mask| {
-            kept.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(if clouds {
-                    &cloud_layout
-                } else {
-                    &entity_layout
-                }),
-                vertex: wgpu::VertexState {
-                    module: &entity_shader,
-                    entry_point: Some(if clouds { "vs_cloud" } else { "vs_entity" }),
-                    compilation_options: Default::default(),
-                    buffers: &entity_vertex,
-                },
-                primitive: wgpu::PrimitiveState {
-                    cull_mode,
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: Some(depth_write),
-                    depth_compare: Some(compare),
-                    stencil: Default::default(),
-                    bias,
-                }),
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &entity_shader,
-                    entry_point: Some(fragment),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: frame_format,
-                        blend: Some(blend),
-                        write_mask,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+        let entity_pipeline_with = entity_pipeline_factory(
+            &kept,
+            &entity_layout,
+            &cloud_layout,
+            &entity_shader,
+            &entity_vertex,
+            frame_format,
+        );
         let entity_pipeline = |label, cull_mode, depth_write, compare, bias, blend, clouds| {
             entity_pipeline_with(
                 label,

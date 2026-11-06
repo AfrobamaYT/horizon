@@ -274,12 +274,12 @@ fn code_only_reload_publishes_one_new_inventory_after_prepare_and_preserves_old_
                 assert!(game.reload_datapacks(true, &[]).is_err());
                 assert_eq!(game.options.resources, old_root);
                 assert!(game.pack.data_source.same_generation(&old_data));
+                assert!(
+                    read_tags(game)["inventorytest:requires_code"].contains("minecraft:diamond")
+                );
                 assert_eq!(
                     loaded(game, "inventorytest:requires_code"),
                     (true, true, true, true, true, true)
-                );
-                assert!(
-                    read_tags(game)["inventorytest:requires_code"].contains("minecraft:diamond")
                 );
                 assert_eq!(
                     EnabledMods::read(&old_root)
