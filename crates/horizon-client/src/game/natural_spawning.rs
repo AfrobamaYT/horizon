@@ -762,7 +762,10 @@ impl NaturalLevel for GameLevel<'_, '_> {
                 .any(|(_, b, alive, _)| alive && b.intersects(bounds))
     }
     fn spawn_mobs(&self) -> bool {
-        self.game.ui.rules.bool("spawn_mobs")
+        self.game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
     }
     /// WORLD_SURFACE (every spawn attempt's) is the chunk's kept heightmap.
     /// The others are scanned down the column: sections of air alone are
@@ -794,7 +797,10 @@ impl horizon_client::mobs::spawner::SpawnerLevel for GameLevel<'_, '_> {
         self.players.iter().any(|p| p.alive_near(x, y, z, range))
     }
     fn spawner_blocks_work(&self) -> bool {
-        self.game.ui.rules.bool("spawner_blocks_work")
+        self.game
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWNER_BLOCKS_WORK)
     }
     fn entity_exists(&self, id: &str) -> bool {
         self.game.res.mob_types().contains_key(id) || self.game.entity_type_exists(id)
@@ -993,8 +999,14 @@ impl<'a> Game<'a> {
             *self.world.inhabited.entry(key).or_insert(0) += 1;
         }
         laps.lap("sn_inhabited");
-        let spawn_mobs = self.ui.rules.bool("spawn_mobs");
-        let spawn_enemies = self.ui.rules.bool("spawn_monsters");
+        let spawn_mobs = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS);
+        let spawn_enemies = self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS);
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
         let mut pending = Vec::new();
         let last_state;
