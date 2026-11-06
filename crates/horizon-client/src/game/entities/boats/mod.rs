@@ -1219,11 +1219,15 @@ impl Game<'_> {
         // of coasting on the velocity of the ride that just ended.
         self.boats[i].velocity = Vec3::ZERO;
         self.boats[i].delta_rotation = 0.0;
-        let target = self.boat_dismount_target(i, 0.6, self.yaw);
+        let target = self.boat_player_dismount_target(i, self.yaw);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
             p.velocity = Vec3::ZERO;
         }
+    }
+    /// Where the boat at `i` lets a player facing `yaw` off.
+    pub(super) fn boat_player_dismount_target(&self, i: usize, yaw: f32) -> Vec3 {
+        self.boat_dismount_target(i, 0.6, yaw)
     }
     /// `getDismountLocationForPassenger` for a passenger `width` wide
     /// facing `yaw`.

@@ -72,13 +72,6 @@ impl MobsBackend for Game<'_> {
         );
         self.native_mob_can_use_portal(mob)
     }
-    fn mob_leash_holder(&self, mob: MobRef) -> Option<MobLeashHolder> {
-        mod_api::__private::check_access(
-            "mob_leash_holder",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
-        self.native_mob_leash_holder(mob)
-    }
     fn mob_target(&self, mob: MobRef) -> Option<LivingRef> {
         mod_api::__private::check_access("mob_target", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_target(mob)

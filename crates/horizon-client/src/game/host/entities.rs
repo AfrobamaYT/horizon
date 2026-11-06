@@ -242,6 +242,49 @@ impl EntitiesBackend for Game<'_> {
         );
         self.native_entity_is_vehicle(entity)
     }
+    fn entity_indirect_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>> {
+        mod_api::__private::check_access(
+            "entity_indirect_passengers",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_indirect_passengers(entity)
+    }
+    fn entity_controlling_passenger(&self, entity: EntityRef) -> Option<LivingRef> {
+        mod_api::__private::check_access(
+            "entity_controlling_passenger",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_controlling_passenger(entity)
+    }
+    fn entity_is_passenger_of_same_vehicle(
+        &self,
+        entity: EntityRef,
+        other: EntityRef,
+    ) -> Option<bool> {
+        mod_api::__private::check_access(
+            "entity_is_passenger_of_same_vehicle",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_is_passenger_of_same_vehicle(entity, other)
+    }
+    fn entity_dismount_location(
+        &self,
+        vehicle: EntityRef,
+        passenger: LivingRef,
+    ) -> Option<[f64; 3]> {
+        mod_api::__private::check_access(
+            "entity_dismount_location",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_dismount_location(vehicle, passenger)
+    }
+    fn entity_leash_holder(&self, entity: EntityRef) -> Option<LeashHolder> {
+        mod_api::__private::check_access(
+            "entity_leash_holder",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_leash_holder(entity)
+    }
     fn entity_sound_source(&self, entity: EntityRef) -> Option<SoundSource> {
         mod_api::__private::check_access(
             "entity_sound_source",
@@ -521,6 +564,27 @@ impl EntitiesBackendMut for Game<'_> {
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_entity_eject_passengers(entity)
+    }
+    fn entity_leash_to(&mut self, entity: EntityRef, holder: EntityRef) -> bool {
+        mod_api::__private::check_access(
+            "entity_leash_to",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_leash_to(entity, holder)
+    }
+    fn entity_leash_to_knot(&mut self, entity: EntityRef, pos: [i32; 3]) -> bool {
+        mod_api::__private::check_access(
+            "entity_leash_to_knot",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_leash_to_knot(entity, pos)
+    }
+    fn entity_detach_leash(&mut self, entity: EntityRef, drop_lead: bool) -> bool {
+        mod_api::__private::check_access(
+            "entity_detach_leash",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_entity_detach_leash(entity, drop_lead)
     }
     fn entity_play_sound(
         &mut self,

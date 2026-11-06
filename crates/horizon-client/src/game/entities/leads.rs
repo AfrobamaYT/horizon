@@ -2,7 +2,7 @@
 //! (`Entity.interact`'s leash part), fence knots (`LeadItem.useOn` and
 //! `LeashFenceKnotEntity.interact`), loading and saving who holds what,
 //! breaking, and drawing the rope (`LeashFeatureRenderer`) and the knot.
-use super::Game;
+use super::{Game, commands::Target};
 use horizon_client::actions::Action;
 use horizon_client::{
     items::ItemStack,
@@ -229,6 +229,62 @@ impl Game<'_> {
         let ctx = self.who_context(None, None);
         self.post_game_event("minecraft:shear", at, ctx);
         true
+    }
+    /// `Leashable.setLeashedTo` on the mob or boat `target`: its lead goes to `holder` whatever
+    /// held it, or was still waiting for a saved holder. `player` is a player holder's UUID.
+    /// Taking the lead over is no removal, so no unleash hook hears it. False for anything else.
+    pub(super) fn set_leash(
+        &mut self,
+        target: Target,
+        holder: Holder,
+        player: Option<[i32; 4]>,
+    ) -> bool {
+        match target {
+            Target::Mob(id) => {
+                let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+                    return false;
+                };
+                m.extra.leash = Some(holder);
+                m.extra.leash_player = player;
+                m.extra.leash_pending = None;
+                true
+            }
+            Target::Boat(id) => {
+                let Some(b) = self.boats.iter_mut().find(|b| b.id == id) else {
+                    return false;
+                };
+                b.leash = Some(holder);
+                b.leash_player = player;
+                b.leash_pending = None;
+                true
+            }
+            _ => false,
+        }
+    }
+    /// `Leashable.dropLeash` (`drop`) or `removeLeash` on the mob or boat `target`. False when no
+    /// holder has the lead: a holder still unresolved from a save stays, as in `dropLeash`.
+    pub(super) fn detach_leash(&mut self, target: Target, drop: bool) -> bool {
+        match target {
+            Target::Mob(id) => {
+                let held = self
+                    .mobs
+                    .iter()
+                    .any(|m| m.id == id && m.extra.leash.is_some());
+                if held {
+                    self.break_leash(id, drop, false);
+                }
+                held
+            }
+            Target::Boat(id) => {
+                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
+                    return false;
+                };
+                let held = self.boats[i].leash.is_some();
+                self.release_stored_boat_leash(i, drop);
+                held
+            }
+            _ => false,
+        }
     }
     /// `break_leash` by the acting player's use (untying it, shears).
     fn break_leash_used(&mut self, id: u32, drop: bool) {
