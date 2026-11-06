@@ -166,7 +166,7 @@ def main():
         normalized = [subprocess.check_output(['rustfmt', '--edition', '2024', '--emit', 'stdout'],
                       input=('fn proof() {\n' + block + '\n}').encode()).decode() for block in blocks]
         assert normalized[0] == normalized[1], 'changed native module discovery loop'
-        print(f'Native discovery: {len(blocks[0].splitlines())} removed / {len(blocks[1].splitlines())} added loop lines match after declared indentation/rustfmt normalization')
+        print(f'Native discovery: {len(blocks[0].rstrip().splitlines())} removed / {len(blocks[1].rstrip().splitlines())} added loop lines match after declared indentation/rustfmt normalization')
         print(f'{len(moves)} files; {sum(removed.values())} normalized moved lines; removed/added multisets equal')
     else:
         for group in {area(Path(p).stem) for p in metadata} | {Path(p).parts[4] for p in moves.values()}:
