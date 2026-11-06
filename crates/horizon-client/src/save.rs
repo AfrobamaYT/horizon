@@ -7675,6 +7675,8 @@ mod tests {
         );
         assert!(!rules.contains_key(&"minecraft:max_minecart_speed".into()));
         level.enabled_features = [crate::gamerules::MINECART_IMPROVEMENTS.to_owned()].into();
+        level.game_rules =
+            crate::gamerules::GameRules::with_features(&level.enabled_features).by_name();
         level.write(&dir).unwrap();
         assert_eq!(
             super::read_saved_data(&dir, "game_rules")
