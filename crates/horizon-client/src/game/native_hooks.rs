@@ -2201,7 +2201,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         state: BlockStateId,
         context: &PlacementContext,
-        fluid: FluidState,
+        fluid: mod_api::FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
         self.fire_state_for_placement(dimension, state, context, fluid, answer);

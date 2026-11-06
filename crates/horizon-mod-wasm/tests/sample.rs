@@ -58,6 +58,10 @@ impl mod_api::Host for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
         Some(mod_api::__private::resolved_block(key)?.default)
     }
+    fn state_fluid_state(&self, _: mod_api::BlockStateId) -> Option<mod_api::FluidState> {
+        let engine = horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true);
+        Some(mod_api::__private::engine_fluid_state(mod_api::__private::world_fluid_key(engine.kind())?, engine))
+    }
     fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
         Some(mod_api::BackendRef::of(self))
     }
