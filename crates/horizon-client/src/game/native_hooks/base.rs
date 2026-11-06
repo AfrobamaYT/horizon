@@ -5701,22 +5701,14 @@ mod screen_open_tests {
         with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.focused = false;
-                assert!(!mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(!mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.focused = true;
-                assert!(mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.title = None;
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.screen = Screen::Inventory;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 let mut builder = winit::event_loop::EventLoop::builder();
                 #[cfg(target_os = "linux")]
                 {
@@ -5737,13 +5729,11 @@ mod screen_open_tests {
                 game.options.offscreen = true;
                 game.renderer = Some(game.new_renderer(window).unwrap());
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.set_screen(Screen::Inventory);
                 game.observe_screen();
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "inventory"
@@ -5752,7 +5742,7 @@ mod screen_open_tests {
                     game.link_prompt = Some("https://example.com".into());
                 });
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "link_prompt"
