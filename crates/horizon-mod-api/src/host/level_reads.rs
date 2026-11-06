@@ -50,12 +50,7 @@ pub trait LevelReadsBackend {
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
     /// `block_state`. API 381.
-    fn level_block_property(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-        key: &str,
-    ) -> Option<String> {
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
         crate::phase::unprovided(
             "Backend::level_block_property",
             "level_block_property",
@@ -91,12 +86,7 @@ pub trait LevelReadsBackend {
     /// Side: server.
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
     /// None as for `block_state`: a position that isn't loaded has no light to read.
-    fn level_brightness(
-        &self,
-        level: LevelRef,
-        layer: LightLayer,
-        pos: [i32; 3],
-    ) -> Option<i32> {
+    fn level_brightness(&self, level: LevelRef, layer: LightLayer, pos: [i32; 3]) -> Option<i32> {
         crate::phase::unprovided(
             "Backend::level_brightness",
             "level_brightness",

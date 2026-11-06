@@ -3,8 +3,8 @@
 //! `native_*` functions. `Host`, `ServerHost` and `ClientHost` are the unions of those traits, so
 //! a mod reaches every area through them and the handles.
 use super::Game;
-use mod_api::*;
 use mod_api::__private::game::*;
+use mod_api::*;
 
 include!(concat!(env!("OUT_DIR"), "/game_host_modules.rs"));
 

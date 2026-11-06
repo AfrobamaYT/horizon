@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, host, free_function_source, native_hook_files, sources};
+use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 

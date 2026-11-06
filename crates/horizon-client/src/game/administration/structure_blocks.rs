@@ -513,8 +513,8 @@ impl Game<'_> {
             self.with_level(|b, level, ticks| {
                 b.set_block(level, ticks, at, id, flags::UPDATE_CLIENTS)
             });
-            if let Some(entity) = entity {
-                self.world.block_entities.put(pos, entity);
+            if let Some((lease, entity)) = entity {
+                self.world.block_entities.put(lease, entity);
             }
             let _ = self.process_level_events();
         }

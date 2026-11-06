@@ -1,28 +1,19 @@
 //! The game's side of the `display_refs` area (`horizon-mod-api/src/host/display_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl DisplayRefsServerHost for Game<'_> {
     fn display(&self, entity: EntityRef) -> Option<DisplayRef> {
-        mod_api::__private::check_access(
-            "display",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("display", mod_api::__private::LoadAccess::WorldOnly);
         self.native_display(entity)
     }
 }
 impl DisplayRefsBackend for Game<'_> {
     fn display_kind(&self, display: DisplayRef) -> Option<NativeDisplayKind> {
-        mod_api::__private::check_access(
-            "display_kind",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("display_kind", mod_api::__private::LoadAccess::WorldOnly);
         self.native_display_kind(display)
     }
-    fn display_transformation(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeTransformation> {
+    fn display_transformation(&self, display: DisplayRef) -> Option<NativeTransformation> {
         mod_api::__private::check_access(
             "display_transformation",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -107,10 +98,7 @@ impl DisplayRefsBackend for Game<'_> {
         self.native_display_teleport_duration(display)
     }
     fn display_text(&self, display: DisplayRef) -> Option<Text> {
-        mod_api::__private::check_access(
-            "display_text",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("display_text", mod_api::__private::LoadAccess::WorldOnly);
         self.native_display_text(display)
     }
     fn display_line_width(&self, display: DisplayRef) -> Option<i32> {
@@ -170,16 +158,10 @@ impl DisplayRefsBackend for Game<'_> {
         self.native_display_block_state(display)
     }
     fn display_item(&self, display: DisplayRef) -> Option<ItemStack> {
-        mod_api::__private::check_access(
-            "display_item",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("display_item", mod_api::__private::LoadAccess::WorldOnly);
         self.native_display_item(display)
     }
-    fn display_item_context(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeItemDisplayContext> {
+    fn display_item_context(&self, display: DisplayRef) -> Option<NativeItemDisplayContext> {
         mod_api::__private::check_access(
             "display_item_context",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -199,11 +181,7 @@ impl DisplayRefsBackendMut for Game<'_> {
         );
         self.native_display_set_transformation(display, transformation)
     }
-    fn display_set_billboard(
-        &mut self,
-        display: DisplayRef,
-        billboard: NativeBillboard,
-    ) -> bool {
+    fn display_set_billboard(&mut self, display: DisplayRef, billboard: NativeBillboard) -> bool {
         mod_api::__private::check_access(
             "display_set_billboard",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -235,11 +213,7 @@ impl DisplayRefsBackendMut for Game<'_> {
         );
         self.native_display_set_shadow_radius(display, radius)
     }
-    fn display_set_shadow_strength(
-        &mut self,
-        display: DisplayRef,
-        strength: f32,
-    ) -> bool {
+    fn display_set_shadow_strength(&mut self, display: DisplayRef, strength: f32) -> bool {
         mod_api::__private::check_access(
             "display_set_shadow_strength",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -260,44 +234,28 @@ impl DisplayRefsBackendMut for Game<'_> {
         );
         self.native_display_set_height(display, height)
     }
-    fn display_set_glow_color_override(
-        &mut self,
-        display: DisplayRef,
-        color: i32,
-    ) -> bool {
+    fn display_set_glow_color_override(&mut self, display: DisplayRef, color: i32) -> bool {
         mod_api::__private::check_access(
             "display_set_glow_color_override",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_display_set_glow_color_override(display, color)
     }
-    fn display_set_interpolation_duration(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_interpolation_duration(&mut self, display: DisplayRef, ticks: i32) -> bool {
         mod_api::__private::check_access(
             "display_set_interpolation_duration",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_display_set_interpolation_duration(display, ticks)
     }
-    fn display_set_start_interpolation(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_start_interpolation(&mut self, display: DisplayRef, ticks: i32) -> bool {
         mod_api::__private::check_access(
             "display_set_start_interpolation",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_display_set_start_interpolation(display, ticks)
     }
-    fn display_set_teleport_duration(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_teleport_duration(&mut self, display: DisplayRef, ticks: i32) -> bool {
         mod_api::__private::check_access(
             "display_set_teleport_duration",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -364,22 +322,14 @@ impl DisplayRefsBackendMut for Game<'_> {
         );
         self.native_display_set_alignment(display, alignment)
     }
-    fn display_set_block_state(
-        &mut self,
-        display: DisplayRef,
-        state: BlockStateId,
-    ) -> bool {
+    fn display_set_block_state(&mut self, display: DisplayRef, state: BlockStateId) -> bool {
         mod_api::__private::check_access(
             "display_set_block_state",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_display_set_block_state(display, state)
     }
-    fn display_set_item(
-        &mut self,
-        display: DisplayRef,
-        stack: Option<ItemStack>,
-    ) -> bool {
+    fn display_set_item(&mut self, display: DisplayRef, stack: Option<ItemStack>) -> bool {
         mod_api::__private::check_access(
             "display_set_item",
             mod_api::__private::LoadAccess::WorldOnly,

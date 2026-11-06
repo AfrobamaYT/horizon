@@ -1,7 +1,7 @@
 //! The game's side of the `draw` area (`horizon-mod-api/src/host/draw.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 /// [`DrawContext`] on the game's `crate::hud::HudBatch`.
 pub(crate) struct GameDrawContext<'a, 'g> {
     pub(crate) game: &'a Game<'g>,
@@ -12,7 +12,8 @@ impl DrawContext for GameDrawContext<'_, '_> {
         self.game.native_size(&*self.surface)
     }
     fn item_model(&mut self, item: &str, model: &str, at: [f32; 2], size: f32) -> bool {
-        self.game.native_item_model(&mut *self.surface, item, model, at, size)
+        self.game
+            .native_item_model(&mut *self.surface, item, model, at, size)
     }
     fn quad(&mut self, points: [[f32; 2]; 4], argb: u32) {
         self.game.native_quad(&mut *self.surface, points, argb)
@@ -20,29 +21,27 @@ impl DrawContext for GameDrawContext<'_, '_> {
     fn fill(&mut self, rect: [f32; 4], argb: u32) {
         self.game.native_fill(&mut *self.surface, rect, argb)
     }
-    fn sprite(
-        &mut self,
-        name: &str,
-        src: [f32; 4],
-        dst: [f32; 4],
-        tint: Option<u32>,
-    ) -> bool {
-        self.game.native_sprite(&mut *self.surface, name, src, dst, tint)
+    fn sprite(&mut self, name: &str, src: [f32; 4], dst: [f32; 4], tint: Option<u32>) -> bool {
+        self.game
+            .native_sprite(&mut *self.surface, name, src, dst, tint)
     }
     fn item(&mut self, item: &str, at: [f32; 2], size: f32) -> bool {
         self.game.native_item(&mut *self.surface, item, at, size)
     }
     fn text(&mut self, text: &str, at: [f32; 2], argb: u32, shadow: bool) {
-        self.game.native_text(&mut *self.surface, text, at, argb, shadow)
+        self.game
+            .native_text(&mut *self.surface, text, at, argb, shadow)
     }
     fn item_stack(&mut self, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
-        self.game.native_item_stack(&mut *self.surface, stack, at, size)
+        self.game
+            .native_item_stack(&mut *self.surface, stack, at, size)
     }
     fn gui_paint(&mut self, draws: &[GuiDraw]) {
         self.game.native_gui_paint(&mut *self.surface, draws)
     }
     fn gui_nine_slice(&mut self, sprite: &str, rect: [f32; 4], color: u32) {
-        self.game.native_gui_nine_slice(&mut *self.surface, sprite, rect, color)
+        self.game
+            .native_gui_nine_slice(&mut *self.surface, sprite, rect, color)
     }
     fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) {
         self.game.native_gui_tooltip(&mut *self.surface, lines, at)
@@ -53,33 +52,21 @@ impl DrawContext for GameDrawContext<'_, '_> {
     fn fluid(&mut self, fluid: &str, at: [f32; 2], size: f32) {
         self.game.native_fluid(&mut *self.surface, fluid, at, size)
     }
-    fn draw_scene(
-        &mut self,
-        rect: [f32; 4],
-        blocks: &[NativeSceneBlock],
-        view: NativeSceneView,
-    ) {
-        self.game.native_draw_scene(&mut *self.surface, rect, blocks, view)
+    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
+        self.game
+            .native_draw_scene(&mut *self.surface, rect, blocks, view)
     }
     fn draw_menu_background(&mut self, rect: [f32; 4], in_world: bool) {
-        self.game.native_draw_menu_background(&mut *self.surface, rect, in_world)
+        self.game
+            .native_draw_menu_background(&mut *self.surface, rect, in_world)
     }
-    fn tiled_sprite(
-        &mut self,
-        sprite: &str,
-        rect: [f32; 4],
-        size: f32,
-        argb: u32,
-    ) -> bool {
-        self.game.native_tiled_sprite(&mut *self.surface, sprite, rect, size, argb)
+    fn tiled_sprite(&mut self, sprite: &str, rect: [f32; 4], size: f32, argb: u32) -> bool {
+        self.game
+            .native_tiled_sprite(&mut *self.surface, sprite, rect, size, argb)
     }
-    fn gui_draw_item_with(
-        &mut self,
-        stack: &ItemStack,
-        at: [f32; 2],
-        text: Option<&str>,
-    ) {
-        self.game.native_gui_draw_item_with(&mut *self.surface, stack, at, text)
+    fn gui_draw_item_with(&mut self, stack: &ItemStack, at: [f32; 2], text: Option<&str>) {
+        self.game
+            .native_gui_draw_item_with(&mut *self.surface, stack, at, text)
     }
 }
 /// [`BlockEntityDrawContext`] on the game's `crate::game::native_block_entity_draw::BlockEntityDraw`.
@@ -98,7 +85,8 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         self.game.native_draw_translate(&mut *self.surface, by)
     }
     fn rotate_about(&mut self, axis: [f32; 3], degrees: f32, pivot: [f32; 3]) {
-        self.game.native_draw_rotate_about(&mut *self.surface, axis, degrees, pivot)
+        self.game
+            .native_draw_rotate_about(&mut *self.surface, axis, degrees, pivot)
     }
     fn scale(&mut self, by: [f32; 3]) {
         self.game.native_draw_scale(&mut *self.surface, by)
@@ -118,14 +106,9 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
     fn set_light(&mut self, light: u32) {
         self.game.native_draw_set_light(&mut *self.surface, light)
     }
-    fn quad(
-        &mut self,
-        sprite: &str,
-        corners: [[f32; 3]; 4],
-        uv: [f32; 4],
-        tint: u32,
-    ) -> bool {
-        self.game.native_draw_quad(&mut *self.surface, sprite, corners, uv, tint)
+    fn quad(&mut self, sprite: &str, corners: [[f32; 3]; 4], uv: [f32; 4], tint: u32) -> bool {
+        self.game
+            .native_draw_quad(&mut *self.surface, sprite, corners, uv, tint)
     }
     fn cube(
         &mut self,
@@ -134,10 +117,12 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         faces: [Option<CubeFace<'_>>; 6],
         tint: u32,
     ) -> bool {
-        self.game.native_draw_cube(&mut *self.surface, from, to, faces, tint)
+        self.game
+            .native_draw_cube(&mut *self.surface, from, to, faces, tint)
     }
     fn block(&mut self, block: &str, properties: &[(&str, &str)]) -> bool {
-        self.game.native_draw_block(&mut *self.surface, block, properties)
+        self.game
+            .native_draw_block(&mut *self.surface, block, properties)
     }
     fn item(
         &mut self,
@@ -146,15 +131,10 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         owner_yaw: Option<f32>,
         seed: i32,
     ) -> bool {
-        self.game.native_draw_item(&mut *self.surface, stack, display, owner_yaw, seed)
+        self.game
+            .native_draw_item(&mut *self.surface, stack, display, owner_yaw, seed)
     }
-    fn spin(
-        &mut self,
-        axis: [f32; 3],
-        pivot: [f32; 3],
-        degrees_per_tick: f32,
-        phase: f32,
-    ) {
+    fn spin(&mut self, axis: [f32; 3], pivot: [f32; 3], degrees_per_tick: f32, phase: f32) {
         self.game
             .native_draw_spin(&mut *self.surface, axis, pivot, degrees_per_tick, phase)
     }
@@ -164,21 +144,16 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
     fn model(&mut self, model: ModelRef, tint: u32) -> Result<(), ModelError> {
         self.game.native_draw_model(&mut *self.surface, model, tint)
     }
-    fn text(
-        &mut self,
-        text: &Text,
-        at: [f32; 2],
-        color: u32,
-        glowing: bool,
-        outline: u32,
-    ) -> f32 {
-        self.game.native_draw_text(&mut *self.surface, text, at, color, glowing, outline)
+    fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
+        self.game
+            .native_draw_text(&mut *self.surface, text, at, color, glowing, outline)
     }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_draw_text_width(&*self.surface, text)
     }
     fn model_part(&mut self, part: &ModelPart, sprite: &str, tint: u32) -> bool {
-        self.game.native_draw_model_part(&mut *self.surface, part, sprite, tint)
+        self.game
+            .native_draw_model_part(&mut *self.surface, part, sprite, tint)
     }
 }
 /// [`WorldDrawContext`] on the game's `crate::world_geometry::WorldGeometry`.

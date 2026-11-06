@@ -351,7 +351,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
-        let parked = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether");
+        let parked = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
         assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
         assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
     }
@@ -539,10 +539,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for Ordered {
-    }
+    impl Backend for Ordered {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(Ordered, except(level_reads, block_entity_refs, item_capability));
+    mod_api::impl_backend_areas!(
+        Ordered,
+        except(level_reads, block_entity_refs, item_capability)
+    );
     #[cfg(test)]
     impl mod_api::prelude::BlockEntityRefsHost for Ordered {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {

@@ -34,11 +34,7 @@ pub trait LevelWorldBackend {
     }
     /// Side: server.
     /// Read a registered boolean game rule.
-    fn level_game_rule_bool(
-        &self,
-        level: LevelRef,
-        key: BoolGameRuleKey,
-    ) -> Option<bool> {
+    fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
         crate::phase::unprovided(
             "Backend::level_game_rule_bool",
             "level_game_rule_bool",

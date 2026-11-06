@@ -7,7 +7,7 @@
 //! client predicts its own movement; the server stays authoritative for
 //! everything else.
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
-use super::{Dim, Game, Mining, Screen};
+use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
 use horizon_client::{
@@ -534,6 +534,8 @@ pub(super) struct Remote {
     pub(super) dimension: DimensionType,
     /// The level's key (`minecraft:overworld`): where its far terrain is kept.
     pub(super) level: String,
+    /// `level`'s key, as mods' handles name the level.
+    pub(super) level_key: mod_api::DimensionKey,
     /// `ClientPlayerNetworkEvent.LoggingOut` was fired for this connection: every way out
     /// of a world reports it once.
     logged_out: bool,
@@ -1109,6 +1111,7 @@ impl Game<'_> {
             use_item: None,
             dimension: DimensionType::vanilla("minecraft:overworld"),
             level: "minecraft:overworld".into(),
+            level_key: mod_api::DimensionKey::OVERWORLD,
             hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
@@ -2340,6 +2343,7 @@ impl Game<'_> {
         r.resolve_clocks();
         self.world.day_time = r.clock_time(r.default_clock);
         r.level = spawn.dimension.clone();
+        r.level_key = mod_api::__private::dimension_key(&spawn.dimension);
         r.hashed_seed = spawn.seed;
         r.game_mode = spawn.game_type;
         r.flat = spawn.flat;
@@ -2513,7 +2517,7 @@ impl Game<'_> {
         horizon_client::chunk::free_columns(freed, gone.len());
         self.world
             .block_entities
-            .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+            .unload(|k| gone.contains(&(k.0 >> 4, k.2 >> 4)));
         if let Some(r) = self.remote.as_mut() {
             r.attachments.retain(|holder, _| match *holder {
                 Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
@@ -2763,8 +2767,10 @@ impl Game<'_> {
                 f64::from(pos[1]) + 0.5,
                 f64::from(pos[2]) + 0.5,
             ];
-            self.audio
-                .play(&s.place, Some(at), (s.volume + 1.0) / 2.0, s.pitch * 0.8);
+            self.play_client_local_sound(
+                LevelSound::new(&s.place, at, (s.volume + 1.0) / 2.0, s.pitch * 0.8)
+                    .in_source(mod_api::SoundSource::Blocks),
+            );
             if let Some(r) = self.remote.as_mut() {
                 r.placing = None;
             }
@@ -3604,36 +3610,27 @@ impl Game<'_> {
                         f64::from(p.y) / 8.0,
                         f64::from(p.z) / 8.0,
                     ];
-                    // ClientPacketListener.handleSoundEvent plays with packet.getSource().
-                    match usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
+                    let mut sound = LevelSound::new(&name, at, p.volume, p.pitch);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
                     {
-                        Some(source) => {
-                            self.audio
-                                .play_on(source, &name, Some(at), p.volume, p.pitch)
-                        }
-                        None => self.audio.play(&name, Some(at), p.volume, p.pitch),
+                        sound.source = *source;
                     }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::SoundEntity(p) => {
                 if let Some(name) = self.remote_sound_name(&p.sound)
                     && !self.settings.extras.pvp.combat.mutes_sound(&name)
-                    && let Some(state) = self.remote_sound_entity_state(p.id)
                 {
-                    let source = usize::try_from(p.source)
-                        .ok()
-                        .filter(|s| *s < horizon_client::settings::SOUND_SOURCES.len())
-                        .unwrap_or_else(|| horizon_client::settings::sound_source(&name));
-                    let entity = horizon_client::sound_engine::SoundEntity::new(
-                        p.id as u32,
-                        state.position,
-                        state.silent,
-                    );
-                    entity.update(state);
-                    self.audio
-                        .play_entity_seeded(&name, source, p.volume, p.pitch, p.seed, entity);
+                    let mut sound = LevelSound::new(&name, [0.0; 3], p.volume, p.pitch);
+                    sound.emitter = Some(p.id as u32);
+                    if let Ok(source) = usize::try_from(p.source)
+                        && let Some(source) = mod_api::SoundSource::ALL.get(source)
+                    {
+                        sound.source = *source;
+                    }
+                    self.play_client_level_sound(sound, p.seed);
                 }
             }
             C::StopSound(p) => self
@@ -4267,23 +4264,11 @@ impl Game<'_> {
                 let own = me == Some(p.id);
                 self.pvp_hurt(p.id, own, p.direct.map(|d| Some(d) == me));
                 if own {
-                    let at = self
-                        .player
-                        .as_ref()
-                        .map(|pl| [pl.position.x, pl.position.y, pl.position.z]);
                     if let Some(pl) = self.player.as_mut() {
                         pl.health.animate_hurt();
-                    }
-                    if let Some(at) = at {
                         let sound = self.remote_hurt_sound(p.source_type);
                         let pitch = player_voice_pitch();
-                        self.audio.play_on(
-                            horizon_client::settings::sound_source(sound),
-                            sound,
-                            Some(at),
-                            1.0,
-                            pitch,
-                        );
+                        self.play_client_player_sound(sound, 1.0, pitch);
                     }
                 } else if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     m.limb_speed = 1.5;
@@ -4416,18 +4401,11 @@ impl Game<'_> {
                 // (the server's goes to everyone else).
                 if p.event == 3
                     && self.remote.as_ref().is_some_and(|r| r.entity_id == p.id)
-                    && let Some(pl) = self.player.as_ref()
+                    && self.player.is_some()
                 {
-                    let at = [pl.position.x, pl.position.y, pl.position.z];
                     let sound = "minecraft:entity.player.death";
                     let pitch = player_voice_pitch();
-                    self.audio.play_on(
-                        horizon_client::settings::sound_source(sound),
-                        sound,
-                        Some(at),
-                        1.0,
-                        pitch,
-                    );
+                    self.play_client_player_sound(sound, 1.0, pitch);
                 }
                 // The events that start a mob's animation (the warden's).
                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
@@ -4638,11 +4616,14 @@ impl Game<'_> {
                     if p.param == 1.0
                         && let Some(at) = self.player.as_ref().map(|m| m.position)
                     {
-                        self.audio.play(
-                            "minecraft:entity.elder_guardian.curse",
-                            Some([at.x, at.y, at.z]),
-                            1.0,
-                            1.0,
+                        self.play_client_local_sound(
+                            LevelSound::new(
+                                "minecraft:entity.elder_guardian.curse",
+                                [at.x, at.y, at.z],
+                                1.0,
+                                1.0,
+                            )
+                            .in_source(mod_api::SoundSource::Hostile),
                         );
                     }
                 }
@@ -4675,8 +4656,10 @@ impl Game<'_> {
                 // plays ARROW_HIT_PLAYER at player eye height.
                 6 => {
                     if let Some(at) = self.eye_position() {
-                        self.audio
-                            .play("minecraft:entity.arrow.hit_player", Some(at), 0.18, 0.45);
+                        self.play_client_local_sound(
+                            LevelSound::new("minecraft:entity.arrow.hit_player", at, 0.18, 0.45)
+                                .in_source(mod_api::SoundSource::Players),
+                        );
                     }
                 }
                 // RAIN_LEVEL_CHANGE: ClientPacketListener.handleGameEvent.
@@ -4693,11 +4676,14 @@ impl Game<'_> {
                 // plays PUFFER_FISH_STING at player position.
                 9 => {
                     if let Some(at) = self.player.as_ref().map(|m| m.position) {
-                        self.audio.play(
-                            "minecraft:entity.puffer_fish.sting",
-                            Some([at.x, at.y, at.z]),
-                            1.0,
-                            1.0,
+                        self.play_client_local_sound(
+                            LevelSound::new(
+                                "minecraft:entity.puffer_fish.sting",
+                                [at.x, at.y, at.z],
+                                1.0,
+                                1.0,
+                            )
+                            .in_source(mod_api::SoundSource::Neutral),
                         );
                     }
                 }
@@ -6542,7 +6528,6 @@ impl Game<'_> {
         let events = std::mem::take(&mut player.events);
         self.previous_eye = self.eye;
         self.eye += (player.dimensions.eye_height - self.eye) * 0.5;
-        let feet = [player.position.x, player.position.y, player.position.z];
         for event in events {
             match event {
                 horizon_client::motion::MotionEvent::Emission { state, muffled, .. } => {
@@ -6553,11 +6538,10 @@ impl Game<'_> {
                     } else {
                         (sounds.volume * 0.15, sounds.pitch)
                     };
-                    self.audio.play(&sounds.step, Some(feet), volume, pitch);
+                    self.play_client_player_sound(&sounds.step, volume, pitch);
                 }
                 horizon_client::motion::MotionEvent::Swim { volume, pitch } => {
-                    self.audio
-                        .play("minecraft:entity.player.swim", Some(feet), volume, pitch);
+                    self.play_client_player_sound("minecraft:entity.player.swim", volume, pitch);
                 }
                 // Entity.doWaterSplashEffect on the client's own level: the
                 // server's splash skips this player (Player.playSound), and
@@ -6572,7 +6556,7 @@ impl Game<'_> {
                     } else {
                         "minecraft:entity.player.splash"
                     };
-                    self.audio.play(name, Some(feet), volume, pitch);
+                    self.play_client_player_sound(name, volume, pitch);
                 }
                 horizon_client::motion::MotionEvent::SplashParticle {
                     bubble,
@@ -6592,9 +6576,8 @@ impl Game<'_> {
                     );
                 }
                 horizon_client::motion::MotionEvent::Chime { volume, pitch } => {
-                    self.audio.play(
+                    self.play_client_player_sound(
                         "minecraft:block.amethyst_block.chime",
-                        Some(feet),
                         volume,
                         pitch,
                     );
@@ -6612,8 +6595,7 @@ impl Game<'_> {
                 // the slide sound, heard here (LocalPlayer.playSound); the
                 // particles come from the server's event 53.
                 horizon_client::motion::MotionEvent::HoneySlide { sound: true, .. } => {
-                    self.audio
-                        .play("minecraft:block.honey_block.slide", Some(feet), 1.0, 1.0);
+                    self.play_client_player_sound("minecraft:block.honey_block.slide", 1.0, 1.0);
                 }
                 // LivingEntity.causeFallDamage and HoneyBlock.fallOn on the
                 // client's own level: the fall and honey sounds are heard here
@@ -6631,7 +6613,7 @@ impl Game<'_> {
                         .player_fall_sound()
                         .or_else(|| sound.honey_landing_sound())
                     {
-                        self.audio.play(name, Some(feet), volume, pitch);
+                        self.play_client_player_sound(name, volume, pitch);
                     }
                 }
                 _ => {}
@@ -8431,13 +8413,17 @@ impl Game<'_> {
                 .is_some();
             if waxes {
                 self.level_event_at(3003, hit.pos, 0);
-                self.audio
-                    .play("minecraft:item.honeycomb.wax_on", Some(at), 1.0, 1.0);
+                self.play_client_local_sound(
+                    LevelSound::new("minecraft:item.honeycomb.wax_on", at, 1.0, 1.0)
+                        .in_source(mod_api::SoundSource::Blocks),
+                );
             }
             waxes
         } else if let Some((_, sound, _, _, particle)) = self.block_transform(stack, hit) {
             self.transform_particle(&particle, hit.pos);
-            self.audio.play(&sound, Some(at), 1.0, 1.0);
+            self.play_client_local_sound(
+                LevelSound::new(&sound, at, 1.0, 1.0).in_source(mod_api::SoundSource::Blocks),
+            );
             true
         } else if self
             .res
@@ -8514,7 +8500,9 @@ impl Game<'_> {
             } else {
                 format!("minecraft:{sound}")
             };
-            self.audio.play(&name, Some(at), *volume, *pitch);
+            self.play_client_local_sound(
+                LevelSound::new(&name, at, *volume, *pitch).in_source(mod_api::SoundSource::Blocks),
+            );
         }
     }
 
@@ -8882,7 +8870,10 @@ impl Game<'_> {
                 } else {
                     format!("minecraft:{sound}")
                 };
-                self.audio.play(&name, Some(at), volume, pitch);
+                self.play_client_local_sound(
+                    LevelSound::new(&name, at, volume, pitch)
+                        .in_source(mod_api::SoundSource::Blocks),
+                );
             }
             // BucketItem.use's SUCCESS (SwingSource.CLIENT) on this client.
             if succeeded {
@@ -11588,6 +11579,8 @@ mod native_entity_tests;
 
 #[cfg(test)]
 mod effect_blend_tests;
+#[cfg(test)]
+mod level_sound_tests;
 
 #[cfg(test)]
 mod tests {
@@ -12674,6 +12667,45 @@ mod tests {
         });
     }
 
+    /// A client names the level it shows by the server's key, even where `Dim` has
+    /// no name for it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_handles_reach_a_custom_level() {
+        use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
+        use horizon_client::level_loading::Reason;
+        use horizon_protocol::{connection::Pipe, packets::play::SpawnInfo};
+        use mod_api::{DimensionKey, LevelRef};
+
+        with_game(|game| {
+            game.options.execution_role = ExecutionRole::Client;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "CustomLevelTest").unwrap();
+            let spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "test:pocket".into(),
+                seed: 0,
+                game_type: 1,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            game.remote.as_mut().unwrap().logged_in = true;
+
+            let level = game.native_level("test:pocket").unwrap();
+            assert_ne!(level.dimension(), DimensionKey::OVERWORLD);
+            assert_eq!(level.dimension().id(game).as_deref(), Some("test:pocket"));
+            assert!(game.native_level("minecraft:overworld").is_none());
+            assert!(level.height(game).is_some());
+            let overworld = LevelRef::new(level.epoch(), DimensionKey::OVERWORLD);
+            assert_eq!(overworld.height(game), None);
+        });
+    }
+
     /// The `both` handle reads answer on a client from its own copy: the local
     /// player's health, effects, equipment and last death, the blocks and time
     /// of day of the level it shows and the entities it tracks.
@@ -12946,7 +12978,7 @@ mod tests {
             };
             game.handle_packet(login(spawn.clone())).unwrap();
             let end = game.native_level("minecraft:the_end").unwrap();
-            let wrong_level = LevelRef::new(end.epoch(), "minecraft:overworld");
+            let wrong_level = LevelRef::new(end.epoch(), mod_api::DimensionKey::OVERWORLD);
             assert_eq!(wrong_level.day_time(game), None);
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 100,
@@ -13103,6 +13135,123 @@ mod tests {
             let reconnected = game.native_level("minecraft:the_nether").unwrap();
             assert_eq!(fresh.day_time(game), None);
             assert_eq!(reconnected.day_time(game), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn client_camera_entity_is_the_player_without_a_server_camera() {
+        use super::super::{
+            Game, native_entity_refs::tests::with_client_game, native_lifecycle::NativeLifecycle,
+        };
+        use horizon_client::{level_loading::Reason, motion::PlayerMotion, title::Title};
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::{
+            connection::Pipe,
+            packets::play::{self, Clientbound as C, SpawnInfo},
+        };
+        use mod_api::ClientHost;
+
+        with_client_game(|game| {
+            let camera = |game: &Game<'_>| (game as &dyn ClientHost).camera_entity();
+            assert!(camera(game).is_none(), "the fixture has no player");
+            game.native_lifecycle = NativeLifecycle::default();
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "CameraReadTest").unwrap();
+            let mut spawn = SpawnInfo {
+                dimension_type: 0,
+                dimension: "minecraft:overworld".into(),
+                seed: 0,
+                game_type: 3,
+                previous_game_type: None,
+                debug: false,
+                flat: true,
+                last_death: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            };
+            game.enter_remote_dimension(&spawn, false, Reason::Other);
+            let remote = game.remote.as_mut().unwrap();
+            remote.logged_in = true;
+            remote.entity_id = 7;
+            assert!(camera(game).is_none(), "a level alone has no player");
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let local = camera(game).unwrap();
+            assert_eq!(
+                local.id(),
+                7,
+                "use the remote identity, not PlayerMotion's default"
+            );
+            assert_eq!(local.position(game), Some([0.0; 3]));
+
+            let pig = game
+                .remote
+                .as_ref()
+                .unwrap()
+                .builtin
+                .get("minecraft:entity_type")
+                .unwrap()
+                .id("minecraft:pig")
+                .unwrap();
+            game.handle_packet(C::AddEntity(play::AddEntity {
+                id: 31,
+                uuid: 9,
+                kind: pig,
+                position: [10.0, 64.0, 12.0],
+                velocity: [0.0; 3],
+                pitch: 0,
+                yaw: 0,
+                head_yaw: 0,
+                data: 0,
+            }))
+            .unwrap();
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 31 }))
+                .unwrap();
+            let attached = camera(game).unwrap();
+            assert_eq!(attached.id(), 31);
+            assert_eq!(attached.position(game), Some([10.0, 64.0, 12.0]));
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 99 }))
+                .unwrap();
+            assert_eq!(
+                camera(game),
+                Some(attached),
+                "unknown packet targets are ignored"
+            );
+            game.handle_packet(C::RemoveEntities(play::RemoveEntities { ids: vec![31] }))
+                .unwrap();
+            assert_eq!(
+                camera(game).unwrap().position(game),
+                None,
+                "a removed target cannot be read"
+            );
+            game.handle_packet(C::SetCamera(play::SetCamera { camera_id: 7 }))
+                .unwrap();
+            assert_eq!(camera(game), Some(local));
+
+            game.title = Some(Title::new(game.save.root.clone(), &game.options.resources));
+            assert!(
+                camera(game).is_none(),
+                "the title screen has no camera entity"
+            );
+            game.title = None;
+            assert_eq!(camera(game), Some(local));
+
+            spawn.dimension = "test:other_overworld".into();
+            game.handle_packet(C::Respawn(play::Respawn { spawn, keep: 0 }))
+                .unwrap();
+            assert!(
+                camera(game).is_none(),
+                "replacement waits for its new player"
+            );
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            let fresh = camera(game).unwrap();
+            assert_eq!(fresh.id(), local.id());
+            assert_ne!(fresh.epoch(), local.epoch());
+            assert_eq!(local.position(game), None, "old level handles stay stale");
+            assert_eq!(fresh.position(game), Some([0.0; 3]));
+            game.client_logging_out();
+            assert!(camera(game).is_none());
+            assert_eq!(fresh.position(game), None);
         });
     }
 

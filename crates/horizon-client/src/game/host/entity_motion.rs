@@ -1,7 +1,7 @@
 //! The game's side of the `entity_motion` area (`horizon-mod-api/src/host/entity_motion.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityMotionBackend for Game<'_> {
     fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
         mod_api::__private::check_access(

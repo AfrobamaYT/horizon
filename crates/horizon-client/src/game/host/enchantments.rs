@@ -1,7 +1,7 @@
 //! The game's side of the `enchantments` area (`horizon-mod-api/src/host/enchantments.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EnchantmentsClientHost for Game<'_> {
     fn enchantments(&self) -> Vec<EnchantmentInfo> {
         mod_api::__private::check_access(

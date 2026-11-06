@@ -60,12 +60,7 @@ pub trait PlayerFoodBackendMut {
     /// `FoodData.eat(nutrition, saturationModifier)`: adds `nutrition` to
     /// the food level (0 to 20) and `nutrition * modifier * 2` to the
     /// saturation, which stays at most the food level.
-    fn player_feed(
-        &mut self,
-        player: PlayerRef,
-        nutrition: i32,
-        saturation_modifier: f32,
-    ) -> bool {
+    fn player_feed(&mut self, player: PlayerRef, nutrition: i32, saturation_modifier: f32) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_feed",
             "player_feed",

@@ -1,13 +1,10 @@
 //! The game's side of the `living_refs` area (`horizon-mod-api/src/host/living_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LivingRefsHost for Game<'_> {
     fn living(&self, entity: EntityRef) -> Option<LivingRef> {
-        mod_api::__private::check_access(
-            "living",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("living", mod_api::__private::LoadAccess::WorldOnly);
         self.native_living(entity)
     }
 }
@@ -44,11 +41,7 @@ impl LivingRefsBackend for Game<'_> {
         );
         self.native_living_attribute_modifiers(living, id)
     }
-    fn living_equipment(
-        &self,
-        living: LivingRef,
-        slot: EquipmentSlot,
-    ) -> Option<ItemStack> {
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
         mod_api::__private::check_access(
             "living_equipment",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -70,10 +63,7 @@ impl LivingRefsBackend for Game<'_> {
         self.native_living_is_tamed(living)
     }
     fn living_owner(&self, living: LivingRef) -> Option<u128> {
-        mod_api::__private::check_access(
-            "living_owner",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("living_owner", mod_api::__private::LoadAccess::WorldOnly);
         self.native_living_owner(living)
     }
 }
@@ -102,12 +92,7 @@ impl LivingRefsBackendMut for Game<'_> {
             "living_replace_attribute_modifier",
             mod_api::__private::LoadAccess::WorldOnly,
         );
-        self.native_living_replace_attribute_modifier(
-            living,
-            attribute,
-            modifier,
-            lifetime,
-        )
+        self.native_living_replace_attribute_modifier(living, attribute, modifier, lifetime)
     }
     fn living_remove_attribute_modifier(
         &mut self,
@@ -121,12 +106,7 @@ impl LivingRefsBackendMut for Game<'_> {
         );
         self.native_living_remove_attribute_modifier(living, attribute, id)
     }
-    fn living_set_attribute_base(
-        &mut self,
-        living: LivingRef,
-        attribute: &str,
-        base: f64,
-    ) -> bool {
+    fn living_set_attribute_base(&mut self, living: LivingRef, attribute: &str, base: f64) -> bool {
         mod_api::__private::check_access(
             "living_set_attribute_base",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -176,10 +156,7 @@ impl LivingRefsBackendMut for Game<'_> {
         throw_randomly: bool,
         include_thrower_name: bool,
     ) -> Option<EntityRef> {
-        mod_api::__private::check_access(
-            "living_drop",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("living_drop", mod_api::__private::LoadAccess::WorldOnly);
         self.native_living_drop(living, stack, throw_randomly, include_thrower_name)
     }
 }

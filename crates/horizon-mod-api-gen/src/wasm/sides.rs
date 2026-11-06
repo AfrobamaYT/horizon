@@ -189,7 +189,10 @@ pub(super) fn guest(
             "ClientHost" => code.push_str("fn client_backend_mut(&mut self) -> Option<crate::ClientBackendMutRef<'_>> { Some(crate::ClientBackendMutRef::of(self)) }\n"),
             _ => {}
         }
-        for method in methods.iter().filter(|m| m.owner == *owner && m.via.is_none()) {
+        for method in methods
+            .iter()
+            .filter(|m| m.owner == *owner && m.via.is_none())
+        {
             code.push_str(&guest_import_call(types, method)?);
         }
         code.push_str("}\n");

@@ -10,11 +10,7 @@ pub trait LivingEffectsBackend {
     /// amplifier and the flags. The effect is a registration-slot key resolved at load.
     /// None when it has the effect not, before effect resolution, or for an armor
     /// stand, the dragon, a stale handle or a client.
-    fn living_effect(
-        &self,
-        living: LivingRef,
-        effect: EffectKey,
-    ) -> Option<NativeActiveEffect> {
+    fn living_effect(&self, living: LivingRef, effect: EffectKey) -> Option<NativeActiveEffect> {
         crate::phase::unprovided(
             "Backend::living_effect",
             "living_effect",
@@ -101,11 +97,7 @@ pub trait LivingEffectsBackendMut {
     /// ticks. False before effect resolution, for a duration below -1, an armor
     /// stand, the dragon, a stale handle or a client, or when the active
     /// instance did not change, as in vanilla's `addEffect`.
-    fn living_add_effect(
-        &mut self,
-        living: LivingRef,
-        effect: &NativeActiveEffect,
-    ) -> bool {
+    fn living_add_effect(&mut self, living: LivingRef, effect: &NativeActiveEffect) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_add_effect",
             "living_add_effect",

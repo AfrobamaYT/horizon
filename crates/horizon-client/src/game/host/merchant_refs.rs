@@ -1,13 +1,10 @@
 //! The game's side of the `merchant_refs` area (`horizon-mod-api/src/host/merchant_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl MerchantRefsServerHost for Game<'_> {
     fn merchant(&self, entity: EntityRef) -> Option<MerchantRef> {
-        mod_api::__private::check_access(
-            "merchant",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("merchant", mod_api::__private::LoadAccess::WorldOnly);
         self.native_merchant(entity)
     }
 }
@@ -48,10 +45,7 @@ impl MerchantRefsBackend for Game<'_> {
         self.native_villager_type(merchant)
     }
     fn merchant_xp(&self, merchant: MerchantRef) -> Option<i32> {
-        mod_api::__private::check_access(
-            "merchant_xp",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("merchant_xp", mod_api::__private::LoadAccess::WorldOnly);
         self.native_villager_xp(merchant)
     }
 }
@@ -68,11 +62,7 @@ impl MerchantRefsBackendMut for Game<'_> {
         );
         self.native_merchant_set_offer(merchant, index, offer)
     }
-    fn merchant_add_offer(
-        &mut self,
-        merchant: MerchantRef,
-        offer: MerchantOffer,
-    ) -> bool {
+    fn merchant_add_offer(&mut self, merchant: MerchantRef, offer: MerchantOffer) -> bool {
         mod_api::__private::check_access(
             "merchant_add_offer",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -86,11 +76,7 @@ impl MerchantRefsBackendMut for Game<'_> {
         );
         self.native_merchant_remove_offer(merchant, index)
     }
-    fn merchant_set_profession(
-        &mut self,
-        merchant: MerchantRef,
-        profession: &str,
-    ) -> bool {
+    fn merchant_set_profession(&mut self, merchant: MerchantRef, profession: &str) -> bool {
         mod_api::__private::check_access(
             "merchant_set_profession",
             mod_api::__private::LoadAccess::WorldOnly,

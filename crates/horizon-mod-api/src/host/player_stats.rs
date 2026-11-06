@@ -8,12 +8,7 @@ pub trait PlayerStatsBackend {
     /// The value of statistic `stat_type` for `key` (`minecraft:stone`,
     /// `minecraft:jump`...), as `ServerStatsCounter.getValue`: 0 when never
     /// counted.
-    fn player_stat(
-        &self,
-        player: PlayerRef,
-        stat_type: NativeStatType,
-        key: &str,
-    ) -> Option<i32> {
+    fn player_stat(&self, player: PlayerRef, stat_type: NativeStatType, key: &str) -> Option<i32> {
         crate::phase::unprovided(
             "Backend::player_stat",
             "player_stat",
@@ -23,11 +18,7 @@ pub trait PlayerStatsBackend {
     /// Side: server.
     /// Whether the player's recipe book knows `recipe`
     /// (`ServerRecipeBook.contains`).
-    fn player_has_discovered_recipe(
-        &self,
-        player: PlayerRef,
-        recipe: &str,
-    ) -> Option<bool> {
+    fn player_has_discovered_recipe(&self, player: PlayerRef, recipe: &str) -> Option<bool> {
         crate::phase::unprovided(
             "Backend::player_has_discovered_recipe",
             "player_has_discovered_recipe",
@@ -77,11 +68,7 @@ pub trait PlayerStatsBackendMut {
     /// `player_recipe_discovered` hook, and the client hears of them.
     /// Unknown ids are skipped. The number of recipe displays added, None
     /// for a player it can't reach.
-    fn player_award_recipes(
-        &mut self,
-        player: PlayerRef,
-        recipes: &[&str],
-    ) -> Option<i32> {
+    fn player_award_recipes(&mut self, player: PlayerRef, recipes: &[&str]) -> Option<i32> {
         crate::phase::unprovided(
             "BackendMut::player_award_recipes",
             "player_award_recipes",
@@ -91,11 +78,7 @@ pub trait PlayerStatsBackendMut {
     /// Side: server.
     /// `ServerPlayer.resetRecipes`, as `/recipe take` does. The number of
     /// recipe displays taken out, None for a player it can't reach.
-    fn player_reset_recipes(
-        &mut self,
-        player: PlayerRef,
-        recipes: &[&str],
-    ) -> Option<i32> {
+    fn player_reset_recipes(&mut self, player: PlayerRef, recipes: &[&str]) -> Option<i32> {
         crate::phase::unprovided(
             "BackendMut::player_reset_recipes",
             "player_reset_recipes",

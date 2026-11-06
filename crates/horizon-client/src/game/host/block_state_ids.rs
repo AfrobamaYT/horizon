@@ -1,13 +1,10 @@
 //! The game's side of the `block_state_ids` area (`horizon-mod-api/src/host/block_state_ids.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl BlockStateIdsHost for Game<'_> {
     fn fluid_key(&self, id: &str) -> Option<FluidKey> {
-        mod_api::__private::check_access(
-            "fluid_key",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("fluid_key", mod_api::__private::LoadAccess::WorldOnly);
         self.native_fluid_key(id)
     }
     fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
@@ -46,26 +43,17 @@ impl BlockStateIdsHost for Game<'_> {
         self.native_item_crafting_remainder(stack)
     }
     fn block_item(&self, block: BlockKey) -> Option<String> {
-        mod_api::__private::check_access(
-            "block_item",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("block_item", mod_api::__private::LoadAccess::WorldOnly);
         self.native_block_item(block)
     }
 }
 impl BlockStateIdsBackend for Game<'_> {
     fn block_key_id(&self, key: BlockKey) -> String {
-        mod_api::__private::check_access(
-            "block_key_id",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("block_key_id", mod_api::__private::LoadAccess::WorldOnly);
         self.native_block_key_id(key)
     }
     fn item_key_id(&self, key: ItemKey) -> String {
-        mod_api::__private::check_access(
-            "item_key_id",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("item_key_id", mod_api::__private::LoadAccess::WorldOnly);
         self.native_item_key_id(key)
     }
     fn effect_key_id(&self, key: EffectKey) -> String {

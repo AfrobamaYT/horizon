@@ -128,11 +128,7 @@ pub trait EntityDataBackendMut {
     /// Shows the entity's name at any distance, or only when looked at
     /// (`Entity.setCustomNameVisible`): saved, and sent to the players
     /// tracking a mob or an armor stand. False where `set_custom_name` is.
-    fn entity_set_custom_name_visible(
-        &mut self,
-        entity: EntityRef,
-        visible: bool,
-    ) -> bool {
+    fn entity_set_custom_name_visible(&mut self, entity: EntityRef, visible: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::entity_set_custom_name_visible",
             "entity_set_custom_name_visible",

@@ -38,12 +38,7 @@ pub trait ItemPlacesBackend {
     /// `ResourceHandler.isValid` and `getCapacityAsLong`: how many of `item`
     /// slot `slot` of one item of `stack` holds when empty. None of a shulker
     /// box, nor into a slot past the item's slots.
-    fn item_container_capacity(
-        &self,
-        stack: &ItemStack,
-        slot: usize,
-        item: &ItemStack,
-    ) -> u32 {
+    fn item_container_capacity(&self, stack: &ItemStack, slot: usize, item: &ItemStack) -> u32 {
         crate::phase::unprovided(
             "Backend::item_container_capacity",
             "item_container_capacity",
@@ -105,12 +100,7 @@ pub trait ItemPlacesBackendMut {
     /// commit; an entity slot's into the entity's other slots (`forHandlerIndex`). How much
     /// went: 0 where `native_game_stack` reads nothing for want of the place. In transaction
     /// `tx`, which keeps each place as it was. The player's screen follows with the tick's sync.
-    fn game_insert(
-        &mut self,
-        place: &ItemPlace,
-        stack: ItemStack,
-        tx: &Transaction,
-    ) -> u32 {
+    fn game_insert(&mut self, place: &ItemPlace, stack: ItemStack, tx: &Transaction) -> u32 {
         crate::phase::unprovided(
             "BackendMut::game_insert",
             "game_insert",
@@ -121,12 +111,7 @@ pub trait ItemPlacesBackendMut {
     /// `ItemAccess.extract` at those places: up to `stack.count` of the item and components of
     /// `stack`, how many came out. An item entity emptied stays, empty, until the root commit
     /// removes it. A creative player's hand gives without losing any (`forInfiniteMaterials`).
-    fn game_extract(
-        &mut self,
-        place: &ItemPlace,
-        stack: ItemStack,
-        tx: &Transaction,
-    ) -> u32 {
+    fn game_extract(&mut self, place: &ItemPlace, stack: ItemStack, tx: &Transaction) -> u32 {
         crate::phase::unprovided(
             "BackendMut::game_extract",
             "game_extract",

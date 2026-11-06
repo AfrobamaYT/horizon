@@ -1,27 +1,16 @@
 //! The game's side of the `player_read` area (`horizon-mod-api/src/host/player_read.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl PlayerReadHost for Game<'_> {
     fn player(&self, uuid: u128) -> Option<PlayerRef> {
-        mod_api::__private::check_access(
-            "player",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("player", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_ref(uuid)
     }
 }
 impl PlayerReadServerHost for Game<'_> {
-    fn fake_player(
-        &mut self,
-        level: LevelRef,
-        uuid: u128,
-        name: &str,
-    ) -> Option<PlayerRef> {
-        mod_api::__private::check_access(
-            "fake_player",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+    fn fake_player(&mut self, level: LevelRef, uuid: u128, name: &str) -> Option<PlayerRef> {
+        mod_api::__private::check_access("fake_player", mod_api::__private::LoadAccess::WorldOnly);
         self.native_fake_player(level, uuid, name)
     }
 }
@@ -69,10 +58,7 @@ impl PlayerReadBackend for Game<'_> {
         self.native_player_may_build(player)
     }
     fn player_food(&self, player: PlayerRef) -> Option<NativePlayerFood> {
-        mod_api::__private::check_access(
-            "player_food",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("player_food", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_food(player)
     }
     fn player_abilities(&self, player: PlayerRef) -> Option<NativePlayerAbilities> {

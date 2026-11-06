@@ -27,13 +27,7 @@ pub trait DrawContext {
     /// `mymod:gui/...`), drawn stretched into `dst` (`[x, y, w, h]` in GUI
     /// pixels), every texel multiplied by `tint` (`0xAARRGGBB`, a fluid's colour)
     /// when there is one. False when there is no such sprite.
-    fn sprite(
-        &mut self,
-        name: &str,
-        src: [f32; 4],
-        dst: [f32; 4],
-        tint: Option<u32>,
-    ) -> bool {
+    fn sprite(&mut self, name: &str, src: [f32; 4], dst: [f32; 4], tint: Option<u32>) -> bool {
         unimplemented!("DrawContext::sprite")
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
@@ -87,12 +81,7 @@ pub trait DrawContext {
     /// the order drawn. Draw it from a screen's drawing hook
     /// (`native_screen_draw`). A client's call; nothing is drawn on a server.
     /// API @API:scenes_in_screens@.
-    fn draw_scene(
-        &mut self,
-        rect: [f32; 4],
-        blocks: &[NativeSceneBlock],
-        view: NativeSceneView,
-    ) {
+    fn draw_scene(&mut self, rect: [f32; 4], blocks: &[NativeSceneBlock], view: NativeSceneView) {
         unimplemented!("DrawContext::draw_scene")
     }
     /// `Screen.renderMenuBackground`: draws the tiled menu background (32x32) across `rect`
@@ -105,22 +94,11 @@ pub trait DrawContext {
     /// Repeats sprite `sprite` across `rect` (`[x, y, w, h]` in GUI pixels) with each tile
     /// sized `size` GUI pixels square, tinted by `argb`. False when the sprite is not in the HUD atlas.
     /// API @API:screen_transparent_background@.
-    fn tiled_sprite(
-        &mut self,
-        sprite: &str,
-        rect: [f32; 4],
-        size: f32,
-        argb: u32,
-    ) -> bool {
+    fn tiled_sprite(&mut self, sprite: &str, rect: [f32; 4], size: f32, argb: u32) -> bool {
         unimplemented!("DrawContext::tiled_sprite")
     }
     /// Draw an item stack with custom count/decoration text (or None) at `at` in GUI units.
-    fn gui_draw_item_with(
-        &mut self,
-        stack: &ItemStack,
-        at: [f32; 2],
-        text: Option<&str>,
-    ) {
+    fn gui_draw_item_with(&mut self, stack: &ItemStack, at: [f32; 2], text: Option<&str>) {
         unimplemented!("DrawContext::gui_draw_item_with")
     }
 }
@@ -181,13 +159,7 @@ pub trait BlockEntityDrawContext {
     /// texels of 16 per side) of `sprite` (`mymod:entity/screen`,
     /// `mymod:block/casing`, `block/stone`) times the 0xRRGGBB `tint`
     /// (0xFFFFFF for none). False for an unknown sprite.
-    fn quad(
-        &mut self,
-        sprite: &str,
-        corners: [[f32; 3]; 4],
-        uv: [f32; 4],
-        tint: u32,
-    ) -> bool {
+    fn quad(&mut self, sprite: &str, corners: [[f32; 3]; 4], uv: [f32; 4], tint: u32) -> bool {
         unimplemented!("BlockEntityDrawContext::draw_quad")
     }
     /// Draws a box from `from` to `to` (texels of 16 per block, as a block
@@ -237,13 +209,7 @@ pub trait BlockEntityDrawContext {
         unimplemented!("BlockEntityDrawContext::draw_item")
     }
     /// Begin time-based rotation using the surface's one implementation.
-    fn spin(
-        &mut self,
-        axis: [f32; 3],
-        pivot: [f32; 3],
-        degrees_per_tick: f32,
-        phase: f32,
-    ) {
+    fn spin(&mut self, axis: [f32; 3], pivot: [f32; 3], degrees_per_tick: f32, phase: f32) {
         unimplemented!("BlockEntityDrawContext::draw_spin")
     }
     /// End time-based rotation for subsequent geometry.
@@ -267,14 +233,7 @@ pub trait BlockEntityDrawContext {
     /// `draw.light`; a nonzero 0xRRGGBB `outline` rings each glyph, as glowing
     /// sign text's. Returns the width drawn, in font pixels: centre a line
     /// by starting it at minus half its width. API @API:draw_text@.
-    fn text(
-        &mut self,
-        text: &Text,
-        at: [f32; 2],
-        color: u32,
-        glowing: bool,
-        outline: u32,
-    ) -> f32 {
+    fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
         unimplemented!("BlockEntityDrawContext::draw_text")
     }
     /// The width of `text` in font pixels, as `draw_text` draws it, to centre a

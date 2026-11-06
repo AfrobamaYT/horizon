@@ -1,13 +1,10 @@
 //! The game's side of the `item_entity_refs` area (`horizon-mod-api/src/host/item_entity_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl ItemEntityRefsHost for Game<'_> {
     fn item_entity(&self, entity: EntityRef) -> Option<ItemEntityRef> {
-        mod_api::__private::check_access(
-            "item_entity",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("item_entity", mod_api::__private::LoadAccess::WorldOnly);
         self.native_item_entity_ref(entity)
     }
 }
@@ -84,11 +81,7 @@ impl ItemEntityRefsBackendMut for Game<'_> {
         );
         self.native_item_entity_set_never_pickup(item)
     }
-    fn item_entity_set_target(
-        &mut self,
-        item: ItemEntityRef,
-        target: Option<u128>,
-    ) -> bool {
+    fn item_entity_set_target(&mut self, item: ItemEntityRef, target: Option<u128>) -> bool {
         mod_api::__private::check_access(
             "item_entity_set_target",
             mod_api::__private::LoadAccess::WorldOnly,

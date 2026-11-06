@@ -85,8 +85,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             crate::registry_keys::effect_id(key).unwrap().to_owned()
         }
     }
-    impl Backend for Table {
-    }
+    impl Backend for Table {}
     mod_api::impl_backend_areas!(Table, except(block_state_ids));
     impl mod_api::prelude::TagFluidReadsHost for Table {
         fn unresolved_fluid_id(&self, fluid: crate::UnresolvedFluid) -> String {
@@ -118,8 +117,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             true
         }
     }
-    impl crate::BackendMut for Table {
-    }
+    impl crate::BackendMut for Table {}
     mod_api::impl_backend_mut_areas!(Table, except(living_effects));
     impl crate::ServerHost for Table {
         fn backend_mut(&mut self) -> Option<crate::BackendMutRef<'_>> {

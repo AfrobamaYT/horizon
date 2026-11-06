@@ -21,11 +21,7 @@ pub trait EntityHandlesHost {
     /// client, with no world open, or for a dimension the server hasn't
     /// loaded. API 373.
     fn level(&self, dimension: &str) -> Option<LevelRef> {
-        crate::phase::unprovided(
-            "Host::level",
-            "level",
-            crate::phase::LoadAccess::WorldOnly,
-        )
+        crate::phase::unprovided("Host::level", "level", crate::phase::LoadAccess::WorldOnly)
     }
 }
 /// The handles' reads of the `entity_handles` area, implemented by the game and reached through [`Backend`].
@@ -78,6 +74,15 @@ pub trait EntityHandlesBackend {
         crate::phase::unprovided(
             "Backend::entity_level",
             "entity_level",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// The name of a dimension's key (`minecraft:the_nether`). None for a key the game never gave out.
+    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::dimension_key_id",
+            "dimension_key_id",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

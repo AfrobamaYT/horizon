@@ -19,12 +19,7 @@ pub trait PlayerReadHost {
 pub trait PlayerReadServerHost {
     /// Side: server.
     /// Create or retrieve a connectionless player for the level currently in place.
-    fn fake_player(
-        &mut self,
-        level: LevelRef,
-        uuid: u128,
-        name: &str,
-    ) -> Option<PlayerRef> {
+    fn fake_player(&mut self, level: LevelRef, uuid: u128, name: &str) -> Option<PlayerRef> {
         crate::phase::unprovided(
             "ServerHost::fake_player",
             "fake_player",

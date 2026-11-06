@@ -1,13 +1,10 @@
 //! The game's side of the `minecart_refs` area (`horizon-mod-api/src/host/minecart_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl MinecartRefsServerHost for Game<'_> {
     fn minecart(&self, entity: EntityRef) -> Option<MinecartRef> {
-        mod_api::__private::check_access(
-            "minecart",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("minecart", mod_api::__private::LoadAccess::WorldOnly);
         self.native_minecart_ref(entity)
     }
 }
@@ -54,10 +51,7 @@ impl MinecartRefsBackend for Game<'_> {
         );
         self.native_minecart_hurt_time(cart)
     }
-    fn minecart_custom_display_block(
-        &self,
-        cart: MinecartRef,
-    ) -> Option<Option<BlockStateId>> {
+    fn minecart_custom_display_block(&self, cart: MinecartRef) -> Option<Option<BlockStateId>> {
         mod_api::__private::check_access(
             "minecart_custom_display_block",
             mod_api::__private::LoadAccess::WorldOnly,

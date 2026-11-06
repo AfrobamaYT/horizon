@@ -113,10 +113,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for EnergyWorld {
-    }
+    impl Backend for EnergyWorld {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(EnergyWorld, except(level_reads, block_entity_refs, energy_capability));
+    mod_api::impl_backend_areas!(
+        EnergyWorld,
+        except(level_reads, block_entity_refs, energy_capability)
+    );
     #[cfg(test)]
     impl mod_api::prelude::EnergyCapabilityBackendMut for EnergyWorld {
         fn energy_insert(&mut self, at: BlockSide, amount: u32, _: &Transaction) -> u32 {
@@ -137,8 +139,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for EnergyWorld {
-    }
+    impl BackendMut for EnergyWorld {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(EnergyWorld, except(energy_capability));
 

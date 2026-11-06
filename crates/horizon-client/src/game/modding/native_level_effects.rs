@@ -4,7 +4,7 @@
 //! `sendParticles` send them. They return false on a client, for a handle of
 //! an earlier open, or for arguments the network can't carry.
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
-use super::{Dim, Game, creatures::NativeSound, lan_particles::QueuedParticle};
+use super::{Game, creatures::NativeSound, lan_particles::QueuedParticle};
 use horizon_world::registry::BlockStateId;
 use mod_api::{LevelRef, ParticleOptions, SoundSource};
 
@@ -12,10 +12,7 @@ impl Game<'_> {
     /// The level's dimension id, for a handle of this open on the server.
     fn native_level_dimension(&self, level: LevelRef) -> Option<&'static str> {
         self.native_level_world(level)?;
-        [Dim::Overworld, Dim::Nether, Dim::End]
-            .into_iter()
-            .map(Dim::id)
-            .find(|id| *id == level.dimension())
+        Some(level.dimension_id())
     }
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as

@@ -95,8 +95,7 @@ pub mod tests {
                     .to_owned()
             }
         }
-        impl Backend for Table {
-        }
+        impl Backend for Table {}
         mod_api::impl_backend_areas!(Table, except(block_state_ids));
         impl Host for Table {
             fn backend(&self) -> Option<BackendRef<'_>> {

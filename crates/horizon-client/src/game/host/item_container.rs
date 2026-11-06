@@ -1,7 +1,7 @@
 //! The game's side of the `item_container` area (`horizon-mod-api/src/host/item_container.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl ItemContainerBackend for Game<'_> {
     fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
         mod_api::__private::check_access(

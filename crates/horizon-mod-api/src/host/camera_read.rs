@@ -25,4 +25,15 @@ pub trait CameraReadClientHost {
             crate::phase::LoadAccess::ClientSetup,
         )
     }
+    /// Side: client.
+    /// The entity the view follows: the player, or the entity a server attached the camera to
+    /// (a spectator following a mob, a cutscene mod). None outside a world. Read it again each
+    /// frame; the handle is for this world and goes stale when it ends.
+    fn camera_entity(&self) -> Option<EntityRef> {
+        crate::phase::unprovided(
+            "ClientHost::camera_entity",
+            "camera_entity",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
 }

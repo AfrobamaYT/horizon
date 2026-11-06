@@ -1,13 +1,10 @@
 //! The game's side of the `block_entity_refs` area (`horizon-mod-api/src/host/block_entity_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl BlockEntityRefsHost for Game<'_> {
     fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
-        mod_api::__private::check_access(
-            "block_entity",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("block_entity", mod_api::__private::LoadAccess::WorldOnly);
         self.native_block_entity_ref(level, pos)
     }
 }
@@ -88,33 +85,21 @@ impl BlockEntityRefsBackendMut for Game<'_> {
         );
         self.native_player_open_block_menu(player, entity)
     }
-    fn block_entity_set_lock(
-        &mut self,
-        entity: BlockEntityRef,
-        lock: Option<Compound>,
-    ) -> bool {
+    fn block_entity_set_lock(&mut self, entity: BlockEntityRef, lock: Option<Compound>) -> bool {
         mod_api::__private::check_access(
             "block_entity_set_lock",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_set_lock(entity, lock)
     }
-    fn block_entity_merge_data(
-        &mut self,
-        entity: BlockEntityRef,
-        data: Compound,
-    ) -> bool {
+    fn block_entity_merge_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
         mod_api::__private::check_access(
             "block_entity_merge_data",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_merge_data(entity, data)
     }
-    fn block_entity_replace_data(
-        &mut self,
-        entity: BlockEntityRef,
-        data: Compound,
-    ) -> bool {
+    fn block_entity_replace_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
         mod_api::__private::check_access(
             "block_entity_replace_data",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -128,11 +113,7 @@ impl BlockEntityRefsBackendMut for Game<'_> {
         );
         self.native_block_entity_set_changed(entity)
     }
-    fn block_entity_set_name(
-        &mut self,
-        entity: BlockEntityRef,
-        name: Option<&str>,
-    ) -> bool {
+    fn block_entity_set_name(&mut self, entity: BlockEntityRef, name: Option<&str>) -> bool {
         mod_api::__private::check_access(
             "block_entity_set_name",
             mod_api::__private::LoadAccess::WorldOnly,

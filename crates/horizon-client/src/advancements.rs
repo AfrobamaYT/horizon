@@ -154,19 +154,21 @@ impl Tree {
         if overlay.kind("advancement").next().is_some() {
             return Arc::new(Tree::load_with(data, overlay));
         }
-        static TREES: Mutex<Vec<(PathBuf, Weak<Tree>)>> = Mutex::new(Vec::new());
+        type TreeKey = (PathBuf, horizon_world::conditions::LoadConditions);
+        static TREES: Mutex<Vec<(TreeKey, Weak<Tree>)>> = Mutex::new(Vec::new());
         // Held while loading: a second reader waits for the first one's tree.
+        let key = (data.to_path_buf(), overlay.conditions.clone());
         let mut trees = TREES.lock().unwrap_or_else(|e| e.into_inner());
         trees.retain(|(_, tree)| tree.strong_count() > 0);
         if let Some(tree) = trees
             .iter()
-            .find(|(path, _)| path == data)
+            .find(|(held, _)| held == &key)
             .and_then(|(_, tree)| tree.upgrade())
         {
             return tree;
         }
-        let tree = Arc::new(Tree::load(data));
-        trees.push((data.to_path_buf(), Arc::downgrade(&tree)));
+        let tree = Arc::new(Tree::load_with(data, overlay));
+        trees.push((key, Arc::downgrade(&tree)));
         tree
     }
     /// Loads `<data>/<namespace>/advancement/**/*.json`.
@@ -204,6 +206,9 @@ impl Tree {
             }
         }
         for (id, v) in json {
+            if !overlay.conditions.allows(&v) {
+                continue;
+            }
             if let Some(a) = parse(&id, &v) {
                 let index = tree.list.len();
                 for (ci, c) in a.criteria.iter().enumerate() {
@@ -1700,6 +1705,54 @@ impl Tree {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn conditional_advancements_select_before_filtering_and_cache_by_inventory() {
+        let data = std::env::temp_dir().join(format!(
+            "horizon-advancement-conditions-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(data.join("demo/advancement")).unwrap();
+        let plain = json!({"criteria":{"never":{"trigger":"minecraft:impossible"}}});
+        let mut conditional = plain.clone();
+        conditional["neoforge:conditions"] =
+            json!([{"type":"neoforge:mod_loaded","modid":"provider"}]);
+        std::fs::write(
+            data.join("demo/advancement/entry.json"),
+            conditional.to_string(),
+        )
+        .unwrap();
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let off = Tree::shared(&data, &horizon_world::loot::PackOverlay::NONE);
+        let on_overlay = horizon_world::loot::PackOverlay {
+            conditions: &enabled,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        let on = Tree::shared(&data, &on_overlay);
+        assert!(off.get("demo:entry").is_none());
+        assert!(on.get("demo:entry").is_some());
+        assert!(!Arc::ptr_eq(&off, &on));
+        assert!(Arc::ptr_eq(&on, &Tree::shared(&data, &on_overlay)));
+        let files = [(
+            "advancement/demo:entry".into(),
+            vec![
+                plain.to_string().into_bytes(),
+                json!({"neoforge:conditions":[{"type":"unsupported"}]})
+                    .to_string()
+                    .into_bytes(),
+            ],
+        )];
+        let overridden = Tree::shared(
+            &data,
+            &horizon_world::loot::PackOverlay {
+                files: &files,
+                ..on_overlay
+            },
+        );
+        assert!(overridden.get("demo:entry").is_none());
+        std::fs::remove_dir_all(data).unwrap();
+    }
 
     #[test]
     fn advancement_reward_function_is_optional_and_namespaced() {

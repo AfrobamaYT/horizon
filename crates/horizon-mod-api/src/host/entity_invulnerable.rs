@@ -34,11 +34,7 @@ pub trait EntityInvulnerableBackendMut {
     /// Side: server.
     /// `Entity.setInvulnerable`: sets a mob's `Invulnerable` flag, saved
     /// with it. False for the other kinds.
-    fn entity_set_invulnerable(
-        &mut self,
-        entity: EntityRef,
-        invulnerable: bool,
-    ) -> bool {
+    fn entity_set_invulnerable(&mut self, entity: EntityRef, invulnerable: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::entity_set_invulnerable",
             "entity_set_invulnerable",
@@ -48,11 +44,7 @@ pub trait EntityInvulnerableBackendMut {
     /// Side: server.
     /// Sets `LivingEntity.damageCooldownTime`, as mods do to let rapid hits
     /// through (0). Mobs and players.
-    fn entity_set_damage_cooldown_time(
-        &mut self,
-        entity: EntityRef,
-        ticks: i32,
-    ) -> bool {
+    fn entity_set_damage_cooldown_time(&mut self, entity: EntityRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::entity_set_damage_cooldown_time",
             "entity_set_damage_cooldown_time",

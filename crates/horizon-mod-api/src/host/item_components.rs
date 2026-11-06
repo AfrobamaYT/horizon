@@ -37,6 +37,18 @@ pub trait ItemComponentsHost {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// Whether enchantments `a` and `b` (ids, `minecraft:sharpness`) may be on one item
+    /// (`Enchantment.areCompatible`), by the world's enchantment definitions, data packs' included:
+    /// false for the same enchantment twice or where either lists the other as exclusive; an id
+    /// that names no enchantment excludes nothing.
+    fn enchantments_compatible(&self, a: &str, b: &str) -> bool {
+        crate::phase::unprovided(
+            "Host::enchantments_compatible",
+            "enchantments_compatible",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' reads of the `item_components` area, implemented by the game and reached through [`Backend`].
 #[doc(hidden)]
@@ -50,6 +62,17 @@ pub trait ItemComponentsBackend {
         crate::phase::unprovided(
             "Backend::item_has_enchantment_effect",
             "item_has_enchantment_effect",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// The slot `stack` is equipped to (`Equippable.slot`): the item's `equippable` component
+    /// after the stack's own patch, which may add, change or remove it. `head`, `chest`, `legs`,
+    /// `feet`, `body`, `mainhand`, `offhand` or `saddle`; none where the stack is not equippable.
+    fn item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::item_equippable_slot",
+            "item_equippable_slot",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

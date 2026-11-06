@@ -1,7 +1,7 @@
 //! The game's side of the `level_block_writes` area (`horizon-mod-api/src/host/level_block_writes.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelBlockWritesBackendMut for Game<'_> {
     fn level_set_block(
         &mut self,
@@ -16,12 +16,7 @@ impl LevelBlockWritesBackendMut for Game<'_> {
         );
         self.native_level_set_block(level, pos, state, flags)
     }
-    fn level_remove_block(
-        &mut self,
-        level: LevelRef,
-        pos: [i32; 3],
-        moved: bool,
-    ) -> bool {
+    fn level_remove_block(&mut self, level: LevelRef, pos: [i32; 3], moved: bool) -> bool {
         mod_api::__private::check_access(
             "level_remove_block",
             mod_api::__private::LoadAccess::WorldOnly,

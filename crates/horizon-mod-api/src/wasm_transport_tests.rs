@@ -101,8 +101,7 @@ fn generated_flat_output_reuses_transport() {
             vec![[1.0, 2.0, 3.0, 4.0]; 8]
         }
     }
-    impl crate::ClientHost for Host {
-    }
+    impl crate::ClientHost for Host {}
     mod_api::impl_client_host_areas!(Host, except(screen_exclusion_areas));
     let mut config = wasmtime::Config::new();
     config.consume_fuel(true);

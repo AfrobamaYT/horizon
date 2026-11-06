@@ -14,7 +14,7 @@ use mod_api::{
 struct World;
 
 fn overworld() -> LevelRef {
-    LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+    LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
 impl mod_api::prelude::LevelReadsBackend for World {
@@ -35,8 +35,7 @@ impl mod_api::prelude::BlockEntityRefsBackend for World {
             .flatten()
     }
 }
-impl Backend for World {
-}
+impl Backend for World {}
 mod_api::impl_backend_areas!(World, except(level_reads, level_world, block_entity_refs));
 
 impl mod_api::prelude::EntityHandlesHost for World {

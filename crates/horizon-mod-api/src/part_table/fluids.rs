@@ -312,10 +312,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for TankWorld {
-    }
+    impl Backend for TankWorld {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(TankWorld, except(level_reads, block_entity_refs, fluid_capability));
+    mod_api::impl_backend_areas!(
+        TankWorld,
+        except(level_reads, block_entity_refs, fluid_capability)
+    );
     #[cfg(test)]
     impl mod_api::prelude::FluidCapabilityBackendMut for TankWorld {
         fn fluid_tank_insert(
@@ -381,8 +383,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for TankWorld {
-    }
+    impl BackendMut for TankWorld {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(TankWorld, except(fluid_capability));
     #[cfg(test)]

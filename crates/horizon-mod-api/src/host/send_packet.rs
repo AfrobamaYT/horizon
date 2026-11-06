@@ -12,10 +12,7 @@ pub trait SendPacketClientHost {
     /// player isn't in a server's play state, and for a custom payload past
     /// `ServerboundCustomPayloadPacket.MAX_PAYLOAD_SIZE`, which a server
     /// disconnects for. API 409.
-    fn send_packet(
-        &mut self,
-        packet: ServerboundPlayPacket,
-    ) -> Result<(), SendPacketError> {
+    fn send_packet(&mut self, packet: ServerboundPlayPacket) -> Result<(), SendPacketError> {
         crate::phase::unprovided(
             "ClientHost::send_packet",
             "send_packet",

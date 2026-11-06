@@ -24,14 +24,13 @@ struct World;
 impl mod_api::prelude::EntityHandlesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld")
-            .then(|| LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld"))
+            .then(|| LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD))
     }
     fn entity(&self, _id: u32) -> Option<mod_api::EntityRef> {
         None
     }
 }
-impl Host for World {
-}
+impl Host for World {}
 mod_api::impl_host_areas!(World, except(entity_handles));
 
 impl mod_api::prelude::BaseServerHost for World {
@@ -39,8 +38,7 @@ impl mod_api::prelude::BaseServerHost for World {
         (20.0, 50.0)
     }
 }
-impl ServerHost for World {
-}
+impl ServerHost for World {}
 mod_api::impl_server_host_areas!(World, except(base));
 
 /// One call of the hook `work` names: the server tick for `tick`, else the chat hook with

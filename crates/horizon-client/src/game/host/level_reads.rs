@@ -1,7 +1,7 @@
 //! The game's side of the `level_reads` area (`horizon-mod-api/src/host/level_reads.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelReadsBackend for Game<'_> {
     fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId> {
         mod_api::__private::check_access(
@@ -26,18 +26,10 @@ impl LevelReadsBackend for Game<'_> {
         self.native_level_block_transform(level, player, hand, stack, pos, hit)
     }
     fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
-        mod_api::__private::check_access(
-            "level_block",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("level_block", mod_api::__private::LoadAccess::WorldOnly);
         self.native_level_block(level, pos)
     }
-    fn level_block_property(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-        key: &str,
-    ) -> Option<String> {
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
         mod_api::__private::check_access(
             "level_block_property",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -58,12 +50,7 @@ impl LevelReadsBackend for Game<'_> {
         );
         self.native_level_is_loaded(level, pos)
     }
-    fn level_brightness(
-        &self,
-        level: LevelRef,
-        layer: LightLayer,
-        pos: [i32; 3],
-    ) -> Option<i32> {
+    fn level_brightness(&self, level: LevelRef, layer: LightLayer, pos: [i32; 3]) -> Option<i32> {
         mod_api::__private::check_access(
             "level_brightness",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -71,10 +58,7 @@ impl LevelReadsBackend for Game<'_> {
         self.native_level_brightness(level, layer, pos)
     }
     fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
-        mod_api::__private::check_access(
-            "level_height",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("level_height", mod_api::__private::LoadAccess::WorldOnly);
         self.native_level_height(level)
     }
     fn level_game_time(&self, level: LevelRef) -> Option<i64> {

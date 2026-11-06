@@ -209,7 +209,7 @@ impl Game<'_> {
             enabled_features,
             &additional,
         );
-        let prepared = self.prepare_server_reload(&stack)?;
+        let prepared = self.prepare_server_reload(&stack, &resources)?;
         let context = self
             .prepare_loop_context(&resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
@@ -496,10 +496,10 @@ impl Game<'_> {
                 &[&f.id, &horizon_client::text::Text::tr(&key, &args).plain()],
             )
         })?;
-        if self.exec.function_depth >= 128 {
+        if self.exec.functions.len() >= 128 {
             return Ok(Outcome::NoReturn);
         }
-        self.exec.function_depth += 1;
+        self.exec.functions.push(f.id.clone());
         let outer = self.exec.returned.take();
         let level = std::mem::replace(&mut self.ui.registries.permission, self.fns.command_level());
         let inner = Source {
@@ -524,7 +524,7 @@ impl Game<'_> {
         }
         self.ui.registries.permission = level;
         let returned = std::mem::replace(&mut self.exec.returned, outer);
-        self.exec.function_depth -= 1;
+        self.exec.functions.pop();
         Ok(match returned {
             None => Outcome::NoReturn,
             Some(Some(v)) => Outcome::Value(v),
@@ -1089,7 +1089,7 @@ impl Game<'_> {
         );
         stack.enabled =
             datapack::selected_ids(stack.packs.iter().map(Arc::as_ref), &self.fns.enabled);
-        let prepared = match self.prepare_server_reload(&stack) {
+        let prepared = match self.prepare_server_reload(&stack, &self.options.resources) {
             Ok(prepared) => prepared,
             Err(error) => {
                 self.fns.enabled = previous_enabled;
@@ -1167,6 +1167,31 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn function_frames_restore_outer_frame() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::datapack::{Function, FunctionLine};
+
+        let mut ran = false;
+        with_game(|game| {
+            ran = true;
+            let inner = Function {
+                id: "test:inner".into(),
+                lines: vec![FunctionLine::Command("return 1".into())],
+                parameters: vec![],
+            };
+            game.exec.functions.push("test:outer".into());
+            let source = game.server_source();
+            game.run_function(&inner, None, source).unwrap();
+            assert_eq!(game.exec.functions, ["test:outer"]);
+            game.exec.functions.clear();
+            game.run_function(&inner, None, source).unwrap();
+            assert!(game.exec.functions.is_empty());
+        });
+        assert!(ran, "the prepared-resource fixture must run this case");
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -1596,7 +1621,7 @@ mod tests {
             .find(|(id, _)| id == "tags/pkg:item/both")
             .unwrap();
         assert!(horizon_world::loot::PackOverlay::top(versions).starts_with(b"{\"replace\""));
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert!(tags["pkg:both"].contains("pkg:from_pack"));
         assert!(!tags["pkg:both"].contains("pkg:from_mod"));
@@ -1610,7 +1635,7 @@ mod tests {
             &stack,
             vec![("tags/pkg:item/mod_only".to_owned(), tag("pkg:second_load"))],
         );
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert_eq!(
             tags["pkg:mod_only"].iter().collect::<Vec<_>>(),
@@ -1624,7 +1649,7 @@ mod tests {
                 ("tags/pkg:item/good".to_owned(), tag("pkg:good")),
             ],
         );
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay::new(&files);
         let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
         assert!(!tags.contains_key("pkg:mod_only"));
         assert!(tags["pkg:good"].contains("pkg:good"));

@@ -184,6 +184,20 @@ impl MotionResources {
         assets: &Assets,
         facts: &crate::blocks::BlockFacts,
     ) -> Result<Self> {
+        Self::load_with_conditions(
+            root,
+            assets,
+            facts,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        )
+    }
+    /// Motion's damage definitions use the owning startup load's inventory.
+    pub fn load_with_conditions(
+        root: &Path,
+        assets: &Assets,
+        facts: &crate::blocks::BlockFacts,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Result<Self> {
         let attributes = Arc::new(Catalog::from_json(&horizon_world::json_file::read(
             &root.join("attributes.json"),
         )?)?);
@@ -217,7 +231,7 @@ impl MotionResources {
         )?;
         Ok(Self {
             landing: crate::landing::load(root, &properties)?,
-            health: crate::health::HealthResources::load(root)?,
+            health: crate::health::HealthResources::load_with_conditions(root, conditions)?,
             fluids: FluidResources::new(assets, facts)?,
             attributes,
             blocks: properties.bind(&MovementTags {

@@ -161,11 +161,7 @@ pub trait BossBarRefsBackendMut {
     }
     /// Side: server.
     /// `ServerBossEvent.setOverlay`.
-    fn boss_bar_set_overlay(
-        &mut self,
-        bar: BossBarRef,
-        overlay: BossBarOverlay,
-    ) -> bool {
+    fn boss_bar_set_overlay(&mut self, bar: BossBarRef, overlay: BossBarOverlay) -> bool {
         crate::phase::unprovided(
             "BackendMut::boss_bar_set_overlay",
             "boss_bar_set_overlay",

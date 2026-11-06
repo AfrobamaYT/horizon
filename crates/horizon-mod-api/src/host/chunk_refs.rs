@@ -6,11 +6,7 @@ pub trait ChunkRefsHost {
     /// Side: both.
     /// Find a loaded chunk in an open server level.
     fn chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
-        crate::phase::unprovided(
-            "Host::chunk",
-            "chunk",
-            crate::phase::LoadAccess::WorldOnly,
-        )
+        crate::phase::unprovided("Host::chunk", "chunk", crate::phase::LoadAccess::WorldOnly)
     }
 }
 /// The handles' reads of the `chunk_refs` area, implemented by the game and reached through [`Backend`].

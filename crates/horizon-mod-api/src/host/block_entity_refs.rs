@@ -129,11 +129,7 @@ pub trait BlockEntityRefsBackendMut {
     }
     /// Side: server.
     /// Change the lock through the same storage used by container opening and saving.
-    fn block_entity_set_lock(
-        &mut self,
-        entity: BlockEntityRef,
-        lock: Option<Compound>,
-    ) -> bool {
+    fn block_entity_set_lock(&mut self, entity: BlockEntityRef, lock: Option<Compound>) -> bool {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_lock",
             "block_entity_set_lock",
@@ -148,11 +144,7 @@ pub trait BlockEntityRefsBackendMut {
     /// handle, a client, another level than the one in place, data nested too deep or that
     /// changes nothing, or a result the block entity can't load. Inside a transaction an
     /// abort puts the block entity, its name, `lock`, loot table roll and attachments back.
-    fn block_entity_merge_data(
-        &mut self,
-        entity: BlockEntityRef,
-        data: Compound,
-    ) -> bool {
+    fn block_entity_merge_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
         crate::phase::unprovided(
             "BackendMut::block_entity_merge_data",
             "block_entity_merge_data",
@@ -163,11 +155,7 @@ pub trait BlockEntityRefsBackendMut {
     /// Replaces the saved payload, retaining identity and position metadata.
     /// Uses the same transactional load and client update path as `merge_data`.
     /// False for a missing or stale block entity, unsupported data, or no change.
-    fn block_entity_replace_data(
-        &mut self,
-        entity: BlockEntityRef,
-        data: Compound,
-    ) -> bool {
+    fn block_entity_replace_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
         crate::phase::unprovided(
             "BackendMut::block_entity_replace_data",
             "block_entity_replace_data",
@@ -190,11 +178,7 @@ pub trait BlockEntityRefsBackendMut {
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
     /// False for a block entity that isn't nameable, a stale handle, a client or another
     /// level than the one in place. Inside a transaction an abort puts the name back.
-    fn block_entity_set_name(
-        &mut self,
-        entity: BlockEntityRef,
-        name: Option<&str>,
-    ) -> bool {
+    fn block_entity_set_name(&mut self, entity: BlockEntityRef, name: Option<&str>) -> bool {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_name",
             "block_entity_set_name",

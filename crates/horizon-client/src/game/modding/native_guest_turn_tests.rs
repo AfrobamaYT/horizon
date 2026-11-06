@@ -1,6 +1,5 @@
 //! Real-game regressions for native handles used during a guest's turn.
 
-use mod_api::prelude::*;
 use super::{lan::LanSettings, native_entity_refs::tests::with_game};
 use horizon_client::{
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},
@@ -8,6 +7,7 @@ use horizon_client::{
 };
 use horizon_core::geometry::Vec3;
 use horizon_protocol::packets::configuration::ClientInformation;
+use mod_api::prelude::*;
 use std::sync::{
     Arc,
     atomic::{AtomicI32, AtomicUsize},
@@ -83,6 +83,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &game.pack.data_changes,
             false,
             &[],
+            &[],
         );
         let error = game
             .prepare_world_reload(&stack, &root, false)
@@ -109,6 +110,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &game.pack.data_source,
             &game.pack.data_changes,
             false,
+            &[],
             &[],
         );
         let prepared = game.prepare_world_reload(&stack, &good, false).unwrap();

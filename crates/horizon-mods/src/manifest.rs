@@ -2,6 +2,7 @@
 //!
 //! Raw injection schema adapted from horizon-mixins (Copyright (c) 2026 levzzz),
 //! MIT licensed; see `HORIZON_MIXINS_LICENSE` and `THIRD_PARTY_NOTICES.md`.
+pub mod inject;
 mod jar;
 mod wasm;
 pub use jar::{
@@ -63,6 +64,9 @@ pub struct Manifest {
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
+    /// Unified listeners; routing and staging are separate from manifest parsing.
+    #[serde(default)]
+    pub inject: Vec<inject::Inject>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -427,6 +431,8 @@ impl Manifest {
                 m.id
             ));
         }
+        inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
+            .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             Internal::check_all(&native.internals)?;
             let mut ids = std::collections::HashSet::new();
@@ -1569,8 +1575,9 @@ capabilities = ["registries"]
                     error.contains("unsupported executable file"),
                     "{name}: {error}"
                 );
-            } else if name.trim_start_matches("./") == WASM {
-                // On disk `./mod.wasm` is the top-level module too.
+            } else if std::fs::symlink_metadata(dir.join(WASM)).is_ok() {
+                // On disk `./mod.wasm` is the top-level module too, and so is `MOD.WASM` where the
+                // filesystem ignores case (Windows, macOS).
                 let undeclared = WasmError::Undeclared.to_string();
                 assert_eq!(
                     Package::read(&dir).err(),
@@ -1645,7 +1652,9 @@ capabilities = ["registries"]
         let path = root.join("ruby.hmod");
         for link in [false, true] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
-            let options = zip::write::SimpleFileOptions::default();
+            // Made by a Unix tool on every OS: the writer's default on Windows is DOS attributes,
+            // which hold no mode to refuse.
+            let options = zip::write::SimpleFileOptions::default().system(zip::System::Unix);
             zip.start_file(MANIFEST, options).unwrap();
             zip.write_all(EXAMPLE.as_bytes()).unwrap();
             if link {

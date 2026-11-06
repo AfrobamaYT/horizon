@@ -100,11 +100,7 @@ pub trait MerchantRefsBackendMut {
     /// yet are rolled first, as `getOffers` does for a player's first trade
     /// (this draws the trade set's world random sequence, as that does).
     /// False for a stale handle or an invalid offer (see `set_offer`).
-    fn merchant_add_offer(
-        &mut self,
-        merchant: MerchantRef,
-        offer: MerchantOffer,
-    ) -> bool {
+    fn merchant_add_offer(&mut self, merchant: MerchantRef, offer: MerchantOffer) -> bool {
         crate::phase::unprovided(
             "BackendMut::merchant_add_offer",
             "merchant_add_offer",
@@ -126,11 +122,7 @@ pub trait MerchantRefsBackendMut {
     /// forgets the offers, which roll again on the next trade. Clients see the
     /// new profession through entity data. False for an unknown id, a wandering
     /// trader, or a villager with a trading screen open.
-    fn merchant_set_profession(
-        &mut self,
-        merchant: MerchantRef,
-        profession: &str,
-    ) -> bool {
+    fn merchant_set_profession(&mut self, merchant: MerchantRef, profession: &str) -> bool {
         crate::phase::unprovided(
             "BackendMut::merchant_set_profession",
             "merchant_set_profession",

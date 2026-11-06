@@ -96,7 +96,7 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         native.injection[0].ordinal = Some(9);
         let error = check(std::slice::from_ref(&site), &manifest, of(&manifest).next().unwrap()).unwrap_err();
         assert!(error.to_string().contains("E_NOT_SITE"));
-        assert!(error.to_string().contains("sites/example.txt"));
+        assert!(error.to_string().contains("slots/example.txt"));
         if kind == "WRAP_WITH_CONDITION" {
             manifest.native.as_mut().unwrap().injection[0].ordinal = Some(0);
             site.output = "u32".into();

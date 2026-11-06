@@ -492,11 +492,11 @@ fn neoforge_shapes_items_reach_two_guests() {
     let sync = Arc::new(
         SyncData::load(
             &resources,
-            &horizon_world::loot::PackOverlay { files: &packs },
+            &horizon_world::loot::PackOverlay::new(&packs),
             &defaults,
             &horizon_client::crafting::ResolvedSources::load_or_empty(
                 &resources,
-                &horizon_world::loot::PackOverlay { files: &packs },
+                &horizon_world::loot::PackOverlay::new(&packs),
                 &server_load(),
             ),
         )

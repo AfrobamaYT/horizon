@@ -1,15 +1,9 @@
 //! The game's side of the `level_events` area (`horizon-mod-api/src/host/level_events.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelEventsBackendMut for Game<'_> {
-    fn level_level_event(
-        &mut self,
-        level: LevelRef,
-        id: i32,
-        pos: [i32; 3],
-        data: i32,
-    ) -> bool {
+    fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool {
         mod_api::__private::check_access(
             "level_level_event",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -37,12 +31,7 @@ impl LevelEventsBackendMut for Game<'_> {
         );
         self.native_level_explode(level, center, radius, fire, interaction)
     }
-    fn level_strike_lightning(
-        &mut self,
-        level: LevelRef,
-        at: [f64; 3],
-        visual_only: bool,
-    ) -> bool {
+    fn level_strike_lightning(&mut self, level: LevelRef, at: [f64; 3], visual_only: bool) -> bool {
         mod_api::__private::check_access(
             "level_strike_lightning",
             mod_api::__private::LoadAccess::WorldOnly,

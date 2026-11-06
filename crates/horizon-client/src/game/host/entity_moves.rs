@@ -1,7 +1,7 @@
 //! The game's side of the `entity_moves` area (`horizon-mod-api/src/host/entity_moves.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityMovesBackend for Game<'_> {
     fn entity_head_yaw(&self, entity: EntityRef) -> Option<f32> {
         mod_api::__private::check_access(
@@ -53,10 +53,7 @@ impl EntityMovesBackendMut for Game<'_> {
         self.native_entity_set_head_yaw(entity, yaw)
     }
     fn entity_push(&mut self, entity: EntityRef, delta: [f64; 3]) -> bool {
-        mod_api::__private::check_access(
-            "entity_push",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("entity_push", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_push(entity, delta)
     }
 }

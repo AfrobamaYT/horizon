@@ -29,12 +29,7 @@ pub trait FluidCapabilityBackend {
     /// block's fillable tank its capacity, a cauldron a bucket; none for another tank, a
     /// drain-only one, or a fluid the tanks there don't take: other than water and lava, or
     /// with components into a mod block's tanks.
-    fn fluid_tank_capacity(
-        &self,
-        at: BlockSide,
-        tank: usize,
-        fluid: &FluidStack,
-    ) -> u32 {
+    fn fluid_tank_capacity(&self, at: BlockSide, tank: usize, fluid: &FluidStack) -> u32 {
         crate::phase::unprovided(
             "Backend::fluid_tank_capacity",
             "fluid_tank_capacity",

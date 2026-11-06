@@ -1,20 +1,14 @@
 //! The game's side of the `entity_data` area (`horizon-mod-api/src/host/entity_data.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityDataBackend for Game<'_> {
     fn entity_tags(&self, entity: EntityRef) -> Option<Vec<String>> {
-        mod_api::__private::check_access(
-            "entity_tags",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("entity_tags", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_tags(entity)
     }
     fn entity_name(&self, entity: EntityRef) -> Option<String> {
-        mod_api::__private::check_access(
-            "entity_name",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("entity_name", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_name(entity)
     }
     fn entity_custom_name_visible(&self, entity: EntityRef) -> Option<bool> {
@@ -41,10 +35,7 @@ impl EntityDataBackend for Game<'_> {
 }
 impl EntityDataBackendMut for Game<'_> {
     fn entity_nbt(&mut self, entity: EntityRef) -> Option<Compound> {
-        mod_api::__private::check_access(
-            "entity_nbt",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("entity_nbt", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_nbt(entity)
     }
     fn entity_merge_nbt(&mut self, entity: EntityRef, nbt: Compound) -> bool {
@@ -75,11 +66,7 @@ impl EntityDataBackendMut for Game<'_> {
         );
         self.native_entity_set_custom_name(entity, name)
     }
-    fn entity_set_custom_name_visible(
-        &mut self,
-        entity: EntityRef,
-        visible: bool,
-    ) -> bool {
+    fn entity_set_custom_name_visible(&mut self, entity: EntityRef, visible: bool) -> bool {
         mod_api::__private::check_access(
             "entity_set_custom_name_visible",
             mod_api::__private::LoadAccess::WorldOnly,

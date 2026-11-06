@@ -17,7 +17,8 @@ pub trait Hooks {
         contract = "collect",
         out = "additions",
         context = "data_load",
-        target = "mod_api::crafting::native_recipe_property_sets"
+        target = "mod_api::crafting::native_recipe_property_sets",
+        neoforge = "RegisterRecipePropertiesEvent"
     )]
     fn recipe_property_sets();
 }

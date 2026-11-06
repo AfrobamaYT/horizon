@@ -11,11 +11,7 @@ pub trait LivingPositionBackend {
     /// False for a target in another level. None for a stale or unavailable
     /// living entity or target, one outside the level in place, or on a
     /// client.
-    fn living_has_line_of_sight(
-        &self,
-        living: LivingRef,
-        target: EntityRef,
-    ) -> Option<bool> {
+    fn living_has_line_of_sight(&self, living: LivingRef, target: EntityRef) -> Option<bool> {
         crate::phase::unprovided(
             "Backend::living_has_line_of_sight",
             "living_has_line_of_sight",

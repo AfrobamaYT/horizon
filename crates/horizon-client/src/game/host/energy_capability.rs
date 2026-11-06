@@ -1,7 +1,7 @@
 //! The game's side of the `energy_capability` area (`horizon-mod-api/src/host/energy_capability.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EnergyCapabilityBackend for Game<'_> {
     fn energy_amount(&self, at: BlockSide) -> Option<u32> {
         mod_api::__private::check_access(

@@ -4090,7 +4090,9 @@ mod tests {
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.pause = false;
-            assert!(!mod_api::prelude::ClientPauseReadClientHost::is_paused(game));
+            assert!(!mod_api::prelude::ClientPauseReadClientHost::is_paused(
+                game
+            ));
             game.pause = true;
             assert!(mod_api::prelude::ClientPauseReadClientHost::is_paused(game));
         });
@@ -4113,16 +4115,25 @@ mod tests {
             assert!(!mod_api::prelude::ClientInputReadsClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward = mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward").unwrap();
+            let forward =
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
                 (forward.down, forward.label.plain()),
                 (false, "W".to_owned())
             );
             game.keys.insert(KeyCode::KeyW);
-            assert!(mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward").unwrap().down);
-            let attack = mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.attack").unwrap();
+            assert!(
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward")
+                    .unwrap()
+                    .down
+            );
+            let attack =
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.attack").unwrap();
             assert_eq!(attack.label.plain(), "Left Button");
-            assert!(mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.mymod.boost").is_none());
+            assert!(
+                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.mymod.boost")
+                    .is_none()
+            );
         });
     }
 

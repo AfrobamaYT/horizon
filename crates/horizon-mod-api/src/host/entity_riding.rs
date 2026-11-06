@@ -66,12 +66,7 @@ pub trait EntityRidingBackendMut {
     /// mob and up to two passengers in total. `force` bypasses normal
     /// admission checks, not these storage limits. Player boarding cooldown and the strider's
     /// eye-in-lava admission check are not yet represented by the game.
-    fn entity_start_riding(
-        &mut self,
-        entity: EntityRef,
-        vehicle: EntityRef,
-        force: bool,
-    ) -> bool {
+    fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::entity_start_riding",
             "entity_start_riding",

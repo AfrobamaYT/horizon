@@ -780,7 +780,7 @@ pub mod tests {
 
     /// The level the test worlds are.
     fn here() -> LevelRef {
-        LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld")
+        LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD)
     }
 
     /// The block at `pos` in [`here`], through `side`.
@@ -851,7 +851,7 @@ pub mod tests {
     fn a_host_without_a_backend_refuses_handle_calls() {
         // NoHost implements nothing, so Host::backend keeps its None default:
         // every handle answers its typed refusal, never a no-op success.
-        let level = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:overworld");
+        let level = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD);
         assert!(!level.in_place(&NoHost));
         assert_eq!(
             level.entities_in(&NoHost, [0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
@@ -1069,8 +1069,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for TypeOf {
-    }
+    impl Backend for TypeOf {}
     #[cfg(test)]
     mod_api::impl_backend_areas!(TypeOf, except(block_entity_refs));
     #[cfg(test)]

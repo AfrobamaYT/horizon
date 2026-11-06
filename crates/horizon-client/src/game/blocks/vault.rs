@@ -6,6 +6,7 @@ use super::Game;
 use horizon_assets::item_model::DisplayContext;
 use horizon_client::{
     Result,
+    block_entities::BlockEntityLease,
     block_entity_render::vertex_light,
     containers::BlockEntity,
     item_render,
@@ -16,6 +17,13 @@ use horizon_client::{
 use horizon_core::random::LegacyRandom;
 
 type Pos = (i32, i32, i32);
+
+pub(super) struct TakenVault {
+    pub(super) lease: BlockEntityLease,
+    pub(super) vault: Box<Vault>,
+    pub(super) current: VaultState,
+    pub(super) ominous: bool,
+}
 
 /// What a vault reads: the game time and the players.
 struct Players {
@@ -49,7 +57,7 @@ impl Game<'_> {
         }
     }
     /// The vault at `key` with its block's state and ominous flag.
-    pub(super) fn take_vault(&mut self, key: Pos) -> Option<(Box<Vault>, VaultState, bool)> {
+    pub(super) fn take_vault(&mut self, key: Pos) -> Option<TakenVault> {
         let state = self.world.block(key.0, key.1, key.2);
         let block = self.pack.assets.registry.state(state)?;
         if block.name != "minecraft:vault" {
@@ -61,10 +69,15 @@ impl Game<'_> {
             .and_then(|s| VaultState::from_name(s))
             .unwrap_or_default();
         let ominous = block.properties.get("ominous").is_some_and(|v| v == "true");
-        let Some(BlockEntity::Vault(vault)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Vault(vault))) = self.world.block_entities.take(&key) else {
             return None;
         };
-        Some((vault, current, ominous))
+        Some(TakenVault {
+            lease,
+            vault,
+            current,
+            ominous,
+        })
     }
     /// Runs `f` on the vault at `key` with the level random and a loot roll,
     /// then applies its events.
@@ -81,7 +94,12 @@ impl Game<'_> {
             &mut Vec<VaultEvent>,
         ) -> T,
     ) -> Option<Result<T>> {
-        let (mut vault, current, ominous) = self.take_vault(key)?;
+        let TakenVault {
+            lease,
+            mut vault,
+            current,
+            ominous,
+        } = self.take_vault(key)?;
         let players = self.vault_players();
         let mut random = std::mem::replace(&mut self.world.random, LegacyRandom::new(0));
         let mut sequences = std::mem::take(&mut self.rand_sequences);
@@ -118,7 +136,7 @@ impl Game<'_> {
         self.rand_sequences = sequences;
         self.world
             .block_entities
-            .put(key, BlockEntity::Vault(vault));
+            .put(lease, BlockEntity::Vault(vault));
         Some(self.vault_events(key, events).map(|()| out))
     }
     /// The server tick of the vault at `key`, then its client tick when there

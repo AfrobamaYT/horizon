@@ -77,10 +77,7 @@ pub trait MinecartRefsBackend {
     /// Side: server.
     /// `AbstractMinecart.customDisplayBlockState`: the block the cart shows in
     /// place of its kind's default, None (inner) when it has none.
-    fn minecart_custom_display_block(
-        &self,
-        cart: MinecartRef,
-    ) -> Option<Option<BlockStateId>> {
+    fn minecart_custom_display_block(&self, cart: MinecartRef) -> Option<Option<BlockStateId>> {
         crate::phase::unprovided(
             "Backend::minecart_custom_display_block",
             "minecart_custom_display_block",

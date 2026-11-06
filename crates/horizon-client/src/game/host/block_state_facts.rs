@@ -1,7 +1,7 @@
 //! The game's side of the `block_state_facts` area (`horizon-mod-api/src/host/block_state_facts.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl BlockStateFactsBackend for Game<'_> {
     fn block_state_replaceable(&self, state: BlockStateId) -> Option<bool> {
         mod_api::__private::check_access(

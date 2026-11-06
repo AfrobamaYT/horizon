@@ -206,13 +206,7 @@ pub trait BaseServerHost {
     /// client's copy of the world, for another dimension, a position outside
     /// `/summon`'s bounds, a chunk that isn't loaded, a kind Horizon can't
     /// load, or one a mod kept out (`native_entity_join_level`).
-    fn summon(
-        &mut self,
-        dimension: &str,
-        kind: &str,
-        pos: [f64; 3],
-        nbt: Compound,
-    ) -> Option<u32> {
+    fn summon(&mut self, dimension: &str, kind: &str, pos: [f64; 3], nbt: Compound) -> Option<u32> {
         crate::phase::unprovided(
             "ServerHost::summon",
             "summon",
@@ -254,11 +248,7 @@ pub trait BaseServerHost {
     /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
     /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
     /// or more than 65536 filters.
-    fn edit_blocks(
-        &mut self,
-        dimension: &str,
-        edit: &NativeBlockEdit,
-    ) -> Result<u64, String> {
+    fn edit_blocks(&mut self, dimension: &str, edit: &NativeBlockEdit) -> Result<u64, String> {
         crate::phase::unprovided(
             "ServerHost::edit_blocks",
             "edit_blocks",
@@ -785,12 +775,7 @@ pub trait BaseBackendMut {
     /// The lines over and under that player's list of players (Tab):
     /// `ClientboundTabListPacket`, an empty text for none. False when they
     /// aren't on.
-    fn player_tab_list(
-        &mut self,
-        player: PlayerRef,
-        header: &Text,
-        footer: &Text,
-    ) -> bool {
+    fn player_tab_list(&mut self, player: PlayerRef, header: &Text, footer: &Text) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_tab_list",
             "player_tab_list",
@@ -820,11 +805,7 @@ pub trait BaseBackendMut {
     /// Plain text: the mod checks it (`Messages::text_allowed`, its length,
     /// other players' names). False when the server list is unavailable,
     /// the handle is stale or the player isn't online.
-    fn player_set_nickname(
-        &mut self,
-        player: PlayerRef,
-        nickname: Option<&str>,
-    ) -> bool {
+    fn player_set_nickname(&mut self, player: PlayerRef, nickname: Option<&str>) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_set_nickname",
             "player_set_nickname",

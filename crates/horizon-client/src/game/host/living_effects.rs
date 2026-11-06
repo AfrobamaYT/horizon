@@ -1,13 +1,9 @@
 //! The game's side of the `living_effects` area (`horizon-mod-api/src/host/living_effects.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LivingEffectsBackend for Game<'_> {
-    fn living_effect(
-        &self,
-        living: LivingRef,
-        effect: EffectKey,
-    ) -> Option<NativeActiveEffect> {
+    fn living_effect(&self, living: LivingRef, effect: EffectKey) -> Option<NativeActiveEffect> {
         mod_api::__private::check_access(
             "living_effect",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -56,11 +52,7 @@ impl LivingEffectsBackendMut for Game<'_> {
         );
         self.native_living_apply_consume_effect(living, stack, index)
     }
-    fn living_add_effect(
-        &mut self,
-        living: LivingRef,
-        effect: &NativeActiveEffect,
-    ) -> bool {
+    fn living_add_effect(&mut self, living: LivingRef, effect: &NativeActiveEffect) -> bool {
         mod_api::__private::check_access(
             "living_add_effect",
             mod_api::__private::LoadAccess::WorldOnly,

@@ -20,12 +20,7 @@ pub trait MenuSlotsBackend {
     /// How many of `stack` menu slot `slot` holds (`Slot.mayPlace`, then `Slot.getMaxStackSize`):
     /// a furnace's fuel slot one bucket, an armour slot one piece that fits it, a crafting result
     /// none.
-    fn menu_slot_holds(
-        &self,
-        menu: MenuRef,
-        slot: usize,
-        stack: &ItemStack,
-    ) -> Option<u32> {
+    fn menu_slot_holds(&self, menu: MenuRef, slot: usize, stack: &ItemStack) -> Option<u32> {
         crate::phase::unprovided(
             "Backend::menu_slot_holds",
             "menu_slot_holds",

@@ -1,20 +1,14 @@
 //! The game's side of the `boss_bar_refs` area (`horizon-mod-api/src/host/boss_bar_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl BossBarRefsServerHost for Game<'_> {
     fn boss_bar(&self, id: &str) -> Option<BossBarRef> {
-        mod_api::__private::check_access(
-            "boss_bar",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("boss_bar", mod_api::__private::LoadAccess::WorldOnly);
         self.native_boss_bar(id)
     }
     fn boss_bars(&self) -> Vec<BossBarRef> {
-        mod_api::__private::check_access(
-            "boss_bars",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("boss_bars", mod_api::__private::LoadAccess::WorldOnly);
         self.native_boss_bars()
     }
     fn create_boss_bar(&mut self, id: &str, name: Text) -> Option<BossBarRef> {
@@ -27,10 +21,7 @@ impl BossBarRefsServerHost for Game<'_> {
 }
 impl BossBarRefsBackend for Game<'_> {
     fn boss_bar_id(&self, bar: BossBarRef) -> Option<String> {
-        mod_api::__private::check_access(
-            "boss_bar_id",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("boss_bar_id", mod_api::__private::LoadAccess::WorldOnly);
         self.native_boss_bar_id(bar)
     }
     fn boss_bar_name(&self, bar: BossBarRef) -> Option<Text> {
@@ -83,10 +74,7 @@ impl BossBarRefsBackend for Game<'_> {
         self.native_boss_bar_value(bar)
     }
     fn boss_bar_max(&self, bar: BossBarRef) -> Option<i32> {
-        mod_api::__private::check_access(
-            "boss_bar_max",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("boss_bar_max", mod_api::__private::LoadAccess::WorldOnly);
         self.native_boss_bar_max(bar)
     }
     fn boss_bar_visible(&self, bar: BossBarRef) -> Option<bool> {
@@ -119,11 +107,7 @@ impl BossBarRefsBackendMut for Game<'_> {
         );
         self.native_boss_bar_set_color(bar, color)
     }
-    fn boss_bar_set_overlay(
-        &mut self,
-        bar: BossBarRef,
-        overlay: BossBarOverlay,
-    ) -> bool {
+    fn boss_bar_set_overlay(&mut self, bar: BossBarRef, overlay: BossBarOverlay) -> bool {
         mod_api::__private::check_access(
             "boss_bar_set_overlay",
             mod_api::__private::LoadAccess::WorldOnly,

@@ -9,12 +9,7 @@ pub trait LevelSignalsBackend {
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
     /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale
     /// handle or a client. Takes a shared host and opens no transaction.
-    fn level_signal(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-        direction: Direction,
-    ) -> Option<i32> {
+    fn level_signal(&self, level: LevelRef, pos: [i32; 3], direction: Direction) -> Option<i32> {
         crate::phase::unprovided(
             "Backend::level_signal",
             "level_signal",

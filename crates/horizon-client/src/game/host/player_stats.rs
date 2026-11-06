@@ -1,25 +1,13 @@
 //! The game's side of the `player_stats` area (`horizon-mod-api/src/host/player_stats.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl PlayerStatsBackend for Game<'_> {
-    fn player_stat(
-        &self,
-        player: PlayerRef,
-        stat_type: NativeStatType,
-        key: &str,
-    ) -> Option<i32> {
-        mod_api::__private::check_access(
-            "player_stat",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+    fn player_stat(&self, player: PlayerRef, stat_type: NativeStatType, key: &str) -> Option<i32> {
+        mod_api::__private::check_access("player_stat", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_stat(player, stat_type, key)
     }
-    fn player_has_discovered_recipe(
-        &self,
-        player: PlayerRef,
-        recipe: &str,
-    ) -> Option<bool> {
+    fn player_has_discovered_recipe(&self, player: PlayerRef, recipe: &str) -> Option<bool> {
         mod_api::__private::check_access(
             "player_has_discovered_recipe",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -53,22 +41,14 @@ impl PlayerStatsBackendMut for Game<'_> {
         );
         self.native_player_reset_stat(player, stat_type, key)
     }
-    fn player_award_recipes(
-        &mut self,
-        player: PlayerRef,
-        recipes: &[&str],
-    ) -> Option<i32> {
+    fn player_award_recipes(&mut self, player: PlayerRef, recipes: &[&str]) -> Option<i32> {
         mod_api::__private::check_access(
             "player_award_recipes",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_player_award_recipes(player, recipes)
     }
-    fn player_reset_recipes(
-        &mut self,
-        player: PlayerRef,
-        recipes: &[&str],
-    ) -> Option<i32> {
+    fn player_reset_recipes(&mut self, player: PlayerRef, recipes: &[&str]) -> Option<i32> {
         mod_api::__private::check_access(
             "player_reset_recipes",
             mod_api::__private::LoadAccess::WorldOnly,

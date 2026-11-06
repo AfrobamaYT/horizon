@@ -87,11 +87,7 @@ pub trait LivingRefsBackend {
     /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
     /// None when it is empty, the entity has no such slot (a player has no
     /// body or saddle slot), or the handle is stale. API 382.
-    fn living_equipment(
-        &self,
-        living: LivingRef,
-        slot: EquipmentSlot,
-    ) -> Option<ItemStack> {
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
         crate::phase::unprovided(
             "Backend::living_equipment",
             "living_equipment",
@@ -191,12 +187,7 @@ pub trait LivingRefsBackendMut {
     /// Sets the attribute's base value (`AttributeInstance.setBaseValue`);
     /// the value stays within the attribute's range. False for a non-finite
     /// base, and in the cases `add_attribute_modifier` is.
-    fn living_set_attribute_base(
-        &mut self,
-        living: LivingRef,
-        attribute: &str,
-        base: f64,
-    ) -> bool {
+    fn living_set_attribute_base(&mut self, living: LivingRef, attribute: &str, base: f64) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_set_attribute_base",
             "living_set_attribute_base",

@@ -565,10 +565,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for PipeWorld {
-    }
+    impl Backend for PipeWorld {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(PipeWorld, except(level_reads, block_entity_refs, item_capability));
+    mod_api::impl_backend_areas!(
+        PipeWorld,
+        except(level_reads, block_entity_refs, item_capability)
+    );
     #[cfg(test)]
     impl mod_api::prelude::ItemCapabilityBackendMut for PipeWorld {
         fn container_insert(
@@ -586,8 +588,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for PipeWorld {
-    }
+    impl BackendMut for PipeWorld {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(PipeWorld, except(item_capability));
     #[cfg(test)]
@@ -886,7 +887,7 @@ pub mod tests {
         }
         fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
             Some(match entity.id() {
-                4 => LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether"),
+                4 => LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER),
                 _ => here(),
             })
         }
@@ -911,10 +912,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for Player {
-    }
+    impl Backend for Player {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(Player, except(level_reads, entity_handles, item_places, item_container));
+    mod_api::impl_backend_areas!(
+        Player,
+        except(level_reads, entity_handles, item_places, item_container)
+    );
     #[cfg(test)]
     impl mod_api::prelude::EntityHandlesBackendMut for Player {
         fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
@@ -965,8 +968,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for Player {
-    }
+    impl BackendMut for Player {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(Player, except(entity_handles, item_places));
     #[cfg(test)]
@@ -1240,10 +1242,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for Shelf {
-    }
+    impl Backend for Shelf {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(Shelf, except(level_reads, block_entity_refs, item_capability));
+    mod_api::impl_backend_areas!(
+        Shelf,
+        except(level_reads, block_entity_refs, item_capability)
+    );
     #[cfg(test)]
     impl mod_api::prelude::ItemCapabilityBackendMut for Shelf {
         fn container_insert(
@@ -1294,8 +1298,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for Shelf {
-    }
+    impl BackendMut for Shelf {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(Shelf, except(item_capability));
     #[cfg(test)]
@@ -1629,8 +1632,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for TwoChests {
-    }
+    impl Backend for TwoChests {}
     #[cfg(test)]
     mod_api::impl_backend_areas!(TwoChests, except(level_reads, item_capability));
     #[cfg(test)]
@@ -1684,8 +1686,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for TwoChests {
-    }
+    impl BackendMut for TwoChests {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(TwoChests, except(item_capability));
     #[cfg(test)]
@@ -1908,8 +1909,7 @@ pub mod tests {
                 }
             }
         }
-        impl Host for Report {
-        }
+        impl Host for Report {}
         mod_api::impl_host_areas!(Report, except(item_components));
         let stick = ItemResource::of(&stick());
         let set = |id, value: Tag| {
@@ -2396,8 +2396,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for HeldItem {
-    }
+    impl Backend for HeldItem {}
     #[cfg(test)]
     mod_api::impl_backend_areas!(HeldItem, except(item_container));
     #[cfg(test)]
@@ -2407,8 +2406,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for HeldItem {
-    }
+    impl BackendMut for HeldItem {}
     #[cfg(test)]
     mod_api::impl_backend_mut_areas!(HeldItem, except(item_places));
     #[cfg(test)]

@@ -1,7 +1,7 @@
 //! The game's side of the `level_shapes` area (`horizon-mod-api/src/host/level_shapes.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelShapesBackend for Game<'_> {
     fn level_block_shape(
         &self,
@@ -23,10 +23,7 @@ impl LevelShapesBackend for Game<'_> {
         blocks: NativeClipBlock,
         fluids: NativeClipFluid,
     ) -> Option<NativeClipHit> {
-        mod_api::__private::check_access(
-            "level_clip",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("level_clip", mod_api::__private::LoadAccess::WorldOnly);
         self.native_level_clip(level, from, to, blocks, fluids)
     }
     fn level_block_face_sturdy(

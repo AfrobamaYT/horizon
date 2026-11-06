@@ -402,6 +402,7 @@ impl Game<'_> {
             ui_metadata,
             language,
         } = staged;
+        let loop_context = self.prepare_loop_context(&root)?;
         let standalone_geometry =
             super::native_block_entity_draw::StandaloneGeometry::new(&pack, &gui);
         // Keep the working GPU resources, and hand its window surface over.
@@ -555,7 +556,7 @@ impl Game<'_> {
         // The creative screen survives the reload; item names may not.
         self.creative_screen.forget_items();
         super::client_reload::apply_client_reload(&self.mod_phase, client_applies);
-        self.refresh_loop_context()?;
+        self.install_loop_context(loop_context);
         self.texture_atlases_stitched();
         self.native_client_resources_reloaded();
         Ok(())

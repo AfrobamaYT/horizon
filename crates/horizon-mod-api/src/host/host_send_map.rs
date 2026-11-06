@@ -13,12 +13,7 @@ pub trait HostSendMapBackendMut {
     /// map is never sent again by the game), so send it again after the
     /// player joins. Use ids far from the world's own (they count up from 0).
     /// False for a player not here, or `colors` not 16384 long.
-    fn player_send_map(
-        &mut self,
-        player: PlayerRef,
-        map_id: i32,
-        colors: &[u8],
-    ) -> bool {
+    fn player_send_map(&mut self, player: PlayerRef, map_id: i32, colors: &[u8]) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_send_map",
             "player_send_map",

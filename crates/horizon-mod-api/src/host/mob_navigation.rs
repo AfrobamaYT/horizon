@@ -84,12 +84,7 @@ pub trait MobNavigationBackendMut {
     /// saved, as in vanilla, so a reload or conversion keeps the species'
     /// own. False for a malus that is not finite, a stale or unavailable mob,
     /// the dragon, or on a client.
-    fn mob_set_pathfinding_malus(
-        &mut self,
-        mob: MobRef,
-        kind: PathType,
-        malus: f32,
-    ) -> bool {
+    fn mob_set_pathfinding_malus(&mut self, mob: MobRef, kind: PathType, malus: f32) -> bool {
         crate::phase::unprovided(
             "BackendMut::mob_set_pathfinding_malus",
             "mob_set_pathfinding_malus",

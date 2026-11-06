@@ -1,7 +1,7 @@
 //! The game's side of the `entity_state` area (`horizon-mod-api/src/host/entity_state.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityStateBackend for Game<'_> {
     fn entity_is_shift_key_down(&self, entity: EntityRef) -> Option<bool> {
         mod_api::__private::check_access(
@@ -116,19 +116,12 @@ impl EntityStateBackend for Game<'_> {
         self.native_entity_is_invisible(entity)
     }
     fn entity_pose(&self, entity: EntityRef) -> Option<&'static str> {
-        mod_api::__private::check_access(
-            "entity_pose",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("entity_pose", mod_api::__private::LoadAccess::WorldOnly);
         self.native_entity_pose(entity)
     }
 }
 impl EntityStateBackendMut for Game<'_> {
-    fn entity_set_remaining_fire_ticks(
-        &mut self,
-        entity: EntityRef,
-        ticks: i32,
-    ) -> bool {
+    fn entity_set_remaining_fire_ticks(&mut self, entity: EntityRef, ticks: i32) -> bool {
         mod_api::__private::check_access(
             "entity_set_remaining_fire_ticks",
             mod_api::__private::LoadAccess::WorldOnly,

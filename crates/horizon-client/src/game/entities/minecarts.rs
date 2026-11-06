@@ -2984,6 +2984,26 @@ impl PreparedModelFace {
             light_emission: quad.light_emission,
         }
     }
+
+    pub(super) fn gpu_vertex(&self, corner: usize) -> horizon_client::gfx::PreparedModelVertex {
+        let normal = horizon_client::item_render::direction_vector(self.facing);
+        horizon_client::gfx::PreparedModelVertex {
+            pos: [
+                self.positions[corner][0],
+                self.positions[corner][1],
+                self.positions[corner][2],
+                1.0,
+            ],
+            uv: [self.uv[corner][0], self.uv[corner][1], 0.0, 0.0],
+            normal: [normal.x, normal.y, normal.z, 0.0],
+            flags: [
+                u32::from(self.tint_index >= 0),
+                u32::from(self.light_emission),
+                0,
+                0,
+            ],
+        }
+    }
 }
 
 /// Shared transform, shading and light path for block-state and prepared standalone faces.

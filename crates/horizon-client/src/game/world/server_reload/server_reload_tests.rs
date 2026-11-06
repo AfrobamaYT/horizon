@@ -99,12 +99,9 @@ fn build_mod_resources(
     jar_store: &Path,
     mods: &[horizon_client::mod_content::ContentMod],
     prepared: &Path,
+    inventory: &horizon_mods::enabled::EnabledMods,
 ) -> horizon_assets::resource_source::ResourceRoot {
-    let inventory = horizon_mods::enabled::EnabledMods::new(
-        mods.iter()
-            .map(|m| (m.id.clone(), horizon_mods::Side::Both)),
-    );
-    horizon_client::mod_content::build(base, jar_store, mods, prepared, &inventory).unwrap();
+    horizon_client::mod_content::build(base, jar_store, mods, prepared, inventory).unwrap();
     let resolved = horizon_client::mod_content::resolved_resources(
         base,
         prepared.to_owned(),
@@ -309,6 +306,10 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
             jars: vec![jar.clone()],
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let function = world.join("datapacks/test/data/reload_test/function/keep.mcfunction");
@@ -382,6 +383,10 @@ fn server_reload_delivers_mod_files_overrides_and_preserves_all_data_on_failure(
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
@@ -555,6 +560,10 @@ fn server_reload_skips_unparsable_files_and_delivers_the_rest() {
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");
@@ -750,6 +759,10 @@ fn server_reload_retains_listeners_for_other_hooks() {
             jars: Vec::new(),
         }],
         &resources,
+        &horizon_mods::enabled::EnabledMods::new([(
+            "reload_test".into(),
+            horizon_mods::Side::Both,
+        )]),
     );
     let world = root.join("world");
     let pack = world.join("datapacks/test");

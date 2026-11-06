@@ -21,10 +21,7 @@ pub trait PlayerCooldownsBackend {
     /// Side: server.
     /// Every group the player waits on and its ticks left, ordered by
     /// group.
-    fn player_item_cooldowns(
-        &self,
-        player: PlayerRef,
-    ) -> Option<Vec<NativeItemCooldown>> {
+    fn player_item_cooldowns(&self, player: PlayerRef) -> Option<Vec<NativeItemCooldown>> {
         crate::phase::unprovided(
             "Backend::player_item_cooldowns",
             "player_item_cooldowns",
@@ -43,11 +40,7 @@ pub trait PlayerCooldownsBackend {
     /// Side: server.
     /// `ItemCooldowns.getCooldownPercent(group, 0)`: what is left of the
     /// group's cooldown, from 1 (just started) to 0 (none).
-    fn player_item_cooldown_percent(
-        &self,
-        player: PlayerRef,
-        group: &str,
-    ) -> Option<f32> {
+    fn player_item_cooldown_percent(&self, player: PlayerRef, group: &str) -> Option<f32> {
         crate::phase::unprovided(
             "Backend::player_item_cooldown_percent",
             "player_item_cooldown_percent",
@@ -72,12 +65,7 @@ pub trait PlayerCooldownsBackendMut {
     /// `ItemCooldowns.addCooldown(group, ticks)`: starts (or restarts) the
     /// group's cooldown, and the player's client draws it on every item of the
     /// group (`ServerItemCooldowns.onCooldownStarted`).
-    fn player_set_item_cooldown(
-        &mut self,
-        player: PlayerRef,
-        group: &str,
-        ticks: i32,
-    ) -> bool {
+    fn player_set_item_cooldown(&mut self, player: PlayerRef, group: &str, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_set_item_cooldown",
             "player_set_item_cooldown",
@@ -110,11 +98,7 @@ pub trait PlayerCooldownsBackendMut {
     /// one tracker here, the integrated server owner's (the shriekers read it
     /// for whoever sets them off), so this is every player's.
     /// False, changing nothing, for anyone but the tracker's owner until each player has their own.
-    fn player_set_warden_warning_cooldown(
-        &mut self,
-        player: PlayerRef,
-        ticks: u32,
-    ) -> bool {
+    fn player_set_warden_warning_cooldown(&mut self, player: PlayerRef, ticks: u32) -> bool {
         crate::phase::unprovided(
             "BackendMut::player_set_warden_warning_cooldown",
             "player_set_warden_warning_cooldown",

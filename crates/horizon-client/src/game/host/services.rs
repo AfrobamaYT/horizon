@@ -1,34 +1,22 @@
 //! The game's side of the `services` area (`horizon-mod-api/src/host/services.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl ServicesServerHost for Game<'_> {
     fn commands(&mut self) -> &mut dyn Commands {
-        mod_api::__private::check_access(
-            "commands",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("commands", mod_api::__private::LoadAccess::WorldOnly);
         self
     }
     fn levels(&self) -> &dyn Levels {
-        mod_api::__private::check_access(
-            "levels",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("levels", mod_api::__private::LoadAccess::WorldOnly);
         self
     }
     fn messages(&self) -> &dyn Messages {
-        mod_api::__private::check_access(
-            "messages",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("messages", mod_api::__private::LoadAccess::WorldOnly);
         self
     }
     fn players(&self) -> &dyn Players {
-        mod_api::__private::check_access(
-            "players",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("players", mod_api::__private::LoadAccess::WorldOnly);
         self
     }
 }
@@ -73,42 +61,27 @@ impl ClientSession for Game<'_> {
 }
 impl Commands for Game<'_> {
     fn feedback(&mut self, line: Text) {
-        mod_api::__private::check_access(
-            "feedback",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("feedback", mod_api::__private::LoadAccess::WorldOnly);
         self.native_feedback(line)
     }
     fn run_command(&mut self, line: &str) -> bool {
-        mod_api::__private::check_access(
-            "run_command",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("run_command", mod_api::__private::LoadAccess::WorldOnly);
         self.native_run_command(line)
     }
 }
 impl Levels for Game<'_> {
     fn list_levels(&self) -> Vec<LevelRef> {
-        mod_api::__private::check_access(
-            "list_levels",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("list_levels", mod_api::__private::LoadAccess::WorldOnly);
         self.native_list_levels()
     }
 }
 impl Messages for Game<'_> {
     fn text_allowed(&self, text: &str) -> Option<bool> {
-        mod_api::__private::check_access(
-            "text_allowed",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("text_allowed", mod_api::__private::LoadAccess::WorldOnly);
         self.native_text_allowed(text)
     }
     fn broadcast(&self, line: Text) {
-        mod_api::__private::check_access(
-            "broadcast",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("broadcast", mod_api::__private::LoadAccess::WorldOnly);
         self.native_broadcast(line)
     }
 }

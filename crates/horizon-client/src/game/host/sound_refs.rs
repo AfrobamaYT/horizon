@@ -1,7 +1,7 @@
 //! The game's side of the `sound_refs` area (`horizon-mod-api/src/host/sound_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl SoundRefsBackendMut for Game<'_> {
     fn player_stop_sound(
         &mut self,

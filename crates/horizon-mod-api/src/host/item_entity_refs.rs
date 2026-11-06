@@ -120,11 +120,7 @@ pub trait ItemEntityRefsBackendMut {
     }
     /// Side: server.
     /// `ItemEntity.setTarget`; None allows any player to pick it up.
-    fn item_entity_set_target(
-        &mut self,
-        item: ItemEntityRef,
-        target: Option<u128>,
-    ) -> bool {
+    fn item_entity_set_target(&mut self, item: ItemEntityRef, target: Option<u128>) -> bool {
         crate::phase::unprovided(
             "BackendMut::item_entity_set_target",
             "item_entity_set_target",

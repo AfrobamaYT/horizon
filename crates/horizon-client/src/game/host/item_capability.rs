@@ -1,7 +1,7 @@
 //! The game's side of the `item_capability` area (`horizon-mod-api/src/host/item_capability.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl ItemCapabilityBackend for Game<'_> {
     fn container_size(&self, at: BlockSide) -> Option<usize> {
         mod_api::__private::check_access(

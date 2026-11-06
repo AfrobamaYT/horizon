@@ -117,8 +117,7 @@ mod tests {
             self.depth -= 1;
         }
     }
-    impl ServerHost for Journal {
-    }
+    impl ServerHost for Journal {}
     mod_api::impl_server_host_areas!(Journal, except(transactions));
 
     #[test]

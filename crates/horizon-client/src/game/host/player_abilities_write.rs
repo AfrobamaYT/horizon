@@ -1,7 +1,7 @@
 //! The game's side of the `player_abilities_write` area (`horizon-mod-api/src/host/player_abilities_write.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl PlayerAbilitiesWriteBackendMut for Game<'_> {
     fn player_set_abilities(
         &mut self,

@@ -52,12 +52,7 @@ pub trait MobGoalsBackendMut {
     /// Side: server.
     /// `GoalSelector.addGoal` on the mob's target selector. The same rules
     /// as `add_goal`.
-    fn mob_add_target_goal(
-        &mut self,
-        mob: MobRef,
-        priority: i32,
-        goal: &NativeGoal,
-    ) -> bool {
+    fn mob_add_target_goal(&mut self, mob: MobRef, priority: i32, goal: &NativeGoal) -> bool {
         crate::phase::unprovided(
             "BackendMut::mob_add_target_goal",
             "mob_add_target_goal",

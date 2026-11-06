@@ -1,7 +1,7 @@
 //! The game's side of the `living_flags` area (`horizon-mod-api/src/host/living_flags.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LivingFlagsBackend for Game<'_> {
     fn living_gliding_ticks(&self, living: LivingRef) -> Option<i32> {
         mod_api::__private::check_access(
@@ -46,10 +46,7 @@ impl LivingFlagsBackend for Game<'_> {
         self.native_living_is_climbing(living)
     }
     fn living_baby(&self, living: LivingRef) -> Option<bool> {
-        mod_api::__private::check_access(
-            "living_baby",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("living_baby", mod_api::__private::LoadAccess::WorldOnly);
         self.native_living_baby(living)
     }
 }

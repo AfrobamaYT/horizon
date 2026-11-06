@@ -78,13 +78,14 @@ impl Game<'_> {
     /// the block removes or replaces that entity, so the block is not read
     /// again here.
     pub(super) fn tick_spawner(&mut self, key: Pos) -> Result<()> {
-        let Some(BlockEntity::Spawner(mut spawner)) = self.world.block_entities.take(&key) else {
+        let Some((lease, BlockEntity::Spawner(mut spawner))) = self.world.block_entities.take(&key)
+        else {
             return Ok(());
         };
         let result = self.server_tick_spawner(key, &mut spawner);
         self.world
             .block_entities
-            .put(key, BlockEntity::Spawner(spawner));
+            .put(lease, BlockEntity::Spawner(spawner));
         result
     }
     /// The client ticks of these spawners, then the shown mobs of spawners

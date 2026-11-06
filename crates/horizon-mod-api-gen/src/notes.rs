@@ -12,17 +12,12 @@ const HEADER: &str = "# Hook notes\n";
 /// Renders the page from the declarations' notes, in catalog order: the general notes, then the hooks'.
 pub fn render(catalog: &Catalog) -> String {
     let mut page = String::from(HEADER);
-    for notes in catalog
-        .general_notes
-        .as_deref()
-        .into_iter()
-        .chain(
-            catalog
-                .hooks
-                .iter()
-                .filter_map(|hook| hook.notes.as_deref()),
-        )
-    {
+    for notes in catalog.general_notes.as_deref().into_iter().chain(
+        catalog
+            .hooks
+            .iter()
+            .filter_map(|hook| hook.notes.as_deref()),
+    ) {
         page.push('\n');
         page.push_str(notes.trim_end());
         page.push('\n');

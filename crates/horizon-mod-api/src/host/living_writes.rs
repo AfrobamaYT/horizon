@@ -15,6 +15,15 @@ pub trait LivingWritesBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    ///
+    fn living_used_item_hand(&self, living: LivingRef) -> Option<Hand> {
+        crate::phase::unprovided(
+            "Backend::living_used_item_hand",
+            "living_used_item_hand",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' server writes of the `living_writes` area, implemented by the game and reached through [`Backend`].
 #[doc(hidden)]
@@ -27,12 +36,7 @@ pub trait LivingWritesBackendMut {
     /// `send_to_self`. True when a swing started. Mobs and players; false
     /// for armor stands and the dragon, and for a player other than the
     /// acting one while another player acts.
-    fn living_swing(
-        &mut self,
-        living: LivingRef,
-        hand: Hand,
-        send_to_self: bool,
-    ) -> bool {
+    fn living_swing(&mut self, living: LivingRef, hand: Hand, send_to_self: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_swing",
             "living_swing",
@@ -93,11 +97,7 @@ pub trait LivingWritesBackendMut {
     /// Side: server.
     /// `LivingEntity.removeStingerTime`, as `set_arrow_removal_ticks` for the
     /// stingers.
-    fn living_set_stinger_removal_ticks(
-        &mut self,
-        living: LivingRef,
-        ticks: i32,
-    ) -> bool {
+    fn living_set_stinger_removal_ticks(&mut self, living: LivingRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::living_set_stinger_removal_ticks",
             "living_set_stinger_removal_ticks",
@@ -117,6 +117,24 @@ pub trait LivingWritesBackendMut {
         crate::phase::unprovided(
             "BackendMut::living_set_item_use_remaining",
             "living_set_item_use_remaining",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
+    ///
+    fn living_start_using_item(&mut self, living: LivingRef, hand: Hand) -> bool {
+        crate::phase::unprovided(
+            "BackendMut::living_start_using_item",
+            "living_start_using_item",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
+    ///
+    fn living_release_using_item(&mut self, living: LivingRef) -> bool {
+        crate::phase::unprovided(
+            "BackendMut::living_release_using_item",
+            "living_release_using_item",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

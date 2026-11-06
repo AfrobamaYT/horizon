@@ -180,11 +180,7 @@ pub trait EntityStateBackend {
 pub trait EntityStateBackendMut {
     /// Side: server.
     /// Sets the remaining fire ticks (`Entity.setRemainingFireTicks`).
-    fn entity_set_remaining_fire_ticks(
-        &mut self,
-        entity: EntityRef,
-        ticks: i32,
-    ) -> bool {
+    fn entity_set_remaining_fire_ticks(&mut self, entity: EntityRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::entity_set_remaining_fire_ticks",
             "entity_set_remaining_fire_ticks",

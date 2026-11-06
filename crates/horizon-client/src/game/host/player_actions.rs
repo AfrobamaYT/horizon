@@ -1,7 +1,7 @@
 //! The game's side of the `player_actions` area (`horizon-mod-api/src/host/player_actions.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl PlayerActionsBackendMut for Game<'_> {
     fn player_perform_action(
         &mut self,

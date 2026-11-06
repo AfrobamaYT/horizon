@@ -54,8 +54,7 @@ impl mod_api::prelude::BlockStateIdsBackend for Server {
             .to_owned()
     }
 }
-impl mod_api::Backend for Server {
-}
+impl mod_api::Backend for Server {}
 mod_api::impl_backend_areas!(Server, except(block_state_ids));
 impl mod_api::prelude::BlockStateIdsHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
@@ -87,8 +86,7 @@ impl mod_api::prelude::ServicesServerHost for Server {
         self
     }
 }
-impl mod_api::ServerHost for Server {
-}
+impl mod_api::ServerHost for Server {}
 mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
@@ -183,7 +181,8 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     );
     let mut server = Server::default();
     let falling_source =
-        mod_api::prelude::TagFluidReadsHost::state_fluid_state(&server, mod_api::BlockStateId(18)).unwrap();
+        mod_api::prelude::TagFluidReadsHost::state_fluid_state(&server, mod_api::BlockStateId(18))
+            .unwrap();
     assert!(falling_source.falling && falling_source.is_source() && !falling_source.is_empty());
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();

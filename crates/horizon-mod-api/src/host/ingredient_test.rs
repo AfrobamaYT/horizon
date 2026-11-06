@@ -7,11 +7,7 @@ pub trait IngredientTestBackend {
     /// Side: both.
     /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
     /// game's loop context.
-    fn recipe_ingredient_test(
-        &self,
-        ingredient: &Ingredient,
-        stack: &ItemStack,
-    ) -> bool {
+    fn recipe_ingredient_test(&self, ingredient: &Ingredient, stack: &ItemStack) -> bool {
         crate::phase::unprovided(
             "Backend::recipe_ingredient_test",
             "recipe_ingredient_test",

@@ -23,12 +23,7 @@ pub trait LevelBlockWritesBackendMut {
     }
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
-    fn level_remove_block(
-        &mut self,
-        level: LevelRef,
-        pos: [i32; 3],
-        moved: bool,
-    ) -> bool {
+    fn level_remove_block(&mut self, level: LevelRef, pos: [i32; 3], moved: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::level_remove_block",
             "level_remove_block",

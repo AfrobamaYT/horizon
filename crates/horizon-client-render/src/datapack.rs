@@ -625,7 +625,8 @@ pub struct DataStore {
     /// `item_modifier` files, for `/item modify`.
     pub item_modifiers: BTreeMap<String, serde_json::Value>,
     /// The content tables' raw files from the packs after the built-in one:
-    /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `dialog/`, `damage_type/`, `data_maps/` and `tags/…/` files, by
+    /// Server JSON resources (recipes, loot, enchantments, songs, instruments,
+    /// predicates, modifiers, advancements, registries, data maps and tags), by
     /// `<kind-dir>/<ns>:<path>`, each id's files in pack order. The tables
     /// merge them over what they read from the resource root.
     pub files: BTreeMap<String, Vec<Vec<u8>>>,
@@ -634,7 +635,8 @@ pub struct DataStore {
 }
 /// `<kind-dir>/<ns>:<path>` for a pack file the content tables read:
 /// `recipe/`, `recipe_filter/`, `loot_table/`, `advancement/`, `trade_set/`,
-/// `villager_trade/`, `dialog/`, `damage_type/`, `data_maps/` or `tags/<sub>/`, where the id keeps the sub
+/// `villager_trade/`, `dialog/`, `damage_type/`, `data_maps/`, enchantments, songs,
+/// instruments, predicates, item modifiers or `tags/<sub>/`, where the id keeps the sub
 /// path so a nested tag kind stays addressable.
 fn content_id(file: &str) -> Option<String> {
     let rest = file.strip_prefix("data/")?;
@@ -642,7 +644,8 @@ fn content_id(file: &str) -> Option<String> {
     let (kind, rest) = rest.split_once('/')?;
     let kind = match kind {
         "recipe" | "recipe_filter" | "loot_table" | "advancement" | "trade_set"
-        | "villager_trade" | "dialog" | "damage_type" | "data_maps" => kind,
+        | "villager_trade" | "dialog" | "damage_type" | "data_maps" | "enchantment"
+        | "jukebox_song" | "instrument" | "predicate" | "item_modifier" => kind,
         // A tag id is `{ns}:{path-under-tags}` (`tags/worldgen/biome/
         // test:sub/mytag`), the whole path after the namespace, so nested
         // registries keep their directory (`TagLoader`'s id shape).
@@ -665,6 +668,20 @@ fn resource_id(file: &str, kind: &str, ext: &str) -> Option<String> {
 }
 impl DataStore {
     pub fn load(packs: &[&DataPack]) -> Self {
+        Self::load_impl(packs, None)
+    }
+    /// Command resources and function tags share the owning server load's
+    /// conditions; raw JSON stacks remain intact for world-table readers.
+    pub fn load_with_conditions(
+        packs: &[&DataPack],
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Self {
+        Self::load_impl(packs, Some(conditions))
+    }
+    fn load_impl(
+        packs: &[&DataPack],
+        conditions: Option<&horizon_world::conditions::LoadConditions>,
+    ) -> Self {
         let mut s = Self::default();
         for pack in packs {
             // `tags` walks the whole tags tree, so a `tags/function` file is
@@ -676,8 +693,11 @@ impl DataStore {
                 "damage_type",
                 "data_maps",
                 "dialog",
+                "enchantment",
                 "function",
+                "instrument",
                 "item_modifier",
+                "jukebox_song",
                 "loot_table",
                 "predicate",
                 "recipe",
@@ -688,6 +708,15 @@ impl DataStore {
             ]) {
                 if !seen.insert(f.clone()) {
                     continue;
+                }
+                // Preserve JSON stacks independently of the command views
+                // below. World-table readers evaluate the winning resource's
+                // conditions using their captured server inventory.
+                if !builtin
+                    && let Some(id) = content_id(&f)
+                    && let Some(bytes) = pack.read(&f)
+                {
+                    s.files.entry(id).or_default().push(bytes);
                 }
                 if let Some(id) = resource_id(&f, "function", ".mcfunction")
                     && let Some(bytes) = pack.read(&f)
@@ -702,6 +731,9 @@ impl DataStore {
                     && let Some(bytes) = pack.read(&f)
                     && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
                 {
+                    if conditions.is_some_and(|conditions| !conditions.allows(&v)) {
+                        continue;
+                    }
                     let entries = tag_entries(&v);
                     let slot = s.function_tags.entry(id).or_default();
                     if v["replace"].as_bool() == Some(true) {
@@ -718,16 +750,12 @@ impl DataStore {
                     && let Ok(v) = serde_json::from_slice(&bytes)
                 {
                     s.item_modifiers.insert(id, v);
-                } else if !builtin
-                    && let Some(id) = content_id(&f)
-                    && let Some(bytes) = pack.read(&f)
-                {
-                    // The built-in pack's content files are the resource
-                    // root's own, which the tables read from disk; only the
-                    // world's packs come through here.
-                    s.files.entry(id).or_default().push(bytes);
                 }
             }
+        }
+        if let Some(conditions) = conditions {
+            s.predicates.retain(|_, value| conditions.allows(value));
+            s.item_modifiers.retain(|_, value| conditions.allows(value));
         }
         s
     }
@@ -1332,6 +1360,109 @@ mod tests {
             .function_tags
             .insert("d:40".into(), vec![("t:deep".into(), true)]);
         assert_eq!(store.tag_functions("d:0"), ["t:deep"]);
+    }
+
+    #[test]
+    fn server_json_resources_keep_ordered_stacks_for_conditional_readers() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-server-json-stacks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let kinds = [
+            "enchantment",
+            "jukebox_song",
+            "instrument",
+            "predicate",
+            "item_modifier",
+        ];
+        let mut packs = Vec::new();
+        for name in ["low", "high"] {
+            let folder = root.join(name);
+            for kind in kinds {
+                let file = folder.join(format!("data/demo/{kind}/nested/entry.json"));
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, serde_json::json!({"layer":name,"neoforge:conditions":[{"type":"unsupported"}]}).to_string()).unwrap();
+            }
+            packs.push(DataPack::from_source(
+                name.into(),
+                ResourceSource::directory(folder),
+            ));
+        }
+        let store = DataStore::load(&packs.iter().collect::<Vec<_>>());
+        for kind in kinds {
+            let versions = &store.files[&format!("{kind}/demo:nested/entry")];
+            assert_eq!(versions.len(), 2);
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&versions[0]).unwrap()["layer"],
+                "low"
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&versions[1]).unwrap()["layer"],
+                "high"
+            );
+        }
+        assert!(store.predicates.contains_key("demo:nested/entry"));
+        assert!(store.item_modifiers.contains_key("demo:nested/entry"));
+        let filtered = DataStore::load_with_conditions(
+            &packs.iter().collect::<Vec<_>>(),
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
+        assert!(filtered.predicates.is_empty());
+        assert!(filtered.item_modifiers.is_empty());
+        assert_eq!(filtered.files, store.files);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn command_json_selects_before_conditions_and_function_tags_gate_each_layer() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-command-conditions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut packs = Vec::new();
+        for name in ["low", "high"] {
+            let folder = root.join(name);
+            let conditions = if name == "high" {
+                serde_json::json!([{"type":"neoforge:mod_loaded","modid":"provider"}])
+            } else {
+                serde_json::json!([])
+            };
+            for kind in ["predicate", "item_modifier"] {
+                let file = folder.join(format!("data/demo/{kind}/entry.json"));
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(
+                    file,
+                    serde_json::json!({"layer":name,"neoforge:conditions":conditions}).to_string(),
+                )
+                .unwrap();
+            }
+            let dir = folder.join("data/demo/tags/function");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("load.json"), serde_json::json!({"replace":true,"values":[format!("demo:{name}")],"neoforge:conditions":conditions}).to_string()).unwrap();
+            std::fs::write(
+                dir.join("unknown.json"),
+                r#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true}"#,
+            )
+            .unwrap();
+            packs.push(DataPack::from_source(
+                name.into(),
+                ResourceSource::directory(folder),
+            ));
+        }
+        let refs = packs.iter().collect::<Vec<_>>();
+        let off = DataStore::load_with_conditions(
+            &refs,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        );
+        assert!(off.predicates.is_empty());
+        assert!(off.item_modifiers.is_empty());
+        assert_eq!(off.function_tags["demo:load"], [("demo:low".into(), true)]);
+        assert!(!off.function_tags.contains_key("demo:unknown"));
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let on = DataStore::load_with_conditions(&refs, &enabled);
+        assert_eq!(on.predicates["demo:entry"]["layer"], "high");
+        assert_eq!(on.item_modifiers["demo:entry"]["layer"], "high");
+        assert_eq!(on.function_tags["demo:load"], [("demo:high".into(), true)]);
+        assert_eq!(on.files, off.files);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

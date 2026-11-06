@@ -28,10 +28,7 @@ pub trait DisplayRefsBackend {
     }
     /// Side: server.
     /// `Display.createTransformation`: the transformation as shown.
-    fn display_transformation(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeTransformation> {
+    fn display_transformation(&self, display: DisplayRef) -> Option<NativeTransformation> {
         crate::phase::unprovided(
             "Backend::display_transformation",
             "display_transformation",
@@ -230,10 +227,7 @@ pub trait DisplayRefsBackend {
     }
     /// Side: server.
     /// `ItemDisplay.getItemTransform`: how the item is displayed.
-    fn display_item_context(
-        &self,
-        display: DisplayRef,
-    ) -> Option<NativeItemDisplayContext> {
+    fn display_item_context(&self, display: DisplayRef) -> Option<NativeItemDisplayContext> {
         crate::phase::unprovided(
             "Backend::display_item_context",
             "display_item_context",
@@ -261,11 +255,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `Display.setBillboardConstraints`.
-    fn display_set_billboard(
-        &mut self,
-        display: DisplayRef,
-        billboard: NativeBillboard,
-    ) -> bool {
+    fn display_set_billboard(&mut self, display: DisplayRef, billboard: NativeBillboard) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_billboard",
             "display_set_billboard",
@@ -306,11 +296,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `Display.setShadowStrength`. False for a value that isn't finite.
-    fn display_set_shadow_strength(
-        &mut self,
-        display: DisplayRef,
-        strength: f32,
-    ) -> bool {
+    fn display_set_shadow_strength(&mut self, display: DisplayRef, strength: f32) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_shadow_strength",
             "display_set_shadow_strength",
@@ -337,11 +323,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `Display.setGlowColorOverride`.
-    fn display_set_glow_color_override(
-        &mut self,
-        display: DisplayRef,
-        color: i32,
-    ) -> bool {
+    fn display_set_glow_color_override(&mut self, display: DisplayRef, color: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_glow_color_override",
             "display_set_glow_color_override",
@@ -350,11 +332,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `Display.setTransformationInterpolationDuration`.
-    fn display_set_interpolation_duration(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_interpolation_duration(&mut self, display: DisplayRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_interpolation_duration",
             "display_set_interpolation_duration",
@@ -365,11 +343,7 @@ pub trait DisplayRefsBackendMut {
     /// `Display.setTransformationInterpolationDelay`. Like vanilla, every
     /// call is sent to the clients that track the display, even with the
     /// delay it already has, and each client restarts its interpolation.
-    fn display_set_start_interpolation(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_start_interpolation(&mut self, display: DisplayRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_start_interpolation",
             "display_set_start_interpolation",
@@ -379,11 +353,7 @@ pub trait DisplayRefsBackendMut {
     /// Side: server.
     /// `Display.setPosRotInterpolationDuration`, kept from 0 to 59 as
     /// vanilla's load keeps it.
-    fn display_set_teleport_duration(
-        &mut self,
-        display: DisplayRef,
-        ticks: i32,
-    ) -> bool {
+    fn display_set_teleport_duration(&mut self, display: DisplayRef, ticks: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_teleport_duration",
             "display_set_teleport_duration",
@@ -468,11 +438,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `BlockDisplay.setBlockState`; false for another kind of display or an unknown state.
-    fn display_set_block_state(
-        &mut self,
-        display: DisplayRef,
-        state: BlockStateId,
-    ) -> bool {
+    fn display_set_block_state(&mut self, display: DisplayRef, state: BlockStateId) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_block_state",
             "display_set_block_state",
@@ -481,11 +447,7 @@ pub trait DisplayRefsBackendMut {
     }
     /// Side: server.
     /// `ItemDisplay.setItemStack`; None empties it. False for another kind of display.
-    fn display_set_item(
-        &mut self,
-        display: DisplayRef,
-        stack: Option<ItemStack>,
-    ) -> bool {
+    fn display_set_item(&mut self, display: DisplayRef, stack: Option<ItemStack>) -> bool {
         crate::phase::unprovided(
             "BackendMut::display_set_item",
             "display_set_item",

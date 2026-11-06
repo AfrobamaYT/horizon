@@ -1,7 +1,7 @@
 //! The game's side of the `level_world` area (`horizon-mod-api/src/host/level_world.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelWorldBackend for Game<'_> {
     fn level_dimension_shape(&self, level: LevelRef) -> Option<LevelDimensionShape> {
         mod_api::__private::check_access(
@@ -11,10 +11,7 @@ impl LevelWorldBackend for Game<'_> {
         self.native_level_dimension_shape(level)
     }
     fn level_seed(&self, level: LevelRef) -> Option<i64> {
-        mod_api::__private::check_access(
-            "level_seed",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("level_seed", mod_api::__private::LoadAccess::WorldOnly);
         self.native_level_seed(level)
     }
     fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
@@ -24,11 +21,7 @@ impl LevelWorldBackend for Game<'_> {
         );
         self.native_level_difficulty(level)
     }
-    fn level_game_rule_bool(
-        &self,
-        level: LevelRef,
-        key: BoolGameRuleKey,
-    ) -> Option<bool> {
+    fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
         mod_api::__private::check_access(
             "level_game_rule_bool",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -85,10 +78,7 @@ impl LevelWorldBackend for Game<'_> {
         self.native_level_is_thundering(level)
     }
     fn level_random(&self, level: LevelRef) -> Option<LegacyRandom> {
-        mod_api::__private::check_access(
-            "level_random",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("level_random", mod_api::__private::LoadAccess::WorldOnly);
         self.native_level_random(level)
     }
 }

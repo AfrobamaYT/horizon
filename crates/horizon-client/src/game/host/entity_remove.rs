@@ -1,7 +1,7 @@
 //! The game's side of the `entity_remove` area (`horizon-mod-api/src/host/entity_remove.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityRemoveBackendMut for Game<'_> {
     fn entity_discard(&mut self, entity: EntityRef) -> bool {
         mod_api::__private::check_access(

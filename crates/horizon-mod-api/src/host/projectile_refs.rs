@@ -39,10 +39,7 @@ pub trait ProjectileRefsBackend {
     }
     /// Side: server.
     /// `AbstractArrow.getPierceLevel`: the signed byte stored by vanilla.
-    fn projectile_pierce_level(
-        &self,
-        projectile: ProjectileRef,
-    ) -> Result<i8, PierceLevelError> {
+    fn projectile_pierce_level(&self, projectile: ProjectileRef) -> Result<i8, PierceLevelError> {
         crate::phase::unprovided(
             "Backend::projectile_pierce_level",
             "projectile_pierce_level",
@@ -143,11 +140,7 @@ pub trait ProjectileRefsBackendMut {
     /// Side: server.
     /// `AbstractArrow.setBaseDamage`. False for a stale handle, a projectile
     /// that is not an arrow, or a value that is not finite.
-    fn projectile_set_base_damage(
-        &mut self,
-        projectile: ProjectileRef,
-        damage: f64,
-    ) -> bool {
+    fn projectile_set_base_damage(&mut self, projectile: ProjectileRef, damage: f64) -> bool {
         crate::phase::unprovided(
             "BackendMut::projectile_set_base_damage",
             "projectile_set_base_damage",
@@ -157,11 +150,7 @@ pub trait ProjectileRefsBackendMut {
     /// Side: server.
     /// `AbstractArrow.setCritArrow`; clients see the flag at once through the
     /// entity data. False for a stale handle or a projectile that is not an arrow.
-    fn projectile_set_critical(
-        &mut self,
-        projectile: ProjectileRef,
-        critical: bool,
-    ) -> bool {
+    fn projectile_set_critical(&mut self, projectile: ProjectileRef, critical: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::projectile_set_critical",
             "projectile_set_critical",

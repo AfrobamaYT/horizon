@@ -1,7 +1,7 @@
 //! The game's side of the `player_food` area (`horizon-mod-api/src/host/player_food.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl PlayerFoodBackend for Game<'_> {
     fn player_needs_food(&self, player: PlayerRef) -> Option<bool> {
         mod_api::__private::check_access(
@@ -40,16 +40,8 @@ impl PlayerFoodBackend for Game<'_> {
     }
 }
 impl PlayerFoodBackendMut for Game<'_> {
-    fn player_feed(
-        &mut self,
-        player: PlayerRef,
-        nutrition: i32,
-        saturation_modifier: f32,
-    ) -> bool {
-        mod_api::__private::check_access(
-            "player_feed",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+    fn player_feed(&mut self, player: PlayerRef, nutrition: i32, saturation_modifier: f32) -> bool {
+        mod_api::__private::check_access("player_feed", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_feed(player, nutrition, saturation_modifier)
     }
     fn player_add_exhaustion(&mut self, player: PlayerRef, amount: f32) -> bool {

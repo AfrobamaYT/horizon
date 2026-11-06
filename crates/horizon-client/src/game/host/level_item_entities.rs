@@ -1,7 +1,7 @@
 //! The game's side of the `level_item_entities` area (`horizon-mod-api/src/host/level_item_entities.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl LevelItemEntitiesBackendMut for Game<'_> {
     fn level_pop_resource(
         &mut self,
@@ -44,15 +44,7 @@ impl LevelItemEntitiesBackendMut for Game<'_> {
             "level_spawn_item_with_motion",
             mod_api::__private::LoadAccess::WorldOnly,
         );
-        self.native_level_spawn_item_with_motion(
-            level,
-            x,
-            y,
-            z,
-            stack,
-            motion,
-            pickup_delay,
-        )
+        self.native_level_spawn_item_with_motion(level, x, y, z, stack, motion, pickup_delay)
     }
     fn level_award_experience(
         &mut self,

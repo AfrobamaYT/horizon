@@ -1,7 +1,7 @@
 //! The game's side of the `entity_riding` area (`horizon-mod-api/src/host/entity_riding.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl EntityRidingBackend for Game<'_> {
     fn entity_vehicle(&self, entity: EntityRef) -> Option<EntityRef> {
         mod_api::__private::check_access(
@@ -40,12 +40,7 @@ impl EntityRidingBackend for Game<'_> {
     }
 }
 impl EntityRidingBackendMut for Game<'_> {
-    fn entity_start_riding(
-        &mut self,
-        entity: EntityRef,
-        vehicle: EntityRef,
-        force: bool,
-    ) -> bool {
+    fn entity_start_riding(&mut self, entity: EntityRef, vehicle: EntityRef, force: bool) -> bool {
         mod_api::__private::check_access(
             "entity_start_riding",
             mod_api::__private::LoadAccess::WorldOnly,

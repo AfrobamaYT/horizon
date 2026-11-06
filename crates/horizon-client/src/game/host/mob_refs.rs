@@ -1,13 +1,10 @@
 //! The game's side of the `mob_refs` area (`horizon-mod-api/src/host/mob_refs.rs`).
 use crate::game::Game;
-use mod_api::{prelude::*, *};
 use mod_api::__private::game::*;
+use mod_api::{prelude::*, *};
 impl MobRefsHost for Game<'_> {
     fn mob(&self, entity: EntityRef) -> Option<MobRef> {
-        mod_api::__private::check_access(
-            "mob",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_ref(entity)
     }
 }
@@ -27,10 +24,7 @@ impl MobRefsBackend for Game<'_> {
         self.native_mob_leash_holder(mob)
     }
     fn mob_target(&self, mob: MobRef) -> Option<LivingRef> {
-        mod_api::__private::check_access(
-            "mob_target",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob_target", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_target(mob)
     }
     fn mob_is_aggressive(&self, mob: MobRef) -> Option<bool> {
@@ -55,10 +49,7 @@ impl MobRefsBackend for Game<'_> {
         self.native_mob_requires_custom_persistence(mob)
     }
     fn mob_no_ai(&self, mob: MobRef) -> Option<bool> {
-        mod_api::__private::check_access(
-            "mob_no_ai",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob_no_ai", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_no_ai(mob)
     }
     fn mob_restrict_center(&self, mob: MobRef) -> Option<[i32; 3]> {
@@ -141,24 +132,15 @@ impl MobRefsBackendMut for Game<'_> {
         self.native_mob_set_no_ai(mob, no_ai)
     }
     fn mob_set_baby(&mut self, mob: MobRef, baby: bool) -> bool {
-        mod_api::__private::check_access(
-            "mob_set_baby",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob_set_baby", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_set_baby(mob, baby)
     }
     fn mob_look_at(&mut self, mob: MobRef, at: [f64; 3]) -> bool {
-        mod_api::__private::check_access(
-            "mob_look_at",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob_look_at", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_look_at(mob, at)
     }
     fn mob_jump(&mut self, mob: MobRef) -> bool {
-        mod_api::__private::check_access(
-            "mob_jump",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
+        mod_api::__private::check_access("mob_jump", mod_api::__private::LoadAccess::WorldOnly);
         self.native_mob_jump(mob)
     }
     fn mob_restrict_to(&mut self, mob: MobRef, at: [i32; 3], radius: i32) -> bool {

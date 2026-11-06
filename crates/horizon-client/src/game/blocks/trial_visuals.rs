@@ -3,7 +3,7 @@
 //! the ambient sound) and `VaultBlockEntity.Client.tick` (idle smoke and
 //! flames, the connection particles towards the player, the ambient sound).
 //! Every draw comes from the client level's random.
-use super::Game;
+use super::{Game, vault::TakenVault};
 use horizon_client::{
     containers::BlockEntity,
     mobs::trial_spawner::TrialState,
@@ -230,14 +230,20 @@ impl Game<'_> {
     }
     /// `VaultBlockEntity.Client.tick`.
     pub(super) fn client_tick_vault(&mut self, key: Pos) {
-        let Some((mut vault, _, ominous)) = self.take_vault(key) else {
+        let Some(TakenVault {
+            lease,
+            mut vault,
+            ominous,
+            ..
+        }) = self.take_vault(key)
+        else {
             return;
         };
         vault.update_display_item_spin();
         let shows = vault.display_item.is_some();
         self.world
             .block_entities
-            .put(key, BlockEntity::Vault(vault));
+            .put(lease, BlockEntity::Vault(vault));
         let pos = [key.0, key.1, key.2];
         if self.world.game_time % 20 == 0 {
             self.vault_connection_particles(pos);

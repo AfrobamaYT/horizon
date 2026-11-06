@@ -11,13 +11,7 @@ pub trait LevelEventsBackendMut {
     /// block with state id `data`). No player is left out, the acting one
     /// included. False for an event that carries a block state (2001, 2014,
     /// 3008) when `data` isn't one.
-    fn level_level_event(
-        &mut self,
-        level: LevelRef,
-        id: i32,
-        pos: [i32; 3],
-        data: i32,
-    ) -> bool {
+    fn level_level_event(&mut self, level: LevelRef, id: i32, pos: [i32; 3], data: i32) -> bool {
         crate::phase::unprovided(
             "BackendMut::level_level_event",
             "level_level_event",
@@ -64,12 +58,7 @@ pub trait LevelEventsBackendMut {
     /// `visual_only` it only flashes and sounds (`setVisualOnly`). The
     /// `lightning_strike` hook hears it first with the cause `mod` and may
     /// cancel it. False for a chunk that isn't loaded or a canceled strike.
-    fn level_strike_lightning(
-        &mut self,
-        level: LevelRef,
-        at: [f64; 3],
-        visual_only: bool,
-    ) -> bool {
+    fn level_strike_lightning(&mut self, level: LevelRef, at: [f64; 3], visual_only: bool) -> bool {
         crate::phase::unprovided(
             "BackendMut::level_strike_lightning",
             "level_strike_lightning",
