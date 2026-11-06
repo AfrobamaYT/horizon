@@ -201,6 +201,10 @@ pub mod vanilla {
     pub const PVP: RuleIndex = vanilla_index("pvp");
     /// The `respawn_radius` rule.
     pub const RESPAWN_RADIUS: RuleIndex = vanilla_index("respawn_radius");
+    /// The `advance_weather` rule.
+    pub const ADVANCE_WEATHER: RuleIndex = vanilla_index("advance_weather");
+    /// The `spawn_phantoms` rule.
+    pub const SPAWN_PHANTOMS: RuleIndex = vanilla_index("spawn_phantoms");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.

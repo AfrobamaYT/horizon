@@ -379,9 +379,9 @@ impl Game<'_> {
     /// server thread's players are all hosted).
     pub(super) fn spawn_phantoms(&mut self) {
         let rules = &self.ui.rules;
-        if !rules.bool("spawn_mobs")
-            || !rules.bool("spawn_monsters")
-            || !rules.bool("spawn_phantoms")
+        if !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_MONSTERS)
+            || !rules.bool_at(horizon_client::gamerules::vanilla::SPAWN_PHANTOMS)
             || self.dim != Dim::Overworld
             || !self.has_custom_spawner(mod_api::SpawnerKind::Phantom)
         {
