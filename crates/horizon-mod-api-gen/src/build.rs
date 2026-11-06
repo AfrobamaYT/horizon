@@ -15,6 +15,12 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 super::game_modules::declarations(&root.join("crates/horizon-client/src/game"))?,
             ),
             ("native_hook_modules.rs", native_hook_modules(root)?),
+            (
+                "lan_action_modules.rs",
+                super::game_modules::lan_action_modules(
+                    &root.join("crates/horizon-client/src/game/network/lan_actions"),
+                )?,
+            ),
             ("mod_api_host_generated.rs", generated.implementation),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the

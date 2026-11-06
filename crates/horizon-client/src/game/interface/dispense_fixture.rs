@@ -812,7 +812,7 @@ impl Game<'_> {
     /// The saved block entity of a campfire, decorated pot, chiseled
     /// bookshelf or shelf, as a loaded world keeps it.
     fn fixture_fill_saved(&mut self, p: (i32, i32, i32), slot: usize, stack: Option<ItemStack>) {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let name = self
             .res
             .facts()

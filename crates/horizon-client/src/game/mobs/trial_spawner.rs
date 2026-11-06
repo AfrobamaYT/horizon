@@ -15,11 +15,11 @@ use horizon_client::{
         },
     },
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::nbt::Tag;
 use std::collections::HashMap;
 
 type Pos = (i32, i32, i32);

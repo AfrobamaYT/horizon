@@ -2,9 +2,12 @@
 //! pale oak logs on both ends of its axis and the `creaking_active`
 //! environment attribute. The block entity (protector, particles, resin)
 //! lives with the entities in the client.
-use super::{Behaviours, Dimension, LevelAccess, Sim, Ticks, update::rel};
 use crate::registry::BlockStateId;
 use horizon_core::{geometry::Direction, position::BlockPos};
+use {
+    super::{Behaviours, LevelAccess, Sim, Ticks, update::rel},
+    horizon_core::dimension::Dimension,
+};
 
 /// `Direction.Axis.getDirections()`.
 fn axis_directions(axis: &str) -> [Direction; 2] {

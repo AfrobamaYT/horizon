@@ -98,10 +98,35 @@ pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
             .at(format!("{}: {}", d.origin, d.target)));
         }
     }
-    for (path, text) in changes {
-        fs::write(path, text)?;
+    let mut temps = Vec::new();
+    for (path, text) in &changes {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("site");
+        let temp = path.with_file_name(format!(".{name}.site-tmp"));
+        if let Err(error) = fs::write(&temp, text) {
+            for (temp, _) in &temps {
+                let _ = fs::remove_file(temp);
+            }
+            return Err(error.into());
+        }
+        temps.push((temp, path));
     }
-    points::dependencies(root, packages).map_err(Cause::Source)?;
+    if let Err(error) = points::dependencies(root, packages) {
+        for (temp, _) in &temps {
+            let _ = fs::remove_file(temp);
+        }
+        return Err(Cause::Source(error).into());
+    }
+    for index in 0..temps.len() {
+        if let Err(error) = fs::rename(&temps[index].0, temps[index].1) {
+            for (temp, _) in &temps[index..] {
+                let _ = fs::remove_file(temp);
+            }
+            return Err(error.into());
+        }
+    }
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(sites)
 }

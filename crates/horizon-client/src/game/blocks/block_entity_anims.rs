@@ -18,12 +18,12 @@ use horizon_client::{
     save::number,
     skins,
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{
     geometry::{Aabb, Vec3},
     position::BlockPos,
     random::RandomSource,
 };
-use horizon_world::nbt::Tag;
 
 /// The handle of the local player among a bell's gathered entities.
 const PLAYER: u64 = u64::MAX;

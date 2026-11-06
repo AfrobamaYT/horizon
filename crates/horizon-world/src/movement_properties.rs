@@ -1,15 +1,17 @@
 //! Registry-bound block movement coefficients, identities and reloadable tags.
-use crate::{
-    DATA_VERSION,
-    compression::invalid,
-    movement_support::MovementBlockWorld,
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId, BlockTable},
-};
 use horizon_core::position::BlockPos;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, io,
+};
+use {
+    crate::{
+        DATA_VERSION,
+        compression::invalid,
+        movement_support::MovementBlockWorld,
+        registry::{BlockRegistry, BlockStateId, BlockTable},
+    },
+    horizon_core::nbt::Tag,
 };
 
 #[derive(Clone, Copy, Debug)]

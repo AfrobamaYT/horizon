@@ -3,8 +3,11 @@ use horizon_core::{
     geometry::{Axis, VoxelShape},
     random::LegacyRandom,
 };
-use horizon_world::{collision::CachedCollisionRegistry, nbt::Tag, registry::BlockRegistry};
 use std::{collections::BTreeSet, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{collision::CachedCollisionRegistry, registry::BlockRegistry},
+};
 fn text(value: &str) -> Tag {
     Tag::String(value.into())
 }

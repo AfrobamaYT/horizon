@@ -133,8 +133,8 @@ mod tests {
     use super::*;
     use horizon_client::{entities::ArmorStand, mobs::Mob};
     use horizon_core::geometry::Vec3;
+    use horizon_core::nbt::Tag;
     use horizon_protocol::entity_data::{Value, serializer};
-    use horizon_world::nbt::Tag;
     use mod_api::{MobRef, NativeWorldEpoch};
 
     fn dragon_in(game: &mut Game<'_>) -> (EntityRef, DragonRef) {

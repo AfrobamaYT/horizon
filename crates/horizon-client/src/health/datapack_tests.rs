@@ -80,7 +80,7 @@ fn datapack_damage_initial_snapshot_uses_the_prepared_worlds_features() {
         let files: Vec<_> = store.files.into_iter().collect();
         horizon_world::damage_source::Catalog::load(
             &root,
-            &horizon_world::loot::PackOverlay { files: &files },
+            &horizon_world::loot::PackOverlay::new(&files),
         )
         .unwrap()
     };
@@ -111,7 +111,7 @@ fn datapack_damage_uses_custom_identity_armor_fire_and_reloaded_tags() {
     ];
     let open = resources
         .health
-        .with_packs(&root, &PackOverlay { files: &files }, false)
+        .with_packs(&root, &PackOverlay::new(&files), false)
         .unwrap();
     let id = open.damage.id("demo:heated_air").unwrap();
     let player = || {

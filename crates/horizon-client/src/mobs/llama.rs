@@ -204,15 +204,15 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
 }
 /// The llama's own save fields, over the horse ones: `Variant` (the coat id),
 /// `Strength` and a trader llama's `DespawnDelay`.
-pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn to_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     map.insert("Variant".into(), Tag::Int(i32::from(m.extra.variant)));
     map.insert("Strength".into(), Tag::Int(strength(m)));
     if is_trader(m) {
         map.insert("DespawnDelay".into(), Tag::Int(m.extra.ints[0]));
     }
 }
-pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
+pub fn from_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
     use crate::save::number;
     m.extra.variant = number(tag.get("Variant")).unwrap_or(0).clamp(0, 3) as u8;
     m.extra.variant2 = number(tag.get("Strength")).unwrap_or(1).clamp(1, 5) as u8;

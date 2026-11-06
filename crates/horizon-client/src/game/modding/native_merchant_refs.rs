@@ -4,7 +4,7 @@ use horizon_client::{
     merchant::{MerchantOffer, Trader},
     mobs::{Species, render::VILLAGER_TYPES, villager},
 };
-use horizon_world::identifier::Identifier;
+use horizon_core::identifier::Identifier;
 use mod_api::{EntityRef, MerchantRef, PlayerRef};
 
 /// The index of a `minecraft:` registry id in a table of bare names.

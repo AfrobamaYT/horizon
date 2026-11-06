@@ -83,7 +83,7 @@ impl GuestList {
     }
 
     /// Borrow saved data without exposing indexed identity fields.
-    pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_world::nbt::Tag>> {
+    pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_core::nbt::Tag>> {
         let index = self.connection_index(conn)?;
         Some(&mut self.rows[index].saved)
     }

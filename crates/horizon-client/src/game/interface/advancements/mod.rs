@@ -238,7 +238,7 @@ impl adv::World for View<'_, '_> {
     fn smokey(&self, p: [i32; 3]) -> bool {
         horizon_client::beehive::smokey(&self.0.mob_world_base(&[]), p)
     }
-    fn block_entity_nbt(&self, p: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
+    fn block_entity_nbt(&self, p: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
         self.0.block_entity_nbt(p)
     }
     fn in_tag(&self, registry: &str, tag: &str, id: &str) -> bool {
@@ -392,9 +392,21 @@ impl Game<'_> {
             Some(tables) => tables.files.clone(),
             None => super::functions::content_overlay(stack),
         };
+        let conditions = match &self.world_tables {
+            Some(tables) => tables.conditions.clone(),
+            None => horizon_world::conditions::LoadConditions::vanilla(),
+        };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
-            .spawn(move || Tree::shared(&data, &horizon_world::loot::PackOverlay { files: &files }))
+            .spawn(move || {
+                Tree::shared(
+                    &data,
+                    &horizon_world::loot::PackOverlay {
+                        conditions: &conditions,
+                        files: &files,
+                    },
+                )
+            })
             .ok();
     }
     pub(super) fn load_advancements(&mut self) {
@@ -1518,7 +1530,7 @@ impl Game<'_> {
             .data()
             .and_then(|data| data.other("minecraft:max_damage"))
         {
-            Some(horizon_world::nbt::Tag::Int(value)) => i64::from(*value),
+            Some(horizon_core::nbt::Tag::Int(value)) => i64::from(*value),
             _ => i64::from(
                 self.res
                     .items()
@@ -2628,6 +2640,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -3004,6 +3017,7 @@ mod structure_tag_tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -3074,8 +3088,11 @@ mod structure_tag_tests {
             &Default::default(),
             false,
             &[],
+            &[],
         );
-        let (tables, _) = game.build_world_tables(&stack, false).unwrap();
+        let (tables, _) = game
+            .build_world_tables(&stack, false, &root, false)
+            .unwrap();
         game.world_tables = tables;
         assert!(game.world_tables.is_some());
         assert!(holds(&game, "#mypack:village", "minecraft:igloo"));
