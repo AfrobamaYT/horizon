@@ -835,6 +835,15 @@ mod tests {
                 } else {
                     let ticks = |key| horizon_world::datafix::dynamic::as_int(value.get(key), -1);
                     assert_eq!(ticks("delay_ticks"), if patch == "{}" { 0 } else { 40 });
+                    if patch == "{}" {
+                        // The empty KineticWeapon stream fixture from vanilla.
+                        assert_eq!(
+                            received.component(component::KINETIC_WEAPON),
+                            Some(&Component::Raw(vec![
+                                10, 0, 0, 0, 0, 0, 0, 0, 0, 63, 128, 0, 0, 0, 0
+                            ]))
+                        );
+                    }
                     assert_eq!(
                         ticks("contact_cooldown_ticks"),
                         if patch == "{}" { 10 } else { 7 }
