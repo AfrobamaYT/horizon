@@ -12016,21 +12016,21 @@ mod tests {
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "/warp spawn").is_err());
             let (client, _server) = Pipe::pair();
             game.connect_local(client, "ChatTest").unwrap();
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "/warp spawn").is_err());
             game.remote.as_mut().unwrap().joined = true;
-            assert!(ClientHost::send_chat(game, "  ").is_err());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "  ").is_err());
             // Full, then Commands Only, then Hidden.
             game.settings.chat_visibility = 0;
-            assert!(ClientHost::send_chat(game, "hello").is_ok());
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "hello").is_ok());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "/warp spawn").is_ok());
             game.settings.chat_visibility = 1;
-            assert!(ClientHost::send_chat(game, "hello").is_err());
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_ok());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "hello").is_err());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "/warp spawn").is_ok());
             game.settings.chat_visibility = 2;
-            assert!(ClientHost::send_chat(game, "/warp spawn").is_err());
+            assert!(mod_api::prelude::SendChatClientHost::send_chat(game, "/warp spawn").is_err());
         });
     }
 

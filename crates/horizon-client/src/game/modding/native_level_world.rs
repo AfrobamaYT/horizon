@@ -8,6 +8,7 @@ use horizon_client::world::World;
 use horizon_core::position::BlockPos;
 use horizon_core::random::LegacyRandom;
 use horizon_world::registry::BlockStateId;
+use mod_api::prelude::*;
 use mod_api::{BoolGameRuleKey, FeatureFlags, GameRuleValue, LevelDimensionShape, LevelRef};
 use std::sync::Arc;
 use {horizon_core::dimension::Dimension as LevelDimension, horizon_world::level::LevelAccess};
@@ -229,6 +230,7 @@ mod tests {
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
     use horizon_client::gamerules;
+    use mod_api::prelude::*;
     use mod_api::testing::with_mods;
     use mod_api::{
         FeatureFlags, GameRuleChangedEvent, GameRuleValue, Hooks, LevelHost, ModEntry, ServerHost,

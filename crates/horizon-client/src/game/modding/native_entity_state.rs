@@ -11,6 +11,7 @@ use horizon_client::mobs::{Mob, Species, sync};
 use horizon_client::motion::PlayerMotion;
 use horizon_client::pose::Pose;
 use mod_api::EntityRef;
+use mod_api::prelude::*;
 
 /// `Pose`'s serialized names by id (`Pose.STANDING` is 0).
 const POSES: [&str; 18] = [

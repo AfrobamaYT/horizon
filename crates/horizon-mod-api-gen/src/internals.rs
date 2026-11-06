@@ -1364,7 +1364,7 @@ mod tests {
     }
 
     #[test]
-    fn game_area_moves_preserve_internals_points_and_helper_targets() {
+    fn game_area_moves_preserve_internals_and_points() {
         let source = "struct Game; mod feature;";
         let module = "use super::Game; impl Game { fn action(&self) -> u8 { 7 } }";
         let before = Fixture::new(source);
@@ -1381,20 +1381,6 @@ mod tests {
             "crates/horizon-client/src/game/runtime/feature/shared.rs",
             module,
         );
-        fn helpers(root: &Path) -> Vec<String> {
-            let mut methods = Vec::new();
-            crate::game_methods(
-                &root.join("crates/horizon-client/src/game"),
-                "horizon_client::game",
-                &mut methods,
-            )
-            .unwrap();
-            methods
-                .into_iter()
-                .map(|(module, method)| format!("{module}::{}", method.sig.to_token_stream()))
-                .collect()
-        }
-        assert_eq!(helpers(&before.0), helpers(&after.0));
         fn points(root: &Path) -> BTreeSet<String> {
             crate::points::game_files(&root.join("crates/horizon-client/src"), true)
                 .unwrap()
@@ -1483,24 +1469,7 @@ mod tests {
                 "[package]\nname = 'horizon-mod-points'\nversion = '0.1.0'\n",
             );
         }
-        fn inventory(root: &Path) -> (Vec<String>, Vec<serde_json::Value>) {
-            let mut methods = Vec::new();
-            crate::game_methods(
-                &root.join("crates/horizon-client/src/game"),
-                "horizon_client::game",
-                &mut methods,
-            )
-            .unwrap();
-            let methods = methods
-                .into_iter()
-                .map(|(module, method)| {
-                    format!(
-                        "{}::{}",
-                        module.replace("::turns", ""),
-                        method.sig.to_token_stream()
-                    )
-                })
-                .collect();
+        fn inventory(root: &Path) -> Vec<serde_json::Value> {
             let points = crate::points::game_points(root)
                 .unwrap()
                 .into_iter()
@@ -1511,7 +1480,7 @@ mod tests {
                     serde_json::from_str(&json).unwrap()
                 })
                 .collect();
-            (methods, points)
+            points
         }
         assert_eq!(inventory(&before.0), inventory(&after.0));
         let old = discover(&before.0).unwrap();

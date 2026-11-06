@@ -372,6 +372,7 @@ mod sprint_handle_tests {
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::connection::Pipe;
+    use mod_api::prelude::*;
     use mod_api::{ClientHost, EntityRef, Host, NativeWorldEpoch};
     use std::sync::Arc;
 

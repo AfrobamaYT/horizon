@@ -9,6 +9,7 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
 };
 use mod_api::mod_chunk_tickets::ModTicket;
+use mod_api::prelude::*;
 use mod_api::{
     BlockHit, BlockStateId, BlockTransformPreview, ChunkRef, ChunkStatus, Hand, ItemStack,
     LevelRef, LightLayer, NativeTicketOwner, PlayerRef, TicketController, Vec3,
@@ -462,7 +463,7 @@ impl Game<'_> {
     }
     /// `Level.isInWorldBounds`: `pos` within 30,000,000 blocks on x and z and inside the level's
     /// build height. None as for `native_level_height`. Does not load chunks.
-    pub(super) fn native_level_in_world_bounds(
+    pub(in crate::game) fn native_level_in_world_bounds(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -472,7 +473,7 @@ impl Game<'_> {
     }
     /// `Level.isInSpawnableBounds`: 30,000,000 blocks on x and z, 20,000,000 on y. None as for
     /// `native_level_height`. Does not load chunks.
-    pub(super) fn native_level_in_spawnable_bounds(
+    pub(in crate::game) fn native_level_in_spawnable_bounds(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -509,6 +510,7 @@ fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
+    use mod_api::prelude::*;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
     #[test]

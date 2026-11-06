@@ -42,7 +42,7 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
 #[derive(Default)]
 struct Server(Mutex<Vec<String>>);
 
-impl mod_api::Backend for Server {
+impl mod_api::prelude::FluidStatesBackend for Server {
     fn fluid_state_definition(&self, key: mod_api::FluidKey) -> Option<mod_api::FluidDefinition> {
         if mod_api::__private::fluid_id(key)? != "minecraft:water" {
             return Some(mod_api::FluidDefinition::TankOnly);
@@ -80,6 +80,8 @@ impl mod_api::Backend for Server {
             _ => panic!("unexpected guest validation input"),
         }
     }
+}
+impl mod_api::prelude::BlockStateIdsBackend for Server {
     fn block_key_id(&self, key: mod_api::BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")
@@ -91,10 +93,14 @@ impl mod_api::Backend for Server {
             .to_owned()
     }
 }
-impl mod_api::Host for Server {
+impl mod_api::Backend for Server {}
+mod_api::impl_backend_areas!(Server, except(block_state_ids, fluid_states));
+impl mod_api::prelude::BlockStateIdsHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
         Some(mod_api::__private::resolved_block(key)?.default)
     }
+}
+impl mod_api::prelude::TagFluidReadsHost for Server {
     fn state_fluid_state(&self, state: mod_api::BlockStateId) -> Option<mod_api::FluidState> {
         let engine = if state == mod_api::BlockStateId(17) {
             horizon_world::fluid::FluidState::EMPTY
@@ -106,16 +112,21 @@ impl mod_api::Host for Server {
             engine,
         ))
     }
+}
+impl mod_api::Host for Server {
     fn backend(&self) -> Option<mod_api::BackendRef<'_>> {
         Some(mod_api::BackendRef::of(self))
     }
 }
+mod_api::impl_host_areas!(Server, except(block_state_ids, tag_fluid_reads));
 
-impl mod_api::ServerHost for Server {
+impl mod_api::prelude::ServicesServerHost for Server {
     fn messages(&self) -> &dyn mod_api::Messages {
         self
     }
 }
+impl mod_api::ServerHost for Server {}
+mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
     fn broadcast(&self, line: Text) {
@@ -209,7 +220,8 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     );
     let mut server = Server::default();
     let falling_source =
-        mod_api::Host::state_fluid_state(&server, mod_api::BlockStateId(18)).unwrap();
+        mod_api::prelude::TagFluidReadsHost::state_fluid_state(&server, mod_api::BlockStateId(18))
+            .unwrap();
     assert!(falling_source.falling && falling_source.is_source() && !falling_source.is_empty());
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();

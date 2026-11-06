@@ -7,6 +7,7 @@ use horizon_client::{
 };
 use horizon_core::geometry::Vec3;
 use horizon_protocol::packets::configuration::ClientInformation;
+use mod_api::prelude::*;
 use std::sync::{
     Arc,
     atomic::{AtomicI32, AtomicUsize},

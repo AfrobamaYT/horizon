@@ -15,6 +15,7 @@ use super::{
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::registry::BlockStateId;
+use mod_api::prelude::*;
 use mod_api::{
     DimensionKey, EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind,
     NativeBlockUpdateFlags, NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
@@ -135,7 +136,7 @@ impl Game<'_> {
         Some(LevelRef::new(epoch, dim.key()))
     }
     /// The name of a dimension's key.
-    pub(super) fn native_dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+    pub(in crate::game) fn native_dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::dimension_id(key).map(str::to_owned)
     }
     /// The key of the level in place: on a client the level it shows, which
@@ -590,6 +591,7 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 #[cfg(test)]
 pub(super) mod tests {
     use mod_api::__private::game::*;
+    use mod_api::prelude::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
         if std::env::var_os(flag).is_some() {

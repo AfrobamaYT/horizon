@@ -2778,7 +2778,7 @@ impl Game<'_> {
         };
         let before = place;
         let mut cancel = false;
-        let mut draw = super::mod_api_host::generated::GameDrawContext {
+        let mut draw = super::host::draw::GameDrawContext {
             game: self,
             surface: batch,
         };

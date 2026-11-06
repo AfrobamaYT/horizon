@@ -6,6 +6,7 @@ use horizon_client::{
     hud::{HudBatch, rgba},
     hud_layout::GuiDraw,
 };
+use mod_api::prelude::*;
 use mod_api::{ItemStack, Text};
 
 impl Game<'_> {
