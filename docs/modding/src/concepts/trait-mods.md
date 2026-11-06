@@ -321,7 +321,7 @@ NeoForge bus event. A compiled listener that reads the committed items through t
 own test, so it cannot drift):
 
 ```rust,ignore
-{{#include ../../../../crates/horizon-client/src/game/machines/contents_changed_tests.rs:contents_changed_listener}}
+{{#include ../../../../crates/horizon-client/src/game/blocks/machines/contents_changed_tests.rs:contents_changed_listener}}
 ```
 
 Declare a block entity type and its valid blocks during `Hooks::register`, then attach its part:

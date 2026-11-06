@@ -98,7 +98,7 @@ pub(crate) fn module_files(
     let mut pending = vec![(module, path, dir, Vec::new())];
     while let Some((module, path, dir, cfg)) = pending.pop() {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        let file = crate::game_modules::parse(&path, &source)?;
         let here = path
             .parent()
             .expect("a source file has a folder")
@@ -130,6 +130,19 @@ fn children(
     pending: &mut Vec<Pending>,
 ) {
     for item in items {
+        if let Item::Macro(included) = item
+            && included.mac.path.is_ident("include")
+            && !test_only(&included.attrs)
+            && !(every_build && gated(&included.attrs))
+            && let Ok(relative) = syn::parse2::<syn::LitStr>(included.mac.tokens.clone())
+        {
+            pending.push((
+                module.to_owned(),
+                here.join(relative.value()),
+                dir.to_owned(),
+                cfg.to_vec(),
+            ));
+        }
         let Item::Mod(declared) = item else { continue };
         if test_only(&declared.attrs) || (every_build && gated(&declared.attrs)) {
             continue;
@@ -168,7 +181,10 @@ fn children(
         let (file, child_dir) = match explicit {
             Some(relative) => {
                 let file = here.join(relative);
-                let dir = file.with_extension("");
+                let dir = file
+                    .parent()
+                    .expect("a module file has a folder")
+                    .to_owned();
                 (file, dir)
             }
             None if dir.join(format!("{name}.rs")).is_file() => {
@@ -1275,8 +1291,10 @@ mod tests {
                 && game.contains("pub type __SlotReturnListener"),
             "{game}"
         );
-        let remote =
-            std::fs::read_to_string(root.join("crates/horizon-client/src/game/remote.rs")).unwrap();
+        let remote = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/network/remote/mod.rs"),
+        )
+        .unwrap();
         assert!(
             remote.contains("point(name = \"game_remote_decode\", free)] fn decode")
                 && remote.contains("pub type __GameRemoteOtherSendListener"),
