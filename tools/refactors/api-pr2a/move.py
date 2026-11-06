@@ -70,6 +70,7 @@ pub mod registry_keys;
     text = path.read_text()
     bind = extract(text, "pub(super) fn bind_entity_map(", "#[cfg(test)]")
     text = text.replace(bind, "")
+    text = text.replace("AttachmentLifetime, Attachments, Holder", "AttachmentLifetime, Holder")
     text = replace(text,
         "bind_entity_map(map, index, mod_api::EntityRef::new(level.epoch(), id), slot);",
         "slot.bind(map, index, AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)));")

@@ -2,8 +2,7 @@
 
 use super::{Dim, Game};
 use horizon_mod_runtime::attachments::{
-    AttachmentLifetime, Attachments, Holder, index::AttachmentIndex,
-    observer::IndexedAttachmentObserver,
+    AttachmentLifetime, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
 };
 use mod_api::{AttachmentHolder, ChunkRef};
 use std::{
