@@ -185,6 +185,61 @@ mod tests {
     }
 
     #[test]
+    fn owner_drop_destroys_index_only_payloads_outside_the_index_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Clone)]
+        struct Probe {
+            index: std::sync::Weak<Mutex<AttachmentIndex<u32>>>,
+            dropped: Arc<AtomicBool>,
+            unlocked: Arc<AtomicBool>,
+        }
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                let index = self.index.upgrade().unwrap();
+                self.unlocked
+                    .fetch_and(index.try_lock().is_ok(), Ordering::Relaxed);
+                self.dropped.store(true, Ordering::Relaxed);
+            }
+        }
+        let key = AttachmentType {
+            namespace: "test",
+            name: "drop_probe",
+            default: || panic!("no default"),
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let unlocked = Arc::new(AtomicBool::new(true));
+        let mut map = Attachments::default();
+        key.set(
+            &mut map,
+            Holder::Level,
+            Probe {
+                index: Arc::downgrade(&index),
+                dropped: dropped.clone(),
+                unlocked: unlocked.clone(),
+            },
+        )
+        .unwrap();
+        let lifetime = AttachmentLifetime::new(map.bind_index(&index, 1));
+        drop(map);
+        assert!(!dropped.load(Ordering::Relaxed));
+        drop(lifetime);
+        assert!(dropped.load(Ordering::Relaxed));
+        assert!(unlocked.load(Ordering::Relaxed));
+        assert!(
+            index
+                .lock()
+                .unwrap()
+                .snapshot(&("test".into(), "drop_probe".into()))
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn empty_slots_need_no_index_access_and_expired_index_destruction_is_inert() {
         let index = Arc::new(Mutex::new(AttachmentIndex::<u32>::default()));
         let guard = index.lock().unwrap();
