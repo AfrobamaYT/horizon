@@ -1,6 +1,6 @@
 //! Native `[[inject]]` slot routing. The catalog owns validation; generation consumes checked entries.
 use super::{inject::PointInjection, internals::Catalog, sites::Site};
-use horizon_mods::{
+use horizon_mod_package::{
     manifest::inject::{
         route, Access, CallPlace, Entry, Inject, InjectError, Kind, NoSlotReason, Place, Route,
         SlotKind, Target,

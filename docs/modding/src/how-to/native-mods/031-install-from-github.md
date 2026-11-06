@@ -17,7 +17,7 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   Several mods: they are listed, and the player picks one or installs all. Each source folder pins the Horizon commit
   in `[native] horizon`; the launcher packs the checked project into a `.hmod`.
   Release packages must contain native code; content-only packages are rejected by this native installer.
-- **Checked like the registry's files.** The `.hmod` is read as `horizon_mods::index::native::Bundle::read` reads a
+- **Checked like the registry's files.** The `.hmod` is read as `horizon_mod_package::index::native::Bundle::read` reads a
   registry file (flat source and content, size limits, nothing run) before it is installed.
 - **Said first.** Before anything is downloaded: "not reviewed by the Horizon registry; native mods run with full
   access to this computer; read the source", with a link to the exact commit. The command needs

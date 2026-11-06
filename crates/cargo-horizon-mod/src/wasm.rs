@@ -7,7 +7,7 @@
 //! source (`-Zbuild-std`) so its symbols are the same in every member. This tool is also the
 //! link step (cargo calls it as the linker, with `HORIZON_MOD_LINK` set): the std member links
 //! std whole and exports it; a mod leaves std and its library mods out, to resolve to theirs.
-use horizon_mods::manifest::{MANIFEST, WASM, sha512_of};
+use horizon_mod_package::manifest::{MANIFEST, WASM, sha512_of};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -329,8 +329,8 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
         let Ok(text) = std::fs::read_to_string(dir.join(MANIFEST)) else {
             continue;
         };
-        let theirs =
-            horizon_mods::Manifest::parse(&text).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let theirs = horizon_mod_package::Manifest::parse(&text)
+            .map_err(|e| format!("{}: {e}", dir.display()))?;
         let Some(&(_, optional)) = wanted.iter().find(|(id, _)| *id == theirs.id) else {
             continue;
         };
@@ -450,7 +450,10 @@ fn rename(wasm: &[u8], id: &str) -> Result<Vec<u8>, String> {
             .name
             .clone()
             .ok_or("an unnamed interface")?;
-        let name = format!("{}-{short}", horizon_mods::manifest::export_prefix(id));
+        let name = format!(
+            "{}-{short}",
+            horizon_mod_package::manifest::export_prefix(id)
+        );
         prefixes.push((format!("{full}#"), format!("{name}#")));
         // An unnamed copy of the interface, exported under the plain name: it owns its own
         // copies of the types it `use`s, and its functions point at them.
@@ -489,7 +492,7 @@ fn rename(wasm: &[u8], id: &str) -> Result<Vec<u8>, String> {
     }
     // The world, its exports renamed, in a package of the mod's own: the linker merges its
     // members' packages by name, and theirs differ.
-    let prefix = horizon_mods::manifest::export_prefix(id);
+    let prefix = horizon_mod_package::manifest::export_prefix(id);
     let world = bindgen.world;
     resolve.worlds[world].exports = renamed;
     resolve.worlds[world].name = prefix.clone();

@@ -156,7 +156,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     }
     let interface = format!(
         "{}-listeners",
-        horizon_mods::manifest::export_prefix(&manifest.id)
+        horizon_mod_package::manifest::export_prefix(&manifest.id)
     );
     let subscribed: Subscribed = exports
         .func(&interface, "subscribed")

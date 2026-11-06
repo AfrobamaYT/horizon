@@ -40,8 +40,9 @@ facade. `head`, `return` and `modify_arg` use function slots. `before_call`, `af
 `modify_call_arg`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
 `nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
 `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
-hash or missing target is refused, not silently redirected. Priority is descending, then mod id
-and inject id. API listeners, source injects, `replace`, locals and extension fields are explicitly
+hash or missing target is refused, not silently redirected. Points order by descending priority,
+then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
+and inject id order. API listeners, source injects, `replace`, locals and extension fields are explicitly
 refused until their corresponding implementations land. These declarations are native-only for now.
 
 ## For agents
