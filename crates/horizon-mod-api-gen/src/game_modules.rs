@@ -88,7 +88,7 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
             && item.mac.path.is_ident("include")
         {
             let line = item.mac.path.segments[0].ident.span().start().line - 1;
-            lines[line] = match lines[line].trim_end_matches('\n') {
+            let declarations = match lines[line].trim_end_matches('\n') {
                 INCLUDE => declarations(&path.with_extension(""))?,
                 NATIVE => crate::build::native_hook_modules(
                     path.canonicalize()
@@ -99,6 +99,32 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
                 )?,
                 _ => continue,
             };
+            // OUT_DIR lists need absolute paths, but materialized source must survive
+            // the launcher's stage.new -> stage copy and removal of the original tree.
+            let directory = path
+                .parent()
+                .ok_or("game source has no parent")?
+                .canonicalize()
+                .map_err(|e| e.to_string())?;
+            let mut declarations = syn::parse_file(&declarations).map_err(|e| e.to_string())?;
+            for item in &mut declarations.items {
+                let syn::Item::Mod(item) = item else { continue };
+                for attribute in &mut item.attrs {
+                    if let syn::Meta::NameValue(value) = &mut attribute.meta
+                        && value.path.is_ident("path")
+                        && let syn::Expr::Lit(value) = &mut value.value
+                        && let syn::Lit::Str(literal) = &mut value.lit
+                    {
+                        let absolute = literal.value();
+                        let relative = Path::new(&absolute)
+                            .strip_prefix(&directory)
+                            .map_err(|e| e.to_string())?
+                            .to_string_lossy();
+                        *literal = syn::LitStr::new(&relative, literal.span());
+                    }
+                }
+            }
+            lines[line] = prettyplease::unparse(&declarations);
         }
     }
     Ok(lines.concat())
