@@ -181,7 +181,8 @@ pub use horizon_client_core::text::Text;
 #[horizon_mod_api_macros::wasm(via = (u64, Option<f64>))]
 pub use horizon_core::random::LegacyRandom;
 pub use horizon_core::{
-    arm_pose::ArmPose, geometry::Direction, position::BlockPos, random::RandomSource,
+    arm_pose::ArmPose, game_mode::GameMode, geometry::Direction, position::BlockPos,
+    random::RandomSource,
 };
 /// The family of a client notification entering the toast queue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2334,8 +2335,8 @@ impl LevelRef {
 /// raids file saves. `level.raid_at(host, pos)`, `level.raids(host)`,
 /// `level.raid(host, id)` and `mob.raid(host)` make one. A handle resolves
 /// again on each call: it reads as `None` or `false` once the raid is gone,
-/// for a handle of an earlier open, for a level that is not in place, and on a
-/// client.
+/// for a handle of an earlier open, for a closed level, and on a client.
+/// Reads and writes reach parked server levels without moving them into place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct RaidRef {
@@ -2839,53 +2840,6 @@ impl PlayerRef {
 impl From<PlayerRef> for EntityRef {
     fn from(player: PlayerRef) -> Self {
         player.entity
-    }
-}
-
-/// A player's game mode (vanilla's `GameType`).
-#[non_exhaustive]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum GameMode {
-    /// Survival mode.
-    Survival,
-    /// Creative mode.
-    Creative,
-    /// Adventure mode.
-    Adventure,
-    /// Spectator mode.
-    Spectator,
-}
-
-impl GameMode {
-    /// Every mode, in id order.
-    pub const ALL: [Self; 4] = [
-        Self::Survival,
-        Self::Creative,
-        Self::Adventure,
-        Self::Spectator,
-    ];
-    /// `GameType.getId`: 0 survival, 1 creative, 2 adventure, 3 spectator.
-    pub fn id(self) -> i32 {
-        match self {
-            Self::Survival => 0,
-            Self::Creative => 1,
-            Self::Adventure => 2,
-            Self::Spectator => 3,
-        }
-    }
-    /// The mode with `GameType` id `id`, or None for an id vanilla doesn't
-    /// have.
-    pub fn from_id(id: i32) -> Option<Self> {
-        Self::ALL.into_iter().find(|mode| mode.id() == id)
-    }
-    /// `GameType.getName`: `survival`, `creative`, `adventure`, `spectator`.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Survival => "survival",
-            Self::Creative => "creative",
-            Self::Adventure => "adventure",
-            Self::Spectator => "spectator",
-        }
     }
 }
 
@@ -4565,16 +4519,6 @@ mod tests {
         assert_eq!(ran.get(), usize::from(cfg!(feature = "testing")));
     }
 
-    #[test]
-    fn game_modes_round_trip_through_their_ids() {
-        for mode in GameMode::ALL {
-            assert_eq!(GameMode::from_id(mode.id()), Some(mode));
-        }
-        assert_eq!(GameMode::from_id(-1), None);
-        assert_eq!(GameMode::from_id(4), None);
-        assert_eq!(GameMode::Adventure.name(), "adventure");
-    }
-
     struct Quiet;
     #[mod_api::__subscriptions]
     impl Hooks for Quiet {}
@@ -4839,6 +4783,44 @@ mod tests {
                 "minecraft:zombified_piglin".into()
             )]
         );
+    }
+
+    #[test]
+    fn game_mode_change_dispatches_the_shared_type_and_honors_cancellation() {
+        struct VetoSpectator;
+        #[mod_api::__subscriptions]
+        impl Hooks for VetoSpectator {
+            fn player_game_mode_changed(
+                &self,
+                _host: &mut dyn ServerHost,
+                event: &mut PlayerGameModeChangedEvent<'_>,
+            ) -> Flow {
+                assert_eq!((event.player, event.name), (7, "Probe"));
+                assert_eq!(event.from, horizon_core::game_mode::GameMode::Adventure);
+                if event.to == GameMode::Spectator {
+                    Flow::Cancel
+                } else {
+                    Flow::Continue
+                }
+            }
+        }
+        install(vec![ModEntry::new("mode-veto", Box::new(VetoSpectator))].into());
+        let mut host = Reader {
+            block: "minecraft:air",
+            lines: Vec::new(),
+        };
+        for (to, expected_cancel) in [(GameMode::Spectator, true), (GameMode::Survival, false)] {
+            let mut cancel = false;
+            dispatch_player_game_mode_changed(
+                &mut host,
+                7,
+                "Probe",
+                horizon_core::game_mode::GameMode::Adventure,
+                to,
+                &mut cancel,
+            );
+            assert_eq!(cancel, expected_cancel);
+        }
     }
 
     #[test]
