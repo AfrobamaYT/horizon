@@ -1,4 +1,5 @@
 <!-- chapter: Filtering toast notifications -->
+<!-- separator: 1 -->
 
 ## Filtering toast notifications
 
@@ -25,4 +26,3 @@ admission point. Client-lib prepares title candidates and Game admits them with
 a host before applying them; candidates produced during the initial resource
 loading screen wait until that handoff. The pause screen's persistent song label
 is HUD content, not a queued toast, and is not filtered by this hook.
-

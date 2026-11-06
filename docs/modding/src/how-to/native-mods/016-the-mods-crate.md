@@ -1,4 +1,5 @@
 <!-- chapter: The mod's crate -->
+<!-- separator: 1 -->
 
 ### The mod's crate
 
@@ -24,4 +25,3 @@ no default features), `tungstenite` 0.30 (websockets over a stream the mod opens
 no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
 add their dependencies to the lock without building them into the game. A feature
 that introduces a dependency not listed there is refused.
-

@@ -1,4 +1,5 @@
 <!-- chapter: Fluid ingredients -->
+<!-- separator: 1 -->
 
 ### Fluid ingredients
 
@@ -16,4 +17,3 @@ are not checked — any stack of a named fluid answers.
 `{"ingredient": <fluid ingredient>, "amount": 500}` in millibuckets, `"amount"` defaulting to a
 bucket (1000) and always positive. Its `test(&FluidStack)` asks that the stack matches the
 ingredient *and* carries at least that much.
-

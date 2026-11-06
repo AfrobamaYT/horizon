@@ -1,4 +1,5 @@
 <!-- chapter: What the launcher does -->
+<!-- separator: 1 -->
 
 ## What the launcher does
 
@@ -101,4 +102,3 @@ trusting native code is the player's decision, never an agent's.
    pins its version, as picking a version does. Updates of the launcher's version leave a pinned instance where
    it is, and their clean-up never removes a native build. The **Native mods**
    instance keeps its worlds and its build.
-

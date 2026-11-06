@@ -1,4 +1,5 @@
 <!-- chapter: Registry keys -->
+<!-- separator: 1 -->
 
 `Registrar::block_key(id)` and `Registrar::effect_key(id)` request registry entries, not new
 content. Declare them in `register`, retain the returned `BlockKey` or `EffectKey` in the
@@ -51,4 +52,3 @@ skips the parts: a mod reacting to its own blocks uses a part, one reacting to e
 thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
 the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
-

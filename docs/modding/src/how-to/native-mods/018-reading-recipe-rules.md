@@ -1,4 +1,5 @@
 <!-- chapter: Reading recipe rules -->
+<!-- separator: 1 -->
 
 ### Reading recipe rules
 
@@ -13,4 +14,3 @@ absent, requiring empty slots. Trim patterns are either registry references or
 inline definitions. Result templates retain their count and component patch;
 stonecutting exposes the complete fixed output. A mod-defined recipe type
 retains its original `json`. Look up recipes again after a data reload.
-

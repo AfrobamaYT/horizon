@@ -1,4 +1,5 @@
 <!-- chapter: Typed server commands -->
+<!-- separator: 1 -->
 
 ## Typed server commands
 
@@ -20,4 +21,3 @@ from the source's world, relative or local coordinates without loading chunks.
 A player's source is their position and rotation. The console has no source
 entity and uses the Overworld spawn's block corner with zero rotation, so `@s`
 cannot resolve there. Both hooks receive the same owned data, on native and wasm.
-

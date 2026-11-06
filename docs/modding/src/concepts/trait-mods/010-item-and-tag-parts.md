@@ -1,4 +1,5 @@
 <!-- chapter: Item and tag Parts -->
+<!-- separator: 1 -->
 
 For an item-specific Part, request its canonical registry key once in `register`:
 `let stick = r.item_key("minecraft:stick"); r.item_part(stick, Sharp);`. Bare names use the
@@ -16,4 +17,3 @@ that already has that kind of part warns, naming both mods, and the earlier mod'
 doesn't exist warns. Opening a world fails, naming the mod, when a part is attached to a block or item the game
 doesn't have. Scoped hooks run on a game's thread; one dispatched from any other thread (which no game hook
 does) can't see tag parts, and warns once.
-

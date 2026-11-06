@@ -1,4 +1,5 @@
 <!-- chapter: Camera and collision reads -->
+<!-- separator: 0 -->
 
 ## Camera and collision reads
 

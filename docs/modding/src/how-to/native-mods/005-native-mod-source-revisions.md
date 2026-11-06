@@ -1,4 +1,5 @@
 <!-- chapter: Native mod source revisions -->
+<!-- separator: 1 -->
 
 ## Native mod source revisions
 
@@ -26,4 +27,3 @@ separate section of the same fragment and keep their existing paths. The generat
 and includes each section at its original scope. A new hand-written area adds one fragment, while
 catalog-generated hook types need no export-list edit. Do not add declarations or re-export lists to
 `lib.rs`.
-

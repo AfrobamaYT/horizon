@@ -1,4 +1,5 @@
 <!-- chapter: Server attachments -->
+<!-- separator: 1 -->
 
 ### Server attachments
 
@@ -93,4 +94,3 @@ optional server-side persistence, player-respawn option and `sync` with a `Strea
 `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its holder-aware supplier,
 custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `AttachmentSyncHandler` partial updates or a wire codec apart from the disk codec.
-

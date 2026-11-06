@@ -16,7 +16,7 @@ GROUPS = ("concepts/trait-mods.md", "how-to/native-mods.md")
 MARKER = "<!-- concept-pages -->"
 LINK = re.compile(r"(\!?\[[^\n]*?\]\()([^\s)]+)(\))")
 INCLUDE = re.compile(r"(\{\{#(?:rustdoc_)?include )([^ }]+)(\s*\}\})")
-TITLE = re.compile(r"<!-- chapter: (.+) -->\n\n")
+TITLE = re.compile(r"<!-- chapter: (.+) -->\n(?:<!-- separator: (\d+) -->\n)?\n")
 
 
 def headings(text):
@@ -64,7 +64,8 @@ def fragments(src, group):
         text = path.read_text()
         title = TITLE.match(text)
         assert title, f"{path}: missing chapter title"
-        result.append((path.relative_to(src).as_posix(), title[1], text[title.end():]))
+        separator = int(title[2]) if title[2] is not None else 1
+        result.append((path.relative_to(src).as_posix(), title[1], text[title.end():] + "\n" * separator))
     return result
 
 
@@ -72,7 +73,9 @@ def aggregate(src, group):
     parts = fragments(src, group)
     owners = {(path, anchor): g for g in GROUPS for path, _, text in fragments(src, g)
               for _, anchor in headings(text)}
-    content = (src / group).read_text().split(MARKER)[0]
+    content, marker, suffix = (src / group).read_text().partition(MARKER)
+    assert marker and not suffix.strip() and re.fullmatch(r"# [^\n]+\n\n", content), (
+        f"{group}: aggregate must contain only its title and discovery marker")
     for path, _, text in parts:
         content += rewrite(text, lambda u: relocate(u, path, group, owners),
                            lambda u: relocate_include(u, path, group))

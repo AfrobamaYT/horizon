@@ -1,4 +1,5 @@
 <!-- chapter: Entity automation -->
+<!-- separator: 1 -->
 
 #### Entity automation
 
@@ -13,4 +14,3 @@ entities, those entities at the target whose mod provider answers it join the ca
 random with the draw `getEntityContainer` makes; a mod handler takes the container's place and moves one item at a time
 in a transaction, as a mod block's `ITEMS` does. `r.entity_capability(&ENTITY_AUTOMATION, "mymod:robot", |host, robot, side| …)`
 registers one, and `r.entity_capability_before_game` answers ahead of the game's own for a minecart or a boat.
-

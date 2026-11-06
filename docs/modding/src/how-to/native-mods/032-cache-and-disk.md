@@ -1,4 +1,5 @@
 <!-- chapter: Cache and disk -->
+<!-- separator: 1 -->
 
 ## Cache and disk
 
@@ -61,4 +62,3 @@ the game needs a display even with `--offscreen`).
 The native builds an instance plays are kept, and the three newest no instance plays (`native_mods::prune`, by when
 each was built or last used): switching a mod off and on again plays the kept build again without compiling.
 `native/target/` stays for the next one.
-

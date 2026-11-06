@@ -1,4 +1,5 @@
 <!-- chapter: Structure types -->
+<!-- separator: 0 -->
 
 ### Structure types
 

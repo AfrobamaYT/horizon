@@ -1,4 +1,5 @@
 <!-- chapter: Raid handles -->
+<!-- separator: 1 -->
 
 ### Raid handles
 
@@ -9,4 +10,3 @@ come from that level's mobs; raid ids are local to a level. A closed level, an
 earlier world epoch or a client refuses the handle. Entity handles in a parked
 raid's member list keep their identity; their ordinary entity operations still
 require the entity's level to be in place.
-

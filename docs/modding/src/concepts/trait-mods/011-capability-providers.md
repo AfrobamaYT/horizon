@@ -1,4 +1,5 @@
 <!-- chapter: Capability providers -->
+<!-- separator: 1 -->
 
 A capability is answered by providers, registered by block entity type as NeoForge's
 `RegisterCapabilitiesEvent` registers them: obtain `pipe` with the declaration builder or
@@ -28,4 +29,3 @@ A `Capability` may be held for the tick: look a neighbour's up once per tick and
 every move that tick, as pipes and machines do. Ask again on the next tick, since the block
 entity behind it may be gone by then. For a wasm mod each lookup crosses the sandbox (about
 2.5 µs, see [Building a mod to `mod.wasm`](../../how-to/wasm-mods.md)), so holding it matters more there.
-

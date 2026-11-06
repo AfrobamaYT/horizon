@@ -1,4 +1,5 @@
 <!-- chapter: Trait mods (draft) -->
+<!-- separator: 1 -->
 
 ## Trait mods (draft)
 
@@ -30,4 +31,3 @@ is not at the crate root. The launcher links this package into a generated game 
 the generated factory in dependency order (a mod after the mods it depends on, else in bundle order).
 A mod with no raw injections skips horizon-mixins; typed hooks need no injection declarations.
 Dependencies follow the pinned Horizon `Cargo.lock` rules in [The mod's crate](../../how-to/native-mods/016-the-mods-crate.md#the-mods-crate).
-

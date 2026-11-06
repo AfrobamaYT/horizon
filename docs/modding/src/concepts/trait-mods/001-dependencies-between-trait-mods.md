@@ -1,4 +1,5 @@
 <!-- chapter: Dependencies between trait mods -->
+<!-- separator: 1 -->
 
 ### Dependencies between trait mods
 
@@ -36,4 +37,3 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
-

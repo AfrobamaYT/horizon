@@ -1,4 +1,5 @@
 <!-- chapter: Native entry point and diagnostics -->
+<!-- separator: 1 -->
 
 The generated executable uses the installed game's `crates/horizon-client/src/native_main.rs.template`.
 The launcher supplies only ordered literal mod IDs and hook factory paths. The template owns entry
@@ -16,4 +17,3 @@ method; render hooks are not named yet.
 A code mod may listen at the game's injection points as a rare escape hatch, through `impl mod_points::Points`
 (the `horizon-mod-points` crate) on the same type as its `Hooks`; the form
 and its limits are in [Injections](../../injections.md).
-

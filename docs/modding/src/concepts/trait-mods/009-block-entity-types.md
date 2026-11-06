@@ -1,4 +1,5 @@
 <!-- chapter: Block entity types -->
+<!-- separator: 1 -->
 
 Declare a block entity type and its valid blocks during `Hooks::register`, then attach its part:
 
@@ -36,4 +37,3 @@ false for a missing or stale block entity, data the entity cannot load, or an un
 Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
 native types and returns `BlockEntityPartError::VanillaType` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.
-

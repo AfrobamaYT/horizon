@@ -1,4 +1,5 @@
 <!-- chapter: A menu's slots -->
+<!-- separator: 1 -->
 
 #### A menu's slots
 
@@ -63,4 +64,3 @@ host.transaction(|host, tx| {
     if took == 4 && slot.insert(host, tx, &emerald, 4) == 4 { Ok(()) } else { Err(()) }
 })
 ```
-

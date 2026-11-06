@@ -1,4 +1,5 @@
 <!-- chapter: Rebuilds stay on the instance's Horizon -->
+<!-- separator: 1 -->
 
 ## Rebuilds stay on the instance's Horizon
 
@@ -26,4 +27,3 @@ and only when that can't be created the data folder's short (8.3) name. A short 
 (#6009): rustc canonicalizes its own path to find its sysroot, which spells the long name again for the
 linker. A data folder that is itself a junction to a drive with an ASCII path resolves to that and needs
 neither.
-

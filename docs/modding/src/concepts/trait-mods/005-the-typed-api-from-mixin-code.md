@@ -1,4 +1,5 @@
 <!-- chapter: The typed API from mixin code -->
+<!-- separator: 1 -->
 
 ### The typed API from mixin code
 
@@ -12,4 +13,3 @@ versions. Catalog hooks, `Host` calls and raw `target` injections all build agai
 
 Every `impl Hooks` and `impl RenderHooks` must have `#[mod_api::horizon_mod]`. The attribute derives
 subscriptions from the methods implemented in that block, so dispatch knows them at installation.
-

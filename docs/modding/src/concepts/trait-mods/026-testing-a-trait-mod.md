@@ -1,4 +1,5 @@
 <!-- chapter: Testing a trait mod -->
+<!-- separator: 2 -->
 
 ### Testing a trait mod
 
@@ -33,5 +34,3 @@ If a `Host` method returns a game value a test can't build, a double can return 
 `Players::acting_player() -> Option<PlayerRef>`. If the dispatch function itself takes an unconstructible value,
 such as `dispatch_perform_command`'s `&NativeServerPlayer`, test the logic beneath the hook instead. The level
 hosts are small enough to implement whole. NeoForge's GameTest is the in-game counterpart.
-
-

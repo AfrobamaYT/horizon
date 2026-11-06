@@ -1,4 +1,5 @@
 <!-- chapter: Standalone server export -->
+<!-- separator: 1 -->
 
 ### Standalone server export
 
@@ -38,4 +39,3 @@ used as an inventory fallback. A stopped or unreachable engine returns HTTP 409,
 Configuration mod matching is implemented as described above.
 Native mods run unsandboxed: only build code you have read and trust.
 `--trust-native-code` records the operator's decision; an agent must not supply that consent.
-

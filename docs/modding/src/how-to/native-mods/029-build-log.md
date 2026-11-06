@@ -1,4 +1,5 @@
 <!-- chapter: Build log -->
+<!-- separator: 1 -->
 
 ### Build log
 
@@ -13,4 +14,3 @@ whole file, **Open full log** opens it outside the launcher, **Show in folder** 
 **Refresh** reads it again (also after a build finishes). The panel is a snapshot read on open and
 refresh, not a live stream: a running build's later output appears only on the next refresh. Nothing is
 uploaded; the log stays on the player's computer.
-

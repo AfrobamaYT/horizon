@@ -1,4 +1,5 @@
 <!-- chapter: Client effect interpolation -->
+<!-- separator: 1 -->
 
 ### Client effect interpolation
 
@@ -10,4 +11,3 @@ An unblended addition starts at its target immediately; replacing an existing ef
 Darkness and nausea use their existing longer fades. Pass the render partial tick unchanged: the read
 does not clamp it. A missing effect reads `Some(0.0)`; an unknown effect, stale handle or entity other
 than the local player reads `None`. Other visible entities' effect blends are not yet supported.
-

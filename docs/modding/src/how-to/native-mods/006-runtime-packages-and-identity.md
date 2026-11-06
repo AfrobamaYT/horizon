@@ -1,4 +1,5 @@
 <!-- chapter: Runtime packages and identity -->
+<!-- separator: 1 -->
 
 ## Runtime packages and identity
 
@@ -24,4 +25,3 @@ Its SHA-256 values and revision describe the built binary's inputs, not the runn
 The launcher prepares jar data from canonical manifests as non-authoritative candidates; the engine
 validates identity against its embedded inventory. Original-jar pack order and
 whole-package refusal rules are in [Original Java jar layers](../../reference/manifest.md#original-java-jar-layers).
-

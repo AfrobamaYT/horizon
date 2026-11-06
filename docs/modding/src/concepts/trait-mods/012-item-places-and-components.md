@@ -1,4 +1,5 @@
 <!-- chapter: Item places and components -->
+<!-- separator: 1 -->
 
 An item's own capability is reached where its stack lives, an `ItemPlace`: a player's slot, hand or cursor, a
 block entity's slot, an item entity, a stack inside another item (`ItemPlace::Nested`) or a mod's own place
@@ -30,4 +31,3 @@ goes, and where the item has the component by default a removal (`"!minecraft:ma
 patch.
 An exchange of one puts the changed item in place: `place.exchange(host, tx, &place.resource(host)?.with_component(host, &damage,
 Tag::Int(5)), 1)` damages one sword of a stack, splitting it off.
-

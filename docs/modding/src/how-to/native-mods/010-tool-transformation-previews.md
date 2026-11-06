@@ -1,4 +1,5 @@
 <!-- chapter: Tool transformation previews -->
+<!-- separator: 1 -->
 
 ### Tool transformation previews
 
@@ -9,4 +10,3 @@ relative durability cost, sound, loot and particle. The call does not apply the 
 level during a simulation. A stale or unavailable player or level, unloaded position, invalid face,
 or tool with no transformation returns `None`. The real action fires the same hook with
 `simulated` set to `false`.
-

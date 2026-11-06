@@ -1,4 +1,5 @@
 <!-- chapter: Trust -->
+<!-- separator: 1 -->
 
 ## Trust
 
@@ -20,4 +21,3 @@
   logs (the default Horizon instance's, when they are installed there); other instances play their own versions.
 - What this does not do: sandbox the compiled game. horizon-mixins' checks stop mistakes, not a malicious helper
   ([security notes](https://github.com/horizon-rust/horizon-mixins/blob/main/docs/security.md)).
-

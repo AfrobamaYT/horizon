@@ -1,4 +1,5 @@
 <!-- chapter: A mod's own loot functions and conditions -->
+<!-- separator: 1 -->
 
 ### A mod's own loot functions and conditions
 
@@ -23,4 +24,3 @@ position), `block_entity` (the broken block's entity as it was before the break,
 `Items`) and `level` (the dimension, the game time, the time of day, the rain and the thunder, for conditions like
 vanilla's `time_check` and `weather_check`). The game sets it for a block a player or an explosion breaks and for a
 mob's death loot; on other rolls `place` is `None`.
-

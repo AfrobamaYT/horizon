@@ -1,4 +1,5 @@
 <!-- chapter: Hook dispatch and level hosts -->
+<!-- separator: 1 -->
 
 A linked trait mod implements `mod_api::Hooks`. Helper injections run first.
 An injection that returns early skips trait mods. A claimed cancellation also skips trait mods.
@@ -72,4 +73,3 @@ renderer list is installed once alongside the mod list. `render_needs` collects 
 `world_drawn` observes the world pass and can encode drawing before the hand and HUD. Both
 run on the render thread while the frame is built, before any deferred GPU submission.
 The renderer module re-exports the game's wgpu types.
-

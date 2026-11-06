@@ -1,4 +1,5 @@
 <!-- chapter: Entity energy and fluids -->
+<!-- separator: 1 -->
 
 #### Entity energy and fluids
 
@@ -9,4 +10,3 @@ answers neither; register a provider with `r.entity_capability(&ENTITY_ENERGY, "
 which is given that side and may answer differently for each. An entity capability's context is its key's second type:
 `()` for `ENTITY_ITEMS`, `Option<Direction>` for these two and for `ENTITY_AUTOMATION`. The existing `move_energy` and `move_resources` transfer
 between these and block or item handlers inside a transaction.
-

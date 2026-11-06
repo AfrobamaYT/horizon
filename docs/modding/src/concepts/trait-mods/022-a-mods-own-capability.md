@@ -1,4 +1,5 @@
 <!-- chapter: A mod's own capability -->
+<!-- separator: 1 -->
 
 #### A mod's own capability
 
@@ -27,4 +28,3 @@ mods that each declare their own `Chemical` under one name, rather than sharing 
 each other's handlers. So the game refuses that at startup, naming both mods and both types, as NeoForge's
 `CapabilityRegistry.create` refuses one name created with a different type, and it refuses a key whose name has no
 namespace. Both checks run once, when the mods register.
-

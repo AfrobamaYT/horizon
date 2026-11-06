@@ -1,4 +1,5 @@
 <!-- chapter: Observing advancement progress -->
+<!-- separator: 1 -->
 
 ## Observing advancement progress
 
@@ -14,4 +15,3 @@ for suspended and inactive players remain tracked in #1240.
 Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
 cannot change the player's progress and is not updated by subsequent events. No-op grants and
 revokes do not fire. The snapshot uses the same plain-data bindings in native and wasm mods.
-

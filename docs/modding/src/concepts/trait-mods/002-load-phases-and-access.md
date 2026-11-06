@@ -1,4 +1,5 @@
 <!-- chapter: Load phases and access -->
+<!-- separator: 1 -->
 
 ### Load phases and access
 
@@ -50,4 +51,3 @@ There is no separate common-setup, load-complete or intermod event: registration
 reload cover common setup, client setup is `client_setup`, dedicated setup is `server_about_to_start`,
 and dependencies express intermod ordering. Load complete is the edge after initial Config and before
 `server_about_to_start`, not a hook.
-

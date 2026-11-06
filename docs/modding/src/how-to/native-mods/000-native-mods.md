@@ -1,4 +1,5 @@
 <!-- chapter: Native mods -->
+<!-- separator: 1 -->
 
 ## Native mods
 
@@ -52,4 +53,3 @@ install that finishes after a world opens waits until the world closes before ac
 
 Villager handles preserve the full signed integer level (at least 1), including values above the
 five vanilla trade tiers. Higher levels use the master badge and do not gain further vanilla trades.
-

@@ -1,4 +1,5 @@
 <!-- chapter: An entity's items -->
+<!-- separator: 1 -->
 
 #### An entity's items
 
@@ -40,4 +41,3 @@ host.transaction(|host, tx| {
 Cauldron interactions outside a transaction keep vanilla's effect order. Inside an open
 transaction, their statistic award (including `player_stat_award`), sound and overflow
 item toss/spawn wait until the outermost successful commit; an abort emits none of them.
-

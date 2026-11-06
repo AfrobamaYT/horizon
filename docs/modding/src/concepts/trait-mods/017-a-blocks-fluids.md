@@ -1,4 +1,5 @@
 <!-- chapter: A block's fluids -->
+<!-- separator: 1 -->
 
 #### A block's fluids
 
@@ -24,4 +25,3 @@ game answers it for vanilla's buckets, as NeoForge's `BucketResourceHandler` doe
 drained whole, an empty bucket taking plain water or lava and becoming its full bucket, a full one becoming an empty
 bucket. `move_resources` moves between an item and a block as between two blocks: a full cauldron fills a bucket in a
 player's slot, and two thirds of one fill none.
-

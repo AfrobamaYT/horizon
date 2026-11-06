@@ -1,4 +1,5 @@
 <!-- chapter: Conditional data -->
+<!-- separator: 1 -->
 
 ### Conditional data
 
@@ -9,4 +10,3 @@ over them) all answer the gate; `mod_loaded` asks which mods' data is in the roo
 and the content mods that are on. `neoforge:true`, `not`, `and` and `or` combine; a condition the game
 does not know leaves the file out, so a future shape fails closed. Tags, loot tables and advancements
 do not answer the gate yet.
-

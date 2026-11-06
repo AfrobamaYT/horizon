@@ -1,4 +1,5 @@
 <!-- chapter: Parts -->
+<!-- separator: 1 -->
 
 ### Parts
 
@@ -28,4 +29,3 @@ impl Hooks for MyMod {
     }
 }
 ```
-

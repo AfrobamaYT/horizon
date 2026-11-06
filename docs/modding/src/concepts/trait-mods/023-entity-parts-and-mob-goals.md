@@ -1,4 +1,5 @@
 <!-- chapter: Entity parts and mob goals -->
+<!-- separator: 1 -->
 
 ### Entity parts and mob goals
 
@@ -40,4 +41,3 @@ are not part of a goal; the write handles a `ServerHost` takes do not exist in a
 
 Entity parts are a native mod's for now: the goal surface does not cross to wasm (see the
 `attach_entity_part` note), so `r.entity_part` is absent from a wasm build.
-

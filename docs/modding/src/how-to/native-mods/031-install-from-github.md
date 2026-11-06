@@ -1,4 +1,5 @@
 <!-- chapter: Install from GitHub -->
+<!-- separator: 1 -->
 
 ## Install from GitHub
 
@@ -31,4 +32,3 @@ GitHub link, on the Mods page ("Add from GitHub") or with `horizon-launcher mods
   installed from the registry (or by hand) is never replaced.
 
 Installing turns Native mods on, as any native mod does; then build as usual.
-

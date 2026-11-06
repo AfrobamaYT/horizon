@@ -1,4 +1,5 @@
 <!-- chapter: Fake players -->
+<!-- separator: 1 -->
 
 ### Fake players
 
@@ -59,4 +60,3 @@ clients without a joined local player return `None`.
 
 What a machine does beyond a player's action stays in the mod: its own mining progress and catching world drops.
 Scoped actions retain player reach, protection and border checks; eye placement is supplied by the mod.
-

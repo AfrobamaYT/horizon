@@ -59,7 +59,9 @@ def split(revision):
     for group, path, title, body in pieces:
         body = book.rewrite(body, lambda u: book.relocate(u, group, path, owners),
                             lambda u: book.relocate_include(u, group, path))
-        result[path] = f"<!-- chapter: {title} -->\n\n" + body
+        separator = len(body) - len(body.rstrip("\n")) - 1
+        result[path] = (f"<!-- chapter: {title} -->\n<!-- separator: {separator} -->\n\n"
+                        + body.rstrip("\n") + "\n")
     return result
 
 

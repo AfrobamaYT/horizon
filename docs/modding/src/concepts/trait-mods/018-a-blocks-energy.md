@@ -1,4 +1,5 @@
 <!-- chapter: A block's energy -->
+<!-- separator: 1 -->
 
 #### A block's energy
 
@@ -17,4 +18,3 @@ Energy held by an item is `ITEM_ENERGY` (NeoForge's `Capabilities.Energy.ITEM`),
 answers it for its item with `r.item_capability(&ITEM_ENERGY, "mymod:cell", …)`, keeping the energy in the item's
 own stack and rewriting it by an exchange of one, so from a stack of more than one the charged item splits off.
 Vanilla has no energy items, so the game answers it for none.
-

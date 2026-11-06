@@ -1,4 +1,5 @@
 <!-- chapter: State flags on the living handles -->
+<!-- separator: 1 -->
 
 ### State flags on the living handles
 
@@ -51,4 +52,3 @@ such as an enderman carrying a block. It is independent of `PersistenceRequired`
 either flag. The separately modeled dragon has no such predicate and answers `None` to this query, even though
 its persistence flag can be read and set. A `/summon` and a spawn egg set their flags before the entity-join hook
 runs, so a mod's own write in that hook is what stays.
-

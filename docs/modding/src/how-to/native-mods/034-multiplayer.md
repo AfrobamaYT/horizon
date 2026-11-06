@@ -1,4 +1,5 @@
 <!-- chapter: Multiplayer -->
+<!-- separator: 1 -->
 
 ## Multiplayer
 
@@ -9,4 +10,3 @@
 - **Dedicated server:** native mods run in a standalone engine export built with `--server-output`, not in an
   instance build (`--server-output` conflicts with `--instance` and needs an explicit mod `FOLDER`). See
   [Standalone server export](035-standalone-server-export.md#standalone-server-export).
-

@@ -1,4 +1,5 @@
 <!-- chapter: Server services and player handles -->
+<!-- separator: 1 -->
 
 ## Server services and player handles
 
@@ -40,4 +41,3 @@ restricted level host. Native and wasm mods use the same calls: service methods
 are generated imports, and acquiring a service just reborrows the current call's
 frame resource. Block and fluid scheduling stays on `LevelTicksHost`, and
 `tick_stats()` stays on `ServerHost`.
-

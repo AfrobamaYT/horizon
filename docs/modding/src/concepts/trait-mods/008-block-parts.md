@@ -1,4 +1,5 @@
 <!-- chapter: Block Parts -->
+<!-- separator: 1 -->
 
 `BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
 level, position, block state and `include_data`, true when a creative player picks with Ctrl. Return
@@ -20,4 +21,3 @@ own test, so it cannot drift):
 ```rust,ignore
 {{#include ../../../../../crates/horizon-client/src/game/machines/contents_changed_tests.rs:contents_changed_listener}}
 ```
-

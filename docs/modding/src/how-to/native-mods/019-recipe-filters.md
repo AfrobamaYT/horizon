@@ -1,4 +1,5 @@
 <!-- chapter: Recipe filters -->
+<!-- separator: 1 -->
 
 ### Recipe filters
 
@@ -30,4 +31,3 @@ loader applies them: crafting, the stations, brewing, the recipe book and what p
 in id order and each file's filters in order; a pack's file replaces a file of the same id, as any data file
 does. A filter with an unknown key or not exactly one action is skipped with a warning, so a typo never
 matches every recipe.
-
