@@ -219,6 +219,9 @@ impl Game<'_> {
             return MenuOpen::Refused;
         }
         // ServerPlayer.openMenu closes the menu that was open.
+        let previous_window = self.lan.as_ref().and_then(|host| {
+            super::super::native_menus::open_menu_of(host, conn).map(|(window, ..)| window)
+        });
         self.guest_close_all(conn);
         // A hand-off from `open_menu` must not count one player twice. A direct
         // handle open has no earlier `startOpen`; only it starts the block's lid.
@@ -246,6 +249,13 @@ impl Game<'_> {
             _ => None,
         };
         if self.world.block_entities.generation(&pos) != generation {
+            if let Some(container) = previous_window
+                && let Some(host) = self.lan.as_mut()
+                && super::super::native_menus::open_menu_of(host, conn).is_none()
+            {
+                host.hub
+                    .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
+            }
             return MenuOpen::Stale;
         }
         let Some(host) = self.lan.as_mut() else {
