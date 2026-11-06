@@ -3,7 +3,8 @@ use crate::game::{
     native_entity_refs::tests::run_fresh_cases, native_guest_turn_tests::with_guests,
 };
 use mod_api::{
-    AdvancementProgress, Hooks, ModEntry, Mods, PlayerAdvancementProgressEvent, ServerHost,
+    AdvancementProgress, DataPackFilesEvent, Hooks, ModEntry, Mods, PlayerAdvancementProgressEvent,
+    ServerHost,
 };
 use std::sync::Mutex;
 
@@ -22,6 +23,35 @@ struct Observation {
 struct Observer(Arc<Mutex<Vec<Observation>>>);
 #[mod_api::__subscriptions]
 impl Hooks for Observer {
+    fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
+        if matches!(
+            std::env::var("HORIZON_PROGRESS_SNAPSHOT_CHILD").as_deref(),
+            Ok("command-reload" | "nested-reload")
+        ) {
+            event.files.push((
+                "advancement/testmod:progress".into(),
+                br#"{
+                "criteria": {
+                    "alpha": {"trigger": "minecraft:tick"},
+                    "gamma": {"trigger": "minecraft:impossible"}
+                },
+                "requirements": [["alpha"], ["gamma"]],
+                "rewards": {"recipes": ["testmod:reward"], "experience": 7,
+                    "loot": ["testmod:reward"], "function": "testmod:reward"}
+            }"#
+                .to_vec(),
+            ));
+            event.files.push((
+                "recipe/testmod:reward".into(),
+                br#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:stone"],"result":{"id":"minecraft:diamond","count":1}}"#.to_vec(),
+            ));
+            event.files.push((
+                "loot_table/testmod:reward".into(),
+                br#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#.to_vec(),
+            ));
+        }
+    }
+
     fn player_advancement_progress(
         &self,
         host: &mut dyn ServerHost,
@@ -75,7 +105,13 @@ fn progress_events_capture_each_players_full_mutation_state() {
     if run_fresh_cases(
         "game::advancements::progress_tests::progress_events_capture_each_players_full_mutation_state",
         "HORIZON_PROGRESS_SNAPSHOT_CHILD",
-        &["acting", "first", "reload"],
+        &[
+            "acting",
+            "first",
+            "reload",
+            "command-reload",
+            "nested-reload",
+        ],
     ) {
         return;
     }
@@ -104,7 +140,173 @@ fn progress_events_capture_each_players_full_mutation_state() {
     .unwrap();
     let case = std::env::var("HORIZON_PROGRESS_SNAPSHOT_CHILD").unwrap();
     with_guests(|game| {
-        if case == "acting" {
+        if matches!(case.as_str(), "command-reload" | "nested-reload") {
+            use crate::game::lan_actions::GuestCommand;
+            game.world_root = scratch.join("world");
+            let pack = game.world_root.join("datapacks/test");
+            std::fs::create_dir_all(pack.join("data/testmod/function")).unwrap();
+            std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+            std::fs::write(
+                pack.join("data/testmod/function/reward.mcfunction"),
+                "scoreboard players add @s reward_hits 1\n",
+            )
+            .unwrap();
+            std::fs::write(
+                game.world_root.join("datapacks.json"),
+                r#"{"enabled":["file/test"],"disabled":[]}"#,
+            )
+            .unwrap();
+            game.adv.tree = Arc::new(Tree::load(&scratch.join("data")));
+            game.score.board.add_objective(
+                "reward_hits",
+                "dummy",
+                serde_json::json!({"text":"reward_hits"}),
+                horizon_client::scoreboard::RenderType::Integer,
+                false,
+                None,
+            );
+            for guest in &mut game.lan.as_mut().unwrap().hub.guests {
+                guest.advancements_loaded = true;
+                guest.advancements.grant(ID, "gamma", DATE);
+            }
+            game.lan.as_mut().unwrap().hub.mods_loaded = true;
+            let reload = |game: &mut Game<'_>| {
+                assert!(game.run_guest_command(GuestCommand {
+                    conn: 12,
+                    command: "reload".into(),
+                    permission: 4,
+                    integrated: true,
+                    quiet: false,
+                }));
+            };
+            if case == "nested-reload" {
+                game.as_guest(13, reload).unwrap();
+            } else {
+                reload(game);
+            }
+            assert!(
+                game.fns.store.functions.contains_key("testmod:reward"),
+                "reward function was not loaded"
+            );
+            let events = observed.lock().unwrap();
+            let first: Vec<_> = events.iter().filter(|event| event.player == 12).collect();
+            assert_eq!(first.len(), 1);
+            assert_eq!(first[0].criterion, "alpha");
+            assert_eq!(first[0].kind, NativeProgressType::Grant);
+            assert_eq!(
+                first[0].rewarded,
+                Some(false),
+                "live state is read before rewards"
+            );
+            let progress = &first[0].progress;
+            assert_eq!(
+                progress
+                    .criteria
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["alpha", "gamma"]
+            );
+            assert!(progress.criteria[0].obtained_at.is_some());
+            assert_eq!(progress.criteria[1].obtained_at.as_deref(), Some(DATE));
+            assert_eq!(progress.requirements, vec![vec!["alpha"], vec!["gamma"]]);
+            assert_eq!(progress.completed_requirements, 2);
+            assert!(progress.done);
+            assert_eq!(events.len(), 2, "each guest receives its progress event");
+            for event in events.iter() {
+                if event.player == 12 {
+                    assert_eq!(
+                        event.progress.criteria[1].obtained_at.as_deref(),
+                        Some(DATE)
+                    );
+                    assert!(event.progress.done);
+                }
+            }
+            let kept = first[0].progress.clone();
+            drop(events);
+            for conn in [12, 13] {
+                let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+                assert_eq!(guest.xp_total, if conn == 12 { 7 } else { 0 });
+                {
+                    let item = "minecraft:stone";
+                    assert_eq!(
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .filter(|stack| stack.item.as_ref() == item)
+                            .map(|stack| stack.count as usize)
+                            .sum::<usize>(),
+                        usize::from(conn == 12),
+                        "{conn}: {item}"
+                    );
+                }
+                if conn == 13 && case == "nested-reload" {
+                    continue;
+                }
+                assert!(
+                    guest.advancements.has(ID, "alpha"),
+                    "alpha survives leaving the turn"
+                );
+                assert_eq!(guest.advancements.criteria[ID]["gamma"], DATE);
+                assert!(
+                    guest.recipe_book.knows("testmod:reward"),
+                    "reward belongs to the same live player"
+                );
+            }
+            assert_eq!(
+                game.score
+                    .board
+                    .score("guest12", "reward_hits")
+                    .map(|score| score.value),
+                Some(1)
+            );
+            assert_eq!(
+                game.score
+                    .board
+                    .score("guest13", "reward_hits")
+                    .map(|score| score.value),
+                None
+            );
+            if case == "nested-reload" {
+                game.as_guest(13, |game| game.tick_advancements()).unwrap();
+            }
+            reload(game);
+            assert_eq!(
+                observed.lock().unwrap().len(),
+                if case == "nested-reload" { 3 } else { 2 },
+                "a repeated reload makes no duplicate grant"
+            );
+            for conn in [12, 13] {
+                game.as_guest(conn, |game| game.tick_advancements())
+                    .unwrap();
+                let guest = game.lan.as_ref().unwrap().hub.guest(conn).unwrap();
+                assert_eq!(
+                    guest.xp_total,
+                    if conn == 12 || case == "nested-reload" {
+                        7
+                    } else {
+                        0
+                    }
+                );
+                {
+                    let item = "minecraft:stone";
+                    assert_eq!(
+                        guest
+                            .inventory
+                            .iter()
+                            .flatten()
+                            .filter(|stack| stack.item.as_ref() == item)
+                            .map(|stack| stack.count as usize)
+                            .sum::<usize>(),
+                        usize::from(conn == 12 || case == "nested-reload"),
+                        "{conn}: {item}"
+                    );
+                }
+            }
+            assert_eq!(kept.criteria[1].obtained_at.as_deref(), Some(DATE));
+            assert!(kept.done);
+        } else if case == "acting" {
             game.adv.tree = Arc::new(Tree::load(&scratch.join("data")));
             // Another player has unrelated progress: the acting snapshot must not use it.
             game.lan
@@ -186,7 +388,7 @@ fn progress_events_capture_each_players_full_mutation_state() {
                 .advancements
                 .grant(ID, "gamma", DATE);
             host.hub.mods_loaded = reload;
-            host.hub.reload_resources(Arc::new(sync));
+            game.with_advancement_hub(|hub, owners| hub.reload_resources(Arc::new(sync), owners));
             if reload {
                 game.run_native_advancement_grants();
             } else {

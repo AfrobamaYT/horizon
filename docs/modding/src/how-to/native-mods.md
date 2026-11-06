@@ -65,6 +65,11 @@ console permission level 4 and the existing console command path, while
 `host.players().acting_player()` returns the optional `PlayerRef` whose state is
 swapped in for this hook. The online list includes connected players even during
 nested player turns; a displaced body's reads still refuse where they did before.
+`host.players().player_by_name(name)` finds a connected real player by account
+name, case-insensitively, or returns `None`; it does not match nicknames or fake
+players. `host.levels().list_levels()` returns loaded server level handles in
+vanilla dimension order, or an empty list before a server world opens. Both
+services are available through `&dyn ServerHost` and do not mutate the world.
 Read identity through `player.uuid()`, `player.name(host)`,
 `player.permission_level(host)` and `player.address(host)`. The address is the
 connection IP without a port (the forwarded address behind a Velocity proxy),
@@ -95,8 +100,10 @@ Subscribe to `player_advancement_progress` to inspect the whole advancement imme
 one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
 includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
 `None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
-and `done` is the game's completion result. This also describes first-tick and reload grants
-for the event's player, even when another player's state is in place.
+and `done` is the game's completion result. A player-issued `/reload` mutates and snapshots
+the acting player's live progress, including during a nested turn. For a suspended outer
+player, reload grants still use the displaced hub record; full owner-correct reload awards
+for suspended and inactive players remain tracked in #1240.
 
 Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
 cannot change the player's progress and is not updated by subsequent events. No-op grants and
@@ -259,6 +266,8 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
 
+`MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
+
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
 baby age (`-48000` for a sniffer, otherwise `-24000`) or become adults at `0`, including the age-boundary
@@ -314,6 +323,14 @@ must already be in Horizon's lock file in a matching version. The launcher check
 package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
 workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
 stops the build; the game still builds with `--locked`.
+
+Crates included only for mods are listed as optional dependencies in
+`crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with
+`minimal-rust` and `rustls-tls-ring`, no default features), `redis` 1 (blocking,
+no default features), `tungstenite` 0.30 (websockets over a stream the mod opens,
+no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
+add their dependencies to the lock without building them into the game. A feature
+that introduces a dependency not listed there is refused.
 
 ### Conditional data
 

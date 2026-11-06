@@ -5,4 +5,6 @@ pub trait Helpers {
     fn playing();
     #[helper(side = "client")]
     fn mapping();
+    #[helper(side = "client")]
+    fn modifiers();
 }

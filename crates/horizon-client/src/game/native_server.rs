@@ -1020,6 +1020,21 @@ impl Game<'_> {
             .collect()
     }
 
+    /// Find a connected player by their account name, case-insensitively.
+    pub(super) fn native_player_by_name(&self, name: &str) -> Option<PlayerRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        let player = self
+            .lan
+            .as_ref()?
+            .hub
+            .online_players()
+            .find(|player| player.name.eq_ignore_ascii_case(name))?;
+        Some(mod_api::__private::game::player_ref(
+            mod_api::EntityRef::new(epoch, player.entity_id as u32),
+            player.uuid,
+        ))
+    }
+
     /// A connected player's record, including one displaced by a nested turn.
     pub(super) fn online_player_record(&self, player: PlayerRef) -> Option<&Guest> {
         (self.native_lifecycle.epoch()? == player.entity().epoch()).then_some(())?;

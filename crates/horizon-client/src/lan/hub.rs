@@ -42,8 +42,10 @@ use horizon_world::{
 use std::sync::{Arc, Mutex, atomic::Ordering};
 
 /// GameEvent types (ClientboundGameEventPacket).
+pub mod advancements;
 pub mod chat;
 pub mod chat_filter;
+use advancements::AdvancementOwners;
 
 pub mod game_event {
     pub const NO_RESPAWN_BLOCK_AVAILABLE: u8 = 0;
@@ -56,6 +58,19 @@ pub mod game_event {
     pub const IMMEDIATE_RESPAWN: u8 = 11;
     pub const LIMITED_CRAFTING: u8 = 12;
     pub const LEVEL_CHUNKS_LOAD_START: u8 = 13;
+}
+
+fn initial_recipe_book_packets(sync: &SyncData, book: &crate::recipe_book::Settings) -> [C; 2] {
+    let settings = (0..4)
+        .flat_map(|b| [u8::from(book.open[b]), u8::from(book.filtering[b])])
+        .collect();
+    [
+        raw(ids::RECIPE_BOOK_SETTINGS, settings),
+        raw(
+            ids::RECIPE_BOOK_ADD,
+            sync.advancements.initial_recipe_book(book, sync),
+        ),
+    ]
 }
 
 #[derive(Clone, Debug)]
@@ -948,6 +963,13 @@ impl Hub {
     /// Whether an online guest is placed in the level in place (`config.dimension`).
     pub fn here(&self, g: &Guest) -> bool {
         g.participates_online() && g.placed && g.dimension == self.config.dimension
+    }
+    /// How many passes the level in place's entity tracking has run (None
+    /// before its first).
+    pub fn tracking_ticks(&self) -> Option<u32> {
+        self.entities
+            .get(&self.config.dimension)
+            .map(Entities::ticks)
     }
     /// Whether a guest is sent the level in place: the players placed in it, and
     /// the held ones, which look at it without being part of it.
@@ -3291,6 +3313,8 @@ impl Hub {
             vertical_collision: false,
             horizontal_collision: false,
             needs_sync: false,
+            idle: false,
+            bare: false,
             minecart_steps: None,
             leash: None,
             spectator: false,
@@ -3752,38 +3776,36 @@ impl Hub {
     /// filtering flags, then every known recipe.
     fn send_initial_recipe_book(&self, i: usize) {
         let g = &self.guests[i];
-        let book = &g.recipe_book;
-        let settings = (0..4)
-            .flat_map(|b| [u8::from(book.open[b]), u8::from(book.filtering[b])])
-            .collect();
-        g.send(&raw(ids::RECIPE_BOOK_SETTINGS, settings));
-        g.send(&raw(
-            ids::RECIPE_BOOK_ADD,
-            self.sync.advancements.initial_recipe_book(book, &self.sync),
-        ));
+        for packet in initial_recipe_book_packets(&self.sync, &g.recipe_book) {
+            g.send(&packet);
+        }
     }
 
     /// `PlayerList.reloadResources` (`/reload`): every player's advancements
     /// reload against the new data, then everyone gets the tags, and each
     /// player the recipes and their recipe book again.
-    pub fn reload_resources(&mut self, sync: Arc<SyncData>) {
+    pub fn reload_resources(&mut self, sync: Arc<SyncData>, owners: &mut AdvancementOwners<'_>) {
         self.lan.shared.set_sync(sync.clone());
         self.sync = sync.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
-        for g in &mut self.guests {
-            let mut granted = Vec::new();
+        for i in 0..self.guests.len() {
             // PlayerAdvancements.reload: isFirstPacket again, the progress
             // read against the new tree; a player whose advancements were
             // never loaded does that on their first tick.
-            if !g.advancements_loaded {
+            if !self.guests[i].advancements_loaded {
                 continue;
             }
-            g.advancements_visible.clear();
-            g.advancements_changed.clear();
+            self.guests[i].advancements_visible.clear();
+            let Some(state) = owners.state(&mut self.guests, i) else {
+                continue;
+            };
+            state.changed.clear();
             if self.mods_loaded {
-                sync.advancements.prune_progress(&mut g.advancements);
+                sync.advancements.prune_progress(state.progress);
+                let grants = sync.advancements.tick_candidates(state.progress);
+                let g = &self.guests[i];
                 self.native_advancement_grants.push(TickGrants {
                     conn: g.conn,
                     player: g.uuid,
@@ -3791,28 +3813,28 @@ impl Hub {
                     name: g.name.clone(),
                     now_millis: now,
                     first_tick: false,
-                    grants: sync.advancements.tick_candidates(&g.advancements),
+                    grants,
                     sync: sync.clone(),
                 });
-            } else if let Some(add) = sync.advancements.reload(
-                &sync,
-                now,
-                &mut g.advancements,
-                &mut g.recipe_book,
-                &mut granted,
-            ) {
-                g.send(&raw(ids::RECIPE_BOOK_ADD, add));
+            } else {
+                let mut granted = Vec::new();
+                if let Some(add) =
+                    sync.advancements
+                        .reload(&sync, now, state.progress, state.book, &mut granted)
+                {
+                    self.guests[i].send(&raw(ids::RECIPE_BOOK_ADD, add));
+                }
             }
         }
         if self.mods_loaded {
             self.native_reload_pending = true;
             return;
         }
-        self.finish_reload_resources();
+        self.finish_reload_resources(owners);
     }
 
     /// Finish a reload only after its tick grants and their hooks have run.
-    pub fn finish_reload_resources(&mut self) {
+    pub fn finish_reload_resources(&mut self, owners: &mut AdvancementOwners<'_>) {
         self.native_reload_pending = false;
         let sync = self.sync.clone();
         // broadcastAll(ClientboundUpdateTagsPacket).
@@ -3827,8 +3849,34 @@ impl Hub {
             if self.guests[i].brand == "horizon" {
                 send_recipe_content(&self.guests[i]);
             }
-            self.send_initial_recipe_book(i);
+            if let Some(state) = owners.state(&mut self.guests, i) {
+                let packets = initial_recipe_book_packets(&sync, state.book);
+                for packet in packets {
+                    self.guests[i].send(&packet);
+                }
+            }
         }
+    }
+
+    fn advancement_task_guest(&self, task: &TickGrants) -> Option<usize> {
+        if !Arc::ptr_eq(&self.sync, &task.sync) {
+            return None;
+        }
+        self.guests.iter().position(|g| {
+            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
+        })
+    }
+
+    /// The task's player's progress, from the same owner used for its mutation.
+    pub fn advancement_task_progress<R>(
+        &mut self,
+        task: &TickGrants,
+        owners: &mut AdvancementOwners<'_>,
+        read: impl FnOnce(&crate::advancements::Progress) -> R,
+    ) -> Option<R> {
+        let i = self.advancement_task_guest(task)?;
+        let state = owners.state(&mut self.guests, i)?;
+        Some(read(state.progress))
     }
 
     /// Grant one queued criterion. The caller fires its hook before `reward_native_tick`.
@@ -3836,16 +3884,13 @@ impl Hub {
         &mut self,
         task: &TickGrants,
         grant: &super::advancements::CriterionGrant,
+        owners: &mut AdvancementOwners<'_>,
     ) -> Option<bool> {
-        if !Arc::ptr_eq(&self.sync, &task.sync) {
-            return None;
-        }
-        let guest = self.guests.iter_mut().find(|g| {
-            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
-        })?;
+        let i = self.advancement_task_guest(task)?;
+        let state = owners.state(&mut self.guests, i)?;
         task.sync
             .advancements
-            .grant_tick(&mut guest.advancements, grant, task.now_millis)
+            .grant_tick(state.progress, grant, task.now_millis)
     }
 
     /// Apply a completion's rewards after the hook, using the live progress.
@@ -3854,23 +3899,22 @@ impl Hub {
         task: &TickGrants,
         grant: &super::advancements::CriterionGrant,
         was_done: bool,
+        owners: &mut AdvancementOwners<'_>,
     ) {
-        if !Arc::ptr_eq(&self.sync, &task.sync) {
+        let Some(i) = self.advancement_task_guest(task) else {
             return;
-        }
-        let Some(guest) = self.guests.iter_mut().find(|g| {
-            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
-        }) else {
+        };
+        let Some(state) = owners.state(&mut self.guests, i) else {
             return;
         };
         if let Some(add) = task.sync.advancements.reward_tick(
             &task.sync,
-            &guest.advancements,
-            &mut guest.recipe_book,
+            state.progress,
+            state.book,
             grant,
             was_done,
         ) {
-            guest.send(&raw(ids::RECIPE_BOOK_ADD, add));
+            self.guests[i].send(&raw(ids::RECIPE_BOOK_ADD, add));
         }
     }
 
@@ -3879,29 +3923,33 @@ impl Hub {
         &mut self,
         task: &TickGrants,
         fresh: &[super::advancements::CriterionGrant],
+        owners: &mut AdvancementOwners<'_>,
     ) {
-        if !task.first_tick || !Arc::ptr_eq(&self.sync, &task.sync) {
+        if !task.first_tick {
             return;
         }
-        let Some(guest) = self.guests.iter_mut().find(|g| {
-            g.conn == task.conn && g.uuid == task.player && g.entity_id == task.entity_id
-        }) else {
+        let Some(i) = self.advancement_task_guest(task) else {
             return;
         };
-        let mut unlocked = std::mem::take(&mut guest.recipes_unlocked);
-        unlocked.retain(|id| guest.recipe_book.knows(id));
-        if let Some(add) = task.sync.advancements.recipes_added(&unlocked, &task.sync) {
-            guest.send(&raw(ids::RECIPE_BOOK_ADD, add));
-        }
+        let Some(state) = owners.state(&mut self.guests, i) else {
+            return;
+        };
+        let mut unlocked = std::mem::take(state.unlocked);
+        unlocked.retain(|id| state.book.knows(id));
+        let add = task.sync.advancements.recipes_added(&unlocked, &task.sync);
         let (update, visible) = task.sync.advancements.first_snapshot(
             &task.sync,
-            &guest.advancements,
+            state.progress,
             fresh,
             task.now_millis,
         );
+        state.changed.clear();
+        let guest = &mut self.guests[i];
+        if let Some(add) = add {
+            guest.send(&raw(ids::RECIPE_BOOK_ADD, add));
+        }
         guest.send(&raw(ids::UPDATE_ADVANCEMENTS, update));
         guest.advancements_visible = visible;
-        guest.advancements_changed.clear();
     }
 
     /// `PlayerAdvancements.flushDirty` and the recipes the player unlocked
@@ -5330,7 +5378,7 @@ mod tests {
                     == Some(ids::UPDATE_ADVANCEMENTS),
             _ => false,
         }));
-        hub.finish_native_first_tick(&task, &[]);
+        hub.finish_native_first_tick(&task, &[], &mut AdvancementOwners::default());
         let found = rx.try_iter().any(|out| match out {
             crate::lan::Out::Packet(body) => {
                 let mut reader = horizon_protocol::buf::Reader::new(&body);

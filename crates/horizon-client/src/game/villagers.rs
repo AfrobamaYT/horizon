@@ -298,7 +298,10 @@ impl Game<'_> {
     pub(super) fn villager_item_sense(&mut self) {
         if self.dropped.is_empty() {
             for m in &mut self.mobs {
-                if m.species() == Species::Villager && villager_brain::take_item_scan(m) {
+                if m.species() == Species::Villager
+                    && self.creatures.ticked.contains(&m.id)
+                    && villager_brain::take_item_scan(m)
+                {
                     villager_brain::set_wanted_item(m, None);
                 }
             }
@@ -312,7 +315,10 @@ impl Game<'_> {
             .cloned();
         let mut due = Vec::new();
         for (i, m) in self.mobs.iter_mut().enumerate() {
-            if m.species() == Species::Villager && villager_brain::take_item_scan(m) {
+            if m.species() == Species::Villager
+                && self.creatures.ticked.contains(&m.id)
+                && villager_brain::take_item_scan(m)
+            {
                 due.push(i);
             }
         }
@@ -373,7 +379,10 @@ impl Game<'_> {
         let mut near_items = super::item_areas::ItemAreas::default();
         for i in 0..self.mobs.len() {
             let m = &self.mobs[i];
-            if m.species() != Species::Villager || !m.alive() || !self.entity_grief(m.id, griefing)
+            if m.species() != Species::Villager
+                || !m.alive()
+                || !self.creatures.ticked.contains(&m.id)
+                || !self.entity_grief(m.id, griefing)
             {
                 continue;
             }

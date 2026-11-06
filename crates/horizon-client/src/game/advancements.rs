@@ -821,6 +821,29 @@ impl Game<'_> {
             );
         }
     }
+    /// Lend the hub each guest turn's actual advancement storage, without
+    /// moving it back into a record while that turn is still active.
+    pub(super) fn with_advancement_hub<R>(
+        &mut self,
+        run: impl FnOnce(
+            &mut horizon_client::lan::hub::Hub,
+            &mut horizon_client::lan::hub::advancements::AdvancementOwners<'_>,
+        ) -> R,
+    ) -> Option<R> {
+        use horizon_client::lan::hub::advancements::{AdvancementOwners, AdvancementState};
+        let host = self.lan.as_mut()?;
+        let mut owners = AdvancementOwners::active(
+            &self.lan_guest_swaps,
+            AdvancementState {
+                progress: &mut self.adv.progress,
+                changed: &mut self.adv.changed,
+                unlocked: &mut self.adv.unlocked,
+                book: &mut self.level.recipe_book,
+            },
+        );
+        Some(run(&mut host.hub, &mut owners))
+    }
+
     /// Grant the hub's tick criteria one at a time: each hook sees the new
     /// progress before the completion's rewards and packets are applied.
     pub(super) fn run_native_advancement_grants(&mut self) {
@@ -832,27 +855,26 @@ impl Game<'_> {
             let mut fresh = Vec::new();
             for grant in &task.grants {
                 let Some(was_done) = self
-                    .lan
-                    .as_mut()
-                    .and_then(|host| host.hub.grant_native_tick(&task, grant))
+                    .with_advancement_hub(|hub, owners| hub.grant_native_tick(&task, grant, owners))
+                    .flatten()
                 else {
                     continue;
                 };
                 fresh.push(grant.clone());
                 if mod_api::__private::listened(mod_api::HookId::PlayerAdvancementProgress) {
-                    let guest = self
-                        .lan
-                        .as_ref()
-                        .expect("granted guest's host")
-                        .hub
-                        .guest(task.conn)
-                        .expect("granted guest");
                     let definition = task
                         .sync
                         .advancements
                         .definition(&grant.advancement)
                         .expect("granted advancement");
-                    let progress = progress_snapshot(definition, &guest.advancements);
+                    let progress = self
+                        .with_advancement_hub(|hub, owners| {
+                            hub.advancement_task_progress(&task, owners, |progress| {
+                                progress_snapshot(definition, progress)
+                            })
+                        })
+                        .flatten()
+                        .expect("granted task's progress");
                     self.native_player_advancement_progress(
                         mod_api::__private::PlayerAdvancementProgressCall {
                             player: task.player,
@@ -865,21 +887,38 @@ impl Game<'_> {
                         },
                     );
                 }
-                if let Some(host) = self.lan.as_mut() {
-                    host.hub.reward_native_tick(&task, grant, was_done);
+                let definition = task
+                    .sync
+                    .advancements
+                    .definition(&grant.advancement)
+                    .expect("granted advancement");
+                let done = self
+                    .with_advancement_hub(|hub, owners| {
+                        hub.advancement_task_progress(&task, owners, |progress| {
+                            progress.done(definition)
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or(false);
+                if self.lan_acting == Some(task.conn) {
+                    if !was_done && done {
+                        self.award_definition(definition);
+                    }
+                } else {
+                    self.with_advancement_hub(|hub, owners| {
+                        hub.reward_native_tick(&task, grant, was_done, owners);
+                    });
                 }
             }
-            if let Some(host) = self.lan.as_mut() {
-                host.hub.finish_native_first_tick(&task, &fresh);
+            self.with_advancement_hub(|hub, owners| {
+                hub.finish_native_first_tick(&task, &fresh, owners);
+            });
+        }
+        self.with_advancement_hub(|hub, owners| {
+            if hub.native_reload_pending {
+                hub.finish_reload_resources(owners);
             }
-        }
-        if let Some(host) = self
-            .lan
-            .as_mut()
-            .filter(|host| host.hub.native_reload_pending)
-        {
-            host.hub.finish_reload_resources();
-        }
+        });
     }
     /// `PlayerAdvancements.progressChanged`, kept for a network player's client.
     fn progress_changed(&mut self, index: usize) {
@@ -1004,7 +1043,13 @@ impl Game<'_> {
             return;
         }
         let tree = self.adv.tree.clone();
-        let a = &tree.list[index];
+        self.award_definition(&tree.list[index]);
+    }
+
+    fn award_definition(&mut self, a: &adv::Advancement) {
+        if self.lan_acting_fake {
+            return;
+        }
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
