@@ -283,7 +283,18 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
-    for path in hmods(home)
+    let mut packages = hmods(home);
+    // A wasm mod's declarations also select a source build's internals table.
+    packages.extend(
+        fs::read_dir(home.join(horizon_mods::mod_list::DIR))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "hmod")),
+    );
+    packages.sort();
+    for path in packages
         .into_iter()
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
@@ -320,6 +331,18 @@ mod tests {
 
     fn d(id: &str, version: &str, digest: &str) -> Mod {
         (id.into(), version.into(), Some(digest.into()))
+    }
+
+    #[test]
+    fn regular_wasm_package_changes_invalidate_the_build_view_cache() {
+        let home = std::env::temp_dir().join(format!("wasm-build-view-{}", std::process::id()));
+        fs::create_dir_all(home.join(horizon_mods::mod_list::DIR)).unwrap();
+        let package = home.join(horizon_mods::mod_list::DIR).join("example.hmod");
+        fs::write(&package, b"a").unwrap();
+        let before = fingerprint(&home, None);
+        fs::write(&package, b"ab").unwrap();
+        assert_ne!(before, fingerprint(&home, None));
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
