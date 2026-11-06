@@ -318,7 +318,7 @@ pub(super) fn stage(
         "horizon-client",
         "horizon-mod-api",
         "horizon-threads",
-        "horizon-mods",
+        "horizon-mod-package",
     ] {
         let mut dependency = path_dep(&format!("../{name}"));
         if name == "horizon-client" {
@@ -657,6 +657,14 @@ mod tests {
         assert_eq!(platform["package"].as_str(), Some("horizon-mod-api"));
         assert_eq!(platform["features"][0].as_str(), Some("testing"));
         let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
+        assert_eq!(
+            game["dependencies"]["horizon-mod-package"]["path"].as_str(),
+            Some("../horizon-mod-package")
+        );
+        assert!(!game["dependencies"]
+            .as_table()
+            .unwrap()
+            .contains_key("horizon-mods"));
         assert_eq!(
             game["dependencies"]["mod_0"]["package"].as_str(),
             Some("example-mod")

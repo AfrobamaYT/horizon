@@ -53,6 +53,22 @@ let registry = "https://github.com/horizon-rust/horizon-mods";
 '''
         self.assertEqual(rename.rewrite("launcher/src/native_mods/prebuilt.rs", source), expected)
 
+    def test_generated_manifest_packages_do_not_rename_player_or_negative_strings(self):
+        source = '''for name in [
+    "horizon-mods",
+] { let dependency = path_dep(&format!("../{name}")); }
+let folder = "horizon-mods";
+assert!(!dependencies.contains_key("horizon-mods"));
+'''
+        expected = '''for name in [
+    "horizon-mod-package",
+] { let dependency = path_dep(&format!("../{name}")); }
+let folder = "horizon-mods";
+assert!(!dependencies.contains_key("horizon-mods"));
+'''
+        self.assertEqual(rename.rewrite("launcher/src/native_mods/api.rs", source), expected)
+        self.assertEqual(rename.rewrite("launcher/src/export.rs", source), source)
+
     def test_book_filters_and_translations_obey_the_boundary(self):
         source = '{{#include ../../crates/horizon-mods/src/lib.rs}}\n(crates/horizon-mods)\ncrates/horizon-mods/**\n'
         expected = '{{#include ../../crates/horizon-mod-package/src/lib.rs}}\n(crates/horizon-mod-package)\ncrates/horizon-mod-package/**\n'
