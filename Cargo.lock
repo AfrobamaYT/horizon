@@ -1956,6 +1956,8 @@ dependencies = [
  "wat",
  "wgpu",
  "wit-bindgen 0.46.0",
+ "wit-component 0.261.0",
+ "wit-parser 0.261.0",
 ]
 
 [[package]]
@@ -6303,6 +6305,7 @@ dependencies = [
  "wasm-encoder 0.261.0",
  "wasm-metadata 0.261.0",
  "wasmparser 0.261.0",
+ "wat",
  "wit-parser 0.261.0",
 ]
 
