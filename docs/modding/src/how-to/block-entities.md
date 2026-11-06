@@ -1,7 +1,7 @@
 # Declaring a machine's menu data
 
-A mod block entity has two different kinds of storage: its item slots are reached
-through transactional Parts; its integer menu data is read with
+A mod block entity has two different kinds of storage: external item access uses
+transactional Parts, while internal slots use the handle methods below; integer menu data is read with
 `BlockEntityRef::data_slots` and changed on a server Host. Menu data is transient:
 creation and loading both start with an empty data vector, even when the saved
 payload still contains the machine's progress.
@@ -32,3 +32,22 @@ broadcast delivers committed changes to viewers.
 The public handle still resolves a level and position. Removal makes it
 unavailable; replacement at that position is followed, as with the other handle
 methods. This is not an instance-token or borrowed-payload API.
+
+## Internal items versus automation
+
+For a configured mod container, `item_slot(host, slot)` snapshots an internal slot;
+`set_item_slot(host, tx, slot, stack)` replaces it within an existing server
+transaction. Any held mod block-entity handle can be used; there is no caller
+ownership check. This deliberately bypasses inputs, outputs and face policy, so a
+recipe can consume its input and produce its output atomically, including output
+slots that automation cannot insert into. Use the `ITEMS` capability for external
+insertion; its policy is unchanged. Vanilla containers are unavailable here.
+
+Indices use the current container's declared count. Lazy slots read empty; saved
+excess slots are neither exposed nor truncated. None clears, identical values
+return `Ok(false)`, and real changes send Changed at root commit. Nested abort
+restores ordinary before-images, including committed-child writes. Invalid
+indices, unknown/air/zero-count stacks and counts above the registered or
+component-overridden maximum return `BlockEntityItemError`, never a partial write
+or silent count clamp. A positional handle follows a replacement and validates
+its current container; this is distinct from an identity-strict automatic restore.

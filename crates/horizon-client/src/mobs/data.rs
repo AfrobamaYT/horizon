@@ -83,7 +83,7 @@ pub struct MobData {
     pub entity_tags: HashMap<String, std::collections::HashSet<String>>,
     /// The villager POI type of every block state (`PoiTypes.forState`),
     /// worked out the first time a villager looks for one.
-    pub pois: std::sync::OnceLock<Vec<Option<super::villager_brain::Poi>>>,
+    pub pois: std::sync::OnceLock<Vec<Option<horizon_world::poi::PoiType>>>,
     /// [`MobData::placement`] of each species' entity type (by `Species as
     /// usize`), worked out the first time a spawn asks.
     pub species_placements: std::sync::OnceLock<Vec<Placement>>,
