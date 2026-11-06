@@ -1153,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Завантаження, вхід в обліковий запис та оновлення проходять через цей проксі (http://host:port, socks5://host:port). Порожнє поле означає відсутність: натомість використовується HTTPS_PROXY, якщо лаунчер було запущено з ним.",
   "{name} was left out: made for another Horizon version": "{name} пропущено: зроблено для іншої версії Horizon",
   "{name} was left out: clashes with {other}": "{name} пропущено: конфліктує з {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} пропущено: йому потрібен {other}, який пропущено",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "Не збирається на Horizon, у який ви граєте ({code}): збирання пропустить його, доки автор не оновить"
+  "{name} was left out: it needs {other}, which was left out": "{name} пропущено: йому потрібен {other}, який пропущено"
 }
