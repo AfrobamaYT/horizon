@@ -293,6 +293,7 @@ mod native_lifecycle;
 mod native_live_holder_tests;
 mod native_living_effects;
 mod native_living_flags;
+mod native_living_position;
 mod native_living_refs;
 mod native_living_writes;
 mod native_menu_refs;
@@ -4679,6 +4680,7 @@ impl Game<'_> {
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
         let bob = self.particles.random().next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            attachment_lifetime: Default::default(),
             fall_distance: 0.0,
             rotation: [0.0, 0.0],
             join: Default::default(),
@@ -15501,6 +15503,7 @@ impl Game<'_> {
         let p = Vec3::new(at[0], at[1], at[2]);
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             no_gravity: false,
@@ -23733,10 +23736,12 @@ fn start_game<'a>(
         result?;
         return Ok(None);
     }
-    // FMLClientSetupEvent: once per process, here in `run`, after the initial load applied.
+    // The atlases the initial load stitched, then FMLClientSetupEvent: once per process, here in
+    // `run`, after the initial load applied.
     // A dedicated server has no client and returned above; a splitscreen guest's `run` is
     // another local player of the same process.
     if game.options.is_client_start() {
+        game.texture_atlases_stitched();
         game.native_client_setup();
     }
     // Finish Setup -> Config -> World before any screen, connection, input or tick hooks.

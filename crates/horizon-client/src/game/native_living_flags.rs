@@ -22,7 +22,7 @@ impl Game<'_> {
     /// Run a player sleep write in the authoritative body. An acting player's
     /// hub record is displaced until its turn ends; only inactive guests enter
     /// another turn, in the level already in place. Fake players never sleep.
-    fn native_player_sleep_write(
+    pub(super) fn native_player_sleep_write(
         &mut self,
         target: Target,
         write: impl FnOnce(&mut Self) -> bool,

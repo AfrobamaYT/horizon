@@ -617,6 +617,7 @@ mod tests {
             );
             let item = game.dropped[0].id;
             game.orbs.push(ExperienceOrb {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 no_gravity: false,
