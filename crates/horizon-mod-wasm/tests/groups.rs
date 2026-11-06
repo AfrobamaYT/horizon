@@ -17,18 +17,16 @@ fn overworld() -> LevelRef {
     LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD)
 }
 
-impl mod_api::prelude::LevelReadsBackend for World {
+impl mod_api::prelude::LevelsBackend for World {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == overworld()
     }
-}
-impl mod_api::prelude::LevelWorldBackend for World {
     fn level_game_rule_bool(&self, level: LevelRef, key: BoolGameRuleKey) -> Option<bool> {
         (level == overworld() && mod_api::__private::game_rule_bool_slot(key).is_some())
             .then_some(true)
     }
 }
-impl mod_api::prelude::BlockEntityRefsBackend for World {
+impl mod_api::prelude::BlockEntitiesBackend for World {
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         (entity.fields().position == [0, 64, 0])
             .then(|| mod_api::__private::block_entity_type_key("test:counter_box"))
@@ -36,14 +34,14 @@ impl mod_api::prelude::BlockEntityRefsBackend for World {
     }
 }
 impl Backend for World {}
-mod_api::impl_backend_areas!(World, except(level_reads, level_world, block_entity_refs));
+mod_api::impl_backend_areas!(World, except(block_entities, levels));
 
-impl mod_api::prelude::EntityHandlesHost for World {
+impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld").then(overworld)
     }
 }
-impl mod_api::prelude::BlockEntityRefsHost for World {
+impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
         Some(mod_api::__private::game::block_entity_ref(level, position))
     }
@@ -53,7 +51,7 @@ impl Host for World {
         Some(BackendRef::of(self))
     }
 }
-mod_api::impl_host_areas!(World, except(entity_handles, block_entity_refs));
+mod_api::impl_host_areas!(World, except(block_entities, entities));
 
 impl ServerHost for World {}
 mod_api::impl_server_host_areas!(World);
@@ -66,8 +64,10 @@ fn built() -> ([horizon_mod_wasm::WasmPackage; 4], Vec<u8>) {
     let packages = ["counter_lib", "alpha", "beta", "gamma"].map(|id| {
         let package = folder.join(format!("{id}/target/horizon-mod/{id}.hmod"));
         horizon_mod_wasm::WasmPackage {
-            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            manifest: horizon_mod_package::Package::read(&package)
+                .unwrap()
+                .manifest,
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }
     });
     (packages, std_member)
@@ -79,7 +79,7 @@ fn a_library_refused_over_a_point_takes_its_dependents_with_it() {
     let (mut packages, std_member) = built();
     // The library lists a point this game doesn't have.
     let wasm = packages[0].manifest.wasm.as_ref().unwrap();
-    packages[0].manifest = horizon_mods::manifest::Manifest::parse(&format!(
+    packages[0].manifest = horizon_mod_package::manifest::Manifest::parse(&format!(
         "id = \"counter_lib\"\nname = \"Counter library\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
          [[native.injection]]\nid = \"gone\"\ntarget = \"horizon_client::game::Game<'_>::gone\"\n\

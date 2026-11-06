@@ -30,9 +30,9 @@ thread's own handling (including keep-alives and resource pack messages) do not 
 
 `Hooks::client_packet_send` is the other direction: a `ClientPacketSendEvent` with the same
 `ClientPacket` view for each play packet the window's game is about to send (`Connection.send`),
-in order, including the selected slot sent before an attack or a use. Setting `canceled` drops
-the packet, and the game goes on as if it had been sent. Packets the network thread sends itself
-(keep-alives, pongs, cookies, configuration), the phase-dependent answers (resource pack status,
+in order, including the selected slot sent before an attack or a use. Returning `Flow::Cancel` drops
+the packet, and the game goes on as if it had been sent. Play-phase pongs pass through this hook.
+Packets the network thread sends itself (keep-alives, configuration pongs, cookies, configuration), the phase-dependent answers (resource pack status,
 a dialog's custom click action) and far terrain requests do not fire it. With no listener the
 send path checks one flag and builds nothing."#]
     #[hook(

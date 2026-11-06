@@ -19,7 +19,10 @@ mod local_sound_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn render_gui_pre(&self, host: &dyn ClientHost, _: &mut RenderGuiPreEvent) -> Flow {
-            assert!(host.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0));
+            assert!(
+                host.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0)
+                    .is_some()
+            );
             Flow::Continue
         }
     }
@@ -36,13 +39,13 @@ mod local_sound_tests {
                 game.audio.heard.clear();
                 game.native_render_gui_pre(&mut false);
                 assert_eq!(
-                    game.mod_sounds.borrow().len(),
+                    game.mod_sounds.queued.borrow().len(),
                     1,
                     "held for the audio update"
                 );
                 assert!(!game.audio.heard.contains_key("minecraft:ui.button.click"));
                 game.tick_sound_engine();
-                assert!(game.mod_sounds.borrow().is_empty());
+                assert!(game.mod_sounds.queued.borrow().is_empty());
                 assert_eq!(game.audio.heard.get("minecraft:ui.button.click"), Some(&1));
             });
         });

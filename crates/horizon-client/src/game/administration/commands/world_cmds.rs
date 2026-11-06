@@ -402,16 +402,20 @@ impl Game<'_> {
 
     /// `DamageCommand.damage`: retain the accepted hit's player context and run
     /// `Zombie.hurtServer`'s reinforcement requests before the command returns.
+    /// Health-changing hits also raise their damage vibration before return.
     fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
         let attack = self.attack_of_who(damage.attacker);
         let mut reinforcements = Vec::new();
+        let mut health_changed = false;
         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
             let queued = m.outbox.len();
+            let old_health = m.health;
             let hurt = m.damage(
                 crate::game::entity::damage_level_of!(self, &attack),
                 amount,
                 damage,
             );
+            health_changed = hurt && m.health != old_health;
             if hurt {
                 reinforcements = take_new_reinforcements(&mut m.outbox, queued);
             }
@@ -431,6 +435,9 @@ impl Game<'_> {
                         }
                     }
                 }
+            }
+            if health_changed {
+                self.mob_damage_event(id);
             }
         }
         for (mob, target) in reinforcements {

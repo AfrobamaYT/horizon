@@ -29,7 +29,7 @@ const FLOOD_WINDOW: Duration = Duration::from_secs(60);
 
 /// The platform data folder, shared with launcher command preparation.
 pub fn data_dir() -> PathBuf {
-    horizon_mods::selection::data_dir_with(|key| std::env::var_os(key))
+    horizon_mod_package::selection::data_dir_with(|key| std::env::var_os(key))
 }
 
 /// `--home DIR`, set once at start; it wins over `HORIZON_HOME`.

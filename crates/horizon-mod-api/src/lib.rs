@@ -907,6 +907,34 @@ impl SoundPlay {
     }
 }
 
+/// A sound a client mod started with `play_local_sound`, to follow and control: `state`, `stop`
+/// and `fade`. Each handle names one play and is never reused. Once the sound has ended, been
+/// stopped or been cleared (leaving or changing levels stops every sound), the handle is stale: it
+/// reads [`SoundState::Stopped`] and its writes do nothing. It stays valid across a change of
+/// output device, which keeps the sounds playing.
+///
+/// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
+/// it plays (stop it before starting another in its place), or nothing can stop it until the
+/// player leaves the level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so mods cannot build or destructure it
+pub struct SoundRef {
+    pub(crate) id: u64,
+}
+
+/// Where a mod's sound is ([`SoundRef`]'s `state`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundState {
+    /// Not started yet: queued for the next audio update, waiting out `play_local_sound`'s
+    /// `after` ticks, or between a looping sound's repeats (`SoundPlay::looping`'s `delay`).
+    Waiting,
+    /// Playing (`SoundEngine.isActive`).
+    Playing,
+    /// Over: it ended, was stopped, faded to 0 or was cleared. It never plays again.
+    Stopped,
+}
+
 /// A playing sound's channel, for `play_sound_source` and
 /// `play_streaming_source`: an id only, to tell sounds apart across the two
 /// hooks. It gives no control over the channel.
@@ -4570,7 +4598,7 @@ mod tests {
     #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
-        impl mod_api::prelude::BaseHost for Recipes {
+        impl mod_api::prelude::RecipesHost for Recipes {
             fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
                 if kind == "minecraft:crafting_transmute" {
                     self.0.clone()
@@ -4580,7 +4608,7 @@ mod tests {
             }
         }
         impl Host for Recipes {}
-        mod_api::impl_host_areas!(Recipes, except(base));
+        mod_api::impl_host_areas!(Recipes, except(recipes));
         let mut recipe = Recipe::new(
             "test:recipe",
             "minecraft:crafting_transmute",
@@ -4653,13 +4681,13 @@ mod tests {
     #[test]
     fn an_optional_dependency_runs_only_when_built_with_and_installed() {
         struct Installed(&'static str);
-        impl mod_api::prelude::BaseHost for Installed {
+        impl mod_api::prelude::LevelsHost for Installed {
             fn is_loaded(&self, id: &str) -> bool {
                 id == self.0
             }
         }
         impl Host for Installed {}
-        mod_api::impl_host_areas!(Installed, except(base));
+        mod_api::impl_host_areas!(Installed, except(levels));
         // The `testing` feature stands for a dependency's: without it the block isn't compiled,
         // with it the game is asked.
         let ran = std::cell::Cell::new(0);
@@ -4682,15 +4710,15 @@ mod tests {
         lines: Vec<Text>,
     }
 
-    impl mod_api::prelude::LevelReadsBackend for Reader {
+    impl mod_api::prelude::LevelsBackend for Reader {
         fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
             Some(self.block.to_string())
         }
     }
     impl Backend for Reader {}
-    mod_api::impl_backend_areas!(Reader, except(level_reads));
+    mod_api::impl_backend_areas!(Reader, except(levels));
 
-    impl mod_api::prelude::EntityHandlesHost for Reader {
+    impl mod_api::prelude::EntitiesHost for Reader {
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
@@ -4701,7 +4729,7 @@ mod tests {
             Some(BackendRef::of(self))
         }
     }
-    mod_api::impl_host_areas!(Reader, except(entity_handles));
+    mod_api::impl_host_areas!(Reader, except(entities));
     impl ClientHost for Reader {}
     mod_api::impl_client_host_areas!(Reader);
     impl mod_api::prelude::ServicesServerHost for Reader {
@@ -4727,7 +4755,7 @@ mod tests {
             ))
         }
     }
-    impl mod_api::prelude::BaseBackendMut for Reader {
+    impl mod_api::prelude::PlayersBackendMut for Reader {
         fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
             assert_eq!(player.uuid(), 7);
             self.lines.push(line);
@@ -4735,7 +4763,7 @@ mod tests {
         }
     }
     impl BackendMut for Reader {}
-    mod_api::impl_backend_mut_areas!(Reader, except(base));
+    mod_api::impl_backend_mut_areas!(Reader, except(players));
 
     #[test]
     fn server_services_forward_commands_messages_and_player_identity() {
