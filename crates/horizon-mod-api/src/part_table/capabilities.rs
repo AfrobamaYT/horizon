@@ -351,7 +351,7 @@ pub mod tests {
         let host: &mut dyn ServerHost = &mut world;
         // The pipe's type has a provider, which answers in the level in place; parked while
         // the server ticks another, the same block entity's level gives none.
-        let parked = LevelRef::new(NativeWorldEpoch::new(1), "minecraft:the_nether");
+        let parked = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
         assert!(here().capability(host, &ITEMS, PIPE, None).is_some());
         assert!(parked.capability(host, &ITEMS, PIPE, None).is_none());
     }

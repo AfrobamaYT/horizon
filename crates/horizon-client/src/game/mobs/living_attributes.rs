@@ -20,14 +20,16 @@ use std::sync::Arc;
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
 fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+    horizon_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
+    let seed = || {
+        horizon_client::entity_nbt::attribute_entries(m)
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    };
     let changed =
-        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
-            horizon_client::entity_nbt::attribute_entries(m)
-                .into_iter()
-                .map(|(_, e)| e)
-                .collect()
-        });
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -538,6 +540,74 @@ mod tests {
             assert!(speed.modifiers.is_empty());
             // Nothing else: an attribute nothing created sends no instance.
             assert_eq!(synced.len(), 3, "{synced:?}");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_base_write_preserves_covered_for_damage_and_attribute_sync() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:shulker")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let catalog = game.motion.attributes.clone();
+            let m = &mut game.mobs[0];
+            // The permanent row installed by Shulker.setRawPeekAmount(0).
+            m.extra
+                .live
+                .edit(
+                    &catalog,
+                    &m.kind.id,
+                    "minecraft:armor",
+                    true,
+                    Vec::new,
+                    |value, observer| {
+                        value.add_permanent(
+                            Modifier::new("minecraft:covered", 20.0, Operation::AddValue).unwrap(),
+                            observer,
+                        )
+                    },
+                )
+                .unwrap();
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let loaded_id = game.load_mob(saved.clone(), None).unwrap();
+            let loaded = game.mobs.iter().find(|m| m.id == loaded_id).unwrap();
+            assert_eq!(horizon_client::mobs::armor::values(loaded), (20.0, 0.0));
+            game.apply_entity_nbt(Target::Mob(12), saved).unwrap();
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let shulker = living(game, 12);
+            assert!(shulker.set_attribute_base(game, "minecraft:max_health", 40.0));
+            // No handle read in between: damage must not need a read to restore the map.
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let mut synced = Vec::new();
+            let m = game.mobs[0].clone();
+            game.mob_attributes(
+                &m,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
+            let armor_id = catalog.id("minecraft:armor").unwrap().registry_id();
+            let armor = synced.iter().find(|row| row.attribute == armor_id).unwrap();
+            assert_eq!(armor.base, 0.0);
+            assert_eq!(
+                armor.modifiers,
+                [horizon_protocol::packets::play::AttributeModifier {
+                    id: "minecraft:covered".into(),
+                    amount: 20.0,
+                    operation: 0,
+                }]
+            );
         });
     }
 
