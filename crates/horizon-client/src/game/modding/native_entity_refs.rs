@@ -135,7 +135,7 @@ impl Game<'_> {
         Some(LevelRef::new(epoch, dim.key()))
     }
     /// The name of a dimension's key.
-    pub(super) fn native_dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+    pub(in crate::game) fn native_dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::dimension_id(key).map(str::to_owned)
     }
     /// The key of the level in place: on a client the level it shows, which
@@ -631,6 +631,7 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 #[cfg(test)]
 pub(super) mod tests {
     use mod_api::__private::game::*;
+    use mod_api::prelude::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
         if std::env::var_os(flag).is_some() {
@@ -1382,7 +1383,7 @@ pub(super) mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_handles_resolve_loaded_parked_and_stale_levels() {
         use horizon_client::chunk::Chunk;
-        use mod_api::{ChunkStatus, Host, NativeAuthority};
+        use mod_api::{ChunkStatus, NativeAuthority};
         use std::sync::Arc;
         with_game(|game| {
             let level = game.native_level(game.dim.id()).unwrap();

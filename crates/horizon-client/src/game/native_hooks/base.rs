@@ -5701,14 +5701,22 @@ mod screen_open_tests {
         with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.focused = false;
-                assert!(!ClientHost::window_focused(game));
+                assert!(!mod_api::prelude::ClientGuiStateClientHost::window_focused(
+                    game
+                ));
                 game.focused = true;
-                assert!(ClientHost::window_focused(game));
+                assert!(mod_api::prelude::ClientGuiStateClientHost::window_focused(
+                    game
+                ));
                 game.title = None;
                 game.screen = Screen::Playing;
-                assert!(ClientHost::observed_screen_id(game).is_none());
+                assert!(
+                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
+                );
                 game.screen = Screen::Inventory;
-                assert!(ClientHost::observed_screen_id(game).is_none());
+                assert!(
+                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
+                );
                 let mut builder = winit::event_loop::EventLoop::builder();
                 #[cfg(target_os = "linux")]
                 {
@@ -5729,18 +5737,24 @@ mod screen_open_tests {
                 game.options.offscreen = true;
                 game.renderer = Some(game.new_renderer(window).unwrap());
                 game.screen = Screen::Playing;
-                assert!(ClientHost::observed_screen_id(game).is_none());
+                assert!(
+                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
+                );
                 game.set_screen(Screen::Inventory);
                 game.observe_screen();
                 assert_eq!(
-                    ClientHost::observed_screen_id(game).unwrap().id,
+                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                        .unwrap()
+                        .id,
                     "inventory"
                 );
                 game.open_screen_overlay("link_prompt", |game| {
                     game.link_prompt = Some("https://example.com".into());
                 });
                 assert_eq!(
-                    ClientHost::observed_screen_id(game).unwrap().id,
+                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                        .unwrap()
+                        .id,
                     "link_prompt"
                 );
                 let seen = seen.lock().unwrap();
@@ -5816,7 +5830,7 @@ mod text_tests {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let drawn = |argb: u32| {
                 let mut batch = HudBatch::scratch([640, 480]);
-                crate::game::mod_api_host::generated::GameDrawContext {
+                crate::game::host::draw::GameDrawContext {
                     game,
                     surface: &mut batch,
                 }

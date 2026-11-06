@@ -1,8 +1,9 @@
 <!-- chapter: Host helpers and remaining gaps -->
 <!-- separator: 1 -->
 
-`Host` exposes the documented `Game` helpers declared in the `Helpers` traits of
-`crates/horizon-mod-api/src/hooks/`, without their `native_` prefix. Each keeps the helper's
+`Host` exposes the documented `Game` helpers declared by area in
+`crates/horizon-mod-api/src/host/<area>.rs`, one trait per area; `Host`, `ServerHost` and `ClientHost` are the
+unions of those traits, so a mod calls through them and never names an area trait. Each helper keeps its
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
