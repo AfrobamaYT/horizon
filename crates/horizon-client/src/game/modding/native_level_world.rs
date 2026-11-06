@@ -2,6 +2,7 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387): the seed,
 //! difficulty and game rules on the server, and weather on both sides.
 //! Stale handles return `None`.
+use mod_api::prelude::*;
 use super::{Dim, Game};
 use horizon_client::command::vanilla::DIFFICULTIES;
 use horizon_client::world::World;
@@ -211,6 +212,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use mod_api::prelude::*;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::chunk::Chunk;
     use horizon_client::gamerules;

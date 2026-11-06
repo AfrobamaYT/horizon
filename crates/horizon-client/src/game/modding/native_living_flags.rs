@@ -527,8 +527,8 @@ mod tests {
                 event: &mut EntityJoinLevelEvent<'_>,
             ) -> Flow {
                 if event.kind == "minecraft:zombie"
-                    && let Some(er) = Host::entity(&*host, event.entity)
-                    && let Some(m) = Host::mob(&*host, er)
+                    && let Some(er) = mod_api::prelude::EntityHandlesHost::entity(&*host, event.entity)
+                    && let Some(m) = mod_api::prelude::MobRefsHost::mob(&*host, er)
                 {
                     let _ = m.set_persistence_required(&mut *host);
                     let _ = m.set_no_ai(&mut *host, true);

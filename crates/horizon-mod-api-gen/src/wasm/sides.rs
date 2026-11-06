@@ -155,6 +155,7 @@ fn results(
 pub(super) fn guest(
     types: &Types<'_>,
     methods: &[&Method],
+    parts: &[(&'static str, String)],
     wit_text: &str,
     hooks: &[(String, String)],
 ) -> Result<String, String> {
@@ -175,6 +176,9 @@ pub(super) fn guest(
     for owner in super::IMPORTS {
         if !owners.contains(owner) {
             writeln!(code, "impl {} for Guest {{}}", trait_path(owner)).unwrap();
+            for (_, via) in parts.iter().filter(|(of, _)| of == owner) {
+                writeln!(code, "impl {} for Guest {{}}", trait_path(via)).unwrap();
+            }
         }
     }
     for owner in owners.iter().filter(|o| !exports().contains(o)) {
@@ -185,15 +189,22 @@ pub(super) fn guest(
             "ClientHost" => code.push_str("fn client_backend_mut(&mut self) -> Option<crate::ClientBackendMutRef<'_>> { Some(crate::ClientBackendMutRef::of(self)) }\n"),
             _ => {}
         }
-        for method in methods.iter().filter(|m| m.owner == *owner) {
-            let callee = format!(
-                "api::{}::{}",
-                bound_ident(&interface(owner)),
-                bound_ident(&wit_ident(&method.name))
-            );
-            code.push_str(&guest_call(types, method, &callee, None)?);
+        for method in methods.iter().filter(|m| m.owner == *owner && m.via.is_none()) {
+            code.push_str(&guest_import_call(types, method)?);
         }
         code.push_str("}\n");
+        // The area traits that are parts of it: each implemented, those with no method that
+        // crosses included.
+        for (_, via) in parts.iter().filter(|(of, _)| of == owner) {
+            writeln!(code, "impl {} for Guest {{", trait_path(via)).unwrap();
+            for method in methods
+                .iter()
+                .filter(|m| m.owner == *owner && m.via.as_deref() == Some(via.as_str()))
+            {
+                code.push_str(&guest_import_call(types, method)?);
+            }
+            code.push_str("}\n");
+        }
     }
     // The game's objects the mod holds, each method calling its `held-` import; and the mod's
     // own, boxed again.
@@ -777,6 +788,16 @@ pub(super) fn host(
     Ok(code)
 }
 
+/// The guest's method for an import: it calls the import its interface names.
+fn guest_import_call(types: &Types<'_>, method: &Method) -> Result<String, String> {
+    let callee = format!(
+        "api::{}::{}",
+        bound_ident(&interface(method.owner)),
+        bound_ident(&wit_ident(&method.name))
+    );
+    guest_call(types, method, &callee, None)
+}
+
 /// The game's side of an import: `method` called on `receiver` (taking the held object's index
 /// first when `held`).
 fn host_import(
@@ -832,7 +853,7 @@ fn host_import(
                 params.join(", "),
                 results_type(types, method, &sig, &mut_locals),
                 out,
-                trait_path(method.owner),
+                trait_path(method.via.as_deref().unwrap_or(method.owner)),
                 method.name,
                 call_args.join(", ")
             )
@@ -926,7 +947,7 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
         }
         let mut body = format!(
             "{prep} let r = <_ as {}>::{}({receiver}, {}); Ok(({output},))",
-            trait_path(method.owner),
+            trait_path(method.via.as_deref().unwrap_or(method.owner)),
             method.name,
             args.join(", ")
         );

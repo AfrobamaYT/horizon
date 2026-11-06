@@ -5,6 +5,7 @@
 //! batch, as vanilla's block entity renderers draw.
 pub use mod_api::game::CubeFace;
 
+use mod_api::prelude::*;
 use super::{Dim, Game};
 use glam::{DVec3, Mat4, Quat, Vec3};
 use horizon_assets::{
@@ -1204,7 +1205,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn resolved_model_draws_and_resource_replacement_invalidates_it() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use super::super::host::draw::GameBlockEntityDrawContext;
         use mod_api::{BlockEntityDrawContext, ClientHost};
 
         horizon_client::models::register_standalone(vec!["minecraft:block/grass_block".into()]);
@@ -1424,7 +1425,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn text_lays_glyphs_out_under_the_pose_in_the_frames_light() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use super::super::host::draw::GameBlockEntityDrawContext;
         use mod_api::BlockEntityDrawContext;
 
         super::super::native_entity_refs::tests::with_game(|game| {
@@ -1477,7 +1478,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_built_cube_face_draws_in_its_sprite() {
-        use super::super::mod_api_host::generated::GameBlockEntityDrawContext;
+        use super::super::host::draw::GameBlockEntityDrawContext;
         use mod_api::BlockEntityDrawContext;
 
         super::super::native_entity_refs::tests::with_game(|game| {

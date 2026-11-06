@@ -64,6 +64,7 @@ pub mod points {
     }
 }
 mod native_hooks;
+mod host;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).
 use horizon_client::actions::Action as Mapping;

@@ -8,21 +8,3 @@ pub trait Hooks {
     #[hook(side = "client", contract = "listen")]
     fn menu_background();
 }
-
-pub trait Helpers {
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_client_services::Game<'_>::native_gui_paint"
-    )]
-    fn gui_paint();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_client_services::Game<'_>::native_gui_nine_slice"
-    )]
-    fn gui_nine_slice();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_client_services::Game<'_>::native_gui_tooltip"
-    )]
-    fn gui_tooltip();
-}

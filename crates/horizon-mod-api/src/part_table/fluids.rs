@@ -277,16 +277,22 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Backend for TankWorld {
+    impl mod_api::prelude::LevelReadsBackend for TankWorld {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsBackend for TankWorld {
         fn block_entity_kind(
             &self,
             BlockEntityRef { position: pos, .. }: BlockEntityRef,
         ) -> Option<BlockEntityTypeKey> {
             self.types.get(&pos).map(|id| type_key(id))
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::FluidCapabilityBackend for TankWorld {
         fn fluid_tank_count(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             self.tanks.contains_key(&pos).then_some(1)
         }
@@ -306,7 +312,12 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl BackendMut for TankWorld {
+    impl Backend for TankWorld {
+    }
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(TankWorld, except(level_reads, block_entity_refs, fluid_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::FluidCapabilityBackendMut for TankWorld {
         fn fluid_tank_insert(
             &mut self,
             BlockSide { pos, .. }: BlockSide,
@@ -370,26 +381,41 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    impl Host for TankWorld {
+    impl BackendMut for TankWorld {
+    }
+    #[cfg(test)]
+    mod_api::impl_backend_mut_areas!(TankWorld, except(fluid_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsHost for TankWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(BlockEntityRef { level, position })
         }
+    }
+    #[cfg(test)]
+    impl Host for TankWorld {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
     }
     #[cfg(test)]
-    impl ServerHost for TankWorld {
+    mod_api::impl_host_areas!(TankWorld, except(block_entity_refs));
+    #[cfg(test)]
+    impl mod_api::prelude::TransactionsServerHost for TankWorld {
         fn transaction_open(&mut self, _: TransactionSeal) {
             open(self);
         }
         fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
             close(self, commit);
         }
+    }
+    #[cfg(test)]
+    impl ServerHost for TankWorld {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    #[cfg(test)]
+    mod_api::impl_server_host_areas!(TankWorld, except(transactions));
 
     #[cfg(test)]
     fn potion(amount: u32, potion: &str) -> FluidStack {

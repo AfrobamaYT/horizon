@@ -1,3 +1,4 @@
+use mod_api::prelude::*;
 use super::{BlockEntity, Game};
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use horizon_client::{chunk::Chunk, items::ItemStack};

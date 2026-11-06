@@ -519,15 +519,34 @@ pub mod tests {
     #[cfg(test)]
     impl ServerHost for Ordered {}
     #[cfg(test)]
-    impl Backend for Ordered {
+    mod_api::impl_server_host_areas!(Ordered);
+    #[cfg(test)]
+    impl mod_api::prelude::LevelReadsBackend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsBackend for Ordered {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             Some(type_key("test:ordered"))
         }
+    }
+    #[cfg(test)]
+    impl mod_api::prelude::ItemCapabilityBackend for Ordered {
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos[0] >= 8).then_some(27)
+        }
+    }
+    #[cfg(test)]
+    impl Backend for Ordered {
+    }
+    #[cfg(test)]
+    mod_api::impl_backend_areas!(Ordered, except(level_reads, block_entity_refs, item_capability));
+    #[cfg(test)]
+    impl mod_api::prelude::BlockEntityRefsHost for Ordered {
+        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
+            Some(BlockEntityRef { level, position })
         }
     }
     #[cfg(test)]
@@ -535,10 +554,9 @@ pub mod tests {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
-        }
     }
+    #[cfg(test)]
+    mod_api::impl_host_areas!(Ordered, except(block_entity_refs));
 
     #[test]
     fn disabled_capability_providers_are_skipped_and_resume() {

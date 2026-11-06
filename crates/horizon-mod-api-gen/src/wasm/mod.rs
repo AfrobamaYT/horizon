@@ -370,7 +370,10 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
 /// One trait method as it crosses.
 #[derive(Debug)]
 pub(super) struct Method {
+    /// The interface the method belongs to: the union trait a host's area traits are parts of.
     pub(super) owner: &'static str,
+    /// The area trait that declares it, when it is a part of `owner` (`host::items::ItemsHost`).
+    pub(super) via: Option<String>,
     pub(super) name: String,
     /// `Some(mutable)` for a `self` receiver.
     pub(super) receiver: Option<bool>,
@@ -392,6 +395,8 @@ pub(super) struct Surface<'a> {
     pub(super) unbound: Vec<Unbound>,
     /// The methods whose doc says `Not on wasm: <why>.`
     pub(super) excused: Vec<(&'static str, String)>,
+    /// Each imported trait with the area traits that are parts of it.
+    pub(super) parts: Vec<(&'static str, String)>,
 }
 
 /// The line on a method's doc that keeps it off wasm, and says why.
@@ -435,6 +440,7 @@ pub(super) fn surface<'a>(
     let mut methods = Vec::new();
     let mut unbound = Vec::new();
     let mut excused = Vec::new();
+    let mut parts = Vec::new();
     for owner in IMPORTS.iter().chain(exports()) {
         let (path, args) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
@@ -448,10 +454,41 @@ pub(super) fn surface<'a>(
         for (param, arg) in item.generics.type_params().zip(&args) {
             subst.push((param.ident.to_string(), types.ty(api, arg, &[])?));
         }
+        // The trait's own methods, then those of the area traits it is a union of.
+        let mut members: Vec<(usize, Option<String>, syn::TraitItemFn)> = Vec::new();
         for item in &item.items {
-            let TraitItem::Fn(function) = item else {
+            if let TraitItem::Fn(function) = item {
+                members.push((id.module, None, function.clone()));
+            }
+        }
+        for bound in &item.supertraits {
+            let syn::TypeParamBound::Trait(bound) = bound else {
                 continue;
             };
+            let segments: Vec<String> = bound
+                .path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect();
+            if segments.len() != 4 || segments[..2] != ["crate", "host"] {
+                continue;
+            }
+            let via = segments[1..].join("::");
+            let Found::Item(part) = types.index.resolve_path(api, &segments[1..])? else {
+                return Err(format!("{via} is not a mod_api trait"));
+            };
+            let Item::Trait(part_item) = types.index.item(part).clone() else {
+                return Err(format!("{via} is not a trait"));
+            };
+            parts.push((*owner, via.clone()));
+            for item in part_item.items {
+                if let TraitItem::Fn(function) = item {
+                    members.push((part.module, Some(via.clone()), function));
+                }
+            }
+        }
+        for (module, via, function) in &members {
             let name = function.sig.ident.to_string();
             if hidden(&function.attrs) || name.ends_with("subscribed") {
                 continue;
@@ -459,8 +496,11 @@ pub(super) fn surface<'a>(
             if not_on_wasm(&function.attrs) {
                 excused.push((*owner, name.clone()));
             }
-            match method(&mut types, id.module, owner, function, &subst) {
-                Ok(method) => methods.push(method),
+            match method(&mut types, *module, owner, function, &subst) {
+                Ok(mut method) => {
+                    method.via = via.clone();
+                    methods.push(method);
+                }
                 Err(why) => unbound.push(Unbound { owner, name, why }),
             }
         }
@@ -496,6 +536,7 @@ pub(super) fn surface<'a>(
         methods,
         unbound,
         excused,
+        parts,
     })
 }
 
@@ -536,7 +577,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Wasm, String> 
     let wit = wit::package(&surface.types, &imports, &api_version(root)?)?;
     Ok(Wasm {
         providers: providers.clone(),
-        guest: sides::guest(&surface.types, &methods, &wit, &hooks)?,
+        guest: sides::guest(&surface.types, &methods, &surface.parts, &wit, &hooks)?,
         host: sides::host(&surface.types, &imports, &wit, &hooks, &servers)?,
         flat_list_imports: imports
             .iter()
@@ -754,6 +795,7 @@ fn method(
     };
     Ok(Method {
         owner,
+        via: None,
         name: sig.ident.to_string(),
         receiver,
         params,
@@ -1004,7 +1046,9 @@ mod tests {
                 let draw = &resolve.interfaces[package.interfaces["block-entity-draw-context"]];
                 assert!(draw.functions.contains_key("model"));
                 for (owner, name) in [("ClientHost", "render_assets"), ("RenderAssets", "model")] {
-                    let declarations = syn::parse_file(&generated.host).unwrap();
+                    let services = std::fs::read_to_string(root.join("crates/horizon-mod-api/src/host/services.rs")).unwrap();
+                    let declarations = syn::parse_file(&services).unwrap();
+                    let owner = if owner == "ClientHost" { "ServicesClientHost" } else { owner };
                     let method = declarations.items.iter().find_map(|item| match item {
                         syn::Item::Trait(item) if item.ident == owner => item.items.iter().find_map(|item| match item {
                             syn::TraitItem::Fn(method) if method.sig.ident == name => Some(method),
@@ -1013,13 +1057,6 @@ mod tests {
                         _ => None,
                     }).unwrap();
                     assert!(method.to_token_stream().to_string().contains("LoadAccess :: PublishedResources"));
-                }
-                // A resource read may not accidentally open a mixed service during reload.
-                let mut mixed = crate::catalog::Catalog::load(&root).unwrap();
-                mixed.helpers.iter_mut().find(|helper| helper.name == "client_server").unwrap().service = Some("render_assets".into());
-                let (host, implementation, _) = crate::host::generate(&root, &mixed, &generated.hooks).unwrap();
-                for source in [host, implementation] {
-                    assert!(source.contains("check_access(\"render_assets\", mod_api::__private::LoadAccess::WorldOnly)"));
                 }
                 assert!(wasm.host.contains("Ok(h.render_assets())"));
                 assert!(wasm.host.contains("ModelRef::from_parts"));
@@ -1070,64 +1107,6 @@ mod tests {
                 assert!(methods.iter().any(|method| method == "address"));
                 assert!(methods.iter().any(|method| method == "permission_level"));
                 assert!(!methods.iter().any(|method| method == "op_level"));
-                let implementation = syn::parse_file(&generated.implementation).unwrap();
-                for (service, methods) in [
-                    ("Commands", &["run_command", "feedback"][..]),
-                    ("Messages", &["broadcast", "text_allowed"][..]),
-                    ("Players", &["acting_player", "server_players"][..]),
-                    ("ClientSession", &["client_server", "client_language", "client_frame_stats"][..]),
-                    ("RenderAssets", &["model"][..]),
-                    ("Backend", &["player_address", "player_permission_level", "player_block_breaking", "player_ambient_mood"][..]),
-                ] {
-                    let item = implementation
-                        .items
-                        .iter()
-                        .find_map(|i| match i {
-                            syn::Item::Impl(i)
-                                if i.trait_
-                                    .as_ref()
-                                    .is_some_and(|(_, p, _)| p.is_ident(service)) =>
-                            {
-                                Some(i)
-                            }
-                            _ => None,
-                        })
-                        .unwrap();
-                    for name in methods {
-                        let method = item
-                            .items
-                            .iter()
-                            .find_map(|i| match i {
-                                syn::ImplItem::Fn(f) if f.sig.ident == name => Some(f),
-                                _ => None,
-                            })
-                            .unwrap();
-                        let access = if service == "RenderAssets" {
-                            quote::quote!(mod_api::__private::LoadAccess::PublishedResources)
-                        } else if service == "ClientSession" {
-                            quote::quote!(mod_api::__private::LoadAccess::ClientSetup)
-                        } else {
-                            quote::quote!(mod_api::__private::LoadAccess::WorldOnly)
-                        };
-                        let native = quote::format_ident!("native_{name}");
-                        let args: Vec<_> = method.sig.inputs.iter().filter_map(|arg| match arg {
-                            syn::FnArg::Receiver(_) => None,
-                            syn::FnArg::Typed(arg) => match &*arg.pat {
-                                syn::Pat::Ident(pat) => Some(&pat.ident),
-                                _ => panic!("named forwarding argument"),
-                            },
-                        }).collect();
-                        let expected: syn::Block = syn::parse_quote!({
-                            mod_api::__private::check_access(#name, #access);
-                            self.#native(#(#args),*)
-                        });
-                        assert_eq!(
-                            method.block.to_token_stream().to_string(),
-                            expected.to_token_stream().to_string(),
-                            "{service}::{name} guards before forwarding its arguments"
-                        );
-                    }
-                }
                 assert!(wasm.host.contains("Ok(h.commands())"));
                 assert!(wasm.host.contains("Ok(h.messages())"));
                 assert!(wasm.host.contains("Ok(h.players())"));
@@ -1255,11 +1234,6 @@ mod tests {
                 assert!(!server.contains("menu-click:"));
                 assert!(wasm.host.contains("crate::client_backend_mut_of(h)"));
                 assert!(wasm.guest.contains("ClientBackendMutRef::of(self)"));
-                assert!(
-                    generated
-                        .implementation
-                        .contains("impl ClientBackendMut for")
-                );
             })
             .unwrap()
             .join()

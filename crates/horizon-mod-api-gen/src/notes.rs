@@ -9,7 +9,7 @@ use std::path::Path;
 /// The page's title, before the declarations' sections.
 const HEADER: &str = "# Hook notes\n";
 
-/// Renders the page from the declarations' notes, in catalog order: hooks first, then helpers.
+/// Renders the page from the declarations' notes, in catalog order: the general notes, then the hooks'.
 pub fn render(catalog: &Catalog) -> String {
     let mut page = String::from(HEADER);
     for notes in catalog
@@ -21,12 +21,6 @@ pub fn render(catalog: &Catalog) -> String {
                 .hooks
                 .iter()
                 .filter_map(|hook| hook.notes.as_deref()),
-        )
-        .chain(
-            catalog
-                .helpers
-                .iter()
-                .filter_map(|helper| helper.notes.as_deref()),
         )
     {
         page.push('\n');
@@ -47,7 +41,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn renders_general_hook_and_helper_notes_without_a_checked_in_page() {
+    fn renders_general_and_hook_notes_without_a_checked_in_page() {
         let source = r###"
             trait Notes {
                 #[notes = "## General"]
@@ -63,16 +57,11 @@ mod tests {
                 #[hook(side = "server", contract = "listen")]
                 fn no_notes();
             }
-            trait Helpers {
-                #[helper(side = "server")]
-                #[notes = "## Helper\n\nLast.\n\n"]
-                fn helper();
-            }
         "###;
         let catalog = crate::catalog::Catalog::parse(&[("test.rs".into(), source.into())]).unwrap();
         assert_eq!(
             super::render(&catalog),
-            "# Hook notes\n\n## General\n\n## Hook\n\nFirst.\n\nSecond.\n\n## Helper\n\nLast.\n"
+            "# Hook notes\n\n## General\n\n## Hook\n\nFirst.\n\nSecond.\n"
         );
     }
 

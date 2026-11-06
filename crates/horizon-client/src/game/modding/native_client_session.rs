@@ -1,5 +1,6 @@
 //! Read-only projections of the connected client's existing state.
 
+use mod_api::prelude::*;
 use super::{Game, remote::Remote};
 use mod_api::{BlockBreakingState, BlockPos, ClientFrameStats, ClientServer, PlayerRef};
 

@@ -369,6 +369,7 @@ fn swirl(
 
 #[cfg(test)]
 mod sprint_handle_tests {
+    use mod_api::prelude::*;
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::connection::Pipe;

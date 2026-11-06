@@ -8,6 +8,7 @@
 //! copy: the local player and the entities the server told it of, in the level
 //! it shows. The entities are those of the level in place (the one a hook runs
 //! in) and the server's players, whatever their level.
+use mod_api::prelude::*;
 use super::{
     Dim, Game,
     commands::Target,
@@ -574,6 +575,7 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use mod_api::prelude::*;
     use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {

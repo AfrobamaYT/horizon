@@ -2,6 +2,7 @@
 //! (docs/modding/src/how-to/native-mods.md, "Entity and level handles", #7387). Server reads
 //! reach any loaded level; both-side reads also reach the client's current level.
 //! A handle of an earlier open or an unloaded block reads `None` (or `false`).
+use mod_api::prelude::*;
 use super::Game;
 use horizon_client::{streaming::Streaming, world::World};
 use horizon_core::{
@@ -482,6 +483,7 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    use mod_api::prelude::*;
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};

@@ -6,6 +6,7 @@
 //! and `None` for the rest, as for a stale handle. Secondary use also reads
 //! the local client's live semantic sneak state; the other flags are server-only.
 //! Ticks lived (`Entity.tickCount`) are read for mobs, items, orbs and minecarts.
+use mod_api::prelude::*;
 use super::{Game, commands::Target};
 use horizon_client::mobs::{Mob, Species, sync};
 use horizon_client::motion::PlayerMotion;

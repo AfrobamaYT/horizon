@@ -16,8 +16,3 @@ pub trait Hooks {
     )]
     fn ingredient_test();
 }
-
-pub trait Helpers {
-    #[helper(side = "both", backend = true)]
-    fn recipe_ingredient_test();
-}

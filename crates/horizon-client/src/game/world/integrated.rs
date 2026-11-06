@@ -1326,6 +1326,7 @@ fn refused(owner: bool, published: bool, split_seat: bool, memory: bool) -> bool
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use mod_api::prelude::*;
 
     /// Observe both teardownPublishedState and the dropped server task queue.
     pub(in crate::game) fn install_serving(

@@ -1,5 +1,6 @@
 //! Real-game regressions for native handles used during a guest's turn.
 
+use mod_api::prelude::*;
 use super::{lan::LanSettings, native_entity_refs::tests::with_game};
 use horizon_client::{
     lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig},

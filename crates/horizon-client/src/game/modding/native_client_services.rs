@@ -1,6 +1,7 @@
 // game-module-visibility: pub
 //! Client draw operations through the existing GUI drawing context.
 
+use mod_api::prelude::*;
 use super::Game;
 use horizon_client::{
     hud::{HudBatch, rgba},

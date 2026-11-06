@@ -180,10 +180,6 @@ impl Game<'_> {
     }
 }
 
-pub(super) mod generated {
-    include!(concat!(env!("OUT_DIR"), "/mod_api_host_generated.rs"));
-}
-
 pub(super) fn level_side<'a>(level: &'a super::GameLevel<'_>) -> mod_api::LevelSide<'a> {
     if horizon_world::level::LevelAccess::is_client_side(level) {
         mod_api::LevelSide::Client(level)
