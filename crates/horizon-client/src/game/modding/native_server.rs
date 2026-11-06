@@ -1351,7 +1351,9 @@ impl Game<'_> {
         };
         let outer = self.command_source.replace(server);
         let filter = std::mem::replace(&mut self.native_command_filter, true);
+        let outer_exec = std::mem::take(&mut self.exec);
         let ok = self.as_console(|g| g.run_command(line));
+        self.exec = outer_exec;
         self.native_command_filter = filter;
         self.command_source = outer;
         ok
