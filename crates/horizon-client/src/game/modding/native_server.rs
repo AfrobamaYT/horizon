@@ -1684,7 +1684,10 @@ impl Game<'_> {
                 )
                 .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
             CommandSource::CommandBlockMinecart { entity, permission }
-        } else if let Some(player) = self.native_acting_player() {
+        } else if source.origin_player {
+            let player = self
+                .native_acting_player()
+                .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
             CommandSource::Player { player, permission }
         } else {
             CommandSource::Console { permission }
@@ -2015,6 +2018,16 @@ mod tests {
             );
             assert!(game.chat_capture.take().unwrap().is_empty());
             assert!(game.command_source.is_none());
+            game.as_guest(12, |game| {
+                let source = game.server_source();
+                game.with_source(source, |game| {
+                    assert!(matches!(
+                        game.native_command_origin(4),
+                        Ok(mod_api::CommandSource::Console { .. })
+                    ));
+                });
+            })
+            .unwrap();
             game.exec.functions.push("test:outer".into());
             assert!(game.native_run_command("list"));
             assert_eq!(game.exec.functions, ["test:outer"]);
