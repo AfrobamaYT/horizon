@@ -46,6 +46,18 @@ fn store(engine: &wasmtime::Engine) -> Store<State> {
 }
 
 #[test]
+fn flat_input_guard_bounds_scratch_even_on_unwind() {
+    let mut input = FlatInput::<u64>(Vec::new());
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let guard = FlatInputGuard(&mut input.0);
+        guard.0.resize(100_000, 7);
+        panic!("fixture trap");
+    }));
+    assert!(input.0.is_empty());
+    assert!(input.0.capacity() <= 65_536 / std::mem::size_of::<u64>());
+}
+
+#[test]
 fn generated_flat_shadows_match_full_wit_world() {
     let mut resolve = wit_parser::Resolve::default();
     let package = resolve
