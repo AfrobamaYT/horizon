@@ -1313,7 +1313,8 @@ mod tests {
                 Some(false)
             );
             // The home area is saved with the mob.
-            let saved = horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None);
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
             assert_eq!(
                 saved.get("home_pos"),
                 Some(&Tag::IntArray(vec![10, 64, -5]))
@@ -1329,7 +1330,8 @@ mod tests {
                 game.native_mob_is_within_restriction(mob, [20, 64, 0]),
                 Some(true)
             );
-            let saved = horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None);
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
             assert!(saved.get("home_pos").is_none());
             assert!(saved.get("home_radius").is_none());
             // restrictTo with radius -1 clears while keeping the new center.
@@ -1411,7 +1413,8 @@ mod tests {
             assert!(game.mobs[0].extra.pick_up_loot);
             assert_eq!(game.native_mob_can_pick_up_loot(mob), Some(true));
             // Saved as LeftHanded / CanPickUpLoot.
-            let saved = horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None);
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
             assert_eq!(saved.get("LeftHanded"), Some(&Tag::Byte(1)));
             assert_eq!(saved.get("CanPickUpLoot"), Some(&Tag::Byte(1)));
             assert!(game.native_mob_set_left_handed(mob, false));
