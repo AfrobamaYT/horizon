@@ -1153,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "הורדות, כניסות ועדכונים עוברים דרך פרוקסי זה (http://host:port, socks5://host:port). ריק פירושו אין: HTTPS_PROXY משמש במקום זאת כאשר המשגר הופעל עם אחד.",
   "{name} was left out: made for another Horizon version": "{name} הושמט: נוצר לגרסה אחרת של Horizon",
   "{name} was left out: clashes with {other}": "{name} הושמט: מתנגש עם {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} הושמט: הוא צריך את {other}, שהושמט",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "לא נבנה על ה-Horizon שבו אתה משחק ({code}): בנייה משמיטה אותו עד שהיוצר יעדכן אותו"
+  "{name} was left out: it needs {other}, which was left out": "{name} הושמט: הוא צריך את {other}, שהושמט"
 }
