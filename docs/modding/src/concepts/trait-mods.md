@@ -133,7 +133,7 @@ and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded 
 (`LevelReader.enabledFeatures`, a borrowed `FeatureFlags<'_>`). Neither allocates.
 None of them loads a chunk. Light above the build height reads as full sky and below it as
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
-so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_name, tag)`,
+so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
 `item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
 `state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
@@ -192,10 +192,46 @@ impl BlockPart for Gauge {
 #[mod_api::horizon_mod]
 impl Hooks for MyMod {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
-        r.block_part("minecraft:stone", Gauge);
+        let stone = r.block_key("minecraft:stone");
+        r.block_part(stone, Gauge);
     }
 }
 ```
+
+`Registrar::block_key(id)` and `Registrar::effect_key(id)` request registry entries, not new
+content. Declare them in `register`, retain the returned `BlockKey` or `EffectKey` in the
+mod or Part, and reuse them for registry operations. Requests are canonicalized (a bare id
+uses `minecraft:`), deduplicated across mods and checked after every mod's content is known.
+An unknown entry refuses the load with the requesting mod and canonical id, even if the
+key was never attached to a Part. A later mod may supply the requested entry.
+
+Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
+returns an owned canonical `String` through the generated read backend for diagnostics; it
+requires a game-backed host and an invalid slot is a boundary error, not an empty name.
+Normal operations use the slot's resolved numeric mapping instead of looking up its name.
+Block reload rebinds that mapping without changing the key's identity or canonical name;
+a refused rebind clears the old mapping. Effect registration is process-owned and fixed
+until restart, matching the engine's effect registry.
+
+Block tag membership is bound from the same merged item/block tag snapshot at world load and
+reload, including worlds without pack overrides. A read maps the slot to a numeric block id,
+looks up the tag name and tests a `BlockSet` bit; it never resolves the block's name. A fully
+namespaced tag needs no allocation (a bare tag adds `minecraft:`). Binding visits each merged
+block-tag member once, resolves its default state and inserts its numeric block id; it replaces
+the previous snapshot rather than accumulating membership. No membership work is added to ticks
+that do not call this read. Tags and block mappings belong to their resolving thread; missing
+authoritative context or an unavailable mapping returns `None`, not a stale membership result.
+
+`host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
+`host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level
+`schedule_block_tick(pos, stone, delay)` use `BlockKey`. Property expressions accepted by
+`block_state_id`, tag names and fluid ids are separate domains and remain strings.
+`NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
+application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
+uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks
+carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment effect-component
+names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
+and remain strings, as do labels and tags.
 
 A hook whose catalog entry has a `scope` (`block`, `block_entity`, `item`, `menu`) and a `key`, the argument
 naming the thing it is about, is a method on that scope's trait only: `BlockPart`, `BlockEntityPart` (a
@@ -204,7 +240,8 @@ no `Hooks` method: a thing without parts is never asked, and the game asks the p
 order, through the hook's contract, so a `Cancel` or a replacement skips the parts after it. Where NeoForge fires
 a bus event at that moment, the event is a hook of its own on `Hooks`, asked first for every thing, and its cancel
 skips the parts: a mod reacting to its own blocks uses a part, one reacting to every block the event. A part's kind is its type: the same kind twice on one
-thing, or an id with no namespace, stops the game at startup with a message naming the mods. A panic in a part
+thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
+the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
 
 `BlockPart::clone_item_stack` answers on the server when a player picks the block. It receives the
@@ -787,7 +824,7 @@ receiver and documentation; a helper without `self` (`config_files`) takes
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
 plain remainder stack, or `None` when there is none or the item is unknown. Horizon
 currently stores only the remainder item id, not a template's count or components.
-`host.block_item("minecraft:stone")` returns its item registry name; an unknown block
+`host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
 A helper's `receiver` also exposes it on that handle. Receivers come from public

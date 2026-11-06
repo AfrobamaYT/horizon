@@ -164,6 +164,14 @@ pub(super) struct Creatures {
     /// (centre, small, radius, blocks hit, the players it pushed;
     /// game/lan_particles.rs).
     pub lan_explosions: Vec<([f64; 3], bool, f32, usize, Vec<(u32, [f64; 3])>)>,
+    /// The snapshot's buffer between ticks, empty: ~400 bytes a mob, so
+    /// thousands of mobs would allocate and free megabytes every tick.
+    seen_buf: Vec<Seen>,
+    /// The mobs whose own tick ran in the last `tick_creature_entities`:
+    /// `ServerLevel.tick` ticks only the entities in entity-ticking range, so
+    /// what the passes after the loop do for a mob's `aiStep`, goals or brain
+    /// (pickups, item searches) is for these alone.
+    pub ticked: horizon_client::fast_hash::FxHashSet<u32>,
     /// The wandering trader spawner's clock.
     pub trader: super::wandering_trader::Spawner,
     /// When each player last put a parrot on a shoulder (`timeEntitySatOnShoulder`).
@@ -1191,12 +1199,15 @@ impl Game<'_> {
         }
         let uuid = self.level.player_uuid;
         let level_id = self.dim.id();
-        let mut snapshot: Vec<Seen> = self.mobs.iter().map(|m| seen(m, uuid)).collect();
+        let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
+        snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = Vec::new();
         let mut mobs = std::mem::take(&mut self.mobs);
         let mut dead = Vec::new();
         let mut corpses = Vec::new();
         let mut died = std::mem::take(&mut self.died);
+        let mut ticked = std::mem::take(&mut self.creatures.ticked);
+        ticked.clear();
         let ticking = self.entity_ticking_area();
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let mut guests = self.lan_guest_views();
@@ -1396,6 +1407,7 @@ impl Game<'_> {
                 };
                 w.controlling_player_movement = controlling_player_movement;
                 let credit_expiring = m.ai.last_hurt_by_player == 1;
+                ticked.insert(m.id);
                 // `horizon-report`'s cost by mob type (tick_profile.rs).
                 let sampled = super::tick_profile::start().map(|t| (t, mobs[i].kind.clone()));
                 let kept =
@@ -1490,6 +1502,9 @@ impl Game<'_> {
             self.mobs.append(&mut mobs);
         }
         self.died = died;
+        snapshot.clear();
+        self.creatures.seen_buf = snapshot;
+        self.creatures.ticked = ticked;
         self.native_tick_post_batch(round);
         // ... and entity event 60 goes out as it is: the poof.
         for (id, at, width, height) in gone {
@@ -1514,7 +1529,7 @@ impl Game<'_> {
                 .extra
                 .effects
                 .iter()
-                .map(|e| e.0.trim_start_matches("minecraft:"))
+                .map(|e| e.id.trim_start_matches("minecraft:"))
                 .collect();
             let bounds = m.bounds();
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));

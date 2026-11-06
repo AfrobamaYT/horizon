@@ -338,6 +338,8 @@ struct Installed {
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
     requested_types: Vec<BlockEntityTypeRequest>,
+    registry_keys: super::registry_keys::Requests,
+    effects: OnceLock<super::registry_keys::Effects>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -347,6 +349,31 @@ struct Installed {
 /// The block entity types mods registered.
 pub fn block_entity_types() -> &'static [BlockEntityType] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
+}
+
+pub(crate) fn requested_keys() -> &'static super::registry_keys::Requests {
+    static EMPTY: LazyLock<super::registry_keys::Requests> = LazyLock::new(Default::default);
+    installed().map_or(&EMPTY, |installed| &installed.registry_keys)
+}
+
+thread_local! {
+    // A reference to the registrar's canonical requests while Hooks::register is in flight.
+    // The table is moved, not copied, into Installed when registration finishes.
+    static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<super::registry_keys::Requests>>>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn with_registering_keys<T>(
+    read: impl FnOnce(Option<&super::registry_keys::Requests>) -> T,
+) -> T {
+    REGISTERING_KEYS.with(|keys| match keys.borrow().as_ref() {
+        Some(keys) => read(Some(&keys.borrow())),
+        None => read(None),
+    })
+}
+
+pub(crate) fn resolved_effects() -> &'static OnceLock<super::registry_keys::Effects> {
+    static EMPTY: OnceLock<super::registry_keys::Effects> = OnceLock::new();
+    installed().map_or(&EMPTY, |installed| &installed.effects)
 }
 
 pub(crate) fn requested_block_entity_types() -> &'static [BlockEntityTypeRequest] {
@@ -861,6 +888,10 @@ fn attached<'a, 'k, P: ?Sized>(
 pub trait Registrar {
     /// Look up a vanilla or another mod's type. The final registry validates it at load.
     fn block_entity_type_key(&mut self, id: &str) -> super::BlockEntityTypeKey;
+    /// Request a block by canonical registry id. All mods' declarations are checked at load.
+    fn block_key(&mut self, id: &str) -> super::BlockKey;
+    /// Request an effect by canonical registry id. All mods' declarations are checked at load.
+    fn effect_key(&mut self, id: &str) -> super::EffectKey;
     /// Declare block entity type `path` in this mod's namespace, held by `blocks`; mods usually
     /// reach it through `block_entity_type`.
     fn declare_block_entity_type(
@@ -878,7 +909,12 @@ pub trait Registrar {
     /// dropped when it loads.
     fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController;
     /// Attach `part`, of kind `kind` (its type's name), to block `block`.
-    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>);
+    fn attach_block_part(
+        &mut self,
+        block: super::BlockKey,
+        kind: &'static str,
+        part: Arc<dyn BlockPart>,
+    );
     /// Attach `part`, of kind `kind`, to the mod block entity type `key`.
     fn attach_block_entity_part(
         &mut self,
@@ -951,7 +987,7 @@ impl dyn Registrar + '_ {
         }
     }
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
-    pub fn block_part<P: BlockPart>(&mut self, block: &str, part: P) {
+    pub fn block_part<P: BlockPart>(&mut self, block: super::BlockKey, part: P) {
         self.attach_block_part(block, type_name::<P>(), Arc::new(part));
     }
     /// Attach a Part to a native type, including one another mod declares later.
@@ -1086,6 +1122,8 @@ pub struct PartRegistrar {
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
     requested_types: Vec<BlockEntityTypeRequest>,
+    registry_keys: Rc<RefCell<super::registry_keys::Requests>>,
+    effects: OnceLock<super::registry_keys::Effects>,
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
     refused: Vec<String>,
@@ -1101,6 +1139,8 @@ impl PartRegistrar {
             tags: TagParts::default(),
             block_entity_types: Vec::new(),
             requested_types: Vec::new(),
+            registry_keys: Default::default(),
+            effects: OnceLock::new(),
             controllers: Vec::new(),
             structure_types: Vec::new(),
             refused: Vec::new(),
@@ -1318,6 +1358,36 @@ impl Registrar for PartRegistrar {
         kind
     }
 
+    fn block_key(&mut self, id: &str) -> super::BlockKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .blocks
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::BlockKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::BlockKey(u32::MAX)
+            }
+        }
+    }
+
+    fn effect_key(&mut self, id: &str) -> super::EffectKey {
+        match self
+            .registry_keys
+            .borrow_mut()
+            .effects
+            .request(self.mod_id, id)
+        {
+            Ok(slot) => super::EffectKey(slot),
+            Err(error) => {
+                self.refused.push(error);
+                super::EffectKey(u32::MAX)
+            }
+        }
+    }
+
     fn declare_block_entity_type(
         &mut self,
         path: &str,
@@ -1342,8 +1412,26 @@ impl Registrar for PartRegistrar {
         )
     }
 
-    fn attach_block_part(&mut self, block: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
-        self.attach(|p| &mut p.blocks, kind, block, part);
+    fn attach_block_part(
+        &mut self,
+        block: super::BlockKey,
+        kind: &'static str,
+        part: Arc<dyn BlockPart>,
+    ) {
+        let id = self
+            .registry_keys
+            .borrow()
+            .blocks
+            .id(block.0)
+            .map(str::to_owned);
+        let Some(id) = id else {
+            self.refused.push(format!(
+                "mod {}: invalid block key slot {}",
+                self.mod_id, block.0
+            ));
+            return;
+        };
+        self.attach(|p| &mut p.blocks, kind, &id, part);
     }
 
     fn attach_block_entity_part(
@@ -1475,7 +1563,14 @@ fn namespaced(id: &str) -> bool {
 
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
 fn register_all(mods: &[ModEntry]) -> PartRegistrar {
-    let mut registrar = PartRegistrar::new(mods[0].id);
+    let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
+    struct RestoreKeys(Option<Rc<RefCell<super::registry_keys::Requests>>>);
+    impl Drop for RestoreKeys {
+        fn drop(&mut self) {
+            REGISTERING_KEYS.set(self.0.take());
+        }
+    }
+    let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
     let context = super::RegistrationContext::new();
     for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
@@ -1498,22 +1593,25 @@ pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
 /// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
-    let mut installed = if mods.is_empty() {
-        Installed::default()
-    } else {
-        let registrar = register_all(mods);
-        if !registrar.refused.is_empty() {
-            return Err(registrar.refused);
-        }
-        Installed {
-            keys: registrar.parts,
-            tags: registrar.tags,
-            block_entity_types: registrar.block_entity_types,
-            requested_types: registrar.requested_types,
-            controllers: registrar.controllers,
-            structure_types: registrar.structure_types,
-            hook_bits: Vec::new(),
-        }
+    install_registrar(register_all(mods))
+}
+
+fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
+    if !registrar.refused.is_empty() {
+        return Err(registrar.refused);
+    }
+    let mut installed = Installed {
+        keys: registrar.parts,
+        tags: registrar.tags,
+        block_entity_types: registrar.block_entity_types,
+        requested_types: registrar.requested_types,
+        registry_keys: Rc::try_unwrap(registrar.registry_keys)
+            .unwrap_or_else(|_| unreachable!("registration scope has ended"))
+            .into_inner(),
+        effects: registrar.effects,
+        controllers: registrar.controllers,
+        structure_types: registrar.structure_types,
+        hook_bits: Vec::new(),
     };
     installed.keys.index_hooks();
     installed.hook_bits = installed.keys.hooks.iter().map(Option::is_some).collect();
@@ -1549,6 +1647,41 @@ pub mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
+    /// Register the game fixture's final block registry through the actual registrar, retaining
+    /// its installed test mods and Parts. Production mods request only the entries they use.
+    pub fn register_game_keys(ids: impl IntoIterator<Item = String>) {
+        let mut registrar = super::register_all(super::super::mods());
+        for id in ids {
+            registrar.block_key(&id);
+        }
+        super::install_registrar(registrar).unwrap();
+        crate::registry_keys::resolve_effects().unwrap();
+    }
+
+    /// A previously requested block in the game fixture. Unknown names are a fixture error.
+    pub fn block_key(id: &str) -> BlockKey {
+        let canonical = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        BlockKey(
+            *super::requested_keys()
+                .blocks
+                .slots
+                .get(&canonical)
+                .expect("fixture requested this block"),
+        )
+    }
+
+    /// A registered effect exposed by the real load-owned mapping, also for unrequested vanilla entries.
+    pub fn effect_key(id: &str) -> EffectKey {
+        let index = horizon_client_core::potions::effect(id)
+            .expect("fixture registered this effect")
+            .index;
+        crate::registry_keys::effect_key(index).expect("fixture resolved effect keys")
+    }
+
     #[cfg(test)]
     fn type_key(id: &str) -> BlockEntityTypeKey {
         BlockEntityTypeKey(id.into())
@@ -1578,6 +1711,193 @@ pub mod tests {
         }
         #[cfg_attr(test, cfg(any()))]
         fn should_check_weak_power(&self, _: &dyn LevelHost, _: &mut ShouldCheckWeakPowerEvent) {}
+    }
+
+    #[test]
+    fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
+        use crate::registry_keys::{ResolvedBlock, block, block_id, resolve_blocks};
+        use horizon_world::level::states::BlockId;
+        struct Keys(Arc<std::sync::Mutex<Vec<BlockKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Keys {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let vanilla = r.block_key("stone");
+                let same = r.block_key("minecraft:stone");
+                let later = r.block_key("later:machine");
+                assert_eq!(vanilla, same);
+                assert_eq!(BlockKey::from_slot(vanilla.0), Ok(vanilla));
+                assert_eq!(BlockKey::from_slot(later.0), Ok(later));
+                assert!(BlockKey::from_slot(later.0 + 1).is_err());
+                r.block_part(vanilla, Gauge);
+                r.block_part(same, Connector);
+                r.block_part(later, Gauge);
+                *self.0.lock().unwrap() = vec![vanilla, same, later];
+            }
+        }
+        let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: Mods = vec![ModEntry::new(
+            "requester",
+            Box::new(Keys(requested.clone())),
+        )]
+        .into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+        let keys = requested.lock().unwrap().clone();
+        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
+        assert!(BlockKey::from_slot(2).is_err());
+        assert!(block(keys[0]).is_none(), "startup has no world mapping");
+        // The final registry contains content declared after the requester's registration.
+        let states = ["minecraft:stone", "later:machine", "later:machine"];
+        resolve_parts(
+            &HashMap::new(),
+            &HashMap::new(),
+            KnownIds {
+                block: &|id| states.contains(&id),
+                item: &|_| false,
+                state_count: states.len(),
+                state_block: &|i| states[i],
+            },
+        )
+        .unwrap();
+        assert_eq!(read(0), 6);
+        assert_eq!(read(1), 6);
+        assert_eq!(read(2), 6);
+        let bind = |offset: u32| {
+            resolve_blocks(|id| {
+                let index: u32 = if id == "minecraft:stone" { 0 } else { 1 };
+                Some(ResolvedBlock {
+                    default: BlockStateId(index + offset),
+                    states: BlockStateRange::new(BlockStateId(index + offset), 1),
+                    block: BlockId(index as u16),
+                })
+            })
+        };
+        bind(0).unwrap();
+        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(0));
+        let key = keys[0];
+        // Declarations are load-owned, but a mapping belongs to its resolving thread.
+        let installed = super::TEST_PARTS.get();
+        std::thread::spawn(move || {
+            super::TEST_PARTS.set(installed);
+            assert_eq!(BlockKey::from_slot(key.0), Ok(key));
+            assert_eq!(block_id(key), Some("minecraft:stone"));
+            assert!(block(key).is_none());
+        })
+        .join()
+        .unwrap();
+        bind(20).unwrap();
+        assert_eq!(block(keys[0]).unwrap().default, BlockStateId(20));
+        assert_eq!(block(keys[2]).unwrap().default, BlockStateId(21));
+        assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
+        assert_eq!(block_id(keys[2]), Some("later:machine"));
+        let errors = resolve_blocks(|_| None).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error == "mod requester requested unknown block later:machine")
+        );
+        assert!(
+            block(keys[0]).is_none(),
+            "a refused reload must not leave stale state mappings"
+        );
+        assert!(BlockKey::from_slot(u32::MAX).is_err());
+        assert_eq!(BlockKey::from_slot(keys[0].0), Ok(keys[0]));
+        assert_eq!(block_id(keys[0]), Some("minecraft:stone"));
+    }
+
+    #[test]
+    fn registry_keys_resolve_effects_declared_later_and_generated_name_reads() {
+        struct Keys(Arc<std::sync::Mutex<Vec<EffectKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Keys {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                let speed = r.effect_key("speed");
+                let later = r.effect_key("key_test:later");
+                assert_eq!(EffectKey::from_slot(speed.0), Ok(speed));
+                assert_eq!(EffectKey::from_slot(later.0), Ok(later));
+                assert!(EffectKey::from_slot(later.0 + 1).is_err());
+                self.0.lock().unwrap().extend([speed, later]);
+                assert_eq!(speed, r.effect_key("minecraft:speed"));
+            }
+        }
+        let requested = Arc::new(std::sync::Mutex::new(Vec::new()));
+        install_parts(&[
+            ModEntry::new("first", Box::new(Keys(requested.clone()))),
+            ModEntry::new("second", Box::new(Keys(requested.clone()))),
+        ])
+        .unwrap();
+        let speed_key = requested.lock().unwrap()[0];
+        assert_eq!(EffectKey::from_slot(speed_key.0), Ok(speed_key));
+        assert!(EffectKey::from_slot(2).is_err());
+        assert!(
+            crate::registry_keys::effect(speed_key).is_none(),
+            "startup has no resolved effects"
+        );
+        assert!(horizon_client_core::potions::register_mod_effects([(
+            "key_test:later".to_owned(),
+            0x123456,
+            horizon_client_core::potions::Category::Neutral
+        )]));
+        crate::registry_keys::resolve_effects().unwrap();
+        let keys = requested.lock().unwrap();
+        assert_eq!(keys[0], keys[2]);
+        assert_eq!(keys[1], keys[3]);
+        let speed = crate::registry_keys::effect(keys[0]).unwrap();
+        let later = crate::registry_keys::effect(keys[1]).unwrap();
+        assert_eq!(speed.id, "speed");
+        assert_eq!(later.id, "key_test:later");
+        assert_eq!(later.color, 0x123456);
+        assert_eq!(crate::registry_keys::effect_key(later.index), Some(keys[1]));
+        for def in horizon_client_core::potions::all_effects() {
+            let key = crate::registry_keys::effect_key(def.index).unwrap();
+            assert_eq!(crate::registry_keys::effect(key).unwrap().id, def.id);
+            assert_eq!(
+                crate::registry_keys::effect_id(key),
+                Some(horizon_client_core::potions::namespaced(def.id))
+            );
+        }
+
+        assert!(EffectKey::from_slot(u32::MAX).is_err());
+        struct Table;
+        impl Backend for Table {
+            fn effect_key_id(&self, key: EffectKey) -> String {
+                crate::registry_keys::effect_id(key)
+                    .expect("invalid effect key slot")
+                    .to_owned()
+            }
+        }
+        impl Host for Table {
+            fn backend(&self) -> Option<BackendRef<'_>> {
+                Some(BackendRef::of(self))
+            }
+        }
+        assert_eq!(keys[0].id(&Table), "minecraft:speed");
+        assert_eq!(keys[1].id(&Table), "key_test:later");
+        struct NoGame;
+        impl Host for NoGame {}
+        assert!(std::panic::catch_unwind(|| keys[0].id(&NoGame)).is_err());
+    }
+
+    #[test]
+    fn registry_keys_reject_unknown_unattached_requests_with_the_requesting_mod() {
+        struct Unknown;
+        #[mod_api::__subscriptions]
+        impl Hooks for Unknown {
+            fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
+                r.block_key("absent:block");
+                r.effect_key("absent:effect");
+            }
+        }
+        install_parts(&[ModEntry::new("lookup", Box::new(Unknown))]).unwrap();
+        assert_eq!(
+            crate::registry_keys::resolve_blocks(|_| None).unwrap_err(),
+            ["mod lookup requested unknown block absent:block"]
+        );
+        assert_eq!(
+            crate::registry_keys::resolve_effects().unwrap_err(),
+            ["mod lookup requested unknown effect absent:effect"]
+        );
     }
 
     #[test]
@@ -1721,7 +2041,7 @@ pub mod tests {
     pub static HOARD_ASKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// The block entity of type `doubler:hoard`, held by block `test:hoard`: when it is
     /// removed it gives back the gold its `HOARD` counts.
-    struct Hoard;
+    struct Hoard(BlockKey);
     #[mod_api::horizon_part]
     impl BlockPart for Hoard {}
     #[mod_api::horizon_part]
@@ -1734,7 +2054,7 @@ pub mod tests {
         ) {
             if event.entity.data == [1] {
                 let level = host.level("minecraft:overworld").unwrap();
-                let state = host.block_state_default("minecraft:granite").unwrap();
+                let state = host.block_state_default(self.0).unwrap();
                 assert!(level.set_block(
                     host,
                     event.pos,
@@ -1794,8 +2114,10 @@ pub mod tests {
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-            r.block_part("test:gauge", Gauge);
-            r.block_part("test:connector", Connector);
+            let block_key = r.block_key("test:gauge");
+            r.block_part(block_key, Gauge);
+            let block_key = r.block_key("test:connector");
+            r.block_part(block_key, Connector);
             r.block_part_tag("test:gauged", TagGauge);
             let kind = r
                 .block_entity_type("press_entity")
@@ -1803,7 +2125,9 @@ pub mod tests {
                 .build();
             r.block_entity_part(&kind, Press).expect("native type");
             let hoard = r.block_entity_type("hoard").blocks(&["test:hoard"]).build();
-            r.block_entity_part(&hoard, Hoard).expect("native type");
+            let granite = r.block_key("minecraft:granite");
+            r.block_entity_part(&hoard, Hoard(granite))
+                .expect("native type");
             // These handlers wrap the test hosts' own slots and tanks, as a mod replacing how a
             // block entity's are reached does: ahead of the game's.
             let pipe = r.block_entity_type_key("test:pipe");
@@ -3078,6 +3402,34 @@ pub mod tests {
         mods
     }
 
+    /// Install a signal part on glass for a real-game query.
+    pub fn signal_game_thread() {
+        struct Signal;
+        #[mod_api::horizon_part]
+        impl BlockPart for Signal {
+            fn block_signal(&self, level: &dyn LevelHost, event: &mut BlockSignalEvent) {
+                assert_eq!(
+                    level.block_state([event.pos.x, event.pos.y, event.pos.z]),
+                    event.state
+                );
+                event.signal = if event.direct { -2 } else { 20 };
+            }
+        }
+        struct SignalMod;
+        #[mod_api::__subscriptions]
+        impl Hooks for SignalMod {
+            fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, Signal);
+            }
+        }
+        let mods: super::super::Mods =
+            vec![ModEntry::new("signal_test", Box::new(SignalMod))].into();
+        super::super::install(mods.clone());
+        install_parts(&mods).unwrap();
+        mark_game_thread();
+    }
+
     /// Install a weak-power part on glass for a real-game query.
     pub fn weak_power_game_thread() {
         struct WeakPower;
@@ -3095,7 +3447,8 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for WeakPowerMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:glass", WeakPower);
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, WeakPower);
             }
         }
         let mods: super::super::Mods =
@@ -3121,15 +3474,17 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for PathMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
+                let block_key = r.block_key("minecraft:glass");
                 r.block_part(
-                    "minecraft:glass",
+                    block_key,
                     Answers(&[
                         (PathComputationType::Land, true),
                         (PathComputationType::Air, true),
                     ]),
                 );
+                let block_key = r.block_key("minecraft:air");
                 r.block_part(
-                    "minecraft:air",
+                    block_key,
                     Answers(&[
                         (PathComputationType::Land, false),
                         (PathComputationType::Water, true),
@@ -3161,7 +3516,8 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for LeaverMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:glass", Leaver);
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, Leaver);
             }
         }
         let mods: super::super::Mods =
@@ -3183,7 +3539,8 @@ pub mod tests {
                     "minecraft:cobblestone_wall",
                     "minecraft:glass_pane",
                 ] {
-                    r.block_part(block, ConnectionRule);
+                    let block_key = r.block_key(block);
+                    r.block_part(block_key, ConnectionRule);
                 }
             }
         }
@@ -3217,7 +3574,7 @@ pub mod tests {
     /// Install a part on glass that, when a neighbour changes, reads its inputs and
     /// schedules its own tick 2 ticks later, as a diode does, for real-game tests.
     pub fn signal_reader_game_thread() {
-        struct Reader;
+        struct Reader(BlockKey);
         #[mod_api::horizon_part]
         impl BlockPart for Reader {
             fn neighbor_changed(
@@ -3230,7 +3587,7 @@ pub mod tests {
                     pos,
                     level.has_neighbor_signal(pos),
                     level.best_neighbor_signal(pos),
-                    level.schedule_block_tick(pos, "minecraft:glass", 2),
+                    level.schedule_block_tick(pos, self.0, 2),
                 );
                 SIGNAL_READS.with(|r| r.borrow_mut().push(read));
             }
@@ -3250,7 +3607,8 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for ReaderMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:glass", Reader);
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, Reader(block_key));
             }
         }
         let mods: super::super::Mods =
@@ -3266,7 +3624,8 @@ pub mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for RedstoneMod {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
-                r.block_part("minecraft:glass", Connector);
+                let block_key = r.block_key("minecraft:glass");
+                r.block_part(block_key, Connector);
             }
         }
         let mods: super::super::Mods =
@@ -5529,7 +5888,8 @@ pub mod tests {
     fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
         let mut r = super::PartRegistrar::new("registrar-test");
         (&mut r as &mut dyn Registrar).block_part_tag("test:gauged", TagGauge);
-        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
+        let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
+        (&mut r as &mut dyn Registrar).block_part(block_key, Gauge);
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             HashSet::from(["test:gauge".to_owned()]),
@@ -5623,19 +5983,22 @@ pub mod tests {
         #[mod_api::horizon_part]
         impl BlockPart for Other {}
         let mut r = super::PartRegistrar::new("first");
-        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
+        let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
+        (&mut r as &mut dyn Registrar).block_part(block_key, Gauge);
         r.mod_id = "second";
         r.mod_index = 1;
-        (&mut r as &mut dyn Registrar).block_part("test:gauge", Other);
-        (&mut r as &mut dyn Registrar).block_part("test:gauge", Gauge);
-        (&mut r as &mut dyn Registrar).block_part("gauge", Other);
+        let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
+        (&mut r as &mut dyn Registrar).block_part(block_key, Other);
+        let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
+        (&mut r as &mut dyn Registrar).block_part(block_key, Gauge);
+        (&mut r as &mut dyn Registrar).block_key("test:bad name");
         (&mut r as &mut dyn Registrar).block_part_tag("#test:gauged", Other);
         assert_eq!(r.parts.blocks["test:gauge"].len(), 2);
         assert_eq!(r.refused.len(), 3, "{:?}", r.refused);
         assert!(
             r.refused[0].contains("Gauge is attached to test:gauge twice, by first and second")
         );
-        assert!(r.refused[1].contains("not a namespaced id"));
+        assert!(r.refused[1].contains("mod second: invalid registry key"));
         assert!(r.refused[2].contains("write it without #"));
     }
 }

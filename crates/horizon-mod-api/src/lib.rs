@@ -5,6 +5,20 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
 extern crate self as mod_api;
+mod registry_keys;
+
+/// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct BlockKey(u32);
+
+/// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so only registration creates a key
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct EffectKey(u32);
+
 // Never compiled: the generator reads these declarations to build the `Hooks` trait and its dispatch.
 #[cfg(any())]
 mod hooks;
@@ -17,6 +31,8 @@ pub mod block_sprites;
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod camera;
+mod command;
+pub use command::{CommandArgument, CommandArgumentValue, CommandInvocation};
 // hidden: a module of game-side types; mods use their re-exports
 #[doc(hidden)]
 pub mod containers;
@@ -99,6 +115,10 @@ pub use phase::{
 };
 mod advancement_progress;
 pub use advancement_progress::{AdvancementProgress, CriterionProgress};
+mod recipe_rule;
+pub use recipe_rule::{
+    FireworkShape, FireworkShapeIngredient, RecipeRule, RecipeTemplate, RecipeTrimPattern,
+};
 mod criteria;
 pub use criteria::{CriterionContext, CriterionTest, CriterionTestError, TriggerCriterionError};
 mod packets;
@@ -202,6 +222,40 @@ pub enum ToastKind {
     System,
     /// A toast without one of the above families, including now-playing music.
     Other,
+}
+
+/// Build range and sky properties of a loaded level's dimension type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LevelDimensionShape {
+    /// Lowest buildable block Y.
+    pub min_y: i32,
+    /// Build height in blocks.
+    pub height: i32,
+    /// Height used by portals and chorus fruit.
+    pub logical_height: i32,
+    /// Whether the dimension has skylight.
+    pub sky_light: bool,
+    /// Whether the dimension has a ceiling.
+    pub has_ceiling: bool,
+}
+impl LevelDimensionShape {
+    /// Construct a dimension shape from its build and sky properties.
+    pub fn new(
+        min_y: i32,
+        height: i32,
+        logical_height: i32,
+        sky_light: bool,
+        has_ceiling: bool,
+    ) -> Self {
+        Self {
+            min_y,
+            height,
+            logical_height,
+            sky_light,
+            has_ceiling,
+        }
+    }
 }
 
 /// The registry facts a recipe viewer needs for an enchantment.
@@ -330,6 +384,39 @@ pub struct NativeArmorHurt {
     pub damage: f32,
     /// The durability damage to apply instead; starts equal to `damage`.
     pub new_damage: f32,
+}
+
+/// A snapshot of the client window's modifier keys.
+///
+/// The bits use GLFW's input-event encoding: shift 1, control 2, alt 4 and super 8.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClientModifiers {
+    /// Modifier bits in GLFW's input-event encoding.
+    pub bits: u32,
+}
+
+impl ClientModifiers {
+    /// Construct a snapshot from GLFW modifier bits.
+    pub fn new(bits: u32) -> Self {
+        Self { bits }
+    }
+    /// Whether shift is held.
+    pub fn shift(self) -> bool {
+        self.bits & 1 != 0
+    }
+    /// Whether control is held.
+    pub fn control(self) -> bool {
+        self.bits & 2 != 0
+    }
+    /// Whether alt is held.
+    pub fn alt(self) -> bool {
+        self.bits & 4 != 0
+    }
+    /// Whether super is held.
+    pub fn super_key(self) -> bool {
+        self.bits & 8 != 0
+    }
 }
 
 /// A vanilla key mapping as the client holds it (`ClientHost::mapping`).
@@ -1618,8 +1705,8 @@ impl ItemEnchantments {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct NativeActiveEffect {
-    /// The effect's namespaced id.
-    pub id: Identifier,
+    /// The effect's load-owned registry key; `id.id(host)` reads its canonical name.
+    pub id: EffectKey,
     /// The ticks left; -1 is infinite.
     pub duration: i32,
     /// The amplifier, from 0.
@@ -1632,13 +1719,7 @@ pub struct NativeActiveEffect {
 
 impl NativeActiveEffect {
     /// Construct an effect with its duration, amplifier and visual flags.
-    pub fn new(
-        id: Identifier,
-        duration: i32,
-        amplifier: i32,
-        ambient: bool,
-        visible: bool,
-    ) -> Self {
+    pub fn new(id: EffectKey, duration: i32, amplifier: i32, ambient: bool, visible: bool) -> Self {
         Self {
             id,
             duration,
@@ -3200,7 +3281,7 @@ pub struct ToolUse {
     pub click: [f64; 3],
     /// The action being considered.
     pub ability: ToolAbility,
-    /// Whether this is a simulation. Current vanilla calls pass false.
+    /// Whether this is a simulation. Preview calls pass true; actual use passes false.
     pub simulated: bool,
 }
 
@@ -3726,6 +3807,40 @@ impl BlockHit {
     }
 }
 
+/// The result of previewing a tool's block transformation. Applying it is a separate action.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct BlockTransformPreview {
+    /// The resulting block state.
+    pub state: BlockStateId,
+    /// Sound played by the action.
+    pub sound: String,
+    /// Optional loot table generated by the action.
+    pub loot: Option<String>,
+    /// Durability cost of the action.
+    pub durability: u32,
+    /// Particle or level-event identifier.
+    pub particle: String,
+}
+impl BlockTransformPreview {
+    /// Construct a transformation result from the engine's decision.
+    pub fn new(
+        state: BlockStateId,
+        sound: String,
+        loot: Option<String>,
+        durability: u32,
+        particle: String,
+    ) -> Self {
+        Self {
+            state,
+            sound,
+            loot,
+            durability,
+            particle,
+        }
+    }
+}
+
 /// A vector of doubles, as vanilla's `Vec3`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 // exhaustive: a vector is its three components, as vanilla's `Vec3`
@@ -4110,7 +4225,7 @@ mod generated_host {
 pub use generated_host::{Backend, BackendMut, ClientBackendMut};
 pub use generated_host::{
     BlockEntityDrawContext, ClientHost, ClientSession, Commands, DrawContext, Host, HostSide,
-    LevelSide, Messages, Players, ServerHost,
+    LevelSide, Levels, Messages, Players, ServerHost,
 };
 
 /// Result of accessing or decoding an attachment.
@@ -4189,7 +4304,7 @@ pub trait LevelHost {
         unimplemented!("LevelHost::block_state_id")
     }
     /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
-    fn block_state_default(&self, _block: &str) -> Option<BlockStateId> {
+    fn block_state_default(&self, _block: BlockKey) -> Option<BlockStateId> {
         unimplemented!("LevelHost::block_state_default")
     }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
@@ -4204,9 +4319,9 @@ pub trait LevelHost {
     fn height(&self) -> i32 {
         unimplemented!("LevelHost::height")
     }
-    /// `BlockState.is(TagKey)`: whether the block registry name is in the merged block tag.
-    /// Unknown names and tags return false; unavailable authoritative tags return None.
-    fn block_in_tag(&self, _block: &str, _tag: &str) -> Option<bool> {
+    /// `BlockState.is(TagKey)`: numeric membership of the resolved block in the merged block tag.
+    /// Unknown tags return false; unavailable authoritative tags or block mappings return None.
+    fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
     /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
@@ -4302,7 +4417,7 @@ level_random_draws!(LevelRandomHost, LevelWriteHost);
 /// A `LevelReader` with vanilla's `ScheduledTickAccess`. Shape updates cannot write blocks.
 pub trait LevelTicksHost: LevelHost {
     /// Schedule a block tick through `native_schedule_block_tick`.
-    fn schedule_block_tick(&mut self, _pos: [i32; 3], _block: &str, _delay: i32) -> bool {
+    fn schedule_block_tick(&mut self, _pos: [i32; 3], _block: BlockKey, _delay: i32) -> bool {
         unimplemented!("LevelTicksHost::schedule_block_tick")
     }
     /// Schedule a fluid tick through `native_schedule_fluid_tick`.
@@ -4517,6 +4632,55 @@ mod hooks_tests;
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn native_host_returns_typed_recipe_rules() {
+        struct Recipes(Arc<[Recipe]>);
+        impl Host for Recipes {
+            fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
+                if kind == "minecraft:crafting_transmute" {
+                    self.0.clone()
+                } else {
+                    Arc::from([])
+                }
+            }
+        }
+        let mut recipe = Recipe::new(
+            "test:recipe",
+            "minecraft:crafting_transmute",
+            Arc::new(serde_json::json!({"source": "test"})),
+        );
+        recipe.rule = Some(RecipeRule::Transmute {
+            input: Ingredient::of(vec!["test:input".into()]),
+            material: Ingredient::of(vec!["test:material".into()]),
+            min: 2,
+            max: 4,
+            add_count: true,
+            result: RecipeTemplate::new(None, 3, None),
+        });
+        let host = Recipes(Arc::from([recipe]));
+        let view = (&host as &dyn Host).recipes_of_type("minecraft:crafting_transmute");
+        let Some(RecipeRule::Transmute {
+            input,
+            material,
+            min,
+            max,
+            add_count,
+            result,
+        }) = &view[0].rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(input.order, ["test:input"]);
+        assert_eq!(material.order, ["test:material"]);
+        assert_eq!((*min, *max, *add_count, result.count), (2, 4, true, 3));
+        assert_eq!(view[0].json["source"], "test");
+        assert!(
+            (&host as &dyn Host)
+                .recipes_of_type("test:other")
+                .is_empty()
+        );
+    }
 
     #[test]
     fn client_menu_click_refuses_a_host_without_its_backend() {
@@ -5704,7 +5868,7 @@ pub(crate) mod built {
     }
     // exhaustive: the game builds it with a literal; mods only read it
     pub struct NativeActiveEffect {
-        pub id: &'static str,
+        pub id: super::EffectKey,
         pub duration: i32,
         pub amplifier: i32,
         pub ambient: bool,
@@ -5720,8 +5884,7 @@ pub(crate) mod built {
                 visible,
             } = v;
             Self {
-                id: crate::Identifier::parse_namespaced(id)
-                    .expect("the game's effect ids are namespaced"),
+                id,
                 duration,
                 amplifier,
                 ambient,
