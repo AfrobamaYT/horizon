@@ -1,8 +1,9 @@
+use super::resolve::{Resolved, resolve};
 use super::*;
-use crate::points::file_points;
-use quote::format_ident;
+use crate::{crossing::Rule, internals::Internal, points::file_points};
+use quote::{ToTokens, format_ident, quote};
 use sha2::{Digest, Sha256};
-use syn::{spanned::Spanned, visit::Visit};
+use syn::{FnArg, Type, spanned::Spanned, visit::Visit};
 
 struct Calls<'a> {
     selector: &'a str,
@@ -26,6 +27,7 @@ impl<'a> Visit<'a> for Calls<'a> {
         syn::visit::visit_expr(self, expr);
     }
     fn visit_item(&mut self, _: &'a syn::Item) {}
+    fn visit_expr_const(&mut self, _: &'a syn::ExprConst) {}
 }
 
 fn digest(text: String) -> String {
@@ -49,8 +51,8 @@ pub fn rewrite(
     module: &str,
     entries: &[Internal],
     declarations: &[Declaration],
-) -> Result<(String, Vec<Site>), String> {
-    let parsed = syn::parse_file(source).map_err(|e| e.to_string())?;
+) -> Result<(String, Vec<Site>), Error> {
+    let parsed = syn::parse_file(source)?;
     let mut functions = Vec::new();
     file_points(module, &parsed.items, &|_| true, &mut functions);
     let rule = Rule::new(entries);
@@ -72,7 +74,7 @@ pub fn rewrite(
             .iter()
             .filter(|f| plain_path(&f.target()) == declaration.target)
         {
-            let build = || -> Result<_, String> {
+            let build = || -> Result<_, Error> {
                 let mut calls = Calls {
                     selector: &declaration.selector,
                     calls: Vec::new(),
@@ -83,13 +85,16 @@ pub fn rewrite(
                     _ => call.span().start(),
                 });
                 if calls.calls.is_empty() {
-                    return Err("selector matched no call".into());
+                    return Err(Cause::Missing("selector matched no call").into());
                 }
                 if calls.calls.len() > 1 && declaration.ordinal.is_none() {
-                    return Err("ambiguous selector: supply an ordinal".into());
+                    return Err(Cause::Ambiguous("ambiguous selector: supply an ordinal").into());
                 }
                 let ordinal = declaration.ordinal.unwrap_or(0);
-                let expr = *calls.calls.get(ordinal).ok_or("ordinal matched no call")?;
+                let expr = *calls
+                    .calls
+                    .get(ordinal)
+                    .ok_or(Cause::Missing("ordinal matched no call"))?;
                 let enclosing = entries
                     .iter()
                     .find(|e| {
@@ -97,7 +102,9 @@ pub fn rewrite(
                             && matches!(e.kind, "method" | "fn")
                             && e.cfg.is_empty()
                     })
-                    .ok_or("enclosing function is not in the internals catalog")?;
+                    .ok_or(Cause::Missing(
+                        "enclosing function is not in the internals catalog",
+                    ))?;
                 let Resolved {
                     callee,
                     signature,
@@ -121,7 +128,7 @@ pub fn rewrite(
                     .collect::<Vec<Expr>>();
                 match &mut original {
                     Expr::MethodCall(call) => {
-                        call.receiver = Box::new(syn::parse_quote!(__recv));
+                        *call.receiver = syn::parse_quote!(__recv);
                         call.args = arg_fields.into_iter().collect();
                     }
                     Expr::Call(call) => {
@@ -145,15 +152,17 @@ pub fn rewrite(
                     }
                     _ => quote!(let __recv = ();),
                 };
-                // Aliases live beside the caller; native spellings must name this owning crate.
                 let owning = module.split("::").next().expect("a module has a crate");
-                let receiver_type = receiver_type
-                    .to_string()
-                    .replace(&format!(":: {owning} ::"), "crate ::")
-                    .parse::<proc_macro2::TokenStream>()
-                    .map_err(|e| e.to_string())?;
-                let mut alias_type: Type =
-                    syn::parse2(receiver_type.clone()).map_err(|e| e.to_string())?;
+                let local =
+                    |ty: proc_macro2::TokenStream| -> Result<proc_macro2::TokenStream, Error> {
+                        ty.to_string()
+                            .replace(&format!(":: {owning} ::"), "crate ::")
+                            .parse()
+                            .map_err(|_| Cause::Signature("invalid native type spelling").into())
+                    };
+                let receiver_type = local(receiver_type)?;
+                let output = local(output)?;
+                let mut alias_type: Type = syn::parse2(receiver_type.clone())?;
                 if let Type::Reference(reference) = &mut alias_type {
                     reference.lifetime = Some(syn::parse_quote!('r));
                 }
@@ -194,14 +203,11 @@ pub fn rewrite(
                 Ok((expr.span(), raw.to_string(), replacement.to_string(), site))
             };
             let (span, raw, replacement, site) = build()
-                .map_err(|e| format!("{}: {}: {e}", declaration.origin, declaration.target))?;
+                .map_err(|e| e.at(format!("{}: {}", declaration.origin, declaration.target)))?;
             let start = offset(span.start());
             let end = offset(span.end());
             if let Some(other) = claimed.insert((start, end), declaration.origin.clone()) {
-                return Err(format!(
-                    "{} conflicts with {other}: both select the same call",
-                    declaration.origin
-                ));
+                return Err(Error::from(Cause::Conflict(other)).at(declaration.origin.clone()));
             }
             edits.insert((start, end), replacement);
             edits
@@ -215,7 +221,7 @@ pub fn rewrite(
     let mut boundary = source.len();
     for ((start, end), text) in edits.into_iter().rev() {
         if end > boundary {
-            return Err("nested selected call sites overlap".into());
+            return Err(Cause::Record("nested selected call sites overlap").into());
         }
         out.replace_range(start..end, &text);
         boundary = start;

@@ -1,42 +1,47 @@
+use super::rewrite::rewrite;
 use super::*;
-use crate::points;
-use quote::format_ident;
+use crate::{internals::Internal, points};
+use quote::{format_ident, quote};
 
 const DIRECTORY: &str = "crates/horizon-mod-api-gen/sites";
 
 /// The list directory and each listed crate's source: build-script inputs.
-pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, String> {
+pub fn tracked(root: &Path) -> Result<Vec<PathBuf>, Error> {
     let mut paths = vec![root.join(DIRECTORY)];
     paths.extend(files(root)?.into_iter().map(|file| file.path));
     Ok(paths)
 }
 
-fn files(root: &Path) -> Result<Vec<points::GameFile>, String> {
-    let mut files = points::game_files(&root.join("crates/horizon-client/src"), true)?;
+fn files(root: &Path) -> Result<Vec<points::GameFile>, Error> {
+    let mut files =
+        points::game_files(&root.join("crates/horizon-client/src"), true).map_err(Cause::Source)?;
     let crates: std::collections::BTreeSet<_> = listed(&root.join(DIRECTORY))?
         .into_iter()
         .filter_map(|d| d.target.split("::").next().map(str::to_owned))
         .collect();
     for krate in crates.into_iter().filter(|k| k != "horizon_client") {
-        if points::below_points(root)?.contains(&krate) {
+        if points::below_points(root)
+            .map_err(Cause::Source)?
+            .contains(&krate)
+        {
             let declaration = listed(&root.join(DIRECTORY))?
                 .into_iter()
                 .find(|d| d.target.starts_with(&format!("{krate}::")))
                 .expect("listed crate");
-            return Err(format!(
-                "{}: {krate} is built under the points' own crate",
-                declaration.origin
-            ));
+            return Err(Error::from(Cause::Signature(
+                "site crate is built under the points' own crate",
+            ))
+            .at(declaration.origin));
         }
-        let (_, lib) = points::crate_root(root, &krate)?;
+        let (_, lib) = points::crate_root(root, &krate).map_err(Cause::Source)?;
         let dir = lib.parent().expect("source parent").to_owned();
-        files.extend(points::module_files(krate, lib, dir, true)?);
+        files.extend(points::module_files(krate, lib, dir, true).map_err(Cause::Source)?);
     }
     Ok(files)
 }
 
 /// Generate site IDs independently of the raw types, keeping the points crate below gameplay.
-pub fn ids(root: &Path) -> Result<String, String> {
+pub fn ids(root: &Path) -> Result<String, Error> {
     let declarations = listed(&root.join(DIRECTORY))?;
     let names = declarations
         .iter()
@@ -51,7 +56,7 @@ pub fn ids(root: &Path) -> Result<String, String> {
 }
 
 /// Validate the entire union before writing any expression rewrite. Widening precedes this pass.
-pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, String> {
+pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, Error> {
     let declarations = listed(&root.join(DIRECTORY))?;
     if declarations.is_empty() {
         return Ok(Vec::new());
@@ -66,14 +71,16 @@ pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, String> {
         {
             continue;
         }
-        let source = fs::read_to_string(&file.path).map_err(|e| e.to_string())?;
+        let source = fs::read_to_string(&file.path)?;
         let (rewritten, found) = rewrite(&source, &file.module, entries, &declarations)?;
         if found.is_empty() {
             continue;
         }
         if !file.module.starts_with("horizon_client::") {
             packages.insert(
-                points::crate_root(root, file.module.split("::").next().expect("crate"))?.0,
+                points::crate_root(root, file.module.split("::").next().expect("crate"))
+                    .map_err(Cause::Source)?
+                    .0,
             );
         }
         sites.extend(found);
@@ -85,16 +92,16 @@ pub fn stage(root: &Path, entries: &[Internal]) -> Result<Vec<Site>, String> {
                 && s.selector == d.selector
                 && Some(s.ordinal) == d.ordinal.or(Some(0))
         }) {
-            return Err(format!(
-                "{}: {}: no eligible function matched the site target",
-                d.origin, d.target
-            ));
+            return Err(Error::from(Cause::Missing(
+                "no eligible function matched the site target",
+            ))
+            .at(format!("{}: {}", d.origin, d.target)));
         }
     }
     for (path, text) in changes {
-        fs::write(path, text).map_err(|e| e.to_string())?;
+        fs::write(path, text)?;
     }
-    points::dependencies(root, packages)?;
+    points::dependencies(root, packages).map_err(Cause::Source)?;
     sites.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(sites)
 }
@@ -131,7 +138,8 @@ mod tests {
         .unwrap();
         let error = stage(&root, &entries).unwrap_err();
         assert!(
-            error.contains("test.txt:2") && error.contains("no eligible function"),
+            error.to_string().contains("test.txt:2")
+                && error.to_string().contains("no eligible function"),
             "{error}"
         );
         assert_eq!(fs::read_to_string(&file).unwrap(), source);

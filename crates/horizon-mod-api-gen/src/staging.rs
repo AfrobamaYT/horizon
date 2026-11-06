@@ -32,7 +32,7 @@ pub fn stage(
         Mode::Discovery => internals::discover(root)?,
     };
     write(internals_json, &internals.entries)?;
-    let sites = sites::stage(root, &internals.entries)?;
+    let sites = sites::stage(root, &internals.entries).map_err(|e| e.to_string())?;
     let points = points::stage(root)?;
     #[derive(serde::Serialize)]
     struct Manifest {

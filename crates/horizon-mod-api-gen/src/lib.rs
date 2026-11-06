@@ -970,7 +970,7 @@ pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
 pub mod points;
-pub mod sites;
+pub(crate) mod sites;
 pub mod staging;
 mod wasm;
 pub use build::{generate, generate_points};
