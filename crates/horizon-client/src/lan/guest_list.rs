@@ -20,10 +20,12 @@ impl GuestList {
     /// not scan the collection or rebuild its indexes.
     pub fn update<T>(&mut self, index: usize, update: impl FnOnce(&mut Guest) -> T) -> T {
         let before = index_fields(&self.rows[index]);
+        let registration = self.rows[index].attachments.registration();
         let edit = Edit {
             list: self,
             index,
             before,
+            registration,
         };
         update(&mut edit.list.rows[index])
     }
@@ -268,6 +270,7 @@ struct Edit<'a> {
     list: &'a mut GuestList,
     index: usize,
     before: (u32, u128, i32, bool),
+    registration: Option<horizon_world::attachments::AttachmentRegistration>,
 }
 fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
     (
@@ -279,6 +282,14 @@ fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
 }
 impl Drop for Edit<'_> {
     fn drop(&mut self) {
+        if let Some(old) = &self.registration
+            && !self.list.rows[self.index]
+                .attachments
+                .registration()
+                .is_some_and(|current| old.same_registration(&current))
+        {
+            old.unregister();
+        }
         if index_fields(&self.list.rows[self.index]) != self.before {
             self.list.reindex();
         }
@@ -375,6 +386,49 @@ mod tests {
             assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
             assert_eq!(before[0].entry.read(&VALUE), Ok(&7));
             assert_eq!(VALUE.get_existing(&mut saved, Holder::Level), Ok(Some(7)));
+        }
+    }
+
+    #[test]
+    fn displaced_updates_retire_retained_owners() {
+        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use std::sync::{Arc, Mutex};
+
+        for action in ["replace", "swap", "capture", "connection", "unwind"] {
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let key = ("guest_test".into(), "value".into());
+            let mut player = guest(1);
+            VALUE
+                .set(&mut player.attachments, Holder::Level, 7)
+                .unwrap();
+            player.attachments.bind_index(&index, player.uuid);
+            let mut list = GuestList::default();
+            list.push(player);
+            let mut retained = guest(2);
+            match action {
+                "replace" => retained = list.update(0, |g| std::mem::replace(g, guest(2))),
+                "swap" => list.update(0, |g| std::mem::swap(g, &mut retained)),
+                "capture" => list.update_all(|g| retained = std::mem::replace(g, guest(2))),
+                "connection" => {
+                    retained = list
+                        .update_connection(1, |g| std::mem::replace(g, guest(2)))
+                        .unwrap()
+                }
+                "unwind" => {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        list.update(0, |g| {
+                            std::mem::swap(g, &mut retained);
+                            panic!("fixture")
+                        })
+                    }));
+                }
+                _ => unreachable!(),
+            }
+            assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
+            VALUE
+                .set(&mut retained.attachments, Holder::Level, 9)
+                .unwrap();
+            assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
         }
     }
 

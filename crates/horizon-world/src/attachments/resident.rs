@@ -33,6 +33,11 @@ impl ResidentAttachments {
         binding
     }
 
+    /// Copy the current registration without owning its lifetime.
+    pub fn registration(&self) -> Option<AttachmentRegistration> {
+        self.lifetime.registration()
+    }
+
     /// Retire before a removed owner is returned or retained across callbacks.
     pub fn retire(&mut self) {
         self.lifetime = AttachmentLifetime::default();

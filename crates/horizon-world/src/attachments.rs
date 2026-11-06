@@ -580,6 +580,11 @@ impl AttachmentRegistration {
     pub fn unregister(&self) -> bool {
         self.publisher.unregister()
     }
+
+    /// Whether two handles refer to the same registration.
+    pub fn same_registration(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.publisher, &other.publisher)
+    }
 }
 
 /// The data held by one entity, block entity, chunk or level.
