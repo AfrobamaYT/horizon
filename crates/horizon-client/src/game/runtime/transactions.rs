@@ -50,9 +50,14 @@ pub(super) struct Level {
     menus: HashMap<u32, KeptMenus>,
     /// Each entity's, player's, chunk's and the level's attachment map before this transaction
     /// first reached it (a block entity's is kept with it).
-    attachments: HashMap<Holder, Attachments>,
+    attachments: HashMap<Holder, KeptAttachments>,
     /// What the root commit does, in order.
     after: Vec<After>,
+}
+
+struct KeptAttachments {
+    contents: Attachments,
+    indexed: bool,
 }
 
 struct Kept {
@@ -238,7 +243,21 @@ impl Game<'_> {
         if level.attachments.contains_key(&holder) {
             return;
         }
-        let Ok(kept) = self.attachment_slot(holder).map(|map| map.clone()) else {
+        let painting_bound = if let Holder::Entity(id) = holder {
+            self.paintings
+                .iter()
+                .find(|painting| painting.id == id)
+                .map(|painting| painting.attachment_lifetime.is_bound())
+        } else {
+            None
+        };
+        let Ok(kept) = self
+            .attachment_slot(holder, mod_api::AttachmentAccess::Existing)
+            .map(|map| KeptAttachments {
+                contents: map.clone(),
+                indexed: painting_bound.unwrap_or_else(|| map.has_index_binding()),
+            })
+        else {
             return;
         };
         if let Some(level) = self.transactions.last_mut() {
@@ -492,8 +511,17 @@ impl Game<'_> {
             });
         }
         for (holder, kept) in level.attachments {
-            if let Ok(map) = self.attachment_slot(holder) {
-                map.replace_contents(kept);
+            if let Ok(map) = self.attachment_slot(holder, mod_api::AttachmentAccess::Existing) {
+                map.replace_contents(kept.contents);
+                if !kept.indexed {
+                    map.unbind_index();
+                }
+            }
+            if !kept.indexed
+                && let Holder::Entity(id) = holder
+                && let Some(painting) = self.paintings.iter_mut().find(|painting| painting.id == id)
+            {
+                painting.attachment_lifetime = Default::default();
             }
         }
         for (uuid, kept) in level.players {
@@ -994,7 +1022,10 @@ mod tests {
         let chest_holder = mod_api::Holder::BlockEntity([0, 64, 0]);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());
         game.transaction_open();
-        assert!(game.attachment_map_quiet(chest_holder).is_ok());
+        assert!(
+            game.attachment_map_quiet(chest_holder, mod_api::AttachmentAccess::Existing)
+                .is_ok()
+        );
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_some());
         game.transaction_close(false);
         assert!(game.world.block_entities.attachments((0, 64, 0)).is_none());

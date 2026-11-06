@@ -51,7 +51,7 @@ impl Game<'_> {
                 .and_then(|uuid| self.entity_attachments.get(uuid))
                 .map(|map| map.synced()),
             _ => self
-                .attachment_map_quiet(holder)
+                .attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                 .ok()
                 .map(|map| map.synced()),
         }
@@ -123,7 +123,8 @@ impl Game<'_> {
             }
         }
         for holder in std::mem::take(&mut self.world.attachment_syncs) {
-            let Ok(map) = self.attachment_map_quiet(holder) else {
+            let Ok(map) = self.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
+            else {
                 continue;
             };
             let changes = map.take_sync_changes();
