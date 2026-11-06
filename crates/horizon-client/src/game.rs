@@ -1841,7 +1841,9 @@ impl LevelAccess for GameLevel<'_> {
         fluid: FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
-        if self.native_authoritative {
+        if self.native_authoritative
+            && let Some(fluid) = native_world_read::api_fluid_state(fluid)
+        {
             self.native_state_for_placement(self.dimension, state, context, fluid, answer);
         }
     }
@@ -24288,6 +24290,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
+    mods::register_debug_entries(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

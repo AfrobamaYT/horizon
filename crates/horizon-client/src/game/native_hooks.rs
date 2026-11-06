@@ -1006,7 +1006,7 @@ use horizon_core::{
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
-    fluid::{FluidKind, FluidState},
+    fluid::FluidKind,
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
@@ -1028,7 +1028,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, EffectKey, NativeKeyRegistration};
+use mod_api::{BlockKey, DebugEntry, EffectKey, NativeKeyRegistration};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -2201,7 +2201,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         state: BlockStateId,
         context: &PlacementContext,
-        fluid: FluidState,
+        fluid: mod_api::FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
         self.fire_state_for_placement(dimension, state, context, fluid, answer);
@@ -3723,6 +3723,15 @@ impl Game<'_> {
     ) {
         Self::fire_layer_definitions(context, layers);
     }
+    /// The F3 debug entries a mod adds (NeoForge's `RegisterDebugEntriesEvent`):
+    /// push a `DebugEntry` per entry, its id `<mod id>:<path>` and the vanilla
+    /// group its lines join. Asked once at start, on the client.
+    pub(super) fn native_register_debug_entries(
+        context: &mod_api::RegistrationContext,
+        entries: &mut Vec<DebugEntry>,
+    ) {
+        Self::fire_register_debug_entries(context, entries);
+    }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
         self.fire_mods(mods);
@@ -4790,6 +4799,12 @@ impl Game<'_> {
         lines: &mut Vec<String>,
     ) {
         self.fire_screen_tooltip(block, data, at, lines);
+    }
+    /// The lines of one enabled F3 debug entry a mod registered
+    /// (`native_register_debug_entries`), asked each frame the overlay draws
+    /// it: push them to `lines`. A disabled entry is never asked.
+    pub(super) fn native_debug_entry_lines(&self, id: &str, lines: &mut Vec<String>) {
+        self.fire_debug_entry_lines(id, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;

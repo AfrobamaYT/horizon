@@ -180,6 +180,15 @@ pub(super) fn register_layer_definitions(role: ExecutionRole) {
     Game::native_layer_definitions(&RegistrationContext::new(), &mut layers);
     horizon_client::mobs::model_layers::register(layers);
 }
+/// The native mods' F3 debug entries (`native_register_debug_entries`), kept once at start.
+pub(super) fn register_debug_entries(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut entries = Vec::new();
+    Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
+    horizon_client::debug_entries::register(entries);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
