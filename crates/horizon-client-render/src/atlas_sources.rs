@@ -8,7 +8,6 @@ use horizon_client_core::pattern::Pattern;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -172,72 +171,36 @@ fn decode_source(s: &Value) -> Option<SpriteSource> {
 
 /// The texture files of a resource tree: `namespace:path` for every
 /// `assets/<namespace>/textures/<path>.png`.
-pub fn list_textures(root: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
-        return out;
-    };
-    for ns in namespaces.flatten() {
-        let namespace = ns.file_name().to_string_lossy().into_owned();
-        let base = ns.path().join("textures");
-        // A prepared root's: from its data file, without listing the disk.
-        if let Some(files) = horizon_core::prepared_files::files_under(&base) {
-            out.extend(
-                files
-                    .iter()
-                    .filter_map(|file| file.strip_suffix(".png"))
-                    .map(|rel| format!("{namespace}:{rel}")),
-            );
-            continue;
-        }
-        let mut stack = vec![base.clone()];
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = fs::read_dir(&dir) else {
-                continue;
-            };
-            for e in entries.flatten() {
-                let p = e.path();
-                // `file_type` comes with the listing; `Path::is_dir` is a stat per
-                // entry, kept for links (which it follows).
-                let dir = match e.file_type() {
-                    Ok(t) if t.is_symlink() => p.is_dir(),
-                    Ok(t) => t.is_dir(),
-                    Err(_) => p.is_dir(),
-                };
-                if dir {
-                    stack.push(p);
-                } else if p.extension().is_some_and(|x| x == "png")
-                    && let Ok(rel) = p.strip_prefix(&base)
-                {
-                    let rel = rel.with_extension("").to_string_lossy().replace('\\', "/");
-                    out.push(format!("{namespace}:{rel}"));
-                }
-            }
-        }
-    }
-    out.sort();
-    out
+pub fn list_textures(source: &crate::resource_source::ResourceSource) -> Vec<String> {
+    source
+        .list_under("assets", &["textures"])
+        .into_iter()
+        .filter_map(|file| {
+            let (namespace, texture) = file.strip_prefix("assets/")?.split_once("/textures/")?;
+            Some(format!("{namespace}:{}", texture.strip_suffix(".png")?))
+        })
+        .collect()
 }
 /// The file of a texture identifier. A Custom Item Textures id (`cit_assets`) names its
 /// resource path, wherever the folder: `directory` is not used for it. An id whose path would
 /// leave the root (a pack's model may write any) names a file that is never there.
 pub fn texture_path(root: &Path, texture: &str, directory: &str) -> PathBuf {
+    root.join(texture_resource(texture, directory))
+}
+/// Resource name of a texture, including Custom Item Textures outside `textures/`.
+pub fn texture_resource(texture: &str, directory: &str) -> String {
     // No file can have a NUL in its name, so this one is never there.
     const NOWHERE: &str = "assets/minecraft/textures/horizon/\0refused.png";
     if texture.starts_with("horizon_cit:") {
-        return root.join(
-            crate::cit_assets::resource(texture, "png")
-                .as_deref()
-                .unwrap_or(NOWHERE),
-        );
+        return crate::cit_assets::resource(texture, "png").unwrap_or_else(|| NOWHERE.to_owned());
     }
     let (namespace, path) = texture.split_once(':').unwrap_or(("minecraft", texture));
     let rel = format!("assets/{namespace}/{directory}/{path}.png");
-    root.join(if horizon_optifine::paths::valid(&rel) {
-        &rel
+    if horizon_optifine::paths::valid(&rel) {
+        rel
     } else {
-        NOWHERE
-    })
+        NOWHERE.to_owned()
+    }
 }
 
 /// `SpriteSourceList.list`: every sprite id of the atlas and its origin.
@@ -397,33 +360,48 @@ pub fn generate(
 
 /// Every atlas definition of a resource tree (`atlases/*.json` in every
 /// namespace), by atlas id.
-pub fn atlases(root: &Path) -> BTreeMap<String, Vec<SpriteSource>> {
-    let mut out = BTreeMap::new();
-    let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
-        return out;
-    };
-    for ns in namespaces.flatten() {
-        let namespace = ns.file_name().to_string_lossy().into_owned();
-        let Ok(files) = fs::read_dir(ns.path().join("atlases")) else {
-            continue;
-        };
-        for f in files.flatten() {
-            let path = f.path();
-            if path.extension().is_none_or(|e| e != "json") {
-                continue;
-            }
-            let name = path.file_stem().unwrap_or_default().to_string_lossy();
-            if let Some(sources) = fs::read_to_string(&path).ok().and_then(|t| decode(&t)) {
-                out.insert(format!("{namespace}:{name}"), sources);
-            }
-        }
-    }
-    out
+pub fn atlases(
+    source: &crate::resource_source::ResourceSource,
+) -> BTreeMap<String, Vec<SpriteSource>> {
+    source
+        .list_under("assets", &["atlases"])
+        .into_iter()
+        .filter_map(|file| {
+            let (namespace, path) = file.strip_prefix("assets/")?.split_once("/atlases/")?;
+            let name = path.strip_suffix(".json")?;
+            let sources = decode(&source.read_to_string(&file).ok()?)?;
+            Some((format!("{namespace}:{name}"), sources))
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn discovers_archive_textures_and_nested_atlas_definitions_in_place() {
+        use std::io::{Cursor, Write};
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            ("assets/demo/textures/item/x.png", b"png".as_slice()),
+            ("assets/zzz/textures/item/z.png", b"png"),
+            ("assets/demo/atlases/custom/nested.json", br#"{"sources":[{"type":"single","resource":"demo:item/x","sprite":"demo:renamed"}]}"#),
+            ("assets/demo/atlases/ignored.txt", b"ignored"),
+        ] {
+            writer.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(bytes).unwrap();
+        }
+        let source = crate::resource_source::ResourceSource::opened_archive(
+            crate::zip::Zip::from_bytes(writer.finish().unwrap().into_inner()).unwrap(),
+        );
+        let textures = list_textures(&source);
+        assert_eq!(textures, ["demo:item/x", "zzz:item/z"]);
+        let atlases = atlases(&source);
+        assert_eq!(atlases.keys().collect::<Vec<_>>(), [&"demo:custom/nested"]);
+        assert!(
+            matches!(list(&atlases["demo:custom/nested"], &textures).get("demo:renamed"), Some(SpriteOrigin::File(texture)) if texture == "demo:item/x")
+        );
+    }
 
     fn textures() -> Vec<String> {
         let mut t: Vec<String> = [

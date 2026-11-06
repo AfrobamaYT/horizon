@@ -99,9 +99,20 @@ fn default_components_reader_baseline() -> client::Result<()> {
     let defaults = item_data.defaults();
     let items = horizon_items::items::Items::catalog(&root, &PackOverlay::NONE, defaults)?;
     assert_eq!(items.get("probe:token").unwrap().max_stack, 16);
-    let library = client::model_library::ParsedModels::load(&root).into_item_library();
-    let client = ItemRenderer::load_with_library(&root, library.clone(), &item_data)?;
-    let server = ItemRenderer::load_for_server(&root, library, &item_data)?;
+    let library = client::model_library::ParsedModels::load(
+        &client::resource_source::ResourceSource::directory(root.clone()),
+    )
+    .into_item_library();
+    let client = ItemRenderer::load_with_library(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        library.clone(),
+        &item_data,
+    )?;
+    let server = ItemRenderer::load_for_server(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        library,
+        &item_data,
+    )?;
     let _banners = client::banner::Banners::load(&root, defaults);
     let _loot = LootData::load(&root, &PackOverlay::NONE, defaults)?;
     let identity = client::content_identity::identity(&root, defaults)?;

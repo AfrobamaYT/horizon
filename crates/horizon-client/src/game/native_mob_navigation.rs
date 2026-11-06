@@ -66,6 +66,36 @@ impl Game<'_> {
         };
         Some(self.mobs.iter().find(|m| m.id == id)?.ai.nav.is_done())
     }
+
+    /// `PathNavigation.getSpeedModifier`: the multiplier the current path
+    /// is followed at (1.0 is the mob's normal speed; 0 until a path sets
+    /// one). This is not the mob's movement-speed attribute. None for a
+    /// stale or unavailable mob, or on a client, and for the dragon.
+    pub(super) fn native_mob_navigation_speed(&self, mob: MobRef) -> Option<f64> {
+        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
+            return None;
+        };
+        Some(self.mobs.iter().find(|m| m.id == id)?.ai.nav.speed_modifier)
+    }
+
+    /// `PathNavigation.setSpeedModifier`: sets the multiplier the current
+    /// path is followed at, as `move_to`'s speed argument does. The mob's
+    /// own AI — a goal's or a brain species' next `moveTo` — sets its own
+    /// again, as in vanilla. False for a non-finite speed, a stale or
+    /// unavailable mob, or on a client, and for the dragon.
+    pub(super) fn native_mob_set_navigation_speed(&mut self, mob: MobRef, speed: f64) -> bool {
+        if !speed.is_finite() {
+            return false;
+        }
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id)
+            .map(|m| m.ai.nav.speed_modifier = speed)
+            .is_some()
+    }
 }
 
 #[cfg(test)]
@@ -175,6 +205,40 @@ mod tests {
                 .unwrap();
             assert!(!fish.move_to(game, [9.5, 65.0, 7.5], 1.0));
             assert_eq!(fish.is_done(game), Some(true));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn navigation_speed_is_the_paths_speed_modifier() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(99, kind, Vec3::new(3.5, 65.0, 3.5), 0.0));
+            let entity = game.native_entity(99).unwrap();
+            let mob = game.native_mob_ref(entity).unwrap();
+            // A fresh navigation has no path, so no speed was set for one.
+            assert_eq!(mob.navigation_speed(game), Some(0.0));
+            assert!(mob.set_navigation_speed(game, 1.25));
+            assert_eq!(mob.navigation_speed(game), Some(1.25));
+            assert_eq!(game.mobs[0].ai.nav.speed_modifier, 1.25);
+            assert!(!mob.set_navigation_speed(game, f64::NAN));
+            assert_eq!(game.mobs[0].ai.nav.speed_modifier, 1.25);
+            // Not the movement-speed attribute.
+            let attribute = game.mobs[0].movement_speed();
+            assert_ne!(attribute, 1.25);
+            let stale = MobRef::new(EntityRef::new(
+                NativeWorldEpoch::new(entity.epoch().get() + 1),
+                99,
+            ));
+            assert_eq!(stale.navigation_speed(game), None);
+            assert!(!stale.set_navigation_speed(game, 1.0));
+            assert_eq!(game.mobs[0].ai.nav.speed_modifier, 1.25);
         });
     }
 }
