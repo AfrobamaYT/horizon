@@ -20564,7 +20564,7 @@ impl<'a> Game<'a> {
         let now = Instant::now();
         let look = options.look;
         let particles = horizon_client::particles::ParticleEngine::new(
-            &root,
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
             &gui.atlas.sprites,
             &gui.atlas.translucent,
         );

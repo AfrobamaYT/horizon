@@ -412,8 +412,11 @@ impl Game<'_> {
         self.mod_view_distances.take();
         // The atlas's sprites moved: the particle engine re-reads every rect
         // and the packs' sprite sets, or every particle draws a stale region.
-        self.particles
-            .reload(&root, &self.gui.atlas.sprites, &self.gui.atlas.translucent);
+        self.particles.reload(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            &self.gui.atlas.sprites,
+            &self.gui.atlas.translucent,
+        );
         horizon_client::ui_theme::reset_atlas();
         // Villager hats come from the pack's texture metadata (shared data, swapped in place).
         *self
