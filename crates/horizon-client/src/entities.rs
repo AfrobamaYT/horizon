@@ -2984,6 +2984,31 @@ mod merge_tests {
     }
 
     #[test]
+    fn merging_a_joined_batch_preserves_survivor_joins_and_order() {
+        let mut items: crate::join_seq::JoinList<_> = [
+            item("minecraft:sand", 3, 0.5, 41),
+            item("minecraft:sand", 5, 1.2, 7),
+            item("minecraft:gravel", 1, 8.0, 1),
+        ]
+        .into_iter()
+        .collect();
+        let joins: Vec<_> = items.iter().map(|item| item.join).collect();
+        let mut removed = [false; 3];
+        let mut cells = ItemCells::new(&items);
+        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, &max_stack);
+        let mut removed = removed.into_iter();
+        items.retain(|_| !removed.next().unwrap());
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].stack.count, items[0].age), (8, 7));
+        assert_eq!(&*items[1].stack.item, "minecraft:gravel");
+        assert_eq!(items[1].stack.count, 1);
+        assert_eq!(
+            items.iter().map(|item| item.join).collect::<Vec<_>>(),
+            joins[1..]
+        );
+    }
+
+    #[test]
     fn the_smaller_stack_goes_into_the_larger() {
         let mut items = [
             item("minecraft:sand", 3, 0.5, 41),
