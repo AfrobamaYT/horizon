@@ -1804,31 +1804,34 @@ pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     install_registrar(register_all(mods))
 }
 
-fn install_registrar(registrar: PartRegistrar) -> Result<(), Vec<String>> {
-    if !registrar.refused.is_empty() {
-        return Err(registrar.refused);
-    }
+fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
     let registry = horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
         &registrar.game_rule_categories,
         &registrar.game_rules,
     )
     .map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|error| {
-                let owner = match &error {
-                    horizon_client_core::gamerules::RuleRegistryError::UnknownCategory {
-                        rule,
-                        ..
-                    }
-                    | horizon_client_core::gamerules::RuleRegistryError::Duplicate(rule) => {
-                        rule.split_once(':').map_or("unknown", |(owner, _)| owner)
-                    }
-                };
-                format!("mod {owner}: {error:?}")
-            })
-            .collect::<Vec<_>>()
+        registrar.refused.extend(
+            errors
+                .into_iter()
+                .map(|error| {
+                    let owner = match &error {
+                        horizon_client_core::gamerules::RuleRegistryError::UnknownCategory {
+                            rule,
+                            ..
+                        }
+                        | horizon_client_core::gamerules::RuleRegistryError::Duplicate(rule) => {
+                            rule.split_once(':').map_or("unknown", |(owner, _)| owner)
+                        }
+                    };
+                    format!("mod {owner}: {error:?}")
+                })
+                .collect::<Vec<_>>(),
+        );
+        registrar.refused.clone()
     })?;
+    if !registrar.refused.is_empty() {
+        return Err(registrar.refused);
+    }
     let game_rule_slots = registrar
         .game_rules
         .iter()
@@ -1939,10 +1942,11 @@ pub mod tests {
         assert_eq!(errors.len(), 2);
         assert!(errors[0].contains("first:active"));
         assert!(errors[1].contains("second:active"));
-        let errors = errors.join(" ");
-        assert!(errors.contains("first:active"));
-        assert!(errors.contains("missing:machines"));
-        assert!(errors.contains("first"));
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("missing:machines"))
+        );
         assert!(super::game_rule_registry().rule("first:active").is_none());
     }
 
@@ -1950,8 +1954,16 @@ pub mod tests {
     fn bool_rule_declarations_validate_slots_and_fail_atomically() {
         use super::Registrar;
         let mut refused = super::PartRegistrar::new("example");
+        refused
+            .game_rule_bool("active", "missing:machines", true)
+            .unwrap();
         let _ = refused.game_rule_bool("foreign:bad", "example:machines", true);
-        assert!(super::install_registrar(refused).is_err());
+        let errors = super::install_registrar(refused).unwrap_err().join(" ");
+        assert!(
+            errors.contains("ForeignNamespace")
+                && errors.contains("example:active")
+                && errors.contains("missing:machines")
+        );
         let mut good = super::PartRegistrar::new("example");
         let _key = good
             .game_rule_bool("active", "example:machines", true)
