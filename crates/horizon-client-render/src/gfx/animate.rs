@@ -626,7 +626,9 @@ mod tests {
         {
             return;
         }
-        let mut sprites = crate::sprites::Sprites::default();
+        let mut sprites = crate::sprites::Sprites::new(
+            crate::resource_source::ResourceSource::directory(root.clone()),
+        );
         for name in [
             "water_still",
             "water_flow",
@@ -639,9 +641,7 @@ mod tests {
             "kelp",
             "straw_bed",
         ] {
-            sprites
-                .insert(&root, &format!("minecraft:block/{name}"))
-                .unwrap();
+            sprites.insert(&format!("minecraft:block/{name}")).unwrap();
         }
         sprites.finish();
         assert_eq!(sprites.size, 64);
@@ -669,11 +669,11 @@ mod tests {
         {
             return;
         }
-        let mut sprites = crate::sprites::Sprites::default();
+        let mut sprites = crate::sprites::Sprites::new(
+            crate::resource_source::ResourceSource::directory(root.clone()),
+        );
         for name in ["kelp", "kelp_plant", "seagrass", "tall_seagrass_top"] {
-            sprites
-                .insert(&root, &format!("minecraft:block/{name}"))
-                .unwrap();
+            sprites.insert(&format!("minecraft:block/{name}")).unwrap();
         }
         sprites.finish();
         // A level drawn nowhere: no texel passes the cutout's alpha test.

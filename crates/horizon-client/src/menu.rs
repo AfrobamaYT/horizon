@@ -555,7 +555,7 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Dispatch a content mod menu's slot placement and maximum stack rules.
+/// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
 /// The slot is its backing container index. The shared application bounds the
 /// final maximum.
 #[inline(always)]
@@ -909,7 +909,10 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
-            registry_id: None,
+            registry_id: match kind {
+                Kind::Mod(kind) => Some(kind.id.into()),
+                _ => None,
+            },
             slots,
             containers,
             grid_size,
@@ -1782,14 +1785,6 @@ impl Menu {
         partial
     }
 
-    // Enable registered vanilla menus here when the guest engine uses the same rules.
-    fn dispatch_id(&self) -> Option<&str> {
-        match self.kind {
-            Kind::Mod(kind) => Some(kind.id),
-            _ => None,
-        }
-    }
-
     fn slot_rules(
         &self,
         env: &Env,
@@ -1798,7 +1793,7 @@ impl Menu {
         own: bool,
         max: u32,
     ) -> (bool, u32) {
-        let Some(id) = self.dispatch_id() else {
+        let Some(id) = self.registry_id() else {
             return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
@@ -2475,7 +2470,7 @@ impl Menu {
                 // never aims at its result.
                 let refuses = if self.slots[dest].role == Role::Hidden {
                     true
-                } else if let Some(id) = self.dispatch_id() {
+                } else if let Some(id) = self.registry_id() {
                     !apply_menu_slot_rules(
                         env.loop_context,
                         id,

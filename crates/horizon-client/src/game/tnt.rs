@@ -730,7 +730,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -792,7 +796,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -862,7 +870,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -1008,7 +1020,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -1114,7 +1130,11 @@ mod tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
         let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
@@ -1212,7 +1232,7 @@ mod tests {
         }
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
             None,
             &root,
             &settings,
@@ -1233,7 +1253,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

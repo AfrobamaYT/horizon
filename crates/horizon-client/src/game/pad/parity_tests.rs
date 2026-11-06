@@ -18,7 +18,7 @@ fn playing(test: impl FnOnce(&mut Game)) {
     let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
         None,
         &root,
         &settings,
@@ -38,7 +38,9 @@ fn playing(test: impl FnOnce(&mut Game)) {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.to_path_buf(),
+        )),
         None,
     )
     .unwrap();
