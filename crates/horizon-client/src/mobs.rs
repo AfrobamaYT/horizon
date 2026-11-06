@@ -2580,7 +2580,7 @@ pub struct Seen {
     pub potential_job: Option<[i32; 3]>,
     pub meeting: Option<[i32; 3]>,
     /// `variant2`: a villager's profession (index into
-    /// `render::PROFESSIONS`), a llama's strength or a horse's markings.
+    /// `villager::PROFESSIONS`), a llama's strength or a horse's markings.
     /// And a villager's experience.
     pub profession: u8,
     pub xp: i32,
@@ -2623,8 +2623,7 @@ impl Mob {
         }
         // Villager.getTypeName returns its registered profession's name.
         if self.species() == Species::Villager {
-            let professions = &render::PROFESSIONS;
-            let profession = professions[self.extra.variant2 as usize % professions.len()];
+            let profession = villager::profession(self.extra.variant2).id;
             return crate::text::Text::translate(
                 &format!("entity.minecraft.villager.{profession}"),
                 &[],

@@ -196,7 +196,10 @@ impl Game<'_> {
             }
             "trade" => {
                 let profession = arg(1)?.trim_start_matches("minecraft:").to_owned();
-                if !horizon_client::merchant::PROFESSIONS.contains(&profession.as_str()) {
+                if !horizon_client::mobs::villager::PROFESSIONS
+                    .iter()
+                    .any(|p| p.trade_set == Some(profession.as_str()))
+                {
                     return Err(format!("unknown profession {profession}").into());
                 }
                 let level: i32 = words.get(2).map_or(Ok(1), |l| l.parse())?;

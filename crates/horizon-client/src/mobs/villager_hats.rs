@@ -1,8 +1,5 @@
 //! VillagerProfessionLayer's cached texture metadata and type-layer head visibility.
-use super::{
-    anim::Poses,
-    render::{PROFESSIONS, VILLAGER_TYPES},
-};
+use super::{anim::Poses, render::VILLAGER_TYPES};
 use std::{collections::HashMap, fs, path::Path};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -20,26 +17,25 @@ impl VillagerHats {
     pub fn load(root: &Path) -> Self {
         let mut hats = HashMap::new();
         for folder in ["villager", "zombie_villager"] {
-            for (group, names) in [
-                ("type", VILLAGER_TYPES.as_slice()),
-                ("profession", PROFESSIONS.as_slice()),
-            ] {
-                for name in names {
-                    let texture = format!("entity/{folder}/{group}/{name}");
-                    let path = root.join(format!("assets/minecraft/textures/{texture}.png.mcmeta"));
-                    let metadata = fs::read(path)
-                        .ok()
-                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-                    let hat = match metadata
-                        .as_ref()
-                        .and_then(|v| v["villager"]["hat"].as_str())
-                    {
-                        Some("partial") => Hat::Partial,
-                        Some("full") => Hat::Full,
-                        _ => Hat::None,
-                    };
-                    hats.insert(texture, hat);
-                }
+            for (group, name) in VILLAGER_TYPES.iter().map(|name| ("type", *name)).chain(
+                super::villager::PROFESSIONS
+                    .iter()
+                    .map(|p| ("profession", p.id)),
+            ) {
+                let texture = format!("entity/{folder}/{group}/{name}");
+                let path = root.join(format!("assets/minecraft/textures/{texture}.png.mcmeta"));
+                let metadata = fs::read(path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+                let hat = match metadata
+                    .as_ref()
+                    .and_then(|v| v["villager"]["hat"].as_str())
+                {
+                    Some("partial") => Hat::Partial,
+                    Some("full") => Hat::Full,
+                    _ => Hat::None,
+                };
+                hats.insert(texture, hat);
             }
         }
         Self(hats)
