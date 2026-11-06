@@ -4,7 +4,7 @@ use horizon_protocol::{
     item::Component,
     registry::Builtin,
 };
-use horizon_world::{datafix::dynamic::as_number, nbt::Tag};
+use horizon_world::{datafix::dynamic::as_number, identifier::Identifier, nbt::Tag};
 
 const CONDITIONS: [&str; 3] = [
     "dismount_conditions",
@@ -84,18 +84,21 @@ pub(crate) fn encode(tag: &Tag, id: &dyn Fn(&str, &str) -> Option<i32>) -> Optio
         w.bool(sound.is_some());
         match sound {
             Some(Tag::String(name)) => {
-                w.varint(id("minecraft:sound_event", &name.to_string_lossy())? + 1)
+                let name = Identifier::parse(&name.to_string_lossy()).ok()?;
+                w.varint(id("minecraft:sound_event", &name.to_string())? + 1)
             }
             Some(sound) => {
                 let Tag::String(name) = sound.get("sound_id")? else {
                     return None;
                 };
+                let name = Identifier::parse(&name.to_string_lossy()).ok()?;
                 w.varint(0);
-                w.string(&name.to_string_lossy());
-                let range = sound.get("range");
+                w.string(&name.to_string());
+                // SoundEvent.DIRECT_CODEC uses lenientOptionalFieldOf for range.
+                let range = sound.get("range").and_then(as_number);
                 w.bool(range.is_some());
                 if let Some(range) = range {
-                    w.f32(as_number(range)?.float_value());
+                    w.f32(range.float_value());
                 }
             }
             None => {}
@@ -109,7 +112,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn negative_sound_holders_are_refused() {
+    fn negative_sound_holders_have_no_saved_projection() {
         for id in [-1, i32::MIN] {
             let mut w = Writer::new();
             // Default kinetic fields followed by a present sound holder.

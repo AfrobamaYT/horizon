@@ -779,9 +779,11 @@ mod tests {
     /// the inventory stream, including fields that do not affect the pose.
     #[test]
     fn kinetic_patches_survive_inventory_bytes() {
-        use horizon_protocol::{buf::Writer, item::Slot};
+        use horizon_protocol::{buf::Writer, item::Slot, registry::SyncedNames};
         let mut components = vec![String::new(); component::KINETIC_WEAPON as usize + 1];
         components[component::KINETIC_WEAPON as usize] = "minecraft:kinetic_weapon".into();
+        let mut sounds = vec![String::new(); 703];
+        sounds[702] = "minecraft:entity.generic.eat".into();
         let builtin = Builtin {
             registries: [
                 (
@@ -792,16 +794,48 @@ mod tests {
                     "minecraft:data_component_type".into(),
                     Ids::from_names(components),
                 ),
-                (
-                    "minecraft:sound_event".into(),
-                    Ids::from_names(vec!["minecraft:item.spear.use".into()]),
-                ),
+                ("minecraft:sound_event".into(), Ids::from_names(sounds)),
             ]
             .into(),
         };
-        for patch in [
-            "{}",
-            "{contact_cooldown_ticks:7,delay_ticks:40.0d,dismount_conditions:{max_duration_ticks:200.0f,min_speed:14.0f},knockback_conditions:{max_duration_ticks:400,min_relative_speed:5.0f},damage_conditions:{max_duration_ticks:600},forward_movement:0.5f,damage_multiplier:2.0f,sound:'minecraft:item.spear.use',hit_sound:{sound_id:'test:hit',range:12.0f}}",
+        // Payloads and component hashes from the real 26.3 KineticWeapon codec.
+        for (patch, payload, hash) in [
+            ("{}", "0a00000000000000003f8000000000", -982207288),
+            (
+                "{contact_cooldown_ticks:7,delay_ticks:40.0d,dismount_conditions:{max_duration_ticks:200.0f,min_speed:14.0f},knockback_conditions:{max_duration_ticks:400,min_relative_speed:5.0f},damage_conditions:{max_duration_ticks:600},forward_movement:0.5f,damage_multiplier:2.0f,sound:'minecraft:entity.generic.eat',hit_sound:{sound_id:'test:hit',range:12.0f}}",
+                "072801c80141600000000000000190030000000040a0000001d80400000000000000003f0000004000000001bf05010008746573743a6869740141400000",
+                -2132767252,
+            ),
+            (
+                "{delay_ticks:40,sound:'entity.generic.eat'}",
+                "0a28000000000000003f80000001bf0500",
+                211783960,
+            ),
+            (
+                "{delay_ticks:40,sound:{sound_id:'entity.generic.eat'}}",
+                "0a28000000000000003f80000001001c6d696e6563726166743a656e746974792e67656e657269632e6561740000",
+                -607516834,
+            ),
+            (
+                "{delay_ticks:40,sound:{sound_id:'minecraft:entity.generic.eat',range:'oops'}}",
+                "0a28000000000000003f80000001001c6d696e6563726166743a656e746974792e67656e657269632e6561740000",
+                -607516834,
+            ),
+            (
+                "{delay_ticks:40,hit_sound:'entity.generic.eat'}",
+                "0a28000000000000003f8000000001bf05",
+                -1337610829,
+            ),
+            (
+                "{delay_ticks:40,hit_sound:{sound_id:'entity.generic.eat'}}",
+                "0a28000000000000003f8000000001001c6d696e6563726166743a656e746974792e67656e657269632e65617400",
+                -1544992499,
+            ),
+            (
+                "{delay_ticks:40,hit_sound:{sound_id:'minecraft:entity.generic.eat',range:'oops'}}",
+                "0a28000000000000003f8000000001001c6d696e6563726166743a656e746974792e67656e657269632e65617400",
+                -1544992499,
+            ),
         ] {
             let component = horizon_world::nbt::parse_snbt(patch).unwrap().0;
             for removed in [false, true] {
@@ -835,20 +869,21 @@ mod tests {
                 } else {
                     let ticks = |key| horizon_world::datafix::dynamic::as_int(value.get(key), -1);
                     assert_eq!(ticks("delay_ticks"), if patch == "{}" { 0 } else { 40 });
-                    if patch == "{}" {
-                        // The empty KineticWeapon stream fixture from vanilla.
-                        assert_eq!(
-                            received.component(component::KINETIC_WEAPON),
-                            Some(&Component::Raw(vec![
-                                10, 0, 0, 0, 0, 0, 0, 0, 0, 63, 128, 0, 0, 0, 0
-                            ]))
-                        );
-                    }
-                    assert_eq!(
-                        ticks("contact_cooldown_ticks"),
-                        if patch == "{}" { 10 } else { 7 }
-                    );
-                    if patch != "{}" {
+                    let kinetic = received.component(component::KINETIC_WEAPON).unwrap();
+                    let Component::Raw(bytes) = kinetic else {
+                        panic!("kinetic stream payload")
+                    };
+                    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                    assert_eq!(hex, payload);
+                    let dynamic = Dynamic::default();
+                    let names = SyncedNames {
+                        builtin: &builtin,
+                        dynamic: &dynamic,
+                    };
+                    assert_eq!(kinetic.hash(component::KINETIC_WEAPON, &names), Some(hash));
+                    let full = patch.starts_with("{contact_cooldown_ticks");
+                    assert_eq!(ticks("contact_cooldown_ticks"), if full { 7 } else { 10 });
+                    if full {
                         assert_eq!(
                             value
                                 .get("dismount_conditions")
