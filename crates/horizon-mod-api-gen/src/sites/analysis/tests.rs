@@ -201,3 +201,16 @@ fn review_raw_identifier_must_reserve_plain_generated_name() {
     let sig = syn::parse_quote!(fn run(r#__recv: u32));
     assert_eq!(Scope::scan(&sig, None).fresh("__recv"), "__recv_1");
 }
+
+#[test]
+fn raw_receiver_and_argument_names_share_the_same_identifier_set() {
+    for (receiver, argument) in [
+        ("r#child", "child"),
+        ("child", "r#child"),
+        ("self.r#child", "self.child"),
+    ] {
+        let receiver = syn::parse_str(receiver).unwrap();
+        let argument = syn::parse_str(argument).unwrap();
+        assert!(arguments(&[&argument], Some(&receiver), true).is_err());
+    }
+}
