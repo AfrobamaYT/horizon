@@ -1122,6 +1122,7 @@ pub fn main() -> horizon_client::Result<()> {
                 ),
                 eye: [p[0], p[1] + f64::from(1.62_f32), p[2]],
                 alive: true,
+                invulnerable: false,
                 creative: s.creative,
                 sneaking: false,
                 swimming: false,
@@ -1171,6 +1172,7 @@ pub fn main() -> horizon_client::Result<()> {
             };
             ($snapshot:expr, $grid:expr) => {
                 MobWorld {
+                    goal_host: None,
                     teams: Default::default(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,
@@ -1182,6 +1184,8 @@ pub fn main() -> horizon_client::Result<()> {
                     suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
+                    // The probe lends no goal view: no identity to capture.
+                    player_identity: None,
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
@@ -1459,7 +1463,13 @@ pub fn main() -> horizon_client::Result<()> {
                     else {
                         continue;
                     };
-                    let tag = horizon_client::entity_nbt::mob_to_nbt(&mobs[i], [0; 4], None, None);
+                    let tag = horizon_client::entity_nbt::mob_to_nbt(
+                        &mobs[i],
+                        [0; 4],
+                        None,
+                        None,
+                        |_| None,
+                    );
                     let flower = horizon_client::mobs::bee::get(&mobs[i]).and_then(|b| b.flower);
                     let mut honey = Vec::new();
                     let stored = {

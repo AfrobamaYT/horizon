@@ -1006,7 +1006,7 @@ use horizon_core::{
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
-    fluid::{FluidKind, FluidState},
+    fluid::FluidKind,
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
@@ -1028,7 +1028,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, EffectKey};
+use mod_api::{BlockKey, DebugEntry, EffectKey};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -2201,7 +2201,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         state: BlockStateId,
         context: &PlacementContext,
-        fluid: FluidState,
+        fluid: mod_api::FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
         self.fire_state_for_placement(dimension, state, context, fluid, answer);
@@ -2638,6 +2638,8 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// Before an actual connection is discarded, not on a dimension change.
+    /// NeoForge's `ClientPlayerNetworkEvent.LoggingOut`, told here after
+    /// `native_client_level_unload` and only when a connection ends.
     pub(super) fn native_client_disconnecting(&self) {
         self.fire_client_disconnecting();
     }
@@ -2653,6 +2655,19 @@ impl Game<'_> {
     /// The normal menu blur request, before finite/range validation. None disables it.
     pub(super) fn native_menu_background(&self, radius: &mut Option<f32>) {
         self.fire_menu_background(radius);
+    }
+    /// `Screen.renderTransparentBackground`: draws the translucent dark background
+    /// behind an in-game screen (inventory, container, creative, book, sign, editor).
+    /// Set `canceled` (or return `Flow::Cancel`) to suppress the vanilla dark gradient,
+    /// allowing a mod to draw its own background or apply menu background blur
+    /// via `Host::apply_screen_blur`. API @API:screen_transparent_background@.
+    pub(super) fn native_screen_transparent_background(
+        &self,
+        screen: &str,
+        batch: &mut HudBatch,
+        canceled: &mut bool,
+    ) {
+        self.fire_screen_transparent_background(screen, batch, canceled);
     }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
@@ -3366,6 +3381,18 @@ impl Game<'_> {
     ) {
         self.fire_mouse_button_pre(button, pressed, modifiers, canceled);
     }
+    /// A physical key or mouse button bound to the gameplay mapping `mapping` (`key.jump`) changes
+    /// state while playing, before the game acts on it (`pressed` for a press, repeats included,
+    /// and not for a release). Set `canceled` on a press to drop it for every mapping bound to its
+    /// input; `canceled` on a release is ignored, so the game always lets go of what it held.
+    pub(super) fn native_key_mapping_pre(
+        &mut self,
+        mapping: &str,
+        pressed: bool,
+        canceled: &mut bool,
+    ) {
+        self.fire_key_mapping_pre(mapping, pressed, canceled);
+    }
     /// The physical or scaled GUI dimensions changed.
     pub(super) fn native_window_resize(
         &mut self,
@@ -3699,6 +3726,15 @@ impl Game<'_> {
         layers: &mut Vec<(String, LayerDefinition)>,
     ) {
         Self::fire_layer_definitions(context, layers);
+    }
+    /// The F3 debug entries a mod adds (NeoForge's `RegisterDebugEntriesEvent`):
+    /// push a `DebugEntry` per entry, its id `<mod id>:<path>` and the vanilla
+    /// group its lines join. Asked once at start, on the client.
+    pub(super) fn native_register_debug_entries(
+        context: &mod_api::RegistrationContext,
+        entries: &mut Vec<DebugEntry>,
+    ) {
+        Self::fire_register_debug_entries(context, entries);
     }
     /// Options > Mods lists the native mods: push yours.
     pub(super) fn native_mods(&mut self, mods: &mut Vec<NativeMod>) {
@@ -4767,6 +4803,12 @@ impl Game<'_> {
         lines: &mut Vec<String>,
     ) {
         self.fire_screen_tooltip(block, data, at, lines);
+    }
+    /// The lines of one enabled F3 debug entry a mod registered
+    /// (`native_register_debug_entries`), asked each frame the overlay draws
+    /// it: push them to `lines`. A disabled entry is never asked.
+    pub(super) fn native_debug_entry_lines(&self, id: &str, lines: &mut Vec<String>) {
+        self.fire_debug_entry_lines(id, lines);
     }
     /// A player pressed a mod container's button (`clickMenuButton`), on
     /// the server. The block entity is out of the world during the call;
@@ -7083,6 +7125,20 @@ impl Game<'_> {
         self.fire_entity_break_door(entity, kind, pos);
     }
 
+    /// A mob or a player is about to change the block at `pos`: a landing's
+    /// trampling (farmland to dirt, a turtle egg breaking), before its
+    /// neighbour updates and events. `player` is the player whose landing it
+    /// was, `entity` and `kind` the mob for a mob's landing (`None` and the
+    /// player's type here). `from` and `to` are the block names. Set `cancel`
+    /// and the block stays as it was and nothing the change would have caused
+    /// happens, as Bukkit's `EntityChangeBlockEvent` (@API:entity_change_block_pre@).
+    pub(super) fn native_entity_change_block_pre(
+        &mut self,
+        call: mod_api::__private::EntityChangeBlockPreCall<'_>,
+    ) {
+        self.fire_entity_change_block_pre(call);
+    }
+
     /// A mob changed a block at `pos`, after the new state was applied.
     pub(super) fn native_entity_change_block(
         &mut self,
@@ -7970,6 +8026,32 @@ impl Game<'_> {
     /// their channel and raw bytes; no other decoded fields cross the API.
     pub(super) fn native_client_packet(&mut self, packet: &ClientPacket) {
         self.fire_client_packet(packet);
+    }
+    /// Whether a mod cancelled `packet` on its way to the server (`client_packet_send`).
+    /// Builds the packet's view only when a mod listens.
+    pub(super) fn client_packet_send_canceled(
+        &self,
+        packet: &horizon_protocol::packets::play::Serverbound,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ClientPacketSend) {
+            return false;
+        }
+        let mut canceled = false;
+        self.native_client_packet_send(&serverbound_packet_view(packet), &mut canceled);
+        canceled
+    }
+    /// A play packet the window's game is about to send to the server
+    /// (`Connection.send`): every packet of the play phase it sends, the
+    /// selected slot that goes out before an attack or a use included, in the
+    /// order it sends them. Not heard: what the network thread sends itself
+    /// (keep-alives, pongs, cookies, the configuration phase), the answers the
+    /// connection sends in whichever phase it is in (a resource pack's status, a
+    /// dialog's custom click action), and far terrain requests. Cancel drops the
+    /// packet: the game goes on as if it had been sent. Client-side, on any
+    /// server, single player's own included. Every packet exposes its protocol
+    /// type id; custom payloads also expose their channel and raw bytes.
+    pub(super) fn native_client_packet_send(&self, packet: &ClientPacket, canceled: &mut bool) {
+        self.fire_client_packet_send(packet, canceled);
     }
     /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
     /// posted in `MinecraftServer.createLevels`): before any of its chunks
@@ -10348,6 +10430,55 @@ impl Game<'_> {
         batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, rgba(red, green, blue, a));
         true
     }
+    /// Requests vanilla's menu background blur for this frame, with a per-frame guard
+    /// so blur is applied at most once per frame. Returns true if blur was newly
+    /// requested this frame, or false if it was already applied/requested this frame.
+    /// API @API:screen_transparent_background@.
+    pub(super) fn native_apply_screen_blur(&self) -> bool {
+        if self.screen_blur_requested.get() {
+            return false;
+        }
+        self.screen_blur_requested.set(true);
+        true
+    }
+    /// The user's configured menu background blur radius (`menuBackgroundBlurriness` in options.txt,
+    /// usually 0.0 to 10.0; default 5.0). 0.0 means blur is turned off. API @API:screen_transparent_background@.
+    pub(super) fn native_menu_blur_radius(&self) -> f32 {
+        self.settings.menu_blur as f32
+    }
+    /// `Screen.renderMenuBackground`: draws the tiled menu background (32x32) across `rect`
+    /// (`[x, y, w, h]` in GUI pixels). If `in_world` is true, uses the dark translucent
+    /// texture (`gui/inworld_menu_background`); otherwise uses the opaque dirt-like
+    /// texture (`gui/menu_background`). API @API:screen_transparent_background@.
+    pub(super) fn native_draw_menu_background(
+        &self,
+        batch: &mut HudBatch,
+        rect: [f32; 4],
+        in_world: bool,
+    ) {
+        let [x, y, w, h] = rect;
+        horizon_client::ui::menu_background(batch, &self.gui.atlas, x, y, w, h, in_world);
+    }
+    /// Repeats sprite `sprite` across `rect` (`[x, y, w, h]` in GUI pixels) with each tile
+    /// sized `size` GUI pixels square, tinted by `argb`. False when the sprite is not in the HUD atlas.
+    /// API @API:screen_transparent_background@.
+    pub(super) fn native_tiled_sprite(
+        &self,
+        batch: &mut HudBatch,
+        sprite: &str,
+        rect: [f32; 4],
+        size: f32,
+        argb: u32,
+    ) -> bool {
+        let atlas = &self.gui.atlas;
+        if !atlas.sprites.contains_key(sprite) {
+            return false;
+        }
+        let [x, y, w, h] = rect;
+        let [a, r, g, b] = argb.to_be_bytes();
+        horizon_client::ui::tiled(batch, atlas, sprite, x, y, w, h, size, rgba(r, g, b, a));
+        true
+    }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
     /// `size` GUI pixels square (16 in a slot); false for an unknown item.
     pub(super) fn native_item(
@@ -12320,27 +12451,55 @@ fn client_packet_view(packet: &horizon_protocol::packets::play::Clientbound) -> 
     use mod_api::Identifier;
     use std::sync::LazyLock;
 
-    static TYPES: LazyLock<Vec<Identifier>> = LazyLock::new(|| {
-        horizon_protocol::ids::play::clientbound::NAMES
-            .iter()
-            .map(|name| Identifier::parse(name).expect("protocol packet type identifier"))
-            .collect()
-    });
-    static UNKNOWN: LazyLock<Identifier> =
-        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
-
-    let id = usize::try_from(packet.id())
-        .ok()
-        .and_then(|id| TYPES.get(id))
-        .unwrap_or(&UNKNOWN)
-        .clone();
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::clientbound::NAMES));
     let payload = match packet {
-        Clientbound::CustomPayload(payload) => Some(ClientPayload::new(
-            payload.channel.clone(),
-            payload.data.clone(),
-        )),
+        Clientbound::CustomPayload(payload) => Some(payload),
         _ => None,
     };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// `client_packet_send`'s view of a packet the game sends: as `client_packet_view`.
+fn serverbound_packet_view(packet: &horizon_protocol::packets::play::Serverbound) -> ClientPacket {
+    use horizon_protocol::packets::play::Serverbound;
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static TYPES: LazyLock<Vec<Identifier>> =
+        LazyLock::new(|| packet_types(horizon_protocol::ids::play::serverbound::NAMES));
+    let payload = match packet {
+        Serverbound::CustomPayload(payload) => Some(payload),
+        _ => None,
+    };
+    packet_view(&TYPES, packet.id(), payload)
+}
+
+/// One direction's packet type identifiers, by protocol id.
+fn packet_types(names: &[&str]) -> Vec<mod_api::Identifier> {
+    names
+        .iter()
+        .map(|name| mod_api::Identifier::parse(name).expect("protocol packet type identifier"))
+        .collect()
+}
+
+/// A packet's type, `horizon:unknown` outside the protocol's table, and its custom payload.
+fn packet_view(
+    types: &[mod_api::Identifier],
+    id: i32,
+    payload: Option<&horizon_protocol::packets::configuration::CustomPayload>,
+) -> ClientPacket {
+    use mod_api::Identifier;
+    use std::sync::LazyLock;
+
+    static UNKNOWN: LazyLock<Identifier> =
+        LazyLock::new(|| Identifier::parse("horizon:unknown").unwrap());
+    let id = usize::try_from(id)
+        .ok()
+        .and_then(|id| types.get(id))
+        .unwrap_or(&UNKNOWN)
+        .clone();
+    let payload = payload.map(|p| ClientPayload::new(p.channel.clone(), p.data.clone()));
     ClientPacket::new(id, payload)
 }
 
@@ -12372,6 +12531,33 @@ mod tests {
             assert_eq!(unknown.id.to_string(), "horizon:unknown");
             assert_eq!(unknown.custom_payload, None);
         }
+    }
+
+    #[test]
+    fn serverbound_packet_view_names_the_packets_the_game_sends() {
+        use horizon_protocol::packets::{
+            configuration::CustomPayload,
+            play::{Serverbound, SetCarriedItem},
+        };
+        let slot = super::serverbound_packet_view(&Serverbound::SetCarriedItem(SetCarriedItem {
+            slot: 3,
+        }));
+        assert_eq!(slot.id.to_string(), "minecraft:set_carried_item");
+        assert_eq!(slot.custom_payload, None);
+
+        let payload = super::serverbound_packet_view(&Serverbound::CustomPayload(CustomPayload {
+            channel: "example:message".into(),
+            data: vec![1, 2],
+        }));
+        assert_eq!(payload.id.to_string(), "minecraft:custom_payload");
+        let payload = payload.custom_payload.unwrap();
+        assert_eq!(
+            (payload.channel.as_str(), payload.data.as_slice()),
+            ("example:message", &[1, 2][..])
+        );
+
+        let unknown = super::serverbound_packet_view(&Serverbound::Unknown(-1, vec![9]));
+        assert_eq!(unknown.id.to_string(), "horizon:unknown");
     }
 
     #[test]
@@ -13648,8 +13834,8 @@ mod tests {
 mod screen_open_tests {
     use super::*;
     use mod_api::{
-        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, ModEntry, ScreenClosingEvent,
-        ScreenOpeningEvent, testing::with_mods,
+        ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, KeyMappingPreEvent, ModEntry,
+        ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
     };
     use std::sync::{Arc, Mutex};
 
@@ -13735,6 +13921,116 @@ mod screen_open_tests {
             });
         });
         assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
+    }
+
+    struct MappingProbe(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for MappingProbe {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{}:{}", event.mapping, event.pressed));
+            Flow::Cancel
+        }
+    }
+
+    /// Cancels the second press it hears and no other: an allowed down, then a cancelled repeat.
+    struct CancelSecondPress(Arc<Mutex<usize>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for CancelSecondPress {
+        fn key_mapping_pre(
+            &self,
+            _host: &mut dyn ClientHost,
+            event: &mut KeyMappingPreEvent,
+        ) -> Flow {
+            let mut heard = self.0.lock().unwrap();
+            if event.pressed {
+                *heard += 1;
+                if *heard == 2 {
+                    return Flow::Cancel;
+                }
+            }
+            Flow::Continue
+        }
+    }
+
+    /// A cancelled repeat keeps the hold an accepted press made, while a cancelled first press
+    /// is never held, nor are its repeats.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_repeat_keeps_the_hold_and_a_cancelled_first_press_is_never_held() {
+        use winit::keyboard::KeyCode;
+        let heard = Arc::new(Mutex::new(0));
+        let mods = vec![ModEntry::new(
+            "second",
+            Box::new(CancelSecondPress(heard.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // The first down is allowed and held; its repeat is cancelled but the hold stays.
+                game.physical_keys.insert(space);
+                assert!(!game.key_press_canceled(space, true, false));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(game.physical_keys.contains(&space));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(Arc::new(Mutex::new(Vec::new())))),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                let space = KeyCode::Space;
+                // A cancelled first press is not held, and neither is its repeat.
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, false));
+                assert!(!game.physical_keys.contains(&space));
+                game.physical_keys.insert(space);
+                assert!(game.key_press_canceled(space, true, true));
+                assert!(!game.physical_keys.contains(&space));
+                // Its release clears the rejection.
+                assert!(!game.key_press_canceled(space, false, false));
+                assert!(!game.rejected_keys.contains(&space));
+            });
+        });
+    }
+
+    /// A cancelled press of a mapping is dropped while playing, and only then asked; the
+    /// release of the same key is asked too but never canceled, so nothing stays held.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_cancelled_mapping_press_is_dropped_and_its_release_is_not() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mods = vec![ModEntry::new(
+            "mapping",
+            Box::new(MappingProbe(log.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.title = None;
+                game.screen = Screen::Playing;
+                assert!(game.key_mapping_canceled(Some("key.keyboard.space"), true));
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), false));
+                game.screen = Screen::Inventory;
+                assert!(!game.key_mapping_canceled(Some("key.keyboard.space"), true));
+            });
+        });
+        assert_eq!(take(&log), ["key.jump:true", "key.jump:false"]);
     }
 
     struct Probe {
@@ -15271,6 +15567,71 @@ mod customize_chat_overlay_tests {
                 assert!(seen[1].2, "focused");
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod client_packet_send_tests {
+    use horizon_protocol::packets::{
+        configuration::CustomPayload,
+        play::{Serverbound, SetCarriedItem},
+    };
+    use mod_api::{ClientHost, ClientPacketSendEvent, Flow, Hooks, ModEntry, testing::with_mods};
+    use std::sync::{Arc, Mutex};
+
+    /// Drops payloads on `example:secret`, logging every packet it hears.
+    struct Filter(Arc<Mutex<Vec<String>>>);
+    #[mod_api::__subscriptions]
+    impl Hooks for Filter {
+        fn client_packet_send(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut ClientPacketSendEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.packet.id.to_string());
+            match &event.packet.custom_payload {
+                Some(payload) if payload.channel == "example:secret" => Flow::Cancel,
+                _ => Flow::Continue,
+            }
+        }
+    }
+
+    fn payload(channel: &str) -> Serverbound {
+        Serverbound::CustomPayload(CustomPayload {
+            channel: channel.into(),
+            data: vec![7],
+        })
+    }
+
+    /// `Connection.send`: the mod hears each packet the game sends and cancels the one it
+    /// filters; without a listener nothing is cancelled.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_client_mod_hears_and_cancels_packets_the_game_sends() {
+        let slot = Serverbound::SetCarriedItem(SetCarriedItem { slot: 2 });
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.execution_role = super::ExecutionRole::Client;
+            assert!(!game.client_packet_send_canceled(&payload("example:secret")));
+        });
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods =
+            vec![ModEntry::new("filter", Box::new(Filter(Arc::clone(&seen))))].into();
+        with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.execution_role = super::ExecutionRole::Client;
+                assert!(!game.client_packet_send_canceled(&slot));
+                assert!(game.client_packet_send_canceled(&payload("example:secret")));
+                assert!(!game.client_packet_send_canceled(&payload("example:open")));
+            });
+        });
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                "minecraft:set_carried_item",
+                "minecraft:custom_payload",
+                "minecraft:custom_payload"
+            ]
+        );
     }
 }
 

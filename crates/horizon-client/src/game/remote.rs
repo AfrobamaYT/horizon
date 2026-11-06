@@ -661,6 +661,8 @@ pub(super) struct Remote {
     own_profile: OwnProfile,
     /// The skin texture each profile's players show, once its download is ready.
     skins: HashMap<u128, String>,
+    skins_revision: u64,
+    published_skins: Option<(usize, u128, u64, u64)>,
     listed: std::collections::HashSet<u128>,
     /// `ClientboundLoginPacket.onlineMode`: the player list shows heads.
     pub(super) online_mode: bool,
@@ -1163,6 +1165,8 @@ impl Game<'_> {
             skin_textures: HashMap::new(),
             own_profile: OwnProfile::Idle,
             skins: HashMap::new(),
+            skins_revision: 0,
+            published_skins: None,
             listed: Default::default(),
             online_mode: false,
             level_players: HashMap::new(),
@@ -1273,7 +1277,7 @@ impl Game<'_> {
             r.session.disconnect();
         }
         super::lan::forget_sync_data();
-        self.gui.atlas.object_skins.clear();
+        self.gui.atlas.clear_object_skins();
         self.server_packs_disconnect();
         self.code_of_conduct = None;
         self.reset_tutorial();
@@ -1358,7 +1362,7 @@ impl Game<'_> {
     }
 
     pub(super) fn send(&self, packet: S) {
-        if let Some(r) = &self.remote {
+        if self.remote.is_some() {
             // MultiPlayerGameMode's attack, interact, useItem, useItemOn, releaseUsingItem, dropItem and
             // piercingAttack run ensureHasSentCarriedItem before their packet: a slot the number keys
             // chose this tick goes out first. A miss, a dig's start or a swap waits for the next tick.
@@ -1369,6 +1373,15 @@ impl Game<'_> {
             {
                 self.remote_send_carried();
             }
+            self.send_play(packet);
+        }
+    }
+    /// `Connection.send` for the game's play packets: a mod may cancel one
+    /// (`client_packet_send`), and the server never hears of it.
+    fn send_play(&self, packet: S) {
+        if let Some(r) = &self.remote
+            && !self.client_packet_send_canceled(&packet)
+        {
             r.session.send(packet);
         }
     }
@@ -2048,9 +2061,12 @@ impl Game<'_> {
                     self.send_chat_acknowledgement();
                     self.close_dialogs();
                     // The server configuring us now (a proxy's next one)
-                    // offers its own far terrain, or none.
+                    // offers its own far terrain, or none, and announces its
+                    // own features again (a Horizon server's quiet commands).
                     if let Some(remote) = &mut self.remote {
                         remote.far_terrain = None;
+                        remote.quiet_commands = false;
+                        remote.mod_net = false;
                     }
                     self.clear_lod();
                     if let Some(remote) = &self.remote {
@@ -2299,6 +2315,9 @@ impl Game<'_> {
             self.forget_all_remote_columns();
         }
         let r = self.remote.as_mut().unwrap();
+        // A Horizon server's bulk edit sends whole columns with the light
+        // from before its relight; any other server's packet light is final.
+        let relight_resent = r.quiet_commands;
         let dimension = r.registries.dimension(spawn.dimension_type);
         // The server's dimension type gives the level's shape, and its
         // chunks the shape's column.
@@ -2404,6 +2423,7 @@ impl Game<'_> {
                 self.native_client_level_unload(&old);
             }
         }
+        self.streaming.relight_resent = relight_resent;
         let has_sky = self
             .remote
             .as_ref()
@@ -2793,7 +2813,9 @@ impl Game<'_> {
             });
         }
         if let Some(t) = mob_type {
-            let mut mob = Mob::new(id as u32, t, at, head);
+            // The window's copy of the server's mob: no mod part goals —
+            // their `register_goals` ran on the authoritative side (#1077).
+            let mut mob = Mob::new_remote(id as u32, t, at, head);
             super::remote_mob_data::client_defaults(&mut mob);
             (mob.yaw, mob.previous_yaw) = (yaw, yaw);
             (mob.head_pitch, mob.previous_head_pitch) = (pitch, pitch);
@@ -5362,10 +5384,50 @@ impl Game<'_> {
     /// The player list's view of the connection: the listed players (with
     /// their downloaded skins once ready), online mode, and which players
     /// are in the level with an upside-down name.
+    pub(super) fn publish_tab_object_skins(&mut self) {
+        let Some(r) = self.remote.as_mut() else {
+            return;
+        };
+        let fingerprint = (
+            r.listed.len(),
+            r.listed.iter().fold(0, |xor, uuid| xor ^ uuid),
+            r.skins_revision,
+            self.gui.atlas.object_skins_revision,
+        );
+        if r.published_skins == Some(fingerprint) {
+            return;
+        }
+        for uuid in &r.listed {
+            let Some(p) = r.tab_players.get(uuid) else {
+                continue;
+            };
+            let skin = r.skins.get(uuid).map_or_else(
+                || horizon_client::tab_list::default_skin(*uuid),
+                String::as_str,
+            );
+            for key in [
+                format!("id:{uuid:032x}"),
+                format!("name:{}", p.name.to_ascii_lowercase()),
+            ] {
+                if object_skin_changed(&self.gui.atlas.object_skins, &key, skin) {
+                    self.gui.atlas.set_object_skin(key, skin.to_owned());
+                }
+            }
+        }
+        // Publication itself mutates the atlas; cache its final revision.
+        r.published_skins = Some((
+            fingerprint.0,
+            fingerprint.1,
+            fingerprint.2,
+            self.gui.atlas.object_skins_revision,
+        ));
+    }
+
     pub(super) fn remote_tab_players(
         &mut self,
     ) -> Option<(Vec<horizon_client::tab_list::TabPlayer>, bool, Vec<u128>)> {
         self.update_remote_skins();
+        self.publish_tab_object_skins();
         let mut players: Vec<_> = {
             let r = self.remote.as_ref()?;
             r.listed
@@ -5379,13 +5441,6 @@ impl Game<'_> {
                 .as_ref()
                 .and_then(|r| r.skins.get(&p.uuid).cloned())
                 .unwrap_or_else(|| horizon_client::tab_list::default_skin(p.uuid).to_owned());
-            self.gui
-                .atlas
-                .set_object_skin(format!("id:{:032x}", p.uuid), p.skin.clone());
-            self.gui.atlas.set_object_skin(
-                format!("name:{}", p.name.to_ascii_lowercase()),
-                p.skin.clone(),
-            );
         }
         let r = self.remote.as_ref()?;
         let upside_down = players
@@ -5595,14 +5650,13 @@ impl Game<'_> {
                 (skin.to_owned(), skin.contains("/slim/"))
             }
         };
-        let Some((level, skins, own)) = self.remote.as_mut().map(|r| {
-            r.skins = resolved.into_iter().collect();
+        let skins: HashMap<_, _> = resolved.into_iter().collect();
+        let Some((level, own)) = self.remote.as_ref().map(|r| {
             (
                 r.level_players
                     .iter()
                     .map(|(id, uuid)| (*id as u32, *uuid))
                     .collect::<Vec<_>>(),
-                r.skins.clone(),
                 r.profile,
             )
         }) else {
@@ -5610,12 +5664,16 @@ impl Game<'_> {
         };
         // Only the skins drawn hold atlas slots: the level's players, not
         // every entry of a busy server's player list.
+        // Build once: resolving each player must not scan every level entity.
+        let players: HashMap<_, _> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| &*m.kind.id == "minecraft:player")
+            .map(|(i, m)| (m.id, i))
+            .collect();
         for (id, uuid) in level {
-            let Some(i) = self
-                .mobs
-                .iter()
-                .position(|m| m.id == id && &*m.kind.id == "minecraft:player")
-            else {
+            let Some(&i) = players.get(&id) else {
                 continue;
             };
             let (skin, is_slim) = self.drawn_skin(uuid, skin_of(&skins, uuid));
@@ -5647,14 +5705,21 @@ impl Game<'_> {
                 mob.cape = cape;
             }
         }
+        if let Some(r) = self.remote.as_mut()
+            && r.skins != skins
+        {
+            r.skins_revision = r.skins_revision.wrapping_add(1);
+            r.skins = skins;
+        }
         // ClientMannequin.updateSkin (PlayerSkinRenderCache.lookup): a
         // mannequin's DATA_PROFILE `textures` property resolves like a
         // player's, never required to be signed.
-        let mannequins: Vec<(u32, horizon_client::skins::Textures)> = self
+        let mannequins: Vec<(usize, horizon_client::skins::Textures)> = self
             .mobs
             .iter()
-            .filter(|m| &*m.kind.id == "minecraft:mannequin" && m.profile.is_some())
-            .map(|m| {
+            .enumerate()
+            .filter(|(_, m)| &*m.kind.id == "minecraft:mannequin" && m.profile.is_some())
+            .map(|(i, m)| {
                 let profile = m.profile.as_ref();
                 let t = profile.and_then(|p| p.properties.iter().find(|p| p.name == "textures"));
                 let textures = if let Some(t) = t {
@@ -5692,10 +5757,10 @@ impl Game<'_> {
                     })
                     .unwrap_or_default()
                 };
-                (m.id, textures)
+                (i, textures)
             })
             .collect();
-        let mut resolved: Vec<(u32, Option<String>, bool)> = Vec::new();
+        let mut resolved: Vec<(usize, Option<String>, bool)> = Vec::new();
         for (id, textures) in mannequins {
             let skin = {
                 let mut downloads = self.skin_downloads.borrow_mut();
@@ -5706,16 +5771,12 @@ impl Game<'_> {
             let slim = skin.is_some() && textures.slim;
             resolved.push((id, skin, slim));
         }
-        for (id, skin, slim) in resolved {
+        for (i, skin, slim) in resolved {
             let skin = skin.filter(|s| !s.starts_with("skins/") || self.again_skin(s));
-            if let Some(mob) = self
-                .mobs
-                .iter_mut()
-                .find(|m| m.id == id && &*m.kind.id == "minecraft:mannequin")
-            {
-                mob.slim = slim && skin.is_some();
-                mob.skin = skin;
-            }
+            // Resolution and atlas uploads do not insert or remove mobs.
+            let mob = &mut self.mobs[i];
+            mob.slim = slim && skin.is_some();
+            mob.skin = skin;
         }
     }
     /// Puts a downloaded skin in an atlas skin slot (`SkinSlots::place`),
@@ -9297,7 +9358,7 @@ impl Game<'_> {
             && r.carried.get() != Some(self.selected)
         {
             r.carried.set(Some(self.selected));
-            r.session.send(S::SetCarriedItem(play::SetCarriedItem {
+            self.send_play(S::SetCarriedItem(play::SetCarriedItem {
                 slot: self.selected as i16,
             }));
         }
@@ -11391,6 +11452,10 @@ impl Remote {
             .or_else(|| self.players.get(uuid))
             .map(String::as_str)
     }
+    /// Listed UUIDs always have a tab entry; removal clears both together.
+    pub(super) fn listed_player_count(&self) -> usize {
+        self.listed.len()
+    }
     /// The local player's profile UUID.
     pub(super) fn profile(&self) -> u128 {
         self.profile
@@ -11406,6 +11471,10 @@ impl Remote {
     pub(super) fn tracked(&self, id: i32) -> Option<(&str, [f64; 3])> {
         self.entities.get(&id).map(|t| (&*t.kind, t.position))
     }
+}
+
+fn object_skin_changed(published: &HashMap<String, String>, key: &str, skin: &str) -> bool {
+    published.get(key).is_none_or(|previous| previous != skin)
 }
 
 /// The textures to resolve skins from: every list entry's, and for a player
@@ -13540,6 +13609,49 @@ mod tests {
         kept.remove(&2);
         listed.clear();
         assert_eq!(super::skin_entries(&players, &listed, &mut kept).len(), 1);
+    }
+
+    #[test]
+    fn tab_publication_fingerprint_tracks_all_inputs() {
+        let fingerprint = |ids: &[u128], skins, atlas| {
+            (
+                ids.len(),
+                ids.iter().fold(0, |xor, uuid| xor ^ uuid),
+                skins,
+                atlas,
+            )
+        };
+        let published = fingerprint(&[7, 8], 1, 2);
+        assert_eq!(published, fingerprint(&[8, 7], 1, 2));
+        assert_ne!(published, fingerprint(&[7, 9], 1, 2));
+        assert_ne!(published, fingerprint(&[7, 8], 2, 2));
+        assert_ne!(published, fingerprint(&[7, 8], 1, 3));
+    }
+
+    #[test]
+    fn tab_object_skin_publication_tracks_changes_and_atlas_clear() {
+        let mut published = std::collections::HashMap::new();
+        let mut writes = 0;
+        for skin in ["skins/first", "skins/first", "skins/second"] {
+            for key in ["id:7", "name:player"] {
+                if super::object_skin_changed(&published, key, skin) {
+                    published.insert(key.to_owned(), skin.to_owned());
+                    writes += 1;
+                }
+            }
+        }
+        assert_eq!(writes, 4, "unchanged skins do not publish either entry");
+        published.clear();
+        assert!(super::object_skin_changed(
+            &published,
+            "id:7",
+            "skins/second"
+        ));
+        assert!(super::object_skin_changed(
+            &published,
+            "name:player",
+            "skins/second"
+        ));
     }
 
     /// An NPC plugin's scale: a base the plugin sets, or a modifier on 1.
