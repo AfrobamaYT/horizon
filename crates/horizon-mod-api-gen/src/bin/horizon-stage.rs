@@ -62,6 +62,9 @@ fn stage_table(
         "internals table: {} types, {} thunks from {} declared paths ({} skipped)",
         counts.types, counts.thunks, counts.declared, counts.skipped
     );
+    for (path, name) in &counts.renamed_methods {
+        println!("internals table: {path} is exposed as {name}");
+    }
     for (path, reason) in &counts.refused {
         println!("internals table: skipped {path}: {reason}");
     }

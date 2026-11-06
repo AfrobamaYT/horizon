@@ -31,6 +31,8 @@ pub struct Counts {
     /// Entries without a field/codec/thunk binding, keyed by path, kind and hash. Unlike
     /// `refused`, this retains the reason when another kind at the same path is accepted.
     pub unbound: BTreeMap<(String, &'static str, String), &'static str>,
+    /// Native methods exposed under a collision-free guest name.
+    pub renamed_methods: BTreeMap<String, String>,
     /// Functions with a part that can't cross, or a form a thunk can't make (a generic, a `self`
     /// taken by value, a returned value that is no copy).
     pub skipped: usize,
@@ -551,28 +553,37 @@ impl<'r> Gen<'r> {
     /// references and wrappers: a node may be written only if `w` and every layer allows it, and
     /// a node that may not is never reached through a `&mut`.
     fn step(&mut self, shape: &Shape, q: TokenStream, w: TokenStream) -> TokenStream {
-        let through = |this: &mut Self, ty: TokenStream, to: &Shape, mutable: bool, owned: bool| {
-            let next = if owned || mutable {
-                quote!(if w { &raw mut **(q as *mut #ty) as *mut () } else { &raw const **(q as *const #ty) as *mut () })
-            } else {
-                quote!(&raw const **(q as *const #ty) as *mut ())
-            };
-            let w_next = if owned || mutable {
-                quote!(w)
-            } else {
-                quote!(false)
-            };
-            let rest = this.step(to, quote!(q), w_next);
-            quote!({ let (q, w): (*mut (), bool) = (#q, #w); let q = #next; #rest })
-        };
         match shape {
             Shape::Ref { mutable, to } => {
                 let ty = spell(shape).expect("crossable");
-                through(self, ty, to, *mutable, false)
+                let next = if *mutable {
+                    quote!(if w { &raw mut **(q as *mut #ty) as *mut () } else { &raw const **(q as *const #ty) as *mut () })
+                } else {
+                    quote!(&raw const **(q as *const #ty) as *mut ())
+                };
+                let w_next = if *mutable { quote!(w) } else { quote!(false) };
+                let rest = self.step(to, quote!(q), w_next);
+                quote!({ let (q, w): (*mut (), bool) = (#q, #w); let q = #next; #rest })
             }
             Shape::Wrapped(wrapper, to) => {
-                let ty = spell(shape).expect("crossable");
-                through(self, ty, to, false, *wrapper == Wrapper::Box)
+                let ty = spell(shape).expect("crossable wrapper");
+                let project = match wrapper {
+                    Wrapper::Box => {
+                        quote!(if w { ::std::boxed::Box::as_mut_ptr(&mut *(q as *mut #ty)) as *mut () } else { ::std::boxed::Box::as_ptr(&*(q as *const #ty)) as *mut () })
+                    }
+                    Wrapper::Arc => {
+                        quote!(::std::sync::Arc::as_ptr(&*(q as *const #ty)) as *mut ())
+                    }
+                    Wrapper::Rc => quote!(::std::rc::Rc::as_ptr(&*(q as *const #ty)) as *mut ()),
+                    Wrapper::Cow => quote!((&*(q as *const #ty)).as_ref() as *const _ as *mut ()),
+                };
+                let w_next = if *wrapper == Wrapper::Box {
+                    quote!(w)
+                } else {
+                    quote!(false)
+                };
+                let rest = self.step(to, quote!(q), w_next);
+                quote!({ let (q, w): (*mut (), bool) = (#q, #w); let q = #project; #rest })
             }
             _ => {
                 let id = self.node(shape);
@@ -1519,6 +1530,14 @@ pub(crate) fn select<'a>(
         };
         if probe.thunk(internal).is_some() {
             selection = probe.selection;
+            if let Some((_, Some(owner))) = function_scope(rule, internal) {
+                let path = bare(&internal.path);
+                let func = path.rsplit("::").next().unwrap();
+                let guest = crate::internals_view::method_name(rule, &owner, func);
+                if guest != func {
+                    counts.renamed_methods.insert(internal.path.clone(), guest);
+                }
+            }
             accepted.push(internal);
             exposed.insert(internal.path.clone());
         } else {
@@ -1728,7 +1747,7 @@ pub(crate) mod tests {
             internal(
                 "horizon_client::Bag",
                 "struct",
-                "struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice }",
+                "struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice, boxed: Box<[Pair; 17]>, shared: std::sync::Arc<Vec<Pair>> }",
             ),
             internal(
                 "horizon_client::heal",
@@ -1739,14 +1758,14 @@ pub(crate) mod tests {
         let (code, _) = all_table(&entries);
         run_fixture(
             &code,
-            "#[derive(Clone, Copy)] struct Pair { value: u32 } enum Choice { Values(Vec<Pair>) } struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice } fn heal(a: &mut Pair, b: &mut Pair) { a.value = 20; b.value = 21; }",
+            "#[derive(Clone, Copy)] struct Pair { value: u32 } enum Choice { Values(Vec<Pair>) } struct Bag { array: [Pair; 17], items: Vec<Pair>, choice: Choice, boxed: Box<[Pair; 17]>, shared: std::sync::Arc<Vec<Pair>> } fn heal(a: &mut Pair, b: &mut Pair) { a.value = 20; b.value = 21; }",
             r#"
-            let mut bag = Bag { array: [Pair { value: 1 }; 17], items: vec![Pair { value: 2 }, Pair { value: 3 }], choice: Choice::Values(vec![Pair { value: 4 }]) };
+            let mut bag = Bag { array: [Pair { value: 1 }; 17], items: vec![Pair { value: 2 }, Pair { value: 3 }], choice: Choice::Values(vec![Pair { value: 4 }]), boxed: Box::new([Pair { value: 5 }; 17]), shared: std::sync::Arc::new(vec![Pair { value: 6 }]) };
             let table = &__internals::TABLE;
             let bag_ty = table.types.iter().find(|t| t.path.ends_with("Bag")).unwrap();
-            assert_eq!(bag_ty.raw_fields, &[0, 1, 2]);
+            assert_eq!(bag_ty.raw_fields, &[0, 1, 2, 3]);
             unsafe {
-                for field in [0, 1] {
+                for field in [0, 1, 3] {
                     let Reply::Node(p, ty, _) = (bag_ty.node)((&raw mut bag).cast(), true, Op::Field(field)).unwrap() else { panic!("collection") };
                     let collection = &table.types[ty as usize];
                     assert!(collection.raw_index);
@@ -1764,6 +1783,8 @@ pub(crate) mod tests {
                 }
                 let Reply::Node(p, ty, _) = (bag_ty.node)((&raw mut bag).cast(), true, Op::Field(2)).unwrap() else { panic!("enum") };
                 assert!(table.types[ty as usize].raw_fields.is_empty());
+                let Reply::Node(_, _, writable) = (bag_ty.node)((&raw mut bag).cast(), true, Op::Field(4)).unwrap() else { panic!("arc") };
+                assert!(!writable);
                 (table.types[ty as usize].node)(p, true, Op::Field(0)).unwrap();
             }
             assert_eq!((bag.array[0].value, bag.items[1].value), (20, 21));

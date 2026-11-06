@@ -158,7 +158,11 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
         raw.len()
     );
     internals_view::generate(entries, &declared, &raw, &game_points).unwrap();
-    fs::write(stage.join("crates/horizon-client/src/__internals.rs"), host).unwrap();
+    fs::write(
+        stage.join("crates/horizon-client/src/__internals.rs"),
+        crate::rustfmt(&host).unwrap(),
+    )
+    .unwrap();
     let lib = stage.join("crates/horizon-client/src/lib.rs");
     fs::write(
         &lib,
@@ -185,10 +189,16 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
     let manifest_path = build.join("coverage.toml");
     fs::write(&manifest_path, manifest).unwrap();
     let report = format!(
-        "## Internals binding coverage\n\n{} entries, {} host types, {} thunks.\n\n### Explicit exclusions\n\n{}\n",
+        "## Internals binding coverage\n\n{} entries, {} host types, {} thunks.\n\n### Renamed methods\n\n{}\n\n### Explicit exclusions\n\n{}\n",
         declared.len(),
         bound.types,
         bound.thunks,
+        bound
+            .renamed_methods
+            .iter()
+            .map(|(p, n)| format!("- `{p}`: `{n}`"))
+            .collect::<Vec<_>>()
+            .join("\n"),
         skipped
             .iter()
             .map(|(p, r)| format!("- `{p}`: {r}"))
@@ -217,6 +227,7 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
             .stderr(std::process::Stdio::inherit())
             .args([
                 "check",
+                "--message-format=short",
                 "-j4",
                 "-p",
                 "horizon-client",
@@ -234,6 +245,7 @@ fn real_catalog_has_compiling_host_and_guest_bindings() {
         .env("HORIZON_MOD_INTERNALS_CATALOG", &catalog)
         .args([
             "check",
+            "--message-format=short",
             "-j4",
             "-p",
             "horizon-mod-internals",

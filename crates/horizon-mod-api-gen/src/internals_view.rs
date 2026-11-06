@@ -59,6 +59,48 @@ fn short_alias_available(name: &str) -> bool {
     .contains(&name)
 }
 
+fn field_name(field: &crate::crossing::Field<'_>) -> String {
+    match field.case {
+        Some((_, case)) => format!(
+            "{}_{}",
+            heck::AsSnakeCase(case.to_string()),
+            field.member.to_token_stream()
+        ),
+        None => field.member.to_token_stream().to_string(),
+    }
+}
+
+fn accessor_name(field: &str) -> String {
+    if field.chars().all(|c| c.is_ascii_digit()) {
+        format!("field_{field}")
+    } else {
+        field.into()
+    }
+}
+
+/// Names depend on the complete catalog layout, never on a mod's selected fields.
+pub(crate) fn method_name(rule: &Rule, owner: &str, func: &str) -> String {
+    let named = rule.named(owner).unwrap();
+    let enum_case = func == "case" && matches!(named.item, syn::Item::Enum(_));
+    let field_accessor = rule.fields(owner).iter().any(|field| {
+        let shape = rule.shape(&named.module, Some(owner), field.ty);
+        let crossing = rule.crossing_of(&shape);
+        if crossing == Crossing::Opaque {
+            return false;
+        }
+        let get = accessor_name(&field_name(field));
+        let get = get.trim_start_matches("r#");
+        let getter = func.trim_start_matches("r#") == get;
+        let setter = matches!(crossing, Crossing::Copy(_)) && func == format!("set_{get}");
+        getter || setter
+    });
+    if enum_case || field_accessor {
+        format!("call_{}", func.trim_start_matches("r#"))
+    } else {
+        func.into()
+    }
+}
+
 /// Owned guest spelling: native borrows and shared pointers are copies, not guest borrows.
 pub(crate) fn spell(shape: &Shape, rule: &Rule) -> TokenStream {
     match shape {
@@ -409,14 +451,7 @@ pub fn generate(
                     continue;
                 }
                 copy_shapes(&shape, &rule, &mut copies);
-                let field = match f.case {
-                    Some((_, case)) => format!(
-                        "{}_{}",
-                        heck::AsSnakeCase(case.to_string()),
-                        f.member.to_token_stream()
-                    ),
-                    None => f.member.to_token_stream().to_string(),
-                };
+                let field = field_name(&f);
                 methods.push(accessor(&field, index as u32, &shape, &rule));
             }
             if matches!(named.item, syn::Item::Enum(_)) {
@@ -542,20 +577,7 @@ pub fn generate(
                 )
             };
             let func = if let Some(this) = this {
-                let collision = rule.fields(this).iter().enumerate().any(|(n, f)| {
-                    f.member.to_token_stream().to_string() == func
-                        && (selected.selection.full.contains(this)
-                            || selected
-                                .selection
-                                .owners
-                                .get(this)
-                                .is_some_and(|fs| fs.contains(&n)))
-                });
-                if collision {
-                    format_ident!("call_{func}")
-                } else {
-                    format_ident!("{func}")
-                }
+                format_ident!("{}", method_name(&rule, this, func))
             } else {
                 let id = name(&path);
                 free_aliases
@@ -659,6 +681,9 @@ pub fn generate(
         );
         let mut methods = Vec::new();
         for (n, (field, s)) in fs.iter().enumerate() {
+            if rule.crossing_of(s) == Crossing::Opaque {
+                continue;
+            }
             copy_shapes(s, &rule, &mut copies);
             methods.push(accessor(field, n as u32, s, &rule));
         }
@@ -761,14 +786,7 @@ fn handle(ty: &syn::Ident, methods: Vec<TokenStream>) -> TokenStream {
     }
 }
 fn accessor(field: &str, index: u32, shape: &Shape, rule: &Rule) -> TokenStream {
-    let get = format_ident!(
-        "{}",
-        if field.chars().all(|c| c.is_ascii_digit()) {
-            format!("field_{field}")
-        } else {
-            field.into()
-        }
-    );
+    let get = format_ident!("{}", accessor_name(field));
     let set = format_ident!("set_{}", get.to_string().trim_start_matches("r#"));
     let ty = spell(shape, rule);
     if matches!(rule.crossing_of(shape), Crossing::Copy(_)) {
@@ -830,7 +848,7 @@ mod tests {
             entry(
                 "horizon_client::Owner",
                 "struct",
-                "struct Owner { first: u8, second: i64, hidden: Vec<u8>, wrapped: Arc<(Vec<u8>, bool)> }",
+                "struct Owner { first: u8, second: i64, hidden: Vec<u8>, wrapped: Arc<(Vec<u8>, bool)>, mode: u8 }",
             ),
             entry("horizon_client::Owner::second", "field", "second: i64"),
             entry(
@@ -853,6 +871,11 @@ mod tests {
                 "fn",
                 "fn missing() -> Option<&'static Owner>",
             ),
+            entry(
+                "horizon_client::Owner::set_mode",
+                "method",
+                "fn set_mode(&mut self, mode: u8) -> Result<u32>",
+            ),
         ];
         let declared = [
             declaration(&entries[2]),
@@ -862,7 +885,10 @@ mod tests {
             declaration(&entries[7]),
             declaration(&entries[8]),
             declaration(&entries[9]),
+            declaration(&entries[10]),
         ];
+        let (_, counts) = crate::internals_table::table(&entries, &[entries[10].path.clone()]);
+        assert_eq!(counts.renamed_methods[&entries[10].path], "call_set_mode");
         let code = generate(&entries, &declared, &[], &[])
             .unwrap()
             .replace("# [cfg (target_arch = \"wasm32\")]", "");
@@ -889,7 +915,7 @@ mod tests {
                 pub fn call(index: u32, _: Option<&Node>, _: &[Arg<'_>]) -> Result<Reached, Refusal> {{
                     if index == 5 {{ return Ok(Reached::Node(Node)); }}
                     Ok(Reached::Value(vec![match index {{
-                        3 => Value::Var(0, vec![Value::U(37)]),
+                        3 | 7 => Value::Var(0, vec![Value::U(37)]),
                         6 => Value::Var(0, vec![]),
                         _ => Value::Var(1, vec![]),
                     }}]))
@@ -926,7 +952,8 @@ mod tests {
                 assert_eq!(fail().unwrap(), Err(GameError));
                 assert_eq!(find().unwrap().unwrap().second().unwrap(), 1);
                 assert!(missing().unwrap().is_none());
-                assert_eq!(DECLARED.len(), 10, "seven declarations plus three additional walked layouts");
+                assert_eq!(<Owner as runtime::ViewType>::from_reached(runtime::Reached::Node(runtime::Node)).unwrap().call_set_mode(5).unwrap(), Ok(37));
+                assert_eq!(DECLARED.len(), 11, "eight declarations plus three additional walked layouts");
             }}
         "#
         );
@@ -952,6 +979,27 @@ mod tests {
                 .success()
         );
         std::fs::remove_dir_all(build).unwrap();
+    }
+
+    #[test]
+    fn native_method_collision_names_do_not_depend_on_field_declarations() {
+        let entries = [
+            entry("horizon_client::Mode", "struct", "struct Mode { mode: u8 }"),
+            entry("horizon_client::Mode::mode", "field", "mode: u8"),
+            entry(
+                "horizon_client::Mode::set_mode",
+                "method",
+                "fn set_mode(&mut self, mode: u8)",
+            ),
+        ];
+        for paths in [
+            vec![entries[2].path.clone()],
+            vec![entries[2].path.clone(), entries[1].path.clone()],
+        ] {
+            let (_, counts) = crate::internals_table::table(&entries, &paths);
+            assert!(counts.refused.is_empty());
+            assert_eq!(counts.renamed_methods[&entries[2].path], "call_set_mode");
+        }
     }
 
     #[test]

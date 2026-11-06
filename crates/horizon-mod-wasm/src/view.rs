@@ -243,11 +243,7 @@ fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
     })
 }
 
-fn charge(
-    host: &mut wasmtime::component::Access<'_, State, View>,
-    cost: usize,
-) -> wasmtime::Result<()> {
-    use wasmtime::AsContextMut;
+fn charge(mut host: impl wasmtime::AsContextMut, cost: usize) -> wasmtime::Result<()> {
     let mut store = host.as_context_mut();
     if let Ok(fuel) = store.get_fuel() {
         let left = fuel
@@ -992,6 +988,23 @@ mod tests {
             next.get(&next.root(0).unwrap(), 1).unwrap(),
             internals::Value::B(false)
         );
+    }
+
+    #[test]
+    fn import_fuel_is_debited_and_exhaustion_is_a_trap() {
+        let mut config = crate::RuntimeConfig::default();
+        config.budgets.fuel = Some(Default::default());
+        let engine = crate::engine(&config).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        store.set_fuel(9).unwrap();
+        charge(&mut store, 4).unwrap();
+        assert_eq!(store.get_fuel().unwrap(), 5);
+        let refusal = charge(&mut store, 6).unwrap_err();
+        assert_eq!(refusal.to_string(), "internals fuel exhausted");
+        assert_eq!(store.get_fuel().unwrap(), 5);
+        let engine = crate::engine(&crate::RuntimeConfig::default()).unwrap();
+        let mut unmetered = wasmtime::Store::new(&engine, ());
+        charge(&mut unmetered, 1000).unwrap();
     }
 
     #[test]
