@@ -28,6 +28,15 @@ pub trait EntityHandlesHost {
 #[doc(hidden)]
 pub trait EntityHandlesBackend {
     /// Side: both.
+    /// The name of a dimension's key (`minecraft:the_nether`). None for a key the game never gave out.
+    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::dimension_key_id",
+            "dimension_key_id",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame.
     fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
@@ -74,15 +83,6 @@ pub trait EntityHandlesBackend {
         crate::phase::unprovided(
             "Backend::entity_level",
             "entity_level",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
-    /// Side: both.
-    /// The name of a dimension's key (`minecraft:the_nether`). None for a key the game never gave out.
-    fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
-        crate::phase::unprovided(
-            "Backend::dimension_key_id",
-            "dimension_key_id",
             crate::phase::LoadAccess::WorldOnly,
         )
     }
