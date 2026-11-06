@@ -291,6 +291,8 @@ use std::sync::{LazyLock, RwLock};
     # Resolve the workspace graph without compiling. --no-deps does not refresh
     # Cargo.lock's package edges, so use full metadata for the new runtime edge.
     subprocess.run(["cargo", "metadata", "--format-version", "1"], cwd=ROOT, stdout=subprocess.DEVNULL, check=True)
+    # The launcher is a separate workspace but also consumes world/protocol.
+    subprocess.run(["cargo", "update", "--workspace", "--offline", "--manifest-path", "launcher/Cargo.toml"], cwd=ROOT, check=True)
     print(f"API PR 2a: moved attachment files and generic key tables; formatted {len(changed)} Rust files")
 
 
