@@ -490,6 +490,7 @@ pub(crate) fn with_resource_test_world(
     build(&mut world, registry);
     let lid_openers = std::collections::HashMap::new();
     let w = MobWorld {
+        goal_host: None,
         teams: Default::default(),
         loop_context: crate::test_resources::server_loop_context(),
         world: &world,
@@ -501,6 +502,7 @@ pub(crate) fn with_resource_test_world(
         suffocation: &suffocation,
         data: &data,
         player: None,
+        player_identity: None,
         controlling_player_movement: None,
         nearest_player: None,
         others,
@@ -550,6 +552,7 @@ pub(crate) fn test_player(position: Vec3) -> super::PlayerView {
         ),
         eye: [position.x, position.y + 1.62, position.z],
         alive: true,
+        invulnerable: false,
         creative: false,
         sneaking: false,
         swimming: false,
