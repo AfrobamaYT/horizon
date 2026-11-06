@@ -1151,9 +1151,7 @@ fn quick_craft(
                     max,
                     item_max,
                 );
-                if kind != 2 || !view.guest.creative() {
-                    remaining -= i64::from(new_count) - i64::from(existing);
-                }
+                remaining -= i64::from(new_count) - i64::from(existing);
                 view.set(
                     i,
                     Some(ItemStack {
