@@ -81,6 +81,13 @@ impl<T> Default for JoinList<T> {
     }
 }
 
+impl<T> JoinList<T> {
+    /// Move a batch back without changing its join numbers or order.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
+}
+
 impl<T> From<Vec<T>> for JoinList<T> {
     /// A list put back after a tick took it: the same storage, nothing copied
     /// and nothing renumbered. An entity in it that never joined stays
@@ -148,5 +155,43 @@ impl<T> IntoIterator for JoinList<T> {
     type IntoIter = std::vec::IntoIter<T>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug)]
+    struct Entity {
+        join: JoinSeq,
+        value: u32,
+    }
+    crate::impl_joined!(Entity);
+
+    #[test]
+    fn append_preserves_batch_numbers_and_receiver_order() {
+        let mut list = JoinList::default();
+        for value in 1..=2 {
+            list.push(Entity {
+                join: JoinSeq::UNJOINED,
+                value,
+            });
+        }
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        let mut taken = std::mem::take(&mut list);
+        list.push(Entity {
+            join: JoinSeq::UNJOINED,
+            value: 3,
+        });
+        let fresh = list[0].join;
+        list.append(&mut taken);
+        assert!(taken.is_empty());
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [3, 1, 2]);
+        assert_eq!(
+            list.iter().map(Joined::join_seq).collect::<Vec<_>>(),
+            [fresh, joins[0], joins[1]]
+        );
+        assert!(joins.into_iter().all(|join| join < fresh));
     }
 }
