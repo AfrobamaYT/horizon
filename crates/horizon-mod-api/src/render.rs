@@ -252,7 +252,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Install renderers for this test thread, as [`install`] does once per process.
-    fn install_for_test(renderers: Box<[&'static dyn RenderHooks]>) -> &'static RenderInstalled {
+    fn install_for_test(renderers: &[&'static dyn RenderHooks]) -> &'static RenderInstalled {
         let renderers = renderers
             .iter()
             .enumerate()
@@ -324,7 +324,7 @@ mod tests {
     fn needs_accumulate_in_mod_order() {
         static DEPTH: Depth = Depth;
         static SPANS: Spans = Spans;
-        install_for_test(Box::new([&DEPTH, &SPANS] as [&dyn RenderHooks; 2]));
+        install_for_test(&[&DEPTH, &SPANS]);
         let mut needs = RenderNeeds::default();
         native_render_needs(&mut needs);
         assert_eq!(
@@ -347,9 +347,9 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let installed = install_for_test(renderers);
+        let installed = install_for_test(&renderers);
         assert_eq!(
             installed
                 .subscribers
@@ -381,9 +381,9 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let installed = install_for_test(renderers);
+        let installed = install_for_test(&renderers);
         let needs = RenderNeeds::default();
         std::thread::scope(|scope| {
             scope.spawn(|| {
@@ -416,12 +416,12 @@ mod tests {
     #[test]
     fn empty_render_dispatch_builds_no_event() {
         let mut needs = RenderNeeds::default();
-        install_for_test(Box::new([]));
+        install_for_test(&[]);
         NEEDS_EVENTS_BUILT.set(0);
         native_render_needs(&mut needs);
         assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
         static QUIET: Quiet = Quiet;
-        install_for_test(Box::new([&QUIET as &dyn RenderHooks]));
+        install_for_test(&[&QUIET]);
         native_render_needs(&mut needs);
         assert_eq!(NEEDS_EVENTS_BUILT.get(), 0);
         native_render_needs(&mut needs);
@@ -443,10 +443,10 @@ mod tests {
         let renderers = {
             let mut renderers = renderers;
             renderers.push(listener);
-            renderers.into_boxed_slice()
+            renderers
         };
-        let before: Box<[&'static dyn RenderHooks]> = renderers.clone();
-        install_for_test(renderers);
+        let before: Vec<&'static dyn RenderHooks> = renderers.clone();
+        install_for_test(&renderers);
         native_render_needs(&mut RenderNeeds::default()); // Warm dispatch outside the timed loop.
         let iterations = 1_000_000;
         let start = Instant::now();
@@ -465,10 +465,10 @@ mod tests {
         }
         let subscribed = start.elapsed().as_nanos() as f64 / f64::from(iterations);
         // With no subscriber left, dispatch returns after its count check.
-        let renderers: Box<[&'static dyn RenderHooks]> = (0..9)
+        let renderers: Vec<&'static dyn RenderHooks> = (0..9)
             .map(|_| Box::leak(Box::new(Quiet)) as &'static dyn RenderHooks)
             .collect();
-        install_for_test(renderers);
+        install_for_test(&renderers);
         native_render_needs(&mut RenderNeeds::default()); // Warm the empty dispatch.
         let start = Instant::now();
         for _ in 0..iterations {
