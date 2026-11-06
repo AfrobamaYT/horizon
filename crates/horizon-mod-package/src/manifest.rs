@@ -1575,8 +1575,9 @@ capabilities = ["registries"]
                     error.contains("unsupported executable file"),
                     "{name}: {error}"
                 );
-            } else if name.trim_start_matches("./") == WASM {
-                // On disk `./mod.wasm` is the top-level module too.
+            } else if std::fs::symlink_metadata(dir.join(WASM)).is_ok() {
+                // On disk `./mod.wasm` is the top-level module too, and so is `MOD.WASM` where the
+                // filesystem ignores case (Windows, macOS).
                 let undeclared = WasmError::Undeclared.to_string();
                 assert_eq!(
                     Package::read(&dir).err(),
@@ -1651,7 +1652,9 @@ capabilities = ["registries"]
         let path = root.join("ruby.hmod");
         for link in [false, true] {
             let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
-            let options = zip::write::SimpleFileOptions::default();
+            // Made by a Unix tool on every OS: the writer's default on Windows is DOS attributes,
+            // which hold no mode to refuse.
+            let options = zip::write::SimpleFileOptions::default().system(zip::System::Unix);
             zip.start_file(MANIFEST, options).unwrap();
             zip.write_all(EXAMPLE.as_bytes()).unwrap();
             if link {
