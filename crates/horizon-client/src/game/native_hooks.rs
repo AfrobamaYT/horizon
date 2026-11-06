@@ -1006,7 +1006,7 @@ use horizon_core::{
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
-    fluid::{FluidKind, FluidState},
+    fluid::FluidKind,
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
@@ -2201,7 +2201,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         state: BlockStateId,
         context: &PlacementContext,
-        fluid: FluidState,
+        fluid: mod_api::FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
         self.fire_state_for_placement(dimension, state, context, fluid, answer);
