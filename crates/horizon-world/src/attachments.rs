@@ -484,7 +484,8 @@ impl AttachmentEntry {
 pub struct Attachments {
     entries: BTreeMap<(JavaString, JavaString), Arc<AttachmentEntry>>,
     // Keep malformed or otherwise unrecognized NBT exactly as it was read.
-    raw: Arc<Compound>,
+    // Empty holders need no shared allocation.
+    raw: Option<Arc<Compound>>,
     // Keys to send to clients at the next flush; never saved.
     pending: BTreeSet<(JavaString, JavaString)>,
 }
@@ -506,12 +507,8 @@ impl AttachmentHost for Attachments {
 impl Attachments {
     /// Read the namespaced attachment compound, leaving unknown data intact.
     pub fn from_nbt(raw: Compound) -> Self {
-        let mut result = Self {
-            entries: BTreeMap::new(),
-            raw: Arc::new(raw),
-            pending: BTreeSet::new(),
-        };
-        for (namespace, tag) in result.raw.iter() {
+        let mut result = Self::default();
+        for (namespace, tag) in &raw {
             if let Tag::Compound(names) = tag {
                 for (name, value) in names {
                     if let Tag::Compound(value) = value {
@@ -523,11 +520,12 @@ impl Attachments {
                 }
             }
         }
+        result.raw = (!raw.is_empty()).then(|| Arc::new(raw));
         result
     }
     /// Encode changed values, preserving raw entries and unrecognized tags.
     pub fn to_nbt(&self) -> Compound {
-        let mut raw = (*self.raw).clone();
+        let mut raw = self.raw.as_deref().cloned().unwrap_or_default();
         for ((namespace, name), entry) in &self.entries {
             let value = match &entry.state {
                 Entry::Raw { saved, .. } => Some(saved.clone()),
@@ -584,7 +582,7 @@ impl Attachments {
     /// Refuse a namespace whose saved form isn't a compound: nothing under it can be read or
     /// written without losing it.
     fn check_namespace(&self, namespace: &str) -> Result<(), AttachmentError> {
-        match self.raw.get(&namespace.into()) {
+        match self.raw.as_ref().and_then(|raw| raw.get(&namespace.into())) {
             Some(tag) if !matches!(tag, Tag::Compound(_)) => Err(AttachmentError::InvalidNamespace),
             _ => Ok(()),
         }
@@ -622,11 +620,8 @@ impl Attachments {
         if sync && write != AttachmentWrite::Decoded {
             self.pending.insert(key);
         }
-        if write == AttachmentWrite::Set
-            && let Some(Tag::Compound(names)) =
-                Arc::make_mut(&mut self.raw).get_mut(&namespace.into())
-        {
-            names.remove(&name.into());
+        if write == AttachmentWrite::Set {
+            self.remove_saved(namespace, name);
         }
     }
     fn discard(&mut self, namespace: &str, name: &str, sync: bool) {
@@ -635,7 +630,11 @@ impl Attachments {
         if sync {
             self.pending.insert(key);
         }
-        if let Some(Tag::Compound(names)) = Arc::make_mut(&mut self.raw).get_mut(&namespace.into())
+        self.remove_saved(namespace, name);
+    }
+    fn remove_saved(&mut self, namespace: &str, name: &str) {
+        if let Some(raw) = &mut self.raw
+            && let Some(Tag::Compound(names)) = Arc::make_mut(raw).get_mut(&namespace.into())
         {
             names.remove(&name.into());
         }
@@ -737,32 +736,44 @@ mod tests {
         sync: false,
     };
     #[test]
+    fn empty_and_new_maps_need_no_saved_backing_allocation() {
+        let mut map = Attachments::default();
+        assert!(map.raw.is_none());
+        COUNTER.set(&mut map, Holder::Level, 1).unwrap();
+        assert!(map.raw.is_none());
+        COUNTER.remove(&mut map, Holder::Level).unwrap();
+        assert!(map.raw.is_none());
+        assert!(Attachments::from_nbt(Compound::new()).raw.is_none());
+    }
+    #[test]
     fn shared_bindings_and_map_snapshots_keep_replaced_and_removed_values() {
         let mut map = Attachments::default();
         SYNCED.set(&mut map, Holder::Level, 1).unwrap();
         map.take_sync_changes();
-        let mut snapshot = map.clone();
-        let entry = map.entry("test", "synced").unwrap().unwrap().clone();
-        assert!(Arc::ptr_eq(
-            &entry,
-            snapshot.entry("test", "synced").unwrap().unwrap()
-        ));
-        assert!(Arc::ptr_eq(&map.raw, &snapshot.raw));
-        let saved = snapshot.to_nbt();
+        let loaded = Attachments::from_nbt(map.to_nbt());
+        for mut map in [map, loaded] {
+            let mut snapshot = map.clone();
+            let entry = map.entry("test", "synced").unwrap().unwrap().clone();
+            assert!(Arc::ptr_eq(
+                &entry,
+                snapshot.entry("test", "synced").unwrap().unwrap()
+            ));
+            let saved = snapshot.to_nbt();
 
-        SYNCED.set(&mut map, Holder::Level, 2).unwrap();
-        assert_eq!(entry.read(&SYNCED), Ok(&1));
-        assert_eq!(SYNCED.get_existing(&mut map, Holder::Level), Ok(Some(2)));
-        assert_eq!(SYNCED.remove(&mut map, Holder::Level), Ok(Some(2)));
-        assert!(map.entry("test", "synced").unwrap().is_none());
-        assert_eq!(entry.read(&SYNCED), Ok(&1));
-        assert_eq!(
-            SYNCED.get_existing(&mut snapshot, Holder::Level),
-            Ok(Some(1))
-        );
-        assert_eq!(snapshot.to_nbt(), saved);
-        assert!(snapshot.take_sync_changes().is_empty());
-        assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+            SYNCED.set(&mut map, Holder::Level, 2).unwrap();
+            assert_eq!(entry.read(&SYNCED), Ok(&1));
+            assert_eq!(SYNCED.get_existing(&mut map, Holder::Level), Ok(Some(2)));
+            assert_eq!(SYNCED.remove(&mut map, Holder::Level), Ok(Some(2)));
+            assert!(map.entry("test", "synced").unwrap().is_none());
+            assert_eq!(entry.read(&SYNCED), Ok(&1));
+            assert_eq!(
+                SYNCED.get_existing(&mut snapshot, Holder::Level),
+                Ok(Some(1))
+            );
+            assert_eq!(snapshot.to_nbt(), saved);
+            assert!(snapshot.take_sync_changes().is_empty());
+            assert_eq!(map.take_sync_changes(), [change("synced", None)]);
+        }
     }
     #[test]
     fn raw_read_cache_borrows_without_claiming_the_canonical_type_or_policy() {
@@ -788,6 +799,10 @@ mod tests {
         let saved = original.to_nbt();
         let mut map = Attachments::from_nbt(saved.clone());
         let snapshot = map.clone();
+        assert!(Arc::ptr_eq(
+            map.raw.as_ref().unwrap(),
+            snapshot.raw.as_ref().unwrap()
+        ));
         let entry = map.entry("test", "counter").unwrap().unwrap().clone();
         let value = entry.read(&key).unwrap();
         assert_eq!(value.0, 42);
