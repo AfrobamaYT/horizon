@@ -852,14 +852,11 @@ fn bundle_click(view: &mut View, i: usize, right: bool, rules: &dyn Rules) -> bo
     {
         match other {
             // tryTransfer: as much as fits, through `safeTake`.
-            Some(mut other) => {
+            Some(other) => {
                 if can_be_in_bundle(&other) {
                     let amount = other.count.min(contents.room_for(items, &other));
-                    if amount > 0 {
-                        let mut taken = other.clone();
-                        taken.count = amount;
-                        other.count -= amount;
-                        view.set(i, (other.count > 0).then_some(other));
+                    let mut slot = HostedSlotView { view, slot: i, rules };
+                    if let Some(mut taken) = crate::menu::SlotView::safe_take(&mut slot, amount, amount) {
                         contents.try_insert(items, &mut taken);
                     }
                 }
@@ -976,7 +973,6 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules, drops: &mut 
     // stack it holds only comes out while `Slot.mayPickup` allows it, and the
     // hotbar's stack only goes in where the slot takes it.
     if (a.is_some() && !view.may_pickup(i, rules))
-        || a.as_ref().is_some_and(|a| !view.may_place(other, a, rules))
         || b.as_ref().is_some_and(|b| !view.may_place(i, b, rules))
     {
         return;
