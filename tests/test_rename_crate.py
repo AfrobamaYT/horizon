@@ -1,7 +1,11 @@
 """Crate renames must not rename player data paths or the separate registry repo."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("rename_crate", Path(__file__).resolve().parents[1] / "tools/rename_crate.py")
 rename = importlib.util.module_from_spec(spec)
@@ -68,6 +72,26 @@ assert!(!dependencies.contains_key("horizon-mods"));
 '''
         self.assertEqual(rename.rewrite("launcher/src/native_mods/api.rs", source), expected)
         self.assertEqual(rename.rewrite("launcher/src/export.rs", source), source)
+
+    def test_verify_rejects_an_unchanged_file_that_still_needs_the_mapping(self):
+        with TemporaryDirectory() as directory, patch.object(rename, "ROOT", Path(directory)):
+            crate = rename.ROOT / rename.OLD_PATH
+            crate.mkdir(parents=True)
+            (crate / "Cargo.toml").write_text('[package]\nname = "horizon-mods"\n')
+            consumer = rename.ROOT / "consumer.rs"
+            consumer.write_text("use horizon_mods::Manifest;\n")
+            rename.run("git", "init", "-q")
+            rename.run("git", "add", "--", rename.OLD_PATH, "consumer.rs")
+            rename.run("git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                       "commit", "-qm", "Baseline")
+            rename.run("git", "mv", rename.OLD_PATH, rename.NEW_PATH)
+            (rename.ROOT / rename.NEW_PATH / "Cargo.toml").write_text(
+                '[package]\nname = "horizon-mod-package"\n')
+            with self.assertRaisesRegex(AssertionError, "unexpected content change: consumer.rs"):
+                rename.verify("HEAD")
+            consumer.write_text("use horizon_mod_package::Manifest;\n")
+            with redirect_stdout(io.StringIO()):
+                rename.verify("HEAD")
 
     def test_book_filters_and_translations_obey_the_boundary(self):
         source = '{{#include ../../crates/horizon-mods/src/lib.rs}}\n(crates/horizon-mods)\ncrates/horizon-mods/**\n'

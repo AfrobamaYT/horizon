@@ -95,11 +95,14 @@ def verify(base):
     files = 0
     for path in sorted(before - OWN_FILES):
         target = destination(path)
-        if path not in changed and target not in changed:
+        changed_file = path in changed or target in changed
+        if not changed_file and path not in text:
             continue
         original = run("git", "show", f"{base}:{path}")
         actual = (ROOT / target).read_bytes()
         expected = normalized(path, original) if path in text else original
+        if not changed_file and expected == original:
+            continue
         if path == "launcher/src/native_mods/api.rs" and STAGING_CHECK not in original:
             assert actual.count(STAGING_CHECK) == 1, "missing or duplicated staging regression"
             actual = actual.replace(STAGING_CHECK, b"")
