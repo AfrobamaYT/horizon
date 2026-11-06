@@ -144,11 +144,32 @@ jobs:
           restore-keys: |
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
             lint-workspace-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.hash }}-
+      # A restore-key hit can predate a profile or dependency change: a successful download
+      # does not mean Cargo has artifacts for the requested graph (for example, #1190).
+      - name: Report lint cache compatibility
+        if: steps.rust.outputs.required != 'false'
+        env:
+          REQUESTED_KEY: ${{ steps.lint-cache.outputs.cache-primary-key }}
+          MATCHED_KEY: ${{ steps.lint-cache.outputs.cache-matched-key }}
+        run: |
+          if [ -z "$MATCHED_KEY" ]; then
+            STATUS="No lint cache found; this run builds from cold."
+          elif [[ "$MATCHED_KEY" == "${REQUESTED_KEY%-*-*}-"* ]]; then
+            STATUS="Matching manifests and lockfile; unchanged Cargo units can be reused."
+          else
+            STATUS="Fallback cache from different manifests or lockfile; dependency or profile changes can require a full rebuild until main saves a matching snapshot."
+            echo "::notice::$STATUS"
+          fi
+          {
+            echo "### Lint workspace cache"
+            echo "$STATUS"
+            printf '\nRequested: `%s`\n\nRestored: `%s`\n\n' "$REQUESTED_KEY" "${MATCHED_KEY:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
       # A fresh checkout otherwise makes every workspace source newer than the cached artifacts.
       # Only byte-identical Git objects regain their cached mtimes; changed inputs stay new.
       - name: Restore unchanged source timestamps
         if: steps.rust.outputs.required != 'false'
-        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json
+        run: python3 tools/ci/source_mtimes.py target/ci-source-mtimes.json | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Check formatting and lint
         if: steps.rust.outputs.required != 'false'
         id: native-lint
