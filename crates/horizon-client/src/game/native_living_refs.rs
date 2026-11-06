@@ -710,6 +710,9 @@ impl Game<'_> {
                 let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
                 self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
             }
+            // The stack's attribute modifiers go on the live map at once, so
+            // the next read — a hit's armor, a `LivingRef`'s — sees them (#941).
+            self.collect_mob_equipment_attributes(id);
             return true;
         }
         // `LivingEntity.onEquipItem` for the entities that keep no equip state
