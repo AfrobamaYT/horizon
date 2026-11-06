@@ -735,7 +735,10 @@ impl Game<'_> {
             if g.world_root.as_os_str().is_empty() {
                 return;
             }
-            g.reload_datapacks(true);
+            if let Err(error) = g.reload_datapacks(true, &g.level.enabled_features.clone()) {
+                log::warn!("Horizon: content mods data reload failed: {error}");
+                return;
+            }
             log::info!(
                 "Horizon: content mods switched live: server data reloaded in {} ms",
                 at.elapsed().as_millis()
