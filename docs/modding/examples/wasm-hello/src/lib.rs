@@ -37,6 +37,9 @@ impl Hooks for Mod {
     }
 
     fn loot_table_load(&self, context: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
+        if event.id != "test:loot" {
+            return;
+        }
         let water = context.fluid_key("minecraft:water").expect("water");
         let ingredient =
             FluidIngredient::from_json(&mod_api::serde_json::json!("minecraft:water"), context)

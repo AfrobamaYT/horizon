@@ -123,7 +123,10 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     mod_api::__private::resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
     let load = horizon_world::native_load_context::LoadContext::new(
         mod_api::DataLoadOrigin::ServerDataLoad,
-        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(Default::default(), Default::default())),
+        std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
+            Default::default(),
+            Default::default(),
+        )),
         [],
     );
     let mut table = mod_api::serde_json::json!({});
