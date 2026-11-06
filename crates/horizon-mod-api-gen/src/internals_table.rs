@@ -1756,6 +1756,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn coverage_lists_refused_map_key_types() {
+        let entries = [
+            internal("horizon_client::Key", "struct", "struct Key { id: u32 }"),
+            internal(
+                "horizon_client::Bag",
+                "struct",
+                "struct Bag { values: std::collections::BTreeMap<Key, u32> }",
+            ),
+        ];
+        let (_, counts) = all_table(&entries);
+        assert!(
+            counts
+                .refused_map_keys
+                .iter()
+                .any(|key| key.contains("Key")),
+            "{:?}",
+            counts.refused_map_keys
+        );
+    }
+
+    #[test]
     fn generated_option_map_keys_canonicalize_before_writes() {
         let entries = [
             internal(
