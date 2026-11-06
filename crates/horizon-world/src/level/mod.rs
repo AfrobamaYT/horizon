@@ -980,6 +980,7 @@ pub struct Behaviours {
     shapes: Vec<VoxelShape>,
     shape_info: Vec<data::ShapeInfo>,
     pub fluid_tags: data::FluidTags,
+    fluid_definitions: HashMap<String, crate::fluid_definitions::FluidDefinition>,
     blocks: Vec<BlockData>,
     items: HashMap<String, ItemBinding>,
     potted_by_content: HashMap<BlockId, BlockId>,
