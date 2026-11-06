@@ -161,5 +161,7 @@ pub(crate) struct Site {
     pub output: String,
 }
 
+pub(crate) mod resolve;
+
 #[cfg(test)]
 mod tests;
