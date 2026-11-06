@@ -1,7 +1,7 @@
 //! The keys a native mod registers on Options > Controls.
 
 use crate::ClientModifiers;
-pub use horizon_mods::mod_list::KeyConflictContext;
+pub use horizon_mod_package::mod_list::KeyConflictContext;
 
 /// A key a mod registers through `Registrar::register_key_mapping`: it is listed under the mod's name on
 /// Options > Controls, and the player's binding and reset are kept by mod id in `horizon-mods.txt`.

@@ -3,8 +3,8 @@
 //! `HORIZON_WASM_STD` at the std member; the test is ignored elsewhere.
 use std::sync::Mutex;
 
+use horizon_mod_package::manifest::Manifest;
 use horizon_mod_wasm::{Refusal, WasmPackage};
-use horizon_mods::manifest::Manifest;
 use mod_api::{__private::game::BackendRefOf, Text};
 
 /// The built sample: its manifest and its `mod.wasm`, and the std member.
@@ -12,8 +12,10 @@ fn sample() -> (Manifest, Vec<u8>, Vec<u8>) {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_SAMPLE");
     let std_member = std::fs::read(path("HORIZON_WASM_STD")).unwrap();
-    let manifest = horizon_mods::Package::read(&package).unwrap().manifest;
-    let module = horizon_mods::Package::read_wasm(&package).unwrap();
+    let manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
+    let module = horizon_mod_package::Package::read_wasm(&package).unwrap();
     (manifest, module, std_member)
 }
 
@@ -81,7 +83,7 @@ impl mod_api::prelude::FluidStatesBackend for Server {
         }
     }
 }
-impl mod_api::prelude::BlockStateIdsBackend for Server {
+impl mod_api::prelude::KeysBackend for Server {
     fn block_key_id(&self, key: mod_api::BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")
@@ -94,13 +96,13 @@ impl mod_api::prelude::BlockStateIdsBackend for Server {
     }
 }
 impl mod_api::Backend for Server {}
-mod_api::impl_backend_areas!(Server, except(block_state_ids, fluid_states));
-impl mod_api::prelude::BlockStateIdsHost for Server {
+mod_api::impl_backend_areas!(Server, except(keys, fluid_states));
+impl mod_api::prelude::BlockStatesHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
         Some(mod_api::__private::resolved_block(key)?.default)
     }
 }
-impl mod_api::prelude::TagFluidReadsHost for Server {
+impl mod_api::prelude::TagsHost for Server {
     fn state_fluid_state(&self, state: mod_api::BlockStateId) -> Option<mod_api::FluidState> {
         let engine = if state == mod_api::BlockStateId(17) {
             horizon_world::fluid::FluidState::EMPTY
@@ -118,7 +120,7 @@ impl mod_api::Host for Server {
         Some(mod_api::BackendRef::of(self))
     }
 }
-mod_api::impl_host_areas!(Server, except(block_state_ids, tag_fluid_reads));
+mod_api::impl_host_areas!(Server, except(block_states, tags));
 
 impl mod_api::prelude::ServicesServerHost for Server {
     fn messages(&self) -> &dyn mod_api::Messages {
@@ -220,8 +222,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     );
     let mut server = Server::default();
     let falling_source =
-        mod_api::prelude::TagFluidReadsHost::state_fluid_state(&server, mod_api::BlockStateId(18))
-            .unwrap();
+        mod_api::prelude::TagsHost::state_fluid_state(&server, mod_api::BlockStateId(18)).unwrap();
     assert!(falling_source.falling && falling_source.is_source() && !falling_source.is_empty());
     for _ in 0..400 {
         let mut args = mod_points::TickArgs::__new();

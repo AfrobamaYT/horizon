@@ -2262,7 +2262,9 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let error =
             widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
-            error.contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
+            error
+                .replace('\\', "/")
+                .contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

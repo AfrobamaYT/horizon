@@ -1043,7 +1043,7 @@ impl Game<'_> {
     }
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
-    /// push a `horizon_mods::content::Block` per block, the same declaration
+    /// push a `horizon_mod_package::content::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
     /// with its id in your mod's namespace. `item: true` gives it a block
@@ -1058,20 +1058,20 @@ impl Game<'_> {
     /// are logged and that namespace's are left out.
     pub(in crate::game) fn native_blocks(
         context: &mod_api::RegistrationContext,
-        blocks: &mut Vec<horizon_mods::content::Block>,
+        blocks: &mut Vec<horizon_mod_package::content::Block>,
     ) {
         Self::fire_blocks(context, blocks);
     }
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
-    /// `horizon_mods::content::Item` per item, a content mod's
+    /// `horizon_mod_package::content::Item` per item, a content mod's
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
     /// Asked once at start, on every side.
     pub(in crate::game) fn native_items(
         context: &mod_api::RegistrationContext,
-        items: &mut Vec<horizon_mods::content::Item>,
+        items: &mut Vec<horizon_mod_package::content::Item>,
     ) {
         Self::fire_items(context, items);
     }
@@ -5701,22 +5701,14 @@ mod screen_open_tests {
         with_mods(mods, || {
             crate::game::native_entity_refs::tests::with_client_game(|game| {
                 game.focused = false;
-                assert!(!mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(!mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.focused = true;
-                assert!(mod_api::prelude::ClientGuiStateClientHost::window_focused(
-                    game
-                ));
+                assert!(mod_api::prelude::ScreensClientHost::window_focused(game));
                 game.title = None;
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.screen = Screen::Inventory;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 let mut builder = winit::event_loop::EventLoop::builder();
                 #[cfg(target_os = "linux")]
                 {
@@ -5737,13 +5729,11 @@ mod screen_open_tests {
                 game.options.offscreen = true;
                 game.renderer = Some(game.new_renderer(window).unwrap());
                 game.screen = Screen::Playing;
-                assert!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game).is_none()
-                );
+                assert!(mod_api::prelude::ScreensClientHost::observed_screen_id(game).is_none());
                 game.set_screen(Screen::Inventory);
                 game.observe_screen();
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "inventory"
@@ -5752,7 +5742,7 @@ mod screen_open_tests {
                     game.link_prompt = Some("https://example.com".into());
                 });
                 assert_eq!(
-                    mod_api::prelude::ClientGuiStateClientHost::observed_screen_id(game)
+                    mod_api::prelude::ScreensClientHost::observed_screen_id(game)
                         .unwrap()
                         .id,
                     "link_prompt"

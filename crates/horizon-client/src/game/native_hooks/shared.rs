@@ -3927,7 +3927,7 @@ mod tests {
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
-                    horizon_mods::content::Block {
+                    horizon_mod_package::content::Block {
                         id: id.into(),
                         template: "minecraft:white_banner".into(),
                         ..Default::default()
@@ -4089,11 +4089,9 @@ mod tests {
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.pause = false;
-            assert!(!mod_api::prelude::ClientPauseReadClientHost::is_paused(
-                game
-            ));
+            assert!(!mod_api::prelude::ClientViewClientHost::is_paused(game));
             game.pause = true;
-            assert!(mod_api::prelude::ClientPauseReadClientHost::is_paused(game));
+            assert!(mod_api::prelude::ClientViewClientHost::is_paused(game));
         });
     }
 
@@ -4109,29 +4107,28 @@ mod tests {
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.screen = Screen::Playing;
-            assert!(mod_api::prelude::ClientInputReadsClientHost::playing(game));
+            assert!(mod_api::prelude::ClientInputClientHost::playing(game));
             game.screen = Screen::Chat;
-            assert!(!mod_api::prelude::ClientInputReadsClientHost::playing(game));
+            assert!(!mod_api::prelude::ClientInputClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
             let forward =
-                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward").unwrap();
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
                 (forward.down, forward.label.plain()),
                 (false, "W".to_owned())
             );
             game.keys.insert(KeyCode::KeyW);
             assert!(
-                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.forward")
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
                     .unwrap()
                     .down
             );
             let attack =
-                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.attack").unwrap();
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
             assert_eq!(attack.label.plain(), "Left Button");
             assert!(
-                mod_api::prelude::ClientInputReadsClientHost::mapping(game, "key.mymod.boost")
-                    .is_none()
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
             );
         });
     }
@@ -4228,7 +4225,7 @@ mod tests {
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::mod_content::{ContentMod, build};
-        use horizon_mods::content::{Block, Content};
+        use horizon_mod_package::content::{Block, Content};
 
         let base = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES")
@@ -4276,7 +4273,10 @@ mod tests {
                 jars: Vec::new(),
             }],
             &root,
-            &horizon_mods::enabled::EnabledMods::new([("ruby".into(), horizon_mods::Side::Both)]),
+            &horizon_mod_package::enabled::EnabledMods::new([(
+                "ruby".into(),
+                horizon_mod_package::Side::Both,
+            )]),
         )
         .unwrap();
         let settings = Settings::default();
@@ -5271,7 +5271,7 @@ pub(super) mod particle_count_tests {
                     "live guardian, pickup and ordinary particles draw"
                 );
                 game.native_render_gui_pre(&mut false);
-                assert_eq!(mod_api::prelude::BaseClientHost::particle_count(game), 0);
+                assert_eq!(mod_api::prelude::EffectsClientHost::particle_count(game), 0);
                 let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
                 game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
                 assert!(
