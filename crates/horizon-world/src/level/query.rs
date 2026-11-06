@@ -226,12 +226,6 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
         self.signals().is_water_at(pos)
     }
-    pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
-        self.b.has_flag(state, state_flags::CONDUCTOR)
-    }
-    pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
-        self.state(above(pos))
-    }
 }
 
 /// `Sim` reads these through its [`Signals`], so there is one implementation of each.
@@ -247,7 +241,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
 }
 
-impl<L: LevelAccess + ?Sized> Signals<'_, L> {
+impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `Level.getRawBrightness(pos, darken)`.
     pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
         self.signals().raw_brightness(pos, darken)
@@ -404,6 +398,15 @@ impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     pub fn is_water_at(&self, pos: BlockPos) -> bool {
         self.b.is_water_fluid(self.b.fluid(self.state(pos)).kind())
     }
+    pub fn is_redstone_conductor(&self, state: BlockStateId, _pos: BlockPos) -> bool {
+        self.b.has_flag(state, state_flags::CONDUCTOR)
+    }
+    pub(crate) fn above_state(&self, pos: BlockPos) -> BlockStateId {
+        self.state(above(pos))
+    }
+}
+
+impl<L: LevelAccess + ?Sized> Signals<'_, L> {
     /// `Level.getRawBrightness(pos, darken)`.
     pub fn raw_brightness(&self, pos: BlockPos, darken: i32) -> i32 {
         super::raw_brightness(self.level, pos, darken)
