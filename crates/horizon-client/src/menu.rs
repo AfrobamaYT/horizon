@@ -579,6 +579,20 @@ pub fn native_menu_slot_rules(
     crate::native_client_hooks::menu_slot_rules(context, menu, slot, stack, may_place, max_stack);
 }
 
+/// Apply the scoped rule to a slot's own answers, then enforce its item cap.
+pub fn apply_menu_slot_rules(
+    context: &LoopContext,
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    mut may_place: bool,
+    mut max_stack: u32,
+    item_max: u32,
+) -> (bool, u32) {
+    native_menu_slot_rules(context, menu, slot, stack, &mut may_place, &mut max_stack);
+    (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
+}
+
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
 pub const OUT_OF_BOUNDS: &str = "IndexOutOfBoundsException";
 
@@ -1768,18 +1782,15 @@ impl Menu {
         let Kind::Mod(t) = self.kind else {
             return (false, 0);
         };
-        let mut may_place = self.slots[s].role == Role::Mod;
-        let mut max_stack = CONTAINER_MAX;
-        let index = self.slots[s].index;
-        native_menu_slot_rules(
+        apply_menu_slot_rules(
             env.loop_context,
             t.id,
-            index,
+            self.slots[s].index,
             stack,
-            &mut may_place,
-            &mut max_stack,
-        );
-        (may_place, max_stack.clamp(1, CONTAINER_MAX))
+            self.slots[s].role == Role::Mod,
+            CONTAINER_MAX,
+            u32::MAX,
+        )
     }
 
     /// `Slot.getMaxStackSize(stack)`.
