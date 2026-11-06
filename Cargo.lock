@@ -1685,9 +1685,9 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-package",
  "horizon-mod-points",
  "horizon-mod-wasm",
- "horizon-mod-package",
  "horizon-narrator",
  "horizon-optifine",
  "horizon-protocol",
@@ -2020,6 +2020,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-package"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-shader-api",
+ "log",
+ "minisign-verify",
+ "png",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "zip",
+]
+
+[[package]]
 name = "horizon-mod-point-shape"
 version = "0.1.0"
 dependencies = [
@@ -2048,8 +2065,8 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api",
  "horizon-mod-api-gen",
- "horizon-mod-points",
  "horizon-mod-package",
+ "horizon-mod-points",
  "horizon-world",
  "log",
  "serde_json",
@@ -2065,23 +2082,6 @@ version = "0.0.0"
 dependencies = [
  "horizon-mod-api",
  "horizon-mod-points",
-]
-
-[[package]]
-name = "horizon-mod-package"
-version = "0.1.0"
-dependencies = [
- "horizon-core",
- "horizon-shader-api",
- "log",
- "minisign-verify",
- "png",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "toml",
- "zip",
 ]
 
 [[package]]

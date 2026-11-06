@@ -454,6 +454,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-package"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+ "horizon-shader-api",
+ "log",
+ "minisign-verify",
+ "png",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+ "zip",
+]
+
+[[package]]
 name = "horizon-mod-registry"
 version = "0.1.0"
 dependencies = [
@@ -471,23 +488,6 @@ dependencies = [
  "toml",
  "tower",
  "ureq",
- "zip",
-]
-
-[[package]]
-name = "horizon-mod-package"
-version = "0.1.0"
-dependencies = [
- "horizon-core",
- "horizon-shader-api",
- "log",
- "minisign-verify",
- "png",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "toml",
  "zip",
 ]
 
