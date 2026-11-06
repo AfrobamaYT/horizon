@@ -1153,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "As descargas, os inicios de sesión e as actualizacións pasan a través deste proxy (http://host:port, socks5://host:port). Baleiro significa ningún: HTTPS_PROXY utilízase cando se iniciou o iniciador cun.",
   "{name} was left out: made for another Horizon version": "Deixouse fóra {name}: feito para outra versión de Horizon",
   "{name} was left out: clashes with {other}": "Deixouse fóra {name}: choca con {other}",
-  "{name} was left out: it needs {other}, which was left out": "Deixouse fóra {name}: precisa de {other}, que se deixou fóra",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "Non se compila no Horizon ao que xogas ({code}): a compilación déixao fóra ata que o seu autor o actualice"
+  "{name} was left out: it needs {other}, which was left out": "Deixouse fóra {name}: precisa de {other}, que se deixou fóra"
 }

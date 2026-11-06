@@ -1153,6 +1153,5 @@
   "Downloads, sign-ins and updates go through this proxy (http://host:port, socks5://host:port). Empty means none: HTTPS_PROXY is used instead when the launcher was started with one.": "Nedlastinger, pålogginger og oppdateringer går gjennom denne proxyen (http://host:port, socks5://host:port). Tom betyr ingen: HTTPS_PROXY brukes i stedet når startprogrammet ble startet med en.",
   "{name} was left out: made for another Horizon version": "{name} ble utelatt: laget for en annen Horizon-versjon",
   "{name} was left out: clashes with {other}": "{name} ble utelatt: kolliderer med {other}",
-  "{name} was left out: it needs {other}, which was left out": "{name} ble utelatt: den trenger {other}, som ble utelatt",
-  "Doesn't build on the Horizon you play ({code}): a build leaves it out until its author updates it": "Bygger ikke på Horizon-versjonen du spiller ({code}): en bygging utelater den til forfatteren oppdaterer den"
+  "{name} was left out: it needs {other}, which was left out": "{name} ble utelatt: den trenger {other}, som ble utelatt"
 }
