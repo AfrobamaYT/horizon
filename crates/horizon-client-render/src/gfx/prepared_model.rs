@@ -1,9 +1,7 @@
-//! Generation-owned prepared model geometry and its one-instance pipeline.
 use super::{EntityPipelineOptions, entity_pipeline_factory, entity_shader};
 use crate::Result;
 use glam::{DVec3, Mat3, Mat4, Vec3};
 
-/// Local corner of a prepared face. Atlas UVs are already resolved.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PreparedModelVertex {
@@ -14,7 +12,6 @@ pub struct PreparedModelVertex {
     pub flags: [u32; 4],
 }
 
-/// One draw of a prepared model. The translation is `origin - camera` in f64, then f32.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PreparedModelInstance {
@@ -26,7 +23,6 @@ pub struct PreparedModelInstance {
 }
 
 impl PreparedModelInstance {
-    /// `local` has no camera translation. The camera-relative matrix is what CPU emission uses.
     pub fn new(local: Mat4, origin: DVec3, camera: DVec3, tint: [f32; 4], light: u32) -> Self {
         let model = camera_matrix(local, origin, camera);
         let normal = Mat3::from_mat4(model).inverse().transpose();
@@ -67,12 +63,10 @@ const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array!
     8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4, 12 => Uint32
 ];
 
-/// The geometry uploaded for one resource generation, plus the pipelines that draw one instance.
 pub struct PreparedModels {
     generation: u64,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
-    /// Index start and count for each standalone slot.
     ranges: Vec<Option<(u32, u32)>>,
     pipeline: wgpu::RenderPipeline,
     hdr_pipeline: wgpu::RenderPipeline,
@@ -122,7 +116,6 @@ impl PreparedModels {
                 ]
             })
             .collect();
-        // Vertex and index buffers, so only `max_buffer_size` applies.
         let limit = device.limits().max_buffer_size;
         let vertex_bytes = std::mem::size_of_val(vertices) as u64;
         let index_bytes = std::mem::size_of_val(indices.as_slice()) as u64;
@@ -207,7 +200,6 @@ impl PreparedModels {
             "fs_hdr_mark",
             wgpu::ColorWrites::ALPHA,
         );
-        // Pop before mapping: a failed allocation must not be mapped.
         let scope_error = checks.pop().map(|error| error.to_string());
         copy_after_scope(scope_error.clone(), || {
             map_bytes(&vertex_buffer, bytemuck::cast_slice(vertices))
@@ -244,7 +236,6 @@ impl PreparedModels {
     }
 }
 
-/// Copies into a buffer created with `mapped_at_creation`. The scope error is checked first, so a failed allocation is never mapped.
 fn copy_after_scope(scope_error: Option<String>, copy: impl FnOnce() -> Result<()>) -> Result<()> {
     if let Some(error) = scope_error {
         return Err(error.into());
@@ -294,6 +285,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs software Vulkan"]
     fn oversized_prepared_upload_returns_an_error() {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = wgpu::Backends::VULKAN;
@@ -340,7 +332,6 @@ mod tests {
         );
     }
 
-    /// llvmpipe does not reliably fail a buffer allocation that is under `max_buffer_size`, so this checks the helper's order instead of injecting an out-of-memory error.
     #[test]
     fn mapped_copy_runs_only_after_a_clean_scope() {
         let mut mapped = false;

@@ -12385,6 +12385,11 @@ mod tests {
                 sources.push((path, base + &text));
             } else if name == "static_entity.wgsl" {
                 sources.push((path, static_entity_shader()));
+            } else if name == "prepared_model.wgsl" {
+                sources.push((
+                    path,
+                    super::entity_shader() + include_str!("prepared_model.wgsl"),
+                ));
             } else if name == "visbuffer.wgsl" {
                 // Appended to terrain.wgsl (gfx/visbuffer.rs).
                 sources.push((path, include_str!("terrain.wgsl").to_owned() + &text));
