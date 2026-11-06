@@ -52,7 +52,7 @@ impl dyn Registrar + '_ {
     }
     /// Register chunk generator `name` (`void` or `mymod:void`) once at
     /// startup: a level whose stem names `mymod:void` then has the terrain of
-    /// `generator`, whose [`fill_from_noise`](crate::ChunkGenerator::fill_from_noise)
+    /// `generator`, whose [`build_terrain`](crate::ChunkGenerator::build_terrain)
     /// runs on the worldgen worker threads. The level gets no surface, carvers
     /// or features. The id is in the calling mod's namespace; another mod's
     /// namespace, an empty name, a name that is no folder of the world and an id
@@ -291,7 +291,7 @@ pub mod tests {
     struct Void;
     #[cfg(test)]
     impl mod_api::ChunkGenerator for Void {
-        fn fill_from_noise(&self, _: &mut dyn mod_api::ChunkAccess) {}
+        fn build_terrain(&self, _: &mut dyn mod_api::ChunkAccess) {}
     }
 
     /// A generator's name is held to the same rule, so `Void` or `../x` refuses the mods too.
@@ -395,7 +395,7 @@ pub mod tests {
         use horizon_world::worldgen::mod_generators::ChunkAccess as EngineChunk;
         struct Marker;
         impl mod_api::ChunkGenerator for Marker {
-            fn fill_from_noise(&self, chunk: &mut dyn ChunkAccess) {
+            fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
                 let state = chunk.state("stone");
                 chunk.set_block([1, chunk.min_y(), 2], state);
             }
@@ -436,7 +436,7 @@ pub mod tests {
         install_parts(&[ModEntry::new("test", Box::new(Writes))]).unwrap();
         let generators = mod_api::__private::installed_chunk_generators();
         let mut chunk = Written::default();
-        generators["test:marker"].fill_from_noise(&mut chunk);
+        generators["test:marker"].build_terrain(&mut chunk);
         assert_eq!(chunk.0, [([1, -64, 2], BlockStateId(9))]);
     }
 

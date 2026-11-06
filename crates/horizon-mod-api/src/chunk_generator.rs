@@ -48,9 +48,9 @@ pub trait ChunkAccess {
 /// a level stem with `"generator": {"type": "modid:void"}`. Implemented once,
 /// kept by the game; deterministic and stateless.
 pub trait ChunkGenerator: Send + Sync + 'static {
-    /// `ChunkGenerator.fillFromNoise`: write the terrain of `chunk`, which
+    /// `ChunkGenerator.buildTerrain`: write the terrain of `chunk`, which
     /// starts as air. The same seed and chunk give the same blocks.
-    fn fill_from_noise(&self, chunk: &mut dyn ChunkAccess);
+    fn build_terrain(&self, chunk: &mut dyn ChunkAccess);
 }
 
 /// A mod's generator as the engine's: the engine's chunk reaches the mod as a [`ChunkAccess`],
@@ -58,8 +58,8 @@ pub trait ChunkGenerator: Send + Sync + 'static {
 pub(crate) struct Adapter(pub(crate) Arc<dyn ChunkGenerator>);
 
 impl ModChunkGenerator for Adapter {
-    fn fill_from_noise(&self, chunk: &mut dyn EngineChunk) {
-        self.0.fill_from_noise(&mut Converting(chunk));
+    fn build_terrain(&self, chunk: &mut dyn EngineChunk) {
+        self.0.build_terrain(&mut Converting(chunk));
     }
 }
 
