@@ -279,6 +279,10 @@ authoritative context or an unavailable mapping returns `None`, not a stale memb
 `block_state_id`, tag names and existing fluid operation arguments remain strings for now.
 
 Declare a tank-only fluid in your own namespace with `r.declare_fluid("chocolate")`; the returned `FluidKey` identifies it for the mod load. Request vanilla or another mod's declared fluid with `r.fluid_key("minecraft:water")` or `r.fluid_key("other:chocolate")`. Requests resolve after all registrations, so declaration order does not matter; an unknown request stops the load and names the requesting mod. Tank-only fluids have no world simulation or world state. Fluid stacks and recipe ingredients use these keys; remaining fluid operations move to them in subsequent changes.
+A saved tank whose fluid's mod is absent carries an opaque unresolved identity. Its stack's
+`key()` is `None`; `UnresolvedFluid::id(host)` reads its saved name. It can move between
+name-backed mod tanks, but not into vanilla buckets or cauldrons.
+
 `NativeActiveEffect::id` and effect hook payloads carry `EffectKey`; living effect queries,
 application and removal use the same resolved key. `NativeActiveEffect::new(speed, …)`
 uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection hooks

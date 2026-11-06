@@ -301,9 +301,7 @@ struct Well {
 
 impl Well {
     fn new(fluid: &mod_api::FluidStack) -> Self {
-        let id = mod_api::__private::fluid_id(fluid.fluid)
-            .expect("resolved fluid key")
-            .to_owned();
+        let id = mod_api::__private::fluid_identity_name(fluid.fluid);
         let look = horizon_client::mod_content::fluid_look(&id);
         let tint = fluid_tint(&id, look.as_ref().and_then(|l| l.tint));
         let amount = format!("{} mB", fluid.amount);

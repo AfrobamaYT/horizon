@@ -6,6 +6,14 @@
 #![deny(missing_docs)]
 extern crate self as mod_api;
 mod registry_keys;
+mod unresolved_fluid;
+pub use unresolved_fluid::FluidIdentity;
+
+/// A saved fluid name retained for the lifetime of the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only trusted engine boundaries create handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
+pub struct UnresolvedFluid(u64);
 pub use registry_keys::UnknownFluid;
 
 /// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
