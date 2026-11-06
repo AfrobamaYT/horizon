@@ -116,7 +116,7 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
     );
     let root = scratch.join("root");
     let mods = [alpha, beta];
-    let warnings = build(&base, &scratch.join("jars"), &mods, &root).unwrap();
+    let warnings = build_fixture(&base, &scratch.join("jars"), &mods, &root).unwrap();
     let resources = resolved_resources(
         &base,
         root.clone(),
@@ -185,7 +185,7 @@ fn a_mods_jars_layer_under_its_files_in_mod_order() {
         ),
         ported("beta-empty", "beta", &[], vec![jar_b]),
     ];
-    build(&base, &scratch.join("jars"), &mods, &root).unwrap();
+    build_fixture(&base, &scratch.join("jars"), &mods, &root).unwrap();
     let resources = resolved_resources(
         &base,
         root.clone(),
@@ -234,7 +234,7 @@ fn a_missing_jar_refuses_the_whole_load_before_decoded_output() {
     );
     m.jars = vec![JarRef::new("porteda".into(), "1.0".into(), "2".repeat(128)).unwrap()];
     let root = scratch.join("root");
-    let error = build(
+    let error = build_fixture(
         &base,
         &scratch.join("jars"),
         std::slice::from_ref(&m),
@@ -636,7 +636,7 @@ fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
         drop(plan);
 
         let output = scratch.join(format!("output-{index}"));
-        build(&base, Path::new(""), &mods, &output).unwrap();
+        build_fixture(&base, Path::new(""), &mods, &output).unwrap();
         let built: serde_json::Value =
             serde_json::from_slice(&fs::read(output.join("registries.json")).unwrap()).unwrap();
         assert_eq!(
@@ -815,7 +815,7 @@ fn content_root_loads_with_every_table() {
     // The base as a relative path (cargo runs tests in the crate's folder):
     // the overlay's links still resolve.
     let relative = relative_base(&base);
-    let root = resource_root(
+    let root = resource_root_fixture(
         &relative,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1212,7 +1212,7 @@ fn refuses_unknown_templates_and_vanilla_ids() {
     let _ = fs::remove_dir_all(&scratch);
     let mut m = ruby_mod(&scratch.join("ruby"));
     m.content.blocks[0].template = "minecraft:not_a_block".into();
-    let e = build(
+    let e = build_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1228,7 +1228,7 @@ fn refuses_unknown_templates_and_vanilla_ids() {
         .find(|i| i.id == "ruby:ruby")
         .unwrap();
     gem.block = Some("minecraft:not_a_block".into());
-    let e = build(
+    let e = build_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1252,7 +1252,7 @@ fn refuses_unknown_templates_and_vanilla_ids() {
         .iter_mut()
         .find(|i| i.id == "ruby:ruby_stew");
     stew.unwrap().crafting_remainder = Some("minecraft:bowll".into());
-    let e = build(
+    let e = build_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1283,7 +1283,7 @@ fn refuses_more_states_than_a_world_holds() {
         b.id = format!("ruby:wire_{i}");
         m.content.blocks.push(b);
     }
-    let e = build(
+    let e = build_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1315,7 +1315,7 @@ fn builds_past_sixteen_bit_states() {
         b.id = format!("ruby:wire_{i}");
         m.content.blocks.push(b);
     }
-    build(
+    build_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -1329,7 +1329,7 @@ fn builds_past_sixteen_bit_states() {
 fn no_content_keeps_the_base_root() {
     let base = Path::new("/nonexistent/base");
     assert_eq!(
-        resource_root(base, Path::new(""), &[], Path::new("/nonexistent/cache")).unwrap(),
+        resource_root_fixture(base, Path::new(""), &[], Path::new("/nonexistent/cache")).unwrap(),
         base
     );
 }
@@ -1532,12 +1532,13 @@ fn content_root_is_reused_until_a_mod_changes() {
     let _ = fs::remove_dir_all(&scratch);
     let mut m = ruby_mod(&scratch.join("ruby"));
     let cache = scratch.join("cache");
-    let root = resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap();
+    let root =
+        resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap();
     // A rebuild starts from an empty folder: this file tells them apart.
     let sentinel = root.join("sentinel");
     fs::write(&sentinel, b"").unwrap();
     assert_eq!(
-        resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap(),
+        resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap(),
         root
     );
     assert!(sentinel.exists(), "an unchanged mod rebuilt the root");
@@ -1547,7 +1548,8 @@ fn content_root_is_reused_until_a_mod_changes() {
     let file = fs::File::options().write(true).open(&lang).unwrap();
     file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
         .unwrap();
-    let changed = resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap();
+    let changed =
+        resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&m), &cache).unwrap();
     assert_ne!(changed, root);
     assert!(sentinel.exists(), "a rebuild removed the active root");
     assert_eq!(fs::read(root.join("facts.json")).unwrap(), old_tables);
@@ -1568,7 +1570,7 @@ fn content_root_is_reused_until_a_mod_changes() {
     );
     assert!(!changed.join("assets/ruby/lang/en_us.json").exists());
     m.content.blocks[0].template = "minecraft:missing_template".into();
-    assert!(resource_root(&base, Path::new(""), std::slice::from_ref(&m), &cache).is_err());
+    assert!(resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&m), &cache).is_err());
     assert!(
         changed.exists(),
         "a refused rebuild removed the accepted root"
@@ -1656,7 +1658,7 @@ fn content_root_carries_a_structure_mod() {
         content: Content::read(&dir, &package.manifest).unwrap(),
         jars: Vec::new(),
     };
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -2082,7 +2084,7 @@ fn content_root_registers_a_mod_mob_effect() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -2131,7 +2133,7 @@ fn content_root_with_only_an_item_checks_its_identity() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -2206,7 +2208,7 @@ fn content_root_registers_a_mod_entity_type() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -2279,7 +2281,7 @@ fn content_root_registers_a_mod_menu_type() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -2356,7 +2358,7 @@ fn listed_namespaces_join_the_root() {
         ],
     );
     let root = scratch.join("root");
-    build(&base, Path::new(""), &[m], &root).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &root).unwrap();
     assert_eq!(namespaces(&root), ["kaisyn", "towers"]);
     assert!(tag_namespaces(&root).contains(&"kaisyn".to_owned()));
     let lists: BTreeMap<String, String> =
@@ -2388,7 +2390,7 @@ fn a_content_root_appends_a_mods_atlas_sources() {
         ],
     );
     let root = scratch.join("root");
-    build(&base, Path::new(""), std::slice::from_ref(&m), &root).unwrap();
+    build_fixture(&base, Path::new(""), std::slice::from_ref(&m), &root).unwrap();
     let resources = resolved_resources(
         &base,
         root.clone(),
@@ -2436,7 +2438,7 @@ fn mods_sharing_a_namespace_are_refused() {
     // The check runs before the base is read.
     let base = scratch.join("no-base");
     let out = scratch.join("root");
-    let e = build(&base, Path::new(""), &[towers, kaisyn], &out).unwrap_err();
+    let e = build_fixture(&base, Path::new(""), &[towers, kaisyn], &out).unwrap_err();
     assert_eq!(
         e.to_string(),
         "mods towers and kaisyn both use the namespace kaisyn; turn one of them off"
@@ -2445,7 +2447,7 @@ fn mods_sharing_a_namespace_are_refused() {
         &scratch.join("towers"),
         &[("horizon-mod.toml", &manifest("towers", "\"kaisyn\""))],
     );
-    let e = build(&base, Path::new(""), &[towers, other], &out).unwrap_err();
+    let e = build_fixture(&base, Path::new(""), &[towers, other], &out).unwrap_err();
     assert!(e.to_string().starts_with("mods towers and other"), "{e}");
     let _ = fs::remove_dir_all(&scratch);
 }
@@ -2521,7 +2523,7 @@ fn a_replacing_mod_tag_reaches_the_root() {
     let vanilla: serde_json::Value =
         serde_json::from_slice(&fs::read(base.join(file)).unwrap()).unwrap();
     assert!(vanilla["values"].as_array().unwrap().len() > 1, "{vanilla}");
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         &[adds, towns, late],
@@ -2719,7 +2721,7 @@ fn content_shapes_drive_outline_and_collision() {
             ),
         ],
     );
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
@@ -2929,7 +2931,7 @@ fn connecting_blocks_join_themselves_and_their_tag() {
         jars: Vec::new(),
     };
     let relative = relative_base(&base);
-    let root = resource_root(
+    let root = resource_root_fixture(
         &relative,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -3260,7 +3262,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
         jars: Vec::new(),
     };
     let relative = relative_base(&base);
-    let root = resource_root(
+    let root = resource_root_fixture(
         &relative,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -3349,7 +3351,7 @@ fn creative_tabs_come_on_their_own_page() {
         jars: Vec::new(),
     };
     let relative = relative_base(&base);
-    let root = resource_root(
+    let root = resource_root_fixture(
         &relative,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -3676,7 +3678,7 @@ fn declared_waterlogged_vegetation_uses_resolved_fluid_for_skylight() {
             ),
         ],
     );
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
@@ -3769,7 +3771,7 @@ fn declared_shapes_reach_render_and_worldgen_occlusion() {
             ),
         ],
     );
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let stone = registry.default_state("minecraft:stone").unwrap();
@@ -4582,7 +4584,7 @@ fn biome_modifier_climate_rejects_malformed_ranges() {
         );
         let m = zinc_mod(&scratch.join("zinc"), &[("bad", &modifier)]);
         assert!(
-            build(&base, Path::new(""), &[m], &scratch.join("out")).is_err(),
+            build_fixture(&base, Path::new(""), &[m], &scratch.join("out")).is_err(),
             "{climate}"
         );
         fs::remove_dir_all(&scratch).unwrap();
@@ -4604,7 +4606,7 @@ fn biome_modifier_climate_standalone_includes_bounds() {
         )],
     );
     let out = scratch.join("out");
-    build(&base, Path::new(""), &[m], &out).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     let features = biome_features(&out);
     assert_eq!(
         features["minecraft:desert"][6],
@@ -4638,7 +4640,7 @@ fn biome_modifier_climate_combines_with_holder_sets() {
         )],
     );
     let out = scratch.join("out");
-    build(&base, Path::new(""), &[m], &out).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     let features = biome_features(&out);
     assert_eq!(
         features["minecraft:plains"][6],
@@ -4670,7 +4672,7 @@ fn biome_modifier_climate_nested_or_not() {
         )],
     );
     let out = scratch.join("out");
-    build(&base, Path::new(""), &[m], &out).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     let features = biome_features(&out);
     assert_eq!(
         features["minecraft:plains"][6],
@@ -4712,7 +4714,7 @@ fn biome_modifiers_place_mod_features_in_vanilla_biomes() {
         ],
     );
     let out = scratch.join("out");
-    build(&base, Path::new(""), &[m], &out).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     let features = biome_features(&out);
     assert_eq!(
         features["minecraft:plains"],
@@ -4807,7 +4809,7 @@ fn configured_features_load_from_the_26_3_path() {
         ],
     );
     let root = scratch.join("out");
-    build(&base, Path::new(""), &[m], &root).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &root).unwrap();
     let bundle: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/features.json")).unwrap()).unwrap();
     assert_eq!(
@@ -4829,7 +4831,7 @@ fn biome_modifiers_none_keep_the_vanilla_biomes() {
     let base = biome_base("biome-modifiers-none");
     let scratch = base.parent().unwrap().to_owned();
     let out = scratch.join("out");
-    build(
+    build_fixture(
         &base,
         Path::new(""),
         &[zinc_mod(&scratch.join("zinc"), &[])],
@@ -4892,7 +4894,7 @@ fn biome_modifiers_refuse_unknown_names() {
     .enumerate()
     {
         let m = zinc_mod(&scratch.join(format!("zinc{i}")), &[("bad", modifier)]);
-        let warnings = build(&base, Path::new(""), &[m], &scratch.join(format!("out{i}"))).unwrap();
+        let warnings = build_fixture(&base, Path::new(""), &[m], &scratch.join(format!("out{i}"))).unwrap();
         assert!(
             warnings.iter().any(|w| w.contains(warning)
                 && w.contains("mod zinc: data/zinc/neoforge/biome_modifier/bad.json")),
@@ -4921,7 +4923,7 @@ fn biome_modifiers_refuse_unknown_names() {
     .enumerate()
     {
         let m = zinc_mod(&scratch.join(format!("zinc-err{i}")), &[("bad", modifier)]);
-        let e = build(
+        let e = build_fixture(
             &base,
             Path::new(""),
             &[m],
@@ -4988,7 +4990,7 @@ fn biome_modifiers_change_mob_spawns_and_spawn_costs() {
         ],
     );
     let out = scratch.join("out");
-    let warnings = build(&base, Path::new(""), &[m], &out).unwrap();
+    let warnings = build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let text = |root: &Path| -> BTreeMap<String, String> {
@@ -5099,7 +5101,7 @@ fn content_root_generates_a_biome_modifier_ore() {
         let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (*a, b.as_str())).collect();
         let dir = scratch.join(format!("zinc-{modifier}"));
         let m = folder_mod(&dir, &files);
-        let root = resource_root(&base, Path::new(""), &[m], &dir.join("cache")).unwrap();
+        let root = resource_root_fixture(&base, Path::new(""), &[m], &dir.join("cache")).unwrap();
         let assets = Assets::load(&root).unwrap();
         let zinc = assets.registry.default_state("zinc:zinc_ore").unwrap().0;
         let biomes = crate::biome::Biomes::load(
@@ -5159,7 +5161,7 @@ fn biome_modifiers_take_one_biome_or_a_list() {
         ],
     );
     let out = scratch.join("out");
-    build(&base, Path::new(""), &[m], &out).unwrap();
+    build_fixture(&base, Path::new(""), &[m], &out).unwrap();
     let features = biome_features(&out);
     assert_eq!(
         features["minecraft:plains"][6],
@@ -5236,7 +5238,7 @@ fn blocks_and_items_declared_in_code_get_ids() {
             .any(|b| b.id == "ruby:ruby_post")
     );
 
-    let root = resource_root(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
     let vanilla = Assets::load(&base).unwrap();
     let assets = Assets::load(&root).unwrap();
     let n = vanilla.registry.len() as u32;
@@ -5274,14 +5276,15 @@ fn blocks_and_items_declared_in_code_get_ids() {
     assert!(items.items["gears:shaft"].block.is_some());
     // The same declarations reuse the root; others build a new one.
     assert_eq!(
-        resource_root(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap(),
+        resource_root_fixture(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap(),
         root
     );
     // Changed declarations build a root of their own: the old one stays as
     // it was, for a switch back to that set.
     let stamp = fs::read(root.join(STAMP)).unwrap();
     mods[1].content.items[0].max_stack_size = Some(2);
-    let changed = resource_root(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
+    let changed =
+        resource_root_fixture(&base, Path::new(""), &mods, &scratch.join("cache")).unwrap();
     assert_ne!(changed, root);
     assert_eq!(fs::read(root.join(STAMP)).unwrap(), stamp);
     assert_ne!(fs::read(changed.join(STAMP)).unwrap(), stamp);
@@ -5386,7 +5389,7 @@ fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -5491,7 +5494,7 @@ fn a_content_fence_gate_plays_its_own_sounds_or_its_woods() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -5577,7 +5580,7 @@ fn a_block_yields_the_item_it_names_or_its_own_or_none() {
             ),
         ],
     );
-    let root = resource_root(
+    let root = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&m),
@@ -5612,7 +5615,7 @@ fn a_block_yields_the_item_it_names_or_its_own_or_none() {
             ),
         ],
     );
-    let e = resource_root(
+    let e = resource_root_fixture(
         &base,
         Path::new(""),
         std::slice::from_ref(&missing),
@@ -5669,7 +5672,7 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
             ),
         ],
     );
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let facts = BlockFacts::load(&root, registry).unwrap();
@@ -6032,13 +6035,14 @@ fn a_data_mod_loads_unloads_and_loads_again() {
     );
 
     let started = std::time::Instant::now();
-    let on = resource_root(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
+    let on =
+        resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
     eprintln!("content root built in {} ms", started.elapsed().as_millis());
     assert_ne!(on, base);
     assert_eq!(tables(&on, std::slice::from_ref(&glint)), loaded);
 
     // Off: the base root, without any of it.
-    let off = resource_root(&base, Path::new(""), &[], &cache).unwrap();
+    let off = resource_root_fixture(&base, Path::new(""), &[], &cache).unwrap();
     assert_eq!(off, base);
     assert_eq!(tables(&off, &[]), (None, None, false));
     assert!(!on.join("assets/glint/lang/en_us.json").exists());
@@ -6059,7 +6063,8 @@ fn a_data_mod_loads_unloads_and_loads_again() {
     let sentinel = on.join("sentinel");
     fs::write(&sentinel, b"").unwrap();
     let started = std::time::Instant::now();
-    let again = resource_root(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
+    let again =
+        resource_root_fixture(&base, Path::new(""), std::slice::from_ref(&glint), &cache).unwrap();
     eprintln!(
         "content root reused in {} ms",
         started.elapsed().as_millis()
@@ -6077,7 +6082,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
         content: Content::read(&scratch.join("glint"), &package.manifest).unwrap(),
     };
     let both_mods = [glint_again, ruby];
-    let both = resource_root(&base, Path::new(""), &both_mods, &cache).unwrap();
+    let both = resource_root_fixture(&base, Path::new(""), &both_mods, &cache).unwrap();
     assert_ne!(both, on);
     assert!(sentinel.exists());
     assert_eq!(tables(&both, &both_mods).0, loaded.0);
@@ -6115,4 +6120,24 @@ fn roots_unused_for_a_day_are_removed() {
     assert!(!roots.join(STAMP).exists() && !roots.join("assets").exists());
     assert!(current.exists() && recent.exists());
     fs::remove_dir_all(&scratch).unwrap();
+}
+
+// These fixtures accept every listed content package on both sides. Production
+// captures the inventory after admission, including active code-only packages.
+fn fixture_inventory(mods: &[ContentMod]) -> horizon_mods::enabled::EnabledMods {
+    horizon_mods::enabled::EnabledMods::new(
+        mods.iter()
+            .map(|package| (package.id.clone(), horizon_mods::Side::Both)),
+    )
+}
+fn build_fixture(base: &Path, jars: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>> {
+    super::build(base, jars, mods, out, &fixture_inventory(mods))
+}
+fn resource_root_fixture(
+    base: &Path,
+    jars: &Path,
+    mods: &[ContentMod],
+    cache: &Path,
+) -> Result<PathBuf> {
+    super::resource_root(base, jars, mods, cache, &fixture_inventory(mods))
 }

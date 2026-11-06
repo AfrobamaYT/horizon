@@ -137,7 +137,7 @@ fn jar_data_layers_merge_tags_and_replace_recipes_below_world_datapacks() {
     let beta = f.content("beta", &[], vec![later]);
     let root = f.0.join("root");
     let mods = [alpha, beta];
-    build(&f.0.join("base"), &f.0.join("jars"), &mods, &root).unwrap();
+    build_fixture(&f.0.join("base"), &f.0.join("jars"), &mods, &root).unwrap();
     let resources = resolved_resources(
         &f.0.join("base"),
         root.clone(),
@@ -238,15 +238,18 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     let base = f.0.join("base");
     let store = f.0.join("jars");
     let cache = f.0.join("cache");
-    let first = resource_root(&base, &store, &mods, &cache).unwrap();
+    let first = resource_root_fixture(&base, &store, &mods, &cache).unwrap();
     let first_source = resolved_resources(&base, first.clone(), &store, &mods, cache.clone())
         .unwrap()
         .source()
         .clone();
     assert_eq!(first_source.read(path).unwrap(), b"b");
-    assert_eq!(resource_root(&base, &store, &mods, &cache).unwrap(), first);
+    assert_eq!(
+        resource_root_fixture(&base, &store, &mods, &cache).unwrap(),
+        first
+    );
     mods[0].jars.reverse();
-    let reversed = resource_root(&base, &store, &mods, &cache).unwrap();
+    let reversed = resource_root_fixture(&base, &store, &mods, &cache).unwrap();
     let reversed_source = resolved_resources(&base, reversed.clone(), &store, &mods, cache.clone())
         .unwrap()
         .source()
@@ -254,7 +257,7 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     assert_ne!(first, reversed);
     assert_eq!(reversed_source.read(path).unwrap(), b"a");
     mods[0].jars.pop();
-    let shortened = resource_root(&base, &store, &mods, &cache).unwrap();
+    let shortened = resource_root_fixture(&base, &store, &mods, &cache).unwrap();
     let shortened_source =
         resolved_resources(&base, shortened.clone(), &store, &mods, cache.clone())
             .unwrap()
@@ -265,19 +268,19 @@ fn changing_jar_list_or_order_rebuilds_and_missing_after_compose_keeps_the_old_r
     check_jars(&shortened, &store).unwrap();
     let relabeled = JarRef::new(b.id().into(), "2".into(), b.sha512().into()).unwrap();
     mods[0].jars[0] = relabeled.clone();
-    let versioned = resource_root(&base, &store, &mods, &cache).unwrap();
+    let versioned = resource_root_fixture(&base, &store, &mods, &cache).unwrap();
     assert_ne!(versioned, shortened);
     let accepted: Vec<horizon_mods::manifest::JarRequirement> =
         serde_json::from_slice(&fs::read(versioned.join(JAR_INPUTS)).unwrap()).unwrap();
     assert_eq!(accepted[0].jar, relabeled);
     mods[0].jars[0] = b.clone();
     assert_eq!(
-        resource_root(&base, &store, &mods, &cache).unwrap(),
+        resource_root_fixture(&base, &store, &mods, &cache).unwrap(),
         shortened
     );
     fs::remove_file(b.cache_path(&store)).unwrap();
     let before = fs::read_dir(&cache).unwrap().count();
-    let error = resource_root(&base, &store, &mods, &cache).unwrap_err();
+    let error = resource_root_fixture(&base, &store, &mods, &cache).unwrap_err();
     let missing = error.downcast_ref::<MissingJar>().unwrap();
     assert_eq!(missing.owners, ["alpha"]);
     assert_eq!(missing.jar, b);
@@ -329,4 +332,49 @@ fn accepted_jar_inputs_distinguish_unreadable_invalid_and_non_file_cache_entries
         JarInputsError::Io { path: failed, source }
             if failed == store && source.kind() == std::io::ErrorKind::InvalidInput
     ));
+}
+
+#[test]
+fn code_only_inventory_changes_cache_roots_and_recipe_conditions_without_content_namespaces() {
+    use horizon_mods::{Side, enabled::EnabledMods};
+    let fixture = Fixture::new("enabled-inventory");
+    fixture.write(
+        "base/data/minecraft/recipe/code_only.json",
+        r#"{"type":"test:recipe","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"code_only"}]}"#,
+    );
+    fixture.write(
+        "base/data/minecraft/recipe/namespace_is_not_a_mod.json",
+        r#"{"type":"test:recipe","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"unrelated_namespace"}]}"#,
+    );
+    fixture.write("base/assets/unrelated_namespace/lang/en_us.json", "{}");
+    let base = fixture.0.join("base");
+    let jars = fixture.0.join("jars");
+    let cache = fixture.0.join("cache");
+    let both = EnabledMods::new([("code_only".into(), Side::Both)]);
+    let first = super::super::resource_root(&base, &jars, &[], &cache, &both).unwrap();
+    assert_ne!(first, base);
+    assert_eq!(EnabledMods::read(&first).unwrap(), both);
+    assert_eq!(
+        super::super::resource_root(&base, &jars, &[], &cache, &both).unwrap(),
+        first
+    );
+    let recipes = |root: &Path| {
+        horizon_items::recipe_sources::sources(root, &Default::default())
+            .unwrap()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(recipes(&first), ["code_only"]);
+    let client = EnabledMods::new([("code_only".into(), Side::Client)]);
+    let next = super::super::resource_root(&base, &jars, &[], &cache, &client).unwrap();
+    assert_ne!(next, first);
+    assert!(recipes(&next).is_empty());
+    let disabled =
+        super::super::resource_root(&base, &jars, &[], &cache, &EnabledMods::default()).unwrap();
+    assert_eq!(disabled, base);
+    assert!(recipes(&disabled).is_empty());
+    // A reload creates another generation; readers of the old root retain
+    // the inventory and conditions they were constructed with.
+    assert_eq!(recipes(&first), ["code_only"]);
 }

@@ -86,6 +86,12 @@ pub fn mods() -> &'static [ModEntry] {
     crate::mods()
 }
 
+/// Actual installed code identities, including mods with no hook subscriptions.
+/// The engine uses this dispatch inventory to apply its saved code switches.
+pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
+    crate::mods().iter().map(|entry| entry.id)
+}
+
 /// The startup package inventory at an owning engine load boundary.
 pub fn loaded_mods() -> LoadedMods {
     LoadedMods::new()
