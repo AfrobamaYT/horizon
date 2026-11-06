@@ -14,6 +14,13 @@ pub trait Hooks {
     /// it today, wherever it is in the list; moving the others to vanilla's order is a separate
     /// parity change. It fires once per level, on the server, and listeners run on replayed ticks,
     /// so they must be pure functions of their inputs. Not cancellable.
+    #[notes = r#"## Custom spawners
+
+`modify_custom_spawners` (NeoForge's `ModifyCustomSpawnersEvent`) fires once per level, the first time the level ticks its custom spawners, with the level's `CustomSpawners` list: vanilla's five (`WanderingTrader`, `Patrol`, `Cat`, `VillageSiege`, `Phantom`) in the order Horizon ticks them. `remove` takes an entry out so it never ticks (its random draws go with it); `add` appends a mod's own spawner by a `SpawnerKey`. With no listener, or one that leaves the list alone, nothing changes: the same spawners tick in the same order.
+
+NeoForge's list holds `CustomSpawner` objects. An object a guest implements cannot cross to a wasm mod, so a mod's spawner is a key it owns and the `custom_spawner_tick(dimension, key, spawn_enemies)` hook stands for `CustomSpawner.tick`: it runs once per tick for each key in the list, in list order, while the `spawn_mobs` rule is on, and the mod that owns the key spawns through its `host`. Every mod gets the call and the others ignore it. A level with no mod spawner pays one list walk per tick and no hook call. Beyond NeoForge: a key plus a tick hook in place of an object.
+
+Horizon ticks vanilla's spawners where it always has: the trader, patrol, cat and siege spawners in the custom spawner block (vanilla's own order differs, and moving it is a separate parity change) and the phantom spawner with the stats, after the mobs. A mod's spawners tick after them in list order, so the position of the `Phantom` entry in the list does not move it. Listeners run on replayed ticks, so they are pure functions of their inputs."#]
     #[hook(
         side = "server",
         contract = "listen",

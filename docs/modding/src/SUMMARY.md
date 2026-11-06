@@ -34,7 +34,8 @@
 - [The registry index and `.hpack`](reference/registry-index.md)
 - [The mod API (rustdoc)](reference/api.md)
 - [Legacy native hook API history (frozen)](reference/native-api-history.md)
-- [Hook notes](reference/hook-notes.md)
+<!-- The hook-notes preprocessor supplies this chapter and its published URL from catalog notes. -->
+- [Hook notes]()
 - [NeoForge counterparts](reference/neoforge-counterparts.md)
 
 # For agents

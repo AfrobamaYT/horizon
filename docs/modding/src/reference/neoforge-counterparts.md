@@ -6,7 +6,7 @@ It is written by `tools/neoforge_counterparts.py` (run it again after changing a
 stale). A key names the event class (`PlayerEvent.Clone`) or the extension method (`IPlayerExtension.openMenu`);
 notes about cancelling or the event bus belong in the hook's `///` doc, not in the key.
 
-579 hooks: 335 name a counterpart, 244 say they have none.
+577 hooks: 333 name a counterpart, 244 say they have none.
 The names were checked against the NeoForge 26.3.0.101 sources (`neoforge-26.3.0.101-sources.jar` on
 maven.neoforged.net): each class or extension method named below exists there. A `none` says why no event or method
 matches; the keys naming FML classes (`FMLClientSetupEvent`, `ModConfigEvent`, `ModContainer`) or a vanilla one
@@ -109,7 +109,6 @@ own note.
 | `explosion_detonate` | server | `ExplosionEvent.Detonate` |
 | `explosion_knockback` | server | `ExplosionKnockbackEvent` |
 | `explosion_start` | server | `ExplosionEvent.Start` |
-| `extract_block_screen_effect` | client | `ExtractBlockScreenEffectEvent` |
 | `fall_on` | server | `LivingFallEvent` |
 | `farmland_trample` | server | `BlockEvent.FarmlandTrampleEvent` |
 | `finalize_spawn` | server | `FinalizeSpawnEvent` |
@@ -232,7 +231,7 @@ own note.
 | `player_break_speed` | both | `PlayerEvent.BreakSpeed` |
 | `player_brewed_potion` | server | `PlayerBrewedPotionEvent` |
 | `player_changed_dimension` | server | `PlayerEvent.PlayerChangedDimensionEvent` |
-| `player_clone` | server | `PlayerEvent.Clone` |
+| `player_clone` | server | `PlayerEvent.Clone (not cancellable)` |
 | `player_command` | server | `CommandEvent` |
 | `player_container_close` | server | `PlayerContainerEvent.Close` |
 | `player_container_open` | server | `PlayerContainerEvent.Open` |
@@ -243,14 +242,14 @@ own note.
 | `player_harvest_check` | both | `PlayerEvent.HarvestCheck` |
 | `player_heart_type` | client | `PlayerHeartTypeEvent` |
 | `player_item_smithed` | server | `PlayerEvent.ItemSmithedEvent` |
-| `player_load_from_file` | server | `PlayerEvent.LoadFromFile` |
+| `player_load_from_file` | server | `PlayerEvent.LoadFromFile (not cancellable)` |
 | `player_logged_in` | server | `PlayerEvent.PlayerLoggedInEvent` |
 | `player_logged_out` | server | `PlayerEvent.PlayerLoggedOutEvent` |
 | `player_name_format` | both | `PlayerEvent.NameFormat` |
 | `player_portal` | server | `EntityTravelToDimensionEvent` |
 | `player_respawn_position` | server | `PlayerRespawnPositionEvent` |
 | `player_respawned` | server | `PlayerEvent.PlayerRespawnEvent` |
-| `player_save_to_file` | server | `PlayerEvent.SaveToFile` |
+| `player_save_to_file` | server | `PlayerEvent.SaveToFile (not cancellable)` |
 | `player_set_spawn` | server | `PlayerSetSpawnEvent` |
 | `player_spawn_phantoms` | server | `PlayerSpawnPhantomsEvent` |
 | `player_start_tracking` | server | `PlayerEvent.StartTracking` |
@@ -277,7 +276,6 @@ own note.
 | `register_configs` | both | `ModContainer.registerConfig` |
 | `register_debug_entries` | client | `RegisterDebugEntriesEvent` |
 | `register_range_select_item_model_property` | client | `RegisterRangeSelectItemModelPropertyEvent` |
-| `register_select_item_model_property` | client | `RegisterSelectItemModelPropertyEvent` |
 | `release_using` | both | `LivingEntityUseItemEvent.Stop` |
 | `render_arm` | client | `RenderArmEvent` |
 | `render_fog` | client | `ViewportEvent.RenderFog` |

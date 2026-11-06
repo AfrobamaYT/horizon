@@ -1,7 +1,7 @@
 //! The `enderman_anger` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait Hooks {
-    /// `player` stares at `enderman` (NeoForge's `EnderManAngerEvent`, at
+    /// `player` stares at `enderman` (NeoForge's `EndermanAngerEvent`, at
     /// the end of `Enderman.isBeingStaredBy`): the look is within the
     /// enderman's cone, in line of sight, and no carved pumpkin hides the
     /// face. Asked each time the enderman's goals check the stare: to get

@@ -14,8 +14,9 @@ pub trait DrawContexts {
 }
 
 pub trait Hooks {
-    /// The world frame's local visual sources. Push requests; Horizon validates
-    /// and limits them before rendering. Called only while a world is visible.
+    /// The world frame's local, world-space rim and colored-light sources.
+    /// Push requests; Horizon validates and limits them before rendering.
+    /// Called only while a world is visible.
     #[hook(
         side = "client",
         contract = "listen",
@@ -354,7 +355,8 @@ pub trait Hooks {
     )]
     fn block_entity_update_tag();
     /// Block `block`'s block entity has item slots (a `WorldlyContainer`):
-    /// set `container` when the block is yours. Asked once for each mod
+    /// hoppers, comparators and breaking the block use them as vanilla's containers.
+    /// Set `container` when the block is yours. Asked once for each mod
     /// block when the ticking table is built; at most 256 slots, and slot
     /// numbers past the count are left out. Its `menu`, one of
     /// `containers::MOD_MENUS` or a content mod's menu type
@@ -920,9 +922,9 @@ pub trait Hooks {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 told item entities, experience orbs and mobs; it now
-    /// tells every kind `native_entity_join_level` does (`kind` is the type), each
-    /// once, when the game next notices it gone (the tick or action that removed
+    /// It only hears. It tells every kind `native_entity_join_level` does
+    /// (`kind` is the type), each once, when the game next notices it gone
+    /// (the tick or action that removed
     /// it). Check `kind`. Server-side.
     #[hook(
         side = "server",
@@ -1059,7 +1061,8 @@ pub trait Hooks {
         neoforge = "RenderLevelStageEvent.AfterLevel"
     )]
     fn world_drawn();
-    /// Asked as a frame is built and drawn: set what your mod needs.
+    /// Asked as a frame is built and drawn: set what your mod needs in
+    /// `RenderNeeds`, including entity runs and the world's depth without a shader pack.
     #[hook(
         side = "client",
         contract = "collect",
@@ -1341,7 +1344,9 @@ pub trait Hooks {
     /// `LootTableEvents.MODIFY_DROPS`); `context` says what dropped them and
     /// how, and it is called even when `drops` is empty. A player's use drops
     /// through it too (`NativeLootDrops::used`: shears, a brush, an item
-    /// frame), with that player named. It hears blocks that a
+    /// frame), with that player named. Lead drops from untying or cutting a
+    /// leash, and from a mob a player killed while leashed, pass through here
+    /// too, with that player named. It hears blocks that a
     /// player, an explosion or a mob breaks, not other breaks (leaves decaying,
     /// a torch losing its wall, a piston, `/setblock ... destroy`), nor a
     /// creative break or a tool that can't harvest the block, nor experience.
@@ -1419,7 +1424,14 @@ pub trait Hooks {
         cancellable = false
     )]
     fn screen_render_post();
-    /// NeoForge 26.3's ModifyDefaultComponentsEvent: once per item after registries freeze, before the owning load publishes immutable defaults. Receives a read-only DataLoadContext with the actual ServerDataLoad or ClientPreload origin, frozen registry names, settings captured once for loaded packages at this load boundary, and the shared LoadedMods view. Readers and datapack reloads do not replay this event. No runtime Host, world handles or transaction access.
+    /// NeoForge 26.3's ModifyDefaultComponentsEvent: set or remove entries in
+    /// `components`, the default component map for `item`, including vanilla items.
+    /// Asked once per item after registries freeze, before the owning load
+    /// publishes immutable defaults. Receives a read-only DataLoadContext with
+    /// the actual ServerDataLoad or ClientPreload origin, frozen registry names,
+    /// settings captured once for loaded packages at this load boundary, and
+    /// the shared LoadedMods view. Readers and datapack reloads do not replay
+    /// this event. No runtime Host, world handles or transaction access.
     #[hook(
         side = "both",
         contract = "collect",
@@ -2528,6 +2540,15 @@ pub trait Hooks {
     /// side, before any resource loads: push the same ones every time, from
     /// nothing but your code. Declarations that don't pass the files' checks
     /// are logged and that namespace's are left out.
+    #[notes = r#"## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "both",
         contract = "collect",
@@ -2875,8 +2896,9 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event)"
     )]
     fn block_failed_dispense();
-    /// Precipitation is about to form or add to a block at `pos`. `from` and
-    /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
+    /// Precipitation is about to form ice or place or thicken snow at `pos`.
+    /// `from` and `to` are block state IDs. Set `cancel` to keep the old state.
+    /// Server-side.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -3005,7 +3027,7 @@ pub trait Hooks {
         cancellable = true
     )]
     fn item_consumption_teleport();
-    /// A compostable item was added to the composter at `pos`.
+    /// A player added a compostable item to the composter at `pos`.
     #[hook(
         side = "server",
         contract = "listen",
@@ -3740,7 +3762,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.Clone",
+        neoforge = "PlayerEvent.Clone (not cancellable)",
         cancellable = false
     )]
     fn player_clone();
@@ -3869,7 +3891,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.LoadFromFile",
+        neoforge = "PlayerEvent.LoadFromFile (not cancellable)",
         cancellable = false
     )]
     fn player_load_from_file();
@@ -3911,7 +3933,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.SaveToFile",
+        neoforge = "PlayerEvent.SaveToFile (not cancellable)",
         cancellable = false
     )]
     fn player_save_to_file();
@@ -4749,9 +4771,13 @@ pub trait Hooks {
     fn world_saved();
     /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
     /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
-    /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
-    /// changes to the event field do not affect the vanilla entity event. Asked on
-    /// servers, for the entities `native_living_breathe` is. It is given the loop `context` of the server that ticks the entity (its registries, settings and mod list), because it fires inside the tick's own air and damage update.
+    /// drowns at -20 air, for 2 damage and 8 bubbles. Change `is_drowning` or
+    /// `damage_amount`, or cancel to skip drowning this tick. Bubble count is
+    /// read-only; changes to the event field do not affect the vanilla entity
+    /// event. Asked on servers, for the entities `native_living_breathe` is.
+    /// It is given the loop `context` of the server that ticks the entity (its
+    /// registries, settings and mod list), because it fires inside the tick's
+    /// own air and damage update.
     #[hook(
         side = "server",
         contract = "cancel",

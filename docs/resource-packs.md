@@ -12,7 +12,7 @@ reads `pack.mcmeta` (format range, overlays, filters) and resolves one shared re
 prepared vanilla resources, later packs winning. Folders and open zip files use the same lookup and listing
 interface; archive entries stay in their archives. Files vanilla reads as a resource *stack* (language files,
 `sounds.json`, font definitions, atlas definitions) are merged layer by layer as vanilla merges them.
-Every loader reads that view; `game/packs.rs` (`reload_packs`) prepares a new generation on a worker and
+Every loader reads that view; `game/world/packs/mod.rs` (`reload_packs`) prepares a new generation on a worker and
 publishes it after loading succeeds, as `Minecraft.reloadResourcePacks` does. Readers of the previous
 archive generation retain its open files. Prepared registry tables and disposable decoding caches have
 separate filesystem locations. [The older overlay measurements](reuse-pack-overlays.md) describe the
@@ -68,7 +68,7 @@ harness named checks that loader against vanilla).
 | Entity textures and variants | `textures/entity/` | works | `test_entity_model_parity`, loaded from the overlay |
 | Block entities: chests, signs, beds, banners, shields, shulker boxes, decorated pots | `atlases/`, `textures/entity/` | works | `test_block_entity_render_parity` |
 | Villager hats | `*.png.mcmeta` `villager` | **no** | the type layer's hat is always drawn; vanilla hides it under a profession hat marked `full`/`partial` |
-| Equipment (armour, horse/llama/wolf/nautilus armour, wings, dyeable layers) | `equipment/`, `textures/entity/equipment/` | works | `game/armor_stands.rs`, `mobs/render.rs` read the overlay |
+| Equipment (armour, horse/llama/wolf/nautilus armour, wings, dyeable layers) | `equipment/`, `textures/entity/equipment/` | works | `game/entities/armor_stands.rs`, `mobs/render.rs` read the overlay |
 | Armour trims on items | `atlases/items.json`, `textures/trims/items/` | works | `paletted_permutations` (`atlas_sources.rs` tests) |
 | Armour trims on worn armour | `textures/trims/entity/`, `textures/palettes/`, `palette` metadata | **no** | worn trims aren't drawn yet (`PalettedTextureManager`) |
 | Particles | `particles/`, `textures/particle/` | works | `test_particle_providers_parity` |
