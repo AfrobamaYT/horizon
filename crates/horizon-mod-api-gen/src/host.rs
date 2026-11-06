@@ -140,10 +140,8 @@ impl Area {
     }
 }
 
-/// The traits of one area file by tier. A trait is a tier's when it is named `<Camel><Tier>`; any
-/// other trait whose name ends like a host trait is refused, since it would reach neither a union
-/// nor the WIT. Other traits (the draw contexts and services of `draw.rs` and `services.rs`) are not
-/// host traits and stay with their own generators.
+/// The traits of one area file by tier. Only `<Camel><Tier>` and the explicitly listed draw
+/// contexts and services are accepted: an unknown trait would reach neither a union nor the WIT.
 fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>, String> {
     let mut tiers = BTreeMap::new();
     for item in file.items {
@@ -155,15 +153,26 @@ fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>
             .into_iter()
             .find(|tier| name == format!("{camel}{}", tier.suffix()))
         else {
-            if Tier::ALL
-                .into_iter()
-                .any(|tier| name.ends_with(tier.suffix()))
-            {
-                return Err(format!(
-                    "trait `{name}` looks like a host trait but is not named `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>`"
-                ));
+            if matches!(
+                (camel, name.as_str()),
+                (
+                    "Draw",
+                    "DrawContext" | "BlockEntityDrawContext" | "WorldDrawContext"
+                ) | (
+                    "Services",
+                    "ClientSession"
+                        | "Commands"
+                        | "Levels"
+                        | "Messages"
+                        | "Players"
+                        | "RenderAssets"
+                )
+            ) {
+                continue;
             }
-            continue;
+            return Err(format!(
+                "unrecognised trait `{name}`: expected `{camel}<Host|ServerHost|ClientHost|Backend|ClientBackend|BackendMut|ClientBackendMut>` or an explicitly listed draw context or service"
+            ));
         };
         let entries = item
             .items
@@ -784,7 +793,7 @@ mod tests {
     #[test]
     fn an_area_file_reads_its_tier_traits() {
         let file = syn::parse_str(
-            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); } pub trait Unrelated {}",
+            "pub trait ItemsHost { fn a(&self); } pub trait ItemsBackendMut { fn b(&mut self); }",
         )
         .unwrap();
         let tiers = area_tiers("Items", file).unwrap();
@@ -796,14 +805,31 @@ mod tests {
     }
 
     #[test]
-    fn a_host_like_trait_that_is_not_named_for_its_area_is_refused() {
-        for wrong in ["ItemHost", "ItemsReadBackend", "OtherServerHost"] {
-            let file = syn::parse_str(&format!(
-                "pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
-            ))
-            .unwrap();
-            let error = area_tiers("Items", file).err().unwrap();
-            assert!(error.contains(wrong), "{error}");
+    fn an_unrecognised_area_trait_is_refused() {
+        for wrong in [
+            "ItemHost",
+            "ItemsReadBackend",
+            "OtherServerHost",
+            "ReviewProbeHosts",
+            "Unrelated",
+        ] {
+            for recognised in ["", "pub trait ItemsHost { fn known(&self); }"] {
+                let file = syn::parse_str(&format!(
+                    "{recognised} pub trait {wrong} {{ fn a(&self) -> &std::path::Path; }}"
+                ))
+                .unwrap();
+                let error = area_tiers("Items", file).err().unwrap();
+                assert!(error.contains(wrong), "{error}");
+            }
+        }
+    }
+
+    #[test]
+    fn non_host_traits_are_allowed_only_in_their_own_file() {
+        for (area, name) in [("Draw", "DrawContext"), ("Services", "Commands")] {
+            let file = syn::parse_file(&format!("pub trait {name} {{}}")).unwrap();
+            assert!(area_tiers(area, file.clone()).unwrap().is_empty());
+            assert!(area_tiers("Items", file).is_err());
         }
     }
 
