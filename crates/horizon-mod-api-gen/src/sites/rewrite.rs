@@ -3,32 +3,7 @@ use super::*;
 use crate::{crossing::Rule, internals::Internal, points::file_points};
 use quote::{ToTokens, format_ident, quote};
 use sha2::{Digest, Sha256};
-use syn::{FnArg, Type, spanned::Spanned, visit::Visit};
-
-struct Calls<'a> {
-    selector: &'a str,
-    calls: Vec<&'a Expr>,
-}
-impl<'a> Visit<'a> for Calls<'a> {
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        let selector = match expr {
-            Expr::MethodCall(call) => {
-                format!("{}.{}", call.receiver.to_token_stream(), call.method).replace(' ', "")
-            }
-            Expr::Call(call) => call.func.to_token_stream().to_string().replace(' ', ""),
-            _ => String::new(),
-        };
-        if !selector.is_empty()
-            && (selector == self.selector
-                || self.selector.starts_with('.') && selector.ends_with(self.selector))
-        {
-            self.calls.push(expr);
-        }
-        syn::visit::visit_expr(self, expr);
-    }
-    fn visit_item(&mut self, _: &'a syn::Item) {}
-    fn visit_expr_const(&mut self, _: &'a syn::ExprConst) {}
-}
+use syn::{FnArg, Type, spanned::Spanned};
 
 fn digest(text: String) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))[..16].to_owned()
@@ -65,24 +40,16 @@ pub fn rewrite(
             .filter(|f| plain_path(&f.target()) == declaration.target)
         {
             let build = || -> Result<_, Error> {
-                let mut calls = Calls {
-                    selector: &declaration.selector,
-                    calls: Vec::new(),
-                };
-                calls.visit_block(found.body);
-                calls.calls.sort_by_key(|call| match call {
-                    Expr::MethodCall(call) => call.method.span().start(),
-                    _ => call.span().start(),
-                });
-                if calls.calls.is_empty() {
+                let calls = super::analysis::calls(found.body, &declaration.selector);
+                let mut lexical = super::analysis::Scope::scan(found.sig, Some(found.body));
+                if calls.is_empty() {
                     return Err(Cause::Missing("selector matched no call").into());
                 }
-                if calls.calls.len() > 1 && declaration.ordinal.is_none() {
+                if calls.len() > 1 && declaration.ordinal.is_none() {
                     return Err(Cause::Ambiguous("ambiguous selector: supply an ordinal").into());
                 }
                 let ordinal = declaration.ordinal.unwrap_or(0);
                 let expr = *calls
-                    .calls
                     .get(ordinal)
                     .ok_or(Cause::Missing("ordinal matched no call"))?;
                 let enclosing = entries
@@ -104,7 +71,7 @@ pub fn rewrite(
                     fields,
                     types,
                     output,
-                } = resolve(expr, enclosing, found.sig, entries, &rule)?;
+                } = resolve(expr, enclosing, found.sig, &lexical, entries, &rule)?;
                 let name = format!(
                     "S{}",
                     digest(format!(
@@ -117,14 +84,17 @@ pub fn rewrite(
                 let variant = format_ident!("{name}");
                 let receiver_alias = format_ident!("__{name}Receiver");
                 let output_alias = format_ident!("__{name}Output");
+                let recv = lexical.fresh("__recv");
+                let args = lexical.fresh("__args");
+                let wrap = lexical.fresh("__wrap");
                 let mut original = expr.clone();
                 let arg_fields = fields
                     .iter()
-                    .map(|f| syn::parse_quote!(__args.#f))
+                    .map(|f| syn::parse_quote!(#args.#f))
                     .collect::<Vec<Expr>>();
                 match &mut original {
                     Expr::MethodCall(call) => {
-                        *call.receiver = syn::parse_quote!(__recv);
+                        *call.receiver = syn::parse_quote!(#recv);
                         call.args = arg_fields.into_iter().collect();
                     }
                     Expr::Call(call) => {
@@ -141,12 +111,12 @@ pub fn rewrite(
                             quote!(#expr)
                         };
                         if r.mutability.is_some() {
-                            quote!(let __recv = &mut #place;)
+                            quote!(let #recv = &mut #place;)
                         } else {
-                            quote!(let __recv = &#place;)
+                            quote!(let #recv = &#place;)
                         }
                     }
-                    _ => quote!(let __recv = ();),
+                    _ => quote!(let #recv = ();),
                 };
                 let owning = module.split("::").next().expect("a module has a crate");
                 let local =
@@ -171,8 +141,8 @@ pub fn rewrite(
                 let replacement = quote! {
                     if ::mod_points::__private::SITES[::mod_points::SiteId::#variant as usize].load(::std::sync::atomic::Ordering::Relaxed) {
                         #binding
-                        let mut __args = #record { #(#fields: #arguments,)* };
-                        ::horizon_mod_api_macros::site!(#variant, #listener, #receiver_alias, #record, #output_alias, __recv, __args, |__recv: #receiver_alias<'_, '_>, __args: &mut #record| #original)
+                        let mut #args = #record { #(#fields: #arguments,)* };
+                        ::horizon_mod_api_macros::site!(#wrap, #variant, #listener, #receiver_alias, #record, #output_alias, #recv, #args, |#recv: #receiver_alias<'_, '_>, #args: &mut #record| #original)
                     } else { #expr }
                 };
                 let site = Site {

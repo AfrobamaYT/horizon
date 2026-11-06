@@ -81,9 +81,11 @@ pub(crate) fn resolve<'a>(
     expr: &'a Expr,
     enclosing: &Internal,
     enclosing_sig: &syn::Signature,
+    lexical: &super::analysis::Scope,
     entries: &'a [Internal],
     rule: &Rule,
 ) -> Result<Resolved<'a>, Error> {
+    lexical.check_target(expr)?;
     let (scope, this) = crate::internals_table::function_scope(rule, enclosing)
         .ok_or(Cause::Missing("unresolved enclosing receiver"))?;
     let (callee, recv, arguments) = match expr {
@@ -210,31 +212,17 @@ pub(crate) fn resolve<'a>(
     if arguments.len() != fields.len() {
         return Err(Cause::Record("callee argument count differs").into());
     }
-    let root = recv.map(|r| {
-        r.to_token_stream()
-            .to_string()
-            .split('.')
-            .next()
-            .expect("receiver")
-            .trim()
-            .to_owned()
-    });
-    if arguments.iter().any(|arg| {
-        arg.to_token_stream()
-            .to_string()
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .any(|s| s == "self" || root.as_deref() == Some(s))
-    }) {
-        return Err(Cause::Record(
-            "argument borrows or reads the receiver: two-phase borrowing is not record-safe",
-        )
-        .into());
-    }
+    super::analysis::arguments(
+        &arguments,
+        recv,
+        sig.receiver()
+            .is_some_and(|r| r.reference.is_some() && r.mutability.is_some()),
+    )?;
     let output = match &sig.output {
         syn::ReturnType::Default => quote!(()),
         syn::ReturnType::Type(_, ty) => {
             let shape = rule.shape(&callee_module, callee_this.as_deref(), ty);
-            if point_shape::borrows(ty) || matches!(shape, Shape::Ref { .. } | Shape::Opaque(_)) {
+            if shape.may_borrow() {
                 return Err(Cause::Signature("borrowed or unresolved call result").into());
             }
             crate::internals_table::spell(&shape).ok_or(Cause::Missing("unresolved call result"))?
