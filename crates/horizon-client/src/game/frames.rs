@@ -299,7 +299,7 @@ impl Game<'_> {
             let Some(held) = self.held().cloned() else {
                 return false;
             };
-            self.item_frames[i].item = Some(ItemStack { count: 1, ..held });
+            self.item_frames[i].set_item(Some(held));
             action = "put";
             self.audio
                 .play(&sound(&self.item_frames[i], "add_item"), Some(at), 1.0, 1.0);
@@ -394,7 +394,7 @@ impl Game<'_> {
     /// for a non-empty stack and updates the comparators.
     pub(super) fn set_frame_item(&mut self, i: usize, stack: Option<ItemStack>) {
         let f = &mut self.item_frames[i];
-        f.item = stack.map(|s| ItemStack { count: 1, ..s });
+        f.set_item(stack);
         let (pos, filled) = (f.pos, f.item.is_some());
         if filled {
             let (name, at) = (

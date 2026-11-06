@@ -475,7 +475,7 @@ mod jukebox_play_tests {
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
-        .ok()?;
+        .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
@@ -498,7 +498,8 @@ mod jukebox_play_tests {
             .pack
             .assets
             .registry
-            .default_state("minecraft:jukebox")?;
+            .default_state("minecraft:jukebox")
+            .unwrap();
         game.world.set(0, 64, 0, jukebox).unwrap();
         let disc = ItemStack::new("minecraft:music_disc_cat", 1);
         crate::game::dispense_fixture::start_recording();

@@ -495,7 +495,7 @@ mod interact_vibration_tests {
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
-        .ok()?;
+        .unwrap();
         let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
         options.resources = root.clone();
         options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
