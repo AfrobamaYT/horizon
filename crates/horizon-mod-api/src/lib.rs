@@ -56,6 +56,22 @@ pub enum GameRuleError {
     Duplicate,
 }
 
+/// Why an entity type's attribute declaration was refused
+/// ([`Registrar::declare_entity_attributes`](crate::Registrar)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EntityAttributeError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// The set declares the same attribute twice.
+    DuplicateAttribute,
+    /// A base value is not finite.
+    NotFinite,
+    /// Another declaration already covers the entity type.
+    Duplicate,
+}
+
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys

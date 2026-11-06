@@ -1094,6 +1094,73 @@ mod tests {
         );
     }
 
+    /// A mod's declared attribute set (#845, `EntityAttributeCreationEvent`)
+    /// reaches everything a mob of the type is: the fields it spawns with,
+    /// the finalize defaults and the live attribute map's catalog row —
+    /// built from the template's, so the reads of #1469 and #1493 answer the
+    /// declared values with no second copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_entity_attributes_reach_spawn_and_the_live_map() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let declared = [
+            ("minecraft:max_health".to_string(), 55.0),
+            ("minecraft:movement_speed".to_string(), 0.4),
+        ];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let base = |catalog: &Catalog, entity: &str, name: &str| {
+            catalog.default_base(entity, catalog.id(name).unwrap())
+        };
+        // The declared values, and the template's row under them.
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:max_health"),
+            Some(55.0)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:movement_speed"),
+            Some(0.4)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:attack_damage"),
+            base(&catalog, "minecraft:zombie", "minecraft:attack_damage")
+        );
+        // The live map builds for the type and answers the declared values.
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(55.0)
+        );
+        // The type's fields spawn with them.
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        Arc::make_mut(ghoul).declare_attributes(&declared);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(ghoul.health, 55.0, "the spawn's health");
+        assert_eq!(ghoul.attrs.max_health, 55.0);
+        assert_eq!(ghoul.attrs.speed, 0.4);
+        assert_eq!(
+            ghoul.kind.attributes.get("minecraft:max_health"),
+            Some(&55.0),
+            "the finalize defaults read the declared value"
+        );
+    }
+
     /// A content mod's type from the wandering trader, the neutral template
     /// whose behaviour is all goals: a trader under its own id, with a
     /// trader's goals, that saves what a trader saves and loads back.

@@ -483,6 +483,29 @@ impl MobType {
         self.layers.get(key)
     }
 
+    /// Takes the mod's declared attribute set (#845, NeoForge's
+    /// `EntityAttributeCreationEvent`): each value replaces the row's, in
+    /// the attribute map the finalize store and the live attribute map's
+    /// catalog read, and in the fields a mob of the type spawns with.
+    pub fn declare_attributes(&mut self, attributes: &[(String, f64)]) {
+        for (id, value) in attributes {
+            Arc::make_mut(&mut self.attributes).insert(id.clone(), *value);
+            match id.as_str() {
+                "minecraft:max_health" => self.max_health = *value as f32,
+                "minecraft:movement_speed" => self.speed = *value,
+                "minecraft:flying_speed" => self.flying_speed = *value,
+                "minecraft:attack_damage" => self.attack_damage = *value as f32,
+                "minecraft:attack_knockback" => self.attack_knockback = *value,
+                "minecraft:follow_range" => self.follow_range = *value,
+                "minecraft:armor" => self.armor = *value as f32,
+                "minecraft:armor_toughness" => self.armor_toughness = *value as f32,
+                "minecraft:knockback_resistance" => self.knockback_resistance = *value,
+                "minecraft:jump_strength" => self.jump_strength = *value,
+                _ => {}
+            }
+        }
+    }
+
     /// The vanilla entity type whose class this type's mobs are: the type
     /// itself, or the template a content mod's living type copies. What a
     /// class saves and syncs of its own (`Zombie.addAdditionalSaveData`, its

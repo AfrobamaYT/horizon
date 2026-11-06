@@ -3,7 +3,7 @@
 use super::{Definition, Instance, Observer};
 use crate::{DATA_VERSION, compression::invalid};
 use serde_json::Value;
-use std::{collections::BTreeMap, convert::Infallible, io, sync::Arc};
+use std::{collections::BTreeMap, convert::Infallible, fmt, io, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AttributeId(usize);
@@ -17,17 +17,40 @@ impl AttributeId {
         self.0 as i32
     }
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RegisteredAttribute {
     pub name: String,
     pub definition: Definition,
     pub syncable: bool,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Catalog {
     attributes: Vec<RegisteredAttribute>,
     ids: BTreeMap<String, AttributeId>,
     defaults: BTreeMap<String, Arc<[Option<f64>]>>,
+}
+/// A row `Catalog::with_entity_row` refused: an override names an attribute
+/// the catalog does not know, or the template has no row of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EntityRowError {
+    UnknownAttribute { entity: String, attribute: String },
+    UnknownTemplate { entity: String, template: String },
+}
+impl fmt::Display for EntityRowError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownAttribute { entity, attribute } => {
+                write!(f, "entity {entity} has no attribute {attribute}")
+            }
+            Self::UnknownTemplate { entity, template } => {
+                write!(
+                    f,
+                    "entity {entity} copies {template}, which has no attribute row"
+                )
+            }
+        }
+    }
 }
 fn string(v: &Value) -> io::Result<&str> {
     v.as_str()
@@ -108,6 +131,43 @@ impl Catalog {
     /// The entity type's supplier base of an attribute, if the type has it.
     pub fn default_base(&self, entity: &str, id: AttributeId) -> Option<f64> {
         self.defaults.get(entity).and_then(|b| b[id.0])
+    }
+    /// A copy of the catalog with `entity`'s supplier built from its
+    /// `template`'s row and `overrides`: a mod entity type's declared
+    /// attribute set (`EntityAttributeCreationEvent`), as its content row is
+    /// the template's values with its own on top. An override id the catalog
+    /// does not know, or a template without a row, refuses, naming the
+    /// entity.
+    pub fn with_entity_row(
+        &self,
+        entity: &str,
+        template: &str,
+        overrides: &[(String, f64)],
+    ) -> Result<Catalog, EntityRowError> {
+        let mut bases = self
+            .defaults
+            .get(template)
+            .ok_or_else(|| EntityRowError::UnknownTemplate {
+                entity: entity.to_owned(),
+                template: template.to_owned(),
+            })?
+            .to_vec();
+        for (name, base) in overrides {
+            let Some(id) = self.ids.get(name.as_str()) else {
+                return Err(EntityRowError::UnknownAttribute {
+                    entity: entity.to_owned(),
+                    attribute: name.clone(),
+                });
+            };
+            bases[id.0] = Some(*base);
+        }
+        let mut defaults = self.defaults.clone();
+        defaults.insert(entity.to_owned(), Arc::from(bases));
+        Ok(Catalog {
+            attributes: self.attributes.clone(),
+            ids: self.ids.clone(),
+            defaults,
+        })
     }
     pub fn id(&self, name: &str) -> Option<AttributeId> {
         self.ids.get(name).copied()
@@ -274,5 +334,64 @@ impl EntityAttributes {
     }
     pub fn clear_sync(&mut self, id: AttributeId) {
         self.sync[id.0] = false;
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    fn catalog() -> Catalog {
+        let bits = |n: f64| format!("{:016x}", n.to_bits());
+        Catalog::from_json(&serde_json::json!({
+            "data_version": DATA_VERSION,
+            "attributes": [
+                {"id": "minecraft:max_health", "default": bits(20.0), "min": bits(1.0), "max": bits(1024.0), "syncable": true},
+                {"id": "minecraft:armor", "default": bits(0.0), "min": bits(0.0), "max": bits(30.0), "syncable": true}
+            ],
+            "entities": {
+                "minecraft:zombie": {"minecraft:max_health": bits(20.0), "minecraft:armor": bits(2.0)}
+            }
+        }))
+        .unwrap()
+    }
+
+    /// A declared row starts from its template's, as a content row does and
+    /// `Zombie.createAttributes` does for the event's supplier (#845).
+    #[test]
+    fn a_declared_row_starts_from_its_templates() {
+        let catalog = catalog();
+        let merged = catalog
+            .with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("minecraft:max_health".into(), 55.0)],
+            )
+            .unwrap();
+        let health = merged.id("minecraft:max_health").unwrap();
+        let armor = merged.id("minecraft:armor").unwrap();
+        assert_eq!(merged.default_base("ruby:ghoul", health), Some(55.0));
+        // The template's own attributes come along.
+        assert_eq!(merged.default_base("ruby:ghoul", armor), Some(2.0));
+        // The catalog itself keeps what it had.
+        assert_eq!(catalog.default_base("minecraft:zombie", health), Some(20.0));
+        assert_eq!(catalog.default_base("ruby:ghoul", health), None);
+    }
+
+    #[test]
+    fn a_declared_row_refuses_unknown_attributes_and_templates() {
+        let catalog = catalog();
+        assert!(matches!(
+            catalog.with_entity_row(
+                "ruby:ghoul",
+                "minecraft:zombie",
+                &[("missing:attribute".into(), 1.0)]
+            ),
+            Err(EntityRowError::UnknownAttribute { .. })
+        ));
+        assert!(matches!(
+            catalog.with_entity_row("ruby:ghoul", "missing:template", &[]),
+            Err(EntityRowError::UnknownTemplate { .. })
+        ));
     }
 }
