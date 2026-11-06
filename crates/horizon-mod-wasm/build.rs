@@ -55,32 +55,39 @@ fn main() {
         .push_str(path, &std::fs::read_to_string(path).unwrap())
         .unwrap();
     let world = resolve.select_world(&[package], Some("internals")).unwrap();
-    let output = emit(&resolve, world, |interface, function| {
-        if interface != "horizon:mod-internals/view@0.1.0" {
-            return Err(format!("unhandled internals interface {interface}"));
-        }
-        let name = function
-            .name
-            .rsplit_once('.')
-            .map_or(function.name.as_str(), |(_, n)| n)
-            .to_snake_case();
-        let args: Vec<_> = (0..function.params.len())
-            .map(|i| format!("arg{i}"))
-            .collect();
-        let types = function
-            .params
-            .iter()
-            .map(|p| rust_type(&resolve, p.ty))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(Registration {
-            parameters: format!("({},): ({},)", args.join(","), types.join(",")),
-            body: format!(
-                "Ok((Metered::{name}(store.as_context_mut(), {})?,))",
-                args.join(",")
-            ),
-            shadow: false,
-        }))
-    })
+    let output = emit(
+        &resolve,
+        world,
+        |interface| {
+            if interface != "horizon:mod-internals/view@0.1.0" {
+                return Err(format!("unhandled internals interface {interface}"));
+            }
+            Ok(())
+        },
+        |_, function| {
+            let name = function
+                .name
+                .rsplit_once('.')
+                .map_or(function.name.as_str(), |(_, n)| n)
+                .to_snake_case();
+            let args: Vec<_> = (0..function.params.len())
+                .map(|i| format!("arg{i}"))
+                .collect();
+            let types = function
+                .params
+                .iter()
+                .map(|p| rust_type(&resolve, p.ty))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(Registration {
+                parameters: format!("({},): ({},)", args.join(","), types.join(",")),
+                body: format!(
+                    "Ok((Metered::{name}(store.as_context_mut(), {})?,))",
+                    args.join(",")
+                ),
+                shadow: false,
+            }))
+        },
+    )
     .unwrap();
     std::fs::write(
         std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("internals_imports.rs"),
