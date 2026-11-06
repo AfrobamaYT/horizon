@@ -29,6 +29,33 @@ fn tuple_name(shape: &Shape) -> syn::Ident {
     )
 }
 
+fn short_alias_available(name: &str) -> bool {
+    ![
+        "I",
+        "V",
+        "Node",
+        "Reached",
+        "Arg",
+        "Value",
+        "CopyValue",
+        "ViewType",
+        "AsNode",
+        "Refusal",
+        "Seq",
+        "Map",
+        "Opt",
+        "DECLARED",
+        "call",
+        "root",
+        "flatten",
+        "unflatten",
+        "changed",
+        "wire_refusal",
+        "root_as",
+    ]
+    .contains(&name)
+}
+
 /// Owned guest spelling: native borrows and shared pointers are copies, not guest borrows.
 pub(crate) fn spell(shape: &Shape, rule: &Rule) -> TokenStream {
     match shape {
@@ -383,15 +410,14 @@ pub fn generate(
         }
     }
     for (alias, types) in aliases {
-        if types.len() == 1
-            && !["Refusal", "Seq", "Map", "Opt", "CopyValue"].contains(&alias.as_str())
-        {
+        if types.len() == 1 && short_alias_available(&alias) {
             let alias = format_ident!("{alias}");
             let ty = &types[0];
             items.push(quote!(pub use #ty as #alias;));
         }
     }
     let mut free_aliases = BTreeMap::<String, Vec<syn::Ident>>::new();
+    let mut omitted = Vec::new();
     for (index, d) in declared.iter().enumerate() {
         if let Some(i) = selected
             .accepted
@@ -403,6 +429,15 @@ pub fn generate(
             let (_, func) = path.rsplit_once("::").unwrap();
             let (module, this) = function_scope(&rule, i).expect("validated function scope");
             let (module, this) = (module.as_str(), this.as_deref());
+            // Copy fields currently have Get/Set operations, but no node step. There is no
+            // typed guest argument that could supply the host thunk's mutable copy borrow.
+            if sig.inputs.iter().any(|a| {
+                let syn::FnArg::Typed(a) = a else { return false; };
+                matches!(rule.shape(module, this, &a.ty), Shape::Ref { mutable: true, to } if matches!(rule.crossing_of(&to), Crossing::Copy(_)))
+            }) {
+                omitted.push(format!("// Not on wasm: {}: mutable copy arguments need copy-field node stepping on the host.", i.path));
+                continue;
+            }
             let mut args = Vec::new();
             let mut params = Vec::new();
             for (n, arg) in sig
@@ -424,20 +459,7 @@ pub fn generate(
                     } else {
                         &shape
                     };
-                    let ty = if matches!(rule.crossing_of(t), Crossing::Copy(_)) {
-                        match t {
-                            Shape::Named(path, _) => {
-                                let n = node_name(path, &rule);
-                                quote!(#n)
-                            }
-                            _ => {
-                                let t = spell(t, &rule);
-                                quote!(CopyNode<#t>)
-                            }
-                        }
-                    } else {
-                        spell(t, &rule)
-                    };
+                    let ty = spell(t, &rule);
                     params.push(quote!(#a: &#ty));
                     args.push(quote!(Arg::Node(#a.node())));
                 } else {
@@ -501,7 +523,7 @@ pub fn generate(
         }
     }
     for (alias, functions) in free_aliases {
-        if functions.len() == 1 {
+        if functions.len() == 1 && short_alias_available(&alias) {
             let alias = format_ident!("{alias}");
             let function = &functions[0];
             items.push(quote!(pub use #function as #alias;));
@@ -595,14 +617,14 @@ pub fn generate(
         let root = u32::from(has_receiver);
         let recv = if has_receiver {
             let ty = node_name(owner.as_ref().unwrap(), &rule);
-            quote!(Some($crate::view::#ty::from_node(root(0).expect("raw receiver"))))
+            quote!(Some($crate::runtime::root_as::<$crate::view::#ty>(0)))
         } else {
             quote!(None::<()>)
         };
         let idx = index as u32;
         let listener = format_ident!("raw_listener_{index}");
         listeners.push(listener.clone());
-        calls.push(quote!(#idx => $ #listener($crate::view::#ty::from_node(root(#root).expect("raw record")), #recv),));
+        calls.push(quote!(#idx => $ #listener($crate::runtime::root_as::<$crate::view::#ty>(#root), #recv),));
     }
     for shape in copies.values() {
         if let Shape::Tuple(parts) = shape
@@ -644,7 +666,7 @@ pub fn generate(
             (#($ #listeners:path),*) => {
                 #[cfg(target_arch = "wasm32")]
                 const _: () = {
-                    use $crate::runtime::*;
+                    use $crate::runtime::{Guest, HostKind};
                     struct RawListeners;
                     impl Guest for RawListeners {
                         fn declared() -> Vec<(String, String)> { $crate::view::DECLARED.iter().map(|(p,h)| ((*p).into(), (*h).into())).collect() }
@@ -656,7 +678,7 @@ pub fn generate(
             };
         }
     };
-    Ok(code.to_string())
+    Ok(format!("{}\n{code}", omitted.join("\n")))
 }
 
 fn handle(ty: &syn::Ident, methods: Vec<TokenStream>) -> TokenStream {
@@ -666,7 +688,6 @@ fn handle(ty: &syn::Ident, methods: Vec<TokenStream>) -> TokenStream {
         impl AsNode for #ty { fn node(&self) -> &Node { &self.0 } }
         impl ViewType for #ty { fn from_reached(reached: Reached) -> Result<Self, Refusal> { match reached { Reached::Node(n) => Ok(Self(n)), _ => Err(changed("a node")) } } }
         impl #ty {
-            pub fn from_node(node: Node) -> Self { Self(node) }
             #(#methods)*
         }
     }
@@ -797,7 +818,7 @@ mod tests {
                 for value in [Choice::Empty, Choice::Named {{ value: 'x' }}] {{ assert_eq!(Choice::from_value(value.to_value()).unwrap(), value); }}
                 let value = Borrowed {{ text: Box::new("owned".into()), wide: (1 << 100) | 42 }};
                 assert_eq!(Borrowed::from_value(value.to_value()).unwrap(), value);
-                assert_eq!(Owner::from_node(runtime::Node).second().unwrap(), 1, "declaration-order field number, not selected-field order");
+                assert_eq!(<Owner as runtime::ViewType>::from_reached(runtime::Reached::Node(runtime::Node)).unwrap().second().unwrap(), 1, "declaration-order field number, not selected-field order");
                 assert!(Data::from_value(V::None).is_err());
                 assert_eq!(DECLARED.len(), 6, "three declarations plus three additional walked layouts");
             }}
@@ -825,6 +846,54 @@ mod tests {
                 .success()
         );
         std::fs::remove_dir_all(build).unwrap();
+    }
+
+    #[test]
+    fn mutable_copy_arguments_do_not_emit_an_unsupplyable_guest_parameter() {
+        let entries = [
+            entry(
+                "horizon_client::Counter",
+                "struct",
+                "struct Counter { value: u8 }",
+            ),
+            entry(
+                "horizon_client::Counter::mutate",
+                "method",
+                "fn mutate(&mut self, out: &mut u8)",
+            ),
+        ];
+        let code = generate(&entries, &[declaration(&entries[1])], &[], &[]).unwrap();
+        let file = syn::parse_file(&code).unwrap();
+        let view = file
+            .items
+            .iter()
+            .find_map(|i| match i {
+                syn::Item::Mod(m) if m.ident == "view" => Some(&m.content.as_ref().unwrap().1),
+                _ => None,
+            })
+            .unwrap();
+        assert!(!view.iter().any(|i| {
+            match i {
+                syn::Item::Impl(i) => i
+                    .items
+                    .iter()
+                    .any(|i| matches!(i, syn::ImplItem::Fn(f) if f.sig.ident == "mutate")),
+                _ => false,
+            }
+        }));
+        let listed = view
+            .iter()
+            .find_map(|i| match i {
+                syn::Item::Const(c) if c.ident == "DECLARED" => {
+                    Some(c.expr.to_token_stream().to_string())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            listed.contains("horizon_client::Counter::mutate"),
+            "load-time compatibility still checks every manifest entry"
+        );
     }
 
     #[test]

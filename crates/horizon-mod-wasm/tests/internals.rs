@@ -7,6 +7,7 @@ use mod_points::internals::{
 struct Game {
     left: i64,
     right: i64,
+    hidden: Vec<i32>,
 }
 struct Record {
     message: String,
@@ -123,7 +124,11 @@ fn a_generated_guest_view_reads_writes_calls_and_commits_a_raw_listener() {
         listening.register().unwrap();
     }
     mod_points::__private::seal();
-    let mut game = Game { left: 1, right: 10 };
+    let mut game = Game {
+        left: 1,
+        right: 10,
+        hidden: vec![99],
+    };
     let mut raw = Record {
         message: "before".into(),
         cancel: false,
@@ -137,7 +142,14 @@ fn a_generated_guest_view_reads_writes_calls_and_commits_a_raw_listener() {
             callback(place, (&raw mut game).cast(), (&raw mut raw).cast());
         }
     });
-    assert_eq!(game, Game { left: 8, right: 13 });
+    assert_eq!(
+        game,
+        Game {
+            left: 8,
+            right: 13,
+            hidden: vec![99]
+        }
+    );
     assert_eq!(raw.message, "proof21");
     assert!(raw.cancel);
 }

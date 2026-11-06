@@ -32,8 +32,8 @@
   {
     "path": "horizon_client::Large::process",
     "kind": "method",
-    "signature": "fn process(&mut self, amount: i64, small: &Small, other: &Large, out: &mut Small) -> Option<Small>",
-    "hash": "ce4a313ffd66d4466f62561ba86ca181f5ac8e5e0919030de8da3e110a13947b"
+    "signature": "fn process(&mut self, amount: i64, small: &Small, other: &Large) -> Option<Small>",
+    "hash": "3ee4208ab46a2548904ec3d1408e5dfee113105cf21506ef8ef00b062d78042d"
   },
   {
     "path": "horizon_client::read",

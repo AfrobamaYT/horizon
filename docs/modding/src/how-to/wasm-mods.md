@@ -102,7 +102,10 @@ typed node. `Seq<T>` and `Map<K, V>` have `len` and `get`; `Opt<T>` has `case` a
 Guest copies own their data: a native borrowed or shared copy is represented by `Box<T>`.
 Small named copies are plain structs or enums; their node form, when used as a receiver, has
 `Node` appended to its name. Same-named types retain their fully qualified generated names;
-an unambiguous type also gets a short alias such as `Game`.
+an unambiguous type also gets a short alias such as `Game` unless it conflicts with the view's
+runtime types. Functions taking a mutable reference to a copy argument are not generated yet:
+the host exposes copy fields as values, not as nodes that could supply that argument. The
+generated file records the omitted function and this reason in a comment.
 
 The listener sees its own journaled writes immediately. A declared function applies that journal
 before running, and listener return applies the remaining writes. A trap drops writes since the

@@ -30,29 +30,11 @@ pub mod runtime {
     pub trait ViewType: Sized {
         fn from_reached(reached: Reached) -> Result<Self, Refusal>;
     }
+    pub fn root_as<T: ViewType>(index: u32) -> T {
+        T::from_reached(Reached::Node(root(index).expect("raw call root"))).expect("raw root shape")
+    }
     pub trait AsNode {
         fn node(&self) -> &Node;
-    }
-
-    /// A copy-typed root passed by mutable reference to a declared function.
-    pub struct CopyNode<T>(Node, PhantomData<T>);
-    impl<T: CopyValue> CopyNode<T> {
-        pub fn read(&self) -> Result<T, Refusal> {
-            T::from_value(unflatten(self.0.read()?).map_err(wire_refusal)?)
-        }
-    }
-    impl<T> AsNode for CopyNode<T> {
-        fn node(&self) -> &Node {
-            &self.0
-        }
-    }
-    impl<T> ViewType for CopyNode<T> {
-        fn from_reached(reached: Reached) -> Result<Self, Refusal> {
-            match reached {
-                Reached::Node(n) => Ok(Self(n, PhantomData)),
-                _ => Err(changed("a copy node")),
-            }
-        }
     }
 
     /// A sequence node; elements are copied or reached as call-scoped nodes by their generated type.
