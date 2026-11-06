@@ -33,8 +33,8 @@ pub(super) struct ModsState {
     pub(super) live: Option<std::time::Instant>,
     /// The content mods installed, and those of them with only assets and
     /// data (`mod_content::live_switch`): they switch with a world open.
-    content_ids: std::collections::BTreeSet<String>,
-    live_ids: std::collections::BTreeSet<String>,
+    pub(super) content_ids: std::collections::BTreeSet<String>,
+    pub(super) live_ids: std::collections::BTreeSet<String>,
     /// The server's data comes from a root a live switch built, not the one
     /// `res` was loaded from: the world tables are built from it even with no
     /// data pack (`build_world_tables`).
