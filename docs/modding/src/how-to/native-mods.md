@@ -220,6 +220,13 @@ and code mods; the scaffold does not create one.
 Raw injections belong in the same manifest as `[[native.injection]]` tables. The decision ladder, the fields and the
 forms are in the modding book: [Injections](../injections.md).
 
+### Dimension shape
+
+`LevelRef::dimension_shape` reads the loaded server level's build range, logical height,
+skylight and ceiling from its dimension shape. It accepts `&dyn Host`, including when the
+level is parked, and returns `None` for a stale or unavailable level or on a client. It does
+not load a level or allocate.
+
 ### Raid handles
 
 Raid handles returned by `LevelRef::raid`, `raid_at` and `raids` resolve their
@@ -351,6 +358,20 @@ over them) all answer the gate; `mod_loaded` asks which mods' data is in the roo
 and the content mods that are on. `neoforge:true`, `not`, `and` and `or` combine; a condition the game
 does not know leaves the file out, so a future shape fails closed. Tags, loot tables and advancements
 do not answer the gate yet.
+
+### Reading recipe rules
+
+`recipes_of_type` returns the loaded recipes after pack overrides. Shaped,
+shapeless and cooking recipes expose their resolved ingredients and fixed
+results. Stonecutting, smithing and special crafting recipes expose a typed
+`RecipeRule` instead, including resolved ingredient roles. A smithing or
+special rule's result depends on its inputs: its template is not a fixed
+stack. Use `LevelRef::craft` for the actual output and remainders of a
+crafting grid. Smithing transform's template and addition ingredients can be
+absent, requiring empty slots. Trim patterns are either registry references or
+inline definitions. Result templates retain their count and component patch;
+stonecutting exposes the complete fixed output. A mod-defined recipe type
+retains its original `json`. Look up recipes again after a data reload.
 
 ### Recipe filters
 
