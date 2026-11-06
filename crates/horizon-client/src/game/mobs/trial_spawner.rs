@@ -109,14 +109,15 @@ impl Game<'_> {
         let Some((current, ominous)) = self.trial_spawner_block(key) else {
             return Ok(());
         };
-        let Some(BlockEntity::TrialSpawner(mut spawner)) = self.world.block_entities.take(&key)
+        let Some((lease, BlockEntity::TrialSpawner(mut spawner))) =
+            self.world.block_entities.take(&key)
         else {
             return Ok(());
         };
         let result = self.server_tick_trial_spawner(key, &mut spawner, current, ominous);
         self.world
             .block_entities
-            .put(key, BlockEntity::TrialSpawner(spawner));
+            .put(lease, BlockEntity::TrialSpawner(spawner));
         result
     }
     /// The trial spawner block at `key`: its state and ominous flag.

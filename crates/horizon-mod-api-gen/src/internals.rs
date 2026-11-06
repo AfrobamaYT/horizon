@@ -1227,23 +1227,9 @@ pub fn discover(root: &Path) -> Result<Widened, String> {
 }
 
 fn stage(root: &Path, discovery: bool) -> Result<Widened, String> {
-    let mut lists = Vec::new();
-    for name in ["internals.txt", "points.txt"] {
-        let path = root.join("crates/horizon-mod-api-gen").join(name);
-        lists.push((
-            name,
-            fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
-        ));
-    }
-    let sites = crate::sites::listed(&root.join("crates/horizon-mod-api-gen/sites"))
-        .map_err(|e| e.to_string())?;
-    lists.extend(
-        sites
-            .iter()
-            .filter(|d| !d.target.starts_with("horizon_client::"))
-            .map(|d| (d.origin.as_str(), d.target.clone())),
-    );
-    widen_mode(root, &lists, discovery)
+    let path = root.join("crates/horizon-mod-api-gen/internals.txt");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    widen_mode(root, &[("internals.txt", text)], discovery)
 }
 
 /// [`widen`] with each list's file name and text, so an error names the file and line it came from.
@@ -1283,6 +1269,18 @@ fn widen_mode(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<
                     .map_err(|e| format!("{name}:{}: {path}: {e}", line + 1))?;
             }
         }
+    }
+    let slots =
+        crate::sites::slots(&root.join(crate::sites::DIRECTORY)).map_err(|e| e.to_string())?;
+    for (path, origin) in slots.functions.iter().chain(
+        slots
+            .calls
+            .iter()
+            .filter(|d| !d.target.starts_with("horizon_client::"))
+            .map(|d| (&d.target, &d.origin)),
+    ) {
+        pass.lower(root, path)
+            .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
     pass.shapes(root)?;
     if discovery {
@@ -1478,7 +1476,7 @@ mod tests {
             "impl Game { pub(super) fn action(&self, value: u8) -> u8 { value } }",
         );
         for fixture in [&before, &after] {
-            fixture.put("crates/horizon-mod-api-gen/points.txt", "");
+            fixture.put("crates/horizon-mod-api-gen/slots/horizon.txt", "");
             fixture.put("crates/horizon-mod-api-gen/internals.txt", "");
             fixture.put(
                 "crates/horizon-mod-points/Cargo.toml",
@@ -2258,23 +2256,45 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
+    fn slot_functions_and_calls_are_widened_but_types_are_only_carried() {
+        for declaration in [
+            "lower::hidden::inner::Thing::run",
+            "lower::hidden::inner::Thing::run | helper | 0 |",
+        ] {
+            let fixture = Fixture::new("struct Game;\n");
+            fixture.lower();
+            fixture.put(
+                "crates/horizon-mod-api-gen/slots/test.txt",
+                &format!("{declaration}\ntype lower::FutureExtension\n"),
+            );
+            let result = widen_with(&fixture.0, &[]).unwrap();
+            assert!(
+                result
+                    .entries
+                    .iter()
+                    .any(|entry| entry.path == "lower::hidden::inner::Thing::run")
+            );
+            assert!(
+                fs::read_to_string(fixture.0.join("crates/lower/src/other.rs"))
+                    .unwrap()
+                    .contains("pub fn run")
+            );
+        }
+    }
+
+    #[test]
     fn unresolved_line_is_an_error_and_does_not_write_sources() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
-        // The error names the list and line it came from, past the lists before it.
-        let error = widen_with(
-            &fixture.0,
-            &[
-                ("internals.txt", "# one\n# two\n".into()),
-                (
-                    "points.txt",
-                    "# comment\nlower::hidden::inner::Thing::missing\n".into(),
-                ),
-            ],
-        )
-        .unwrap_err();
+        fixture.put(
+            "crates/horizon-mod-api-gen/slots/horizon.txt",
+            "# comment\nlower::hidden::inner::Thing::missing\n",
+        );
+        // The error names the slot list and its own line, not the preceding internals list.
+        let error =
+            widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
-            error.contains("points.txt:2: lower::hidden::inner::Thing::missing"),
+            error.contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

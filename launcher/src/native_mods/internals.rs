@@ -84,7 +84,7 @@ impl std::fmt::Display for Error {
                 &[("mod", mod_id), ("target", target)],
             ),
             Self::NotSite { mod_id, line } => trf(
-                "E_NOT_SITE: {mod}: add `{line}` to crates/horizon-mod-api-gen/sites/{mod}.txt and rebuild the game; this call is not a compiled-in site.",
+                "E_NOT_SITE: {mod}: add `{line}` to crates/horizon-mod-api-gen/slots/{mod}.txt and rebuild the game; this call is not a compiled-in site.",
                 &[("mod", mod_id), ("line", line)],
             ),
             Self::SiteKind { mod_id, injection } => trf(

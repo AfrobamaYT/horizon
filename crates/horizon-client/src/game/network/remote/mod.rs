@@ -2513,7 +2513,7 @@ impl Game<'_> {
         horizon_client::chunk::free_columns(freed, gone.len());
         self.world
             .block_entities
-            .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+            .unload(|k| gone.contains(&(k.0 >> 4, k.2 >> 4)));
         if let Some(r) = self.remote.as_mut() {
             r.attachments.retain(|holder, _| match *holder {
                 Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
