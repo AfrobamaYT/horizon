@@ -868,5 +868,6 @@
   "How far a trigger is pulled before it counts as pressed.": "How far a trigger is pulled before it counts as pressed.",
   "horizon.mods.switch.worldgen": "changes world generation",
   "horizon.mods.switch.registries": "adds blocks, items or other registry entries",
-  "horizon.mods.switch.restart": "Restart the game to apply %s: they add blocks, items or world generation."
+  "horizon.mods.switch.restart": "Restart the game to apply %s: they add blocks, items or world generation.",
+  "horizon.datapack.required": "Pack %s is required and cannot be disabled"
 }

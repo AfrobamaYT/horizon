@@ -45,6 +45,7 @@
 
 mod base;
 mod add_client_reload_listeners;
+mod add_pack_finders;
 mod add_server_reload_listeners;
 mod affect_neighbors_after_removal;
 mod animal_tame;

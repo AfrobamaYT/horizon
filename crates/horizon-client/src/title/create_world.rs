@@ -46,6 +46,8 @@ pub struct WorldOptions {
     /// The folder of packs for the new world (vanilla's `mcworld-`
     /// temporary folder), made when Data Packs first opens.
     pub pack_dir: Option<std::path::PathBuf>,
+    /// Additional repository sources retained for this creation configuration.
+    pub additional_data_packs: std::sync::Arc<[std::sync::Arc<crate::datapack::DataPack>]>,
 }
 impl Default for WorldOptions {
     fn default() -> Self {
@@ -62,6 +64,7 @@ impl Default for WorldOptions {
             rules: crate::gamerules::GameRules::default(),
             data_packs: vec!["vanilla".into()],
             pack_dir: None,
+            additional_data_packs: std::sync::Arc::from([]),
         }
     }
 }
@@ -138,6 +141,11 @@ impl WorldOptions {
     }
     fn available_packs(&self, resources: &std::path::Path) -> Vec<crate::datapack::DataPack> {
         let mut packs = crate::datapack::feature_packs(resources);
+        packs.extend(
+            self.additional_data_packs
+                .iter()
+                .map(|pack| (**pack).clone()),
+        );
         if let Some(dir) = &self.pack_dir {
             packs.extend(crate::datapack::discover_folder(dir));
         }

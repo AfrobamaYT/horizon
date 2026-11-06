@@ -53,6 +53,8 @@ pub struct Pack {
     /// `filter.block` entries (namespace and path patterns) hiding resources
     /// of the packs below this one.
     pub filter: Vec<Filter>,
+    /// Presentation and selection supplied by an additional repository source.
+    pub selection: Option<crate::pack_screen::PackInfo>,
 }
 #[derive(Clone, Debug, Default)]
 pub struct Filter {
@@ -471,6 +473,7 @@ impl Pack {
             compatibility: crate::pack_screen::Compat::Compatible,
             overlays: Vec::new(),
             filter: Vec::new(),
+            selection: None,
         }
     }
 
@@ -496,7 +499,7 @@ fn pack(id: String, title: Text, source: Source) -> Option<Pack> {
     pack_for(id, title, source, RESOURCE_FORMAT)
 }
 /// A pack whose compatibility is against `format`.
-fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Option<Pack> {
+pub fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Option<Pack> {
     let meta = read_meta(&source)?;
     let (raw_description, description_style) = component_root(&meta["pack"]["description"]);
     Some(Pack {
@@ -510,6 +513,7 @@ fn pack_for(id: String, title: Text, source: Source, format: (i64, i64)) -> Opti
         overlays: overlays_of(&meta),
         filter: filter_of(&meta),
         source,
+        selection: None,
     })
 }
 /// Built-in and `resourcepacks/` packs (vanilla itself excluded), sorted like
@@ -1061,16 +1065,32 @@ pub fn server_pack(id: u128, path: &Path) -> Option<Pack> {
 }
 /// The packs to apply for an options.txt `resourcePacks` list (bottom first).
 pub fn enabled(all: &[Pack], ids: &[String]) -> Vec<Pack> {
-    ids.iter()
-        .filter(|id| *id != "vanilla")
-        .filter_map(|id| all.iter().find(|p| &p.id == id).cloned())
+    let available = all
+        .iter()
+        .map(|pack| {
+            pack.selection.as_ref().map_or_else(
+                || Selectable::optional(&pack.id, pack.compatible),
+                crate::pack_screen::PackInfo::selectable,
+            )
+        })
+        .collect();
+    SelectionModel::new(available, ids)
+        .selected
+        .into_iter()
+        .rev()
+        .filter_map(|selected| all.iter().find(|p| p.id == selected.id).cloned())
         .collect()
 }
 /// `PackRepository.isAbleToClearAnyPack`: clearing the selection
 /// (`rebuildSelected([])`, which keeps only the required vanilla pack)
 /// changes it, that is, some selected pack still exists.
 pub fn able_to_clear_any_pack(all: &[Pack], selected: &[String]) -> bool {
-    !enabled(all, selected).is_empty()
+    let current = enabled(all, selected);
+    let required = enabled(all, &[]);
+    current
+        .iter()
+        .map(|pack| &pack.id)
+        .ne(required.iter().map(|pack| &pack.id))
 }
 /// Resource root for a pack selection: vanilla itself when no pack is on.
 pub fn resource_root(vanilla: &Path, packs: &[Pack], cache: &Path) -> io::Result<PathBuf> {

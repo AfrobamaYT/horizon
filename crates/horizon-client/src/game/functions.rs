@@ -73,10 +73,11 @@ pub(super) fn pack_stack(
     content_source: &horizon_assets::resource_source::ResourceSource,
     vanilla_disabled: bool,
     enabled_features: &[String],
+    additional: &[Arc<DataPack>],
 ) -> PackStack {
     let builtin = (!vanilla_disabled)
         .then(|| DataPack::from_source("vanilla".into(), builtin_source.clone()));
-    let packs = datapack::discover_with_features(world_root, resources);
+    let packs = super::pack_finders::data_repository(world_root, resources, additional);
     let enabled = datapack::enabled_ids(world_root, &packs, enabled_features);
     PackStack {
         content: DataPack::from_source("horizon-content".into(), content_source.clone()),
@@ -180,6 +181,7 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
+        let additional = super::pack_finders::data_packs(&self.mods);
         let stack = pack_stack(
             &self.world_root,
             &self.options.resources,
@@ -187,6 +189,7 @@ impl Game<'_> {
             &self.pack.data_changes,
             self.cmds.vanilla_disabled,
             enabled_features,
+            &additional,
         );
         let prepared = self.prepare_server_reload(&stack)?;
         if !run_load {
@@ -195,6 +198,7 @@ impl Game<'_> {
         self.fns.packs = stack.packs.clone();
         self.fns.enabled = stack.enabled.clone();
         self.apply_server_reload(prepared, &stack);
+        self.pack.additional_data = additional.into();
         self.fns.loaded = true;
         self.fns.load_pending = true;
         // An explicit reload (`/reload`, `/datapack`) also rebuilds the
@@ -948,6 +952,16 @@ impl Game<'_> {
                 if !selected.contains(&name) {
                     return Err(err("commands.datapack.disable.failed", &[&name]));
                 }
+                if self
+                    .fns
+                    .packs
+                    .iter()
+                    .find(|pack| pack.id == name)
+                    .and_then(|pack| pack.selection.as_ref())
+                    .is_some_and(|info| info.required)
+                {
+                    return Err(err("horizon.datapack.required", &[&name]));
+                }
                 if FEATURE_PACKS.iter().any(|(p, _)| *p == name) {
                     // `DataPackCommand`'s ERROR_CANNOT_DISABLE_FEATURE: the
                     // flag stays on for the world's life.
@@ -978,6 +992,7 @@ impl Game<'_> {
         // One resolve for the store and the tables, as `/reload`'s is: the
         // timers already in memory stay, and none come back from disk
         // (`ServerFunctionManager` keeps its queue over a pack change).
+        let additional = super::pack_finders::data_packs(&self.mods);
         let mut stack = pack_stack(
             &self.world_root,
             &self.options.resources,
@@ -985,8 +1000,10 @@ impl Game<'_> {
             &self.pack.data_changes,
             self.cmds.vanilla_disabled,
             &self.level.enabled_features,
+            &additional,
         );
-        stack.enabled = self.fns.enabled.clone();
+        stack.enabled =
+            datapack::selected_ids(stack.packs.iter().map(Arc::as_ref), &self.fns.enabled);
         let prepared = match self.prepare_server_reload(&stack) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -996,6 +1013,9 @@ impl Game<'_> {
             }
         };
         self.save_datapack_settings();
+        self.fns.packs = stack.packs.clone();
+        self.fns.enabled = stack.enabled.clone();
+        self.pack.additional_data = additional.into();
         self.apply_server_reload(prepared, &stack);
         self.fns.load_pending = true;
         self.reload_world_tables(&stack);
@@ -1192,6 +1212,7 @@ mod tests {
                 &Default::default(),
                 true,
                 &[],
+                &[],
             );
             let files = content_overlay(&stack);
             let (_, versions) = files.iter().find(|(id, _)| id == "recipe/x:r").unwrap();
@@ -1249,6 +1270,7 @@ mod tests {
             &Default::default(),
             &passive,
             true,
+            &[],
             &[],
         );
         let files = overlay_files(

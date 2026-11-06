@@ -414,6 +414,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            Vec::new(),
             None,
             root,
             &settings,

@@ -13,15 +13,22 @@ use std::{
 };
 
 /// A pack on disk.
+#[derive(Clone, Debug, PartialEq)]
 pub struct DataPack {
     /// `file/<name>` in `/datapack` and level.dat.
     pub id: String,
     source: ResourceSource,
+    /// Presentation and selection supplied by an additional repository source.
+    pub selection: Option<crate::pack_screen::PackInfo>,
 }
 impl DataPack {
     /// A named resource layer, retaining its open source for lazy reads.
     pub fn from_source(id: String, source: ResourceSource) -> Self {
-        Self { id, source }
+        Self {
+            id,
+            source,
+            selection: None,
+        }
     }
     pub fn source(&self) -> &ResourceSource {
         &self.source
@@ -86,6 +93,7 @@ impl DataPack {
         Ok(Self {
             id,
             source: source.open()?,
+            selection: None,
         })
     }
     /// The built-in `vanilla` pack: the game's own data directory.
@@ -93,6 +101,7 @@ impl DataPack {
         DataPack {
             id: "vanilla".into(),
             source: ResourceSource::directory(root.to_path_buf()),
+            selection: None,
         }
     }
 }
@@ -113,6 +122,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
             packs.push(DataPack {
                 id: format!("file/{name}"),
                 source: ResourceSource::directory(path),
+                selection: None,
             });
         } else if name.ends_with(".zip")
             && let Ok(z) = Zip::open(&path)
@@ -121,6 +131,7 @@ pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
             packs.push(DataPack {
                 id: format!("file/{name}"),
                 source: ResourceSource::opened_archive(z),
+                selection: None,
             });
         }
     }
@@ -143,6 +154,7 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
             packs.push(DataPack {
                 id: e.file_name().to_string_lossy().into_owned(),
                 source: ResourceSource::directory(path),
+                selection: None,
             });
         }
     }
@@ -154,6 +166,25 @@ pub fn feature_packs(resources: &Path) -> Vec<DataPack> {
 pub fn discover_with_features(world_root: &Path, resources: &Path) -> Vec<DataPack> {
     let mut packs = discover(world_root);
     packs.extend(feature_packs(resources));
+    packs
+}
+
+/// Built-in and contributed feature packs offered as world experiments.
+pub fn feature_repository(
+    resources: &Path,
+    additional: &[std::sync::Arc<DataPack>],
+) -> Vec<DataPack> {
+    let mut packs = feature_packs(resources);
+    packs.extend(
+        additional
+            .iter()
+            .filter(|pack| {
+                pack.selection
+                    .as_ref()
+                    .is_some_and(|info| info.source == crate::pack_screen::Source::Feature)
+            })
+            .map(|pack| (**pack).clone()),
+    );
     packs
 }
 
@@ -814,7 +845,30 @@ pub fn enabled_ids(world: &Path, packs: &[DataPack], enabled_features: &[String]
             enabled.push(p.id.clone());
         }
     }
-    enabled
+    selected_ids(packs.iter(), &enabled)
+}
+
+/// Rebuild a data-pack selection, preserving its order and inserting required packs.
+pub fn selected_ids<'a>(
+    packs: impl Iterator<Item = &'a DataPack>,
+    selected: &[String],
+) -> Vec<String> {
+    // Existing selections keep their order; mandatory additions use the same
+    // insertion rules as the pack screen.
+    let available = packs
+        .map(|pack| {
+            pack.selection.as_ref().map_or_else(
+                || crate::packs::Selectable::optional(&pack.id, true),
+                crate::pack_screen::PackInfo::selectable,
+            )
+        })
+        .collect();
+    crate::packs::SelectionModel::new(available, selected)
+        .selected
+        .into_iter()
+        .rev()
+        .map(|pack| pack.id)
+        .collect()
 }
 
 /// The level stems of `packs` (`data/<namespace>/dimension/<path>.json`, lowest priority first,

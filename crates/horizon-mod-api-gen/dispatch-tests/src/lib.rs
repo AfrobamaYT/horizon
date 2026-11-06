@@ -267,6 +267,7 @@ mod tests {
         pub(super) struct WorldPhase;
         pub(super) trait ServerReloadListeners {}
         pub(super) trait ClientReloadListeners {}
+        pub(super) trait PackFinders {}
     }
     use serde_json::{Map, Value};
     use stubs::*;

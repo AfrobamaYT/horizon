@@ -44,6 +44,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "AttachmentStore",
     "ServerReloadListeners",
     "ClientReloadListeners",
+    "PackFinders",
     "ServerReloadResources",
     "CriterionContext",
 ];

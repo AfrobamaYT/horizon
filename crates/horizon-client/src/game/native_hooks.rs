@@ -1393,7 +1393,8 @@ impl Game<'_> {
     /// shows; `screen_init_post` follows. With no world open nothing else can
     /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
     /// mod's screen can't open over the title).
-    pub(super) fn show_title(&mut self, title: horizon_client::title::Title) {
+    pub(super) fn show_title(&mut self, mut title: horizon_client::title::Title) {
+        title.set_additional_data_packs(self.pack.additional_data.clone());
         if !self.screen_hooks_heard() {
             self.title = Some(title);
             return;
@@ -3021,6 +3022,10 @@ impl Game<'_> {
         listeners: &mut dyn ClientReloadListeners,
     ) {
         self.fire_add_client_reload_listeners(listeners);
+    }
+    /// Register sources when a resource or data pack repository is discovered.
+    pub(super) fn native_add_pack_finders(&mut self, packs: &mut dyn mod_api::PackFinders) {
+        self.fire_add_pack_finders(packs);
     }
     /// The server is assembling its data tables, as for
     /// `native_data_pack_files` (a world's first open and every `/reload`):
@@ -12795,6 +12800,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -12897,6 +12903,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
@@ -13006,6 +13013,7 @@ mod tests {
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,

@@ -334,6 +334,7 @@ mod occlusion_culling;
 mod ominous_item_spawner;
 mod options;
 mod ordered_tick;
+mod pack_finders;
 mod packs;
 mod pad;
 mod pad_actions;
@@ -2577,6 +2578,7 @@ pub struct PackResources {
     source: horizon_assets::resource_source::ResourceSource,
     data_source: horizon_assets::resource_source::ResourceSource,
     data_changes: horizon_assets::resource_source::ResourceSource,
+    additional_data: Arc<[Arc<horizon_client::datapack::DataPack>]>,
     assets: Arc<Assets>,
     block_registries: Arc<horizon_client::command::args::Registries>,
     render: Arc<RenderAssets>,
@@ -2669,6 +2671,7 @@ impl PackResources {
             source: root.source().clone(),
             data_source: root.data().clone(),
             data_changes: root.data_changes().clone(),
+            additional_data: Arc::from([]),
             names: Arc::new(Names::load(root.source())),
             clouds: Arc::new(load_clouds(root.source())),
             forcefield: Arc::new(load_forcefield(root.source())),
@@ -13565,7 +13568,14 @@ impl Game<'_> {
                 self.set_screen(Screen::Options);
                 self.options_from_title = true;
                 let resources = self.vanilla_root();
-                self.ui.options.open_data_packs(dir, selected, resources);
+                let additional = self
+                    .discover_mod_packs(mod_api::PackType::ServerData)
+                    .into_iter()
+                    .filter_map(|pack| pack.selection)
+                    .collect();
+                self.ui
+                    .options
+                    .open_data_packs(dir, selected, resources, additional);
             }
             Action::None => {}
         }
@@ -21569,6 +21579,7 @@ impl Game<'_> {
                         &self.options.resources,
                         &packs,
                         self.res.biomes(),
+                        &self.pack.additional_data,
                     )
                 })
                 .unwrap_or_default();
@@ -21674,6 +21685,7 @@ impl Game<'_> {
             &self.options.resources,
             self.res.biomes(),
             &self.level.enabled_features,
+            &self.pack.additional_data,
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
     }
@@ -22108,6 +22120,7 @@ struct GameplayTables {
 /// models), which `load_resources` rolls back from.
 fn load_core(
     resources: &horizon_assets::resource_source::ResourceRoot,
+    additional_data: &[Arc<horizon_client::datapack::DataPack>],
     role: execution_role::ExecutionRole,
     parallel: bool,
     progress: &Progress,
@@ -22203,6 +22216,7 @@ fn load_core(
                         registry,
                         biomes.clone(),
                         item_data.clone(),
+                        additional_data,
                     );
                 }
                 Ok::<_, String>(biomes)
@@ -22295,6 +22309,7 @@ fn gameplay_tables(
 #[allow(clippy::too_many_arguments)]
 fn load_resources(
     mut resolved: horizon_assets::resource_source::ResourceRoot,
+    additional_data: Vec<Arc<horizon_client::datapack::DataPack>>,
     launch_world: Option<&str>,
     vanilla_root: &std::path::Path,
     settings: &Settings,
@@ -22352,7 +22367,7 @@ fn load_resources(
                 // it waits for the core that loaded.
                 let early = launch_world.filter(|_| root == vanilla_root);
                 startup::time("core", || {
-                    load_core(&resolved, role, parallel, progress, early)
+                    load_core(&resolved, &additional_data, role, parallel, progress, early)
                 })
             });
             let ui = load_ui(resolved.source()).map(|ui| offer(ui, &root));
@@ -22408,13 +22423,14 @@ fn load_resources(
             assets.registry,
             biomes.clone(),
             item_data.clone(),
+            &additional_data,
         );
     }
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(&assets, &render, &facts, visibility)
     })?);
     let pack_step = startup::step("pack.assemble");
-    let pack = PackResources::assemble(
+    let mut pack = PackResources::assemble(
         &resolved,
         assets.clone(),
         render,
@@ -22423,6 +22439,7 @@ fn load_resources(
         biomes.clone(),
         Arc::new(light),
     );
+    pack.additional_data = additional_data.into();
     drop(pack_step);
     log::info!("load pack tables: {:.2}s", started.elapsed().as_secs_f32());
     progress.set(4);
@@ -23441,7 +23458,11 @@ impl Loading {
             "Horizon: loading the title artwork after {} ms",
             self.started.elapsed().as_millis()
         );
-        self.menu.set_root(root, &self.settings);
+        let additional = self
+            .options
+            .as_ref()
+            .map_or_else(Vec::new, |options| pack_finders::data_packs(&options.mods));
+        self.menu.set_root(root, &self.settings, additional.into());
         self.gui = Some(gui);
         self.title_drawn = false;
         horizon_client::ui_theme::reset_atlas();
@@ -23915,6 +23936,7 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     })?;
     let mut loaded = load_resources(
         selected_root,
+        pack_finders::data_packs(&options.mods),
         launch_world(&options),
         &vanilla_root,
         &early_settings,
@@ -24323,6 +24345,7 @@ mod tests {
                 &game.pack.data_changes,
                 game.cmds.vanilla_disabled,
                 &game.level.enabled_features,
+                &game.pack.additional_data,
             );
             game.reload_world_tables(&stack);
             let stone = game

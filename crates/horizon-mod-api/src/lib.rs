@@ -118,6 +118,10 @@ pub use screenshot::ScreenshotImage;
 mod file_to_id_converter;
 pub use file_to_id_converter::{FileToIdConverter, FileToIdConverterError};
 mod client_reload;
+mod pack_finders;
+pub use pack_finders::{
+    PackFinderError, PackFinders, PackPosition, PackRegistration, PackSource, PackType,
+};
 mod client_session;
 pub use client_session::{BlockBreakingState, ClientFrameStats, ClientServer};
 pub(crate) mod reload;
