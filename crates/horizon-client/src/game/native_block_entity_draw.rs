@@ -1122,6 +1122,64 @@ mod tests {
             let bytes = |vertices: &[Vertex]| bytemuck::cast_slice::<_, u8>(vertices).to_vec();
             assert_eq!(bytes(&surface.vertices), bytes(&expected));
             assert!(surface.vertices.iter().all(|v| v.light == 0x7030));
+            // An explicitly emissive tinted face and its untinted twin exercise both
+            // branches independently of the vanilla grass model's current contents.
+            let source = game.pack.render.resolve_model(model).unwrap();
+            let face = &source.faces[0];
+            let sprite = game
+                .pack
+                .layer_names
+                .get(&face.layer)
+                .and_then(|name| game.gui.atlas.sprites.get(name))
+                .copied()
+                .unwrap();
+            let mut tinted = face.quad.clone();
+            tinted.tint_index = 0;
+            tinted.light_emission = 12;
+            let mut plain = tinted.clone();
+            plain.tint_index = -1;
+            let mut emitted = Vec::new();
+            super::super::minecarts::emit_model_faces(
+                [(&tinted, sprite), (&plain, sprite)],
+                Mat4::IDENTITY,
+                |_| 0x2030,
+                true,
+                |index| (index >= 0).then_some(0x123456),
+                &mut emitted,
+            );
+            assert_eq!(emitted.len(), 8);
+            assert!(emitted.iter().all(|v| v.light == 0xC030));
+            assert!(emitted[..4].iter().all(|v| v.color == 0xFF563412));
+            assert!(emitted[4..].iter().all(|v| v.color == u32::MAX));
+
+            // Same content and emitter on each side; this times CPU work only.
+            let mut scratch = Vec::with_capacity(expected.len());
+            let rounds = 20_000;
+            let start = std::time::Instant::now();
+            for _ in 0..rounds {
+                scratch.clear();
+                game.baked_model_vertices(
+                    [source],
+                    surface.pose(),
+                    |_| surface.light,
+                    true,
+                    |index| (index >= 0).then_some(0x123456),
+                    &mut scratch,
+                );
+                std::hint::black_box(&scratch);
+            }
+            let before_time = start.elapsed();
+            let start = std::time::Instant::now();
+            for _ in 0..rounds {
+                surface.vertices.clear();
+                game.native_draw_model(&mut surface, model, 0x123456)
+                    .unwrap();
+                std::hint::black_box(&surface.vertices);
+            }
+            eprintln!(
+                "CPU model {rounds} draws: lookup {before_time:?}, prepared {:?}",
+                start.elapsed()
+            );
             let before = bytes(&surface.vertices);
             let invalid =
                 mod_api::__private::built::model_ref(game.pack.render.generation, u32::MAX);
@@ -1155,8 +1213,23 @@ mod tests {
                 ))
                 .unwrap();
             assert_ne!(replacement.generation, game.pack.render.generation);
-            game.pack.render = std::sync::Arc::new(replacement);
-            game.standalone_sprites = StandaloneSprites::new(&game.pack, &game.gui);
+            let _ = replacement;
+            let listeners = game.register_client_reload_listeners();
+            let staged = super::super::packs::stage_pack(
+                &game.options.resources,
+                &[],
+                &[],
+                &game.mods,
+                listeners,
+                &game.pack.assets,
+                game.res,
+                &game.pack.context,
+                false,
+                false,
+                &super::super::Progress::new(),
+            )
+            .unwrap();
+            game.apply_staged_pack(staged).unwrap();
             assert_eq!(
                 game.native_draw_model(&mut surface, model, 0x123456),
                 Err(ModelError::StaleModel)
