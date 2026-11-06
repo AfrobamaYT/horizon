@@ -4048,7 +4048,7 @@ impl Level {
                 *value = default;
             }
         } else {
-            rules.remove(minecart_rule.name);
+            rules.remove(&minecart_rule.name);
         }
         level.game_rules = rules;
         // Seed: world_gen_settings.dat (26.3) or Data.WorldGenSettings.
@@ -4757,13 +4757,13 @@ impl Level {
                 let tag = match rule.default {
                     crate::gamerules::Value::Bool(default) => Tag::Byte(i8::from(
                         self.game_rules
-                            .get(rule.name)
+                            .get(&rule.name)
                             .copied()
                             .unwrap_or(i32::from(default))
                             != 0,
                     )),
                     crate::gamerules::Value::Int(default) => {
-                        Tag::Int(self.game_rules.get(rule.name).copied().unwrap_or(default))
+                        Tag::Int(self.game_rules.get(&rule.name).copied().unwrap_or(default))
                     }
                 };
                 put(&mut rules, &format!("minecraft:{}", rule.name), tag);
@@ -4779,7 +4779,7 @@ impl Level {
                 };
                 let value = self
                     .game_rules
-                    .get(rule.name)
+                    .get(&rule.name)
                     .copied()
                     .filter(|v| (rule.min..=rule.max).contains(v))
                     .unwrap_or(default);
