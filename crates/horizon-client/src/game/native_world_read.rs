@@ -11,7 +11,7 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use mod_api::BlockKey;
-use mod_api::{FluidState, LevelRef, NativeLifecycleContext, TagRegistry};
+use mod_api::{FluidState, LevelRef, NativeLifecycleContext, TagRegistry, UnresolvedFluid};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]
@@ -108,6 +108,11 @@ fn fluid_kind(fluid: &str) -> Option<FluidKind> {
 }
 
 impl Game<'_> {
+    /// The saved name for an engine-issued unresolved fluid.
+    pub(super) fn native_unresolved_fluid_id(&self, fluid: UnresolvedFluid) -> String {
+        mod_api::__private::unresolved_fluid_name(fluid)
+    }
+
     /// The merged tag tables, once the world has built them. None on a server's client, whose
     /// tags are not the server's, and before the world has loaded its tags (the world lock is
     /// installed after they are built).
