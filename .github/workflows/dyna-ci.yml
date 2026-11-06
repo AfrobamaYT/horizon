@@ -140,6 +140,9 @@ jobs:
             # The slot's build folder persists between jobs; point the checkout's target at it.
             mkdir -p "$CARGO_TARGET_DIR"
             ln -s "$CARGO_TARGET_DIR" target
+            # sccache can't wrap clippy-driver (`sccache clippy-driver rustc -vV` fails); the persistent
+            # build folder is the cache here, so lint runs without the runner's wrapper.
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
           fi
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy --target wasm32-unknown-unknown
       - name: Lint cache toolchain
