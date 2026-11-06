@@ -131,6 +131,97 @@ fn install_mod_resources(
     game.pack.data_changes = root.data_changes().clone();
 }
 
+#[test]
+#[ignore = "needs prepared resources"]
+fn reload_command_uses_applied_listener_state_and_preserves_tables_on_refusal() {
+    use mod_api::{DataPackFilesEvent, Registrar, RegistrationContext, ServerHost};
+    use std::sync::atomic::AtomicUsize;
+    struct Listener(Arc<AtomicUsize>);
+    impl ServerReloadListener for Listener {
+        fn prepare(
+            &self,
+            _: &ServerReloadContext,
+        ) -> Result<Box<dyn ReloadApply>, ReloadResourceError> {
+            let state = self.0.clone();
+            Ok(<dyn ReloadApply>::new(move || {
+                state.fetch_add(1, Ordering::SeqCst);
+            }))
+        }
+    }
+    #[mod_api::__subscriptions]
+    impl Hooks for Listener {
+        fn add_server_reload_listeners(
+            &self,
+            _: &dyn Host,
+            event: &mut AddServerReloadListenersEvent<'_>,
+        ) {
+            event
+                .listeners
+                .add_listener(
+                    Identifier::parse("reload_order:listener").unwrap(),
+                    FileToIdConverter::json("reload_order").unwrap(),
+                    Arc::new(Listener(self.0.clone())),
+                )
+                .unwrap();
+        }
+        fn data_pack_files(&self, _: &mut dyn ServerHost, event: &mut DataPackFilesEvent<'_>) {
+            let item = if self.0.load(Ordering::SeqCst) == 1 {
+                "minecraft:stone"
+            } else {
+                "minecraft:diamond"
+            };
+            event.files.push((
+                "tags/reload_order:block/derived".into(),
+                format!(r#"{{"values":["{item}"]}}"#).into_bytes(),
+            ));
+        }
+    }
+    struct Missing;
+    #[mod_api::__subscriptions]
+    impl Hooks for Missing {
+        fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+            registrar.item_key("reload_order:missing");
+        }
+    }
+    let state = Arc::new(AtomicUsize::new(0));
+    mod_api::testing::with_mods(
+        vec![ModEntry::new(
+            "reload_order",
+            Box::new(Listener(state.clone())),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                let root =
+                    std::env::temp_dir().join(format!("reload-order-{}", std::process::id()));
+                game.load_world(request(&root)).unwrap();
+                state.store(0, Ordering::SeqCst);
+                assert!(game.run_command("reload"));
+                assert_eq!(state.load(Ordering::SeqCst), 1);
+                assert!(
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                );
+                let old = game.world_tables.as_ref().map(|tables| tables as *const _);
+                mod_api::__private::install_parts(&[ModEntry::new(
+                    "reload_order",
+                    Box::new(Missing),
+                )])
+                .unwrap();
+                assert!(!game.run_command("reload"));
+                assert_eq!(state.load(Ordering::SeqCst), 2);
+                assert_eq!(
+                    old,
+                    game.world_tables.as_ref().map(|tables| tables as *const _)
+                );
+                assert!(
+                    game.items().block_tags["reload_order:derived"].contains("minecraft:stone")
+                );
+                let _ = std::fs::remove_dir_all(root);
+            });
+        },
+    );
+}
+
 fn request(root: &Path) -> WorldRequest {
     WorldRequest {
         rule_registry: std::sync::Arc::new(horizon_client::gamerules::RuleRegistry::vanilla()),
