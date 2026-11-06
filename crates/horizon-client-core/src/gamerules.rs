@@ -1,5 +1,5 @@
 //! Game rules (26.3 `GameRules`): the registered rules with their category,
-//! type, default and bounds, a value map, and persistence in the world's
+//! type, default and bounds, dense values, and persistence in the world's
 //! `data/minecraft/game_rules.dat` saved-data file.
 use horizon_world::{
     DATA_VERSION,
@@ -141,13 +141,22 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
 }
 
 /// Current values (defaults unless set).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GameRules {
-    values: BTreeMap<&'static str, Value>,
+    values: Vec<Value>,
     // Keep entries that cannot be interpreted by the current registry verbatim.
     // A temporarily absent mod must not lose its saved rule values.
     unknown: nbt::Compound,
     minecart_improvements: bool,
+}
+impl Default for GameRules {
+    fn default() -> Self {
+        Self {
+            values: available_rules(true).map(|rule| rule.default).collect(),
+            unknown: nbt::Compound::new(),
+            minecart_improvements: false,
+        }
+    }
 }
 impl GameRules {
     pub fn with_features(features: &[String]) -> Self {
@@ -161,8 +170,8 @@ impl GameRules {
     pub fn copy_with_features(&self, features: &[String]) -> Self {
         let mut rules = Self::with_features(features);
         rules.unknown = self.unknown.clone();
-        for (&name, &value) in &self.values {
-            rules.set(name, value);
+        for (rule, &value) in available_rules(true).zip(&self.values) {
+            rules.set(rule.name, value);
         }
         rules
     }
@@ -170,11 +179,9 @@ impl GameRules {
         available_rules(self.minecart_improvements)
     }
     pub fn get(&self, name: &str) -> Option<Value> {
-        let r = rule(name)?;
-        if r.name == MAX_MINECART_SPEED.name && !self.minecart_improvements {
-            return None;
-        }
-        Some(self.values.get(r.name).copied().unwrap_or(r.default))
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let index = self.available_rules().position(|rule| rule.name == name)?;
+        Some(self.values[index])
     }
     pub fn bool(&self, name: &str) -> bool {
         matches!(self.get(name), Some(Value::Bool(true)))
@@ -196,7 +203,12 @@ impl GameRules {
     }
     /// Set a rule; false if the name or value type is wrong.
     pub fn set(&mut self, name: &str, value: Value) -> bool {
-        let Some(r) = rule(name).filter(|r| self.get(r.name).is_some()) else {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        let Some((index, r)) = self
+            .available_rules()
+            .enumerate()
+            .find(|(_, r)| r.name == name)
+        else {
             return false;
         };
         let ok = match (r.default, value) {
@@ -204,10 +216,8 @@ impl GameRules {
             (Value::Int(_), Value::Int(v)) => (r.min..=r.max).contains(&v),
             _ => false,
         };
-        if ok && value == r.default {
-            self.values.remove(r.name);
-        } else if ok {
-            self.values.insert(r.name, value);
+        if ok {
+            self.values[index] = value;
         }
         ok
     }
@@ -215,8 +225,9 @@ impl GameRules {
     /// them (booleans as 0 or 1).
     pub fn by_name(&self) -> BTreeMap<String, i32> {
         self.available_rules()
-            .map(|r| {
-                let v = match self.values.get(r.name).copied().unwrap_or(r.default) {
+            .enumerate()
+            .map(|(index, r)| {
+                let v = match self.values[index] {
                     Value::Bool(b) => i32::from(b),
                     Value::Int(i) => i,
                 };
@@ -227,8 +238,8 @@ impl GameRules {
     /// GameRuleMap codec: `{data: {"minecraft:<rule>": value...}, DataVersion}`.
     pub fn to_nbt(&self) -> NamedTag {
         let mut data = self.unknown.clone();
-        data.extend(self.available_rules().map(|r| {
-            let v = self.values.get(r.name).copied().unwrap_or(r.default);
+        data.extend(self.available_rules().enumerate().map(|(index, r)| {
+            let v = self.values[index];
             let tag = match v {
                 Value::Bool(b) => Tag::Byte(i8::from(b)),
                 Value::Int(i) => Tag::Int(i),
