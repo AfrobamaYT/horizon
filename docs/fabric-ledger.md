@@ -52,3 +52,58 @@ Event counterparts belong on individual hooks, not in this ledger. These rows co
 | `fabric-serialization-api-v1`: `MoreCodecs`, `FabricValueInput`, `FabricValueOutput` | **Gap:** Fabric's codec/value-input extensions; existing Rust serialization and attachment codecs are different APIs. | — |
 | `fabric-tag-api-v1`: `FabricTagFile`, `ClientTags` | **Covered in part:** vanilla datapack tags and the `server_data_loaded` notice (#27 Done: server data loaded). **Gap:** Fabric's tag-file extensions and client tag API semantics. | — |
 | `fabric-dimensions-v1`: `DimensionEvents.MODIFY_ATTRIBUTES` | **Gap:** no equivalent dimension-attribute modification contract established; this event is not a level lifecycle event. | — |
+
+## Event counterparts: client lifecycle and ticks (#1014)
+
+Checked against Fabric API 26.3 at `2065040b236a0d5ac011bd6a45625dc49579b222`
+(Apache-2.0, including the headers of the files below). **Covered** here means a
+verified event moment, logical side, listener inputs and non-cancelling contract;
+it does not expose Java objects or promise the whole Fabric API. The client object
+passed by Fabric is represented by the generated `ClientHost`, not an extra event
+field. Both client tick events have no other payload, return `void`, and iterate
+all listeners; Horizon uses `contract = "listen"` and no cancellation output.
+
+Scope: every hook in `client_setup.rs`, `client_stopping.rs`, `client_stopped.rs`,
+`client_tick_pre.rs`, `client_tick_post.rs`, `client_player_logging_in.rs` and
+`client_player_logging_out.rs`, plus the unmapped server lifecycle declarations
+`world_lifecycle`, `server_about_to_start`, `server_starting`, `server_started` and
+`server_stopped` in `base.rs`. The four existing Fabric mappings in `base.rs` and
+its unrelated hook families are unchanged and are not certified by this review.
+Paths in the Horizon column are under `crates/horizon-client/src/`.
+
+| Horizon hook | Fabric event considered / status | Evidence and porting boundary |
+|---|---|---|
+| `client_setup` | **Gap:** `ClientLifecycleEvents.CLIENT_STARTED` | [Client lifecycle API][cl-api] lines 28–37, 51–54 and [client mixin][cl-mixin] lines 49–53 fire in `Minecraft.run` just after `gameThread` is assigned, while the splash is displayed. Horizon `game.rs:23112–23116` fires after initial resources have applied. Both are client-only notices with client context, but the resource-readiness moment differs. No key. |
+| `client_stopping` | **Gap:** `ClientLifecycleEvents.CLIENT_STOPPING` | [Client lifecycle API][cl-api] lines 39–49, 56–59 explicitly precedes integrated-server stopping; [client mixin][cl-mixin] lines 44–47 injects in `exitWorldAndClose` after logging. Horizon `game.rs:20608–20618` calls `save_for_exit` first, then notifies with client context. Same side and non-cancellation, different ordering. No key; corrected the hook comment's former counterpart claim. |
+| `client_stopped` | **Gap:** none | [Client lifecycle API][cl-api] lines 24–60 defines only started/stopping, no completion event. Horizon `game.rs:23216–23243` notifies after its event loop and shutdown services. `CLIENT_STOPPING` is earlier, not an alias for this client-only notice. |
+| `client_tick_pre` | **Covered:** `ClientTickEvents.START_CLIENT_TICK` | [Client tick API][ct-api] lines 29–36, 67–70 passes only the client and returns `void`; [client mixin][cl-mixin] lines 34–37 injects at `Minecraft.tick` HEAD without cancellation. Horizon `game.rs:20364–20369` fires before each client tick, outside the title/pause guard; `game/native_hooks.rs:2892–2895` forwards without extra payload. Generated client host supplies the client context. |
+| `client_tick_post` | **Covered:** `ClientTickEvents.END_CLIENT_TICK` | [Client tick API][ct-api] lines 38–45, 72–75 and [client mixin][cl-mixin] lines 39–42: client-only, client context only, `void`, at each successful `Minecraft.tick` RETURN. Horizon `game.rs:20373–20391` fires after the tick and client UI/audio work, outside the title/pause guard; errors return before it. `game/native_hooks.rs:2896–2899` forwards without extra payload. |
+| `client_player_logging_in` | **Gap:** `ClientPlayConnectionEvents.INIT` / `JOIN` | [Connection API][connection-api] lines 31–52, 68–76 passes `(listener, client)` for INIT and `(listener, sender, client)` for JOIN, both `void`. [Play mixin][play-mixin] lines 46–57 and [play addon][play-addon] lines 52–67 fire INIT after packet-listener construction and JOIN after `handleLogin` returns, before initial channel registration. Horizon `game/remote.rs:3355–3367` notifies after level/player login setup; `game/native_hooks.rs:2731–2733` supplies entity ID and UUID plus client host, not a packet listener and sender. INIT is also earlier. No key, even though JOIN is a similar login-completion notice. |
+| `client_player_logging_out` | **Gap:** `ClientPlayConnectionEvents.DISCONNECT` | [Connection API][connection-api] lines 54–63, 78–81 passes `(listener, client)`, returns `void` and forbids packet sends. [Connection mixin][connection-mixin] lines 89–101 reaches the addon at channel inactivity or before `PacketListener.onDisconnect`; [network addon][network-addon] lines 158–162 deduplicates and invokes before ending the session, then [play addon][play-addon] lines 96–99 fires DISCONNECT. Horizon `game/remote.rs:1200–1211,1219` notifies before game teardown with optional player ID/UUID (`game/native_hooks.rs:2737–2742`), not a packet listener. The transport boundary and arguments are not established as equivalent. No key. |
+| `world_lifecycle` | **Gap:** none for the complete contract | [Server lifecycle API][sl-api] lines 31–78, 128–146 has separate non-cancelling start/stop events taking a server, not Horizon's lifecycle context, phase and error text (`game/native_hooks.rs:2929–2935`). In particular it does not provide the `WorldOpenFailed` / `WorldCloseFailed` error notices of this hook. No key for a partial phase overlap. |
+| `server_about_to_start` | **Gap:** `ServerLifecycleEvents.SERVER_STARTING` | [Server mixin][server-mixin] lines 56–59 fires before `initServer`; [server lifecycle API][sl-api] lines 31–40, 128–131 supplies the server, returns `void`, before player list/levels load. Horizon `game/dedicated.rs:996–1011` already loads server lists before this `loadLevel` boundary; `game/integrated.rs:764–775` likewise places it at world opening. Same logical server side, later moment. No key. |
+| `server_starting` | **Gap:** `ServerLifecycleEvents.SERVER_STARTING` | Same Fabric evidence as above. Horizon fires immediately after `server_about_to_start` (`game/dedicated.rs:1009–1010`, `game/integrated.rs:769–770`), not before `initServer`. `game/native_hooks.rs:3053–3054` passes a `dedicated` flag and server host, with no veto. The matching name is not evidence of the matching point. No key. |
+| `server_started` | **Gap:** `ServerLifecycleEvents.SERVER_STARTED` (not proven) | [Server lifecycle API][sl-api] lines 42–51, 133–136 is a server-only `void` notice with server context, after levels load and before ticking; [server mixin][server-mixin] lines 61–65 places it immediately before the first `buildServerStatus`. Horizon `game/integrated.rs:679–681` and `game/dedicated.rs:1232–1239` mark world-open readiness, forwarding server host and `dedicated` (`game/native_lifecycle.rs:206–209`, `game/native_hooks.rs:3063–3064`). These establish a similar broad phase, but not its exact ordering against status construction. No key until that firing-point equivalence is established. |
+| `server_stopped` | **Gap:** `ServerLifecycleEvents.SERVER_STOPPED` | [Server lifecycle API][sl-api] lines 67–78, 143–146 supplies the server and returns `void`; [server mixin][server-mixin] lines 72–75 injects at `stopServer` TAIL. Horizon `game/server_lifecycle.rs:59–94` also notifies after teardown errors or listener panics; a thrown exception does not reach a Fabric TAIL injection. The successful shutdown phase resembles it, but failure coverage differs. No key. |
+
+`ClientTickEvents.START_LEVEL_TICK` and `END_LEVEL_TICK` are not aliases for the
+client tick hooks. They pass a `ClientLevel`, not a client ([client tick API][ct-api]
+lines 47–65, 77–85), and fire at `ClientLevel.tickEntities` HEAD and `ClientLevel.tick`
+RETURN ([client level mixin][level-mixin] lines 30–38). They require a level and do
+not wrap the whole client tick in menus or while paused. No additional key is added.
+
+The host argument is generated by `crates/horizon-mod-api-gen/src/host_param.rs:105–121`;
+empty hook declarations do not mean the listener lacks client context. This change
+adds metadata only: no dispatch, tick-time work, adapter, alias or gameplay changes.
+
+[cl-api]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/client/java/net/fabricmc/fabric/api/client/event/lifecycle/v1/ClientLifecycleEvents.java
+[ct-api]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/client/java/net/fabricmc/fabric/api/client/event/lifecycle/v1/ClientTickEvents.java
+[cl-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/client/java/net/fabricmc/fabric/mixin/event/lifecycle/client/MinecraftMixin.java
+[level-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/client/java/net/fabricmc/fabric/mixin/event/lifecycle/client/ClientLevelMixin.java
+[sl-api]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/main/java/net/fabricmc/fabric/api/event/lifecycle/v1/ServerLifecycleEvents.java
+[server-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/main/java/net/fabricmc/fabric/mixin/event/lifecycle/MinecraftServerMixin.java
+[connection-api]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-networking-api-v1/src/client/java/net/fabricmc/fabric/api/client/networking/v1/ClientPlayConnectionEvents.java
+[play-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-networking-api-v1/src/client/java/net/fabricmc/fabric/mixin/networking/client/ClientPacketListenerMixin.java
+[play-addon]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-networking-api-v1/src/client/java/net/fabricmc/fabric/impl/networking/client/ClientPlayNetworkAddon.java
+[connection-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-networking-api-v1/src/main/java/net/fabricmc/fabric/mixin/networking/ConnectionMixin.java
+[network-addon]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-networking-api-v1/src/main/java/net/fabricmc/fabric/impl/networking/AbstractNetworkAddon.java

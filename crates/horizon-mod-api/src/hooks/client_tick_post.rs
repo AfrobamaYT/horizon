@@ -7,7 +7,8 @@ pub trait Hooks {
     #[hook(
         side = "client",
         contract = "listen",
-        neoforge = "ClientTickEvent.Post"
+        neoforge = "ClientTickEvent.Post",
+        fabric = "ClientTickEvents.END_CLIENT_TICK"
     )]
     fn client_tick_post();
 }
