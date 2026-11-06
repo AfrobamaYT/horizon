@@ -5372,7 +5372,9 @@ pub(crate) mod tests {
     /// A server host that answers nothing: the hooks here don't call it.
     struct NoHost;
     impl mod_api::Host for NoHost {}
+    mod_api::impl_host_areas!(NoHost);
     impl mod_api::ServerHost for NoHost {}
+    mod_api::impl_server_host_areas!(NoHost);
 
     /// Records what `player_brewed_potion` told it.
     struct BrewWatcher(std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, ItemStack)>>>);

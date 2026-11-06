@@ -17,11 +17,3 @@ pub trait Hooks {
     )]
     fn menu_extra_data();
 }
-
-pub trait Helpers {
-    #[helper(side = "client")]
-    fn screen_pos();
-    /// Not on wasm: it returns a borrowed view of the screen's bytes, which crosses only as a resource.
-    #[helper(side = "client")]
-    fn screen_extra_data();
-}

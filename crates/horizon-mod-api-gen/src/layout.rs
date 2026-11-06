@@ -13,12 +13,7 @@ pub fn native_hook_layout(root: &Path, source: &str) -> Result<Value, String> {
             path.display().to_string(),
             fs::read_to_string(&path).map_err(|e| e.to_string())?,
         )])?;
-        for target in catalog.hooks.iter().map(|h| &h.target).chain(
-            catalog
-                .helpers
-                .iter()
-                .flat_map(|h| std::iter::once(&h.target).chain(h.client_target.iter())),
-        ) {
+        for target in catalog.hooks.iter().map(|h| &h.target) {
             if target.starts_with("horizon_client::game::native_hooks::") {
                 let name = target.rsplit("::").next().unwrap().to_owned();
                 if let Some(previous) = areas.insert(name.clone(), area.clone())

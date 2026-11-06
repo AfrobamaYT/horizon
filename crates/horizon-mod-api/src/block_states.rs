@@ -121,6 +121,7 @@ mod tests {
     /// A mod's test double: a host with no game behind it.
     struct Double;
     impl Host for Double {}
+    mod_api::impl_host_areas!(Double);
 
     #[test]
     fn a_host_without_a_game_answers_none() {
