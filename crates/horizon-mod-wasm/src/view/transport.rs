@@ -1,7 +1,7 @@
 //! Stock canonical list cursors on input, and store-owned buffers retained until lowering ends.
 use super::*;
 use std::sync::Arc;
-use wasmtime::component::{Access, ResourceType, WasmList};
+use wasmtime::component::WasmList;
 use wasmtime::{AsContextMut, StoreContextMut};
 
 type Get = Result<Arc<Vec<wire::Cell>>, wire::Refusal>;
@@ -58,6 +58,7 @@ fn get_many(
     store: StoreContextMut<'_, State>,
     reads: WasmList<Read>,
 ) -> wasmtime::Result<Arc<Vec<Get>>> {
+    bounded_batch(reads.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
         contain(|| {
             buffers.begin();
@@ -91,6 +92,7 @@ fn set_many(
     store: StoreContextMut<'_, State>,
     writes: WasmList<Write>,
 ) -> wasmtime::Result<Arc<Vec<Result<(), wire::Refusal>>>> {
+    bounded_batch(writes.len())?;
     State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
         contain(|| {
             buffers.begin();
@@ -113,83 +115,13 @@ fn set_many(
     })
 }
 
-fn get(
-    store: StoreContextMut<'_, State>,
-    node: Resource<wire::Node>,
-    field: Option<u32>,
-) -> wasmtime::Result<Get> {
-    State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
-        contain(|| {
-            buffers.begin();
-            charge(
-                &mut store,
-                1usize
-                    .saturating_add(node_cost(&node))
-                    .saturating_add(journal_cost()),
-            )?;
-            let value = match field {
-                Some(field) => View.get_value(&node, field),
-                None => current(|a| a.frame.read(a.node(&node)?).map_err(Into::into)),
-            }
-            .and_then(|v| buffers.encode(0, v));
-            charge(&mut store, value.as_ref().map_or(0, |v| wire_cost(v)))?;
-            Ok(value)
-        })
-    })
-}
-
-fn set(
-    store: StoreContextMut<'_, State>,
-    node: Resource<wire::Node>,
-    field: u32,
-    cells: WasmList<wire::Cell>,
-) -> wasmtime::Result<Result<(), wire::Refusal>> {
-    State::with_buffer::<Buffers, _>(store, |buffers, mut store| {
-        contain(|| {
-            buffers.begin();
-            let cost = 1usize
-                .saturating_add(node_cost(&node))
-                .saturating_add(buffers.input(&mut store, cells, 0)?);
-            charge(&mut store, cost)?;
-            Ok(View.set_buffer(&node, field, &mut buffers.inputs[0]))
-        })
-    })
-}
-
 pub(super) fn add_to_linker(linker: &mut Linker<State>) -> wasmtime::Result<()> {
+    linker.allow_shadowing(true);
     let mut interface = linker.instance("horizon:mod-internals/view@0.1.0")?;
-    interface.resource("node", ResourceType::host::<wire::Node>(), |store, rep| {
-        <View as wire::HostNodeWithStore<State>>::drop(
-            Access::new(store, |_| View),
-            Resource::new_own(rep),
-        )
-    })?;
-    macro_rules! forward {
-        ($trait:ident, $method:ident, $name:literal, $($arg:ident: $ty:ty),*) => {
-            interface.func_wrap($name, |store: StoreContextMut<'_, State>, ($($arg,)*): ($($ty,)*)| {
-                Ok((<View as wire::$trait<State>>::$method(Access::new(store, |_| View), $($arg),*)?,))
-            })?;
-        };
-    }
-    forward!(HostNodeWithStore, field, "[method]node.field", node: Resource<wire::Node>, n: u32);
-    forward!(HostNodeWithStore, index, "[method]node.index", node: Resource<wire::Node>, i: u64);
-    forward!(HostNodeWithStore, key, "[method]node.key", node: Resource<wire::Node>, k: Vec<wire::Cell>);
-    forward!(HostNodeWithStore, len, "[method]node.len", node: Resource<wire::Node>);
-    forward!(HostNodeWithStore, case, "[method]node.case", node: Resource<wire::Node>);
-    forward!(HostWithStore, root, "root", n: u32);
-    forward!(HostWithStore, call, "call", declared: u32, receiver: Option<Resource<wire::Node>>, args: Vec<wire::Arg>);
-    interface.func_wrap("[method]node.get", |store, (node, field)| {
-        Ok((get(store, node, Some(field))?,))
-    })?;
-    interface.func_wrap("[method]node.read", |store, (node,)| {
-        Ok((get(store, node, None)?,))
-    })?;
-    interface.func_wrap("[method]node.set", |store, (node, field, cells)| {
-        Ok((set(store, node, field, cells)?,))
-    })?;
     interface.func_wrap("get-many", |store, (reads,)| Ok((get_many(store, reads)?,)))?;
     interface.func_wrap("set-many", |store, (writes,)| {
         Ok((set_many(store, writes)?,))
     })?;
+    linker.allow_shadowing(false);
     Ok(())
 }

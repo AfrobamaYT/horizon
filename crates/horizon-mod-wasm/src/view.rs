@@ -227,7 +227,9 @@ impl HasData for View {
 
 /// Adds the internals imports to a group's linker.
 pub fn add_to_linker(linker: &mut Linker<State>) {
-    transport::add_to_linker(linker).expect("the game's internals imports are defined once");
+    wire::add_to_linker::<State, View>(linker, |_| View)
+        .expect("the game's internals imports are defined once");
+    transport::add_to_linker(linker).expect("the batch imports match the internals interface");
 }
 
 fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
@@ -411,7 +413,7 @@ impl wire::HostWithStore<State> for View {
         host: wasmtime::component::Access<'_, State, Self>,
         reads: Vec<(Resource<wire::Node>, u32)>,
     ) -> wasmtime::Result<Vec<Result<Vec<wire::Cell>, wire::Refusal>>> {
-        let reads = bounded_batch(reads)?;
+        bounded_batch(reads.len())?;
         let cells = reads
             .iter()
             .map(|(n, _)| node_cost(n).saturating_add(journal_cost()))
@@ -433,7 +435,7 @@ impl wire::HostWithStore<State> for View {
         host: wasmtime::component::Access<'_, State, Self>,
         writes: Vec<(Resource<wire::Node>, u32, Vec<wire::Cell>)>,
     ) -> wasmtime::Result<Vec<Result<(), wire::Refusal>>> {
-        let writes = bounded_batch(writes)?;
+        bounded_batch(writes.len())?;
         let cells = writes
             .iter()
             .map(|(n, _, v)| node_cost(n).saturating_add(wire_cost(v)))
@@ -473,9 +475,9 @@ impl wire::HostWithStore<State> for View {
     }
 }
 
-fn bounded_batch<T>(entries: Vec<T>) -> wasmtime::Result<Vec<T>> {
-    wasmtime::ensure!(entries.len() <= 12, "internals batch entry budget");
-    Ok(entries)
+fn bounded_batch(len: usize) -> wasmtime::Result<()> {
+    wasmtime::ensure!(len <= 12, "internals batch entry budget");
+    Ok(())
 }
 
 fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
@@ -1049,6 +1051,18 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs the internals guest fixture"]
+    fn guest_oversize_batches_trap_without_writes() {
+        for message in ["oversize_get", "oversize_set"] {
+            let group = fixture_group();
+            let mut game = fixture_game();
+            let error = fixture_result(&group, &mut game, message).unwrap_err();
+            assert!(error.contains("internals batch entry budget"), "{error}");
+            assert_eq!(game, fixture_game());
+        }
     }
 
     #[test]

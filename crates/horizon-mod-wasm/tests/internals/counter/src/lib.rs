@@ -44,6 +44,20 @@ fn call(raw: HandleChatInputRaw, game: Option<Game>) {
         }
         return;
     }
+    if matches!(message.as_str(), "oversize_get" | "oversize_set") {
+        use mod_internals::runtime::{AsNode, bindings::horizon::mod_internals::view};
+        let node = game.node();
+        if message.as_str() == "oversize_get" {
+            let reads = (0..13).map(|_| (node, 0)).collect::<Vec<_>>();
+            let _ = view::get_many(&reads);
+        } else {
+            let writes = (0..13)
+                .map(|_| (node, 0, vec![view::Cell::S(9)]))
+                .collect::<Vec<_>>();
+            let _ = view::set_many(&writes);
+        }
+        panic!("oversized batch did not trap");
+    }
     match message.as_str() {
         "panic_thunk" => {
             game.set_left(42).unwrap();
