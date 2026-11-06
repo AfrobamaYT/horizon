@@ -1110,6 +1110,7 @@ impl<'r> Gen<'r> {
         let mut lets = Vec::new();
         let mut args = Vec::new();
         let mut updates = Vec::new();
+        let mut borrowed_copy = false;
         // Named input lifetimes can be tied to a receiver's stored borrows. Spelling a listed
         // lifetime-bearing input with `'static` would also invent an outlives guarantee.
         struct InputLifetimes<'r> {
@@ -1165,6 +1166,7 @@ impl<'r> Gen<'r> {
                     args.push(quote!(#arg));
                 }
                 (Shape::Ref { mutable, to }, Crossing::Copy(_)) => {
+                    borrowed_copy = true;
                     if !*mutable && matches!(**to, Shape::Scalar(Scalar::Str)) {
                         let value =
                             self.decode(&Shape::Scalar(Scalar::String), quote!(I::value(#arg)?));
@@ -1199,6 +1201,25 @@ impl<'r> Gen<'r> {
         let result = match output {
             syn::ReturnType::Default => quote!(Ok(I::Reply::Done)),
             syn::ReturnType::Type(_, ty) => {
+                let shape = rule.shape(module, this, ty);
+                if borrowed_copy
+                    && callee.receiver.is_none()
+                    && rule.crossing_of(&shape) == Crossing::Handle
+                {
+                    struct Elision(bool);
+                    impl<'ast> syn::visit::Visit<'ast> for Elision {
+                        fn visit_type_reference(&mut self, r: &'ast syn::TypeReference) {
+                            self.0 |= r.lifetime.as_ref().is_none_or(|l| l.ident == "_");
+                            syn::visit::visit_type_reference(self, r);
+                        }
+                    }
+                    let mut elision = Elision(false);
+                    syn::visit::Visit::visit_type(&mut elision, ty);
+                    if elision.0 {
+                        self.skip_reason = "returned node may borrow a decoded copy";
+                        return None;
+                    }
+                }
                 if let Some(reference) = optional_reference(rule, module, this, ty) {
                     self.selection.reach(&reference, rule);
                     let node =
@@ -1209,9 +1230,7 @@ impl<'r> Gen<'r> {
                     })
                 } else {
                     let success = result_success(rule, module, this, ty);
-                    let shape = success
-                        .clone()
-                        .unwrap_or_else(|| rule.shape(module, this, ty));
+                    let shape = success.clone().unwrap_or(shape);
                     self.selection.reach(&shape, rule);
                     match (&shape, rule.crossing_of(&shape)) {
                         (_, Crossing::Opaque) => return None,
@@ -1796,12 +1815,14 @@ pub(crate) mod tests {
         "#,
             r#"
             use internals::{Arg, CallReply};
+            let mut n = 0u32;
             let mut pair = Pair { x: 2, flag: false };
             let ty = __internals::TABLE.types.iter().find(|t| t.path.ends_with("Pair")).unwrap();
             unsafe { assert_eq!((ty.node)((&raw mut pair).cast(), true, Op::Read), Ok(Reply::Value(Value::Rec(vec![Value::U(2), Value::B(false)])))); }
             for thunk in __internals::TABLE.thunks {
                 assert_eq!(thunk.writes, 0, "copy locals never write through nodes");
                 assert!(thunk.args.iter().all(Option::is_none));
+                unsafe { assert!((thunk.call)(None, vec![Arg::Node((&raw mut n).cast())]).is_err()); }
                 let mut args = vec![Arg::Value(Value::U(7))];
                 let (result, updates) = if thunk.path.ends_with("mutate") {
                     args.push(Arg::Value(Value::Rec(vec![Value::U(2), Value::B(false)])));
@@ -1812,6 +1833,61 @@ pub(crate) mod tests {
                     (Reply::Value(Value::Var(1, vec![])), vec![Value::U(99)])
                 } else { (Reply::Done, vec![Value::U(42)]) };
                 unsafe { assert_eq!((thunk.call)(None, args), Ok(CallReply { result, updates })); }
+            }
+        "#,
+        );
+    }
+
+    #[test]
+    fn returned_nodes_cannot_borrow_decoded_copy_locals() {
+        let mut entries = vec![
+            internal(
+                "horizon_client::State",
+                "struct",
+                "struct State { values: Vec<u8> }",
+            ),
+            internal(
+                "horizon_client::State::bytes",
+                "method",
+                "fn bytes(&self, n: &mut String) -> &Vec<u8>",
+            ),
+        ];
+        entries.extend(
+            [
+                "fn bytes(n: &mut String) -> &Vec<u8>",
+                "fn maybe(n: &mut String) -> Option<&Vec<u8>>",
+                "fn shared(n: &String) -> &Vec<u8>",
+                "fn named<'a>(n: &'a mut String) -> &'a Vec<u8>",
+                "fn fixed(n: &mut String) -> &'static Vec<u8>",
+            ]
+            .map(|sig| {
+                let name = signature(sig).unwrap().ident;
+                internal(&format!("horizon_client::{name}"), "fn", sig)
+            }),
+        );
+        let (code, counts) = all_table(&entries);
+        assert_eq!(counts.thunks, 2);
+        let skipped = &counts.skipped_functions;
+        assert_eq!(skipped["returned node may borrow a decoded copy"], 3);
+        assert_eq!(
+            skipped["named input lifetime or lifetime-bearing input type"],
+            1
+        );
+        run_fixture(
+            &code,
+            r#"
+            struct State { values: Vec<u8> }
+            impl State { fn bytes(&self, n: &mut String) -> &Vec<u8> { n.clear(); &self.values } }
+            fn fixed(_: &mut String) -> &'static Vec<u8> { static EMPTY: Vec<u8> = Vec::new(); &EMPTY }
+        "#,
+            r#"
+            let mut state = State { values: vec![42] };
+            for thunk in __internals::TABLE.thunks {
+                let receiver = thunk.receiver.map(|_| (&raw mut state).cast());
+                let reply = unsafe { (thunk.call)(receiver, vec![internals::Arg::Value(Value::Str("copy".into()))]).unwrap() };
+                assert_eq!(reply.updates.len(), 1);
+                let Reply::Node(p, ty, w) = reply.result else { panic!("node") };
+                assert_eq!(unsafe { (__internals::TABLE.types[ty as usize].node)(p, w, Op::Len) }, Ok(Reply::Value(Value::U(if receiver.is_some() { 1 } else { 0 }))));
             }
         "#,
         );

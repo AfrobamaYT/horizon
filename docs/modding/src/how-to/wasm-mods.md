@@ -108,7 +108,8 @@ crosses into a separate host local, and the final value is written back into the
 after the call, including when the game returns an error. For example, `mutate(&mut count,
 &mut small)?` updates both guest values without making either a node or aliasing game state.
 Mutable node arguments still require the separation described below. Sets are opaque, not indexed
-sequences.
+sequences. A returned node may not borrow a decoded copy local; such signatures are refused.
+Elided return borrows on methods still resolve to `self`, not to copied arguments.
 
 A function returning `Result<T, E>` (including a written `Result<T>` alias) can expose a copyable
 `T` even when its error is opaque. Its view method returns `Result<Result<T, GameError>, Refusal>`:

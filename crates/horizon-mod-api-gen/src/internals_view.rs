@@ -1021,6 +1021,23 @@ mod tests {
     }
 
     #[test]
+    fn mutable_copy_arguments_are_bound() {
+        let entries = [
+            entry(
+                "horizon_client::Counter",
+                "struct",
+                "struct Counter { value: u8 }",
+            ),
+            entry(
+                "horizon_client::Counter::mutate",
+                "method",
+                "fn mutate(&mut self, out: &mut u8)",
+            ),
+        ];
+        generate(&entries, &[declaration(&entries[1])], &[], &[]).unwrap();
+    }
+
+    #[test]
     fn build_refuses_changed_missing_and_opaque_declarations() {
         let entries = [entry(
             "horizon_client::Data",
