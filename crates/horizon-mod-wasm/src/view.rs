@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::component::{HasData, Linker, Resource};
 
+mod transport;
+
 /// A declared-list entry resolved once at load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resolved {
@@ -225,8 +227,7 @@ impl HasData for View {
 
 /// Adds the internals imports to a group's linker.
 pub fn add_to_linker(linker: &mut Linker<State>) {
-    wire::add_to_linker::<State, View>(linker, |_| View)
-        .expect("the game's internals imports are defined once");
+    transport::add_to_linker(linker).expect("the game's internals imports are defined once");
 }
 
 fn contain<T>(f: impl FnOnce() -> wasmtime::Result<T>) -> wasmtime::Result<T> {
@@ -475,7 +476,11 @@ fn encode(value: internals::Value) -> Result<Vec<wire::Cell>, wire::Refusal> {
     Ok(flatten(value))
 }
 
-fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
+fn decode(mut cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
+    decode_buffer(&mut cells)
+}
+
+fn decode_buffer(cells: &mut Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
     if cells.len() > 65_536
         || cells
             .iter()
@@ -488,7 +493,7 @@ fn decode(cells: Vec<wire::Cell>) -> Result<internals::Value, wire::Refusal> {
     {
         return Err(wire::Refusal::NotHere("internals budget".into()));
     }
-    unflatten(cells).map_err(Into::into)
+    unflatten(cells.drain(..)).map_err(Into::into)
 }
 
 impl View {
@@ -525,20 +530,37 @@ impl View {
         node: Resource<wire::Node>,
         n: u32,
     ) -> Result<Vec<wire::Cell>, wire::Refusal> {
-        current(|a| encode(a.frame.get(a.node(&node)?, n)?))
+        encode(self.get_value(&node, n)?)
+    }
+    fn get_value(
+        &mut self,
+        node: &Resource<wire::Node>,
+        n: u32,
+    ) -> Result<internals::Value, wire::Refusal> {
+        current(|a| a.frame.get(a.node(node)?, n).map_err(Into::into))
     }
     pub fn set(
         &mut self,
         node: Resource<wire::Node>,
         n: u32,
-        v: Vec<wire::Cell>,
+        mut v: Vec<wire::Cell>,
+    ) -> Result<(), wire::Refusal> {
+        self.set_buffer(&node, n, &mut v)
+    }
+    fn set_buffer(
+        &mut self,
+        node: &Resource<wire::Node>,
+        n: u32,
+        cells: &mut Vec<wire::Cell>,
     ) -> Result<(), wire::Refusal> {
         current(|a| {
             let node = a
                 .nodes
                 .get(&node.rep())
                 .ok_or_else(|| gone("the node's call is over"))?;
-            a.frame.set(&node.node, n, decode(v)?).map_err(Into::into)
+            a.frame
+                .set(&node.node, n, decode_buffer(cells)?)
+                .map_err(Into::into)
         })
     }
     pub fn index(
