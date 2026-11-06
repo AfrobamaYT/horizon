@@ -1811,10 +1811,18 @@ pub mod tests {
     #[test]
     fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
         use super::Registrar;
-        let mut refused = super::PartRegistrar::new("example");
-        let _ = refused.game_rule_category("foreign:machines");
-        let _ = refused.game_rule_category("bad path");
-        assert!(super::install_registrar(refused).is_err());
+        let mut foreign = super::PartRegistrar::new("example");
+        assert_eq!(
+            foreign.game_rule_category("foreign:machines"),
+            Err(crate::GameRuleError::ForeignNamespace)
+        );
+        assert!(super::install_registrar(foreign).is_err());
+        let mut invalid = super::PartRegistrar::new("example");
+        assert_eq!(
+            invalid.game_rule_category("bad path"),
+            Err(crate::GameRuleError::InvalidId)
+        );
+        assert!(super::install_registrar(invalid).is_err());
         let mut good = super::PartRegistrar::new("example");
         assert_eq!(good.game_rule_category("machines"), Ok(()));
         assert!(super::install_registrar(good).is_ok());
@@ -1826,7 +1834,7 @@ pub mod tests {
         let mut duplicate = super::PartRegistrar::new("example");
         duplicate.game_rule_category("machines").unwrap();
         assert_eq!(
-            duplicate.game_rule_category("machines"),
+            duplicate.game_rule_category("example:machines"),
             Err(crate::GameRuleError::Duplicate)
         );
         assert!(super::install_registrar(duplicate).is_err());
