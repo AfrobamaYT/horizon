@@ -1017,6 +1017,8 @@ pub mod points;
 pub(crate) mod sites;
 pub mod staging;
 mod wasm;
+/// Shared registration emitter for component-model WIT worlds.
+pub mod wasm_imports;
 pub use build::{generate, generate_points};
 pub use wasm::{Wasm, generate as generate_wasm};
 
