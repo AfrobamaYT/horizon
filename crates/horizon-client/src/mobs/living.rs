@@ -458,32 +458,52 @@ impl Mob {
         }
     }
     /// Entity dimensions: the type's, a class's BABY_DIMENSIONS, or the
-    /// slime size scaling.
+    /// slime size scaling, in the mob's current pose.
     /// `EntityDimensions` (float width, height and eye height) widened to double.
     pub fn dims(&self) -> (f64, f64, f64) {
-        // LivingEntity.SLEEPING_DIMENSIONS.
+        self.dims_in_pose(self.pose())
+    }
+    /// The pose this mob is in (`Entity.getPose`): the stance its species
+    /// keeps in its own fields — a villager's bed, a camel's sit flag, an
+    /// avatar's stance — else the synced pose id.
+    pub fn pose(&self) -> mod_api::Pose {
         if super::villager::sleeping(self) {
-            return (f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32));
+            return mod_api::Pose::Sleeping;
         }
-        self.awake_dims()
+        if super::camel::is_camel(self.kind.species) && super::camel::sitting(self) {
+            return mod_api::Pose::Sitting;
+        }
+        if matches!(&*self.kind.id, "minecraft:player" | "minecraft:mannequin") {
+            return self.extra.avatar_pose.into();
+        }
+        mod_api::Pose::from_id(i32::from(self.extra.pose))
     }
     /// `dims` without the sleeping box: a sleeping villager's
     /// `getDimensions(Pose.STANDING)`, whose eye height lays it in the bed
     /// (`LivingEntityRenderer.submit`).
     pub fn awake_dims(&self) -> (f64, f64, f64) {
-        self.awake_dims_in(self.extra.pose == super::sync::LONG_JUMPING)
+        self.dims_in_pose(match self.pose() {
+            mod_api::Pose::Sleeping => mod_api::Pose::Standing,
+            pose => pose,
+        })
     }
-    /// `Entity.getDimensions(Pose)` of the standing pose, or of
-    /// `Pose.LONG_JUMPING` (what `LongJumpUtil` checks an arc with).
-    pub fn awake_dims_in(&self, long_jumping: bool) -> (f64, f64, f64) {
+    /// `Entity.getDimensions(Pose)` of the pose asked for: the species' box
+    /// (a player's or mannequin's follows the pose, `Avatar.POSES`; a goat
+    /// long-jumping and a camel sitting read it from the pose; the sniffer
+    /// digging, the warden emerging, the baby, the slime size, the puffer
+    /// fish, the shulker's lid, the salmon's variant and the polar bear's
+    /// rear-up read the mob's own state, as their `getDefaultDimensions`
+    /// do) times its `minecraft:scale` (`getScale`), width, height and eye
+    /// height alike — except the fixed 0.2 box every living entity sleeps
+    /// in (`LivingEntity.SLEEPING_DIMENSIONS`).
+    pub fn dims_in_pose(&self, pose: mod_api::Pose) -> (f64, f64, f64) {
+        if pose == mod_api::Pose::Sleeping {
+            return (f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32));
+        }
         let k = &self.kind;
-        // `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
-        // getScale())` on every living entity: the species' box (a player's or
-        // mannequin's follows its pose, Avatar.POSES) times its
-        // `minecraft:scale` (`getScale`), width, height and eye height alike.
         let scale = self.model_scale();
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
-            let d = self.extra.avatar_pose.dimensions(scale);
+            let d = crate::pose::Pose::from(pose).dimensions(scale);
             return (
                 f64::from(d.width),
                 f64::from(d.height),
@@ -508,11 +528,11 @@ impl Mob {
             }
         }
         // Goat.getDefaultDimensions: a long jump scales the box by 0.7.
-        if long_jumping && k.species == super::Species::Goat {
+        if pose == mod_api::Pose::LongJumping && k.species == super::Species::Goat {
             (w, h, e) = (w * 0.7_f32, h * 0.7_f32, e * 0.7_f32);
         }
         // Camel.getDefaultDimensions: a sitting camel is lower.
-        if super::camel::is_camel(k.species) && super::camel::sitting(self) {
+        if super::camel::is_camel(k.species) && pose == mod_api::Pose::Sitting {
             (w, h, e) = super::camel::sitting_dims(self.is_baby());
         }
         // Warden.getDefaultDimensions: a metre tall while digging or emerging.

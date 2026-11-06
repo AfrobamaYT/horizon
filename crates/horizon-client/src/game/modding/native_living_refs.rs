@@ -388,7 +388,7 @@ impl Game<'_> {
         )
     }
 
-    fn native_target_attribute(
+    pub(super) fn native_target_attribute(
         &self,
         target: Target,
         name: &str,

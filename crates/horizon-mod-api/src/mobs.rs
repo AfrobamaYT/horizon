@@ -100,3 +100,55 @@ impl PathType {
         }
     }
 }
+/// `Pose`: the stance a living entity's box follows (`Entity.setPose`),
+/// vanilla 26.3's set. A species' own box reads its state where its
+/// `getDefaultDimensions` does; a stance a species never takes answers its
+/// standing box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: a closed set the game matches without a wildcard
+pub enum Pose {
+    Standing,
+    FallFlying,
+    Sleeping,
+    Swimming,
+    SpinAttack,
+    Crouching,
+    LongJumping,
+    Dying,
+    Croaking,
+    UsingTongue,
+    Sitting,
+    Roaring,
+    Sniffing,
+    Emerging,
+    Digging,
+    Sliding,
+    Shooting,
+    Inhaling,
+}
+impl Pose {
+    /// The pose the network id (`Pose.id`) names; an unknown id is standing
+    /// (`ByIdMap`'s out-of-bounds strategy).
+    pub fn from_id(id: i32) -> Self {
+        match id {
+            1 => Self::FallFlying,
+            2 => Self::Sleeping,
+            3 => Self::Swimming,
+            4 => Self::SpinAttack,
+            5 => Self::Crouching,
+            6 => Self::LongJumping,
+            7 => Self::Dying,
+            8 => Self::Croaking,
+            9 => Self::UsingTongue,
+            10 => Self::Sitting,
+            11 => Self::Roaring,
+            12 => Self::Sniffing,
+            13 => Self::Emerging,
+            14 => Self::Digging,
+            15 => Self::Sliding,
+            16 => Self::Shooting,
+            17 => Self::Inhaling,
+            _ => Self::Standing,
+        }
+    }
+}

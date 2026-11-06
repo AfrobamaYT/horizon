@@ -1,8 +1,9 @@
-//! `LivingRef` line of sight and random teleport (#944): the engine's own
-//! clip and `randomTeleport` paths, for players and mobs alike.
+//! `LivingRef` line of sight, random teleport and the box of a pose (#944):
+//! the engine's own clip and `randomTeleport` paths, for players and mobs
+//! alike.
 use super::{Game, commands::Target};
 use horizon_core::geometry::Vec3;
-use mod_api::{EntityRef, LivingRef};
+use mod_api::{EntityRef, LivingRef, Pose};
 
 impl Game<'_> {
     /// `LivingEntity.hasLineOfSight(Entity)`: whether nothing that collides
@@ -33,6 +34,56 @@ impl Game<'_> {
             Vec3::new(from[0], from[1], from[2]),
             Vec3::new(to[0], to[1], to[2]),
         ))
+    }
+
+    /// `LivingEntity.getDimensions(Pose)`: the box the living entity has in
+    /// `pose` — its width, height and eye height, `minecraft:scale`
+    /// included, the fixed 0.2 box of a sleeping pose included. The species'
+    /// own state still answers where its `getDefaultDimensions` reads it: a
+    /// digging sniffer or an emerging warden is low in every pose. None for
+    /// a stale or unavailable handle.
+    pub(super) fn native_living_dimensions_for_pose(
+        &self,
+        living: LivingRef,
+        pose: Pose,
+    ) -> Option<[f64; 3]> {
+        match self.native_living_read_target(living)? {
+            t @ (Target::Player | Target::Guest(_)) => {
+                // `Avatar.getDefaultDimensions(pose).scale(getScale())`.
+                let scale = self.native_target_attribute(
+                    t,
+                    "minecraft:scale",
+                    horizon_world::attribute_map::ValueKind::Computed,
+                )? as f32;
+                let d = crate::pose::Pose::from(pose).dimensions(scale);
+                Some([f64::from(d.width), f64::from(d.height), f64::from(d.eye_height)])
+            }
+            Target::Mob(id) => {
+                let (w, h, e) = self
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == id && !m.removed)?
+                    .dims_in_pose(pose);
+                Some([w, h, e])
+            }
+            // ArmorStand.getDefaultDimensions ignores the pose: a marker's
+            // box is empty, a small stand's BABY_DIMENSIONS, else the type's.
+            Target::Stand(id) => {
+                let a = self.armor_stands.iter().find(|a| a.id == id)?;
+                let dims = if a.marker {
+                    (0.0, 0.0, 0.0)
+                } else {
+                    a.probe_dimensions()
+                };
+                Some([dims.0, dims.1, dims.2])
+            }
+            // The dragon's box follows no pose (EntityType.ENDER_DRAGON).
+            Target::Dragon(id) => {
+                self.dragon.as_ref().filter(|d| d.id == id)?;
+                Some([16.0, 8.0, 6.8])
+            }
+            _ => None,
+        }
     }
 
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: the point `at`
@@ -186,6 +237,236 @@ mod tests {
             assert!(zombie.random_teleport(game, [-3.5, 66.0, -3.5], None));
             assert_eq!(at(game), Vec3::new(-3.5, 64.0, -3.5));
             assert!(!zombie.random_teleport(game, [f64::NAN, 66.0, 0.5], None));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dimensions_follow_the_pose_asked() {
+        use super::super::lan::LanSettings;
+        use horizon_client::lan::{
+            Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig,
+        };
+        use horizon_protocol::packets::configuration::ClientInformation;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicUsize},
+        };
+
+        with_game(|game| {
+            let settings = LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            };
+            let net = NetConfig {
+                listen: false,
+                announce: false,
+                lod_distance: 0,
+                ..NetConfig::lan(0, String::new(), 2)
+            };
+            let config = HubConfig {
+                default_game_mode: 0,
+                guest_commands: false,
+                force_game_mode: false,
+                hardcore: false,
+                view_distance: 2,
+                simulation_distance: 2,
+                dimension: game.dim.id().to_owned(),
+                allow_flight: true,
+                seed: 0,
+                max_players: 2,
+                integrated: true,
+                levels: game.level_shapes,
+            };
+            game.lan_host(settings, net, config).unwrap();
+            let (tx, _rx) = std::sync::mpsc::channel();
+            let mut guest = Guest::new(
+                Joined {
+                    conn: 12,
+                    uuid: 12,
+                    name: "guest12".to_owned(),
+                    properties: Vec::new(),
+                    info: ClientInformation::new(8),
+                    brand: String::new(),
+                    sender: PlayerSender::new(tx, Arc::new(AtomicUsize::new(0))),
+                    latency: Arc::new(AtomicI32::new(0)),
+                    address: "127.0.0.1:1".parse().unwrap(),
+                    expected: false,
+                },
+                12,
+                [3.0, 64.0, 5.0],
+                10,
+            );
+            guest.placed = true;
+            let motion =
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::new(3.0, 64.0, 5.0))
+                    .unwrap();
+            guest.motion = Some(Box::new(motion));
+            game.lan.as_mut().unwrap().hub.guests.push(guest);
+            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            // Avatar.POSES: the box of each stance a player takes.
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Standing),
+                Some([f64::from(0.6_f32), f64::from(1.8_f32), f64::from(1.62_f32)])
+            );
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Crouching),
+                Some([f64::from(0.6_f32), f64::from(1.5_f32), f64::from(1.27_f32)])
+            );
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Swimming),
+                Some([f64::from(0.6_f32), f64::from(0.6_f32), f64::from(0.4_f32)])
+            );
+            // LivingEntity.SLEEPING_DIMENSIONS: the fixed 0.2 box, scale off.
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Sleeping),
+                Some([f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32)])
+            );
+            // The stances a player never takes answer standing, as
+            // Avatar.getDefaultDimensions' fallback does.
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Roaring),
+                Some([f64::from(0.6_f32), f64::from(1.8_f32), f64::from(1.62_f32)])
+            );
+            game.lan.as_mut().unwrap().hub.guests.clear();
+            assert_eq!(
+                living.dimensions_for_pose(game, Pose::Standing),
+                None,
+                "a gone player"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn camel_sitting_is_lower_even_while_standing() {
+        with_game(|game| {
+            floor_and_zombies(game);
+            let ty = game
+                .res
+                .mob_types()
+                .get("minecraft:camel")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(20, ty, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let camel = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let standing = camel.dimensions_for_pose(game, Pose::Standing).unwrap();
+            // Camel.getDefaultDimensions: the sitting box 1.43 lower, its eyes
+            // at 0.845 (`sitting_dims`), asked of a camel that stands.
+            let sitting = camel.dimensions_for_pose(game, Pose::Sitting).unwrap();
+            assert_eq!(
+                sitting,
+                [
+                    f64::from(1.7_f32),
+                    f64::from(horizon_client::mobs::camel::sitting_dims(false).1),
+                    f64::from(horizon_client::mobs::camel::sitting_dims(false).2)
+                ]
+            );
+            assert!(standing[1] > sitting[1]);
+            // A camel that sits is in the sitting pose, so its own box is the
+            // sitting one — but the standing pose still answers the standing
+            // box, as `getDefaultDimensions` reads the pose asked for.
+            let mob = game.mobs.iter_mut().find(|m| m.id == 20).unwrap();
+            mob.extra.camel_sitting = true;
+            let own = mob.dims();
+            assert_eq!(own, (sitting[0], sitting[1], sitting[2]));
+            let still_standing = camel.dimensions_for_pose(game, Pose::Standing).unwrap();
+            assert_eq!(still_standing, standing);
+            game.mobs.retain(|m| m.id != 20);
+            assert_eq!(camel.dimensions_for_pose(game, Pose::Sitting), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn goat_long_jump_scales_the_box_by_seven_tenths() {
+        with_game(|game| {
+            floor_and_zombies(game);
+            let ty = game.res.mob_types().get("minecraft:goat").unwrap().clone();
+            game.mobs
+                .push(Mob::new(21, ty, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let goat = game.native_living(game.native_entity(21).unwrap()).unwrap();
+            let standing = goat.dimensions_for_pose(game, Pose::Standing).unwrap();
+            let long_jump = goat.dimensions_for_pose(game, Pose::LongJumping).unwrap();
+            for (asked, is) in standing.iter().zip(&long_jump) {
+                assert!(
+                    (is - asked * f64::from(0.7_f32)).abs() < 1.0e-6,
+                    "{is} is seven tenths of {asked}"
+                );
+            }
+            // The pose the goat is in (`Entity.setPose` of a long jump) gives
+            // the same box through `dims`.
+            let mob = game.mobs.iter_mut().find(|m| m.id == 21).unwrap();
+            mob.extra.pose = horizon_client::mobs::sync::LONG_JUMPING;
+            assert_eq!(mob.dims(), (long_jump[0], long_jump[1], long_jump[2]));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn warden_digging_answers_low_in_every_pose() {
+        with_game(|game| {
+            floor_and_zombies(game);
+            let ty = game
+                .res
+                .mob_types()
+                .get("minecraft:warden")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(22, ty, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let warden = game.native_living(game.native_entity(22).unwrap()).unwrap();
+            let mob = game.mobs.iter_mut().find(|m| m.id == 22).unwrap();
+            horizon_client::mobs::sync::set_pose(mob, horizon_client::mobs::sync::DIGGING);
+            // Warden.getDefaultDimensions reads its own state, not the pose
+            // asked for: a metre tall, its eyes at 0.85, however asked —
+            // except the fixed 0.2 box every pose sleeps in.
+            for pose in [Pose::Standing, Pose::LongJumping, Pose::Sitting] {
+                let dims = warden.dimensions_for_pose(game, pose).unwrap();
+                assert_eq!(dims[1], 1.0, "a metre tall in {pose:?}");
+                assert_eq!(dims[2], f64::from(0.85_f32), "the eyes at 0.85 in {pose:?}");
+            }
+            assert_eq!(
+                warden.dimensions_for_pose(game, Pose::Sleeping).unwrap(),
+                [f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32)]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn villager_sleeping_answers_the_sleeping_box() {
+        with_game(|game| {
+            floor_and_zombies(game);
+            let ty = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(23, ty, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let villager = game.native_living(game.native_entity(23).unwrap()).unwrap();
+            let standing = villager.dimensions_for_pose(game, Pose::Standing).unwrap();
+            let mob = game.mobs.iter_mut().find(|m| m.id == 23).unwrap();
+            mob.extra.ints[1] = 1;
+            let own = mob.dims();
+            // LivingEntity.SLEEPING_DIMENSIONS, and the pose the villager is
+            // in while it sleeps (`LivingEntity.startSleeping`).
+            let sleeping = villager.dimensions_for_pose(game, Pose::Sleeping).unwrap();
+            assert_eq!(
+                sleeping,
+                [f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32)]
+            );
+            assert_eq!(own, (sleeping[0], sleeping[1], sleeping[2]));
+            // Asked for the standing pose, the sleeping villager answers its
+            // standing box (the eye height that lays it in the bed).
+            assert_eq!(
+                villager.dimensions_for_pose(game, Pose::Standing).unwrap(),
+                standing
+            );
         });
     }
 

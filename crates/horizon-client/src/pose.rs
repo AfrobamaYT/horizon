@@ -58,6 +58,36 @@ impl Pose {
         }
     }
 }
+impl From<Pose> for mod_api::Pose {
+    /// The living entity's pose (`Entity.getPose`) the avatar's stance names.
+    fn from(pose: Pose) -> Self {
+        match pose {
+            Pose::Standing => Self::Standing,
+            Pose::FallFlying => Self::FallFlying,
+            Pose::Sleeping => Self::Sleeping,
+            Pose::Swimming => Self::Swimming,
+            Pose::SpinAttack => Self::SpinAttack,
+            Pose::Crouching => Self::Crouching,
+        }
+    }
+}
+impl From<mod_api::Pose> for Pose {
+    /// The avatar's stance of a living entity's pose: the six `Avatar.POSES`
+    /// holds (sleeping is the fixed 0.2 box every living entity takes);
+    /// every other stance (the mob poses and dying, which this game's
+    /// players never take) answers standing, as `Avatar.getDefaultDimensions`'
+    /// fallback does.
+    fn from(pose: mod_api::Pose) -> Self {
+        match pose {
+            mod_api::Pose::FallFlying => Self::FallFlying,
+            mod_api::Pose::Sleeping => Self::Sleeping,
+            mod_api::Pose::Swimming => Self::Swimming,
+            mod_api::Pose::SpinAttack => Self::SpinAttack,
+            mod_api::Pose::Crouching => Self::Crouching,
+            _ => Self::Standing,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug)]
 pub struct Dimensions {
     pub width: f32,
