@@ -902,12 +902,16 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     for path in paths {
         let source = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
+        let mut names = HashSet::new();
         for item in file.items {
             if let Item::Impl(item) = item {
-                methods.extend(impl_functions(item));
+                for method in impl_functions(item) {
+                    names.insert(method.sig.ident.to_string());
+                    methods.push(method);
+                }
             }
         }
-        files.push((path, source));
+        files.push((path, source, names));
     }
     let dispatch::HookSources {
         traits,
@@ -962,10 +966,10 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     }
     if matches!(fill, FillMode::Fill) {
         let mut outputs = Vec::new();
-        for (path, source) in &files {
+        for (path, source, names) in &files {
             let local = fills
                 .iter()
-                .filter(|fill| source.contains(&format!("fn {}(", fill.native)))
+                .filter(|fill| names.contains(&fill.native))
                 .cloned()
                 .collect::<Vec<_>>();
             if !local.is_empty() {
@@ -1710,7 +1714,11 @@ mod tests {
                 .contains("item_damaged: needs a #[hook(...)] attribute")
         );
         std::fs::write(&declared, shipped_declarations).unwrap();
+        let decoy = hooks.with_file_name("decoy.rs");
+        let decoy_source = "impl Game<'_> { /// mentions fn native_item_damaged(\n fn unrelated(&self) { let _ = self; } }\n";
+        std::fs::write(&decoy, decoy_source).unwrap();
         super::fill_hooks(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(decoy).unwrap(), decoy_source);
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");
         assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
