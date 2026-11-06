@@ -199,7 +199,7 @@ mod prepared_model;
 #[cfg(feature = "test-support")]
 pub use prepared_model::fail_next_prepared_upload;
 pub use prepared_model::{
-    PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
+    PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
 #[cfg(test)]
 mod inter_stage_tests;
@@ -1360,9 +1360,10 @@ pub struct Renderer {
     entity_group: wgpu::BindGroup,
     /// The layout of `entity_group`, for the native shadow pass.
     entity_bindings: wgpu::BindGroupLayout,
-    /// Generation-owned prepared model geometry. Production draws stay on the CPU
-    /// path until the world hook consumes this buffer.
+    /// Generation-owned prepared model geometry. World block entities instance it
+    /// when the draw is not kept, spinning, or claimed by a shader pack.
     prepared_models: Option<PreparedModels>,
+    prepared_draws: Vec<PreparedModelDraw>,
     /// The entity resources with the hand's projection (`hand_globals`).
     hand_group: wgpu::BindGroup,
     hand_globals: wgpu::Buffer,
@@ -2599,6 +2600,18 @@ impl Renderer {
         )?;
         self.prepared_models = Some(next);
         Ok(())
+    }
+
+    /// The uploaded generation, when a prepared buffer is resident.
+    pub fn prepared_generation(&self) -> Option<u64> {
+        self.prepared_models
+            .as_ref()
+            .map(|models| models.generation())
+    }
+
+    /// This frame's prepared copies, in entity-stream order. Replaces any not yet drawn.
+    pub fn stage_prepared_draws(&mut self, draws: Vec<PreparedModelDraw>) {
+        self.prepared_draws = draws;
     }
 
     pub async fn new(
@@ -4697,6 +4710,7 @@ impl Renderer {
             entity_group,
             entity_bindings,
             prepared_models: None,
+            prepared_draws: Vec::new(),
             static_entity_group,
             static_entity_transform,
             static_entity_camera: None,
@@ -7139,6 +7153,17 @@ impl Renderer {
     }
     /// `checks`: the error scopes of a scaled screenshot's frame, checked before its PNG is written.
     fn draw_frame(&mut self, frame: &Frame, checks: Option<GpuChecks>) -> Result<bool> {
+        let prepared_draws = std::mem::take(&mut self.prepared_draws);
+        let prepared_instances = (!prepared_draws.is_empty()).then(|| {
+            let uploaded: Vec<PreparedModelInstance> =
+                prepared_draws.iter().map(|draw| draw.instance).collect();
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Prepared model instances"),
+                    contents: bytemuck::cast_slice(&uploaded),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        });
         // Its steps as spans (HORIZON_SPIKES): each lap names the step that just ended.
         let mut laps = crate::spans::laps();
         let landing = Instant::now();
@@ -8438,10 +8463,12 @@ impl Renderer {
         // While a shader pack draws entities, the runs of `entity_spans` its programs draw are
         // left out of Horizon's own entity draw.
         let mut entities = frame.entities;
+        let mut pack_entities = false;
         if !frame.title
             && let Some((_, Some(post))) = &mut self.pack_post
             && post.has_entities()
         {
+            pack_entities = true;
             post.prepare_entities(
                 &self.device,
                 &self.queue,
@@ -9859,16 +9886,40 @@ impl Renderer {
                 pass.set_bind_group(0, &self.group, &[]);
             }
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            if entity_quads > 0 {
+            let prepared_draws = if pack_entities {
+                Vec::new()
+            } else {
+                prepared_draws
+            };
+            if entity_quads > 0 || !prepared_draws.is_empty() {
                 pass.set_pipeline(&self.entity_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
                 pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
-                if self.hdr.is_some() {
-                    pass.set_pipeline(&self.hdr_mark_pipeline);
+                if prepared_draws.is_empty() {
                     pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+                    if self.hdr.is_some() {
+                        pass.set_pipeline(&self.hdr_mark_pipeline);
+                        pass.draw_indexed(0..entity_quads * 6, 0, 0..1);
+                    }
+                } else if let Some(instances) = &prepared_instances {
+                    prepared_model::draw_ordered(
+                        &mut pass,
+                        &prepared_model::EntityRangePass {
+                            pipeline: &self.entity_pipeline,
+                            hdr_pipeline: &self.hdr_mark_pipeline,
+                            vertices: &self.entity_buffer,
+                            indices: &self.indices,
+                            hdr: self.hdr.is_some(),
+                            vertex_count: entity_quads * 4,
+                            posed,
+                        },
+                        self.prepared_models.as_ref(),
+                        instances,
+                        &prepared_draws,
+                    );
                 }
                 pass.set_bind_group(0, &self.group, &[]);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             }
             if text_quads > 0 && !oit_on {
                 pass.set_pipeline(&self.text_polygon_offset_pipeline);

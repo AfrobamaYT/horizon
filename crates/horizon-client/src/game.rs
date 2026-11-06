@@ -2701,6 +2701,8 @@ struct Game<'a> {
     /// Mod block entities' geometry their mods kept
     /// (game/modding/native_block_entity_draw.rs).
     kept_block_entities: std::cell::RefCell<native_block_entity_draw::KeptGeometry>,
+    /// Prepared block-entity copies for this frame, in entity-stream order.
+    prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
@@ -17203,6 +17205,7 @@ impl Game<'_> {
         &mut self,
         consume: impl FnOnce(&mut Renderer, &Frame<'_>) -> Result<bool>,
     ) -> Result<bool> {
+        self.prepared_model_draws.borrow_mut().clear();
         let prepare = spans::guard("prepare");
         let mut pr = spans::laps();
         // The window's GPU holds the atlas: its copy in memory is kept
@@ -17943,9 +17946,11 @@ impl Game<'_> {
         pr.lap("pr_frame");
         // Renderer encoding and GPU waiting belong to render, not prepare.
         drop(prepare);
+        let prepared = std::mem::take(&mut *self.prepared_model_draws.borrow_mut());
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
                 renderer.set_pass_timing(self.debug || self.gpu_passes);
+                renderer.stage_prepared_draws(prepared);
                 consume(renderer, &frame)
             }
             None => Err("renderer".into()),
@@ -21071,6 +21076,7 @@ impl<'a> Game<'a> {
             frames: 0,
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
+            prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),

@@ -180,6 +180,46 @@ pub struct BlockEntityDraw {
     /// Where each turning part starts in `vertices` (`spin`), and where the
     /// parts standing still start again (`still`, none).
     spins: Vec<(usize, Option<Spin>)>,
+    /// World block entities record a prepared copy instead of CPU vertices.
+    /// Shader packs, GUI scenes and mobs leave this clear, so the model stays
+    /// in the vertex stream those paths and their spans already cover.
+    prepared: bool,
+    records: Vec<PreparedRecord>,
+}
+
+struct PreparedRecord {
+    at: usize,
+    slot: u32,
+    generation: u64,
+    pose: Mat4,
+    tint: u32,
+    light: u32,
+}
+
+/// Instance tint in the same bytes the CPU vertex colour uses.
+pub(super) fn prepared_tint(rgb: u32) -> [f32; 4] {
+    horizon_client::hud_layout::multiply(
+        u32::MAX,
+        horizon_client::mobs::render::abgr(rgb & 0xFF_FFFF),
+    )
+    .to_le_bytes()
+    .map(|byte| byte as f32 / 255.0)
+}
+
+pub(super) fn prepared_instance(
+    pose: Mat4,
+    origin: DVec3,
+    camera: DVec3,
+    tint: u32,
+    light: u32,
+) -> horizon_client::gfx::PreparedModelInstance {
+    horizon_client::gfx::PreparedModelInstance::new(
+        pose,
+        origin,
+        camera,
+        prepared_tint(tint),
+        light,
+    )
 }
 
 /// A part of a block entity's frame that turns by itself (`BlockEntityDraw::spin`).
@@ -273,7 +313,68 @@ impl BlockEntityDraw {
             vertices,
             kept: false,
             spins: Vec::new(),
+            prepared: false,
+            records: Vec::new(),
         }
+    }
+
+    fn spinning(&self) -> bool {
+        self.spins.last().is_some_and(|(_, spin)| spin.is_some())
+    }
+
+    /// Record a prepared copy at the current vertex, unless this draw is CPU-only or spinning.
+    fn defer_model(&mut self, slot: u32, generation: u64, tint: u32) -> bool {
+        if !self.prepared || self.spinning() {
+            return false;
+        }
+        self.records.push(PreparedRecord {
+            at: self.vertices.len(),
+            slot,
+            generation,
+            pose: self.pose(),
+            tint,
+            light: self.light,
+        });
+        true
+    }
+
+    fn bake_recorded(&mut self, slots: &[Option<Vec<super::minecarts::PreparedModelFace>>]) {
+        for record in std::mem::take(&mut self.records).into_iter().rev() {
+            let Some(faces) = slots.get(record.slot as usize).and_then(Option::as_deref) else {
+                continue;
+            };
+            let mut extra = Vec::new();
+            super::minecarts::emit_model_faces(
+                faces.iter().copied().map(|face| (face, record.light)),
+                record.pose,
+                true,
+                |index| (index >= 0).then_some(record.tint & 0xFF_FFFF),
+                &mut extra,
+            );
+            let count = extra.len();
+            for (at, _) in &mut self.spins {
+                if *at >= record.at {
+                    *at += count;
+                }
+            }
+            self.vertices.splice(record.at..record.at, extra);
+        }
+    }
+
+    fn take_instances(
+        &mut self,
+        origin: DVec3,
+        camera: DVec3,
+    ) -> Vec<horizon_client::gfx::PreparedModelDraw> {
+        std::mem::take(&mut self.records)
+            .into_iter()
+            .map(|record| horizon_client::gfx::PreparedModelDraw {
+                cpu_vertices: record.at as u32,
+                generation: record.generation,
+                slot: record.slot,
+                instance: prepared_instance(record.pose, origin, camera, record.tint, record.light),
+            })
+            .collect()
     }
     /// The vertices drawn, with those it was made with first.
     pub(super) fn into_vertices(self) -> Vec<Vertex> {
@@ -562,6 +663,13 @@ impl Game<'_> {
             vertices: std::mem::take(out),
             kept: false,
             spins: Vec::new(),
+            prepared: self.pack_ids.is_none()
+                && self
+                    .renderer
+                    .as_ref()
+                    .and_then(|renderer| renderer.prepared_generation())
+                    == Some(self.standalone_geometry.generation()),
+            records: Vec::new(),
         };
         let now = self.world.game_time;
         let mut kept = self.kept_block_entities.borrow_mut();
@@ -626,7 +734,9 @@ impl Game<'_> {
             draw.light = light;
             draw.kept = false;
             draw.spins.clear();
+            draw.records.clear();
             self.native_block_entity_submit(pos, block, id, entity, &mut draw);
+            self.finish_prepared_draw(&mut draw, corner, camera);
             // The turning parts, from the start of this block's vertices.
             let spins: Vec<(usize, Option<Spin>)> = draw
                 .spins
@@ -663,6 +773,21 @@ impl Game<'_> {
             }
         }
         *out = draw.vertices;
+    }
+
+    /// Keep, spin, or a missing upload bakes the model into the vertex span.
+    /// Otherwise the copy is drawn from the prepared buffer at the same cut.
+    fn finish_prepared_draw(&self, draw: &mut BlockEntityDraw, origin: DVec3, camera: DVec3) {
+        if draw.records.is_empty() {
+            return;
+        }
+        if draw.kept || !draw.spins.is_empty() {
+            draw.bake_recorded(&self.standalone_geometry.slots);
+        } else {
+            self.prepared_model_draws
+                .borrow_mut()
+                .extend(draw.take_instances(origin, camera));
+        }
     }
 }
 
@@ -913,6 +1038,9 @@ impl Game<'_> {
             .get(fields.slot as usize)
             .and_then(Option::as_ref)
             .ok_or(ModelError::UnknownModel)?;
+        if draw.defer_model(fields.slot, fields.generation, tint) {
+            return Ok(());
+        }
         let light = draw.light;
         super::minecarts::emit_model_faces(
             faces.iter().copied().map(|face| (face, light)),
@@ -1084,6 +1212,8 @@ mod tests {
             vertices: Vec::new(),
             kept: false,
             spins: Vec::new(),
+            prepared: false,
+            records: Vec::new(),
         }
     }
 
@@ -1154,6 +1284,89 @@ mod tests {
             assert_eq!(v.color, if i < 4 { 0xFF563412 } else { u32::MAX });
         }
         assert_eq!(out.len(), 8);
+    }
+
+    fn marker(pos: f32) -> Vertex {
+        Vertex {
+            pos: [pos, 0.0, 0.0],
+            uv: [0.0, 0.0],
+            layer: 0,
+            color: 0,
+            light: 0,
+            normal: [0; 4],
+            glint_uv: [0.0, 0.0],
+        }
+    }
+
+    #[test]
+    fn prepared_models_stay_ordered_and_cpu_inside_the_block_span() {
+        use super::super::minecarts::{PreparedModelFace, emit_model_faces};
+        let mut quad = bake_flat_face(
+            [0.0; 3],
+            [16.0; 3],
+            [0.0, 0.0, 16.0, 16.0],
+            Direction::South,
+            Material {
+                sprite: String::new(),
+                force_translucent: false,
+            },
+            0,
+        )
+        .unwrap();
+        quad.positions = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ];
+        quad.uv = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let face = PreparedModelFace::new(&quad, sprite());
+        let slots = vec![Some(vec![face])];
+        let mut gpu = draw();
+        gpu.prepared = true;
+        gpu.light = 0xF030;
+        gpu.vertices.extend((0..4).map(|i| marker(i as f32)));
+        let span = gpu.vertices.len();
+        assert!(gpu.defer_model(0, 3, 0x80c040));
+        gpu.vertices.extend((0..4).map(|i| marker(10.0 + i as f32)));
+        let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
+        let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
+        let instances = gpu.take_instances(origin, camera);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].cpu_vertices, span as u32);
+        assert_eq!(gpu.vertices.len(), 8, "a prepared copy is not in the span");
+        assert!((0..4).all(|i| gpu.vertices[i].pos[0] < 4.0));
+        assert!((4..8).all(|i| gpu.vertices[i].pos[0] >= 10.0));
+
+        let mut cpu = draw();
+        cpu.prepared = false;
+        assert!(
+            !cpu.defer_model(0, 3, 0x80c040),
+            "packs, gui and mobs stay on the cpu"
+        );
+        cpu.prepared = true;
+        cpu.vertices.extend((0..4).map(|i| marker(i as f32)));
+        assert!(cpu.defer_model(0, 3, 0x80c040));
+        let pose = cpu.records[0].pose;
+        cpu.spin([0.0, 1.0, 0.0], [0.5; 3], 12.0, 0.0);
+        cpu.bake_recorded(&slots);
+        let mut expected = Vec::new();
+        emit_model_faces(
+            [(face, cpu.light)],
+            pose,
+            true,
+            |index| (index >= 0).then_some(0x80c040),
+            &mut expected,
+        );
+        assert_eq!(cpu.vertices.len(), 4 + expected.len());
+        assert_eq!(cpu.spins[0].0, 4 + expected.len());
+        for (got, want) in cpu.vertices[4..].iter().zip(&expected) {
+            assert_eq!(got.pos, want.pos);
+            assert_eq!(got.uv, want.uv);
+            assert_eq!(got.color, want.color);
+            assert_eq!(got.light, want.light);
+            assert_eq!(got.normal, want.normal);
+        }
     }
 
     #[test]
@@ -1236,7 +1449,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_instance_matches_cpu_pixels() {
         use glam::DVec3;
-        use horizon_client::gfx::{PreparedModelInstance, fail_next_prepared_upload};
+        use horizon_client::gfx::fail_next_prepared_upload;
         use mod_api::{__private::game::Fields, ClientHost};
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
@@ -1259,13 +1472,7 @@ mod tests {
             surface.light = 0xF030;
             game.native_draw_model(&mut surface, model, 0x80c040)
                 .unwrap();
-            let tint = horizon_client::hud_layout::multiply(
-                u32::MAX,
-                horizon_client::mobs::render::abgr(0x80c040),
-            )
-            .to_le_bytes()
-            .map(|byte| byte as f32 / 255.0);
-            let instance = PreparedModelInstance::new(local, origin, camera, tint, 0xF030);
+            let instance = super::prepared_instance(local, origin, camera, 0x80c040, 0xF030);
             assert_eq!(instance.matrix(), pose);
             let (vertices, ranges) = game.standalone_geometry.prepared_upload();
             let atlas = &game.gui.atlas;
