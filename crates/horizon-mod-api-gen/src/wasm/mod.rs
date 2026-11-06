@@ -907,6 +907,22 @@ mod tests {
     }
 
     #[test]
+    fn client_option_snapshots_have_generated_wasm_bindings() {
+        with_interface("client-host", |client, unbound| {
+            for (function, name) in [
+                ("graphics-options", "graphics_options"),
+                ("gui-options", "gui_options"),
+                ("chat-options", "chat_options"),
+                ("audio-options", "audio_options"),
+            ] {
+                assert!(client.functions.contains_key(function), "{function}");
+                let unbound_name = format!("ClientHost::{name}");
+                assert!(!unbound.iter().any(|n| *n == unbound_name), "{name}");
+            }
+        });
+    }
+
+    #[test]
     fn recipe_rules_are_generated_in_wasm_contract() {
         std::thread::Builder::new()
             .stack_size(64 << 20)
