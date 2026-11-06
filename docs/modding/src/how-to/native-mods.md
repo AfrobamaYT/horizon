@@ -21,6 +21,13 @@ when edited (`native_config_loading`, `native_config_reloading`, as NeoForge's `
 keep its own server config in `serverconfig/` ([native mods](native-mods.md)). Settings kept with `native_set_setting` stay where they were, in `horizon-mods/.horizon-mod-data/<id>/`.
 8c838a6b381b93150deaeed2057acd1
 
+For a client HUD's session information, use the read-only
+`ClientHost::client_session()` service and the local `PlayerRef`'s
+`block_breaking` and `ambient_mood` reads rather than raw injections. Missing
+sessions, external display names and memory addresses remain explicit optional
+values; all counters stay local. See [client session and local-player status](../reference/hook-notes.md#client-session-and-local-player-status)
+for their exact availability and frame-time semantics.
+
 `native_compute_fov_modifier(player, base, modifier)` runs on the client each tick for the local player's FOV scale, after vanilla effects and before zoom and camera easing. `player` contains the calculation inputs and `base` is the original scale. Non-finite modifiers or values outside 0.01..=10 fall back to `base`. It does not affect a spectator camera on a mob.
 
 The client hook `native_render_name_tag(entity_id, kind, vanilla_visible, visible, text)` runs at player and mob, armor stand, and item frame name decisions before shared geometry. Set `visible` to override vanilla and `text` to `Some` literal replacement text (NeoForge `RenderNameTagEvent`). Distance and entity availability still apply; the local player's tag is considered only when its own camera and settings gates allow it.
@@ -58,6 +65,11 @@ console permission level 4 and the existing console command path, while
 `host.players().acting_player()` returns the optional `PlayerRef` whose state is
 swapped in for this hook. The online list includes connected players even during
 nested player turns; a displaced body's reads still refuse where they did before.
+`host.players().player_by_name(name)` finds a connected real player by account
+name, case-insensitively, or returns `None`; it does not match nicknames or fake
+players. `host.levels().list_levels()` returns loaded server level handles in
+vanilla dimension order, or an empty list before a server world opens. Both
+services are available through `&dyn ServerHost` and do not mutate the world.
 Read identity through `player.uuid()`, `player.name(host)`,
 `player.permission_level(host)` and `player.address(host)`. The address is the
 connection IP without a port (the forwarded address behind a Velocity proxy),
@@ -88,8 +100,10 @@ Subscribe to `player_advancement_progress` to inspect the whole advancement imme
 one criterion is granted or revoked, before its completion rewards. `event.progress.criteria`
 includes obtained and unobtained criteria; `obtained_at` is the original saved grant date or
 `None`. `requirements` lists the OR groups, `completed_requirements` counts satisfied groups,
-and `done` is the game's completion result. This also describes first-tick and reload grants
-for the event's player, even when another player's state is in place.
+and `done` is the game's completion result. A player-issued `/reload` mutates and snapshots
+the acting player's live progress, including during a nested turn. For a suspended outer
+player, reload grants still use the displaced hub record; full owner-correct reload awards
+for suspended and inactive players remain tracked in #1240.
 
 Keep `event.progress.clone()` if it is needed later: the owned `AdvancementProgress` snapshot
 cannot change the player's progress and is not updated by subsequent events. No-op grants and
@@ -216,6 +230,16 @@ earlier world epoch or a client refuses the handle. Entity handles in a parked
 raid's member list keep their identity; their ordinary entity operations still
 require the entity's level to be in place.
 
+### Tool transformation previews
+
+`LevelRef::block_transform` previews a tool against a loaded block in the server level in place.
+Pass the live player, hand, stack, position and hit; the owned result describes the new state,
+relative durability cost, sound, loot and particle. The call does not apply the result. It fires
+`block_tool_modification` with `ToolUse::simulated` set to `true`: listeners must not change the
+level during a simulation. A stale or unavailable player or level, unloaded position, invalid face,
+or tool with no transformation returns `None`. The real action fires the same hook with
+`simulated` set to `false`.
+
 ### Named hook points
 
 The declarations under `crates/horizon-mod-api/src/hooks/` name each hook point and the version of its contract (signature,
@@ -251,6 +275,8 @@ beside the bed with the normal wake animation, teleport and pose sync; the usual
 `set_sleeping_pos` and `clear_sleeping_pos` only change a player's sleeping position/pose, without moving them,
 occupying a bed or playing a wake animation. The next entity sync publishes the changed pose and bed to clients.
 Villagers use `start_sleeping`/`stop_sleeping`, not the raw player position setters.
+
+`MobRef::can_use_portal` reads the existing server portal decision for a mob in the current level, including mounts and player riders. It takes `&dyn Host`: `Some(false)` means the mob is ineligible, while `None` means a client, stale or unavailable handle, parked mob, or the separately modelled dragon. It does not load a level.
 
 Through `MobRef`: `no_ai`/`set_no_ai` (`Mob.isNoAi` and `setNoAi`: the mob stands, saved as `NoAI`) and
 `set_baby` (`Mob.setBaby` through the canonical species-specific setup). Ageable mobs start at their species'
@@ -307,6 +333,14 @@ must already be in Horizon's lock file in a matching version. The launcher check
 package in the staged lock against Horizon's: name, version, source and checksum. Only the staged
 workspace packages are added. A missing crate or a feature that introduces an unlocked dependency
 stops the build; the game still builds with `--locked`.
+
+Crates included only for mods are listed as optional dependencies in
+`crates/horizon-mod-deps/Cargo.toml`: `mysql` 27 (blocking MariaDB/MySQL, with
+`minimal-rust` and `rustls-tls-ring`, no default features), `redis` 1 (blocking,
+no default features), `tungstenite` 0.30 (websockets over a stream the mod opens,
+no default features), and `rusty-opus` 1 (Opus encoder and decoder). These entries
+add their dependencies to the lock without building them into the game. A feature
+that introduces a dependency not listed there is refused.
 
 ### Conditional data
 

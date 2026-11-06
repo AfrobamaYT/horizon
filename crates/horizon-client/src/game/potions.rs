@@ -2476,10 +2476,10 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         keep
     }
     fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool) {
-        if let Some(living) = self.effect_living_ref(Some(mob as i32)) {
-            if let Some(effect) = mod_api::__private::effect_key(effect) {
-                self.native_mob_effect_expired(living, effect, amplifier, cancel);
-            }
+        if let Some(living) = self.effect_living_ref(Some(mob as i32))
+            && let Some(effect) = mod_api::__private::effect_key(effect)
+        {
+            self.native_mob_effect_expired(living, effect, amplifier, cancel);
         }
     }
 }

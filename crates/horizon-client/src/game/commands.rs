@@ -941,7 +941,7 @@ impl Game<'_> {
     }
     /// The loaded levels, in the order the server holds them: the
     /// overworld, the nether, the end (MinecraftServer.getAllLevels).
-    fn loaded_dims(&self) -> Vec<Dim> {
+    pub(super) fn loaded_dims(&self) -> Vec<Dim> {
         let mut dims = vec![self.dim];
         dims.extend(self.levels.parked_dims());
         dims.sort_by_key(|d| match d {

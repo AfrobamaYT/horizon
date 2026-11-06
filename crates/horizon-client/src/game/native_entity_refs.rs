@@ -133,6 +133,16 @@ impl Game<'_> {
             .find(|d| d.id() == dimension)?;
         Some(LevelRef::new(epoch, dim.id()))
     }
+    /// Loaded server levels, in vanilla dimension order. Empty without a server world.
+    pub(super) fn native_list_levels(&self) -> Vec<LevelRef> {
+        if !self.is_logical_server() || self.native_lifecycle.epoch().is_none() {
+            return Vec::new();
+        }
+        self.loaded_dims()
+            .into_iter()
+            .filter_map(|dim| self.native_level(dim.id()))
+            .collect()
+    }
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
     /// Returns None on a client, for a stale handle, or for a parked level:
@@ -2954,6 +2964,8 @@ pub(super) mod tests {
                 .is_some()
         );
         let nether = game.native_level("minecraft:the_nether").unwrap();
+        let host: &dyn mod_api::ServerHost = &game;
+        assert_eq!(host.levels().list_levels(), vec![level, nether]);
         let cube = vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
         assert_eq!(
             game.native_level_block_shape(nether, [0, 64, 0], NativeBlockShapeKind::Outline),
