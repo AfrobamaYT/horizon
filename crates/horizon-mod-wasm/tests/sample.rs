@@ -44,7 +44,7 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
 #[derive(Default)]
 struct Server(Mutex<Vec<String>>);
 
-impl mod_api::prelude::FluidStatesBackend for Server {
+impl mod_api::prelude::BlockStatesBackend for Server {
     fn fluid_state_definition(&self, key: mod_api::FluidKey) -> Option<mod_api::FluidDefinition> {
         if mod_api::__private::fluid_id(key)? != "minecraft:water" {
             return Some(mod_api::FluidDefinition::TankOnly);
@@ -96,7 +96,7 @@ impl mod_api::prelude::KeysBackend for Server {
     }
 }
 impl mod_api::Backend for Server {}
-mod_api::impl_backend_areas!(Server, except(keys, fluid_states));
+mod_api::impl_backend_areas!(Server, except(block_states, keys));
 impl mod_api::prelude::BlockStatesHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
         Some(mod_api::__private::resolved_block(key)?.default)
