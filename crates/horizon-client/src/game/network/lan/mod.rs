@@ -253,20 +253,18 @@ pub(super) fn forget_sync_data() {
 
 /// Without a hub yet, retain this world's frozen registries through `/reload`
 /// too. World entry discards this snapshot before loading another world's.
-pub(super) fn reload_cached_sync_data(
-    root: &std::path::Path,
-    item_data: &ItemData,
-    overlay: &horizon_world::loot::PackOverlay,
-) -> std::result::Result<(), String> {
-    let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
-    if let Some(kept) = kept {
-        reload_sync_data(root, item_data, overlay, &kept)?;
-    }
-    Ok(())
+pub(super) fn cached_reload_sync() -> Option<Arc<SyncData>> {
+    SYNC.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .data
+        .as_ref()
+        .and_then(|cached| cached.result.as_ref().ok())
+        .cloned()
 }
 
 /// Keep lazy-cache admission aligned with the current packs even when no
 /// complete wire snapshot has been loaded yet. Damage definitions stay frozen.
+#[cfg(test)]
 fn prepare_sync_reload(
     sync: &mut SyncCache,
     overlay: &horizon_world::loot::PackOverlay,
@@ -282,35 +280,35 @@ fn prepare_sync_reload(
 /// tags, recipes and advancements read again with the world's packs, the
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
-pub(super) fn reload_sync_data(
+pub(super) fn prepare_wire_reload(
     root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
+    sources: &ResolvedSources,
 ) -> std::result::Result<Arc<SyncData>, String> {
-    // Kept pack dialogs count as packs: a world opened without packs after
-    // a `/reload` that dropped them must read its own registries again.
-    let packs = !overlay.files.is_empty() || kept.has_pack_entries();
-    let sync = SyncData::reload(
-        root,
-        overlay,
-        kept,
-        item_data.defaults(),
-        server_sources(root, item_data, overlay)
-            .map_err(|error| error.to_string())?
-            .as_ref(),
-    )
-    .map(|mut sync| {
+    SyncData::reload(root, overlay, kept, item_data.defaults(), sources).map(|mut sync| {
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
-    });
-    SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some(Synced {
+    })
+}
+
+pub(super) fn install_wire_reload(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    overlay: &horizon_world::loot::PackOverlay,
+    sync: Option<Arc<SyncData>>,
+) {
+    // Kept pack dialogs count as packs: a world opened without packs after
+    // a `/reload` that dropped them must read its own registries again.
+    let mut cache = SYNC.lock().unwrap_or_else(|e| e.into_inner());
+    cache.world_packs = !overlay.files.is_empty();
+    cache.data = sync.map(|sync| Synced {
         root: root.to_owned(),
-        with_packs: packs,
+        with_packs: !overlay.files.is_empty() || sync.has_pack_entries(),
         generation: item_data.defaults().generation(),
-        result: sync.clone(),
+        result: Ok(sync),
     });
-    sync
 }
 
 impl Game<'_> {

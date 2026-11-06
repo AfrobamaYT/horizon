@@ -2034,6 +2034,7 @@ struct PreparedWorldReload {
     tables: Option<WorldTables>,
     health: horizon_client::health::HealthResources,
     parts: PreparedParts,
+    wire: Option<Arc<horizon_client::lan::data::SyncData>>,
 }
 
 impl WorldTables {
@@ -22073,10 +22074,32 @@ impl Game<'_> {
             .as_ref()
             .map_or_else(|| self.res.items(), |tables| &tables.items);
         let parts = self.prepare_parts(items)?;
+        let overlay = pack_files(&tables);
+        let kept = self
+            .lan
+            .as_ref()
+            .map(|host| host.hub.lan.shared.sync())
+            .or_else(lan::cached_reload_sync);
+        let wire = if let Some(kept) = kept {
+            let sources = match tables
+                .as_ref()
+                .and_then(|tables| tables.reload_sources.clone())
+            {
+                Some(sources) => sources,
+                None => lan::prepare_server_sources(root, &self.res.core.item_data, &overlay)?,
+            };
+            Some(
+                lan::prepare_wire_reload(root, &self.res.core.item_data, &overlay, &kept, &sources)
+                    .map_err(|error| format!("wire reload: {error}"))?,
+            )
+        } else {
+            None
+        };
         Ok(PreparedWorldReload {
             tables,
             health,
             parts,
+            wire,
         })
     }
 
@@ -22085,6 +22108,7 @@ impl Game<'_> {
             tables,
             health,
             parts,
+            wire,
         } = prepared;
         lan::forget_server_sources();
         if let Some(tables) = &tables
@@ -22113,33 +22137,17 @@ impl Game<'_> {
         // PlayerList.reloadResources: the tags and recipes go to the players
         // and their advancements reload. The synchronized registries (the
         // dialogs, and the commands' ids of them) stay the hub's.
-        let kept = self.lan.as_ref().map(|host| host.hub.lan.shared.sync());
-        match kept {
-            Some(kept) => {
-                match lan::reload_sync_data(
-                    &self.options.resources,
-                    &self.res.core.item_data,
-                    &self.pack_files(),
-                    &kept,
-                ) {
-                    Ok(sync) => {
-                        self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
-                        self.run_native_advancement_grants();
-                    }
-                    Err(e) => {
-                        log::warn!("Horizon: the players are not sent the reloaded data: {e}")
-                    }
-                }
-            }
-            None => {
-                if let Err(e) = lan::reload_cached_sync_data(
-                    &self.options.resources,
-                    &self.res.core.item_data,
-                    &self.pack_files(),
-                ) {
-                    log::warn!("Horizon: the cached world data is not reloaded: {e}");
-                }
-            }
+        lan::install_wire_reload(
+            &self.options.resources,
+            &self.res.core.item_data,
+            &self.pack_files(),
+            wire.clone(),
+        );
+        if self.lan.is_some()
+            && let Some(sync) = wire
+        {
+            self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
+            self.run_native_advancement_grants();
         }
         let overlay = pack_files(&self.world_tables);
         self.adv.tree = Arc::new(horizon_client::advancements::Tree::load_with(
