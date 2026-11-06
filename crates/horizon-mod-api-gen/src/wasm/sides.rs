@@ -571,7 +571,7 @@ pub(super) fn host(
         }
         code.push_str("}\n");
     }
-    code.push_str(&flat_imports(types, methods)?);
+    code.push_str(&flat_imports(types, methods, wit_text)?);
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
@@ -840,10 +840,8 @@ fn host_import(
     Ok(code)
 }
 
-fn flat_imports(types: &Types<'_>, methods: &[&Method]) -> Result<String, String> {
-    let mut code = String::from(
-        "pub(super) fn add_flat_lists(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> { linker.allow_shadowing(true);\n",
-    );
+fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Result<String, String> {
+    let mut registrations = std::collections::BTreeMap::new();
     for method in methods.iter().filter(|m| {
         (!exports().contains(&m.owner) || super::held(m.owner)) && flat_method(types, m)
     }) {
@@ -934,10 +932,53 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method]) -> Result<String, String
                 "super::State::with_buffer::<{ty}, _>(store, |{var}, mut store| {{ {body} }})"
             );
         }
-        writeln!(code, "linker.instance(\"horizon:mod-api/{interface}@0.1.0\")?.func_wrap(\"{}\", |mut store: wasmtime::StoreContextMut<'_, super::State>, ({},)| {{ {body} }})?;", wit_ident(&method.name), params.join(", ")).unwrap();
+        let (names, types): (Vec<_>, Vec<_>) =
+            params.iter().map(|p| p.split_once(": ").unwrap()).unzip();
+        let pattern = if names.is_empty() {
+            "()".to_string()
+        } else {
+            format!("({},)", names.join(", "))
+        };
+        let param_types = if types.is_empty() {
+            "()".to_string()
+        } else {
+            format!("({},)", types.join(", "))
+        };
+        registrations.insert(
+            (interface, wit_ident(&method.name)),
+            crate::wasm_imports::Registration {
+                parameters: format!("{pattern}: {param_types}"),
+                body,
+                shadow: true,
+            },
+        );
     }
-    code.push_str("linker.allow_shadowing(false); Ok(()) }\n");
-    Ok(code)
+    let mut resolve = wit_parser::Resolve::default();
+    let package = resolve
+        .push_str("mod-api.wit", wit_text)
+        .map_err(|e| e.to_string())?;
+    let world = resolve
+        .select_world(&[package], Some("mod"))
+        .map_err(|e| e.to_string())?;
+    let emitted = crate::wasm_imports::emit(&resolve, world, |interface, function| {
+        let short = interface
+            .split('/')
+            .next_back()
+            .unwrap()
+            .split('@')
+            .next()
+            .unwrap();
+        Ok(registrations.remove(&(short.to_string(), function.name.clone())))
+    })?;
+    if !registrations.is_empty() {
+        return Err(format!(
+            "flat-list imports missing from WIT: {:?}",
+            registrations.keys().collect::<Vec<_>>()
+        ));
+    }
+    Ok(format!(
+        "pub(super) fn add_flat_lists(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> {{ {emitted} Ok(()) }}\n"
+    ))
 }
 
 /// The Rust type of an import's results.

@@ -46,6 +46,81 @@ fn store(engine: &wasmtime::Engine) -> Store<State> {
 }
 
 #[test]
+fn generated_draw_list_reuses_transport() {
+    struct Draw;
+    impl crate::WorldDrawContext for Draw {
+        fn lines(&mut self, lines: &[crate::WorldLine]) -> Result<(), crate::DrawError> {
+            assert_eq!(lines.len(), 8);
+            assert_eq!(lines[0].from, [1.0, 2.0, 3.0]);
+            Ok(())
+        }
+    }
+    let engine = wasmtime::Engine::default();
+    let source = r#"(component
+      (import "horizon:mod-api/world-draw-context@0.1.0" (instance $api
+        (type $depth (enum "tested" "through-walls"))
+        (type $point (tuple float64 float64 float64))
+        (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth)))
+        (type $lines (list $line))
+        (type $error (enum "non-finite" "invalid-width" "capacity-exceeded"))
+        (export "lines" (func (param "lines" $lines) (result (result (error $error)))))))
+      (alias export $api "lines" (func $lines))
+      (core module $memory (memory (export "memory") 1)
+        (func (export "realloc") (param i32 i32 i32 i32) (result i32) i32.const 8192))
+      (core instance $mem (instantiate $memory))
+      (alias core export $mem "memory" (core memory $memory))
+      (alias core export $mem "realloc" (core func $realloc))
+      (core func $lower (canon lower (func $lines) (memory $memory) (realloc $realloc)))
+      (core instance $imports (export "lines" (func $lower)))
+      (core module $runner (import "imports" "lines" (func $lines (param i32 i32 i32)))
+        (func (export "run") (param i32 i32) (result i32)
+          local.get 0 local.get 1 i32.const 32 call $lines i32.const 32))
+      (core instance $run (instantiate $runner (with "imports" (instance $imports))))
+      (alias core export $run "run" (core func $run))
+      (type $depth (enum "tested" "through-walls"))
+      (type $point (tuple float64 float64 float64))
+      (type $line (record (field "from" $point) (field "to" $point) (field "color" u32) (field "width" float32) (field "depth" $depth)))
+      (type $lines (list $line))
+      (type $error (enum "non-finite" "invalid-width" "capacity-exceeded"))
+      (func (export "run") (param "lines" $lines) (result (result (error $error)))
+        (canon lift (core func $run) (memory $memory) (realloc $realloc))))"#;
+    let component = Component::new(&engine, wat::parse_str(source).unwrap()).unwrap();
+    let mut linker = Linker::<State>::new(&engine);
+    glue::add_flat_lists(&mut linker).unwrap();
+    let mut store = store(&engine);
+    let instance = linker.instantiate(&mut store, &component).unwrap();
+    use glue::horizon::mod_api::types::{DrawError, WorldDepth, WorldLine};
+    let call = instance
+        .get_typed_func::<(&[WorldLine],), (Result<(), DrawError>,)>(&mut store, "run")
+        .unwrap();
+    let values: Vec<_> = (0..8)
+        .map(|_| WorldLine {
+            from: (1.0, 2.0, 3.0),
+            to: (4.0, 5.0, 6.0),
+            color: 1,
+            width: 1.0,
+            depth: WorldDepth::Tested,
+        })
+        .collect();
+    let mut draw = Draw;
+    let mut frame = Frame::default();
+    frame.world_draw_context_mut(&mut draw);
+    let _scope = CallScope {
+        frame: CURRENT.replace(&mut frame),
+        caller: CALLER.replace(None),
+    };
+    for _ in 0..10 {
+        assert!(call.call(&mut store, (&values,)).unwrap().0.is_ok());
+    }
+    COUNT.set(Some(0));
+    for _ in 0..1000 {
+        assert!(call.call(&mut store, (&values,)).unwrap().0.is_ok());
+    }
+    let count = COUNT.replace(None).unwrap();
+    eprintln!("generated draw transport: {count} allocations per 1000 calls");
+}
+
+#[test]
 fn resource_list_transport_reuses_host_buffers() {
     struct Node;
     let engine = wasmtime::Engine::default();
