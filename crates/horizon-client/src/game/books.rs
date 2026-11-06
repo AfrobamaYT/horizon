@@ -1082,6 +1082,7 @@ impl Game<'_> {
             return None;
         };
         let mut menu = Menu::new(Kind::Lectern);
+        menu.set_registry_id(Some("minecraft:lectern"));
         menu.set_slot(&self.menu_env(), 0, l.book.clone());
         menu.data[0] = l.page;
         Some(menu)
