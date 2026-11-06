@@ -807,6 +807,20 @@ impl Game<'_> {
         slot: EquipmentSlot,
         stack: Option<ItemStack>,
     ) -> bool {
+        self.write_living_equipment(living, slot, stack, false)
+    }
+    /// The write `native_living_set_equipment` makes (#932): with `defer`,
+    /// its equip sound and game event wait for the root commit of the open
+    /// transaction — an abort stays quiet — while the equipment and the
+    /// attribute map change at once, as later steps of the same transaction
+    /// read them.
+    pub(super) fn write_living_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+        defer: bool,
+    ) -> bool {
         // A client's copy changes only when the server says so.
         if self.remote.is_some() {
             return false;
@@ -842,8 +856,17 @@ impl Game<'_> {
                         })
                         .flatten()
                 });
-                let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
-                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+                if defer {
+                    self.after_commit(super::transactions::After::Equip {
+                        at: [at.x, at.y, at.z],
+                        sound,
+                        equips: equippable.is_some(),
+                        who: id,
+                    });
+                } else {
+                    let ctx = self.who_context(Some(horizon_client::mobs::Who::Mob(id)), None);
+                    self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+                }
             }
             // The stack's attribute modifiers go on the live map at once, so
             // the next read — a hit's armor, a `LivingRef`'s — sees them (#941).
@@ -926,7 +949,7 @@ impl Game<'_> {
     /// side, not a spectator, not the first tick, another item): the equip
     /// sound when there is one, and the `equip` (the stack is equippable) or
     /// `unequip` game event.
-    fn equip_item_effects(
+    pub(in crate::game) fn equip_item_effects(
         &mut self,
         at: [f64; 3],
         sound: Option<String>,

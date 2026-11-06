@@ -7,7 +7,7 @@ use super::transactions::After;
 use super::{Game, minecarts::CartKind};
 use horizon_client::{first_person::Hand, items::ItemStack};
 use mod_api::__private::game::*;
-use mod_api::{ItemPlace, Transaction};
+use mod_api::{EquipmentSlot, ItemPlace, LivingRef, Transaction};
 
 impl Game<'_> {
     /// The player a place belongs to, if a player's: a cursor's only while its menu is open.
@@ -102,6 +102,16 @@ impl Game<'_> {
         let b = self.boats.iter().find(|b| b.id == entity)?;
         b.chest.then_some(b.items.len())
     }
+    /// How many equipment slots living entity `entity`'s [`ENTITY_ITEMS`](mod_api::ENTITY_ITEMS)
+    /// answers (#932, NeoForge's `LivingEntityEquipmentWrapper`): a mob's seven (main hand,
+    /// off hand, feet, legs, chest, head and body, by `EquipmentSlot`'s ordinal; the saddle is
+    /// not automation's to move), none for any other entity, and on a client.
+    pub(super) fn native_entity_equipment_size(&self, entity: u32) -> Option<usize> {
+        self.mobs
+            .iter()
+            .any(|m| m.id == entity && !m.removed)
+            .then_some(7)
+    }
     /// `EntityType.is(TagKey)`: whether `entity_type` (`minecraft:player`) is in the entity
     /// type tag `tag` (`minecraft:cannot_be_pushed_onto_boats`).
     pub(super) fn native_entity_type_in_tag(&self, entity_type: &str, tag: &str) -> bool {
@@ -125,6 +135,14 @@ impl Game<'_> {
         if let ItemPlace::EntitySlot { entity, slot } = place {
             let (slots, _) = self.entity_slots(*entity)?;
             return slots.get(*slot).cloned().flatten().filter(|s| s.count > 0);
+        }
+        if let ItemPlace::Equipment { entity, slot } = place {
+            let mob = self.mobs.iter().find(|m| m.id == *entity && !m.removed)?;
+            return mob
+                .equipment_stacks()
+                .get(*slot as usize)
+                .cloned()
+                .filter(|s| s.count > 0);
         }
         let mut stack = None;
         self.native_as_player(self.place_player(place)?, |g| {
@@ -212,6 +230,24 @@ impl Game<'_> {
                     fill(held, &mut rest);
                 }
             }
+            return stack.count - rest.count;
+        }
+        if let ItemPlace::Equipment { entity, slot } = place {
+            // One slot only: what doesn't fit stays out (the handler's
+            // capacity already refused what the kind cannot wear).
+            let Some(mob) = self.mobs.iter().find(|m| m.id == *entity && !m.removed) else {
+                return 0;
+            };
+            let mut held = mob
+                .equipment_stacks()
+                .get(*slot as usize)
+                .cloned();
+            fill(&mut held, &mut rest);
+            if rest.count == stack.count {
+                return 0;
+            }
+            self.journal_equipment(*entity);
+            self.write_entity_equipment(*entity, *slot, held.filter(|h| h.count > 0));
             return stack.count - rest.count;
         }
         let Some(player) = self.place_player(place) else {
@@ -303,6 +339,23 @@ impl Game<'_> {
             slots[*slot] = kept.filter(|kept| kept.count > 0);
             return took;
         }
+        if let ItemPlace::Equipment { entity, slot } = place {
+            let Some(mob) = self.mobs.iter().find(|m| m.id == *entity && !m.removed) else {
+                return 0;
+            };
+            let held = mob
+                .equipment_stacks()
+                .get(*slot as usize)
+                .cloned();
+            let took = taken(held.as_ref());
+            if took == 0 {
+                return 0;
+            }
+            let kept = held.as_ref().map(|held| left(held, took));
+            self.journal_equipment(*entity);
+            self.write_entity_equipment(*entity, *slot, kept.filter(|kept| kept.count > 0));
+            return took;
+        }
         let Some(player) = self.place_player(place) else {
             return 0;
         };
@@ -323,6 +376,17 @@ impl Game<'_> {
             }
         });
         took
+    }
+    /// Writes mob `entity`'s equipment `slot` (#932): the same write
+    /// `native_living_set_equipment` makes — stack, attribute map, equip sound and game event
+    /// — with the effects waiting for the root commit of the open transaction, so an abort of
+    /// it is quiet. The equipment goes back then too (`journal_equipment`).
+    fn write_entity_equipment(&mut self, entity: u32, slot: EquipmentSlot, stack: Option<ItemStack>) {
+        let Some(epoch) = self.native_lifecycle.epoch() else {
+            return;
+        };
+        let living = LivingRef::new(mod_api::EntityRef::new(epoch, entity));
+        self.write_living_equipment(living, slot, stack, true);
     }
     /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
     /// what it can't put back.
@@ -542,6 +606,132 @@ pub(super) mod tests {
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 39, &pumpkin, 64)));
             assert_eq!(wrote, Ok(1));
+        });
+    }
+
+    /// A zombie mob, standing at the origin.
+    fn zombie(game: &mut super::Game<'_>) -> u32 {
+        let kind = game
+            .res
+            .mob_types()
+            .get("minecraft:zombie")
+            .unwrap()
+            .clone();
+        game.mobs
+            .push(horizon_client::mobs::Mob::new(
+                30,
+                kind,
+                horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            ));
+        30
+    }
+
+    /// A living entity's [`ENTITY_ITEMS`] is its equipment (#932): seven slots by
+    /// `EquipmentSlot`'s ordinal, the armour ones taking only what their `equippable`
+    /// names for that kind, the writes transactional — an abort puts the equipment back
+    /// and stays quiet, a commit is `set_equipment`'s write.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn living_equipment_moves_through_the_entity_items_handler() {
+        with_game(|game| {
+            let id = zombie(game);
+            let host: &mut dyn ServerHost = game;
+            let items = host
+                .entity(id)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS, ())
+                .unwrap();
+            assert_eq!(items.size(host), 7);
+            let chestplate = ItemResource::of(&ItemStack::new("minecraft:diamond_chestplate", 1));
+            let boots = ItemResource::of(&ItemStack::new("minecraft:diamond_boots", 1));
+            let sword = ItemResource::of(&ItemStack::new("minecraft:iron_sword", 1));
+            // The armour slots take what names them for a zombie, one of it; the
+            // chestplate is not for the feet, and a sword is not armour at all.
+            assert_eq!(items.capacity(host, 4, &chestplate), 1);
+            assert_eq!(items.capacity(host, 2, &chestplate), 0);
+            assert_eq!(items.capacity(host, 2, &boots), 1);
+            assert_eq!(items.capacity(host, 4, &sword), 0);
+            // A hand takes a stack of anything.
+            assert_eq!(items.capacity(host, 0, &sword), 1);
+
+            // An aborted transaction puts the equipment back.
+            let _ = host.transaction(|host, tx| {
+                assert_eq!(items.insert(host, tx, 4, &chestplate, 1), 1);
+                assert_eq!(items.amount(host, 4), 1, "the transaction sees its own write");
+                Err::<(), ()>(())
+            });
+            assert_eq!(items.amount(host, 4), 0, "the abort put it back");
+
+            // A committed one wears it and hands it back out.
+            let _ = host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sword, 1)));
+            let _ = host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1)));
+            assert_eq!(items.amount(host, 0), 1);
+            assert_eq!(items.amount(host, 4), 1);
+            let _ = host.transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 4, &chestplate, 1)));
+            assert_eq!(items.amount(host, 4), 0);
+            assert_eq!(items.amount(host, 0), 1);
+
+            // A gone entity answers nothing.
+            game.mobs.clear();
+            let host: &mut dyn ServerHost = game;
+            assert_eq!(items.amount(host, 4), 0);
+            assert_eq!(
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sword, 1))),
+                Ok(0)
+            );
+        });
+    }
+
+    /// A committed equipment write through the handler is `set_equipment`'s: the same
+    /// stacks, and the same attribute map (#941's live map reads the worn armour).
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_committed_equipment_write_matches_set_equipments() {
+        use mod_api::EquipmentSlot;
+        with_game(|game| {
+            zombie(game);
+            game.mobs
+                .push(horizon_client::mobs::Mob::new(
+                    31,
+                    game.res.mob_types().get("minecraft:zombie").unwrap().clone(),
+                    horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5),
+                    0.0,
+                ));
+            let host: &mut dyn ServerHost = game;
+            let chest = ItemStack::new("minecraft:diamond_chestplate", 1);
+            // Through the handler, committed.
+            let handler = host
+                .entity(30)
+                .unwrap()
+                .capability(host, &ENTITY_ITEMS, ())
+                .unwrap();
+            let _ = host.transaction(|host, tx| {
+                Ok::<_, ()>(handler.insert(host, tx, 4, &ItemResource::of(&chest), 1))
+            });
+            // Through `set_equipment`.
+            let written = host.entity(31).unwrap();
+            let through_setter = game.native_living(game.native_entity(31).unwrap()).unwrap();
+            assert!(game.native_living_set_equipment(
+                through_setter,
+                EquipmentSlot::Chest,
+                Some(chest.clone())
+            ));
+            let _ = written;
+            let (a, b) = (&game.mobs[0], &game.mobs[1]);
+            assert_eq!(
+                a.equipment_stacks().get(4).cloned(),
+                b.equipment_stacks().get(4).cloned(),
+                "the same worn stack"
+            );
+            // The attribute map answers the same armour for both (#941).
+            let read = |game: &super::Game<'_>, id: u32| {
+                let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+                let host: &dyn mod_api::Host = game;
+                living.attribute_value(host, "minecraft:armor")
+            };
+            assert_eq!(read(game, 30), read(game, 31));
+            assert!(read(game, 30).unwrap_or(0.0) >= 8.0, "diamond chestplate armour");
         });
     }
 

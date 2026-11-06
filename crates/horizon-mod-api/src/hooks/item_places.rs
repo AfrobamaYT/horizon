@@ -40,6 +40,12 @@ pub trait Helpers {
     #[helper(
         side = "server",
         backend = true,
+        target = "horizon_client::game::native_item_places::Game<'_>::native_entity_equipment_size"
+    )]
+    fn entity_equipment_size();
+    #[helper(
+        side = "server",
+        backend = true,
         target = "horizon_client::game::native_item_places::Game<'_>::native_entity_automation_size"
     )]
     fn entity_automation_size();

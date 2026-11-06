@@ -864,6 +864,9 @@ pub mod tests {
         fn entity_container_size(&self, _: u32) -> Option<usize> {
             None
         }
+        fn entity_equipment_size(&self, _: u32) -> Option<usize> {
+            None
+        }
         fn entity_automation_size(&self, _: u32) -> Option<usize> {
             None
         }
