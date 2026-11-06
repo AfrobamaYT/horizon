@@ -82,6 +82,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &game.pack.data_changes,
             false,
             &[],
+            &[],
         );
         let error = game
             .prepare_world_reload(&stack, &root, false)
@@ -108,6 +109,7 @@ fn refused_wire_reload_preserves_hub_and_engine_generation() {
             &game.pack.data_source,
             &game.pack.data_changes,
             false,
+            &[],
             &[],
         );
         let prepared = game.prepare_world_reload(&stack, &good, false).unwrap();
