@@ -555,7 +555,7 @@ fn tidy(slot: &mut Option<ItemStack>) {
     }
 }
 
-/// Dispatch a content mod menu's slot placement and maximum stack rules.
+/// Dispatch registered vanilla and mod menu slot placement and maximum stack rules.
 /// The slot is its backing container index. The shared application bounds the
 /// final maximum.
 #[inline(always)]
@@ -582,6 +582,24 @@ pub fn apply_menu_slot_rules(
 ) -> (bool, u32) {
     native_menu_slot_rules(context, menu, slot, stack, &mut may_place, &mut max_stack);
     (may_place, max_stack.clamp(1, CONTAINER_MAX).min(item_max))
+}
+
+/// Vanilla quick-craft count for one slot, based on the original carried stack.
+pub(crate) fn quick_craft_count(
+    kind: u8,
+    source: u32,
+    slots: usize,
+    have: u32,
+    max: u32,
+    item_max: u32,
+) -> u32 {
+    let each = match kind {
+        0 => (source as f32 / slots as f32).floor() as u32,
+        1 => 1,
+        2 => item_max,
+        _ => source,
+    };
+    (each + have).min(max)
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -891,7 +909,10 @@ impl Menu {
         containers[RESULT] = vec![None; 1];
         Self {
             kind,
-            registry_id: None,
+            registry_id: match kind {
+                Kind::Mod(kind) => Some(kind.id.into()),
+                _ => None,
+            },
             slots,
             containers,
             grid_size,
@@ -1764,14 +1785,6 @@ impl Menu {
         partial
     }
 
-    // Enable registered vanilla menus here when the guest engine uses the same rules.
-    fn dispatch_id(&self) -> Option<&str> {
-        match self.kind {
-            Kind::Mod(kind) => Some(kind.id),
-            _ => None,
-        }
-    }
-
     fn slot_rules(
         &self,
         env: &Env,
@@ -1780,7 +1793,7 @@ impl Menu {
         own: bool,
         max: u32,
     ) -> (bool, u32) {
-        let Some(id) = self.dispatch_id() else {
+        let Some(id) = self.registry_id() else {
             return (own, max.min(Self::max_stack(env, stack)));
         };
         apply_menu_slot_rules(
@@ -2457,7 +2470,7 @@ impl Menu {
                 // never aims at its result.
                 let refuses = if self.slots[dest].role == Role::Hidden {
                     true
-                } else if let Some(id) = self.dispatch_id() {
+                } else if let Some(id) = self.registry_id() {
                     !apply_menu_slot_rules(
                         env.loop_context,
                         id,
@@ -3115,14 +3128,14 @@ impl Menu {
                             let have = self.slot(s).map_or(0, |c| c.count);
                             let max =
                                 Self::max_stack(env, &source).min(self.slot_max(env, s, &source));
-                            let each = match self.quick_type {
-                                0 => (source.count as f32 / self.quick_slots.len() as f32).floor()
-                                    as u32,
-                                1 => 1,
-                                2 => Self::max_stack(env, &source),
-                                _ => source.count,
-                            };
-                            let new_count = (each + have).min(max);
+                            let new_count = quick_craft_count(
+                                self.quick_type as u8,
+                                source.count,
+                                self.quick_slots.len(),
+                                have,
+                                max,
+                                Self::max_stack(env, &source),
+                            );
                             remaining -= i64::from(new_count) - i64::from(have);
                             let mut placed = source.clone();
                             placed.count = new_count;

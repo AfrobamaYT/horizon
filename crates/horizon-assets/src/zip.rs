@@ -5,6 +5,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    hash::{DefaultHasher, Hash, Hasher},
     io::{self, Read, Seek, SeekFrom},
     path::Path,
     sync::Arc,
@@ -14,6 +15,30 @@ use zip::{CompressionMethod, ZipArchive};
 /// The most one entry inflates to: far above any real pack file, but a zip
 /// bomb stops here.
 const MAX_ENTRY: usize = 1 << 30;
+
+/// File identity/change stamps for resource-cache keys, following symlinks.
+pub(crate) fn metadata_fingerprint(metadata: &fs::Metadata) -> io::Result<u64> {
+    let mut hash = DefaultHasher::new();
+    metadata.len().hash(&mut hash);
+    metadata.modified()?.hash(&mut hash);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+        )
+            .hash(&mut hash);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.creation_time().hash(&mut hash);
+    }
+    Ok(hash.finish())
+}
 
 /// One archive with its entries indexed by name (`\` read as `/`), files
 /// and folders apart.
@@ -35,6 +60,14 @@ fn read_at(file: &fs::File, out: &mut [u8], at: u64) -> io::Result<usize> {
     return std::os::unix::fs::FileExt::read_at(file, out, at);
     #[cfg(windows)]
     return std::os::windows::fs::FileExt::seek_read(file, out, at);
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (file, out, at);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "positional file reads are unavailable on this target",
+        ))
+    }
 }
 /// The bytes of `file` from `start` to `end`.
 fn read_range(file: &fs::File, start: u64, end: u64) -> io::Result<Vec<u8>> {
@@ -92,6 +125,32 @@ impl Seek for Reader {
     }
 }
 impl Zip {
+    /// Hash the open archive snapshot, rather than reopening its pathname (a
+    /// reload may already have replaced it). Match the pack-cache policy for
+    /// large jars: central directory and file stamps above 250 MiB.
+    pub(crate) fn fingerprint(&self) -> io::Result<u64> {
+        let mut hash = DefaultHasher::new();
+        let mut reader = self.archive.clone().into_inner();
+        if self.len > 250 << 20 {
+            reader.tail.hash(&mut hash);
+            if let Some(file) = &reader.file {
+                metadata_fingerprint(&file.metadata()?)?.hash(&mut hash);
+            }
+        } else {
+            reader.position = 0;
+            let mut remaining = reader.tail_at + reader.tail.len() as u64;
+            let mut buffer = [0; 64 * 1024];
+            while remaining > 0 {
+                let read = reader.read(&mut buffer[..remaining.min(64 * 1024) as usize])?;
+                if read == 0 {
+                    return Err(io::ErrorKind::UnexpectedEof.into());
+                }
+                hash.write(&buffer[..read]);
+                remaining -= read as u64;
+            }
+        }
+        Ok(hash.finish())
+    }
     /// Reads the central directory, not the entries: opening a pack of many
     /// gigabytes for its `pack.mcmeta` costs what opening a small one does.
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -169,40 +228,44 @@ impl Zip {
         self.index(name).is_some()
     }
     pub fn read(&self, name: &str) -> io::Result<Vec<u8>> {
+        self.read_limited(name, MAX_ENTRY as u64)
+    }
+    /// Read an entry under a caller's size limit, checking actual output rather
+    /// than trusting the archive's declared uncompressed size.
+    pub fn read_limited(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        let max = usize::try_from(max).unwrap_or(usize::MAX).min(MAX_ENTRY);
+        let bytes = self.read_prefix(name, max as u64 + 1)?;
+        if bytes.len() > max {
+            return Err(invalid("entry exceeds the size limit"));
+        }
+        Ok(bytes)
+    }
+    /// Read a prefix without inflating the remainder or trusting declared sizes.
+    pub fn read_head(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
+        self.read_prefix(name, max.min(MAX_ENTRY as u64 + 1))
+    }
+    fn read_prefix(&self, name: &str, max: u64) -> io::Result<Vec<u8>> {
         let index = self
             .index(name)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, name.to_owned()))?;
-        // A clone shares the reader's data and the central directory: reading
-        // needs `&mut`.
         let mut archive = self.archive.clone();
-        let mut entry = archive.by_index_raw(index).map_err(invalid)?;
-        let method = entry.compression();
-        let mut raw = Vec::with_capacity((entry.compressed_size() as usize).min(self.len));
-        entry.read_to_end(&mut raw)?;
-        match method {
-            CompressionMethod::Stored => Ok(raw),
+        let entry = archive.by_index_raw(index).map_err(invalid)?;
+        let capacity = entry.compressed_size().min(self.len as u64).min(max) as usize;
+        let mut bytes = Vec::with_capacity(capacity);
+        match entry.compression() {
+            CompressionMethod::Stored => entry.take(max).read_to_end(&mut bytes)?,
             CompressionMethod::Deflated => {
-                // Java's ZipFile trusts neither size an entry declares: it
-                // inflates the stream to its end and keeps what comes out.
-                // Packs in the wild (a Nexo-generated one served through
-                // Dropbox, for one) carry central-directory sizes that point
-                // at other files, and miniz_oxide, which refuses input past
-                // the stream's end, failed whole entries with "corrupt
-                // deflate stream" and with them the whole pack. Only the
-                // size limit stands between the archive and a zip bomb.
-                let decoder = flate2::read::DeflateDecoder::new(raw.as_slice());
-                let mut decoded = Vec::with_capacity(raw.len().min(MAX_ENTRY));
-                decoder
-                    .take(MAX_ENTRY as u64 + 1)
-                    .read_to_end(&mut decoded)
-                    .map_err(|_| invalid("corrupt deflate stream"))?;
-                if decoded.len() > MAX_ENTRY {
-                    return Err(invalid("entry inflates past the size limit"));
-                }
-                Ok(decoded)
+                // Java's ZipFile ignores inaccurate uncompressed sizes and bytes
+                // after the deflate stream. Decode the stream directly so header
+                // reads need neither the whole compressed entry nor its output.
+                flate2::read::DeflateDecoder::new(entry)
+                    .take(max)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| invalid("corrupt deflate stream"))?
             }
-            _ => Err(invalid("unsupported zip compression")),
-        }
+            _ => return Err(invalid("unsupported zip compression")),
+        };
+        Ok(bytes)
     }
 }
 
@@ -327,6 +390,22 @@ mod tests {
         assert!(opened("empty", b"").is_err());
         assert!(opened("garbage", b"PK not really").is_err());
     }
+    #[test]
+    fn bounded_reads_check_actual_stored_and_inflated_bytes() {
+        for compressed in [false, true] {
+            let bytes = archive_of(&[("file", b"abcd", compressed)]);
+            let zip = Zip::from_bytes(bytes).unwrap();
+            assert_eq!(zip.read_head("file", 2).unwrap(), b"ab");
+            assert_eq!(zip.read_head("file", 0).unwrap(), b"");
+            assert_eq!(zip.read_head("file", 8).unwrap(), b"abcd");
+            assert_eq!(zip.read_limited("file", 4).unwrap(), b"abcd");
+            assert_eq!(
+                zip.read_limited("file", 3).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+            assert!(zip.read_limited("file", 0).is_err());
+        }
+    }
     /// A hand-built archive with one stored and one deflated entry.
     fn archive() -> Vec<u8> {
         archive_of(&[
@@ -429,6 +508,8 @@ mod tests {
 
         let zip = Zip::from_bytes(bytes).unwrap();
         assert_eq!(zip.read("large.txt").unwrap(), vec![b'x'; 4096]);
+        assert!(zip.read_limited("large.txt", 4095).is_err());
+        assert_eq!(zip.read_limited("large.txt", 4096).unwrap().len(), 4096);
     }
 
     /// Some pack writers leave an entry's compressed size longer than its
