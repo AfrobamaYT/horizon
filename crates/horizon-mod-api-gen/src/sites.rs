@@ -325,5 +325,8 @@ pub fn resolve<'a>(
     })
 }
 
+mod rewrite;
+pub use rewrite::rewrite;
+
 #[cfg(test)]
 mod tests;
