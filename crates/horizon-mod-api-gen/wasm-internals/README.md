@@ -25,4 +25,7 @@ The stage reports missing, conditional, opaque and unsupported declarations with
 their individual reasons, but does not fail. The mod loader is responsible for
 refusing a mod whose declared internals are unavailable. A seed file is not proof
 that every native operation of a mod can run in wasm: `treefall.txt` records the
-remaining lower-crate method, opaque input and closure boundaries as comments.
+remaining lower-crate method and opaque input boundaries as comments. A closure
+boundary has no thunk: the game declares the non-closure helper for the operation
+instead (`Game::level_can_survive` for the `BlockState.canSurvive` inside
+`Game::with_level`).

@@ -166,15 +166,6 @@ impl Game<'_> {
         }
     }
 
-    /// The active mob's portal cooldown, or zero when no portal state exists.
-    pub(super) fn native_mob_portal_cooldown(&self, mob: MobRef) -> Option<i32> {
-        let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
-            return None;
-        };
-        self.mobs.iter().find(|m| m.id == id)?;
-        Some(self.portals.entities.get(&id).map_or(0, |p| p.cooldown))
-    }
-
     /// The existing portal decision for an available mob in the current level.
     pub(super) fn native_mob_can_use_portal(&self, mob: MobRef) -> Option<bool> {
         let Target::Mob(id) = self.native_entity_target(mob.entity())? else {
@@ -249,8 +240,9 @@ impl Game<'_> {
     /// can be stored in the current level are supported; armor stands are
     /// refused. The dragon stores a mob or a player, which its flight ignores
     /// and its save does not keep (vanilla keeps no target either). Brain-backed mobs refuse writes: vanilla's setter
-    /// does not update their brain memory. Foxes, endermen and zombified
-    /// piglins also refuse writes until their setter side effects are modeled.
+    /// does not update their brain memory (#934). A fox, an enderman or a
+    /// zombified piglin stores the target with its own `setTarget` side
+    /// effects (`Mob::set_target`).
     /// Invalid targets are refused (false, mob unchanged); vanilla instead
     /// stores `asValidTarget(target)`, clearing the target when it is invalid.
     /// False also means a stale handle, client, or an unavailable mob/player.
@@ -301,7 +293,7 @@ impl Game<'_> {
         let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return false;
         };
-        mob.ai.target = who;
+        mob.set_target(who);
         true
     }
 
@@ -762,41 +754,6 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn mob_portal_cooldown_tracks_ticks_and_refuses_unavailable_handles() {
-        use super::super::Dim;
-        use horizon_client::nether_portal::ENTITY_DELAY;
-
-        with_game(|game| {
-            let mob = add_mob(game, 12, "minecraft:cow");
-            assert_eq!(mob.portal_cooldown(game), Some(0));
-            game.set_portal_cooldown(12);
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 1));
-            game.handle_entity_portals();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
-
-            let stale = MobRef::new(EntityRef::new(
-                NativeWorldEpoch::new(mob.entity().epoch().get() + 1),
-                12,
-            ));
-            assert_eq!(stale.portal_cooldown(game), None);
-            let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
-            dragon.id = 15;
-            game.dragon = Some(dragon);
-            let dragon = game
-                .native_mob_ref(game.native_entity(15).unwrap())
-                .unwrap();
-            assert_eq!(dragon.portal_cooldown(game), None);
-            game.enter_level(Dim::Nether).unwrap();
-            assert_eq!(mob.portal_cooldown(game), None);
-            game.enter_level(Dim::Overworld).unwrap();
-            assert_eq!(mob.portal_cooldown(game), Some(ENTITY_DELAY - 2));
-        });
-    }
-
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mob_portal_eligibility_matches_gameplay() {
         with_game(|game| {
             let cow = add_mob(game, 12, "minecraft:cow");
@@ -1092,6 +1049,65 @@ mod tests {
             game.lan.as_mut().unwrap().mob_players.clear();
             assert_eq!(mob.target(game), None);
             assert_eq!(game.mobs[0].ai.target, Some(Who::Player));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fox_enderman_and_zombified_piglin_take_targets_with_their_side_effects() {
+        with_game(|game| {
+            for (id, name) in [
+                (12, "minecraft:fox"),
+                (13, "minecraft:enderman"),
+                (14, "minecraft:zombified_piglin"),
+                (15, "minecraft:zombie"),
+            ] {
+                let kind = game.res.mob_types().get(name).unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let handle = |game: &Game<'_>, id| {
+                game.native_mob_ref(game.native_entity(id).unwrap())
+                    .unwrap()
+            };
+            let (fox, enderman, piglin) = (handle(game, 12), handle(game, 13), handle(game, 14));
+            let other = game.native_living(game.native_entity(15).unwrap()).unwrap();
+            let state =
+                |game: &Game<'_>, id| game.mobs.iter().find(|m| m.id == id).unwrap().clone();
+
+            // Fox.setTarget: a target leaves defending as it is; clearing ends it.
+            game.mobs
+                .iter_mut()
+                .find(|m| m.id == 12)
+                .unwrap()
+                .extra
+                .ints[0] |= mobs::fox::DEFENDING;
+            assert!(fox.set_target(game, Some(other)));
+            assert_eq!(fox.target(game), Some(other));
+            assert!(mobs::fox::flag(&state(game, 12), mobs::fox::DEFENDING));
+            assert!(fox.set_target(game, None));
+            assert_eq!(fox.target(game), None);
+            assert!(!mobs::fox::flag(&state(game, 12), mobs::fox::DEFENDING));
+
+            // Enderman.setTarget: the open mouth, targetChangeTime and the
+            // attack speed modifier follow the target.
+            game.mobs.iter_mut().find(|m| m.id == 13).unwrap().age = 1234;
+            assert!(enderman.set_target(game, Some(other)));
+            let m = state(game, 13);
+            assert!(m.extra.flag, "DATA_CREEPY");
+            assert_eq!(m.extra.counter, 1234, "targetChangeTime");
+            assert!(mobs::enderman::attacking_speed(&m) > 0.0);
+            assert!(enderman.set_target(game, None));
+            let m = state(game, 13);
+            assert!(!m.extra.flag);
+            assert_eq!(m.extra.counter, 0);
+            assert_eq!(mobs::enderman::attacking_speed(&m), 0.0);
+
+            // ZombifiedPiglin.setTarget: stored; its anger, sound delay and
+            // alert interval start on the AI step that first sees it.
+            assert!(piglin.set_target(game, Some(other)));
+            assert_eq!(piglin.target(game), Some(other));
+            assert!(piglin.set_target(game, None));
+            assert_eq!(piglin.target(game), None);
         });
     }
 
