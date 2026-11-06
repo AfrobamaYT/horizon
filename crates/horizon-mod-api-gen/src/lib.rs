@@ -955,6 +955,7 @@ mod dispatch;
 mod host_param;
 pub mod internals;
 pub mod points;
+pub mod staging;
 mod wasm;
 pub use build::{generate, generate_points};
 pub use wasm::{Wasm, generate as generate_wasm};
