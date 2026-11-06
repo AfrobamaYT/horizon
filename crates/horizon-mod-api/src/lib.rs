@@ -183,6 +183,17 @@ impl FluidState {
     pub fn is_source(self) -> bool {
         self.source
     }
+    /// Match carried vanilla properties locally. Unknown names or noncanonical values
+    /// do not match. Validate against `host.fluid_states()` separately for indexed errors.
+    pub fn matches(self, constraints: &[StateConstraint]) -> bool {
+        constraints.iter().all(|c| match c.name.as_str() {
+            "falling" if !self.is_empty() => c.value == if self.falling { "true" } else { "false" },
+            "level" if !self.is_empty() && !self.source => {
+                (1..=8).contains(&self.amount) && c.value.as_bytes() == [b'0' + self.amount]
+            }
+            _ => false,
+        })
+    }
 }
 
 /// A hook's mutable block entity payload, with a read-only type identity.

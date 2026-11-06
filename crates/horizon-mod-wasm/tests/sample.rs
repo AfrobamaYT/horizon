@@ -43,6 +43,43 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
 struct Server(Mutex<Vec<String>>);
 
 impl mod_api::Backend for Server {
+    fn fluid_state_definition(&self, key: mod_api::FluidKey) -> Option<mod_api::FluidDefinition> {
+        if mod_api::__private::fluid_id(key)? != "minecraft:water" {
+            return Some(mod_api::FluidDefinition::TankOnly);
+        }
+        Some(mod_api::FluidDefinition::World {
+            default: mod_api::__private::engine_fluid_state(
+                key,
+                horizon_world::fluid::FluidState::new(
+                    horizon_world::fluid::FluidKind::Water,
+                    8,
+                    true,
+                ),
+            ),
+            properties: vec![mod_api::StateProperty::new(
+                "falling".into(),
+                vec!["true".into(), "false".into()],
+            )],
+        })
+    }
+    fn fluid_state_validate(
+        &self,
+        key: mod_api::FluidKey,
+        constraints: &[mod_api::StateConstraint],
+    ) -> Result<(), mod_api::FluidStateError> {
+        // Distinct canned results exercise real guest lifting, not game validation logic.
+        if mod_api::__private::fluid_id(key) != Some("minecraft:water") {
+            return Err(mod_api::FluidStateError::NoWorldState);
+        }
+        match constraints {
+            [] => Ok(()),
+            [c] if c.name == "level" && c.value == "8" => {
+                Err(mod_api::FluidStateError::UnknownProperty(0))
+            }
+            [a, b] if a.name == "falling" && a == b => Err(mod_api::FluidStateError::Duplicate(1)),
+            _ => panic!("unexpected guest validation input"),
+        }
+    }
     fn block_key_id(&self, key: mod_api::BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")

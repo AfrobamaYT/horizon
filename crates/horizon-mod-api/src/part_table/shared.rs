@@ -692,6 +692,8 @@ pub mod tests {
     /// its installed test mods and Parts. Production mods request only the entries they use.
     pub fn register_game_keys(ids: impl IntoIterator<Item = String>) {
         let mut registrar = super::register_all(super::super::mods());
+        registrar.mod_id = "horizon";
+        registrar.declare_fluid("definition_test");
         for id in ids {
             registrar.block_key(&id);
         }
