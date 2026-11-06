@@ -15193,7 +15193,7 @@ mod client_packet_send_tests {
         fn client_packet_send(
             &self,
             _: &dyn ClientHost,
-            event: &mut ClientPacketSendEvent,
+            event: &mut ClientPacketSendEvent<'_>,
         ) -> Flow {
             self.0.lock().unwrap().push(event.packet.id.to_string());
             match &event.packet.custom_payload {
