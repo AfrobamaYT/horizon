@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Default)]
 pub(crate) struct Requests {
+    pub(crate) game_rules: Names,
     pub(crate) blocks: Names,
     pub(crate) fluids: Names,
     pub(crate) declared_fluids: HashMap<String, &'static str>,
@@ -398,4 +399,16 @@ pub fn effect_key(index: usize) -> Option<EffectKey> {
         .keys
         .get(index)
         .copied()
+}
+
+impl crate::BoolGameRuleKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::part_table::with_registering_keys(|keys| {
+            keys.unwrap_or(crate::part_table::requested_keys())
+                .game_rules
+                .id(slot)
+                .ok_or("unknown bool rule slot")?;
+            Ok(Self(slot))
+        })
+    }
 }

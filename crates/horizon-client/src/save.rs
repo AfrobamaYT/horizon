@@ -4790,7 +4790,11 @@ impl Level {
                 _ => Tag::Compound(Compound::new()),
             };
             let registry = &self.rule_registry;
-            for rule in registry.available_rules(false) {
+            for rule in registry.available_rules(
+                self.enabled_features
+                    .iter()
+                    .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS),
+            ) {
                 let tag = match rule.default {
                     crate::gamerules::Value::Bool(default) => Tag::Byte(i8::from(
                         self.game_rules
@@ -5431,6 +5435,47 @@ fn record_is_old(root: &NamedTag) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::mobs::spawner::SpawnDataExt;
+
+    #[test]
+    fn registered_rule_survives_level_save_and_absence() {
+        use crate::gamerules::{Rule, RuleRegistry, Value};
+        let dir = std::env::temp_dir().join(format!("horizon-mod-rule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let rule = Rule {
+            name: "example:enabled".into(),
+            category: "example:machines".into(),
+            default: Value::Bool(true),
+            min: 0,
+            max: 0,
+        };
+        let registry = std::sync::Arc::new(
+            RuleRegistry::with_bool_rules(&["example:machines".into()], &[rule]).unwrap(),
+        );
+        let mut level = super::Level {
+            rule_registry: registry.clone(),
+            ..Default::default()
+        };
+        level.game_rules.insert("example:enabled".into(), 0);
+        level.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("example:enabled"),
+            Some(&super::Tag::Byte(0))
+        );
+        let mut absent = super::Level::read(&dir).unwrap();
+        absent.write(&dir).unwrap();
+        assert_eq!(
+            super::read_saved_data(&dir, "game_rules")
+                .unwrap()
+                .get("example:enabled"),
+            Some(&super::Tag::Byte(0))
+        );
+        let mut returned = super::Level::read_with_registry(&dir, registry).unwrap();
+        assert_eq!(returned.game_rules.get("example:enabled"), Some(&0));
+        returned.write(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_server_falls_back_to_level_dat_old_and_restores_it() {
