@@ -18,7 +18,7 @@ fn model_flags(input: &Value) -> horizon_client::Result<Value> {
         decode_components(Some(&Tag::compound([("minecraft:custom_model_data", tag)])));
     let view = stack_view(&stack);
     let mut models = ItemModels::default();
-    models.prototypes.insert(
+    std::sync::Arc::make_mut(&mut models.prototypes).insert(
         "minecraft:diamond".into(),
         BTreeMap::from([("minecraft:item_model".into(), json!("minecraft:diamond"))]),
     );
@@ -66,7 +66,7 @@ pub fn main() -> horizon_client::Result<()> {
             continue;
         }
         let item = input["item"].as_str().ok_or("missing item")?;
-        models.prototypes.insert(
+        std::sync::Arc::make_mut(&mut models.prototypes).insert(
             item.into(),
             BTreeMap::from([
                 ("minecraft:item_model".into(), json!("horizon:fixture")),
