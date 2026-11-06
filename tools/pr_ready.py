@@ -187,17 +187,17 @@ def duration(seconds):
 
 
 def git(*arguments):
-    return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, check=True).stdout.decode("utf-8")
 
 
 def line_counts(base, changed):
     """Lines added and removed in each changed path since base, untracked files included: {path: (added, removed)}."""
     counts = {}
-    for row in git("diff", "--numstat", base).splitlines():
+    for row in filter(None, git("diff", "--numstat", "--no-renames", "-z", base).split("\0")):
         plus, minus, path = row.split("\t", 2)
         if plus != "-":
             counts[path] = (int(plus), int(minus))
-    for path in git("ls-files", "--others", "--exclude-standard").splitlines():
+    for path in git("ls-files", "--others", "--exclude-standard", "-z").split("\0"):
         if path in changed:
             try:
                 counts[path] = (len((ROOT / path).read_text(encoding="utf-8").splitlines()), 0)
@@ -482,6 +482,9 @@ def run_windows(steps, verbose):
         cwd = ROOT
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
+        if command and command[0].startswith("CARGO_BUILD_JOBS="):  # the shell form, with no shell to read it
+            command.pop(0)
+            env.setdefault("CARGO_BUILD_JOBS", "4")
         if step.name == "Public tree":
             command = [sys.executable, "tools/check_public_tree.py"]
         elif step.name == "Python tests":

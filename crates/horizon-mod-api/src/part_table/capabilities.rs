@@ -521,19 +521,19 @@ pub mod tests {
     #[cfg(test)]
     mod_api::impl_server_host_areas!(Ordered);
     #[cfg(test)]
-    impl mod_api::prelude::LevelReadsBackend for Ordered {
+    impl mod_api::prelude::LevelsBackend for Ordered {
         fn level_in_place(&self, level: LevelRef) -> bool {
             level == here()
         }
     }
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsBackend for Ordered {
+    impl mod_api::prelude::BlockEntitiesBackend for Ordered {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
             Some(type_key("test:ordered"))
         }
     }
     #[cfg(test)]
-    impl mod_api::prelude::ItemCapabilityBackend for Ordered {
+    impl mod_api::prelude::ItemsBackend for Ordered {
         fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
             (pos[0] >= 8).then_some(27)
         }
@@ -541,12 +541,9 @@ pub mod tests {
     #[cfg(test)]
     impl Backend for Ordered {}
     #[cfg(test)]
-    mod_api::impl_backend_areas!(
-        Ordered,
-        except(level_reads, block_entity_refs, item_capability)
-    );
+    mod_api::impl_backend_areas!(Ordered, except(block_entities, items, levels));
     #[cfg(test)]
-    impl mod_api::prelude::BlockEntityRefsHost for Ordered {
+    impl mod_api::prelude::BlockEntitiesHost for Ordered {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
             Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
@@ -558,7 +555,7 @@ pub mod tests {
         }
     }
     #[cfg(test)]
-    mod_api::impl_host_areas!(Ordered, except(block_entity_refs));
+    mod_api::impl_host_areas!(Ordered, except(block_entities));
 
     #[test]
     fn disabled_capability_providers_are_skipped_and_resume() {
