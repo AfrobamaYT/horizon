@@ -3575,7 +3575,13 @@ mod tests {
             ),
         ]))?;
         let mut sprites = Sprites::default();
-        let catalog = StateModels::from_facts(&root, &registry, &names, &mut sprites, &facts)?;
+        let catalog = StateModels::from_facts(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            &registry,
+            &names,
+            &mut sprites,
+            &facts,
+        )?;
         for (id, name) in names.iter().enumerate() {
             let models = catalog.collect(
                 BlockStateId(id as u32),

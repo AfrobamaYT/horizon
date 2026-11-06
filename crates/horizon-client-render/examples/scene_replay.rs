@@ -179,7 +179,9 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let root = o.root.clone().unwrap_or_else(|| settings.resources.clone());
     let loading = Instant::now();
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     if AtlasCheck::of(&render) != settings.atlas {
         return Err(format!(
             "the block sprites at {} are not the ones the capture was made with (resource packs \

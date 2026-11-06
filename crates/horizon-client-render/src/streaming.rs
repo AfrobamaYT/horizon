@@ -3507,7 +3507,13 @@ mod tests {
         }
         let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let assets = Arc::new(Assets::load(&root).unwrap());
-        let render = Arc::new(assets.reload(&root).unwrap());
+        let render = Arc::new(
+            assets
+                .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                    root.to_path_buf(),
+                ))
+                .unwrap(),
+        );
         let facts = BlockFacts::load(&root, assets.registry).unwrap();
         let visibility = models::load_visibility(&root, assets.registry).unwrap();
         let context = Arc::new(WorkerContext {

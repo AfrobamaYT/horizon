@@ -9684,7 +9684,11 @@ mod pearl_tests {
             return;
         }
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let registry = assets.registry;
         let facts = horizon_client::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = horizon_client::motion::MotionResources::load(&root, &assets).unwrap();

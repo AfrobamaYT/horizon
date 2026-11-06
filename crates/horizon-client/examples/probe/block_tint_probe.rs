@@ -15,7 +15,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input: Value = serde_json::from_slice(&fs::read(&args[1])?)?;
     let root = Path::new(input["resources"].as_str().unwrap());
     let assets = Assets::load(root)?;
-    let render = assets.reload(root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let facts = BlockFacts::load(root, assets.registry)?;
     let tables = MeshTables::new(
         &assets,

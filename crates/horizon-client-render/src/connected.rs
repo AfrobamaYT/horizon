@@ -5,6 +5,7 @@
 //!
 //! The rules and the tile geometry are `horizon_optifine::ctm`'s.
 
+use crate::resource_source::ResourceSource;
 use crate::sprites::Sprites;
 use horizon_optifine::ctm::{
     self, Connect, Method, Orient, Rule, Tile,
@@ -12,7 +13,7 @@ use horizon_optifine::ctm::{
 };
 use horizon_world::block_state_properties::BlockProperties;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-use std::{collections::HashMap, path::Path};
+use std::collections::HashMap;
 
 /// A tile as the mesher draws it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,14 +128,12 @@ impl ConnectedTextures {
     /// The rules under `root`, with their tiles inserted into `sprites` (before it finishes).
     /// `face_layer` answers a block state's sprite on a side, for rules that connect by tile.
     pub fn load(
-        root: &Path,
+        root: &ResourceSource,
         registry: &BlockRegistry,
         sprites: &mut Sprites,
         mut face_layer: impl FnMut(BlockStateId, Face) -> Option<u32>,
     ) -> Self {
-        let mut rules = ctm::load(&horizon_assets::resource_source::ResourceSource::directory(
-            root.to_owned(),
-        ));
+        let mut rules = ctm::load(root);
         // Rules with a custom name load no tiles: section meshes see no block entity.
         rules.retain(|r| r.name.is_none());
         // Rule indices are `u16`.

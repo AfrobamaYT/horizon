@@ -336,8 +336,34 @@ impl Sprites {
     pub fn try_insert(&mut self, name: &str) -> Result<u32> {
         match self.layers.get(name) {
             Some(layer) => Ok(*layer),
-            None => self.load(name),
+            None => self.load(name, None),
         }
+    }
+    /// Load a sprite id or resource file only when its PNG fits the byte limit,
+    /// including cached layers. The checked bytes are reused when decoding.
+    pub fn try_insert_limited(&mut self, name: &str, max: u64) -> Result<u32> {
+        let bytes = self.limited_png(name, max)?;
+        match self.layers.get(name) {
+            Some(layer) => Ok(*layer),
+            None => self.load(name, Some(&bytes)),
+        }
+    }
+    fn limited_png(&self, name: &str, max: u64) -> Result<Vec<u8>> {
+        let path = if name.contains(':') {
+            crate::atlas_sources::texture_resource(name, "textures")
+        } else {
+            name.to_owned()
+        };
+        Ok(self.source.read_limited(&path, max)?)
+    }
+    /// Like `insert`, but refuses unreadable or oversized PNG data before decoding.
+    pub fn insert_limited(&mut self, name: &str, max: u64) -> Result<u32> {
+        let bytes = self.limited_png(name, max)?;
+        if let Some(layer) = self.layers.get(name) {
+            return Ok(*layer);
+        }
+        let loaded = self.load(name, Some(&bytes));
+        self.or_missing(name, loaded)
     }
     /// The layer of a texture, added on first use. A texture that is missing
     /// or does not load (a resource pack's filter or a broken file) becomes
@@ -346,7 +372,11 @@ impl Sprites {
         if let Some(layer) = self.layers.get(name) {
             return Ok(*layer);
         }
-        match self.load(name) {
+        let loaded = self.load(name, None);
+        self.or_missing(name, loaded)
+    }
+    fn or_missing(&mut self, name: &str, loaded: Result<u32>) -> Result<u32> {
+        match loaded {
             Ok(layer) => Ok(layer),
             Err(e) => {
                 // `MissingTextureAtlasSprite.getLocation()`: vanilla models name the
@@ -407,10 +437,10 @@ impl Sprites {
             }
         }
     }
-    fn load(&mut self, name: &str) -> Result<u32> {
+    fn load(&mut self, name: &str, png: Option<&[u8]>) -> Result<u32> {
         // Custom Item Textures' files are outside `textures/`, which the disk cache's
         // fingerprint covers: like `insert_file`'s, they skip it.
-        let cit = name.starts_with("horizon_cit:");
+        let cit = name.starts_with("horizon_cit:") || !name.contains(':');
         let disk = self.disk.as_mut().filter(|_| !cit);
         let cached = disk.as_ref().and_then(|d| d.get(name)).cloned();
         let decoded = match cached {
@@ -418,7 +448,17 @@ impl Sprites {
             None => {
                 let decoded = match self.ready.remove(name) {
                     Some(decoded) => decoded,
-                    None => Self::decode(&self.source, name)?,
+                    None => match png {
+                        Some(bytes) => {
+                            let path = if name.contains(':') {
+                                crate::atlas_sources::texture_resource(name, "textures")
+                            } else {
+                                name.to_owned()
+                            };
+                            Self::decode_file_data(&self.source, &path, name, Some(bytes))?
+                        }
+                        None => Self::decode(&self.source, name)?,
+                    },
                 };
                 if let Some(disk) = disk {
                     disk.insert(name, decoded.clone());
@@ -568,6 +608,14 @@ impl Sprites {
         path: &str,
         name: &str,
     ) -> Result<crate::sprite_cache::Decoded> {
+        Self::decode_file_data(source, path, name, None)
+    }
+    fn decode_file_data(
+        source: &ResourceSource,
+        path: &str,
+        name: &str,
+        png: Option<&[u8]>,
+    ) -> Result<crate::sprite_cache::Decoded> {
         let metadata = match source.read_to_string(&format!("{path}.mcmeta")) {
             Ok(text) => Some(serde_json::from_str::<
                 BTreeMap<String, Box<serde_json::value::RawValue>>,
@@ -583,7 +631,10 @@ impl Sprites {
             .as_deref()
             .map(AnimationMetadata::from_json)
             .transpose()?;
-        let (png_width, png_height, pixels) = read_rgba(source, path)?;
+        let (png_width, png_height, pixels) = match png {
+            Some(bytes) => decode_rgba(bytes)?,
+            None => read_rgba(source, path)?,
+        };
         let (width, height) = if let Some(animation) = &animation {
             let [width, height] =
                 animation.frame_size(i32::try_from(png_width)?, i32::try_from(png_height)?);
@@ -731,7 +782,9 @@ impl Sprites {
 /// when it holds the texture: no file opened per texture, nor for its absent
 /// LabPBR maps.
 fn read_rgba(source: &ResourceSource, path: &str) -> Result<(u32, u32, Vec<u8>)> {
-    let bytes = source.read(path)?;
+    decode_rgba(&source.read(path)?)
+}
+fn decode_rgba(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);

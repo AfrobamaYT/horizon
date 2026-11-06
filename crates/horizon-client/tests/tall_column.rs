@@ -65,7 +65,13 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
     let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
     let layout = shape.column();
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let render = Arc::new(assets.reload(&root).unwrap());
+    let render = Arc::new(
+        assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+    );
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let visibility = models::load_visibility(&root, assets.registry).unwrap();
     let context = Arc::new(WorkerContext {

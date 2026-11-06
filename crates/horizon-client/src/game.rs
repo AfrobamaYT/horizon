@@ -21897,11 +21897,22 @@ fn load_core(
                 let parsed_models = parsed_models;
                 let render = startup::time("core.block_models_sprites", || {
                     if headless {
-                        assets.reload_for_server(root)
+                        assets.reload_for_server(
+                            &horizon_assets::resource_source::ResourceRoot::directory(
+                                root.to_path_buf(),
+                            ),
+                        )
                     } else if let Some(parsed) = parsed_models {
-                        assets.reload_with_models(root, parsed)
+                        assets.reload_with_models(
+                            &horizon_assets::resource_source::ResourceRoot::directory(
+                                root.to_path_buf(),
+                            ),
+                            parsed,
+                        )
                     } else {
-                        assets.reload(root)
+                        assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                            root.to_path_buf(),
+                        ))
                     }
                 })
                 .map_err(|e| e.to_string())?;

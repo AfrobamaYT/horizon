@@ -547,7 +547,9 @@ pub(super) fn stage_pack(
             )
         });
         (
-            assets.reload(&root),
+            assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            )),
             atlas.join(),
             panorama.join(),
             small

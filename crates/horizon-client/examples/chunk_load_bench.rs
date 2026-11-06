@@ -79,7 +79,9 @@ fn main() -> Result<(), Error> {
         .unwrap_or((-60, 10));
 
     let assets = Arc::new(Assets::load(&root)?);
-    let render = Arc::new(assets.reload(&root)?);
+    let render = Arc::new(assets.reload(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )?);
     let facts = BlockFacts::load(&root, assets.registry)?;
     let visibility = models::load_visibility(&root, assets.registry)?;
     let biomes = Arc::new(Biomes::load(&root)?);

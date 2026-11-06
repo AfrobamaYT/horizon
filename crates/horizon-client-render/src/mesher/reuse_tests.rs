@@ -120,7 +120,11 @@ fn a_shader_pack_lights_the_faces_itself() {
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let biomes = Biomes::load(&root).unwrap();
-    let render = assets.reload(&root).unwrap();
+    let render = assets
+        .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
     let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
@@ -176,7 +180,11 @@ fn a_shader_pack_lights_every_nether_face_like_an_up_face() {
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let biomes = Biomes::load(&root).unwrap();
-    let render = assets.reload(&root).unwrap();
+    let render = assets
+        .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
     let state = |name| assets.registry.default_state(name).unwrap().0;
@@ -229,7 +237,11 @@ fn separate_ao_passes_ao_in_alpha_without_darkening_rgb() {
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let biomes = Biomes::load(&root).unwrap();
-    let render = assets.reload(&root).unwrap();
+    let render = assets
+        .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
     let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
@@ -312,7 +324,11 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
     // The same scratch and output buffers survive a resource reload. They must
     // contain no references into the previous RenderAssets or MeshTables.
     for reload in 0..2 {
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
         let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
         let mut mesher = Mesher {
@@ -450,7 +466,11 @@ fn a_shader_pack_s_still_water_top_starts_at_its_south_west_corner() {
     let assets = Assets::load(&root).unwrap();
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let biomes = Biomes::load(&root).unwrap();
-    let render = assets.reload(&root).unwrap();
+    let render = assets
+        .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap();
     let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
     let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
     let state = |name| assets.registry.default_state(name).unwrap().0;

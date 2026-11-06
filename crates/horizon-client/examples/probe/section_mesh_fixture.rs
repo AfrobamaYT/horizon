@@ -193,7 +193,9 @@ pub fn main() -> Result<()> {
     }
     let root = PathBuf::from(&args[0]);
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let facts = BlockFacts::load(&root, assets.registry)?;
     let mut biomes = Biomes::load(&root)?;
     let visibility = models::load_visibility(&root, assets.registry)?;

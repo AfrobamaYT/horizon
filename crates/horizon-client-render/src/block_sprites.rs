@@ -276,7 +276,9 @@ mod tests {
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
         let assets = Arc::new(Assets::load(&root)?);
-        let render = Arc::new(assets.reload(&root)?);
+        let render = Arc::new(assets.reload(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )?);
         let facts = BlockFacts::load(&root, assets.registry)?;
         let tables = Arc::new(MeshTables::new(
             &assets,
