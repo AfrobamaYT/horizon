@@ -181,3 +181,23 @@ fn argument_records_refuse_hidden_receiver_aliases_and_macro_expansions() {
         );
     }
 }
+
+#[test]
+fn review_raw_binding_must_shadow_plain_callee() {
+    let sig = syn::parse_quote!(fn run(r#add: fn(u32) -> bool));
+    let call = syn::parse_quote!(add(1));
+    assert!(Scope::scan(&sig, None).check_target(&call).is_err());
+}
+
+#[test]
+fn review_plain_binding_must_shadow_raw_callee() {
+    let sig = syn::parse_quote!(fn run(add: fn(u32) -> bool));
+    let call = syn::parse_quote!(r#add(1));
+    assert!(Scope::scan(&sig, None).check_target(&call).is_err());
+}
+
+#[test]
+fn review_raw_identifier_must_reserve_plain_generated_name() {
+    let sig = syn::parse_quote!(fn run(r#__recv: u32));
+    assert_eq!(Scope::scan(&sig, None).fresh("__recv"), "__recv_1");
+}

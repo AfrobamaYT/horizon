@@ -382,7 +382,7 @@ impl Found<'_> {
 }
 
 /// `r#type` as `type`.
-fn unraw(ident: &syn::Ident) -> String {
+pub(crate) fn unraw(ident: &syn::Ident) -> String {
     ident.to_string().trim_start_matches("r#").to_owned()
 }
 

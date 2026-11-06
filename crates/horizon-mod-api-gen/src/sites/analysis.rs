@@ -1,4 +1,5 @@
 //! Conservative lexical facts shared by site resolution and expression rewriting.
+use crate::points::unraw;
 use proc_macro2::{Ident, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use std::collections::BTreeSet;
@@ -14,7 +15,7 @@ fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
     for token in stream {
         match token {
             TokenTree::Ident(id) => {
-                identifiers.insert(id.to_string());
+                identifiers.insert(unraw(&id));
             }
             TokenTree::Group(group) => tokens(group.stream(), identifiers),
             _ => {}
@@ -23,10 +24,10 @@ fn tokens(stream: TokenStream, identifiers: &mut BTreeSet<String>) {
 }
 impl<'a> Visit<'a> for Bindings {
     fn visit_ident(&mut self, id: &'a Ident) {
-        self.identifiers.insert(id.to_string());
+        self.identifiers.insert(unraw(&id));
     }
     fn visit_pat_ident(&mut self, pattern: &'a syn::PatIdent) {
-        self.names.insert(pattern.ident.to_string());
+        self.names.insert(unraw(&pattern.ident));
         syn::visit::visit_pat_ident(self, pattern);
     }
     fn visit_macro(&mut self, mac: &'a syn::Macro) {
@@ -35,10 +36,10 @@ impl<'a> Visit<'a> for Bindings {
     }
     fn visit_use_name(&mut self, name: &'a syn::UseName) {
         self.opaque |= name.ident == "self";
-        self.names.insert(name.ident.to_string());
+        self.names.insert(unraw(&name.ident));
     }
     fn visit_use_rename(&mut self, name: &'a syn::UseRename) {
-        self.names.insert(name.rename.to_string());
+        self.names.insert(unraw(&name.rename));
     }
     fn visit_use_glob(&mut self, _: &'a syn::UseGlob) {
         self.opaque = true;
@@ -66,7 +67,7 @@ impl<'a> Visit<'a> for Bindings {
             }
             _ => return,
         };
-        self.names.insert(id.to_string());
+        self.names.insert(unraw(&id));
     }
 }
 
@@ -104,7 +105,7 @@ impl Scope {
                     .first()
                     .filter(|s| {
                         !matches!(
-                            s.ident.to_string().as_str(),
+                            unraw(&s.ident).as_str(),
                             "crate" | "self" | "super" | "Self"
                         )
                     })
@@ -114,7 +115,7 @@ impl Scope {
             _ => None,
         };
         if let Some((name, parameter)) = lexical {
-            let name = name.to_string();
+            let name = unraw(name);
             if self.locals.contains(&name)
                 || parameter && self.parameters.contains(&name)
                 || self.opaque && name != "self"
@@ -180,7 +181,7 @@ pub(crate) fn arguments(
             _ => false,
         }
     }
-    let root = receiver.and_then(root).map(ToString::to_string);
+    let root = receiver.and_then(root).map(unraw);
     for arg in args {
         if opaque_argument(arg) {
             return Err(super::Cause::Record(
