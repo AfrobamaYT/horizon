@@ -806,7 +806,6 @@ mod tests {
                 gui_ticks: frame,
                 background: 0x20ffffff,
                 upside_down: &|_| false,
-                horizon: &|_| false,
             };
             fresh.cache = None;
             assert_eq!(
