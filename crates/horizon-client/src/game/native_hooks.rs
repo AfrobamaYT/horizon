@@ -1006,7 +1006,7 @@ use horizon_core::{
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use horizon_world::{
     consumable::UseAnimation,
-    fluid::{FluidKind, FluidState},
+    fluid::FluidKind,
     level::{BlockId, LevelAccess, PlacementContext, Ticks},
     nbt::{Compound, Tag},
     registry::{BlockRegistry, BlockStateId},
@@ -2202,7 +2202,7 @@ impl GameLevel<'_> {
         dimension: LevelDimension,
         state: BlockStateId,
         context: &PlacementContext,
-        fluid: FluidState,
+        fluid: mod_api::FluidState,
         answer: &mut Option<Option<BlockStateId>>,
     ) {
         self.fire_state_for_placement(dimension, state, context, fluid, answer);
@@ -2639,6 +2639,8 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
     /// Before an actual connection is discarded, not on a dimension change.
+    /// NeoForge's `ClientPlayerNetworkEvent.LoggingOut`, told here after
+    /// `native_client_level_unload` and only when a connection ends.
     pub(super) fn native_client_disconnecting(&self) {
         self.fire_client_disconnecting();
     }
@@ -2654,6 +2656,19 @@ impl Game<'_> {
     /// The normal menu blur request, before finite/range validation. None disables it.
     pub(super) fn native_menu_background(&self, radius: &mut Option<f32>) {
         self.fire_menu_background(radius);
+    }
+    /// `Screen.renderTransparentBackground`: draws the translucent dark background
+    /// behind an in-game screen (inventory, container, creative, book, sign, editor).
+    /// Set `canceled` (or return `Flow::Cancel`) to suppress the vanilla dark gradient,
+    /// allowing a mod to draw its own background or apply menu background blur
+    /// via `Host::apply_screen_blur`. API @API:screen_transparent_background@.
+    pub(super) fn native_screen_transparent_background(
+        &self,
+        screen: &str,
+        batch: &mut HudBatch,
+        canceled: &mut bool,
+    ) {
+        self.fire_screen_transparent_background(screen, batch, canceled);
     }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
@@ -7088,6 +7103,20 @@ impl Game<'_> {
         self.fire_entity_break_door(entity, kind, pos);
     }
 
+    /// A mob or a player is about to change the block at `pos`: a landing's
+    /// trampling (farmland to dirt, a turtle egg breaking), before its
+    /// neighbour updates and events. `player` is the player whose landing it
+    /// was, `entity` and `kind` the mob for a mob's landing (`None` and the
+    /// player's type here). `from` and `to` are the block names. Set `cancel`
+    /// and the block stays as it was and nothing the change would have caused
+    /// happens, as Bukkit's `EntityChangeBlockEvent` (@API:entity_change_block_pre@).
+    pub(super) fn native_entity_change_block_pre(
+        &mut self,
+        call: mod_api::__private::EntityChangeBlockPreCall<'_>,
+    ) {
+        self.fire_entity_change_block_pre(call);
+    }
+
     /// A mob changed a block at `pos`, after the new state was applied.
     pub(super) fn native_entity_change_block(
         &mut self,
@@ -10351,6 +10380,55 @@ impl Game<'_> {
         r.v1 = r.v0 + src[3] * dv;
         let [a, red, green, blue] = tint.unwrap_or(u32::MAX).to_be_bytes();
         batch.rect_uv(dst[0], dst[1], dst[2], dst[3], r, rgba(red, green, blue, a));
+        true
+    }
+    /// Requests vanilla's menu background blur for this frame, with a per-frame guard
+    /// so blur is applied at most once per frame. Returns true if blur was newly
+    /// requested this frame, or false if it was already applied/requested this frame.
+    /// API @API:screen_transparent_background@.
+    pub(super) fn native_apply_screen_blur(&self) -> bool {
+        if self.screen_blur_requested.get() {
+            return false;
+        }
+        self.screen_blur_requested.set(true);
+        true
+    }
+    /// The user's configured menu background blur radius (`menuBackgroundBlurriness` in options.txt,
+    /// usually 0.0 to 10.0; default 5.0). 0.0 means blur is turned off. API @API:screen_transparent_background@.
+    pub(super) fn native_menu_blur_radius(&self) -> f32 {
+        self.settings.menu_blur as f32
+    }
+    /// `Screen.renderMenuBackground`: draws the tiled menu background (32x32) across `rect`
+    /// (`[x, y, w, h]` in GUI pixels). If `in_world` is true, uses the dark translucent
+    /// texture (`gui/inworld_menu_background`); otherwise uses the opaque dirt-like
+    /// texture (`gui/menu_background`). API @API:screen_transparent_background@.
+    pub(super) fn native_draw_menu_background(
+        &self,
+        batch: &mut HudBatch,
+        rect: [f32; 4],
+        in_world: bool,
+    ) {
+        let [x, y, w, h] = rect;
+        horizon_client::ui::menu_background(batch, &self.gui.atlas, x, y, w, h, in_world);
+    }
+    /// Repeats sprite `sprite` across `rect` (`[x, y, w, h]` in GUI pixels) with each tile
+    /// sized `size` GUI pixels square, tinted by `argb`. False when the sprite is not in the HUD atlas.
+    /// API @API:screen_transparent_background@.
+    pub(super) fn native_tiled_sprite(
+        &self,
+        batch: &mut HudBatch,
+        sprite: &str,
+        rect: [f32; 4],
+        size: f32,
+        argb: u32,
+    ) -> bool {
+        let atlas = &self.gui.atlas;
+        if !atlas.sprites.contains_key(sprite) {
+            return false;
+        }
+        let [x, y, w, h] = rect;
+        let [a, r, g, b] = argb.to_be_bytes();
+        horizon_client::ui::tiled(batch, atlas, sprite, x, y, w, h, size, rgba(r, g, b, a));
         true
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
