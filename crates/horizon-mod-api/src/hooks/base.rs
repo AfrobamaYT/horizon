@@ -1784,7 +1784,9 @@ pub trait Hooks {
     /// is where a mod recomputes them.
     /// Contributed files sit below the world's own data packs: a pack's file
     /// for the same path still overrides a mod's. Server-side (the single
-    /// player's integrated server included).
+    /// player's integrated server included). Listener applies run first. A later reload refusal
+    /// preserves the old engine generation, but does not undo callback effects. Contributions
+    /// share one list, so a failed file cannot be attributed to a particular mod.
     #[hook(
         side = "server",
         contract = "collect",

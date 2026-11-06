@@ -282,13 +282,13 @@ pub struct KnownIds<'a> {
 /// tag name without `#` to members). Each run starts again from the key parts, so `/reload` drops
 /// what left a tag. A key naming a block or item the game doesn't know is an error, naming the
 /// mod; a missing tag or a part a tag gives twice is a warning, and the earlier mod's part stays.
-pub fn resolve_parts(
+pub fn prepare_parts(
     block_tags: &HashMap<String, HashSet<String>>,
     item_tags: &HashMap<String, HashSet<String>>,
     known: KnownIds<'_>,
-) -> Result<(), ResolvePartsError> {
+) -> Result<Option<Parts>, ResolvePartsError> {
     let Some(installed) = installed() else {
-        return Ok(());
+        return Ok(None);
     };
     if let Err(errors) = installed.registry_keys.items.resolve(
         |id| (known.item)(id).then_some(()),
@@ -331,7 +331,23 @@ pub fn resolve_parts(
             .map(|state| names.get((known.state_block)(state)).copied())
             .collect();
     }
-    GAME_PARTS.set(Some(Rc::new(parts)));
+    Ok(Some(parts))
+}
+
+/// Publish Parts prepared for this owning game thread.
+pub fn install_resolved_parts(parts: Option<Parts>) {
+    if let Some(parts) = parts {
+        GAME_PARTS.set(Some(Rc::new(parts)));
+    }
+}
+
+/// Resolve and install Parts at a load boundary.
+pub fn resolve_parts(
+    block_tags: &HashMap<String, HashSet<String>>,
+    item_tags: &HashMap<String, HashSet<String>>,
+    known: KnownIds<'_>,
+) -> Result<(), ResolvePartsError> {
+    install_resolved_parts(prepare_parts(block_tags, item_tags, known)?);
     Ok(())
 }
 
