@@ -227,7 +227,8 @@ impl Game<'_> {
             };
             // TrialSpawner.spawnMob: setPersistenceRequired.
             mob.persistent = r.trial;
-            match self.finalize_spawn_event(&mob, reason, source) {
+            let mut group = None;
+            match self.finalize_spawn_event(&mut mob, reason, source, &mut group) {
                 (Finalized::Cancelled, _) => return None,
                 (outcome, difficulty) => {
                     if outcome == Finalized::Done {
@@ -239,7 +240,7 @@ impl Game<'_> {
                             created: Vec::new(),
                             jockey_rider: None,
                         };
-                        horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, reason, None);
+                        horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, reason, group);
                         for m in cx.created {
                             let bounds = m.bounds();
                             l.pending.borrow_mut().push(bounds);

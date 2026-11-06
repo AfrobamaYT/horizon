@@ -1874,6 +1874,39 @@ impl MobRef {
     }
 }
 
+/// A mob the game has made but not yet added to a level (`finalize_spawn`'s mob), lent to one
+/// hook call. It is not an [`EntityRef`]: the mob is in no level yet, so no entity lookup finds
+/// it. Reads take `&dyn Host` (`mob.kind(host)`); the [`UnspawnedMobEdits`] handed out with it
+/// makes the edits. Every read and edit after the hook returns, or with another lend's handle,
+/// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct UnspawnedMobRef {
+    epoch: NativeWorldEpoch,
+    lend: u64,
+}
+
+impl UnspawnedMobRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, lend: u64) -> Self {
+        Self { epoch, lend }
+    }
+    /// The open of the world the handle belongs to.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+    /// Which of that world's lends it names.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn lend(self) -> u64 {
+        self.lend
+    }
+}
+
 /// The player, or mobs of the given species: the class filter of a
 /// [`NativeGoal::NearestTarget`] and of a [`NativeGoal::AvoidEntity`]. The
 /// species ids are namespaced (`minecraft:zombie`); a bare id reads as

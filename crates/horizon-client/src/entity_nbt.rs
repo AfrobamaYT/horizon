@@ -5411,12 +5411,13 @@ fn restore_axolotl_memories(m: &mut Mob, tag: &Tag) {
         }
     }
 }
-const AXOLOTL_VARIANTS: [&str; 5] = ["lucy", "wild", "gold", "cyan", "blue"];
+/// `Axolotl.Variant` names, by id.
+pub const AXOLOTL_VARIANTS: [&str; 5] = ["lucy", "wild", "gold", "cyan", "blue"];
 /// `Salmon.Variant` names, by id.
 const SALMON_SIZES: [&str; 3] = ["small", "medium", "large"];
 /// `TropicalFish.Pattern` names in enum order: the six small patterns, then
 /// the six large ones (the order of `extra.variant`).
-const TROPICAL_PATTERNS: [&str; 12] = [
+pub const TROPICAL_PATTERNS: [&str; 12] = [
     "kob",
     "sunstreak",
     "snooper",
