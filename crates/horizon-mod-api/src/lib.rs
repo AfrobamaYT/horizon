@@ -2352,6 +2352,24 @@ pub enum NativeArrowPickup {
     CreativeOnly,
 }
 
+/// Why a projectile's pierce level is unavailable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PierceLevelError {
+    /// The host is not a logical server.
+    WrongSide,
+    /// The projectile handle is stale or unavailable.
+    Stale,
+    /// The projectile has no arrow state.
+    NotArrow,
+}
+
+impl NoBackend for PierceLevelError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
+}
+
 /// A vanilla `AbstractMinecart`, narrowed from an entity with `host.minecart(entity)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
