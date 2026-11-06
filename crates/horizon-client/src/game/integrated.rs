@@ -1271,7 +1271,9 @@ fn server_game(
     settings: Settings,
 ) -> Result<Game<'_>> {
     let gui = UiResources::server(&options.resources)?;
-    let audio = Audio::silent(&options.resources);
+    let audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+        (&options.resources).to_path_buf(),
+    ));
     Game::new(res, pack, gui, options, settings, audio, None)
 }
 

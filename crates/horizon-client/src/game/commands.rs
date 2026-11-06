@@ -4234,7 +4234,9 @@ mod teleport_pitch_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -4704,7 +4706,9 @@ mod selector_bounds_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -4785,7 +4789,9 @@ mod query_feedback_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();

@@ -11,11 +11,11 @@ use crate::sound_engine::{
 use crate::sound_events::{Sound, SoundRegistry};
 #[cfg(feature = "audio")]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use horizon_assets::resource_source::{Resource, ResourceSource};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use std::{
     collections::HashMap,
-    fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -101,7 +101,7 @@ pub struct Heard {
 /// The mixer side of the engine (`Backend`).
 pub struct MixerBackend {
     mixer: Arc<Mutex<Mixer>>,
-    root: PathBuf,
+    root: ResourceSource,
     cache: Arc<Mutex<SoundCache>>,
     /// The decoder thread for static sounds, started with the first one.
     decoder: Option<std::sync::mpsc::Sender<Decode>>,
@@ -183,7 +183,7 @@ impl SoundCache {
 /// A static sound to decode for a channel waiting on it.
 struct Decode {
     key: String,
-    file: PathBuf,
+    file: Resource,
     channel: ChannelId,
     looping: bool,
 }
@@ -260,12 +260,12 @@ pub struct Audio {
     #[cfg(feature = "audio")]
     device_ticks: u32,
 }
-fn decode(path: &Path) -> Option<(Vec<f32>, u32)> {
+fn decode(resource: &Resource) -> Option<(Vec<f32>, u32)> {
     use symphonia::core::{
         audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
         meta::MetadataOptions, probe::Hint,
     };
-    let file = fs::File::open(path).ok()?;
+    let file = std::io::Cursor::new(resource.read().ok()?);
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     hint.with_extension("ogg");
@@ -418,7 +418,7 @@ impl Backend for MixerBackend {
             return;
         }
         let (namespace, path) = sound.path();
-        let file = self.root.join("assets").join(namespace).join(&path);
+        let file = Resource::file(self.root.clone(), format!("assets/{namespace}/{path}"));
         // A looping sound follows its entity in one client's tracking only: each keeps its own.
         if !looping && self.duplicate(channel, (namespace, &path)) {
             return;
@@ -892,14 +892,14 @@ pub fn output_devices() -> Vec<String> {
 }
 
 impl Audio {
-    pub fn new(root: &Path) -> Self {
+    pub fn new(root: &ResourceSource) -> Self {
         Self::with_device(root, "")
     }
-    pub fn with_device(root: &Path, device_name: &str) -> Self {
+    pub fn with_device(root: &ResourceSource, device_name: &str) -> Self {
         Self::with_output(root, true, device_name)
     }
     /// No output device: the dedicated server.
-    pub fn silent(root: &Path) -> Self {
+    pub fn silent(root: &ResourceSource) -> Self {
         Self::with_output(root, false, "")
     }
     /// The output device asked for (`soundDevice`), empty for the system's default; the
@@ -917,15 +917,13 @@ impl Audio {
         self.engine.set_loop_context(context);
         self.engine.notify_loaded();
     }
-    fn with_output(root: &Path, output: bool, target_device: &str) -> Self {
+    fn with_output(root: &ResourceSource, output: bool, target_device: &str) -> Self {
         let registry = SoundRegistry::load(root);
         if output && registry.is_empty() {
             // The game then plays nothing on a working output (#1035, #1076).
             log::warn!(
-                "Horizon: no sounds in {}: they were not copied from your Minecraft \
-                 install; prepare the game again in the launcher (or run \
-                 horizon-prepare sounds)",
-                root.join("assets").display()
+                "Horizon: no sounds in the active resources; prepare the game again in the \
+                 launcher (or run horizon-prepare sounds)"
             );
         }
         let mixer = Arc::new(Mutex::new(Mixer::default()));
@@ -1272,18 +1270,19 @@ impl Audio {
     }
     /// `SoundManager.reload` (resource packs changed): stop every sound, then
     /// read sound events and sound files from the new resource root.
-    pub fn reload(&mut self, root: &Path) {
+    pub fn reload(&mut self, root: &ResourceSource) {
         self.reload_with(root, SoundRegistry::load(root));
     }
     /// [`Self::reload`] with the root's sound events already read
     /// (`SoundRegistry::load`, which a pack reload runs off the render thread).
-    pub fn reload_with(&mut self, root: &Path, registry: SoundRegistry) {
+    pub fn reload_with(&mut self, root: &ResourceSource, registry: SoundRegistry) {
         self.stop_all();
         self.engine.registry = registry;
         self.backend.root = root.to_owned();
-        let mut cache = self.backend.cache.lock().unwrap();
-        cache.entries.clear();
-        cache.bytes = 0;
+        // A queued decode retains its old resource generation and cache. Dropping
+        // the sender lets it finish without populating the new generation's cache.
+        self.backend.decoder = None;
+        self.backend.cache = Arc::new(Mutex::new(SoundCache::default()));
     }
     /// Play a sound event at a world position, as `ClientLevel.playLocalSound`
     /// (a `SimpleSoundInstance` seeded from the level random), or relative to
@@ -1616,8 +1615,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reload_isolates_pending_decodes_from_the_new_resource_cache() {
+        let source = ResourceSource::indexed(Default::default());
+        let mut audio = Audio::silent(&source);
+        let old = audio.backend.cache.clone();
+        old.lock().unwrap().insert("old".into(), None);
+        audio.reload(&source);
+        assert!(!Arc::ptr_eq(&old, &audio.backend.cache));
+        old.lock().unwrap().insert("late".into(), None);
+        assert!(audio.backend.cache.lock().unwrap().entries.is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires HORIZON_TEST_RESOURCES with imported vanilla sounds"]
+    fn archive_sound_decodes_like_the_original_without_unpacking() {
+        use std::io::Write;
+        let prepared = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("resources"),
+        );
+        let source = ResourceSource::directory(prepared);
+        let name = source
+            .list("assets/minecraft/sounds/")
+            .into_iter()
+            .find(|name| name.ends_with(".ogg"))
+            .expect("imported ogg");
+        let bytes = source.read(&name).unwrap();
+        let original = decode(&Resource::bytes(bytes.clone())).expect("vanilla ogg decodes");
+        assert!(!original.0.is_empty());
+        let folder = std::env::temp_dir().join(format!(
+            "horizon-archive-sound-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&folder).unwrap();
+        let jar = folder.join("sound.jar");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&jar).unwrap());
+        writer
+            .start_file(&name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(&bytes).unwrap();
+        writer.finish().unwrap();
+        let resource = Resource::file(ResourceSource::archive(&jar).unwrap(), name);
+        std::fs::remove_file(&jar).unwrap();
+        let archived = decode(&resource).expect("retained archive ogg decodes");
+        assert_eq!(archived, original);
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 0);
+        std::fs::remove_dir(&folder).unwrap();
+    }
+
+    #[test]
     fn level_capture_keeps_order_category_entity_and_actor_exclusion() {
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-entity-sound-test"));
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-entity-sound-test")).to_path_buf(),
+        ));
         audio.capture = Some(Vec::new());
         let mut expected = audio.random.clone();
         audio.play_on(
@@ -1656,7 +1709,9 @@ mod tests {
 
     #[test]
     fn entity_sound_packets_neither_rebroadcast_nor_advance_the_local_seed_generator() {
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-entity-sound-test"));
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-entity-sound-test")).to_path_buf(),
+        ));
         audio.capture = Some(Vec::new());
         let mut expected = audio.random.clone();
         let entity = crate::sound_engine::SoundEntity::new(7, [1.0, 2.0, 3.0], false);
@@ -1667,7 +1722,9 @@ mod tests {
     #[test]
     fn removal_marks_only_existing_references_to_that_entity() {
         use crate::sound_engine::SoundEntity;
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-entity-sound-test"));
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-entity-sound-test")).to_path_buf(),
+        ));
         let old = SoundEntity::new(7, [0.0; 3], false);
         let other = SoundEntity::new(8, [0.0; 3], false);
         for entity in [old.clone(), other.clone()] {
@@ -1692,7 +1749,9 @@ mod tests {
 
     #[test]
     fn button_click_uses_vanilla_ui_parameters_without_advancing_world_random() {
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-test-assets"));
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_path_buf(),
+        ));
         audio.engine.registry.add_file(
             "minecraft",
             br#"{"ui.button.click":{"sounds":["gui/button"]}}"#,
@@ -1727,7 +1786,9 @@ mod tests {
     #[test]
     fn a_mod_sound_plays_as_its_sound_play_says() {
         use mod_api::{SoundPlay, SoundSource};
-        let mut audio = Audio::silent(Path::new("/nonexistent/horizon-test-assets"));
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_path_buf(),
+        ));
         audio.engine.registry.add_file(
             "minecraft",
             br#"{"ui.button.click":{"sounds":["gui/button"]}}"#,
@@ -1968,7 +2029,9 @@ mod tests {
 
     #[test]
     fn a_shared_listener_registers_even_in_the_hosts_world() {
-        let mut host = Audio::silent(Path::new("/nonexistent/horizon-test-audio"));
+        let mut host = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-audio")).to_path_buf(),
+        ));
         host.set_world("minecraft:overworld");
         let mut guest = host.share(1);
         guest.set_world("minecraft:overworld");
@@ -2052,7 +2115,7 @@ mod tests {
         let shares = Arc::new(std::sync::atomic::AtomicUsize::new(1));
         let backend = |owner| MixerBackend {
             mixer: mixer.clone(),
-            root: PathBuf::new(),
+            root: ResourceSource::indexed(Default::default()),
             cache: Arc::default(),
             decoder: None,
             next: (u64::from(owner)) << 40,
@@ -2096,7 +2159,9 @@ mod tests {
 
     #[test]
     fn reusing_a_seat_does_not_reuse_its_channels_or_leave_its_camera() {
-        let host = Audio::silent(Path::new("/nonexistent/horizon-test-audio"));
+        let host = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-audio")).to_path_buf(),
+        ));
         let mut guest = host.share(1);
         guest.set_world("overworld");
         guest.set_listener([1.0, 0.0, 0.0], 0.0, 0.0);

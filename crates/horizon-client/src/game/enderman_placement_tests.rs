@@ -64,7 +64,9 @@ fn leave_block_goal_uses_real_neighbor_shapes_and_keeps_air_placement() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (&root).to_path_buf(),
+        )),
         None,
     )
     .unwrap();

@@ -1355,7 +1355,9 @@ mod wolf_live_anger_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -1492,7 +1494,9 @@ mod loot_table_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();

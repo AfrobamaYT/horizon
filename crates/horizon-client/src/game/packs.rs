@@ -467,7 +467,10 @@ impl Game<'_> {
             lang::Language::load(&[&root], &code)
         });
         self.refresh_remote_language();
-        self.audio.reload_with(&root, sounds);
+        self.audio.reload_with(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            sounds,
+        );
         self.clear_lod();
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
@@ -551,7 +554,9 @@ pub(super) fn stage_pack(
         });
         let small = s.spawn(|| {
             (
-                horizon_client::sound_events::SoundRegistry::load(&root),
+                horizon_client::sound_events::SoundRegistry::load(
+                    &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+                ),
                 horizon_client::ui::read_metadata(
                     &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
                 ),

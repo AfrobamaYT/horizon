@@ -2547,7 +2547,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();
@@ -2914,7 +2916,9 @@ mod structure_tag_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&root).to_path_buf(),
+            )),
             None,
         )
         .unwrap();

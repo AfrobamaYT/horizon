@@ -42,7 +42,9 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
     let overlay = PathBuf::from(&args[2]).with_extension("overlay");
     packs::build_overlay(&vanilla, &enabled, &overlay)?;
     let language = Language::load(&[&overlay], "en_us");
-    let sounds = SoundRegistry::load(&overlay);
+    let sounds = SoundRegistry::load(&horizon_assets::resource_source::ResourceSource::directory(
+        overlay.to_path_buf(),
+    ));
     let mut out = String::new();
     for line in lines {
         let (kind, arg) = line.split_once(' ').unwrap_or((line, ""));

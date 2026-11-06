@@ -23317,9 +23317,16 @@ impl Loading {
         let renderer_ms = renderer_at.elapsed().as_millis();
         // Audio is created on the main thread, after the core is ready.
         let audio = if !options.execution_role.is_client() {
-            Audio::silent(&options.resources)
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                (&options.resources).to_path_buf(),
+            ))
         } else {
-            Audio::with_device(&options.resources, &self.settings.sound_device)
+            Audio::with_device(
+                &horizon_assets::resource_source::ResourceSource::directory(
+                    (&options.resources).to_path_buf(),
+                ),
+                &self.settings.sound_device,
+            )
         };
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
         // The game borrows its shared resources for the process's lifetime,
@@ -23677,9 +23684,16 @@ pub fn run_with(launch: LaunchArguments, native: horizon_mods::runtime::Runtime)
     let gui = loaded.gui.ok_or("missing menu bundle")?;
     options.resources = loaded.root.clone();
     let audio = if !options.execution_role.is_client() || options.headless {
-        Audio::silent(&options.resources)
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (&options.resources).to_path_buf(),
+        ))
     } else {
-        Audio::with_device(&options.resources, &early_settings.sound_device)
+        Audio::with_device(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                (&options.resources).to_path_buf(),
+            ),
+            &early_settings.sound_device,
+        )
     };
     let resources = loaded.resources;
     let game = start_game(

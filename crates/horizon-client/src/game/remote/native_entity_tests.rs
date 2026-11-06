@@ -50,7 +50,9 @@ fn a_client_reads_the_entities_and_menu_the_server_shows_it() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (&root).to_path_buf(),
+        )),
         None,
     )
     .unwrap();
@@ -259,7 +261,9 @@ fn a_villager_raid_sweat_event_draws_particles() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (&root).to_path_buf(),
+        )),
         None,
     )
     .unwrap();
