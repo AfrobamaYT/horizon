@@ -21,7 +21,13 @@ impl GuestList {
     }
     /// Material player bodies in join order, without visiting connectionless actors.
     pub fn simulation_iter(&self) -> impl Iterator<Item = &Guest> {
-        self.simulation.iter().map(|&index| &self.rows[index])
+        self.simulation_indexed_iter().map(|(_, guest)| guest)
+    }
+    /// Material players and their collection indexes, without visiting connectionless actors.
+    pub fn simulation_indexed_iter(&self) -> impl Iterator<Item = (usize, &Guest)> {
+        self.simulation
+            .iter()
+            .map(|&index| (index, &self.rows[index]))
     }
     pub fn as_slice(&self) -> &[Guest] {
         &self.rows
@@ -156,10 +162,22 @@ mod tests {
             list.simulation_iter().map(|g| g.conn).collect::<Vec<_>>(),
             [1]
         );
+        assert_eq!(
+            list.simulation_indexed_iter()
+                .map(|(i, g)| (i, g.conn))
+                .collect::<Vec<_>>(),
+            [(0, 1)]
+        );
         list.reverse();
         assert_eq!(
             list.simulation_iter().map(|g| g.conn).collect::<Vec<_>>(),
             [1]
+        );
+        assert_eq!(
+            list.simulation_indexed_iter()
+                .map(|(i, g)| (i, g.conn))
+                .collect::<Vec<_>>(),
+            [(256, 1)]
         );
         list.remove(256);
         assert_eq!(list.simulation_iter().count(), 0);
