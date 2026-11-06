@@ -90,6 +90,53 @@ impl Game<'_> {
         save_without_metadata(world, (x, y, z), block_entity, block)
     }
 
+    /// The vanilla lock's item predicate, if present on a loaded block entity.
+    pub(super) fn native_block_entity_lock(&self, entity: BlockEntityRef) -> Option<Compound> {
+        let (world, _) = self.native_block_entity_target(entity)?;
+        let [x, y, z] = entity.fields().position;
+        match world.block_lock((x, y, z))? {
+            Tag::Compound(lock) => Some(lock.clone()),
+            _ => None,
+        }
+    }
+
+    /// Change the lock through the same storage used by container opening and saving.
+    pub(super) fn native_block_entity_set_lock(
+        &mut self,
+        entity: BlockEntityRef,
+        lock: Option<Compound>,
+    ) -> bool {
+        let Some((key, block)) = self.native_block_entity_write_target(entity) else {
+            return false;
+        };
+        if matches!((self.world.block_lock(key), &lock), (None, None))
+            || matches!((self.world.block_lock(key), &lock), (Some(Tag::Compound(old)), Some(new)) if old == new)
+        {
+            return false;
+        }
+        let Some(mut tag) = self
+            .world
+            .block_entities
+            .get(&key)
+            .and_then(|current| save_with_metadata(&self.world, key, current, &block))
+        else {
+            return false;
+        };
+        match lock {
+            Some(lock) => {
+                tag.insert("lock".into(), Tag::Compound(lock));
+            }
+            None => {
+                tag.remove(&"lock".into());
+            }
+        }
+        self.journal_block_entity(key);
+        self.world.set_block_lock(key, &Tag::Compound(tag));
+        self.after_commit(After::Updated(key));
+        self.after_commit(After::Changed(key));
+        true
+    }
+
     /// A loaded block entity of the server level in place, when a write may change it.
     fn native_block_entity_write_key(&self, entity: BlockEntityRef) -> Option<(i32, i32, i32)> {
         if !self.native_level_in_place(entity.fields().level) {
@@ -463,7 +510,53 @@ mod tests {
             game.lan.as_mut().unwrap().hub.guests[0].kind =
                 horizon_client::lan::guest::GuestKind::Network;
             assert!(player.open_menu(game, chest));
+            let stick_lock = compound("{items:\"minecraft:stick\"}");
+            assert!(chest.set_lock(game, Some(stick_lock.clone())));
+            assert_eq!(chest.lock(game), Some(stick_lock));
+            assert!(!player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] =
+                Some(horizon_client::items::ItemStack::new("minecraft:stick", 1));
+            assert!(player.open_menu(game, chest));
+            game.lan.as_mut().unwrap().hub.guests[0].inventory[0] = None;
+            assert!(chest.set_lock(game, None));
+            assert!(player.open_menu(game, chest));
             assert!(player.open_menu(game, furnace));
+
+            // Both halves of a double chest participate, whichever half is opened.
+            use horizon_world::chunk::BlockState;
+            for (x, kind) in [(6, "left"), (7, "right")] {
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .resolve(&BlockState {
+                        name: "minecraft:chest".into(),
+                        properties: [
+                            ("facing".into(), "north".into()),
+                            ("type".into(), kind.into()),
+                            ("waterlogged".into(), "false".into()),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    })
+                    .unwrap();
+                assert!(game.native_level_set_block(
+                    level,
+                    [x, 64, 0],
+                    state,
+                    NativeBlockUpdateFlags::NEIGHBORS
+                ));
+            }
+            let left = game.native_block_entity_ref(level, [6, 64, 0]).unwrap();
+            let right = game.native_block_entity_ref(level, [7, 64, 0]).unwrap();
+            assert!(game.chest_partner((6, 64, 0)).is_some());
+            for half in [left, right] {
+                assert!(half.set_lock(game, Some(compound("{items:\"minecraft:stick\"}"))));
+                assert!(!player.open_menu(game, left));
+                assert!(!player.open_menu(game, right));
+                assert!(half.set_lock(game, None));
+                assert!(player.open_menu(game, left));
+            }
             game.world.block_entities.remove(&(2, 64, 0));
             assert!(!player.open_menu(game, furnace));
         });
@@ -558,6 +651,17 @@ mod tests {
                 (Some(3), Some("Kept".to_owned()))
             );
 
+            // Replacement uses the same journal and restores the original payload on abort.
+            let aborted: Result<(), ()> = (game as &mut dyn ServerHost).transaction(|host, _| {
+                assert!(chest.replace_data(host, compound("{}")));
+                Err(())
+            });
+            assert_eq!(aborted, Err(()));
+            assert_eq!(
+                (slot3(game), chest.name(game)),
+                (Some(3), Some("Kept".to_owned()))
+            );
+
             // Merge preserves omitted data; replacement clears the name and items.
             assert!(chest.merge_data(game, compound("{CustomName:\"Changed\"}")));
             assert_eq!(slot3(game), Some(3));
@@ -609,7 +713,7 @@ mod tests {
 
             let host: &mut dyn ServerHost = game;
             let aborted: Result<(), ()> = host.transaction(|host, _| {
-                assert!(chest.merge_data(host, lock.clone()));
+                assert!(chest.set_lock(host, Some(compound("{items:\"minecraft:stick\"}"))));
                 assert!(chest.merge_data(host, table.clone()));
                 Err(())
             });

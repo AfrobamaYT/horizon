@@ -28,6 +28,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "LevelWriteHost",
     "ConfigFiles",
     "Commands",
+    "Levels",
     "Messages",
     "Players",
     "ClientSession",
@@ -51,6 +52,7 @@ pub(super) const IMPORTS: &[&str] = &[
 pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("ConfigFiles", "host", "Ok(h.config_files())"),
     ("Commands", "server_host_mut", "Ok(h.commands())"),
+    ("Levels", "server_host", "Ok(h.levels())"),
     ("Messages", "server_host", "Ok(h.messages())"),
     ("Players", "server_host", "Ok(h.players())"),
     ("ClientSession", "client_host", "Ok(h.client_session())"),
@@ -881,6 +883,37 @@ mod tests {
                         .any(|name| name.starts_with("Commands::")
                             || name.starts_with("Messages::")
                             || name.starts_with("Players::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn client_modifiers_have_a_generated_wasm_binding() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("native_render_generated.rs", generated.render.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let client =
+                    &resolve.interfaces[resolve.packages[package].interfaces["client-host"]];
+                assert!(client.functions.contains_key("modifiers"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name == "ClientHost::modifiers")
                 );
             })
             .unwrap()
