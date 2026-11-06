@@ -1300,8 +1300,8 @@ fn server_game(
     options: Options,
     settings: Settings,
 ) -> Result<Game<'_>> {
-    let gui = UiResources::server(&options.resources)?;
-    let audio = Audio::silent(&options.resources);
+    let gui = UiResources::server(&pack.source)?;
+    let audio = Audio::silent(&pack.source);
     Game::new(res, pack, gui, options, settings, audio, None)
 }
 

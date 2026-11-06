@@ -38,7 +38,10 @@ fn write_base(root: &std::path::Path) -> Biomes {
     for name in ["plains", "river"] {
         std::fs::write(biome_dir.join(format!("{name}.json")), "{}").unwrap();
     }
-    Biomes::load(root).unwrap()
+    Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap()
 }
 
 #[test]

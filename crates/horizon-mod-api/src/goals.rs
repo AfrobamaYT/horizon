@@ -96,7 +96,7 @@ impl GoalFlags {
 
 /// A mod's own mob goal, run by the mob's goal selector beside vanilla's: the
 /// same priorities and interruption, its state its own (one object per mob,
-/// built in [`EntityPart::register_goals`] at every `Mob` construction, so a
+/// built in [`crate::EntityPart::register_goals`] at every `Mob` construction, so a
 /// mob loaded from a chunk gets fresh goals and nothing of them is saved).
 ///
 /// The draws a goal makes come from [`GoalContext::random`], the mob's own
@@ -139,7 +139,7 @@ pub trait Goal: Send + Sync + 'static {
     }
 }
 
-/// What the game hands an [`EntityPart`]: the two selectors of the mob being
+/// What the game hands an [`crate::EntityPart`]: the two selectors of the mob being
 /// built, as vanilla's `registerGoals` fills them.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct GoalRegistrar<'a> {

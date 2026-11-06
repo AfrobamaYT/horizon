@@ -273,11 +273,12 @@ fn move_up_to_above_solid(w: &MobWorld, mut p: [i32; 3], above: i32) -> [i32; 3]
     }
     p
 }
-/// `Mob.isWithinHome(BlockPos)`.
+/// `Mob.isWithinHome(BlockPos)`: `Vec3i.distSqr` in doubles, so no
+/// coordinate pair overflows, against the radius squared as a Java `int`
+/// (which wraps past 46 340, as vanilla's does).
 pub fn within_home(c: [i32; 3], r: i32, p: [i32; 3]) -> bool {
-    let d = |i: usize| i64::from(c[i] - p[i]);
-    let r = i64::from(r);
-    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < r * r
+    let d = |i: usize| f64::from(c[i]) - f64::from(p[i]);
+    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < f64::from(r.wrapping_mul(r))
 }
 
 impl Mob {
@@ -3950,6 +3951,28 @@ mod breed_xp_tests {
                 .any(|e| matches!(e, MobEvent::Breed { parent: 1, .. })),
             "mob_drops off: the pair still breeds"
         );
+    }
+}
+
+#[cfg(test)]
+mod within_home_tests {
+    use super::within_home;
+
+    /// `Mob.isWithinHome`: `Vec3i.distSqr` in doubles against the radius
+    /// squared as a Java `int`.
+    #[test]
+    fn within_home_matches_vanilla_at_the_edges() {
+        assert!(within_home([10, 64, -5], 6, [12, 64, -2]));
+        assert!(
+            !within_home([10, 64, -5], 6, [16, 64, -5]),
+            "the radius itself is out"
+        );
+        assert!(!within_home([i32::MIN, 0, 0], 6, [i32::MAX, 0, 0]));
+        assert!(!within_home([i32::MIN; 3], i32::MAX, [i32::MAX; 3]));
+        // 65 536² wraps to 0; 46 341² wraps negative.
+        assert!(!within_home([0, 0, 0], 65_536, [0, 0, 0]));
+        assert!(!within_home([0, 0, 0], 46_341, [0, 0, 0]));
+        assert!(within_home([0, 0, 0], 46_340, [46_339, 0, 0]));
     }
 }
 
