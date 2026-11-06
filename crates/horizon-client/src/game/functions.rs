@@ -181,17 +181,40 @@ impl Game<'_> {
         run_load: bool,
         enabled_features: &[String],
     ) -> Result<PackStack, ReloadStageError> {
+        horizon_client::mod_content::check_jars(
+            &self.options.resources,
+            &horizon_client::logging::game_home().join("jars"),
+        )
+        .map_err(ReloadStageError::OriginalJars)?;
+        let next_root = self
+            .stage_enabled_inventory()
+            .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
+        let resources = next_root
+            .as_ref()
+            .map_or(self.options.resources.as_path(), |root| root.prepared());
+        let data = next_root
+            .as_ref()
+            .map_or(&self.pack.data_source, |root| root.data());
+        let changes = next_root
+            .as_ref()
+            .map_or(&self.pack.data_changes, |root| root.data_changes());
         let additional = super::pack_finders::data_packs(&self.mods);
         let stack = pack_stack(
             &self.world_root,
-            &self.options.resources,
-            &self.pack.data_source,
-            &self.pack.data_changes,
+            resources,
+            data,
+            changes,
             self.cmds.vanilla_disabled,
             enabled_features,
             &additional,
         );
         let prepared = self.prepare_server_reload(&stack)?;
+        if let Some(root) = next_root {
+            self.options.resources = root.prepared().to_owned();
+            self.pack.data_source = root.data().clone();
+            self.pack.data_changes = root.data_changes().clone();
+            self.mods.data_switched = true;
+        }
         if !run_load {
             self.fns = Default::default();
         }

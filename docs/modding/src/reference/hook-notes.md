@@ -19,6 +19,14 @@ receive `&dyn ClientHost`. They do not grant server writes.
 not for a dimension change. Initialization and final shutdown still use the
 existing `client_setup` and `client_stopping` hooks, with no parallel aliases.
 
+## Custom world geometry
+
+`Hooks::submit_custom_geometry` runs on the client after particles, before rendering. Its
+`WorldRenderView` holds camera, partial tick and game time; `WorldDrawContext::lines` and `quads`
+accept unlit world-space ARGB geometry with depth testing or through walls. Batches fail atomically
+for invalid inputs or overflow. `usage()` reports shared limits (4,096 of each by default);
+output clears every view. Submit extracted state, without world writes or resource loading.
+
 ## Transparent screen backgrounds and landing changes
 
 `Hooks::screen_transparent_background` runs immediately before an in-game screen's
@@ -141,6 +149,34 @@ item draws as its `base` model, and the log says so once per type. A mod gets th
 JSON: a `minecraft:model` leaf naming a model file with `elements` and `display` draws cuboids with a
 transformation per display context, `tints` colours them, and `minecraft:select`, `condition` and
 `range_dispatch` on a property the mod answers through `item_model_property` pick between variants.
+
+## Numeric item model properties
+
+A client mod adds a numeric `minecraft:range_dispatch` property (NeoForge's
+`RegisterRangeSelectItemModelPropertyEvent`) in two steps. `Hooks::register_range_select_item_model_property`
+pushes its id once at start, before resources load; `Hooks::item_model_range_property` answers the number
+for each stack while a model picks a branch.
+
+```rust,ignore
+fn register_range_select_item_model_property(
+    &self,
+    _context: &RegistrationContext,
+    event: &mut RegisterRangeSelectItemModelPropertyEvent<'_>,
+) {
+    event.properties.push("example:fill".into());
+}
+
+fn item_model_range_property(&self, _host: &dyn ClientHost, event: &mut ItemModelRangePropertyEvent<'_>) {
+    if event.property == "example:fill" {
+        event.value = event.stack.count as f32 / 64.0;
+    }
+}
+```
+
+Use `"property": "example:fill"` in the item's `minecraft:range_dispatch`: the model's `scale` multiplies the
+number, then the highest threshold at or below it wins, else `fallback`, as for vanilla's properties. A
+resource reload keeps reading the mod's number. An id in vanilla's namespace, not `<namespace>:<path>`, or
+registered twice is logged and left out. A property no mod registers reads 0, decided once at load.
 
 ## Item frame rendering
 
@@ -1235,7 +1271,7 @@ registration path.
 
 - `native_block_entity` gives a block a block entity whatever its template: a mod's stone casing or thin part can use any template. The engine removes it when its block is broken or replaced, no piston moves it, and a mod that draws it (`native_block_entity_submit`) is asked for it.
 
-- Slot rules a mod decides in code for its content menu types: `native_menu_slot_rules(menu, slot, stack, may_place, max_stack)` starts with the slot's own answers and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`.
+- Slot rules for registered vanilla and mod menu types: `menu_slot_rules` starts with the slot's own answers and may change both, as a NeoForge mod overrides `Slot.mayPlace` and `Slot.getMaxStackSize`.
 
 - An item's use tick and release, as vanilla's `Item.onUseTick` and `releaseUsing` and NeoForge's `LivingEntityUseItemEvent.Tick` and `.Stop`. Each tick of a use, `native_living_entity_use_item_tick` may change the ticks left: at 0 or less, or on a cancel, the server finishes the use, as NeoForge's code does, and an item used on release stays frozen until let go. `native_on_use_tick` is what a mod's own item does then (cook, charge). When the player lets go early, `native_living_entity_use_item_stop` may skip the release, and `native_release_using` acts with the ticks left (a bow-like item shoots by its charge); setting `used` starts the item's cooldown. All four run on both sides, as vanilla's do, and take the using entity, None for a player; the tick and stop take the hand too. Change the world only where this game runs the world, not on a server's client.
 
@@ -1339,6 +1375,13 @@ registration path.
 
 - The in-world HUD's two moments, as NeoForge's `RenderGuiEvent.Pre` and `.Post`: `render_gui_pre(host, event)` runs once a frame in a world, before any vanilla HUD layer, and a mod that returns `Flow::Cancel` hides the whole HUD as F1 does (no layer, no `gui_layer_pre` or `gui_layer_post`, no `render_gui_post`, no chat or toasts); it is not heard under F1 or while a server dialog or the connection screen covers the window. `render_gui_post(host, draw, corners)` is the old `hud` hook, unchanged: it draws after the minimap, so a mod that implemented `hud` implements `render_gui_post`. Client side; a frame with no listener costs one branch each.
 - Lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1.
+- The camera type F5 cycles to: `camera_type_cycle(host, event)` runs when `key.togglePerspective` cycles the window's
+  camera type (`Minecraft.handleKeybinds`), with `previous` and vanilla's `next` (first person, third person behind, third
+  person in front); a mod may set `next` to skip or keep a type, and the camera entity's post effect follows the answer.
+  `camera_type()` reads the type and `set_camera_type(type)` sets it as F5 does, without a cycle, for a freelook mod that
+  switches to third person and back; with `camera_pose` moving the drawn camera, that is a camera independent of the
+  player. The game's two copies of `CameraType` are now one, `mod_api::CameraType`. Client side.
+
 - A client tick's two moments, as NeoForge's `ClientTickEvent.Pre` and `.Post`: `client_tick_pre(host, event)` runs at the start of every client tick (`Minecraft.tick`), paused or not and on the title screen too, and `client_tick_post` at its end. They replace the single `tick` hook, which also fired on a server's own `Game`: the server's tick is `server_tick` (`ServerTickEvent`), so a mod that implemented `tick` implements `client_tick_pre` and, for a server, `server_tick`. Window only, client side; a tick with no listener costs one branch.
 - How long a client tick lasts, a "timer": `tick_target_millis(host, event)` gets the milliseconds the window's
   `DeltaTracker.Timer` divides each frame's time by (`Minecraft.getTickTargetMillis`), vanilla's 50 at 20 ticks a
@@ -2490,9 +2533,6 @@ handle, an entity the client doesn't track and a level it doesn't show:
   `DATA_STINGER_COUNT_ID`) read and set what is stuck in a player; the player and those around see it. Horizon keeps no
   such count for mobs (None, false). `set_arrow_removal_ticks` and `set_stinger_removal_ticks` set the ticks until the
   next one falls out (`removeArrowTime`, `removeStingerTime`; at 0 or less the timer restarts at `20 * (30 - count)`).
-- `living.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data) and
-  `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`; an allay and a sulfur cube decide for
-  themselves) work on mobs; players and the other kinds read None and write false.
 - `living.item_use_remaining(host)` / `set_item_use_remaining(host, ticks)` (`useItemRemaining`) read and move the end of
   the item a player uses: at 1 the use completes on the next tick, at 0 or less it lasts until the player lets go, as in
   vanilla. It moves the deadline the use-item Tick hook moves, so shield, bow, trident, spear, instrument and bundle uses,
@@ -2714,6 +2754,37 @@ These methods reuse built-in goal kinds; they do not define arbitrary goal callb
 `Mob.registerGoals` moment. [Custom mob goals at construction](https://github.com/arismoko/horizon/issues/1077)
 tracks a typed goal registrar and callbacks on `MobRef` and Parts, shared by native and wasm mods. NeoForge has
 no bus event at this moment. The upstream raw-`Mob` `register_goals` interface is not part of this fork's API.
+
+### Mob AI controls
+
+`crates/horizon-client/src/game/native_mob_refs.rs` and `native_mob_navigation.rs` (#938's mob AI controls): a `MobRef`
+steers a mob through the engine's own controls, each a momentary wish the mob's own AI may replace next tick, as
+`move_to`'s path is. Reads take the host by `&dyn Host` and writes by `&mut dyn ServerHost`.
+
+- `mob.look_at(host, [x, y, z])` is `LookControl.setLookAt`: the mob's look control rotates its head toward the position
+  over the next ticks. Non-finite coordinates are refused. `mob.jump(host)` is `JumpControl.jump`: the mob jumps on its
+  next own tick by its own jump path — no velocity is written. No species refuses either: vanilla's brains themselves
+  write through these controls (a brain species' `LookAtTargetSink` calls the same `lookAt`), so a mod's wish and the
+  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species). A
+  creaking being looked at, an angry bee and an axolotl playing dead hold their look control, and a held creaking its
+  jump control, as in vanilla: the wish waits until the control runs again.
+- `mob.navigation_speed(host)` / `set_navigation_speed(host, speed)` read and set `PathNavigation.speedModifier`, the
+  multiplier the current path is followed at (1.0 is the mob's normal speed; 0 until a path sets one) — not the mob's
+  movement-speed attribute. `move_to`'s speed argument sets the same modifier, and the mob's own next `moveTo` (a goal's
+  or a brain species') sets its own again, as in vanilla. Non-finite speeds are refused.
+- `mob.restrict_to(host, [x, y, z], radius)` is `Mob.restrictTo(pos, radius)`: the home area the mob keeps to — its own
+  stroll and wander goals pick their positions inside it, as a lead's and a guardian's home do. It is saved with the mob
+  (`home_pos`, `home_radius`). `restrict_center(host)` (`getRestrictCenter`; the last live one after a clear, `[0, 0, 0]`
+  for a mob that never had one), `restrict_radius(host)` (`getRestrictRadius`; `-1` without a restriction),
+  `has_restriction(host)` (`hasRestriction`), `clear_restriction(host)` (`clearRestriction`; the center stays) and
+  `is_within_restriction(host, pos)` (`isWithinRestriction`; true everywhere without a restriction) read and change it.
+  Radius `-1` in `restrict_to` clears the restriction while keeping the position as the center.
+- `mob.left_handed(host)` / `set_left_handed` (`Mob.setLeftHanded`, the mob flags in its entity data, saved as
+  `LeftHanded`) and `can_pick_up_loot` / `set_can_pick_up_loot` (`Mob.setCanPickUpLoot`, saved as `CanPickUpLoot`;
+  an allay and a sulfur cube decide for themselves) moved here from the flat `living_*` helpers of #938's first round:
+  vanilla keeps both on `Mob`, so `MobRef` is their home. The flat helpers are gone, with no aliases.
+- All of these answer `None`/`false` for a stale handle, a client, the dragon (no `Mob` state), and a mob whose copy is
+  held out of the level.
 
 ### Mobs drawn by a mod
 
@@ -3018,7 +3089,7 @@ Look blocks up once and keep what you need (a few words a block for your own sha
 
 ### Menu slot rules
 
-`native_menu_slot_rules(context, menu, slot, stack, may_place, max_stack)` asks a content mod menu's scoped `MenuPart` whether a slot takes a stack and how many it holds. `slot` is the backing container index. The slot's own answers arrive first; the final maximum is clamped to 1–99 and the item's stack limit.
+`menu_slot_rules` asks the registered vanilla or mod menu's scoped `MenuPart` whether a slot takes a stack and how many it holds, on both client prediction and server. Mount inventories use `horizon:mount_inventory`; unregistered player inventory and creative picker menus do not dispatch. `slot` is the backing container index. The slot's own answers arrive first; the final maximum is clamped to 1–99 and the item's stack limit. Rules also apply to quick-move top-ups.
 
 The hook runs during clicks, drags and shift-clicks in the restricted loop context, without a level or player; answer from the stack and context alone, and fast. It runs on the server and during client prediction. The context carries the resource generation's side, registries and settings; `/reload` builds the next context.
 

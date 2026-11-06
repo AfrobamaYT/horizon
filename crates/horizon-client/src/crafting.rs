@@ -3035,8 +3035,8 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            root.join(horizon_items::content_namespaces::MOD_IDS_MARKER),
-            br#"["mymod"]"#,
+            root.join(horizon_mods::enabled::MARKER),
+            br#"{"mymod":"both"}"#,
         )
         .unwrap();
         let file = |conditions: &str, tag: &str| {

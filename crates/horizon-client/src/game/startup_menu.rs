@@ -373,7 +373,8 @@ pub(super) fn spawn_loader(
     let (sender, receiver) = std::sync::mpsc::channel();
     let settings = settings.clone();
     let vanilla_root = vanilla_root.to_path_buf();
-    let mod_sources = options.mods.clone();
+    let mut mod_sources = options.mods.clone();
+    mod_sources.capture_code_switches(&settings.mods.disabled);
     let world = launch_world(options).map(str::to_owned);
     let role = options.execution_role;
     let progress = progress.clone();

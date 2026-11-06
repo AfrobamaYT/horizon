@@ -35,6 +35,7 @@ use std::{
 /// The recipes one server load resolved (the `ingredient` hook asked once per
 /// occurrence), shared by every table and the network copy that reads them.
 struct ServerSources {
+    root: std::path::PathBuf,
     generation: u64,
     overlay: u64,
     sources: Arc<ResolvedSources>,
@@ -56,48 +57,48 @@ fn overlay_key(overlay: &horizon_world::loot::PackOverlay) -> u64 {
 /// set: the first caller builds them and later ones adopt them (`/reload`
 /// forgets them first, so it asks again).
 pub(super) fn server_sources(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
-) -> Arc<ResolvedSources> {
+) -> std::io::Result<Arc<ResolvedSources>> {
     let generation = item_data.defaults().generation();
     let key = overlay_key(overlay);
     let mut slot = SOURCES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(held) = slot
         .as_ref()
-        .filter(|held| held.generation == generation && held.overlay == key)
+        .filter(|held| held.generation == generation && held.overlay == key && held.root == root)
     {
-        return held.sources.clone();
+        return Ok(held.sources.clone());
     }
     let sources = Arc::new(ResolvedSources::load_or_empty(
-        item_data.root(),
+        root,
         overlay,
-        &server_data_load(item_data),
+        &server_data_load(root, item_data)?,
     ));
     *slot = Some(ServerSources {
+        root: root.to_owned(),
         generation,
         overlay: key,
         sources: sources.clone(),
     });
-    sources
+    Ok(sources)
 }
 
 /// The recipes of a load of `origin`: a server's are shared, a client's own.
 pub(super) fn load_sources(
+    root: &std::path::Path,
     item_data: &ItemData,
     origin: horizon_world::native_load_context::DataLoadOrigin,
     overlay: &horizon_world::loot::PackOverlay,
-) -> Arc<ResolvedSources> {
+) -> std::io::Result<Arc<ResolvedSources>> {
     use horizon_world::native_load_context::DataLoadOrigin;
     match origin {
-        DataLoadOrigin::ServerDataLoad => server_sources(item_data, overlay),
-        DataLoadOrigin::ClientPreload | _ => Arc::new(ResolvedSources::load_or_empty(
-            item_data.root(),
+        DataLoadOrigin::ServerDataLoad => server_sources(root, item_data, overlay),
+        DataLoadOrigin::ClientPreload | _ => Ok(Arc::new(ResolvedSources::load_or_empty(
+            root,
             overlay,
-            &item_data.context().for_load(
-                DataLoadOrigin::ClientPreload,
-                mod_api::__private::loaded_mods().ids(),
-            ),
-        )),
+            &data_load_context(root, item_data, origin)?,
+        ))),
     }
 }
 
@@ -109,6 +110,7 @@ pub(super) fn forget_server_sources() {
 
 /// What `sync_data` loaded from this resource generation.
 struct Synced {
+    root: std::path::PathBuf,
     with_packs: bool,
     generation: u64,
     result: std::result::Result<Arc<SyncData>, String>,
@@ -131,11 +133,12 @@ static SYNC: Mutex<SyncCache> = Mutex::new(SyncCache {
 
 /// Load wire data once, retaining this session's frozen damage definitions.
 pub(super) fn sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<Arc<SyncData>, String> {
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    cached_sync_data(&mut sync, item_data.root(), overlay, item_data)
+    cached_sync_data(&mut sync, root, overlay, item_data)
 }
 
 fn cached_sync_data(
@@ -149,12 +152,13 @@ fn cached_sync_data(
     if sync
         .data
         .as_ref()
-        .is_some_and(|cached| cached.generation != generation)
+        .is_some_and(|cached| cached.generation != generation || cached.root != root)
     {
         sync.data = None;
     }
     let load = || {
-        let sources = server_sources(item_data, overlay);
+        let sources =
+            server_sources(root, item_data, overlay).map_err(|error| error.to_string())?;
         match &sync.damage {
             Some(damage) => SyncData::load_with_frozen_damage(
                 root,
@@ -173,6 +177,7 @@ fn cached_sync_data(
     }
     sync.data
         .get_or_insert_with(|| Synced {
+            root: root.to_owned(),
             with_packs: packs,
             generation,
             result: load(),
@@ -182,12 +187,13 @@ fn cached_sync_data(
 }
 
 pub(super) fn open_world_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     damage: &horizon_world::damage_source::Catalog,
 ) -> std::result::Result<(), String> {
     let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
-    initialize_world_sync_data(&mut sync, item_data.root(), overlay, damage, item_data)
+    initialize_world_sync_data(&mut sync, root, overlay, damage, item_data)
 }
 
 fn initialize_world_sync_data(
@@ -199,10 +205,9 @@ fn initialize_world_sync_data(
 ) -> std::result::Result<(), String> {
     sync.world_packs = !overlay.files.is_empty();
     if sync.world_packs
-        || sync
-            .data
-            .as_ref()
-            .is_some_and(|cached| cached.generation != item_data.defaults().generation())
+        || sync.data.as_ref().is_some_and(|cached| {
+            cached.generation != item_data.defaults().generation() || cached.root != root
+        })
     {
         sync.data = None;
     }
@@ -222,12 +227,13 @@ pub(super) fn forget_sync_data() {
 /// Without a hub yet, retain this world's frozen registries through `/reload`
 /// too. World entry discards this snapshot before loading another world's.
 pub(super) fn reload_cached_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
 ) -> std::result::Result<(), String> {
     let kept = prepare_sync_reload(&mut SYNC.lock().unwrap_or_else(|e| e.into_inner()), overlay);
     if let Some(kept) = kept {
-        reload_sync_data(item_data, overlay, &kept)?;
+        reload_sync_data(root, item_data, overlay, &kept)?;
     }
     Ok(())
 }
@@ -250,11 +256,11 @@ fn prepare_sync_reload(
 /// synchronized registries `kept` (the hub's) as they were, and that becomes
 /// what `sync_data` gives.
 pub(super) fn reload_sync_data(
+    root: &std::path::Path,
     item_data: &ItemData,
     overlay: &horizon_world::loot::PackOverlay,
     kept: &SyncData,
 ) -> std::result::Result<Arc<SyncData>, String> {
-    let root = item_data.root();
     // Kept pack dialogs count as packs: a world opened without packs after
     // a `/reload` that dropped them must read its own registries again.
     let packs = !overlay.files.is_empty() || kept.has_pack_entries();
@@ -263,13 +269,16 @@ pub(super) fn reload_sync_data(
         overlay,
         kept,
         item_data.defaults(),
-        &server_sources(item_data, overlay),
+        server_sources(root, item_data, overlay)
+            .map_err(|error| error.to_string())?
+            .as_ref(),
     )
     .map(|mut sync| {
         sync.features.clone_from(&kept.features);
         Arc::new(sync)
     });
     SYNC.lock().unwrap_or_else(|e| e.into_inner()).data = Some(Synced {
+        root: root.to_owned(),
         with_packs: packs,
         generation: item_data.defaults().generation(),
         result: sync.clone(),
@@ -298,18 +307,36 @@ impl Game<'_> {
 /// A server's own data load over `item_data`'s registry inputs: the owner of
 /// the data a server reads and sends, whichever window shares the `ItemData`.
 pub(super) fn server_data_load(
+    root: &std::path::Path,
     item_data: &ItemData,
-) -> horizon_world::native_load_context::LoadContext {
-    item_data.context().for_load(
+) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
+    data_load_context(
+        root,
+        item_data,
         horizon_world::native_load_context::DataLoadOrigin::ServerDataLoad,
-        mod_api::__private::loaded_mods().ids(),
     )
+}
+
+fn data_load_context(
+    root: &std::path::Path,
+    item_data: &ItemData,
+    origin: horizon_world::native_load_context::DataLoadOrigin,
+) -> std::io::Result<horizon_world::native_load_context::LoadContext> {
+    use horizon_world::native_load_context::DataLoadOrigin;
+    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let ids: Vec<_> = if origin == DataLoadOrigin::ServerDataLoad {
+        inventory.server_ids().collect()
+    } else {
+        inventory.client_ids().collect()
+    };
+    Ok(item_data.context().for_load(origin, ids))
 }
 
 /// The registries and tags a server sends without data packs over them, read
 /// on a helper thread while a server's world prepares: most worlds have no
 /// packs, so it is what `sync_data` would load once the world is open.
 pub(super) struct SyncPreload {
+    root: std::path::PathBuf,
     generation: u64,
     worker: std::thread::JoinHandle<std::result::Result<SyncData, String>>,
 }
@@ -327,6 +354,7 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
     }) {
         return None;
     }
+    let root = item_data.root().to_owned();
     let item_data = Arc::clone(item_data);
     std::thread::Builder::new()
         .name("Server data preload".into())
@@ -336,10 +364,16 @@ pub(super) fn preload_sync_data(item_data: &Arc<ItemData>) -> Option<SyncPreload
                 item_data.root(),
                 &none,
                 item_data.defaults(),
-                &server_sources(&item_data, &none),
+                server_sources(item_data.root(), &item_data, &none)
+                    .map_err(|error| error.to_string())?
+                    .as_ref(),
             )
         })
-        .map(|worker| SyncPreload { generation, worker })
+        .map(|worker| SyncPreload {
+            root,
+            generation,
+            worker,
+        })
         .ok()
 }
 
@@ -354,6 +388,7 @@ impl SyncPreload {
             let mut sync = SYNC.lock().unwrap_or_else(|e| e.into_inner());
             if !sync.world_packs && sync.data.as_ref().is_none_or(|cached| cached.with_packs) {
                 sync.data = Some(Synced {
+                    root: self.root,
                     with_packs: false,
                     generation: self.generation,
                     result: read.map(Arc::new),
@@ -1508,7 +1543,11 @@ impl Game<'_> {
         net: NetConfig,
         config: HubConfig,
     ) -> Result<()> {
-        let mut sync = sync_data(&self.res.core.item_data, &self.pack_files())?;
+        let mut sync = sync_data(
+            &self.options.resources,
+            &self.res.core.item_data,
+            &self.pack_files(),
+        )?;
         let features = if self.level.enabled_features.is_empty() {
             vec!["minecraft:vanilla".to_owned()]
         } else {
@@ -1529,7 +1568,12 @@ impl Game<'_> {
                 packed.as_deref(),
                 Some(&sync),
                 self.res.item_defaults(),
-                &server_sources(&self.res.core.item_data, &self.pack_files()),
+                server_sources(
+                    &self.options.resources,
+                    &self.res.core.item_data,
+                    &self.pack_files(),
+                )?
+                .as_ref(),
             )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
@@ -4007,12 +4051,13 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
         let mut cache = SyncCache {
             data: Some(super::Synced {
+                root: root.join("no-such-resources"),
                 with_packs: false,
                 generation: item_data.defaults().generation(),
                 result: Ok(preloaded.clone()),
@@ -4052,12 +4097,13 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
         let cache = Arc::new(Mutex::new(SyncCache {
             data: Some(super::Synced {
+                root: root.clone(),
                 with_packs: false,
                 generation: item_data.defaults().generation(),
                 result: Ok(preloaded.clone()),
@@ -4141,7 +4187,7 @@ mod tests {
                 &root,
                 &PackOverlay::NONE,
                 item_data.defaults(),
-                &super::server_sources(&item_data, &PackOverlay::NONE),
+                &super::server_sources(&root, &item_data, &PackOverlay::NONE).unwrap(),
             )
             .unwrap(),
         );
@@ -4151,6 +4197,7 @@ mod tests {
             let files = vec![(key.into(), vec![br#"{"values":[]}"#.to_vec()])];
             let mut cache = SyncCache {
                 data: Some(super::Synced {
+                    root: root.clone(),
                     with_packs: false,
                     generation: item_data.defaults().generation(),
                     result: Ok(preloaded.clone()),
