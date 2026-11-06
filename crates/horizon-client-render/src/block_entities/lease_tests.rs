@@ -1,4 +1,14 @@
 use super::*;
+use horizon_world::attachments::{AttachmentType, Holder};
+
+static VALUE: AttachmentType<i32> = AttachmentType {
+    namespace: "lease_test",
+    name: "value",
+    default: || 0,
+    codec: None,
+    copy_on_death: false,
+    sync: false,
+};
 
 const P: Pos = (1, 64, 1);
 const Q: Pos = (17, 64, 1);
@@ -26,12 +36,16 @@ fn retired_leases_never_restore_removed_or_unloaded_instances() {
     for retire in retirements {
         let mut entities = level();
         entities.insert(P, chest(1));
+        VALUE
+            .set(entities.attachments_mut(P).unwrap(), Holder::Level, 7)
+            .unwrap();
         let slots = entities.tickers(|_| 0);
         let (lease, taken) = entities.take(&P).unwrap();
         retire(&mut entities);
         assert!(!entities.put(lease, taken));
         assert!(entities.get(&P).is_none());
         assert!(entities.attachments_mut(P).is_none());
+        assert!(entities.attachments(P).is_none());
         assert!(!entities.is_live(slots[0]));
         assert!(entities.tickers(|_| 0).is_empty());
     }
@@ -56,11 +70,18 @@ fn replacement_taken_before_old_put_rejects_aba_without_changing_tick_order() {
         assert_eq!(before.iter().map(|(p, _)| *p).collect::<Vec<_>>(), [P, Q]);
         let (old_lease, old) = entities.take(&P).unwrap();
         replace(&mut entities);
+        VALUE
+            .set(entities.attachments_mut(P).unwrap(), Holder::Level, 9)
+            .unwrap();
         assert!(entities.mods_near(0.0, 0.0, 64.0).next().is_none());
         let (new_lease, new) = entities.take(&P).unwrap();
         assert!(!entities.put(old_lease, old));
         assert!(entities.get(&P).is_none());
         assert!(entities.put(new_lease, new));
+        assert_eq!(
+            VALUE.get(entities.attachments_mut(P).unwrap(), Holder::Level),
+            Ok(9)
+        );
         assert!(matches!(entities.get(&P), Some(BlockEntity::Chest(items)) if items.len() == 2));
         assert_eq!(*entities.tickers(|_| 0), *before);
         let (lease, entity) = entities.take(&P).unwrap();
