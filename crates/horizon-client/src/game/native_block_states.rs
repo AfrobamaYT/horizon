@@ -6,7 +6,7 @@ use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
-    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidKey,
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidKey, ItemKey,
     StateConstraint, StateMatchError, StateProperty,
 };
 use std::sync::{Arc, Mutex};
@@ -21,6 +21,12 @@ impl Game<'_> {
     pub(super) fn native_block_key_id(&self, key: BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")
+            .to_owned()
+    }
+    /// The canonical item id retained by the load-owned registration slot.
+    pub(super) fn native_item_key_id(&self, key: ItemKey) -> String {
+        mod_api::__private::item_key_id(key)
+            .expect("invalid item key slot")
             .to_owned()
     }
     /// The canonical effect id retained by the load-owned registration slot.
