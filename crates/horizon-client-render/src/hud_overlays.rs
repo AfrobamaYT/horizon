@@ -581,17 +581,18 @@ pub fn boss_overlay(
             }
             let name = bar.name.resolve_legacy();
             let width = width(font, &name);
-            // The title stays centred over the bar wherever it is moved.
+            // The title stays centred over the bar wherever it is moved. A mod may
+            // have written any i32, so saturate rather than overflow.
             text(
                 &mut out,
                 name,
-                x_left + 91 - width / 2,
-                y - 9,
+                x_left.saturating_add(91).saturating_sub(width / 2),
+                y.saturating_sub(9),
                 crate::hud_layout::WHITE,
                 true,
             );
         }
-        y_offset += at.increment;
+        y_offset = y_offset.saturating_add(at.increment);
         if y_offset >= h / 3 {
             break;
         }
@@ -1276,6 +1277,96 @@ impl SubtitleOverlay {
             row += 1;
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod boss_overlay_tests {
+    use super::*;
+    use crate::hud::Rect;
+    use std::{collections::HashMap, path::Path};
+
+    fn font() -> Font {
+        // The missing-glyph metrics let these tests run without game assets.
+        Font::load(
+            Path::new("/nonexistent-horizon-boss-overlay-test-resources"),
+            &HashMap::new(),
+            &[],
+            (1, 1),
+            (0, 0),
+            Rect {
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+                w: 1,
+                h: 1,
+            },
+        )
+    }
+
+    fn bars(n: usize) -> Vec<BossBar> {
+        (0..n)
+            .map(|_| BossBar {
+                name: Text::literal("Boss"),
+                progress: 1.0,
+                color: 0,
+                overlay: 0,
+            })
+            .collect()
+    }
+
+    /// The top-left corner of each bar's background sprite, in draw order.
+    fn backgrounds(draws: &[GuiDraw]) -> Vec<(i32, i32)> {
+        draws
+            .iter()
+            .filter_map(|d| match d {
+                GuiDraw::Sprite { sprite, x, y, .. } if sprite.ends_with("_background") => {
+                    Some((*x, *y))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bars_stack_19_apart_from_12_and_cancelled_bars_keep_their_spacing() {
+        let font = font();
+        let none = boss_overlay(400, 300, &bars(3), &font, |_, _| true);
+        assert_eq!(backgrounds(&none), [(109, 12), (109, 31), (109, 50)]);
+        // Moving one bar's y doesn't move the next; cancelling one keeps its spacing.
+        let moved = boss_overlay(400, 300, &bars(3), &font, |i, at| {
+            if i == 0 {
+                at.y = 100;
+            }
+            i != 1
+        });
+        assert_eq!(backgrounds(&moved), [(109, 100), (109, 50)]);
+    }
+
+    /// Values a mod may legally write at the extremes of `i32` lay out without overflow
+    /// (Developer builds check overflow and would panic).
+    #[test]
+    fn extreme_positions_and_spacing_saturate() {
+        let font = font();
+        let draws = boss_overlay(400, 300, &bars(2), &font, |i, at| {
+            if i == 0 {
+                at.x = i32::MAX;
+                at.y = i32::MIN;
+            }
+            true
+        });
+        assert_eq!(backgrounds(&draws), [(i32::MAX, i32::MIN), (109, 31)]);
+        let draws = boss_overlay(400, 300, &bars(2), &font, |_, at| {
+            at.increment = i32::MAX;
+            false
+        });
+        assert!(draws.is_empty());
+        let draws = boss_overlay(400, 300, &bars(3), &font, |i, at| {
+            at.increment = if i == 0 { i32::MIN } else { 19 };
+            true
+        });
+        assert_eq!(backgrounds(&draws).len(), 3);
     }
 }
 
