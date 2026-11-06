@@ -2512,65 +2512,19 @@ impl Game<'_> {
         tint: impl Fn(i32) -> Option<u32>,
         out: &mut Vec<Vertex>,
     ) {
-        let mut normals = horizon_client::item_render::FaceNormals::new(m);
-        for model in models {
-            for face in &model.faces {
-                let Some(s) = self
+        let faces = models.into_iter().flat_map(|model| {
+            model.faces.iter().filter_map(|face| {
+                let sprite = self
                     .pack
                     .layer_names
                     .get(&face.layer)
-                    .and_then(|n| self.gui.atlas.sprites.get(n))
-                else {
-                    continue;
-                };
-                use horizon_assets::model::Direction as D;
-                let shade: u32 = match face.quad.facing {
-                    D::Up => 255,
-                    D::Down => 127,
-                    D::North | D::South => 204,
-                    D::West | D::East => 153,
-                };
-                let mut color = if diffuse {
-                    u32::MAX
-                } else {
-                    0xFF00_0000 | shade << 16 | shade << 8 | shade
-                };
-                if let Some(t) = tint(face.quad.tint_index) {
-                    color = horizon_client::hud_layout::multiply(
-                        color,
-                        horizon_client::mobs::render::abgr(t),
-                    );
-                }
-                let normal = if diffuse {
-                    let n = normals.face(face.quad.facing);
-                    let n = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
-                    [n[0], n[1], n[2], 127]
-                } else {
-                    [0; 4]
-                };
-                let light = light(&face.quad);
-                let light = if diffuse {
-                    let emission = u32::from(face.quad.light_emission) * 16;
-                    (light & 0xFF) | (light >> 8 & 0xFF).max(emission) << 8
-                } else {
-                    light
-                };
-                for k in 0..4 {
-                    let p = face.quad.positions[k];
-                    let uv = face.quad.uv[k];
-                    out.push(Vertex {
-                        normal,
-                        pos: m.transform_point3(glam::Vec3::from_array(p)).to_array(),
-                        uv: [s.u0 + uv[0] * (s.u1 - s.u0), s.v0 + uv[1] * (s.v1 - s.v0)],
-                        layer: 0,
-                        color,
-                        light,
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            }
-        }
+                    .and_then(|name| self.gui.atlas.sprites.get(name))?;
+                Some((&face.quad, *sprite))
+            })
+        });
+        emit_model_faces(faces, m, light, diffuse, tint, out);
     }
+
     /// The block the cart shows: `None` for air (`AbstractMinecartRenderer`
     /// draws and stretches its culling box only for a non-air state).
     fn display_state(&self, c: &Minecart) -> Option<BlockStateId> {
@@ -2996,6 +2950,71 @@ fn furnace_speed(c: &Minecart, base: f64) -> f64 {
         base * if c.in_water { 0.75 } else { 0.5 }
     } else {
         base
+    }
+}
+
+/// Shared transform, shading and light path for block-state and prepared standalone faces.
+pub(super) fn emit_model_faces<'a>(
+    faces: impl IntoIterator<
+        Item = (
+            &'a horizon_assets::bake::ModelQuad,
+            horizon_client::hud::Rect,
+        ),
+    >,
+    m: glam::Mat4,
+    light: impl Fn(&horizon_assets::bake::ModelQuad) -> u32,
+    diffuse: bool,
+    tint: impl Fn(i32) -> Option<u32>,
+    out: &mut Vec<Vertex>,
+) {
+    use horizon_assets::model::Direction as D;
+    let mut normals = horizon_client::item_render::FaceNormals::new(m);
+    for (quad, s) in faces {
+        let shade: u32 = match quad.facing {
+            D::Up => 255,
+            D::Down => 127,
+            D::North | D::South => 204,
+            D::West | D::East => 153,
+        };
+        let mut color = if diffuse {
+            u32::MAX
+        } else {
+            0xFF00_0000 | shade << 16 | shade << 8 | shade
+        };
+        if let Some(t) = tint(quad.tint_index) {
+            color =
+                horizon_client::hud_layout::multiply(color, horizon_client::mobs::render::abgr(t));
+        }
+        let normal = if diffuse {
+            let n = normals
+                .face(quad.facing)
+                .to_array()
+                .map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
+            [n[0], n[1], n[2], 127]
+        } else {
+            [0; 4]
+        };
+        let light = light(quad);
+        let light = if diffuse {
+            let emission = u32::from(quad.light_emission) * 16;
+            (light & 0xFF) | (light >> 8 & 0xFF).max(emission) << 8
+        } else {
+            light
+        };
+        for k in 0..4 {
+            let uv = quad.uv[k];
+            out.push(Vertex {
+                normal,
+                pos: m
+                    .transform_point3(glam::Vec3::from_array(quad.positions[k]))
+                    .to_array(),
+                uv: [s.u0 + uv[0] * (s.u1 - s.u0), s.v0 + uv[1] * (s.v1 - s.v0)],
+                layer: 0,
+                color,
+                light,
+                glint_uv: [0.0, 0.0],
+            });
+        }
     }
 }
 
