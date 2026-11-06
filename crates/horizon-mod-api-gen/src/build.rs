@@ -22,6 +22,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api => {
+            fs::write(
+                out_dir.join(super::part_table::OUTPUT),
+                super::part_table::source(root)?,
+            )
+            .map_err(|e| e.to_string())?;
             for (name, code) in super::exports::sources(root)? {
                 fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
             }
@@ -130,6 +135,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
+    directory(&root.join(super::part_table::DIRECTORY), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

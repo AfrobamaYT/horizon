@@ -4,6 +4,7 @@ mod exports;
 mod game_modules;
 mod host;
 mod layout;
+mod part_table;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
 use heck::ToSnakeCase;
