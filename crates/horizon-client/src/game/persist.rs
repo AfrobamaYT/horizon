@@ -827,6 +827,14 @@ impl Game<'_> {
             self.next_entity,
             Some(self.pack.assets.registry),
         )?;
+        if let horizon_client::mobs::villager::ProfessionState::Unresolved(id) = &m.extra.profession
+            && self.missing_professions.insert(id.clone())
+        {
+            log::warn!(
+                "Unknown villager profession {id} at {:?}; preserving its saved identity",
+                m.position
+            );
+        }
         if horizon_client::mobs::camel::is_camel(m.species()) {
             horizon_client::mobs::camel::finish_load(&mut m, self.world.game_time);
         }
@@ -1990,6 +1998,57 @@ mod tests {
     use super::*;
 
     const MOUNT: [i32; 4] = [1, 2, 3, 4];
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn deferred_zombie_finalization_keeps_unknown_profession_through_save_and_cure() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut tag = entity("minecraft:zombie_villager");
+            if let Tag::Compound(c) = &mut tag {
+                c.insert("horizon:finalize".into(), Tag::Byte(1));
+                c.insert(
+                    "Pos".into(),
+                    Tag::List(vec![
+                        Tag::Double(0.0_f64.to_bits()),
+                        Tag::Double(64.0_f64.to_bits()),
+                        Tag::Double(0.0_f64.to_bits()),
+                    ]),
+                );
+                c.insert(
+                    "VillagerData".into(),
+                    Tag::compound([
+                        ("type", Tag::String("minecraft:plains".into())),
+                        ("profession", Tag::String("example:engineer".into())),
+                        ("level", Tag::Int(1)),
+                    ]),
+                );
+            }
+            let id = game.load_mob(tag, None).unwrap();
+            let zombie = game.mobs.iter().find(|m| m.id == id).unwrap();
+            assert_eq!(zombie.extra.profession.id(), "example:engineer");
+            let saved =
+                entity_nbt::mob_to_nbt(zombie, [0; 4], None, Some(game.pack.assets.registry));
+            let restored = entity_nbt::mob_from_nbt(
+                &saved,
+                game.res.mob_types(),
+                id,
+                Some(game.pack.assets.registry),
+            )
+            .unwrap();
+            let mut cured = horizon_client::mobs::Mob::new(
+                id + 1,
+                game.res
+                    .mob_types()
+                    .get("minecraft:villager")
+                    .unwrap()
+                    .clone(),
+                restored.position,
+                0.0,
+            );
+            super::super::zombie_villagers::convert_to_villager(&restored, &mut cured, false);
+            assert_eq!(cured.extra.profession.id(), "example:engineer");
+        });
+    }
 
     #[test]
     fn a_saved_team_is_joined_only_when_the_scoreboard_has_it() {

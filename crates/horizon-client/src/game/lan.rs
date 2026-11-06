@@ -935,7 +935,8 @@ pub(super) fn mob_meta(
                 defaults.push((19, serializer::BOOLEAN, Value::Bool(false)));
             }
             let villager_type = VILLAGER_TYPES[e.variant as usize % VILLAGER_TYPES.len()];
-            let profession = horizon_client::mobs::villager::profession(e.variant2).id;
+            let profession =
+                horizon_client::mobs::villager::profession(e.profession.index().unwrap_or(0)).id;
             if let (Some(t), Some(p)) = (
                 id("minecraft:villager_type", villager_type),
                 id("minecraft:villager_profession", profession),
@@ -4360,6 +4361,31 @@ mod tests {
         });
     }
 
+    #[test]
+    fn unresolved_profession_sends_none_without_changing_saved_identity() {
+        let types = super::super::mods::living_mod_types();
+        let hub = meta_hub("MissingProfessionMeta");
+        let mut mob = Mob::new(
+            1,
+            types["minecraft:villager"].clone(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        let metadata = |mob: &Mob| {
+            let (mut entries, mut defaults) = (Vec::new(), Vec::new());
+            super::mob_meta(mob, &hub, None, 0, &mut entries, &mut defaults);
+            entries
+                .into_iter()
+                .find(|(_, serializer, _)| *serializer == serializer::VILLAGER_DATA)
+        };
+        let expected = metadata(&mob);
+        assert!(expected.is_some());
+        mob.extra.profession =
+            horizon_client::mobs::villager::ProfessionState::from_id("example:engineer");
+        assert_eq!(metadata(&mob), expected);
+        assert_eq!(mob.extra.profession.id(), "example:engineer");
+    }
+
     /// A content mod's living type sends the entity data of its template's
     /// class (`Zombie.DATA_BABY_ID`, the villager's unhappy counter), entry
     /// for entry what its template sends.
@@ -4393,7 +4419,17 @@ mod tests {
     /// A hub with no players and empty registries, for `mob_meta`.
     fn meta_hub(name: &str) -> horizon_client::lan::hub::Hub {
         use horizon_client::lan::{Lan, NetConfig, chunks::ChunkEncoder, data, hub};
-        let sync = std::sync::Arc::new(data::SyncData::empty());
+        let mut sync = data::SyncData::empty();
+        for (registry, id) in [
+            ("minecraft:villager_type", "minecraft:plains"),
+            ("minecraft:villager_profession", "minecraft:none"),
+        ] {
+            sync.builtin.registries.insert(
+                registry.into(),
+                horizon_protocol::registry::Ids::from_names(vec![id.into()]),
+            );
+        }
+        let sync = std::sync::Arc::new(sync);
         let config = NetConfig {
             announce: false,
             ..NetConfig::loopback(0, name.into(), 2)

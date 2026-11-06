@@ -181,6 +181,9 @@ impl Game<'_> {
     /// `AbstractVillager.getOffers`: generated on first use.
     pub(super) fn ensure_offers(&mut self, index: usize) {
         let species = self.mobs[index].species();
+        if species == Species::Villager && self.mobs[index].extra.profession.index().is_none() {
+            return;
+        }
         let unset = self.mobs[index]
             .extra
             .trade
@@ -204,7 +207,10 @@ impl Game<'_> {
                 }
                 v
             } else {
-                let profession = horizon_client::mobs::villager::profession(m.extra.variant2).id;
+                let profession = horizon_client::mobs::villager::profession(
+                    m.extra.profession.index().unwrap_or(0),
+                )
+                .id;
                 let level = m.extra.villager_level.max(1);
                 let set = merchant::Trades::set_for(profession, level);
                 if self.stations().trades.sets.contains_key(&set) {
@@ -247,7 +253,14 @@ impl Game<'_> {
             self.handle_mob_events(events)?;
             return Ok(true);
         }
+        let unresolved = species == Species::Villager && m.extra.profession.index().is_none();
         self.award_custom_stat("talked_to_villager", 1);
+        if unresolved {
+            let mut events = Vec::new();
+            villager::set_unhappy(&mut self.mobs[index], &mut events);
+            self.handle_mob_events(events)?;
+            return Ok(true);
+        }
         self.ensure_offers(index);
         let m = &self.mobs[index];
         let trade = m.extra.trade.as_deref().cloned().unwrap_or_default();
@@ -261,7 +274,7 @@ impl Game<'_> {
         }
         let villager = species == Species::Villager;
         let profession = if villager {
-            horizon_client::mobs::villager::profession(m.extra.variant2).id
+            horizon_client::mobs::villager::profession(m.extra.profession.index().unwrap_or(0)).id
         } else {
             "wandering_trader"
         };
