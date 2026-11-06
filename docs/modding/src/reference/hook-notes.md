@@ -245,6 +245,19 @@ requires a farmer at work and `mob_griefing` enabled.
   and may add, change or remove any line. Horizon's creative search reads vanilla's exported tooltip text, so it
   does not fire with no player while search trees are built, as NeoForge does.
 
+- Data component tooltip lines: `Registrar::register_tooltip_appender(component, placement, appender)` (NeoForge's
+  `RegisterTooltipAppendersEvent`) gives one component's `TooltipAppender` a `TooltipPlacement`: `BeforeAll`, `AfterAll`,
+  or `Before(id)` and `After(id)` for a component detail Horizon lists (`minecraft:lore`, `minecraft:enchantments`...), where
+  the lines go among the other components' lines. The game asks only that appender, only for a stack that carries the
+  component (live, transient ones included) and whose `tooltip_display` shows it, and only while its mod is enabled. It gets
+  the stack and a `TooltipAppendContext` (the local player, `advanced`, `creative`, and `nested` for a crossbow's projectile),
+  and adds its lines after the item's own lines and before the durability and advanced lines. The creative search doesn't read
+  these lines, as it doesn't `item_tooltip`. A mod that reacts to every item keeps `item_tooltip`.
+  `Before`/`After` accept only the 23 vanilla anchors listed in `tooltip_appender.rs`, not other registered
+  components. The `registerAppender(TooltipLocation, ...)` overload is not represented. Several appenders may register
+  for one component; all run in registration order at an equal placement. The player is always the local player,
+  including for nested crossbow projectiles where vanilla passes no player; use `nested` to distinguish those calls.
+
 - An item's own server behaviour: `ItemPart::use_on(host, event)` hears a right click with its item on a
   block once the block let it through (`ItemStack.useOn`), and `ItemPart::use_item(host, event)` hears the
   item's own use, in the air or after `use_on` let it through (`Item.use`). Each hears a click once.

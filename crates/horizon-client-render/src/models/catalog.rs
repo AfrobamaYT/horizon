@@ -415,6 +415,10 @@ impl StateModels {
     pub fn standalone_slot(&self, name: &str) -> Option<u32> {
         self.standalone.get(name).copied()
     }
+    /// Slots of registered standalone models, including models shared with block states.
+    pub fn standalone_slots(&self) -> impl Iterator<Item = u32> + '_ {
+        self.standalone.values().copied()
+    }
     /// Geometry in this catalog's existing baked store.
     pub fn model_by_slot(&self, slot: u32) -> Option<&BakedModel> {
         self.baked.get(slot as usize).map(|(_, model)| model)
