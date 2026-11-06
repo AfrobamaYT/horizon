@@ -7,6 +7,14 @@ pub trait Helpers {
         target = "horizon_client::game::native_level_refs::Game<'_>::native_level_state"
     )]
     fn level_block_state();
+    /// Preview a tool transformation in this level with the existing block-tool hook marked simulated.
+    /// Does not apply the result; invalid, unloaded or unavailable contexts return None.
+    #[helper(
+        side = "server",
+        receiver = "level",
+        target = "horizon_client::game::native_level_refs::Game<'_>::native_level_block_transform"
+    )]
+    fn level_block_transform();
     #[helper(
         side = "both",
         receiver = "level",

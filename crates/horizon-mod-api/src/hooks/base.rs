@@ -789,13 +789,13 @@ pub trait Hooks {
     #[hook(side = "server", contract = "replace", out = "fluids", host = "read")]
     fn block_entity_fluids();
     /// `MobEffect.shouldApplyEffectTickThisTick` for a content mod's effect
-    /// `effect` (`ruby:bleeding`), each tick a player or a mob has it, in
+    /// `effect` (an `EffectKey` for `ruby:bleeding`), each tick a player or a mob has it, in
     /// `MobEffectInstance.tickServer` before it counts down: `tick_count` is
     /// the ticks left (the entity's tick count when infinite). Set `apply`
     /// and `native_apply_effect_tick` follows. Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn should_apply_effect_tick_this_tick();
-    /// `MobEffect.applyEffectTick`: the content mod's effect `effect` acts on
+    /// `MobEffect.applyEffectTick`: the content mod's resolved `EffectKey` `effect` acts on
     /// `entity` in `dimension` (`minecraft:overworld`). Clear `keep` and the
     /// effect ends now, before it counts down. `entity` is a mob's
     /// `Entity.getId`, None for a player (`host.players().acting_player()` says who).
@@ -807,7 +807,7 @@ pub trait Hooks {
     /// Server-side.
     #[hook(side = "server", contract = "listen", host = "read")]
     fn apply_effect_tick(
-        effect: &str,
+        effect: EffectKey,
         dimension: &str,
         entity: Option<i32>,
         amplifier: i32,
@@ -3765,8 +3765,9 @@ pub trait Hooks {
     /// and before any completion rewards. A grant or revoke that changes nothing is not heard.
     /// `progress` is an owned snapshot of every criterion (including its stored grant date),
     /// the requirement groups and their completion at this exact mutation. It belongs to
-    /// this player, including first-tick and reload grants held by the server hub. A listener
-    /// may retain a clone; later grants, revokes or reloads do not change that snapshot.
+    /// the mutated progress, including first-tick and reload grants queued by the server hub.
+    /// During a nested player turn, a suspended player's hub record may contain displaced
+    /// progress. A listener may retain a clone; later mutations do not change the snapshot.
     #[hook(
         side = "server",
         contract = "listen",
@@ -3832,8 +3833,8 @@ pub trait Hooks {
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)"
     )]
     fn player_bundle_item_select();
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is an `Option<EffectKey>`; None means no effect. Server-side.
     #[hook(
         side = "server",
         contract = "listen",
@@ -4544,6 +4545,22 @@ pub trait Helpers {
         target = "horizon_client::game::native_server::Game<'_>::native_server_players"
     )]
     fn server_players();
+    /// Find a connected real player by account name, ignoring ASCII case.
+    /// Returns None when no player matches; fake players and nicknames are excluded.
+    #[helper(
+        side = "server",
+        service = "players",
+        target = "horizon_client::game::native_server::Game<'_>::native_player_by_name"
+    )]
+    fn player_by_name();
+    /// Enumerate loaded server levels in overworld, nether, end order.
+    /// Returns an empty list before a server world is open.
+    #[helper(
+        side = "server",
+        service = "levels",
+        target = "horizon_client::game::native_entity_refs::Game<'_>::native_list_levels"
+    )]
+    fn list_levels();
     /// The connection IP without its port (the forwarded address behind a Velocity proxy),
     /// including displaced connected players. Empty for an acting player with no known
     /// connection; None for a stale or unavailable player.

@@ -32,6 +32,7 @@ impl Game<'_> {
             if !m.can_pick_up_loot()
                 || !m.alive()
                 || m.removed
+                || !self.creatures.ticked.contains(&m.id)
                 || !self.entity_grief(m.id, griefing)
             {
                 continue;

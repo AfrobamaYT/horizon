@@ -1028,6 +1028,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, TooltipPlace, UsePhase,
 };
+use mod_api::{BlockKey, EffectKey};
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
     NativeItemFished, NativeLootDrops, NativeMinimap, NativeMod, NativePanelEvent,
@@ -5994,15 +5995,15 @@ impl Game<'_> {
     ) {
         self.fire_player_bucket_entity(player, name, entity_id, entity);
     }
-    /// A server player changed a beacon's selected effects, after they were stored. Empty effect ids
-    /// mean no effect. Server-side.
+    /// A server player changed a beacon's selected effects, after they were stored. Each selected
+    /// effect is its load-owned key; None means no effect. Server-side.
     pub(super) fn native_player_change_beacon_effect(
         &mut self,
         player: u128,
         name: &str,
         pos: [i32; 3],
-        primary: &str,
-        secondary: &str,
+        primary: Option<EffectKey>,
+        secondary: Option<EffectKey>,
     ) {
         self.fire_player_change_beacon_effect(player, name, pos, primary, secondary);
     }
@@ -8674,7 +8675,7 @@ impl Game<'_> {
     /// and `native_apply_effect_tick` follows. Server-side.
     pub(super) fn native_should_apply_effect_tick_this_tick(
         &self,
-        effect: &str,
+        effect: EffectKey,
         tick_count: i32,
         amplifier: i32,
         apply: &mut bool,
@@ -8702,7 +8703,7 @@ impl Game<'_> {
     /// which it didn't have. Server-side.
     pub(super) fn native_on_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8725,7 +8726,7 @@ impl Game<'_> {
     /// Server-side.
     pub(super) fn native_mob_effect_added(
         &mut self,
-        effect: &str,
+        effect: EffectKey,
         entity: Option<i32>,
         amplifier: i32,
     ) {
@@ -8740,7 +8741,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_applicable(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         applicable: &mut Option<mod_api::EffectApplicable>,
     ) {
         self.fire_mob_effect_applicable(entity, effect, applicable);
@@ -8795,7 +8796,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_expired(
         &self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -8809,7 +8810,7 @@ impl Game<'_> {
     pub(super) fn native_mob_effect_remove(
         &mut self,
         entity: LivingRef,
-        effect: &str,
+        effect: EffectKey,
         amplifier: i32,
         cancel: &mut bool,
     ) {
@@ -9694,14 +9695,14 @@ impl GameLevel<'_> {
         &self,
         ticks: &mut Ticks,
         pos: [i32; 3],
-        block: &str,
+        block: BlockKey,
         delay: i32,
     ) -> bool {
-        let Some(state) = self.registry.default_state(block) else {
+        let Some(resolved) = mod_api::__private::resolved_block(block) else {
             return false;
         };
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
-        let block = self.behaviours.block(state);
+        let block = resolved.block;
         let time = self.game_time();
         ticks.schedule_block(time, at, block, delay, TickPriority::Normal)
             != ScheduleResult::MissingChunk
@@ -10750,7 +10751,10 @@ impl Game<'_> {
     /// The recipes of type `kind` (`minecraft:smelting`, `mymod:crusher`), vanilla's
     /// types and mods' own alike, from `data/<namespace>/recipe/*.json` of vanilla,
     /// the content mods (`.hmod`) and the world's data packs, in file order: each
-    /// one typed (`Recipe`: its ingredients, results, group and cooking time and experience) with its file as JSON for a mod's own type. These are the
+    /// one typed (`Recipe`: its ingredients, results, group, cooking time and
+    /// experience, or its stonecutting, smithing or special crafting rule),
+    /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
+    /// outputs; use `LevelRef::craft` to assemble a crafting grid. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
@@ -14087,7 +14091,8 @@ mod entity_inside_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 
@@ -14174,7 +14179,8 @@ mod item_fall_on_tests {
     #[mod_api::__subscriptions]
     impl Hooks for Mod {
         fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-            r.block_part("minecraft:stone", self.0.clone());
+            let block_key = r.block_key("minecraft:stone");
+            r.block_part(block_key, self.0.clone());
         }
     }
 

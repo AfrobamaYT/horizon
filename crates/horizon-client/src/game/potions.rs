@@ -1064,7 +1064,10 @@ impl Game<'_> {
                     let mut cancel = false;
                     self.native_mob_effect_expired(
                         player,
-                        mob_effect_id(e.id).unwrap_or(e.id),
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         e.amplifier,
                         &mut cancel,
                     );
@@ -1105,7 +1108,10 @@ impl Game<'_> {
                         },
                     ));
                     let (keep, changes) = self.mod_effect_tick(
-                        e.id,
+                        mod_api::__private::effect_key(
+                            e.registry_index.expect("active effect registry index"),
+                        )
+                        .expect("effects resolved at load"),
                         None,
                         t,
                         e.amplifier,
@@ -1184,9 +1190,23 @@ impl Game<'_> {
         kind: &str,
         effect: &str,
     ) -> bool {
+        let key = brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index));
+        self.can_be_affected_resolved(entity, kind, effect, key)
+    }
+
+    /// The validated registry path, also used by native operations without parsing a name again.
+    pub(super) fn can_be_affected_resolved(
+        &mut self,
+        entity: Option<i32>,
+        kind: &str,
+        effect: &str,
+        key: Option<mod_api::EffectKey>,
+    ) -> bool {
         let mut answered = None;
-        if let Some(living) = self.effect_living_ref(entity) {
-            self.native_mob_effect_applicable(living, effect, &mut answered);
+        if let Some(living) = self.effect_living_ref(entity)
+            && let Some(key) = key
+        {
+            self.native_mob_effect_applicable(living, key, &mut answered);
         }
         match answered {
             Some(EffectApplicable::Allow) => true,
@@ -1200,7 +1220,10 @@ impl Game<'_> {
         // `LivingEntity.addEffect` refuses what cannot affect the entity;
         // players pass the tag check, but the `mob_effect_applicable` hook
         // is asked for every add.
-        if !self.can_be_affected(None, "minecraft:player", effect.id) {
+        let key = effect
+            .registry_index
+            .and_then(mod_api::__private::effect_key);
+        if !self.can_be_affected_resolved(None, "minecraft:player", effect.id, key) {
             return false;
         }
         let id = effect.id;
@@ -1215,28 +1238,35 @@ impl Game<'_> {
             let current = p.health.absorption();
             let _ = p.set_health(current.max(target), true);
         }
-        self.mod_effect_added(id, None, amp, new);
+        if let Some(key) = key {
+            self.mod_effect_added_resolved(key, None, amp, new);
+        }
         changed
     }
     /// Removes one effect, or all effects, and refreshes the player's derived state.
-    pub(super) fn remove_player_effects(&mut self, effect: Option<&str>) -> bool {
+    pub(super) fn remove_player_effects(&mut self, effect: Option<usize>) -> bool {
         let before = self.potions.effects.list.len();
         let mut index = 0;
         while index < self.potions.effects.list.len() {
             let current = &self.potions.effects.list[index];
             // The one being removed, or all of them when `effect` is None.
-            if effect.is_some_and(|id| current.id != id) {
+            if effect.is_some_and(|index| current.registry_index != Some(index)) {
                 index += 1;
                 continue;
             }
-            let (id, amplifier) = (current.id, current.amplifier);
+            let amplifier = current.amplifier;
             // `MobEffectEvent.Remove`: refusing the removal keeps it, and the
             // next one is asked with this one still in place, as in vanilla.
             let mut cancel = false;
             if let Some(living) = self.effect_living_ref(None) {
                 self.native_mob_effect_remove(
                     living,
-                    mob_effect_id(id).unwrap_or(id),
+                    mod_api::__private::effect_key(
+                        current
+                            .registry_index
+                            .expect("active effect registry index"),
+                    )
+                    .expect("effects resolved at load"),
                     amplifier,
                     &mut cancel,
                 );
@@ -1263,7 +1293,24 @@ impl Game<'_> {
         amplifier: i32,
         new: bool,
     ) {
-        if self.remote.is_none() && brewing::is_mod_effect(effect) {
+        if let Some(effect) =
+            brewing::effect(effect).and_then(|def| mod_api::__private::effect_key(def.index))
+        {
+            self.mod_effect_added_resolved(effect, entity, amplifier, new);
+        }
+    }
+    /// Dispatch an already resolved effect's added notices, without a registry name lookup.
+    pub(super) fn mod_effect_added_resolved(
+        &mut self,
+        effect: mod_api::EffectKey,
+        entity: Option<i32>,
+        amplifier: i32,
+        new: bool,
+    ) {
+        if self.remote.is_none()
+            && mod_api::__private::resolved_effect(effect)
+                .is_some_and(|def| def.index >= brewing::EFFECTS.len())
+        {
             if new {
                 self.native_on_effect_added(effect, entity, amplifier);
             }
@@ -1275,7 +1322,7 @@ impl Game<'_> {
     /// may end it. Whether it stays.
     fn mod_effect_tick(
         &self,
-        effect: &str,
+        effect: mod_api::EffectKey,
         entity: Option<i32>,
         tick_count: i32,
         amplifier: i32,
@@ -2395,7 +2442,7 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
     fn tick_mod_effect(
         &self,
         level: &mut DamageLevel<'_>,
-        effect: &str,
+        effect: usize,
         mob: &mut Mob,
         tick_count: i32,
         amplifier: i32,
@@ -2404,6 +2451,9 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
             return true;
         };
         let holder = LivingRef::new(EntityRef::new(epoch, mob.id));
+        let Some(effect) = mod_api::__private::effect_key(effect) else {
+            return true;
+        };
         let (keep, changes) = self.mod_effect_tick(
             effect,
             Some(mob.id as i32),
@@ -2425,8 +2475,10 @@ impl horizon_client::mobs::ModEffectTicks for Game<'_> {
         }
         keep
     }
-    fn effect_expired(&self, mob: u32, effect: &'static str, amplifier: i32, cancel: &mut bool) {
-        if let Some(living) = self.effect_living_ref(Some(mob as i32)) {
+    fn effect_expired(&self, mob: u32, effect: usize, amplifier: i32, cancel: &mut bool) {
+        if let Some(living) = self.effect_living_ref(Some(mob as i32))
+            && let Some(effect) = mod_api::__private::effect_key(effect)
+        {
             self.native_mob_effect_expired(living, effect, amplifier, cancel);
         }
     }
@@ -2457,7 +2509,7 @@ mod tests {
             fn should_apply_effect_tick_this_tick(
                 &self,
                 _: &dyn Host,
-                event: &mut ShouldApplyEffectTickThisTickEvent<'_>,
+                event: &mut ShouldApplyEffectTickThisTickEvent,
             ) {
                 event.apply = true;
             }
@@ -2875,8 +2927,8 @@ mod tests {
             ) {
                 self.calls.fetch_add(1, Ordering::Relaxed);
                 assert_eq!(
-                    event.effect.id.to_string(),
-                    format!("minecraft:{}", self.case.id)
+                    event.effect.id,
+                    mod_api::__private::part_tests::effect_key(self.case.id)
                 );
                 assert_eq!((event.effect.duration, event.effect.amplifier), (450, 1));
                 assert_eq!(event.screen.id, self.screen);
