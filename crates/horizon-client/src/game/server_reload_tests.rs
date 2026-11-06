@@ -194,7 +194,7 @@ fn missing_original_at_reload_preserves_the_published_data_and_reports_its_owner
     zip.finish().unwrap();
     let original = std::fs::read(&jar_file).unwrap();
     let manifest = format!(
-        "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
+        "id='reload_test'\nname='Reload Test'\nversion='1'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1'\nsha512='{}'\n",
         jar.sha512()
     );
     let package = root.join("reload_test.hmod");
