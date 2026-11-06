@@ -755,6 +755,7 @@ mod tests {
                 hash: "",
                 node: cycle,
                 raw_fields: &[0],
+                raw_gets: &[],
                 raw_index: false,
             }],
             ..Table::EMPTY

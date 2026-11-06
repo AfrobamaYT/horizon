@@ -304,6 +304,7 @@ mod tests {
                 hash: "hash",
                 node: counter,
                 raw_fields: &[],
+                raw_gets: &[],
                 raw_index: false,
             }],
             thunks: &[],
