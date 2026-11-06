@@ -5,7 +5,10 @@ use horizon_client::command::{Reader, args::Registries, block};
 use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-use mod_api::{BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey};
+use mod_api::{
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateConstraint, BlockStateMatchError,
+    BlockStateProperty, BlockStateRange, EffectKey,
+};
 use std::sync::{Arc, Mutex};
 
 impl Game<'_> {
@@ -92,6 +95,37 @@ impl Game<'_> {
         Some(mod_api::__private::resolved_block(block)?.states)
     }
 
+    /// The properties of a resolved block, copied for the mod as plain data.
+    pub(super) fn native_block_state_definition(
+        &self,
+        block: BlockKey,
+    ) -> Option<Vec<BlockStateProperty>> {
+        let resolved = mod_api::__private::resolved_block(block)?;
+        let state = self.pack.assets.registry.state(resolved.default)?;
+        let properties = self.pack.block_registries.blocks.get(&state.name)?;
+        Some(
+            properties
+                .iter()
+                .map(|(name, values)| BlockStateProperty::new(name.clone(), values.clone()))
+                .collect(),
+        )
+    }
+
+    /// Match against the existing command registry definitions without allocating on the call.
+    pub(super) fn native_block_state_matches(
+        &self,
+        state: BlockStateId,
+        block: BlockKey,
+        constraints: &[BlockStateConstraint],
+    ) -> Option<Result<bool, BlockStateMatchError>> {
+        let resolved = mod_api::__private::resolved_block(block)?;
+        let registry = self.pack.assets.registry;
+        let target = registry.state(resolved.default)?;
+        let state = registry.state(state)?;
+        let definition = self.pack.block_registries.blocks.get(&target.name)?;
+        Some(match_state(definition, target, state, constraints))
+    }
+
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.
     pub(super) fn native_item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
@@ -121,6 +155,28 @@ impl Game<'_> {
             tag,
         ))
     }
+}
+
+fn match_state(
+    definition: &[(String, Vec<String>)],
+    target: &BlockState,
+    state: &BlockState,
+    constraints: &[BlockStateConstraint],
+) -> Result<bool, BlockStateMatchError> {
+    let mut matches = state.name == target.name;
+    for (index, constraint) in constraints.iter().enumerate() {
+        let Some((_, values)) = definition.iter().find(|(name, _)| name == &constraint.name) else {
+            return Err(BlockStateMatchError::UnknownProperty(index as u32));
+        };
+        if !values.contains(&constraint.value) {
+            return Err(BlockStateMatchError::InvalidValue(index as u32));
+        }
+        matches &= state
+            .properties
+            .get(&constraint.name)
+            .is_some_and(|value| value == &constraint.value);
+    }
+    Ok(matches)
 }
 
 /// The command registries' block table of `registry` alone, built once: what
@@ -221,6 +277,40 @@ mod tests {
                 Some("minecraft:air")
             );
         });
+    }
+
+    #[test]
+    fn block_property_constraints_validate_and_match_partial_states() {
+        let (reg, registry) = blocks();
+        let target = registry.state(BlockStateId(1)).unwrap();
+        let definition = &reg.blocks["minecraft:oak_stairs"];
+        let check = |id, constraints: &[BlockStateConstraint]| {
+            match_state(
+                definition,
+                target,
+                registry.state(BlockStateId(id)).unwrap(),
+                constraints,
+            )
+        };
+        let east = BlockStateConstraint::new("facing", "east");
+        assert_eq!(check(4, std::slice::from_ref(&east)), Ok(true));
+        assert_eq!(check(1, std::slice::from_ref(&east)), Ok(false));
+        assert_eq!(check(0, std::slice::from_ref(&east)), Ok(false));
+        assert_eq!(
+            check(4, &[BlockStateConstraint::new("shape", "straight")]),
+            Err(BlockStateMatchError::UnknownProperty(0))
+        );
+        assert_eq!(
+            check(4, &[BlockStateConstraint::new("facing", "up")]),
+            Err(BlockStateMatchError::InvalidValue(0))
+        );
+        assert_eq!(check(4, &[]), Ok(true));
+        assert_eq!(definition.len(), 2);
+        assert!(
+            definition
+                .iter()
+                .any(|(name, values)| name == "half" && values.contains(&"top".to_owned()))
+        );
     }
 
     #[test]

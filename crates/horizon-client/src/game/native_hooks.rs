@@ -1015,12 +1015,12 @@ use mod_api::__private::game::IngredientTest;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientModifiers, ClientReloadListeners, CommandInvocation,
-    EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, NativeServerPlayer, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase,
-    TicketController, ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, ClientInputOptions, ClientModifiers, ClientReloadListeners,
+    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LivingRef,
+    NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
+    Placement, PlayerRef, RecipeBookCategory, ScreenOpening, ScreenshotImage,
+    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -10121,6 +10121,20 @@ impl Game<'_> {
             && self.title.is_none()
             && self.sign_edit.is_none()
             && self.book.is_none()
+    }
+    /// A snapshot of the current input preferences.
+    pub(super) fn native_input_options(&self) -> ClientInputOptions {
+        let settings = &self.settings;
+        ClientInputOptions {
+            sensitivity: settings.sensitivity,
+            invert_x: settings.invert_x,
+            invert_y: settings.invert_y,
+            mouse_wheel_sensitivity: settings.mouse_wheel_sensitivity,
+            discrete_scroll: settings.discrete_scroll,
+            toggle_crouch: settings.toggle_crouch,
+            toggle_sprint: settings.toggle_sprint,
+            auto_jump: settings.auto_jump,
+        }
     }
     /// This `Game` is the window's, not a server's.
     pub(super) fn native_window(&self) -> bool {
