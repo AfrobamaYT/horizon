@@ -37,6 +37,13 @@ fn lexical_bindings_and_macro_tokens_cannot_be_captured_as_generated_names() {
         use other::*;
     });
     assert!(Scope::scan(&sig, Some(&glob)).opaque);
+    let local_crates = syn::parse_quote!({
+        extern crate other as imported_crate;
+        use other::{self};
+    });
+    let scope = Scope::scan(&sig, Some(&local_crates));
+    assert!(scope.opaque);
+    assert!(scope.locals.contains("imported_crate"));
 }
 
 #[test]

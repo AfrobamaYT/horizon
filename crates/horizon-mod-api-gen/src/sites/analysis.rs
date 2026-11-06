@@ -34,6 +34,7 @@ impl<'a> Visit<'a> for Bindings {
         tokens(mac.to_token_stream(), &mut self.identifiers);
     }
     fn visit_use_name(&mut self, name: &'a syn::UseName) {
+        self.opaque |= name.ident == "self";
         self.names.insert(name.ident.to_string());
     }
     fn visit_use_rename(&mut self, name: &'a syn::UseRename) {
@@ -45,6 +46,7 @@ impl<'a> Visit<'a> for Bindings {
     fn visit_item(&mut self, item: &'a Item) {
         tokens(item.to_token_stream(), &mut self.identifiers);
         let id = match item {
+            Item::ExternCrate(i) => i.rename.as_ref().map_or(&i.ident, |(_, name)| name),
             Item::Fn(i) => &i.sig.ident,
             Item::Const(i) => &i.ident,
             Item::Static(i) => &i.ident,
