@@ -534,6 +534,12 @@ Inventory reads and direct server-side item transactions keep their existing con
 not expose direct client inventory writes or enforce a mod's locked-slot policy. Call from an explicit
 input action rather than submitting every render/tick. Diverges from upstream: new helper.
 
+`menu.close(host)` closes the menu's screen as Escape does and tells the server (`ContainerClose`);
+it returns `false` while that screen is not open, so the inventory menu closes only while the inventory
+screen shows. `menu.click_button(host, button)` presses one of the open menu's buttons
+(`ContainerButtonClick`, as a loom's pattern list does), for input the screen's own
+buttons don't take; the server's menu decides what it does, and the inventory menu has none.
+
 `ItemPlace::MenuSlot { menu, slot }` is slot `slot` of a player's open menu, a `MenuRef` (`player.container_menu(host)`). It is
 a fork addition: NeoForge 26.3's `ItemAccess` reaches a player's inventory slot (`forPlayerSlot`) and cursor
 (`forPlayerCursor`), not a menu's slot. It is the storage the slot shows, named by `menu.slot_backing(host, slot)`
@@ -828,7 +834,7 @@ hosts are small enough to implement whole. NeoForge's GameTest is the in-game co
 A new hook needs its declaration in the area file of `crates/horizon-mod-api/src/hooks/` (`///` lines and
 `#[hook(side = "server", contract = "cancel", out = "cancel")]` on `fn name();`; the argument list is in that folder's `mod.rs`), its `native_*` function with the placeholder body
 `let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
-That command only replaces the placeholder in `native_hooks.rs` with the `dispatch_<hook>` call; commit
+That command only replaces the placeholder in `native_hooks/` with the `dispatch_<hook>` call; commit
 that source change and the declaration. The `horizon-mod-api-gen` build dependency generates the hook traits,
 `Host` methods and dispatch code into Cargo's `OUT_DIR` when the game and renderer build, including release
 builds. These generated Rust files are not kept in the source tree or committed, and no manual regeneration
@@ -864,6 +870,11 @@ Every host is an `AttachmentStore` (and `host.attachments()` gives it): the type
 stand on its few erased ones, so they work the same in a native mod and a wasm mod. A
 value keeps its own Rust type, shared: reading one clones it out, and copying a holder's
 data copies no value.
+
+`AttachmentHolder` keeps an existing typed handle when a system needs to store a holder
+identity: `Entity`, `Player`, `BlockEntity`, `Chunk` or `Level`. It is `Copy`, does not keep
+anything loaded, and follows each handle's ordinary stale-world and unload rules. Unlike
+the storage-relative `Holder`, it carries the handle's world scope.
 
 ```rust
 use mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};

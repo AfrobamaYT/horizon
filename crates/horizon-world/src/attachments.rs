@@ -2,6 +2,8 @@
 #[doc(hidden)]
 pub mod index;
 mod lifetime;
+#[doc(hidden)]
+pub mod observer;
 
 #[doc(hidden)]
 pub use lifetime::AttachmentLifetime;

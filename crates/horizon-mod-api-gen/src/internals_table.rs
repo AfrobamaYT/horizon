@@ -10,6 +10,33 @@
 //! - **Functions.** Each listed function whose receiver, arguments and return can all cross gets a
 //!   thunk: copies are decoded, references come in as nodes, and a returned reference goes back
 //!   as a node.
+/// Whether a function argument is a closure (`impl Fn...`, `dyn Fn...`). A closure has no
+/// thunk: the component model refuses a call back into the guest inside that guest's own
+/// call, so a mod declares the game's non-closure helper for the operation instead.
+fn closure_argument(sig: &syn::Signature) -> bool {
+    fn closure_bound(bound: &syn::TypeParamBound) -> bool {
+        let syn::TypeParamBound::Trait(bound) = bound else {
+            return false;
+        };
+        bound.path.segments.last().is_some_and(|segment| {
+            matches!(
+                segment.ident.to_string().as_str(),
+                "Fn" | "FnMut" | "FnOnce"
+            )
+        })
+    }
+    sig.inputs.iter().any(|arg| {
+        let syn::FnArg::Typed(arg) = arg else {
+            return false;
+        };
+        match &*arg.ty {
+            syn::Type::ImplTrait(ty) => ty.bounds.iter().any(closure_bound),
+            syn::Type::TraitObject(ty) => ty.bounds.iter().any(closure_bound),
+            _ => false,
+        }
+    })
+}
+
 fn structural_key(shape: &crate::crossing::Shape) -> bool {
     use crate::crossing::{Scalar, Shape};
     match shape {
@@ -1023,6 +1050,10 @@ impl<'r> Gen<'r> {
             || sig.unsafety.is_some()
             || sig.variadic.is_some()
         {
+            return None;
+        }
+        self.skip_reason = "closure argument; declare a non-closure helper";
+        if closure_argument(&sig) {
             return None;
         }
         self.skip_reason = "unresolved or opaque owner";
@@ -2696,6 +2727,10 @@ pub(crate) mod tests {
         assert_eq!(counts.types, 7, "{code}");
         assert_eq!(counts.thunks, 4);
         assert_eq!(counts.skipped, 3);
+        assert_eq!(
+            counts.refused["horizon_client::g::Game<'_>::closure"],
+            "closure argument; declare a non-closure helper"
+        );
         // A borrowed field is read, never written; a shared one is walked read-only.
         assert!(code.contains("fn enc__horizon_client__g__Player"));
         assert!(!code.contains("fn dec__horizon_client__g__Player"));
