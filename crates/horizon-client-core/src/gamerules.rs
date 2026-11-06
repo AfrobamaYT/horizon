@@ -182,6 +182,25 @@ pub mod vanilla {
     pub const SHOW_DEATH_MESSAGES: RuleIndex = vanilla_index("show_death_messages");
     /// The `players_sleeping_percentage` rule.
     pub const PLAYERS_SLEEPING_PERCENTAGE: RuleIndex = vanilla_index("players_sleeping_percentage");
+    /// The `allow_entering_nether_using_portals` rule.
+    pub const ALLOW_ENTERING_NETHER_USING_PORTALS: RuleIndex =
+        vanilla_index("allow_entering_nether_using_portals");
+    /// The `elytra_movement_check` rule.
+    pub const ELYTRA_MOVEMENT_CHECK: RuleIndex = vanilla_index("elytra_movement_check");
+    /// The `global_sound_events` rule.
+    pub const GLOBAL_SOUND_EVENTS: RuleIndex = vanilla_index("global_sound_events");
+    /// The `immediate_respawn` rule.
+    pub const IMMEDIATE_RESPAWN: RuleIndex = vanilla_index("immediate_respawn");
+    /// The `limited_crafting` rule.
+    pub const LIMITED_CRAFTING: RuleIndex = vanilla_index("limited_crafting");
+    /// The `locator_bar` rule.
+    pub const LOCATOR_BAR: RuleIndex = vanilla_index("locator_bar");
+    /// The `player_movement_check` rule.
+    pub const PLAYER_MOVEMENT_CHECK: RuleIndex = vanilla_index("player_movement_check");
+    /// The `pvp` rule.
+    pub const PVP: RuleIndex = vanilla_index("pvp");
+    /// The `respawn_radius` rule.
+    pub const RESPAWN_RADIUS: RuleIndex = vanilla_index("respawn_radius");
     /// The `advance_time` rule.
     pub const ADVANCE_TIME: RuleIndex = vanilla_index("advance_time");
     /// The `water_source_conversion` rule.

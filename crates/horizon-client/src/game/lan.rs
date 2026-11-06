@@ -2655,8 +2655,12 @@ impl Game<'_> {
                 streaming: Some(&self.streaming),
             };
             host.hub.movement_checks = (
-                self.ui.rules.bool("player_movement_check"),
-                self.ui.rules.bool("elytra_movement_check"),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                self.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
             );
             host.hub.mods_loaded = !mod_api::__private::mods().is_empty();
             let pass = self.level_pass;
@@ -3003,8 +3007,12 @@ impl Game<'_> {
                     streaming: Some(&self.streaming),
                 };
                 host.hub.movement_checks = (
-                    self.ui.rules.bool("player_movement_check"),
-                    self.ui.rules.bool("elytra_movement_check"),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::PLAYER_MOVEMENT_CHECK),
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ELYTRA_MOVEMENT_CHECK),
                 );
                 // IntegratedServer.getScaledTrackingDistance: the Entity Distance
                 // option scales what an integrated server or a LAN host tracks (a
@@ -3013,10 +3021,16 @@ impl Game<'_> {
                     host.hub.entity_range_percent =
                         (self.settings.entity_distance * 100.0).round() as i32;
                 }
-                host.hub
-                    .set_immediate_respawn(self.ui.rules.bool("immediate_respawn"));
-                host.hub
-                    .set_limited_crafting(self.ui.rules.bool("limited_crafting"));
+                host.hub.set_immediate_respawn(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::IMMEDIATE_RESPAWN),
+                );
+                host.hub.set_limited_crafting(
+                    self.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::LIMITED_CRAFTING),
+                );
                 // A server with several levels runs a pass for each
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
