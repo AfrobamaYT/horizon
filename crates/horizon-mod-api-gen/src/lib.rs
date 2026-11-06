@@ -1,5 +1,6 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
 mod catalog;
+mod exports;
 mod host;
 pub use catalog::DECLARATIONS;
 use catalog::{Catalog, Contract, DrawContext, Hook, HostAccess, PartKind, PhaseContext, Side};
@@ -1622,6 +1623,7 @@ mod tests {
             .join(format!("mod-api-fill-{}", std::process::id()));
         let mut inputs: Vec<String> = [
             "crates/horizon-mod-api/src/hooks",
+            "crates/horizon-mod-api/src/exports",
             "crates/horizon-client/src/game",
             "crates/horizon-mod-api/src/lib.rs",
         ]
