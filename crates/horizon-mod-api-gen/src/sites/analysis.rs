@@ -93,6 +93,40 @@ impl Scope {
             identifiers: scan.identifiers,
         }
     }
+    /// Refuse call identities that cannot be proven from module-level catalog facts.
+    pub fn check_target(&self, expr: &Expr) -> Result<(), super::Cause> {
+        let lexical = match expr {
+            Expr::MethodCall(call) => root(&call.receiver).map(|name| (name, false)),
+            Expr::Call(call) => match &*call.func {
+                Expr::Path(path) if path.path.leading_colon.is_none() => path
+                    .path
+                    .segments
+                    .first()
+                    .filter(|s| {
+                        !matches!(
+                            s.ident.to_string().as_str(),
+                            "crate" | "self" | "super" | "Self"
+                        )
+                    })
+                    .map(|s| (&s.ident, true)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some((name, parameter)) = lexical {
+            let name = name.to_string();
+            if self.locals.contains(&name)
+                || parameter && self.parameters.contains(&name)
+                || self.opaque && name != "self"
+            {
+                return Err(super::Cause::Missing(
+                    "lexically shadowed or macro-dependent call target",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn fresh(&mut self, base: &str) -> Ident {
         for index in 0.. {
             let name = if index == 0 {

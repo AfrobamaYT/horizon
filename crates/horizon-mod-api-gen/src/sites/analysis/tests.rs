@@ -124,3 +124,35 @@ fn resolved_shapes_find_elided_and_nested_lifetimes_before_spelling_results() {
         );
     }
 }
+
+#[test]
+fn lexical_call_identity_refuses_shadowing_in_all_binding_contexts() {
+    let sig = syn::parse_quote!(fn run(child: &Child));
+    let call = syn::parse_quote!(add(1));
+    for body in [
+        "{ let add = callback; add(1); }",
+        "{ let _ = |add: fn(u32) -> u32| add(1); }",
+        "{ match option { Some(add) => add(1), None => 0 } }",
+        "{ use other::add; add(1); }",
+        "{ opaque!(); add(1); }",
+    ] {
+        let body = syn::parse_str(body).unwrap();
+        assert!(Scope::scan(&sig, Some(&body)).check_target(&call).is_err());
+    }
+    let parameter = syn::parse_quote!(fn run(add: fn(u32) -> bool));
+    assert!(Scope::scan(&parameter, None).check_target(&call).is_err());
+    let body = syn::parse_quote!({
+        let child = another;
+    });
+    let child = syn::parse_quote!(child.step(1));
+    assert!(Scope::scan(&sig, Some(&body)).check_target(&child).is_err());
+    assert!(Scope::scan(&sig, None).check_target(&child).is_ok());
+    let body = syn::parse_quote!({
+        opaque!();
+    });
+    let fixed = syn::parse_quote!(crate::game::add(1));
+    assert!(Scope::scan(&sig, Some(&body)).check_target(&fixed).is_ok());
+    let method = syn::parse_quote!(self.child.step(1));
+    assert!(Scope::scan(&sig, Some(&body)).check_target(&method).is_ok());
+    assert!(opaque_argument(&syn::parse_quote!(unknown!(1))));
+}
