@@ -143,12 +143,12 @@ mod tests {
             ("zombie_villager_baby", "entity/zombie_villager"),
         ] {
             let model = load_model(
-                &ResourceSource::directory(std::path::PathBuf::from(&root)),
+                std::path::Path::new(&root),
                 &format!("minecraft:{name}#main"),
             )
             .unwrap();
             let no_hat = load_model(
-                &ResourceSource::directory(std::path::PathBuf::from(&root)),
+                std::path::Path::new(&root),
                 &format!("minecraft:{name}_no_hat#main"),
             )
             .unwrap();
