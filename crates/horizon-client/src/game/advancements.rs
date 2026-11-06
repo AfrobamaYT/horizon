@@ -394,7 +394,15 @@ impl Game<'_> {
         };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
-            .spawn(move || Tree::shared(&data, &horizon_world::loot::PackOverlay { files: &files }))
+            .spawn(move || {
+                Tree::shared(
+                    &data,
+                    &horizon_world::loot::PackOverlay {
+                        conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                        files: &files,
+                    },
+                )
+            })
             .ok();
     }
     pub(super) fn load_advancements(&mut self) {

@@ -1327,7 +1327,10 @@ mod tests {
         let recipes = StationRecipes::load(
             &root,
             &sample_items(),
-            &PackOverlay { files: &packs },
+            &PackOverlay {
+                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                files: &packs,
+            },
             &crate::test_resources::server_load(),
         );
         let _ = fs::remove_dir_all(&root);

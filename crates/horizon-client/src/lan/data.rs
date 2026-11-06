@@ -851,7 +851,10 @@ mod tests {
         ];
         let open = SyncData::load(
             &root,
-            &PackOverlay { files: &files },
+            &PackOverlay {
+                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                files: &files,
+            },
             &horizon_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
         )
@@ -892,7 +895,10 @@ mod tests {
         ];
         let reloaded = SyncData::reload(
             &root,
-            &PackOverlay { files: &changed },
+            &PackOverlay {
+                conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                files: &changed,
+            },
             &open,
             &horizon_world::item_defaults::read(&root).unwrap(),
             &crate::crafting::ResolvedSources::default(),
@@ -934,7 +940,10 @@ mod tests {
         assert!(
             SyncData::load(
                 &root,
-                &PackOverlay { files: &changed },
+                &PackOverlay {
+                    conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                    files: &changed
+                },
                 &horizon_world::item_defaults::read(&root).unwrap(),
                 &crate::crafting::ResolvedSources::default()
             )
@@ -979,7 +988,10 @@ mod tests {
                 vec![br#"{"values":["minecraft:server_links"]}"#.to_vec()],
             ),
         ];
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay {
+            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+            files: &files,
+        };
         pack_entries("dialog", &overlay, &mut found);
         file_order(&mut found);
         let names: Vec<String> = found
@@ -1088,7 +1100,10 @@ mod tests {
                 vec![br#"{"replace":true,"values":["minecraft:dirt"]}"#.to_vec()],
             ),
         ];
-        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let overlay = horizon_world::loot::PackOverlay {
+            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+            files: &files,
+        };
         SyncData::merge_pack_tags(&mut tags, &root, &overlay, &builtin, &dynamic);
         let _ = std::fs::remove_dir_all(&root);
         let sent = |registry: &str, tag: &str| -> Vec<i32> {

@@ -2545,7 +2545,10 @@ mod tests {
                 }))],
             ),
         ];
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay {
+            conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+            files: &files,
+        };
         for (side, expected) in [
             (None, "minecraft:stone"),
             (Some(Side::Client), "minecraft:stone"),

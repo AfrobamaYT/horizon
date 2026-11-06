@@ -779,7 +779,14 @@ mod tests {
         ];
         let open = resources
             .health
-            .with_packs(&root, &PackOverlay { files: &files }, false)
+            .with_packs(
+                &root,
+                &PackOverlay {
+                    conditions: &horizon_world::conditions::LoadConditions::vanilla(),
+                    files: &files,
+                },
+                false,
+            )
             .unwrap();
         let reloaded = open.with_packs(&root, &PackOverlay::NONE, true).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();

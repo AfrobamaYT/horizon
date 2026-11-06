@@ -60,7 +60,13 @@ fn root_namespaces_and_ordered_world_overrides_preserve_vanilla_indices() {
     heat.1.push(definition("high").to_string().into_bytes());
     let files = vec![heat, file("damage_type/aaa:new", definition("new"))];
     let packed = base
-        .with_packs(&f.0, &PackOverlay { files: &files })
+        .with_packs(
+            &f.0,
+            &PackOverlay {
+                conditions: &crate::conditions::LoadConditions::vanilla(),
+                files: &files,
+            },
+        )
         .unwrap();
     assert_eq!(packed.id("minecraft:fall"), Some(fall));
     assert_eq!(
@@ -93,7 +99,14 @@ fn reload_rebinds_tags_but_ignores_changed_removed_and_added_definitions() {
             json!({"values":["demo:heat"]}),
         ),
     ];
-    let open = Catalog::load(&f.0, &PackOverlay { files: &files }).unwrap();
+    let open = Catalog::load(
+        &f.0,
+        &PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
+            files: &files,
+        },
+    )
+    .unwrap();
     let heat = open.id("demo:heat").unwrap();
     assert!(open.in_tag(heat, "minecraft:is_fire"));
     let changed = vec![
@@ -105,7 +118,13 @@ fn reload_rebinds_tags_but_ignores_changed_removed_and_added_definitions() {
         ),
     ];
     let reloaded = open
-        .reload_tags(&f.0, &PackOverlay { files: &changed })
+        .reload_tags(
+            &f.0,
+            &PackOverlay {
+                conditions: &crate::conditions::LoadConditions::vanilla(),
+                files: &changed,
+            },
+        )
         .unwrap();
     assert_eq!(reloaded.id("demo:heat"), Some(heat));
     assert_eq!(reloaded.definition(heat).unwrap().message_id, "original");
@@ -142,7 +161,14 @@ fn replace_nested_optional_and_missing_required_tags_share_one_resolution() {
             json!({"values":["#demo:broken"]}),
         ),
     ];
-    let catalog = Catalog::load(&f.0, &PackOverlay { files: &files }).unwrap();
+    let catalog = Catalog::load(
+        &f.0,
+        &PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
+            files: &files,
+        },
+    )
+    .unwrap();
     assert_eq!(
         catalog
             .tag_members("minecraft:bypasses_armor")
@@ -171,8 +197,22 @@ fn independent_worlds_never_share_reload_state() {
         ),
     ];
     let b = vec![file("damage_type/demo:heat", definition("b"))];
-    let a = Catalog::load(&f.0, &PackOverlay { files: &a }).unwrap();
-    let b = Catalog::load(&f.0, &PackOverlay { files: &b }).unwrap();
+    let a = Catalog::load(
+        &f.0,
+        &PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
+            files: &a,
+        },
+    )
+    .unwrap();
+    let b = Catalog::load(
+        &f.0,
+        &PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
+            files: &b,
+        },
+    )
+    .unwrap();
     assert!(a.in_tag(a.id("demo:heat").unwrap(), "minecraft:is_fire"));
     assert!(!b.in_tag(b.id("demo:heat").unwrap(), "minecraft:is_fire"));
     let _ = a.reload_tags(&f.0, &PackOverlay::NONE).unwrap();
@@ -193,8 +233,48 @@ fn invalid_top_definition_refuses_the_snapshot_without_mutating_base() {
             .into_bytes(),
     );
     assert!(
-        base.with_packs(&f.0, &PackOverlay { files: &[file] })
-            .is_err()
+        base.with_packs(
+            &f.0,
+            &PackOverlay {
+                conditions: &crate::conditions::LoadConditions::vanilla(),
+                files: &[file]
+            }
+        )
+        .is_err()
     );
     assert!(base.id("demo:heat").is_none());
+}
+
+#[test]
+fn conditions_skip_winning_definitions_before_decode_and_each_tag_layer() {
+    let f = Fixture::new();
+    f.write("data/demo/damage_type/heat.json", definition("root"));
+    let files = vec![
+        file(
+            "damage_type/demo:heat",
+            json!({"neoforge:conditions":[{"type":"unsupported"}], "invalid":true}),
+        ),
+        file(
+            "tags/minecraft:damage_type/bypasses_armor",
+            json!({"neoforge:conditions":[{"type":"unsupported"}], "replace":true}),
+        ),
+        file(
+            "tags/demo:damage_type/absent",
+            json!({"neoforge:conditions":[{"type":"unsupported"}]}),
+        ),
+    ];
+    let catalog = Catalog::load(
+        &f.0,
+        &PackOverlay {
+            files: &files,
+            ..PackOverlay::NONE
+        },
+    )
+    .unwrap();
+    assert!(catalog.id("demo:heat").is_none());
+    assert!(catalog.in_tag(
+        catalog.id("minecraft:fall").unwrap(),
+        "minecraft:bypasses_armor"
+    ));
+    assert!(!catalog.tags.contains_key("demo:absent"));
 }

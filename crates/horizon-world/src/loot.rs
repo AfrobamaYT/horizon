@@ -25,13 +25,23 @@ use std::{
 /// `datapack::DataStore.files` is the source; the content tables merge these
 /// over what they read from the resource root, the way
 /// `SimpleJsonResourceReloadListener` and `TagLoader` layer a pack stack.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct PackOverlay<'a> {
+    /// Immutable enabled package IDs for this owning server data load.
+    pub conditions: &'a crate::conditions::LoadConditions,
     pub files: &'a [(String, Vec<Vec<u8>>)],
 }
 impl PackOverlay<'static> {
     /// No packs: the tables are the resource root's alone.
-    pub const NONE: Self = Self { files: &[] };
+    pub const NONE: Self = Self {
+        files: &[],
+        conditions: &crate::conditions::LoadConditions::vanilla(),
+    };
+}
+impl Default for PackOverlay<'_> {
+    fn default() -> Self {
+        PackOverlay::NONE
+    }
 }
 impl PackOverlay<'_> {
     /// The overlay's files under `<kind>/`, with the prefix stripped.
@@ -468,6 +478,7 @@ fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Valu
         };
         out.insert(id.to_owned(), v);
     }
+    out.retain(|_, value| overlay.conditions.allows(value));
 }
 
 /// Loot tables by id. Each is kept as its JSON text and read into a [`Value`]
@@ -521,6 +532,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         root.hash(&mut hasher);
+        overlay.conditions.hash(&mut hasher);
         let data = root.join("data");
         let mut namespaces: Vec<_> = fs::read_dir(&data)
             .into_iter()
@@ -680,6 +692,7 @@ impl LootData {
             "",
             &mut raw_enchantments,
         )?;
+        overlay_map(overlay, "enchantment", &mut raw_enchantments);
         let mut names: Vec<&String> = raw_enchantments.keys().collect();
         names.sort();
         let enchantments = names
@@ -719,6 +732,9 @@ impl LootData {
             let mut raw = HashMap::new();
             load_kind(&all, &format!("tags/{registry}"), &mut raw)?;
             for (name, value) in raw {
+                if !overlay.conditions.allows(&value) {
+                    continue;
+                }
                 let values = value["values"].as_array().cloned().unwrap_or_default();
                 tags.insert((registry.to_owned(), name), values);
             }
@@ -726,13 +742,14 @@ impl LootData {
             // `replace` file drops what the lower sources put in
             // (`TagLoader.load` walks the resource stack the same way).
             for (id, files) in overlay.tag_kind(registry) {
-                let slot = tags
-                    .entry((registry.to_owned(), id.to_owned()))
-                    .or_default();
                 for bytes in files {
                     let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                         continue;
                     };
+                    if !overlay.conditions.allows(&v) {
+                        continue;
+                    }
+                    let slot = tags.entry((registry.to_owned(), id.clone())).or_default();
                     if v["replace"].as_bool() == Some(true) {
                         slot.clear();
                     }
@@ -1922,6 +1939,61 @@ fn enchant(stack: &mut LootStack, name: &str, level: i32) {
 mod namespace_tests {
     use super::*;
 
+    #[test]
+    fn conditional_loot_selection_and_cache_follow_the_owning_inventory() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-loot-conditions-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/demo/loot_table")).unwrap();
+        fs::write(
+            root.join("data/demo/loot_table/replaced.json"),
+            r#"{"pools":[]}"#,
+        )
+        .unwrap();
+        let conditional = br#"{"neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"package_id"}],"pools":[]}"#.to_vec();
+        fs::write(root.join("data/demo/loot_table/base.json"), &conditional).unwrap();
+        let files = vec![
+            ("loot_table/demo:replaced".into(), vec![br#"{"pools":[]}"#.to_vec(), conditional]),
+            ("loot_table/demo:unknown".into(), vec![br#"{"neoforge:conditions":[{"type":"unsupported"}],"pools":[]}"#.to_vec()]),
+            ("tags/demo:item/food".into(), vec![
+                br#"{"values":["minecraft:bread"]}"#.to_vec(),
+                br#"{"neoforge:conditions":[{"type":"unsupported"}],"replace":true,"values":["minecraft:stone"]}"#.to_vec(),
+            ]),
+            ("tags/demo:item/absent".into(), vec![br#"{"neoforge:conditions":[{"type":"unsupported"}],"values":[]}"#.to_vec()]),
+        ];
+        let enabled = crate::conditions::LoadConditions::new(["package_id"]);
+        let off = PackOverlay {
+            files: &files,
+            ..PackOverlay::NONE
+        };
+        let on = PackOverlay {
+            files: &files,
+            conditions: &enabled,
+        };
+        let absent = shared_tables(&root, &off).unwrap();
+        assert!(!absent.contains_key("demo:base"));
+        assert!(!absent.contains_key("demo:replaced")); // No lower-pack fallback.
+        let present = shared_tables(&root, &on).unwrap();
+        assert!(!Arc::ptr_eq(&absent, &present));
+        assert!(present.contains_key("demo:base"));
+        assert!(present.contains_key("demo:replaced"));
+        assert!(!present.contains_key("demo:unknown"));
+        assert!(Arc::ptr_eq(&absent, &shared_tables(&root, &off).unwrap()));
+        fs::write(root.join("items.json"), "{}").unwrap();
+        let defaults = crate::item_defaults::read(&root).unwrap();
+        let loot = LootData::load(&root, &off, &defaults).unwrap();
+        assert_eq!(
+            loot.tags[&("item".into(), "demo:food".into())],
+            vec![serde_json::json!("minecraft:bread")]
+        );
+        assert!(
+            !loot
+                .tags
+                .contains_key(&("item".into(), "demo:absent".into()))
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     /// The same root and packs share one map while it is held; other packs
     /// get their own.
     #[test]
@@ -1942,7 +2014,14 @@ mod namespace_tests {
             "loot_table/minecraft:chests/b".to_owned(),
             vec![br#"{"pools": []}"#.to_vec()],
         )];
-        let packs = shared_tables(&root, &PackOverlay { files: &files }).unwrap();
+        let packs = shared_tables(
+            &root,
+            &PackOverlay {
+                conditions: &crate::conditions::LoadConditions::vanilla(),
+                files: &files,
+            },
+        )
+        .unwrap();
         assert!(!Arc::ptr_eq(&first, &packs));
         assert!(packs.contains_key("minecraft:chests/b"));
         // A table changed at the same path while `first` is still held: the
@@ -2078,6 +2157,7 @@ mod namespace_tests {
     #[test]
     fn tag_kind_yields_tag_loader_ids_for_content_id_keys() {
         let overlay = PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
             files: &[
                 (
                     "tags/minecraft:item/food".to_owned(),
@@ -2111,6 +2191,7 @@ mod namespace_tests {
         )
         .unwrap();
         let overlay = PackOverlay {
+            conditions: &crate::conditions::LoadConditions::vanilla(),
             files: &[(
                 "tags/minecraft:item/food".to_owned(),
                 vec![
@@ -2370,7 +2451,15 @@ mod location_check_biome_tests {
         .unwrap();
         fs::write(root.join("items.json"), "{}").unwrap();
         let defaults = crate::item_defaults::read(&root).unwrap();
-        let data = LootData::load(&root, &PackOverlay { files: packs }, &defaults).unwrap();
+        let data = LootData::load(
+            &root,
+            &PackOverlay {
+                conditions: &crate::conditions::LoadConditions::vanilla(),
+                files: packs,
+            },
+            &defaults,
+        )
+        .unwrap();
         let _ = fs::remove_dir_all(&root);
         data
     }

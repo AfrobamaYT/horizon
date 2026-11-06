@@ -75,6 +75,11 @@ pub fn resource_tags<T: Clone + Ord>(
     let mut tags = TagDefinitions::default();
     for (id, versions) in files {
         for bytes in versions {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                if !overlay.conditions.allows(&value) {
+                    continue;
+                }
+            }
             let result = std::str::from_utf8(&bytes)
                 .map_err(|e| e.to_string())
                 .and_then(|text| {
@@ -201,6 +206,10 @@ impl Catalog {
         }
         let mut catalog = self.clone();
         for (id, bytes) in files {
+            let value: Value = serde_json::from_slice(&bytes)?;
+            if !overlay.conditions.allows(&value) {
+                continue;
+            }
             let definition = Definition::from_json(&id, &bytes)
                 .map_err(|e| invalid(format!("damage type {id}: {e}")))?;
             match catalog.ids.get(&id) {
