@@ -668,19 +668,44 @@ fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
         }
     }
 }
+/// A tick either completed or paused at the fox's inline consumption boundary.
+#[derive(Debug)]
+pub enum TickProgress {
+    Complete(bool),
+    Consumption(super::fox::Consumption),
+}
+
+/// Run a whole mob tick when no owning-host pause is needed by the caller.
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
 ) -> bool {
+    match tick_until_consumption(m, w, level, events) {
+        TickProgress::Complete(kept) => kept,
+        TickProgress::Consumption(decision) => {
+            super::fox::apply_consumption(&decision, w, m, events);
+            super::fox::finish_ai_step(m, w, events);
+            finish_tick(m, w, level, events)
+        }
+    }
+}
+
+/// Stop before a fox's effect draws so its owner can provide a mutable host.
+pub fn tick_until_consumption(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) -> TickProgress {
     if m.removed {
-        return false;
+        return TickProgress::Complete(false);
     }
     // ServerLevel.tick checks despawning before ticking the entity.
     if !check_despawn(m, w) {
         m.removed = true;
-        return false;
+        return TickProgress::Complete(false);
     }
     // `Entity.computeSpeed`: what it moved in the last tick.
     let known_speed = m.position.subtract(m.previous);
@@ -700,7 +725,7 @@ pub fn tick(
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, w, events);
     if m.removed {
-        return false;
+        return TickProgress::Complete(false);
     }
     if m.species() == Species::ZombieVillager {
         // ZombieVillager.tick counts the cure down before super.tick, with
@@ -720,7 +745,7 @@ pub fn tick(
         if super::creaking::is_creaking(m) && super::creaking::tearing_down(m) {
             super::creaking::tear_down(m, events);
         }
-        return false;
+        return TickProgress::Complete(false);
     }
     // LivingEntity.tick: updatingUsingItem, the stab of a spear in use.
     if m.alive() {
@@ -794,10 +819,10 @@ pub fn tick(
         if m.species() == Species::GlowSquid {
             aquatic::glow_squid_dark_tick(m);
         }
-    } else {
-        ai_step(m, w, level, events);
+    } else if let Some(decision) = ai_step(m, w, level, events) {
+        return TickProgress::Consumption(decision);
     }
-    finish_tick(m, w, level, events)
+    TickProgress::Complete(finish_tick(m, w, level, events))
 }
 
 /// Resume the living tick after species AI, before block effects and animation.
@@ -1642,7 +1667,12 @@ fn reset_effect_fall_distance(m: &mut Mob) {
 }
 
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
-fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
+fn ai_step(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) -> Option<super::fox::Consumption> {
     if m.species() == Species::Parrot {
         super::parrot::ai_step(m, w, level.random(), events);
     }
@@ -1720,7 +1750,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut 
     ageable_step(m, w, level, events);
     animal_step(m, events);
     burn_undead(m, w, events);
-    species_ai_step(m, w, level, events);
+    species_ai_step(m, w, level, events)
 }
 /// The end of `LivingEntity.aiStep`: a mob that water hurts (an enderman, a
 /// blaze, a snow golem) takes 1 drowning damage in water or rain
@@ -2072,7 +2102,7 @@ fn species_ai_step(
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
-) {
+) -> Option<super::fox::Consumption> {
     if family(m.species()) == Family::Aquatic {
         aquatic::ai_step(m, w, level, events);
     }
@@ -2126,13 +2156,14 @@ fn species_ai_step(
         Species::Armadillo => super::armadillo::tick(m),
         Species::Frog => super::frog::tick(m),
         Species::Goat => super::goat::tick(m),
-        Species::Fox => super::fox::ai_step(m, w, events),
+        Species::Fox => return super::fox::ai_step_until_consumption(m, w, events),
         Species::Turtle => super::turtle::ai_step(m, w, events),
         Species::Sheep if m.extra.anim_ticks > 0 => {
             m.extra.anim_ticks -= 1;
         }
         _ => {}
     }
+    None
 }
 /// `Entity.checkDespawn` alone, for a mob outside the entity-ticking
 /// chunks. Returns false when the mob is gone.

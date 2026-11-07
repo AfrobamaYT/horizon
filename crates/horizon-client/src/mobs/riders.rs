@@ -427,6 +427,28 @@ pub fn tick(
     level: &mut super::DamageLevel<'_>,
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
+    tick_with(mobs, index, w, level, events, Mob::tick)
+}
+
+/// Return an inline consumption pause only after restoring a rider's navigation loan.
+pub fn tick_until_consumption(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    events: &mut Vec<super::MobEvent>,
+) -> super::ai::TickProgress {
+    tick_with(mobs, index, w, level, events, Mob::tick_until_consumption)
+}
+
+fn tick_with<R>(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    events: &mut Vec<super::MobEvent>,
+    step: impl FnOnce(&mut Mob, &MobWorld, &mut super::DamageLevel<'_>, &mut Vec<super::MobEvent>) -> R,
+) -> R {
     let mut owner = index;
     if !mobs[index].no_ai {
         for _ in 0..mobs.len() {
@@ -446,7 +468,7 @@ pub fn tick(
         }
     }
     if owner == index {
-        return mobs[index].tick(w, level, events);
+        return step(&mut mobs[index], w, level, events);
     }
     let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
     let body = vehicle.path_mob();
@@ -458,7 +480,7 @@ pub fn tick(
         passenger: vehicle.extra.mount.is_some(),
         in_liquid: vehicle.is_in_liquid(),
     }));
-    let kept = rider.tick(w, level, events);
+    let kept = step(rider, w, level, events);
     let redirect = rider
         .ai
         .navigation_redirect

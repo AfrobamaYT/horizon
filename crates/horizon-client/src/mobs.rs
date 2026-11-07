@@ -4332,11 +4332,24 @@ impl Mob {
         level: &mut DamageLevel<'_>,
         events: &mut Vec<MobEvent>,
     ) -> bool {
+        self.prepare_tick();
+        ai::tick(self, w, level, events)
+    }
+    /// A game-owned tick may pause before fox consumption to release its loans.
+    pub fn tick_until_consumption(
+        &mut self,
+        w: &MobWorld,
+        level: &mut DamageLevel<'_>,
+        events: &mut Vec<MobEvent>,
+    ) -> ai::TickProgress {
+        self.prepare_tick();
+        ai::tick_until_consumption(self, w, level, events)
+    }
+    fn prepare_tick(&mut self) {
         self.track_section();
         // LivingEntity.tick: CombatTracker.recheckStatus.
         let alive = self.alive();
         self.combat.recheck(alive, self.age);
-        ai::tick(self, w, level, events)
     }
     /// The section the mob is in, noted when it changes (`EntitySection` lists).
     fn track_section(&mut self) {
