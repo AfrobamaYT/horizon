@@ -7,7 +7,8 @@ pub trait Hooks {
     /// name is `minecraft:`'s) to `skipped_ids`, or `EquipmentSlotGroup` names (`mainhand`,
     /// `armor`, `any`) to `skipped_groups`; a slot group with nothing left shows no heading. Not
     /// asked for a stack whose `minecraft:tooltip_display` hides the attribute modifiers. `player`
-    /// and `player_entity_id` are the local player's, `None` for the recipe book's search text,
+    /// and `player_entity_id` are the local player's, `None` for the recipe book's search text and for a stack nested in another's tooltip (a
+    /// crossbow's loaded projectile),
     /// which has none; `advanced` (F3+H) and `creative` are the tooltip's `TooltipFlag`. Asked each
     /// frame the tooltip shows, only while a mod listens. Client-side.
     #[hook(
