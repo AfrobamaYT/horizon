@@ -150,9 +150,10 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
             (Kind::Head, 0) => horizon_mod_package::manifest::InjectionKind::Head,
             (Kind::Return, 0) => horizon_mod_package::manifest::InjectionKind::Return,
             _ => {
-                return Err(Refusal::Points(
-                    "E_INJECT_NO_SLOT: wasm listener kind or priority pending".into(),
-                ));
+                return Err(Refusal::Points(format!(
+                    "{}: E_INJECT_NO_SLOT: wasm listener kind or priority pending",
+                    injection.id
+                )));
             }
         };
         let place = crate::points::target_place(target, kind)?;

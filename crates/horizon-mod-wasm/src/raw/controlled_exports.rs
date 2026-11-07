@@ -209,6 +209,13 @@ fn manifest_listener_loads_at_its_declared_place() {
     assert!(listen(&manifest, &exports).unwrap().is_some());
     manifest.inject[0].priority = 1;
     assert!(listen(&manifest, &exports).is_err());
+    manifest.inject[0].priority = 0;
+    manifest.inject[0].kind = horizon_mod_package::manifest::inject::Kind::Replace;
+    assert!(matches!(
+        listen(&manifest, &exports),
+        Err(crate::Refusal::Points(message))
+            if message == "a: E_INJECT_NO_SLOT: wasm listener kind or priority pending"
+    ));
 }
 mod build_script {
     include!(concat!(
@@ -225,6 +232,9 @@ mod build_script {
         let manifest = format!(
             "id='generation'\nname='Generation'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[native]\ninternals=[{{path=\"horizon_client::game::Game<'_>::tick\",hash='h'}}]\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='internals'\nhash='h'\nwith='chosen'",
             "0".repeat(128)
+        );
+        let manifest = format!(
+            "{manifest}\n[[inject]]\nid='api_listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='api'\nhash='h'\nwith='api_listener'"
         );
         // SAFETY: only this test sets the build-script environment in this process.
         unsafe {
@@ -243,6 +253,7 @@ mod build_script {
             let _entry_point = main;
             let code = generate().unwrap();
             assert!(code.contains(&format!("crate :: {function}")));
+            assert!(!code.contains("crate :: api_listener"));
         }
     }
 }
