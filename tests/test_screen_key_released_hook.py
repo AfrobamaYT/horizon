@@ -20,7 +20,7 @@ class ScreenKeyReleasedHookTests(unittest.TestCase):
         hooks = native_hook_sources()
         gate = method(hooks.replace("pub(super) fn", "fn"), "screen_key_released")
         mapping = method(source, "mapped_key_event")
-        button = method(source.replace("fn keyboard_button(", "    fn keyboard_button("), "keyboard_button")
+        button = method(source.replace("pub(super) fn keyboard_button(", "    fn keyboard_button("), "keyboard_button")
         start = source.index("            if let WindowEvent::KeyboardInput", source.index("let result: Result<()> = (|| {"))
         opening = source.index("{", source.index("&& self.screen_key_released(key)", start))
         end, depth = opening + 1, 1
