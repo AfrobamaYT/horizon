@@ -12121,12 +12121,14 @@ mod tests {
                 _: &mut dyn mod_api::ClientHost,
                 event: &mut mod_api::ClientChatReceivedEvent<'_>,
             ) -> mod_api::Flow {
-                let text = event.message.plain();
+                let mod_api::text::TextContent::Literal(text) = &event.message.content else {
+                    panic!("expected literal chat fixture");
+                };
                 if text.contains("drop") {
                     return mod_api::Flow::Cancel;
                 }
                 if event.system {
-                    *event.message = Text::literal(format!("[server] {text}"));
+                    *event.message = mod_api::Text::literal(format!("[server] {text}"));
                 }
                 mod_api::Flow::Continue
             }

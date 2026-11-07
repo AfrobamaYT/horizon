@@ -3436,7 +3436,7 @@ mod tests {
         impl ItemPart for Lore {
             fn tooltip(&self, _: &dyn ClientHost, event: &mut TooltipEvent<'_>) {
                 assert!(event.lines.is_empty());
-                event.lines.push((Text::literal("part"), u32::MAX));
+                event.lines.push((mod_api::Text::literal("part"), u32::MAX));
             }
         }
         struct Mod;
@@ -3447,15 +3447,22 @@ mod tests {
                 r.item_part(item, Lore);
             }
             fn item_tooltip(&self, _: &dyn ClientHost, event: &mut ItemTooltipEvent<'_>) {
-                let plain: Vec<String> = event.lines.iter().map(|(t, _)| t.plain()).collect();
-                assert_eq!(plain[..3], ["Stick", "part", "minecraft:stick"]);
+                assert_eq!(
+                    event.lines[..3]
+                        .iter()
+                        .map(|(t, _)| t.clone())
+                        .collect::<Vec<_>>(),
+                    ["Stick", "part", "minecraft:stick"].map(mod_api::Text::literal)
+                );
                 assert!(event.advanced);
                 // Only the hidden stack is asked from a creative slot, where its
                 // display hides every component's lines.
                 assert_eq!(event.display.shows("minecraft:lore"), !event.creative);
                 // Every line is the mod's to change: drop the count, add one at the end.
                 event.lines.pop();
-                event.lines.push((Text::literal("event"), u32::MAX));
+                event
+                    .lines
+                    .push((mod_api::Text::literal("event"), u32::MAX));
             }
         }
         let mods: Mods = vec![ModEntry::new("lore", Box::new(Mod))].into();
@@ -3772,7 +3779,7 @@ mod cycling_tests {
             ) -> mod_api::Flow {
                 assert_eq!(event.elements.len(), 1);
                 assert!(
-                    matches!(&event.elements[0], TooltipElement::Text(t, _) if t.plain() == "Tip")
+                    matches!(&event.elements[0], TooltipElement::Text(t, _) if *t == mod_api::Text::literal("Tip"))
                 );
                 assert_eq!((event.place.x, event.place.y), (10, 20));
                 assert_eq!((event.screen_width, event.screen_height), (320, 240));

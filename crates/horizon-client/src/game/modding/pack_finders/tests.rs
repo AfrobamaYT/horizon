@@ -1,6 +1,7 @@
 use super::*;
 use horizon_client::datapack::{DataStore, FunctionLine};
-use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry, Text, testing::with_mods};
+use horizon_client::text::Text;
+use mod_api::{AddPackFindersEvent, Hooks, Identifier, ModEntry, testing::with_mods};
 use std::{fs, io::Write, path::PathBuf};
 
 const ASSET_PACK: &str = "assets/packmod/resourcepacks/optional";
@@ -125,7 +126,7 @@ impl Hooks for Finder {
             let mut pack = PackRegistration::new(
                 Identifier::parse(&format!("packmod:{path}")).unwrap(),
                 kind,
-                Text::translate("packmod.optional.title", &[]),
+                mod_api::Text::translate("packmod.optional.title", vec![]),
             );
             pack.always_active = self.required;
             pack.position = self.position;
@@ -244,7 +245,7 @@ fn refused_registrations_leave_the_repository_unchanged() {
         PackRegistration::new(
             Identifier::parse(path).unwrap(),
             PackType::ClientResources,
-            Text::translate("packmod.optional.title", &[]),
+            mod_api::Text::translate("packmod.optional.title", vec![]),
         )
     };
     let valid = format!("packmod:{ASSET_PACK}");

@@ -4160,8 +4160,8 @@ mod tests {
             let forward =
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
-                (forward.down, forward.label.plain()),
-                (false, "W".to_owned())
+                (forward.down, forward.label),
+                (false, mod_api::Text::literal("W"))
             );
             game.keys.insert(KeyCode::KeyW);
             assert!(
@@ -4171,7 +4171,7 @@ mod tests {
             );
             let attack =
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
-            assert_eq!(attack.label.plain(), "Left Button");
+            assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
             );
