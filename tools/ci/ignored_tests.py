@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 KNOWN = Path(__file__).with_name("ignored-tests-known-failures.txt")
@@ -54,13 +55,23 @@ def known_failures():
 def run(package, skip):
     """Each test's result in `package`'s ignored library tests but `skip`, or None if they didn't build."""
     skips = [arg for test in skip for arg in ("--skip", test)]
-    process = subprocess.run(
-        [
-            "cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []),
-            "--", "--include-ignored", "--exact", "--test-threads=4", *skips,
-        ],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-    )
+    # Resource-backed fixtures need a fresh home, not the runner user's game files.
+    with tempfile.TemporaryDirectory(prefix="horizon-ignored-") as scratch:
+        env = os.environ.copy()
+        for key in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"):
+            home = Path(scratch) / key.lower()
+            home.mkdir()
+            env[key] = str(home)
+        for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
+            env[key] = str(Path(scratch) / key.lower())
+        env.update(HORIZON_LAUNCHER_NO_SELF_UPDATE="1", HORIZON_NO_AUDIO="1")
+        process = subprocess.run(
+            [
+                "cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []),
+                "--", "--include-ignored", "--exact", "--test-threads=4", *skips,
+            ],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env,
+        )
     results = {}
     summaries = []
     for line in process.stdout.splitlines():
