@@ -533,8 +533,10 @@ mod tests {
             assert!(!game.persist.raw.contains_key(&id));
             assert_eq!(read(game).get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
             assert!(read(game).get("leash").is_none());
-            game.boats[0].leash = Some(Holder::Player);
-            game.boats[0].leash_player = Some(actual_holder);
+            game.boats
+                .update(0, |boat| boat.leash = Some(Holder::Player));
+            game.boats
+                .update(0, |boat| boat.leash_player = Some(actual_holder));
             let expected = Tag::compound([("UUID", Tag::IntArray(actual_holder.to_vec()))]);
             assert_eq!(read(game).get("leash"), Some(&expected));
             assert_eq!(read(game).get("leash"), Some(&expected));
@@ -543,11 +545,12 @@ mod tests {
                 .raw
                 .insert(id, Tag::compound([("leash", delayed.clone())]));
             assert_eq!(read(game).get("leash"), Some(&expected));
-            game.boats[0].leash = None;
-            game.boats[0].leash_player = None;
-            game.boats[0].leash_pending = Some(Pending::Uuid(unknown));
+            game.boats.update(0, |boat| boat.leash = None);
+            game.boats.update(0, |boat| boat.leash_player = None);
+            game.boats
+                .update(0, |boat| boat.leash_pending = Some(Pending::Uuid(unknown)));
             assert_eq!(read(game).get("leash"), Some(&delayed));
-            game.boats[0].leash_pending = None;
+            game.boats.update(0, |boat| boat.leash_pending = None);
             assert!(read(game).get("leash").is_none());
         });
     }

@@ -720,8 +720,8 @@ impl Game<'_> {
                         let conn = g.lan.as_ref().and_then(|h| h.hub.guests.iter()
                             .find(|p| p.uuid == owner && p.placed).map(|p| p.conn))
                             .ok_or("craft fixture: no connected owner")?;
-                        let host = g.lan.as_ref().ok_or("no hub")?;
                         let result = (|| -> Result<Value> {
+                            let host = g.lan.as_ref().ok_or("no hub")?;
                             let (window, revision, _, _) = host.play.get(&conn)
                                 .and_then(|p| p.crafting.table.as_ref())
                                 .ok_or("craft fixture: crafting menu not open")?;
