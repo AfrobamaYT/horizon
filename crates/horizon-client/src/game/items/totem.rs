@@ -273,7 +273,7 @@ mod death_protection_tests {
     use super::death_protection_of;
     use horizon_assets::item_model::ItemModels;
     use horizon_client::items::ItemStack;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     use serde_json::json;
 
     /// The lookup gives what the stack's whole component map gives, for
