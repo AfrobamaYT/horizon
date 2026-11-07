@@ -4,6 +4,8 @@
 mod glue;
 mod index;
 mod sides;
+#[cfg(test)]
+mod text_refusal_tests;
 mod ty;
 mod wit;
 
