@@ -108,6 +108,9 @@ impl Selection {
                     return;
                 }
                 let named = rule.named(path).expect("listed");
+                if named.guarded {
+                    return;
+                }
                 for field in rule.fields(path) {
                     self.reach(&rule.shape(&named.module, Some(path), field.ty), rule);
                 }
@@ -283,7 +286,9 @@ fn buildable(shape: &Shape, rule: &Rule) -> bool {
 /// The fields of the listed type at `path` a node steps into: none for flags, which are read
 /// whole (their bits are no field of theirs).
 pub(crate) fn node_fields<'r>(rule: &'r Rule, path: &str) -> Vec<crate::crossing::Field<'r>> {
-    if crate::crossing::foreign(path) == Some(Foreign::Bits) {
+    if crate::crossing::foreign(path) == Some(Foreign::Bits)
+        || rule.named(path).is_some_and(|named| named.guarded)
+    {
         Vec::new()
     } else {
         rule.fields(path)
@@ -1570,17 +1575,19 @@ pub(crate) fn select<'a>(
     let fields: HashMap<_, _> = rule
         .paths()
         .flat_map(|owner| {
-            node_fields(rule, owner)
-                .into_iter()
-                .enumerate()
-                .map(move |(index, field)| {
-                    let member = field.member.to_token_stream().to_string();
-                    let path = match field.case {
-                        Some((_, case)) => format!("{owner}::{case}::{member}"),
-                        None => format!("{owner}::{member}"),
-                    };
-                    (path, (owner, index, field))
-                })
+            let fields = if rule.named(owner).is_some_and(|named| named.guarded) {
+                rule.fields(owner)
+            } else {
+                node_fields(rule, owner)
+            };
+            fields.into_iter().enumerate().map(move |(index, field)| {
+                let member = field.member.to_token_stream().to_string();
+                let path = match field.case {
+                    Some((_, case)) => format!("{owner}::{case}::{member}"),
+                    None => format!("{owner}::{member}"),
+                };
+                (path, (owner, index, field))
+            })
         })
         .collect();
     let mut functions = Vec::new();
@@ -1639,7 +1646,9 @@ pub(crate) fn select<'a>(
                         let named = rule.named(owner).expect("listed");
                         let shape = rule.shape(&named.module, Some(owner), field.ty);
                         let owner_shape = Shape::Named(owner.into(), named.lifetimes);
-                        if rule.crossing_of(&owner_shape) == Crossing::Opaque {
+                        if named.guarded {
+                            "conditional field or variant"
+                        } else if rule.crossing_of(&owner_shape) == Crossing::Opaque {
                             named.opaque_reason.unwrap_or("opaque owner")
                         } else if rule.crossing_of(&shape) == Crossing::Opaque {
                             "field type cannot cross"
