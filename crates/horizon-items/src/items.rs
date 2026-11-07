@@ -1321,7 +1321,8 @@ impl Items {
             killed_by_player: false,
             explosion_radius: None,
             this_entity: false,
-            levels: None,
+            entity_levels: None,
+            block_levels: None,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1417,7 +1418,8 @@ impl Items {
             killed_by_player: false,
             explosion_radius: roll.explosion,
             this_entity: roll.breaker,
-            levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
+            entity_levels: None,
+            block_levels: roll.levels.map(|_| &ask as &LootLevels<'_, R>),
             keep_empty: roll.keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1454,7 +1456,8 @@ impl Items {
             killed_by_player,
             explosion_radius: None,
             this_entity: false,
-            levels: None,
+            entity_levels: None,
+            block_levels: None,
             keep_empty,
         };
         // LootTable.getRandomItemsRaw visits the table itself first.
@@ -1508,7 +1511,8 @@ impl Items {
             killed_by_player: false,
             explosion_radius: None,
             this_entity: false,
-            levels: None,
+            entity_levels: None,
+            block_levels: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1533,7 +1537,8 @@ impl Items {
             killed_by_player,
             explosion_radius: None,
             this_entity: false,
-            levels: None,
+            entity_levels: None,
+            block_levels: None,
             keep_empty: false,
         };
         ctx.evaluate(table, random)
@@ -1606,7 +1611,8 @@ impl Items {
             killed_by_player,
             explosion_radius: None,
             this_entity: false,
-            levels,
+            entity_levels: levels,
+            block_levels: None,
             keep_empty,
         };
         ctx.evaluate(table, random)
@@ -1681,8 +1687,10 @@ struct LootContext<'a, R> {
     explosion_radius: Option<f32>,
     /// `LootContextParams.THIS_ENTITY` is set (a player broke the block).
     this_entity: bool,
-    /// Asked for the levels the table reads; None keeps them.
-    levels: Option<&'a LootLevels<'a, R>>,
+    /// Asked only at entity enchantment readers; None keeps vanilla's level.
+    entity_levels: Option<&'a LootLevels<'a, R>>,
+    /// Asked only at block enchantment readers; None keeps vanilla's level.
+    block_levels: Option<&'a LootLevels<'a, R>>,
     /// Command replacement consumes the emitted list positions, including empty stacks.
     keep_empty: bool,
 }
@@ -1702,7 +1710,7 @@ impl<R: RandomSource> LootContext<'_, R> {
             0
         };
         let level = self
-            .levels
+            .entity_levels
             .map_or(level, |levels| levels(random, id, level));
         level.min(MAX_LOOT_LEVEL as u32)
     }
@@ -1711,7 +1719,7 @@ impl<R: RandomSource> LootContext<'_, R> {
     fn bonus_level(&self, id: &str, random: &mut R) -> i32 {
         let level = self.enchantment_level(id);
         let level = self
-            .levels
+            .block_levels
             .map_or(level, |levels| levels(random, id, level));
         level.min(MAX_LOOT_LEVEL as u32) as i32
     }
@@ -3172,7 +3180,8 @@ mod tests {
             killed_by_player: block.is_empty(),
             explosion_radius: None,
             this_entity: false,
-            levels: None,
+            entity_levels: None,
+            block_levels: None,
             keep_empty: false,
         }
     }
@@ -3386,7 +3395,7 @@ mod tests {
         };
         let answered = LootContext {
             killed_by_player: false,
-            levels: Some(&levels),
+            entity_levels: Some(&levels),
             ..ctx(&items, None, &props, "")
         };
         let count = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:bone","modifier":[{"type":"minecraft:enchanted_count_increase","count":2.0,"enchantment":"minecraft:looting"}]}]}]});
@@ -3408,7 +3417,7 @@ mod tests {
             let (mut plain, mut asked) = (LegacyRandom::new(seed), LegacyRandom::new(seed));
             let expected = ctx(&items, Some(&sword), &props, "").evaluate(&table, &mut plain);
             let got = LootContext {
-                levels: Some(&same),
+                entity_levels: Some(&same),
                 ..ctx(&items, Some(&sword), &props, "")
             }
             .evaluate(&table, &mut asked);
@@ -3430,7 +3439,7 @@ mod tests {
             level
         };
         let context = LootContext {
-            levels: Some(&drawing),
+            entity_levels: Some(&drawing),
             ..ctx(&items, None, &props, "")
         };
         let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:bone","modifier":[{"type":"minecraft:enchanted_count_increase","count":1.0,"enchantment":"minecraft:looting"}]}]}]});
@@ -3448,7 +3457,7 @@ mod tests {
         let props = horizon_world::chunk::BlockProperties::new();
         let huge = |_: &mut LegacyRandom, _: &str, _: u32| u32::MAX;
         let context = LootContext {
-            levels: Some(&huge),
+            entity_levels: Some(&huge),
             ..ctx(&items, None, &props, "")
         };
         let count = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:bone","modifier":[{"type":"minecraft:enchanted_count_increase","count":2.0,"enchantment":"minecraft:looting"}]}]}]});
@@ -3459,6 +3468,53 @@ mod tests {
             context.evaluate(&squared, &mut LegacyRandom::new(7)).len(),
             1
         );
+    }
+
+    #[test]
+    fn unrelated_entity_reader_does_not_ask_the_block_listener() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let reads = std::cell::Cell::new(0);
+        let levels = |_: &str, _: u32| {
+            reads.set(reads.get() + 1);
+            3
+        };
+        let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:bone","modifier":[{"type":"minecraft:enchanted_count_increase","enchantment":"minecraft:looting","count":2.0}]}]}]});
+        let drops = items.roll_block_table(
+            &table,
+            "minecraft:stone",
+            &props,
+            BlockLootRoll {
+                levels: Some(&levels),
+                ..Default::default()
+            },
+            &mut LegacyRandom::new(7),
+        );
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].count, 1);
+        assert_eq!(reads.get(), 0);
+    }
+
+    #[test]
+    fn unrelated_block_reader_does_not_ask_the_entity_listener() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let reads = std::cell::Cell::new(0);
+        let levels = |_: &mut LegacyRandom, _: &str, _: u32| {
+            reads.set(reads.get() + 1);
+            3
+        };
+        let context = LootContext {
+            entity_levels: Some(&levels),
+            ..ctx(&items, None, &props, "")
+        };
+        let table = json!({"pools":[{"rolls":1,"conditions":[{"type":"minecraft:table_bonus","enchantment":"minecraft:fortune","chances":[0.0,0.0,0.0,1.0]}],"entries":[{"type":"minecraft:item","name":"minecraft:bone"}]}]});
+        let mut random = LegacyRandom::new(7);
+        assert!(context.evaluate(&table, &mut random).is_empty());
+        assert_eq!(reads.get(), 0);
+        let mut expected = LegacyRandom::new(7);
+        expected.next_float();
+        assert_eq!(random.next_long(), expected.next_long());
     }
 
     /// The game's answer is the level a block table's count and condition
@@ -3475,7 +3531,7 @@ mod tests {
             3
         };
         let answered = |pick| LootContext {
-            levels: Some(&levels),
+            block_levels: Some(&levels),
             ..ctx(&items, pick, &props, "minecraft:stone")
         };
         let count = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond","modifier":[{"type":"minecraft:apply_bonus","enchantment":"minecraft:fortune","formula":"minecraft:uniform_bonus_count","parameters":{"bonusMultiplier":2}}]}]}]});
@@ -3508,7 +3564,7 @@ mod tests {
         let props = horizon_world::chunk::BlockProperties::new();
         let levels = |_: &mut LegacyRandom, _: &str, _: u32| u32::MAX;
         let context = LootContext {
-            levels: Some(&levels),
+            block_levels: Some(&levels),
             ..ctx(&items, None, &props, "minecraft:stone")
         };
         for bonus in [
