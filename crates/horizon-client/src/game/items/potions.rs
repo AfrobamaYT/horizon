@@ -2516,6 +2516,58 @@ fn client_tick_effects(effects: &mut PlayerEffects, darkness: &mut (f32, f32)) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn residency_cloud_load_expiry_bottling_and_late_ids() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            game.ominous_spawners.clear();
+            let (tag, _) =
+                horizon_core::nbt::parse_snbt("{Pos:[0d,80d,0d],Duration:2,WaitTime:0,Radius:3f}")
+                    .unwrap();
+            let potion = game.load_potion_cloud(&tag).unwrap();
+            for (age, duration) in [(20, 1), (0, 40)] {
+                game.breath_clouds.push(super::super::dragon::Breath {
+                    id: 0,
+                    at: [0.0, 80.0, 0.0],
+                    radius: 3.0,
+                    age,
+                    duration,
+                    from_dragon: false,
+                    victims: Vec::new(),
+                    potion: None,
+                });
+            }
+            game.add_remote_ominous_item_spawner(0, [0.0, 80.0, 0.0]);
+            let before = game.next_entity;
+            assert_eq!(game.breath_clouds[1].id, 0);
+            game.lan_assign_ids();
+            assert_eq!(game.ominous_spawners[0].id, before + 1);
+            assert_eq!(game.breath_clouds[1].id, before + 2);
+            assert_eq!(game.breath_clouds[2].id, before + 3);
+            game.tick_breath();
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(potion, 0), (before + 3, 1)]
+            );
+            game.tick_potion_clouds();
+            game.tick_potion_clouds();
+            assert_eq!(game.breath_clouds.len(), 1);
+            assert_eq!(game.breath_clouds[0].age, 1);
+            game.breath_clouds.update(0, |c| c.from_dragon = true);
+            assert!(collect_dragon_breath(
+                Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
+                &mut game.breath_clouds
+            ));
+            assert!(game.breath_clouds[0].radius > 2.5 && game.breath_clouds[0].radius < 2.6);
+            game.breath_clouds.clear();
+            assert!(game.breath_clouds.is_empty());
+        });
+    }
+
     use super::super::sculk::darkness_blend_added;
     use super::*;
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};

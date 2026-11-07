@@ -113,3 +113,37 @@ fn warning_dispatch_uses_neutral_at_tick_four() {
     drop(game);
     std::fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn residency_spawner_load_expiry_and_spawn_order() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.ominous_spawners.clear();
+        game.dropped.clear();
+        for (item, delay) in [("diamond", 1), ("emerald", 3), ("gold_ingot", 1)] {
+            let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
+                "{{Pos:[0d,80d,0d],item:{{id:\"minecraft:{item}\",count:1}},spawn_item_after_ticks:{delay}L}}"
+            )).unwrap();
+            game.load_ominous_item_spawner(tag);
+        }
+        let survivor = game.ominous_spawners[1].id;
+        game.tick_ominous_item_spawners();
+        assert_eq!(game.ominous_spawners.len(), 1);
+        assert_eq!(game.ominous_spawners[0].id, survivor);
+        assert_eq!(game.ominous_spawners[0].tick_count, 1);
+        assert_eq!(
+            game.dropped
+                .iter()
+                .map(|e| e.stack.item.as_ref())
+                .collect::<Vec<_>>(),
+            ["minecraft:diamond", "minecraft:gold_ingot"]
+        );
+        game.tick_ominous_item_spawners();
+        game.tick_ominous_item_spawners();
+        assert!(game.ominous_spawners.is_empty());
+        assert_eq!(
+            game.dropped.last().unwrap().stack.item.as_ref(),
+            "minecraft:emerald"
+        );
+    });
+}

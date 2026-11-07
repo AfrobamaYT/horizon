@@ -631,6 +631,17 @@ mod resident_tests {
     }
 
     #[test]
+    fn resident_append_preserves_spawn_buffer_before_survivors() {
+        let mut list: ResidentList<_> = [1, 2].into_iter().collect();
+        let mut taken = list.take();
+        list.push(3);
+        taken.retain(|&id| id != 1);
+        list.append(&mut taken);
+        assert_eq!(&*list, &[3, 2]);
+        assert!(taken.is_empty());
+    }
+
+    #[test]
     fn resident_owners_drop_only_on_discard() {
         struct Owner(Rc<Cell<usize>>);
         impl Drop for Owner {
