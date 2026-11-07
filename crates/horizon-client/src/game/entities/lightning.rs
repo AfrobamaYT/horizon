@@ -789,44 +789,45 @@ mod tests {
     #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
     fn a_bolt_away_from_players_starts_no_fire() {
         use horizon_client::gamerules::Value;
-        let mut game = super::super::native_machines::tests::server_game();
-        let stone = game
-            .pack
-            .assets
-            .registry
-            .default_state("minecraft:stone")
-            .unwrap();
-        let air = game.res.facts().air;
-        game.world.set(8, 64, 8, stone).unwrap();
-        let bolt = [8.5, 65.0, 8.5];
-        // (radius, player's x): fires expected at the strike.
-        for (radius, player_x, fires) in [
-            (128, 12.5, true),
-            (1, 12.5, false),
-            (0, 8.5, false),
-            (-1, 1000.0, true),
-        ] {
-            game.world.set(8, 65, 8, air).unwrap();
-            game.ui
-                .rules
-                .set("fire_spread_radius_around_player", Value::Int(radius));
-            game.player = Some(
-                horizon_client::motion::PlayerMotion::new(
-                    game.motion,
-                    Vec3::new(player_x, 65.0, 8.5),
-                )
-                .unwrap(),
-            );
-            let random = game.world.random.clone();
-            let set = game.bolt_fire(bolt, 4);
-            let burning = game.world.block(8, 65, 8) != air;
-            assert_eq!((set > 0, burning), (fires, fires), "radius {radius}");
-            if !fires {
-                // No offset draws either.
-                let mut before = random;
-                assert_eq!(game.world.random.next_long(), before.next_long());
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            let air = game.res.facts().air;
+            game.world.set(8, 64, 8, stone).unwrap();
+            let bolt = [8.5, 65.0, 8.5];
+            // (radius, player's x): fires expected at the strike.
+            for (radius, player_x, fires) in [
+                (128, 12.5, true),
+                (1, 12.5, false),
+                (0, 8.5, false),
+                (-1, 1000.0, true),
+            ] {
+                game.world.set(8, 65, 8, air).unwrap();
+                game.ui
+                    .rules
+                    .set("fire_spread_radius_around_player", Value::Int(radius));
+                game.player = Some(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        Vec3::new(player_x, 65.0, 8.5),
+                    )
+                    .unwrap(),
+                );
+                let random = game.world.random.clone();
+                let set = game.bolt_fire(bolt, 4);
+                let burning = game.world.block(8, 65, 8) != air;
+                assert_eq!((set > 0, burning), (fires, fires), "radius {radius}");
+                if !fires {
+                    // No offset draws either.
+                    let mut before = random;
+                    assert_eq!(game.world.random.next_long(), before.next_long());
+                }
             }
-        }
+        });
     }
 
     #[test]
