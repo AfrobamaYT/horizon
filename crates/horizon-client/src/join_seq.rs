@@ -80,6 +80,21 @@ macro_rules! impl_joined {
 /// let mut list = JoinList::<u32, false>::default();
 /// list[0] = 1;
 /// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_mut(0);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.iter_mut();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_disjoint_mut([0, 1]);
+/// ```
 /// An entity put in without a join number gets the next one; a numbered entity
 /// keeps its number when taken out and put back. Mutable element access is for
 /// entity state; identity changes and whole-entity replacement remain audited

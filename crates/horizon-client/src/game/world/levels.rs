@@ -55,7 +55,7 @@ pub(super) struct Parked {
     others: horizon_client::join_seq::ResidentList<commands::OtherEntity>,
     fangs: super::fangs::FangState,
     pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat, false>,
-    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
+    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart, false>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
