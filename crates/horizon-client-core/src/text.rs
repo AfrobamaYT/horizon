@@ -98,11 +98,11 @@ pub struct Style {
     pub obfuscated: Option<bool>,
     pub click: Option<ClickEvent>,
     /// Hover text.
-    pub hover: Option<Box<Text>>,
+    pub hover: Option<std::sync::Arc<Text>>,
     /// `HoverEvent.ShowItem`: the event's `{id, count?, components?}` object.
-    pub hover_item: Option<Box<Value>>,
+    pub hover_item: Option<std::sync::Arc<Value>>,
     /// `HoverEvent.ShowEntity`: the event's `{id, uuid, name?}` object.
-    pub hover_entity: Option<Box<Value>>,
+    pub hover_entity: Option<std::sync::Arc<Value>>,
     /// `Style.insertion`: the text a Shift-click puts in the chat box.
     pub insertion: Option<String>,
     /// The font (`FontDescription.Resource`), a full id like
@@ -215,7 +215,7 @@ impl Text {
                 s.clone(),
                 Style {
                     click: Some(ClickEvent::CopyToClipboard(s)),
-                    hover: Some(Box::new(Self::translate("chat.copy.click", &[]))),
+                    hover: Some(std::sync::Arc::new(Self::translate("chat.copy.click", &[]))),
                     ..Style::color(GREEN)
                 },
             ))
@@ -231,7 +231,10 @@ impl Text {
             .append("]")
             .with_style(&Style {
                 click: Some(ClickEvent::SuggestCommand(format!("/tp @s {x} {y} {z}"))),
-                hover: Some(Box::new(Self::translate("chat.coordinates.tooltip", &[]))),
+                hover: Some(std::sync::Arc::new(Self::translate(
+                    "chat.coordinates.tooltip",
+                    &[],
+                ))),
                 ..Style::color(GREEN)
             })
     }

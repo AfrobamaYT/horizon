@@ -278,8 +278,46 @@ pub fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::te
     }
 }
 
+// Hover entity names can themselves contain components. Clone their retained
+// JSON with a work list rather than Value's recursive Clone implementation.
+fn clone_object(object: &serde_json::Map<String, Value>) -> Value {
+    enum Work<'a> {
+        Value(&'a Value),
+        Array(usize),
+        Object(Vec<String>),
+    }
+    let mut pending = vec![Work::Object(object.keys().cloned().collect())];
+    pending.extend(object.values().rev().map(Work::Value));
+    let mut done = Vec::new();
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Value(Value::Array(a)) => {
+                pending.push(Work::Array(a.len()));
+                pending.extend(a.iter().rev().map(Work::Value));
+            }
+            Work::Value(Value::Object(o)) => {
+                pending.push(Work::Object(o.keys().cloned().collect()));
+                pending.extend(o.values().rev().map(Work::Value));
+            }
+            Work::Value(v) => done.push(v.clone()),
+            Work::Array(len) => {
+                let values = done.split_off(done.len() - len);
+                done.push(Value::Array(values));
+            }
+            Work::Object(keys) => {
+                let values = done.split_off(done.len() - keys.len());
+                done.push(Value::Object(keys.into_iter().zip(values).collect()));
+            }
+        }
+    }
+    done.pop().unwrap_or(Value::Null)
+}
+
 /// The style fields of a component object.
-fn object_style(o: &serde_json::Map<String, Value>) -> Style {
+fn object_style<'a>(
+    o: &'a serde_json::Map<String, Value>,
+    child: &mut dyn FnMut(&'a Value) -> Text,
+) -> Style {
     let mut style = Style::default();
     if let Some(c) = o.get("color").and_then(Value::as_str) {
         style.color = named_color(c).or_else(|| hex_color(c));
@@ -306,14 +344,14 @@ fn object_style(o: &serde_json::Map<String, Value>) -> Style {
                     .or_else(|| e.get("contents"))
                     .or_else(|| e.get("text"));
                 if let Some(value) = value {
-                    style.hover = Some(Box::new(to_text(value, &mut |s| Text::literal(s))));
+                    style.hover = Some(std::sync::Arc::new(child(value)));
                 }
             }
             Some("show_item") if e.get("id").is_some_and(Value::is_string) => {
-                style.hover_item = Some(Box::new(Value::Object(e.clone())));
+                style.hover_item = Some(std::sync::Arc::new(clone_object(e)));
             }
             Some("show_entity") if e.get("id").is_some_and(Value::is_string) => {
-                style.hover_entity = Some(Box::new(Value::Object(e.clone())));
+                style.hover_entity = Some(std::sync::Arc::new(clone_object(e)));
             }
             _ => {}
         }
@@ -421,11 +459,90 @@ impl Sourced {
     }
 }
 
+// Every recursive component relation is scheduled before its parent. Results are
+// moved, not cloned: a hover chain must not recursively clone its descendant spans.
 fn build(
     v: &Value,
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
     sourced: Sourced,
+) -> Text {
+    use std::collections::HashMap;
+    let mut pending = vec![(v, false)];
+    let mut done = HashMap::<*const Value, (Text, Style)>::new();
+    let mut order = Vec::new();
+    while let Some((value, ready)) = pending.pop() {
+        if !ready {
+            pending.push((value, true));
+            match value {
+                Value::Array(a) => pending.extend(a.iter().rev().map(|v| (v, false))),
+                Value::Object(o) => {
+                    for key in ["extra", "with"] {
+                        if let Some(Value::Array(a)) = o.get(key) {
+                            pending.extend(a.iter().rev().map(|v| (v, false)));
+                        }
+                    }
+                    if let Some(v) = o.get("fallback") {
+                        pending.push((v, false));
+                    }
+                    if let Some(e) = style_event_object(o, "hover_event", "hoverEvent") {
+                        if e.get("action").and_then(Value::as_str) == Some("show_text") {
+                            if let Some(v) = e
+                                .get("value")
+                                .or_else(|| e.get("contents"))
+                                .or_else(|| e.get("text"))
+                            {
+                                pending.push((v, false));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            let mut style = match value {
+                Value::Object(o) => object_style(o, &mut |v| {
+                    done.remove(&(v as *const Value))
+                        .map(|v| v.0)
+                        .unwrap_or_default()
+                }),
+                Value::Array(a) => a
+                    .first()
+                    .and_then(|v| done.get(&(v as *const Value)))
+                    .map(|v| v.1.clone())
+                    .unwrap_or_default(),
+                _ => Style::default(),
+            };
+            let text = build_node(value, resolve, contents, sourced, &style, &mut |v| {
+                done.remove(&(v as *const Value))
+                    .map(|v| v.0)
+                    .unwrap_or_default()
+            });
+            if !matches!(value, Value::Object(_)) {
+                style = text.spans.first().map(|s| s.style.clone()).unwrap_or(style);
+            }
+            order.push(value as *const Value);
+            done.insert(value as *const Value, (text, style));
+        }
+    }
+    let result = done
+        .remove(&(v as *const Value))
+        .map(|v| v.0)
+        .unwrap_or_default();
+    // Release parents before children, including chains of hover styles.
+    for key in order.into_iter().rev() {
+        done.remove(&key);
+    }
+    result
+}
+
+fn build_node<'a>(
+    v: &'a Value,
+    resolve: &mut dyn FnMut(&str) -> Text,
+    contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
+    sourced: Sourced,
+    style: &Style,
+    child: &mut dyn FnMut(&'a Value) -> Text,
 ) -> Text {
     match v {
         Value::String(s) => sourced.literal(s.clone()),
@@ -436,28 +553,23 @@ fn build(
             let Some((first, rest)) = list.split_first() else {
                 return Text::empty();
             };
-            let mut base = build(first, resolve, contents, sourced);
+            let mut base = child(first);
             // The siblings take the first component's own style, even when
             // its text is empty.
-            let style = match first {
-                Value::Object(o) => object_style(o),
-                _ => base
-                    .spans
-                    .first()
-                    .map(|s| s.style.clone())
-                    .unwrap_or_default(),
-            };
             for sibling in rest {
-                let sibling = build(sibling, resolve, contents, sourced);
+                let sibling = child(sibling);
                 sourced.append(&mut base, sourced.styled(sibling, &style));
             }
             base
         }
         Value::Object(o) => {
-            let style = object_style(o);
             let content = if let Some(t) = contents(o) {
                 t
-            } else if let Some(object) = inline_object(o, resolve, contents) {
+            } else if let Some(object) = inline_object_with_fallback(
+                o,
+                o.get("object").and_then(Value::as_str),
+                o.get("fallback").map(|v| child(v).plain()),
+            ) {
                 let mut text = Text::literal("\u{fffc}");
                 text.spans[0].style.inline_object = Some(object);
                 text
@@ -470,11 +582,7 @@ fn build(
                 let args: Vec<Text> = o
                     .get("with")
                     .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .map(|x| build(x, resolve, contents, sourced))
-                            .collect()
-                    })
+                    .map(|a| a.iter().map(|x| child(x)).collect())
                     .unwrap_or_default();
                 sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args)
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
@@ -491,7 +599,7 @@ fn build(
                 .into_iter()
                 .flatten()
             {
-                let extra = build(extra, resolve, contents, sourced);
+                let extra = child(extra);
                 sourced.append(&mut out, sourced.styled(extra, &style));
             }
             if sourced.0

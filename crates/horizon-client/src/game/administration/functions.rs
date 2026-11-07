@@ -792,7 +792,9 @@ impl Game<'_> {
             .find(|p| p.id == id)
             .map_or_else(|| "Default data pack".to_owned(), |p| p.description());
         let style = text::Style {
-            hover: Some(Box::new(Text::literal(format!("{id}\n{description}")))),
+            hover: Some(std::sync::Arc::new(Text::literal(format!(
+                "{id}\n{description}"
+            )))),
             ..style
         };
         let source = if id == "vanilla" {
