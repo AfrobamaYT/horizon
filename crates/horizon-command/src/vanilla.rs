@@ -606,6 +606,17 @@ pub fn session_dispatcher(registry: &RuleRegistry, features: &[String]) -> Dispa
     if horizon {
         horizon_commands(&mut tree, 0);
     }
+    // Game-session tooling, not part of vanilla's reference/parity dispatcher.
+    let profile = tree.literal(0, "modprofile");
+    tree.requires(profile, 3);
+    for (name, id) in [
+        ("start", "modprofile.start"),
+        ("stop", "modprofile.stop"),
+        ("report", "modprofile.report"),
+    ] {
+        let node = tree.literal(profile, name);
+        tree.executes(node, id);
+    }
     tree
 }
 /// Whether this process is a dedicated server, whose tree has the dedicated
