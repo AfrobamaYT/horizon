@@ -983,7 +983,7 @@ mod tests {
     // NBT constructors assign ids. Reinstall unbound owners to exercise delayed tracking.
     macro_rules! pending {
         ($list:expr) => {{
-            let mut owner = $list.pop().unwrap();
+            let mut owner = $list.remove($list.len() - 1);
             owner.id = 0;
             $list.push(owner);
         }};
@@ -1062,9 +1062,10 @@ mod tests {
                 assert_eq!(game.persist.live, announced);
                 let epoch = game.native_lifecycle.epoch().unwrap();
                 slots.observe(&mut game.falling, epoch, |f| f.id);
-                game.creatures
-                    .projectiles
-                    .for_each_mut(|p| slots.observe_one(p, epoch, p.id));
+                game.creatures.projectiles.for_each_mut(|p| {
+                    let id = p.id;
+                    slots.observe_one(p, epoch, id);
+                });
             }
         });
     }
@@ -1104,19 +1105,45 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn tracking_ids_only_number_the_spawn_buffer_during_a_taken_pass() {
+        macro_rules! check {
+            ($kind:expr, $nbt:expr, $game:ident, $list:expr) => {
+                crate::game::native_entity_refs::tests::with_game(|$game| {
+                    $game
+                        .summon_with_nbt($kind, [1.0, 70.0, 1.0], $nbt)
+                        .unwrap();
+                    pending!($list);
+                    let taken = $list.take();
+                    $game
+                        .summon_with_nbt($kind, [2.0, 70.0, 1.0], $nbt)
+                        .unwrap();
+                    pending!($list);
+                    let base = $game.next_entity;
+                    $game.lan_assign_ids();
+                    assert_eq!(taken[0].id, 0);
+                    assert_eq!($list[0].id, base + 1);
+                    $list.restore(taken);
+                    $game.lan_assign_ids();
+                    assert_eq!(
+                        $list.iter().map(|p| p.id).collect::<Vec<_>>(),
+                        [base + 2, base + 1]
+                    );
+                    assert_eq!($game.next_entity, base + 2);
+                });
+            };
+        }
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.summon_with_nbt("minecraft:arrow", [1.0, 70.0, 1.0], "{}")
                 .unwrap();
             pending!(game.creatures.projectiles);
-            let taken = game.creatures.projectiles.take();
+            let taken = game.take_entities();
             game.summon_with_nbt("minecraft:arrow", [2.0, 70.0, 1.0], "{}")
                 .unwrap();
             pending!(game.creatures.projectiles);
             let base = game.next_entity;
             game.lan_assign_ids();
-            assert_eq!(taken[0].id, 0);
             assert_eq!(game.creatures.projectiles[0].id, base + 1);
-            game.creatures.projectiles.restore(taken);
+            game.restore_entities(taken);
+            assert_eq!(game.creatures.projectiles[0].id, 0);
             game.lan_assign_ids();
             assert_eq!(
                 game.creatures
@@ -1128,6 +1155,18 @@ mod tests {
             );
             assert_eq!(game.next_entity, base + 2);
         });
+        check!(
+            "minecraft:area_effect_cloud",
+            "{Duration:200,Radius:3.0f}",
+            game,
+            game.breath_clouds
+        );
+        check!(
+            "minecraft:ominous_item_spawner",
+            "{}",
+            game,
+            game.ominous_spawners
+        );
     }
 
     #[test]
