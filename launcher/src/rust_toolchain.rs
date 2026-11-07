@@ -8,6 +8,7 @@
 //! Windows also gets a pinned C/link toolchain: WinLibs for x64 and LLVM-MinGW for ARM64.
 use crate::backend;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,20 +17,13 @@ use std::process::Command;
 pub const VERSION: &str = "1.99.1";
 const DIST: &str = "https://static.rust-lang.org/dist/2026-10-15";
 
-/// One platform's components: (name, SHA-256 of `<name>-<VERSION>-<target>.tar.gz`).
+/// One platform's components: (name, SHA-256, compressed bytes) of `<name>-<VERSION>-<target>.tar.gz`.
 #[derive(Debug, PartialEq)]
 pub struct Host {
     pub target: &'static str,
-    components: &'static [Component],
+    components: &'static [(&'static str, &'static str, u64)],
     /// The C and link toolchain it brings besides Rust's components.
     c_toolchain: Option<&'static CToolchain>,
-}
-
-#[derive(Debug, PartialEq)]
-struct Component {
-    name: &'static str,
-    sha256: &'static str,
-    bytes: u64,
 }
 
 /// A Windows C/link toolchain archive, pinned by its SHA-256 and byte length.
@@ -83,21 +77,21 @@ const HOSTS: &[Host] = &[
     Host {
         target: "aarch64-apple-darwin",
         components: &[
-            Component {
-                name: "rustc",
-                sha256: "cc998c1dc8df006106472357aa87838b2da3f7b25446b98a94cfd58796cb0610",
-                bytes: 85305190,
-            },
-            Component {
-                name: "cargo",
-                sha256: "b5cc7634f919949c3e5e131123f813416dc47f6b809a5371d12f1f593595ae13",
-                bytes: 13082476,
-            },
-            Component {
-                name: "rust-std",
-                sha256: "c124006d63885ba1029aca49efd59e93be6b2b171c379318ff94a00ef5eba664",
-                bytes: 48506029,
-            },
+            (
+                "rustc",
+                "cc998c1dc8df006106472357aa87838b2da3f7b25446b98a94cfd58796cb0610",
+                85305190,
+            ),
+            (
+                "cargo",
+                "b5cc7634f919949c3e5e131123f813416dc47f6b809a5371d12f1f593595ae13",
+                13082476,
+            ),
+            (
+                "rust-std",
+                "c124006d63885ba1029aca49efd59e93be6b2b171c379318ff94a00ef5eba664",
+                48506029,
+            ),
         ],
         c_toolchain: None,
     },
@@ -105,94 +99,94 @@ const HOSTS: &[Host] = &[
     Host {
         target: "x86_64-apple-darwin",
         components: &[
-            Component {
-                name: "rustc",
-                sha256: "dad7c1300549bc846e1f02652fa11d131b86cdbb8288d64da5f62b4504d62a8f",
-                bytes: 104855037,
-            },
-            Component {
-                name: "cargo",
-                sha256: "ed05dab7a703d1b4c6fa5cec8e99272cb1c3902a323986c80e0bc57915c85ddd",
-                bytes: 13439668,
-            },
-            Component {
-                name: "rust-std",
-                sha256: "5cc4606fdd6c9226be51f59a333942cc8a203e74f7da38d47aaaf44b986bfe3c",
-                bytes: 48891033,
-            },
+            (
+                "rustc",
+                "dad7c1300549bc846e1f02652fa11d131b86cdbb8288d64da5f62b4504d62a8f",
+                104855037,
+            ),
+            (
+                "cargo",
+                "ed05dab7a703d1b4c6fa5cec8e99272cb1c3902a323986c80e0bc57915c85ddd",
+                13439668,
+            ),
+            (
+                "rust-std",
+                "5cc4606fdd6c9226be51f59a333942cc8a203e74f7da38d47aaaf44b986bfe3c",
+                48891033,
+            ),
         ],
         c_toolchain: None,
     },
     Host {
         target: "x86_64-unknown-linux-gnu",
         components: &[
-            Component {
-                name: "rustc",
-                sha256: "85e7c0e6f21636f714e2a42966011364a6cc56b6548126d32144d6ba90904966",
-                bytes: 141445153,
-            },
-            Component {
-                name: "cargo",
-                sha256: "47babc028247e26577f8a1bf390b11f447ad9b7ab93f5c9a0dda078935fc149b",
-                bytes: 14520879,
-            },
-            Component {
-                name: "rust-std",
-                sha256: "d1290c05994a59c029e562cb75be1bddc6fb11a4c501e1b7b0f61d119c6cbb12",
-                bytes: 50361623,
-            },
+            (
+                "rustc",
+                "85e7c0e6f21636f714e2a42966011364a6cc56b6548126d32144d6ba90904966",
+                141445153,
+            ),
+            (
+                "cargo",
+                "47babc028247e26577f8a1bf390b11f447ad9b7ab93f5c9a0dda078935fc149b",
+                14520879,
+            ),
+            (
+                "rust-std",
+                "d1290c05994a59c029e562cb75be1bddc6fb11a4c501e1b7b0f61d119c6cbb12",
+                50361623,
+            ),
         ],
         c_toolchain: None,
     },
     Host {
         target: WINDOWS_X64_TARGET,
         components: &[
-            Component {
-                name: "rustc",
-                sha256: "43b17e9a9134ea72562bfbb23728a830f671ea9be1db6a72597a8d240e986b35",
-                bytes: 161274138,
-            },
-            Component {
-                name: "cargo",
-                sha256: "57e54617be4420dbb967ca8293f5ace7168104ac12efa9dc7c5c3bda112f8b36",
-                bytes: 18659998,
-            },
-            Component {
-                name: "rust-std",
-                sha256: "6546651238a3ac092b763511be524ca6eda6103e5d47342416923be1b3ce837c",
-                bytes: 44957351,
-            },
-            Component {
-                name: "rust-mingw",
-                sha256: "30263d7bb4fd0bf63a153afe36d7fc102f929a7d42781651c6b3a03a414ba428",
-                bytes: 9594887,
-            },
+            (
+                "rustc",
+                "43b17e9a9134ea72562bfbb23728a830f671ea9be1db6a72597a8d240e986b35",
+                161274138,
+            ),
+            (
+                "cargo",
+                "57e54617be4420dbb967ca8293f5ace7168104ac12efa9dc7c5c3bda112f8b36",
+                18659998,
+            ),
+            (
+                "rust-std",
+                "6546651238a3ac092b763511be524ca6eda6103e5d47342416923be1b3ce837c",
+                44957351,
+            ),
+            (
+                "rust-mingw",
+                "30263d7bb4fd0bf63a153afe36d7fc102f929a7d42781651c6b3a03a414ba428",
+                9594887,
+            ),
         ],
         c_toolchain: Some(&MINGW),
     },
     Host {
         target: WINDOWS_ARM64_TARGET,
         components: &[
-            Component {
-                name: "rustc",
-                sha256: "261a6bff00129905f97e07db33aaecb994d22ab40efef2b6b1e27b8cc37231a8",
-                bytes: 140086017,
-            },
-            Component {
-                name: "cargo",
-                sha256: "a678122654b6ca4240997cec6ab6e3c91fa0e79466939c06b079c8a717efc6aa",
-                bytes: 14008619,
-            },
-            Component {
-                name: "rust-std",
-                sha256: "a492480db6ba615c70a10c8c146012d04276122cd57d00aef225764e0791968f",
-                bytes: 45343615,
-            },
-            Component {
-                name: "rust-mingw",
-                sha256: "69fe700a14751b7b5a191bab92a9620e4deb4095f232873476033d1a6a5d8cd7",
-                bytes: 870178,
-            },
+            (
+                "rustc",
+                "261a6bff00129905f97e07db33aaecb994d22ab40efef2b6b1e27b8cc37231a8",
+                140086017,
+            ),
+            (
+                "cargo",
+                "a678122654b6ca4240997cec6ab6e3c91fa0e79466939c06b079c8a717efc6aa",
+                14008619,
+            ),
+            (
+                "rust-std",
+                "a492480db6ba615c70a10c8c146012d04276122cd57d00aef225764e0791968f",
+                45343615,
+            ),
+            (
+                "rust-mingw",
+                "69fe700a14751b7b5a191bab92a9620e4deb4095f232873476033d1a6a5d8cd7",
+                870178,
+            ),
         ],
         c_toolchain: Some(&LLVM_MINGW),
     },
@@ -203,7 +197,7 @@ impl Host {
     pub fn download_bytes(&self) -> u64 {
         self.components
             .iter()
-            .map(|component| component.bytes)
+            .map(|(_, _, bytes)| bytes)
             .sum::<u64>()
             + self.c_toolchain.map_or(0, |compiler| compiler.bytes)
     }
@@ -516,6 +510,24 @@ pub fn installed() -> Option<Toolchain> {
     (toolchain.dir.join(COMPLETE).is_file() && toolchain.compiler_available()).then_some(toolchain)
 }
 
+// Check the byte after the pinned prefix before the shared writer can commit it.
+struct PinnedArchive<R>(std::io::Take<R>);
+impl<R: Read> Read for PinnedArchive<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let n = self.0.read(buffer)?;
+        if n == 0 && self.0.limit() == 0 && self.0.get_mut().read(&mut [0])? != 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                crate::i18n::tr("Rust toolchain archive exceeds its pinned size."),
+            ));
+        }
+        Ok(n)
+    }
+}
+
 fn download_archive(
     url: &str,
     bytes: u64,
@@ -523,7 +535,32 @@ fn download_archive(
     to: &Path,
     progress: &impl Fn(f32),
 ) -> Result<(), String> {
-    backend::download(url, bytes, sha256, to, progress)?;
+    save_archive(
+        backend::get(url)?.into_reader(),
+        url,
+        bytes,
+        sha256,
+        to,
+        progress,
+    )
+}
+
+fn save_archive(
+    reader: impl Read,
+    name: &str,
+    bytes: u64,
+    sha256: &str,
+    to: &Path,
+    progress: &impl Fn(f32),
+) -> Result<(), String> {
+    backend::save_checked(
+        PinnedArchive(reader.take(bytes)),
+        bytes,
+        name,
+        sha256,
+        to,
+        progress,
+    )?;
     let actual = fs::metadata(to).map_err(|error| error.to_string())?.len();
     if actual != bytes {
         let _ = fs::remove_file(to);
@@ -560,20 +597,12 @@ pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
     let count = (host.components.len() + usize::from(host.c_toolchain.is_some())) as f32;
-    for (i, component) in host.components.iter().enumerate() {
-        let name = component.name;
-        let sha256 = component.sha256;
+    for (i, &(name, sha256, bytes)) in host.components.iter().enumerate() {
         let file = format!("{name}-{VERSION}-{}.tar.gz", host.target);
         let archive = root().join(format!(".{file}"));
         let step = |f: f32| progress((i as f32 + f) / count);
-        download_archive(
-            &format!("{DIST}/{file}"),
-            component.bytes,
-            sha256,
-            &archive,
-            &step,
-        )
-        .map_err(|e| format!("Rust {VERSION} ({name}): {e}"))?;
+        download_archive(&format!("{DIST}/{file}"), bytes, sha256, &archive, &step)
+            .map_err(|e| format!("Rust {VERSION} ({name}): {e}"))?;
         let unpacked = unpack(&archive, &partial);
         let _ = fs::remove_file(&archive);
         unpacked.map_err(|e| format!("Rust {VERSION} ({name}): {e}"))?;
@@ -927,58 +956,48 @@ mod tests {
 
     #[test]
     fn archive_download_checks_pinned_length_as_well_as_hash() {
-        use std::{io::BufRead, net::TcpListener};
-        let _guard = crate::native_mods::TEST_STATE.lock().unwrap();
-        let directory =
-            std::env::temp_dir().join(format!("horizon-rust-length-{}", std::process::id()));
-        fs::create_dir_all(&directory).unwrap();
-        let archive = directory.join("archive");
-        for (bytes, accepted) in [(4, true), (5, false)] {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let url = format!("http://{}/archive", listener.local_addr().unwrap());
-            let server = std::thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut request = String::new();
-                let mut reader = std::io::BufReader::new(&mut stream);
-                while reader.read_line(&mut request).unwrap() != 0 {
-                    if request.ends_with("\r\n\r\n") {
-                        break;
-                    }
-                }
-                drop(reader);
-                stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nrust",
-                    )
-                    .unwrap();
-            });
-            let result = download_archive(
-                &url,
+        let directory = tempfile::tempdir().unwrap();
+        let archive = directory.path().join("archive");
+        let mut oversized = vec![b'x'; 1 << 20];
+        oversized[..4].copy_from_slice(b"rust");
+        for (body, bytes, accepted) in [
+            (b"rust".to_vec(), 4, true),
+            (b"rust".to_vec(), 5, false),
+            (oversized, 4, false),
+            (b"oops".to_vec(), 4, false),
+        ] {
+            let mut reader = std::io::Cursor::new(body);
+            let result = save_archive(
+                &mut reader,
+                "fixture",
                 bytes,
                 "521fe5c9ece1aa1f8b66228171598263574aefc6fa4ba06a61747ec81ee9f5a3",
                 &archive,
                 &|_| {},
             );
-            server.join().unwrap();
-            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(result.is_ok(), accepted, "{result:?}");
             assert_eq!(archive.exists(), accepted);
+            if reader.get_ref().len() > 5 {
+                assert_eq!(reader.position(), 5);
+            }
+            if accepted {
+                fs::remove_file(&archive).unwrap();
+            }
+            assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
         }
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn every_host_pins_each_component_once_with_a_sha256() {
         for host in HOSTS {
-            let names: Vec<&str> = host.components.iter().map(|c| c.name).collect();
+            let names: Vec<&str> = host.components.iter().map(|(name, ..)| *name).collect();
             assert_eq!(
                 &names[..3],
                 ["rustc", "cargo", "rust-std"],
                 "{}",
                 host.target
             );
-            for component in host.components {
-                let name = component.name;
-                let sha = component.sha256;
+            for &(name, sha, _) in host.components {
                 assert!(
                     sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()),
                     "{name} {}",
@@ -995,8 +1014,14 @@ mod tests {
             .find(|h| h.target == WINDOWS_ARM64_TARGET)
             .unwrap();
         assert!(x64.target.ends_with("-gnu"), "preserve the x64 toolchain");
-        assert!(x64.components.iter().any(|c| c.name == "rust-mingw"));
-        assert!(arm64.components.iter().any(|c| c.name == "rust-mingw"));
+        assert!(x64
+            .components
+            .iter()
+            .any(|(name, ..)| *name == "rust-mingw"));
+        assert!(arm64
+            .components
+            .iter()
+            .any(|(name, ..)| *name == "rust-mingw"));
         // Only Windows brings a C toolchain; macOS and Linux use the system's.
         for host in HOSTS {
             assert_eq!(
