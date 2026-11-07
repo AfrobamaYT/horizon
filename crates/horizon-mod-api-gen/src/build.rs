@@ -118,7 +118,8 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let code = super::points::records(&super::points::game_points(root)?)
+    let private = super::points::source::build_input(root)?;
+    let code = super::points::records(&super::points::game_points(root)?, &private)
         + &super::sites::ids(root).map_err(|e| e.to_string())?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
