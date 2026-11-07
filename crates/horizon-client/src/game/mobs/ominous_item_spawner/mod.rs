@@ -107,9 +107,10 @@ impl Game<'_> {
     /// warning sound, then the item) and `tickClient` (particles every 5
     /// game ticks).
     pub(super) fn tick_ominous_item_spawners(&mut self) {
-        let spawners = std::mem::take(&mut self.ominous_spawners);
-        let mut kept = Vec::with_capacity(spawners.len());
-        for mut s in spawners {
+        let mut spawners = self.ominous_spawners.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
+        spawners.retain_mut(|s| {
             s.tick_count += 1;
             let at = block(s.position);
             let center = at.map(|v| f64::from(v) + 0.5);
@@ -123,16 +124,15 @@ impl Game<'_> {
                 );
             }
             if s.tick_count >= s.spawn_item_after {
-                self.spawn_ominous_item(&s);
-                continue;
+                self.spawn_ominous_item(s);
+                return false;
             }
             if self.world.game_time % 5 == 0 {
                 self.ominous_spawner_particles(s.position);
             }
-            kept.push(s);
-        }
-        kept.append(&mut self.ominous_spawners);
-        self.ominous_spawners = kept;
+            true
+        });
+        self.ominous_spawners.restore(spawners);
     }
     /// `handleAddEntity` for a spawner a server sent: its item comes with the
     /// entity data (`ItemStack.EMPTY` until then, which draws nothing).
@@ -151,9 +151,7 @@ impl Game<'_> {
     /// the particles every 5 game ticks; only the server spawns the item.
     pub(super) fn tick_remote_ominous_item_spawners(&mut self) {
         let at: Vec<[f64; 3]> = self.ominous_spawners.iter().map(|s| s.position).collect();
-        for s in &mut self.ominous_spawners {
-            s.tick_count += 1;
-        }
+        self.ominous_spawners.for_each_mut(|s| s.tick_count += 1);
         if self.world.game_time % 5 == 0 {
             for position in at {
                 self.ominous_spawner_particles(position);
