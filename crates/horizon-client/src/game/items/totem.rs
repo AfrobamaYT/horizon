@@ -282,13 +282,12 @@ mod death_protection_tests {
     fn hand_lookup_matches_the_component_map() {
         let totem = json!({"death_effects": [{"type": "minecraft:clear_all_effects"}]});
         let mut models = ItemModels::default();
-        models.prototypes.insert(
+        let prototypes = std::sync::Arc::make_mut(&mut models.prototypes);
+        prototypes.insert(
             "minecraft:totem_of_undying".into(),
             [("minecraft:death_protection".to_owned(), totem.clone())].into(),
         );
-        models
-            .prototypes
-            .insert("minecraft:diamond_sword".into(), Default::default());
+        prototypes.insert("minecraft:diamond_sword".into(), Default::default());
         let mut patched_sword = ItemStack::new("minecraft:diamond_sword", 1);
         patched_sword.data_mut().set_other(
             "minecraft:death_protection",
