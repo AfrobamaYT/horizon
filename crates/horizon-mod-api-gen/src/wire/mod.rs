@@ -7,6 +7,7 @@ mod ty;
 
 use crate::capability_providers::key_shapes;
 use crate::index::{Found, Index};
+use std::fmt::Write as _;
 use std::path::Path;
 use syn::{FnArg, Item, Pat, ReturnType, TraitItem};
 use ty::{Ty, Types};
@@ -254,6 +255,8 @@ pub(super) struct Unbound {
 }
 
 pub(super) struct Surface<'a> {
+    /// The variants of the generated `HookId`, each with its hook's name.
+    pub(super) hooks: Vec<(String, String)>,
     pub(super) types: Types<'a>,
     pub(super) methods: Vec<Method>,
     pub(super) unbound: Vec<Unbound>,
@@ -305,6 +308,7 @@ pub(super) fn surface<'a>(
     let mut unbound = Vec::new();
     let mut excused = Vec::new();
     let mut parts = Vec::new();
+    let hooks = hook_ids(&mut types)?;
     for owner in IMPORTS.iter().chain(exports()) {
         let (path, args) = owner_parts(owner)?;
         let Found::Item(id) = types.index.resolve_path(api, &path)? else {
@@ -400,6 +404,7 @@ pub(super) fn surface<'a>(
     std::fs::write(target.join("wire-skipped.txt"), report)
         .map_err(|e| format!("writing wire report: {e}"))?;
     Ok(Surface {
+        hooks,
         types,
         methods,
         unbound,
@@ -455,6 +460,27 @@ fn coverage(surface: &Surface<'_>) -> Result<(), String> {
     }
 }
 
+/// The variants of the generated `HookId`, each with its hook's name.
+fn hook_ids(types: &mut Types<'_>) -> Result<Vec<(String, String)>, String> {
+    let api = types.index.module("mod_api", &[])?;
+    let Found::Item(id) = types.index.resolve_path(api, &["HookId".to_string()])? else {
+        return Err("HookId is not a mod_api enum".into());
+    };
+    let Item::Enum(item) = types.index.item(id) else {
+        return Err("HookId is not an enum".into());
+    };
+    Ok(item
+        .variants
+        .iter()
+        .map(|v| {
+            (
+                v.ident.to_string(),
+                heck::ToSnakeCase::to_snake_case(v.ident.to_string().as_str()),
+            )
+        })
+        .collect())
+}
+
 fn method(
     types: &mut Types<'_>,
     module: usize,
@@ -502,13 +528,43 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
-/// The `Wire` impls of the API's plain data, from its sources and its generated files.
-pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<String, String> {
+/// What the boundary generates from the API's sources and its generated files: the `Wire`
+/// impls and layout hash of `mod_api`, and the mod's side of every call.
+pub struct Generated {
+    pub wire: String,
+    pub guest: String,
+}
+
+pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, String> {
     let providers = crate::capability_providers::generate(root, included)?.0;
     let mut with_providers = included.to_vec();
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
-    Ok(emit::types(&surface.types))
+    let mut wire = emit::types(&surface.types);
+    let mut guest = calls::guest(&surface.types, &surface.methods, &surface.parts);
+    guest.push_str(&calls::hook_names(&surface.hooks));
+    guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
+    let _ = writeln!(wire, "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};", layout(&surface));
+    Ok(Generated { wire, guest })
+}
+
+/// A hash of everything the two sides must agree on: every method's id and signature, and
+/// every type's shape (FNV-1a over their descriptions).
+fn layout(surface: &Surface<'_>) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut feed = |text: &str| {
+        for byte in text.bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    };
+    for method in &surface.methods {
+        feed(&format!("{method:?}"));
+    }
+    for def in &surface.types.defs {
+        feed(&format!("{:?}", (&def.rust, &def.kind)));
+    }
+    feed(&format!("{:?}", surface.hooks));
+    hash
 }
 
 #[cfg(test)]
@@ -604,8 +660,9 @@ mod tests {
                         .or_default() += 1;
                 }
                 println!("classes {classes:?}");
-                let code = super::calls::guest(&surface.types, &surface.methods);
+                let code = super::calls::guest(&surface.types, &surface.methods, &surface.parts);
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
+                for m in super::calls::imports(&surface.methods) { if !super::calls::plain_pub(m) { println!("nonplain {}::{} ({:?}) -> {:?}", m.owner, m.name, m.params.iter().map(|p| &p.1).collect::<Vec<_>>(), m.ret); } }
                 let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
                 std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
                 println!(
