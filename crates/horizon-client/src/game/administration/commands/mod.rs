@@ -959,6 +959,10 @@ impl Game<'_> {
                 .filter(|c| c.id != 0)
                 .map(|c| Target::Cloud(c.id)),
         );
+        // `isRemoved` from a mod's call on, though the sweep has not taken it out.
+        if !self.persist.removals.is_empty() {
+            candidates.retain(|t| !self.persist.removals.contains(t));
+        }
         candidates
     }
     /// The loaded levels, in the order the server holds them: the
@@ -1005,6 +1009,10 @@ impl Game<'_> {
     /// `ServerLevel.getEntity`: whether the level in place still holds the
     /// entity a target names. Discard removes mobs from lookup immediately.
     fn level_holds(&self, t: Target) -> bool {
+        // Removed by a mod and waiting for the sweep: `isRemoved` from the call on.
+        if self.persist.removals.contains(&t) {
+            return false;
+        }
         match t {
             // A player is in no level of its own.
             Target::Player | Target::Guest(_) => true,
