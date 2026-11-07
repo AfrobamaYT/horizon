@@ -221,6 +221,31 @@ impl<A: TryIntoEngine, B: TryIntoEngine<Error = A::Error>> TryIntoEngine for (A,
     }
 }
 
+impl TryIntoApi for super::spill::BlockItemDrop {
+    type Api = mod_api::NativeItemDrop;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::NativeItemDrop::new(
+            self.stack.try_into_api()?,
+            self.position,
+            self.velocity,
+            self.pickup_delay,
+        ))
+    }
+}
+impl TryIntoEngine for mod_api::NativeItemDrop {
+    type Engine = super::spill::BlockItemDrop;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            stack: self.stack.try_into_engine(items)?,
+            position: self.position,
+            velocity: self.velocity,
+            pickup_delay: self.pickup_delay,
+        })
+    }
+}
+
 impl TryIntoEngine for mod_api::NativeItemDisplayContext {
     type Engine = horizon_assets::item_model::DisplayContext;
     type Error = ();
@@ -313,6 +338,36 @@ impl TryIntoApi for EngineStack {
     }
 }
 
+impl TryIntoApi for horizon_assets::item_model::StackView {
+    type Api = ApiStack;
+    type Error = StackReadError;
+
+    fn try_into_api(&self) -> Result<ApiStack, StackReadError> {
+        let count = u32::try_from(self.count)
+            .ok()
+            .filter(|&count| count > 0)
+            .ok_or(StackReadError::Empty)?;
+        let components = Tag::compound(self.patch.iter().map(|(name, value)| match value {
+            Some(value) => (
+                horizon_core::nbt::JavaString::from(name.as_str()),
+                horizon_client_core::scoreboard::json_to_tag(value),
+            ),
+            None => (
+                horizon_core::nbt::JavaString::from(format!("!{name}").as_str()),
+                Tag::Compound(Compound::new()),
+            ),
+        }));
+        let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
+        EngineStack {
+            item: self.item.as_str().into(),
+            count,
+            damage,
+            extra,
+        }
+        .try_into_api()
+    }
+}
+
 impl TryIntoEngine for mod_api::ItemResource {
     type Engine = EngineStack;
     type Error = StackWriteError;
@@ -321,27 +376,29 @@ impl TryIntoEngine for mod_api::ItemResource {
     }
 }
 
+/// Encode an API value for a read-only engine predicate, without imposing resident maxima.
+/// The write conversion below adds authoritative registry-dependent validation.
+pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
+    let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
+    let patch = value
+        .components()
+        .map(|patch| Tag::Compound(patch.as_nbt().clone()));
+    let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
+    Ok(EngineStack {
+        item: id.clone(),
+        count: value.count(),
+        damage: value.damage(),
+        extra,
+    })
+}
+
 impl TryIntoEngine for ApiStack {
     type Engine = EngineStack;
     type Error = StackWriteError;
 
     fn try_into_engine(&self, items: &Items) -> Result<EngineStack, Self::Error> {
-        let id =
-            mod_api::__private::item_key_id(self.item()).ok_or(StackWriteError::UnknownItem)?;
-        let (id, definition) = items
-            .items
-            .get_key_value(id)
-            .ok_or(StackWriteError::UnknownItem)?;
-        let patch = self
-            .components()
-            .map(|patch| Tag::Compound(patch.as_nbt().clone()));
-        let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-        let stack = EngineStack {
-            item: id.clone(),
-            count: self.count(),
-            damage: self.damage(),
-            extra,
-        };
+        let stack = stack_value(self)?;
+        let definition = items.get(&stack.item).ok_or(StackWriteError::UnknownItem)?;
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -675,11 +732,32 @@ impl mod_api::menu::SlotView for ApiSlot<'_> {
     }
 }
 /// Adapt a synchronous slot event; engine slot rules still own every write.
+pub(crate) fn menu_slot_rules(
+    context: &horizon_world::native_load_context::LoopContext,
+    menu: &str,
+    slot: usize,
+    stack: &EngineStack,
+    may_place: &mut bool,
+    max_stack: &mut u32,
+) {
+    if !mod_api::__private::has_part_hook(mod_api::HookId::MenuSlotRules) {
+        return;
+    }
+    let Ok(stack) = stack.try_into_api() else {
+        return;
+    };
+    let context = mod_api::OwningLoop::new(context);
+    mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
+}
+
 pub(crate) fn stacked_on_other(
     context: &horizon_world::native_load_context::LoopContext,
     event: &mut crate::menu::StackedOnOther<'_>,
     canceled: &mut bool,
 ) {
+    if !mod_api::__private::listened(mod_api::HookId::ItemStackedOnOther) {
+        return;
+    }
     let Ok(mut carried) = event.carried.0.try_into_api() else {
         return;
     };
@@ -1081,6 +1159,7 @@ fn prepare_stack_boundary_tests() {
     mod_api::__private::install_parts(&[]).unwrap();
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
+        "minecraft:stick",
         "minecraft:diamond_sword",
         "minecraft:netherite_chestplate",
         "minecraft:diamond_chestplate",
@@ -1257,6 +1336,9 @@ impl super::Game<'_> {
         entity: &mut crate::containers::ModBlockEntity,
         carried: &mut Option<EngineStack>,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::MenuButton) {
+            return;
+        }
         let (Ok(mut api), Ok(mut cursor)) = (entity.try_into_api(), carried.try_into_api()) else {
             return;
         };
@@ -1277,6 +1359,9 @@ impl super::Game<'_> {
         stack: &mut EngineStack,
         handled: &mut bool,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) {
+            return;
+        }
         let (Ok(mut api), Ok(mut held)) = (entity.try_into_api(), stack.try_into_api()) else {
             return;
         };
@@ -1299,14 +1384,15 @@ impl super::GameLevel<'_> {
         entity: &crate::containers::ModBlockEntity,
         drops: &mut Vec<EngineStack>,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::PreRemoveSideEffects) {
+            return;
+        }
         let Ok(api) = entity.try_into_api() else {
             return;
         };
         let mut added = Vec::new();
         self.native_pre_remove_side_effects(pos, state, &api, &mut added);
-        if let Ok(added) = added.try_into_engine(self.items) {
-            drops.extend(added);
-        }
+        drops.extend(added);
     }
 }
 
@@ -1480,5 +1566,106 @@ mod completion_snapshot_tests {
         assert_eq!(engine.int_value, Some(43));
         assert_eq!(engine.apply("foo 123 bar"), "foo 43 bar");
         assert_eq!(source.text, "42");
+#[cfg(test)]
+mod mutable_output_tests {
+    use super::*;
+
+    #[test]
+    fn array_outputs_are_admitted_only_after_every_stack_passes_resident_limits() {
+        prepare_stack_boundary_tests();
+        let root =
+            std::env::temp_dir().join(format!("horizon-api-array-output-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:stick":{"minecraft:max_stack_size":64}}"#,
+        )
+        .unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items =
+            Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        let key = mod_api::__private::item_key("minecraft:stick").unwrap();
+        let mut api = [
+            ApiStack::new(key, 8).unwrap(),
+            ApiStack::new(key, 65).unwrap(),
+        ];
+        let mut output = [
+            EngineStack::new("minecraft:stick", 3),
+            EngineStack::new("minecraft:stick", 4),
+        ];
+        let before = output.clone();
+        let converted = api.try_into_engine(&items);
+        assert_eq!(
+            converted,
+            Err(StackWriteError::CountExceeded { maximum: 64 })
+        );
+        if let Ok(validated) = converted {
+            output = validated;
+        }
+        assert_eq!(
+            output, before,
+            "a legal first element must not be applied before a rejected second element"
+        );
+
+        api[1].set_count(64).unwrap();
+        output = api.try_into_engine(&items).unwrap();
+        assert_eq!(
+            output,
+            [
+                EngineStack::new("minecraft:stick", 8),
+                EngineStack::new("minecraft:stick", 64)
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod item_model_snapshot_tests {
+    use super::*;
+    use horizon_assets::item_model::StackView;
+
+    #[test]
+    fn model_snapshots_keep_component_patches_without_runtime_bundle_selection() {
+        prepare_stack_boundary_tests();
+        let mut view = StackView::new("minecraft:stick", 2);
+        view.bundle_selected = 3;
+        view.patch
+            .insert("minecraft:damage".into(), Some(serde_json::json!(7)));
+        view.patch.insert(
+            "example:charge".into(),
+            Some(serde_json::json!({"amount":4})),
+        );
+        view.patch.insert("minecraft:custom_name".into(), None);
+        let snapshot = view.try_into_api().unwrap();
+        assert_eq!(
+            snapshot.item(),
+            mod_api::__private::item_key("minecraft:stick").unwrap()
+        );
+        assert_eq!(snapshot.count(), 2);
+        assert_eq!(snapshot.damage(), 7);
+        let patch = snapshot.components().unwrap().as_nbt();
+        assert_eq!(
+            patch.get("example:charge").unwrap().get("amount"),
+            Some(&Tag::Int(4))
+        );
+        assert!(patch.get("!minecraft:custom_name").is_some());
+        assert!(patch.get("bundle_selected").is_none());
+        assert_eq!(view.bundle_selected, 3);
+    }
+
+    #[test]
+    fn empty_model_views_do_not_become_owned_stack_sentinels() {
+        prepare_stack_boundary_tests();
+        for count in [-1, 0] {
+            assert_eq!(
+                StackView::new("minecraft:stick", count).try_into_api(),
+                Err(StackReadError::Empty)
+            );
+        }
+        assert_eq!(
+            StackView::new("example:unknown", 1).try_into_api(),
+            Err(StackReadError::UnknownItem)
+        );
     }
 }

@@ -1592,7 +1592,7 @@ impl Game<'_> {
         &mut self,
         context: &mod_api::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
-        carried: &mut Option<ItemStack>,
+        carried: &mut Option<mod_api::ItemStack>,
     ) {
         self.fire_menu_button(context, entity, carried);
     }
@@ -1625,7 +1625,7 @@ impl Game<'_> {
         entity: &mut ModBlockEntity,
         container_slots: usize,
         slot: usize,
-        stack: &mut ItemStack,
+        stack: &mut mod_api::ItemStack,
         handled: &mut bool,
     ) {
         self.fire_menu_quick_move(pos, entity, container_slots, slot, stack, handled);

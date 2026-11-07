@@ -60,7 +60,7 @@ pub trait MerchantsBackendMut {
         merchant: MerchantRef,
         index: u32,
         offer: MerchantOffer,
-    ) -> Result<bool, crate::StackWriteError>;
+    ) -> Result<bool, StackWriteError>;
     /// Side: server.
     /// Appends an offer, as `getOffers().add(offer)` does. Offers not rolled
     /// yet are rolled first, as `getOffers` does for a player's first trade
@@ -71,7 +71,7 @@ pub trait MerchantsBackendMut {
         &mut self,
         merchant: MerchantRef,
         offer: MerchantOffer,
-    ) -> Result<bool, crate::StackWriteError>;
+    ) -> Result<bool, StackWriteError>;
     /// Side: server.
     /// Removes offer `index`, the ones after it moving up. False for an index
     /// past the end or a stale handle.
