@@ -17,6 +17,7 @@ winresource = "0.1"
 
 [dependencies]
 horizon-mod-runtime = { path = "../horizon-mod-runtime" }
+horizon-mod-render = { path = "../horizon-mod-render" }
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
@@ -168,6 +169,7 @@ path = "examples/wind_burst_hook_probe.rs"
 workspace = true
 
 [dev-dependencies]
+horizon-mod-runtime = { path = "../horizon-mod-runtime", features = ["test-work-count"] }
 horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
 horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
 horizon-items = { path = "../horizon-items", features = ["test-support"] }

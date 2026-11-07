@@ -378,6 +378,9 @@ pub struct Attack {
     pub attacker: i32,
     /// The projectile delivering this hit, if any (`DamageSource.getDirectEntity`).
     pub projectile: Option<i32>,
+    /// An explicitly supplied direct entity, including 0 for no direct entity.
+    /// None uses the normal melee/projectile factory rules.
+    pub direct: Option<i32>,
     /// The verified causing player's UUID, when the attacker is a player.
     pub player_uuid: Option<[i32; 4]>,
     /// What it holds, or none when it is not known (no native mod listens: the game only
@@ -388,6 +391,7 @@ pub struct Attack {
 pub static NO_ATTACK: Attack = Attack {
     attacker: 0,
     projectile: None,
+    direct: None,
     player_uuid: None,
     held: [None, None],
 };
@@ -423,6 +427,9 @@ impl Attack {
     /// This impact's direct entity for `damage_type`: the projectile when the
     /// type names one, else 0. Melee uses the attacker and does not call this.
     pub fn projectile_direct(&self, damage_type: &str) -> i32 {
+        if let Some(direct) = self.direct {
+            return direct;
+        }
         if names_its_projectile(damage_type) {
             self.projectile.unwrap_or(0)
         } else {
@@ -1507,6 +1514,7 @@ mod tests {
         let attack = Attack {
             attacker: 7,
             projectile: None,
+            direct: None,
             player_uuid: None,
             held: [Some(sword.clone()), None],
         };
@@ -1524,6 +1532,7 @@ mod tests {
         let attack = Attack {
             attacker: 0,
             projectile: Some(12),
+            direct: None,
             player_uuid: None,
             held: [None, None],
         };
