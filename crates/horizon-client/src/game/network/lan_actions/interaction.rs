@@ -266,6 +266,10 @@ impl Game<'_> {
             self.lan_log_event(horizon_client::lan::hub::HostEvent::Warn(line));
             return Err(ActionRefused::OutOfReach);
         }
+        let spectator = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| host.hub.guests[gi].spectator());
         let face = hit.face;
         // handleUseItemOn: above or below the world nothing is used and
         // the player is told the limit (the blocks are not resent);
@@ -291,7 +295,7 @@ impl Game<'_> {
             .contains(f64::from(hit.pos[0]), f64::from(hit.pos[2]))
         {
             if spectator && self.spectator_use_portal(conn, gi, hit.pos) {
-                return Ok(());
+                return Ok(true);
             }
             let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
             let heard = self.audio.capture.as_ref().map_or(0, Vec::len);

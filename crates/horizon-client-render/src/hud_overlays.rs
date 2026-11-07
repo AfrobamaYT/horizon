@@ -1406,12 +1406,12 @@ mod subtitle_tests {
 mod text_position_tests {
     use super::*;
     use crate::{font::Font, hud::Rect};
-    use std::{collections::HashMap, path::Path};
+    use std::collections::HashMap;
 
     /// The missing-glyph metrics let these tests run without game assets.
     fn font() -> Font {
         Font::load(
-            Path::new("/nonexistent-horizon-hud-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::default(),
             &HashMap::new(),
             &[],
             (1, 1),

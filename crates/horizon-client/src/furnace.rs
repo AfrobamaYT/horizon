@@ -270,9 +270,11 @@ mod tests {
     #[test]
     fn loaded_totals_survive_until_actual_completion() {
         let (items, recipes, providers) = data("loaded-total");
+        let context = crate::test_resources::server_loop_context();
         assert_eq!(
             recipes
                 .cook(
+                    context,
                     FurnaceKind::Furnace.recipe_type(),
                     &ItemStack::new("test:ore", 3)
                 )
@@ -296,7 +298,10 @@ mod tests {
             for elapsed in 1..=6 {
                 let mut drops = Vec::new();
                 assert!(!f.idle());
-                assert_eq!(f.tick(&recipes, &items, &providers, &mut drops), None);
+                assert_eq!(
+                    f.tick(context, &recipes, &items, &providers, &mut drops),
+                    None
+                );
                 assert!(drops.is_empty());
                 assert_eq!((f.lit_remaining, f.lit_total), (20 - elapsed, 20));
                 assert!(f.items[1].is_none());
@@ -325,7 +330,7 @@ mod tests {
                 );
             }
             // A changed input still goes through setItem's independent reset.
-            f.set_input(&recipes, Some(ItemStack::new("test:ingot", 1)));
+            f.set_input(context, &recipes, Some(ItemStack::new("test:ingot", 1)));
             assert_eq!((f.cooking_timer, f.cooking_total), (0, 200));
         }
     }
