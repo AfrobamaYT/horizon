@@ -407,6 +407,7 @@ impl BlockEntityDraw {
                 |index| (index >= 0).then_some(record.tint & 0xFF_FFFF),
                 &mut extra,
             );
+            super::minecarts::scale_tint_alpha(&mut extra, faces, record.tint);
             let count = extra.len();
             for (at, _) in &mut self.spins {
                 if *at >= record.at {
@@ -430,13 +431,17 @@ impl BlockEntityDraw {
                     cpu_vertices: record.at as u32,
                     generation: record.generation,
                     slot: record.slot,
-                    instance: prepared_instance(
-                        record.pose,
-                        origin,
-                        camera,
-                        record.tint,
-                        record.light,
-                    ),
+                    instance: {
+                        let mut instance = prepared_instance(
+                            record.pose,
+                            origin,
+                            camera,
+                            record.tint,
+                            record.light,
+                        );
+                        instance.tint[3] = (record.tint >> 24) as f32 / 255.0;
+                        instance
+                    },
                 }),
         );
     }
@@ -1109,7 +1114,8 @@ impl Game<'_> {
 
     /// Draws the resolved standalone model under `draw`'s pose: unturned, from
     /// the block's lower north-west corner, lit by `draw.light`. Faces with a tint
-    /// index are multiplied by 0xRRGGBB `tint` (0xFFFFFF for none), others unchanged.
+    /// index are multiplied by `tint` (`0xAARRGGBB`, the same as `WorldQuad::color`;
+    /// `0xFFFFFFFF` for none), alpha included. Faces with no tint index stay opaque.
     /// A stale generation or absent slot returns an error without appending geometry.
     pub(super) fn native_draw_model(
         &self,
@@ -1132,6 +1138,7 @@ impl Game<'_> {
             return Ok(());
         }
         let light = draw.light;
+        let start = draw.vertices.len();
         super::minecarts::emit_model_faces(
             faces.iter().copied().map(|face| (face, light)),
             draw.pose(),
@@ -1139,6 +1146,7 @@ impl Game<'_> {
             |index| (index >= 0).then_some(tint & 0xFF_FFFF),
             &mut draw.vertices,
         );
+        super::minecarts::scale_tint_alpha(&mut draw.vertices[start..], faces, tint);
         Ok(())
     }
 
@@ -1425,7 +1433,7 @@ mod tests {
         gpu.light = 0xF030;
         gpu.vertices.extend((0..4).map(|i| marker(i as f32)));
         let span = gpu.vertices.len();
-        assert!(gpu.defer_model(0, 3, 0x80c040));
+        assert!(gpu.defer_model(0, 3, 0xFF80_C040));
         gpu.vertices.extend((0..4).map(|i| marker(10.0 + i as f32)));
         let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
         let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
@@ -1440,12 +1448,12 @@ mod tests {
         let mut cpu = draw();
         cpu.prepared = false;
         assert!(
-            !cpu.defer_model(0, 3, 0x80c040),
+            !cpu.defer_model(0, 3, 0xFF80_C040),
             "packs, gui and mobs stay on the cpu"
         );
         cpu.prepared = true;
         cpu.vertices.extend((0..4).map(|i| marker(i as f32)));
-        assert!(cpu.defer_model(0, 3, 0x80c040));
+        assert!(cpu.defer_model(0, 3, 0xFF80_C040));
         let pose = cpu.records[0].pose;
         cpu.spin([0.0, 1.0, 0.0], [0.5; 3], 12.0, 0.0);
         cpu.bake_recorded(&slots);
@@ -1454,7 +1462,7 @@ mod tests {
             [(face, cpu.light)],
             pose,
             true,
-            |index| (index >= 0).then_some(0x80c040),
+            |index| (index >= 0).then_some(0xFF80_C040),
             &mut expected,
         );
         assert_eq!(cpu.vertices.len(), 4 + expected.len());
@@ -1489,7 +1497,7 @@ mod tests {
             let mut surface = draw();
             surface.poses = vec![Mat4::from_rotation_z(0.25)];
             surface.light = 0x7030;
-            game.native_draw_model(&mut surface, model, 0x80c040)
+            game.native_draw_model(&mut surface, model, 0xFF80_C040)
                 .unwrap();
             let vertices = &surface.vertices[face_index * 4..face_index * 4 + 4];
             assert!(vertices.iter().all(|v| v.light == 0x7030));
@@ -1572,18 +1580,18 @@ mod tests {
         let face = PreparedModelFace::new(&quad, sprite());
         // kind 0 is an ordinary quad at x; kind 1 is a prepared copy (x, tint, light).
         let scene = [
-            (0, 1.0, 0, 0),              // A
-            (1, 10.0, 0x010203, 0x1110), // B
-            (1, 20.0, 0x040506, 0x2220), // C, same cut as B
-            (0, 2.0, 0, 0),              // D
-            (1, 30.0, 0x070809, 0x3330), // E
-            (0, 3.0, 0, 0),              // F
+            (0, 1.0, 0, 0),                 // A
+            (1, 10.0, 0xFF01_0203, 0x1110), // B
+            (1, 20.0, 0xFF04_0506, 0x2220), // C, same cut as B
+            (0, 2.0, 0, 0),                 // D
+            (1, 30.0, 0xFF07_0809, 0x3330), // E
+            (0, 3.0, 0, 0),                 // F
         ];
         let split = [
             (0, 1.0, 0, 0),
-            (1, 10.0, 0x010203, 0x1110),
-            (1, 20.0, 0x040506, 0x2220),
-            (1, 40.0, 0x0a0b0c, 0x4440),
+            (1, 10.0, 0xFF01_0203, 0x1110),
+            (1, 20.0, 0xFF04_0506, 0x2220),
+            (1, 40.0, 0xFF0A_0B0C, 0x4440),
             (0, 2.0, 0, 0),
         ];
         super::super::native_entity_refs::tests::with_client_game(|game| {
@@ -1679,9 +1687,9 @@ mod tests {
             let mut surface = draw();
             surface.poses = vec![pose];
             surface.light = 0xF030;
-            game.native_draw_model(&mut surface, model, 0x80c040)
+            game.native_draw_model(&mut surface, model, 0xFF80_C040)
                 .unwrap();
-            let instance = super::prepared_instance(local, origin, camera, 0x80c040, 0xF030);
+            let instance = super::prepared_instance(local, origin, camera, 0xFF80_C040, 0xF030);
             assert_eq!(instance.matrix(), pose);
             let (vertices, ranges) = game.standalone_geometry.prepared_upload();
             let atlas = &game.gui.atlas;
@@ -1821,7 +1829,7 @@ mod tests {
                 surface.pose(),
                 |_| surface.light,
                 true,
-                |index| (index >= 0).then_some(0x123456),
+                |index| (index >= 0).then_some(0xFF12_3456),
                 &mut expected,
             );
             assert!(!expected.is_empty());
@@ -1829,7 +1837,7 @@ mod tests {
                 game,
                 surface: &mut surface,
             };
-            assert_eq!(drawn.model(model, 0x123456), Ok(()));
+            assert_eq!(drawn.model(model, 0xFF12_3456), Ok(()));
             let bytes = |vertices: &[Vertex]| bytemuck::cast_slice::<_, u8>(vertices).to_vec();
             assert_eq!(bytes(&surface.vertices), bytes(&expected));
             assert!(surface.vertices.iter().all(|v| v.light == 0x7030));
@@ -1891,7 +1899,7 @@ mod tests {
             let start = std::time::Instant::now();
             for _ in 0..rounds {
                 surface.vertices.clear();
-                game.native_draw_model(&mut surface, model, 0x123456)
+                game.native_draw_model(&mut surface, model, 0xFF12_3456)
                     .unwrap();
                 std::hint::black_box(&surface.vertices);
             }
@@ -1903,7 +1911,7 @@ mod tests {
             let invalid =
                 mod_api::__private::built::model_ref(game.pack.render.generation, u32::MAX);
             assert_eq!(
-                game.native_draw_model(&mut surface, invalid, 0xFFFFFF),
+                game.native_draw_model(&mut surface, invalid, 0xFFFF_FFFF),
                 Err(ModelError::UnknownModel)
             );
             assert_eq!(bytes(&surface.vertices), before);
@@ -1928,7 +1936,7 @@ mod tests {
                 .is_err()
             );
             assert_eq!(
-                game.native_draw_model(&mut surface, model, 0x123456),
+                game.native_draw_model(&mut surface, model, 0xFF12_3456),
                 Ok(())
             );
             let before = bytes(&surface.vertices);
@@ -1952,16 +1960,188 @@ mod tests {
             game.apply_staged_pack(staged).unwrap();
             assert_ne!(game.pack.render.generation, old_generation);
             assert_eq!(
-                game.native_draw_model(&mut surface, model, 0x123456),
+                game.native_draw_model(&mut surface, model, 0xFF12_3456),
                 Err(ModelError::StaleModel)
             );
             assert_eq!(bytes(&surface.vertices), before);
             let fresh = game.render_assets().model(&id).unwrap();
             assert_ne!(fresh, model);
             assert_eq!(
-                game.native_draw_model(&mut surface, fresh, 0x123456),
+                game.native_draw_model(&mut surface, fresh, 0xFF12_3456),
                 Ok(())
             );
+        });
+    }
+
+    fn rows(m: Mat4) -> [f32; 12] {
+        let c = m.to_cols_array();
+        [
+            c[0], c[4], c[8], c[12], c[1], c[5], c[9], c[13], c[2], c[6], c[10], c[14],
+        ]
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
+    fn model_tint_alpha_agrees_on_keep_deferred_and_batch() {
+        use super::super::host::draw::{GameBlockEntityDrawContext, GameWorldDrawContext};
+        use horizon_client::gfx::entity_pixel_test::{self, PreparedInstanceDraw};
+        use mod_api::{
+            BlockEntityDrawContext, Identifier, LightCoords, ModelInstance, Overlay,
+            WorldDrawContext,
+        };
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                horizon_client::gfx::cap_prepared_instance_slots(u64::MAX);
+                horizon_client::gfx::set_test_prepared_generation(None);
+            }
+        }
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let id = Identifier::parse("minecraft:block/grass_block").unwrap();
+            let model = game.render_assets().model(&id).unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(8);
+            let local = Mat4::from_scale_rotation_translation(
+                Vec3::new(0.85, 1.15, 0.7),
+                Quat::from_rotation_y(0.6),
+                Vec3::new(0.12, -0.05, 0.08),
+            );
+            let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
+            let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
+            let tint = 0x40FF_3040;
+            let mut spun = draw();
+            spun.prepared = true;
+            spun.light = 0xF0F0;
+            spun.poses = vec![local];
+            spun.spin([0.0, 1.0, 0.0], [0.5; 3], 0.0, 0.0);
+            {
+                let mut ctx = GameBlockEntityDrawContext {
+                    game,
+                    surface: &mut spun,
+                };
+                ctx.model(model, tint).unwrap();
+            }
+            let mut kept = draw();
+            kept.prepared = true;
+            kept.light = 0xF0F0;
+            kept.poses = vec![local];
+            {
+                let mut ctx = GameBlockEntityDrawContext {
+                    game,
+                    surface: &mut kept,
+                };
+                ctx.model(model, tint).unwrap();
+                ctx.keep();
+            }
+            game.finish_prepared_draw(&mut kept, origin, camera);
+            assert_eq!(spun.vertices.len(), kept.vertices.len());
+            for (spun, kept) in spun.vertices.iter().zip(kept.vertices.iter()) {
+                assert_eq!(spun.color, kept.color, "spin and keep tint alpha differ");
+            }
+            let slot = mod_api::__private::game::Fields::fields(&model).slot;
+            let faces = game.standalone_geometry.faces(slot).unwrap();
+            let (quads, _) = kept.vertices.as_chunks::<4>();
+            assert!(
+                quads
+                    .iter()
+                    .zip(faces)
+                    .any(|(quad, face)| face.tint_index < 0 && quad[0].color >> 24 == 255),
+                "an untinted face stays opaque"
+            );
+            assert!(
+                quads
+                    .iter()
+                    .zip(faces)
+                    .any(|(quad, face)| face.tint_index >= 0 && quad[0].color >> 24 == 0x40),
+                "a tinted face takes the tint alpha"
+            );
+            let shift = (origin - camera).as_vec3();
+            for vertex in &mut kept.vertices {
+                vertex.pos = (Vec3::from(vertex.pos) + shift).to_array();
+            }
+            let mut deferred = draw();
+            deferred.prepared = true;
+            deferred.light = 0xF0F0;
+            deferred.poses = vec![local];
+            {
+                let mut ctx = GameBlockEntityDrawContext {
+                    game,
+                    surface: &mut deferred,
+                };
+                ctx.model(model, tint).unwrap();
+            }
+            game.prepared_model_draws.borrow_mut().clear();
+            game.finish_prepared_draw(&mut deferred, origin, camera);
+            let deferred_instance = game.prepared_model_draws.borrow()[0].instance;
+            let mut batch = crate::world_geometry::WorldGeometry::default();
+            batch.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+            let copy = ModelInstance::new(
+                origin.to_array(),
+                rows(local),
+                tint,
+                LightCoords::FULL_BRIGHT,
+                Overlay::NONE,
+            );
+            {
+                let mut ctx = GameWorldDrawContext {
+                    game,
+                    surface: &mut batch,
+                };
+                ctx.draw_model_instances(model, &[copy]).unwrap();
+            }
+            game.prepared_model_draws.borrow_mut().clear();
+            let mut entities = Vec::new();
+            game.commit_model_instances(&mut batch, camera, &mut entities);
+            let batch_instance = game.prepared_model_draws.borrow()[0].instance;
+            let alpha = 0x40 as f32 / 255.0;
+            assert!((deferred_instance.tint[3] - alpha).abs() < 1e-6);
+            assert!((batch_instance.tint[3] - alpha).abs() < 1e-6);
+            let atlas = &game.gui.atlas;
+            let pixels = atlas.pixels();
+            let uploaded = game.standalone_geometry.generation();
+            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+            let view = Mat4::from_scale_rotation_translation(
+                Vec3::new(1.4, 1.4, 0.2),
+                Quat::IDENTITY,
+                Vec3::new(-0.55, -0.85, 0.5),
+            );
+            let cpu = entity_pixel_test::render(
+                &kept.vertices,
+                [atlas.width, atlas.height],
+                &pixels,
+                view,
+                true,
+            )
+            .expect("keep pixels");
+            let gpu = |instance: &horizon_client::gfx::PreparedModelInstance| {
+                entity_pixel_test::render_instance(PreparedInstanceDraw {
+                    vertices: &vertices,
+                    ranges: ranges.clone(),
+                    uploaded,
+                    requested: uploaded,
+                    slot,
+                    instances: std::slice::from_ref(instance),
+                    per_copy: false,
+                    hdr: true,
+                    atlas_size: [atlas.width, atlas.height],
+                    atlas: &pixels,
+                    view_proj: view,
+                })
+                .expect("instance pixels")
+            };
+            let deferred_pixels = gpu(&deferred_instance);
+            let batch_pixels = gpu(&batch_instance);
+            let worst = |a: &[u8], b: &[u8]| {
+                a.iter()
+                    .zip(b)
+                    .fold(0u8, |worst, (p, q)| worst.max(p.abs_diff(*q)))
+            };
+            assert_eq!(worst(&cpu, &deferred_pixels), 0, "keep and deferred differ");
+            assert_eq!(worst(&cpu, &batch_pixels), 0, "keep and batch differ");
         });
     }
 
