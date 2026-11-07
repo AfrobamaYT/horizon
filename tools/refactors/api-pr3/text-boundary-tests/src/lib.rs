@@ -12,3 +12,18 @@ trait TryIntoEngine<C: ?Sized> {
 }
 #[path = "../../../../../crates/horizon-client/src/game/modding/api_values/text_boundary.rs"]
 mod text_boundary;
+
+/// Exercise the real host-built crossing, recursive ownership, and return crossing.
+pub fn measure_host_text(engine: horizon_client_core::text::Text) {
+    use std::hint::black_box;
+    let api = black_box(&engine).try_into_api().unwrap();
+    eprintln!("captured");
+    drop(black_box(api.clone()));
+    eprintln!("cloned and dropped API");
+    let restored = black_box(&api).try_into_engine(&()).unwrap();
+    eprintln!("emitted engine");
+    drop(black_box(restored.clone()));
+    drop(restored);
+    drop(api);
+    drop(engine);
+}

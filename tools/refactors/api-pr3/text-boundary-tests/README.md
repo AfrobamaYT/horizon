@@ -38,7 +38,14 @@ Recursive `Clone`, `Eq` and `Drop` of a tree the mod itself built are ordinary R
 not part of the boundary guarantee. A guest overflowing its own stack on a 512-deep tree it received
 traps within its dependency group. Neither statement excuses recursive boundary traversal.
 
-## Stack audit
+## Real host stack measurements
+
+The X3 follow-up adds an abort-isolated bisection probe using the real engine builder
+and production conversion module, including recursive clone/drop. See [X3.md](X3.md)
+for results, reproduction, thread inventory and the explicit remaining work. These
+measurements are not a completed global stack-margin proof.
+
+## Stack audit (X2 baseline)
 
 The Windows main stack is explicitly 8 MiB in `crates/horizon-client/build.rs`. This shell reports
 `ulimit -s` = 8192 KiB. Integrated server and network builders do not set an explicit stack size in
