@@ -2064,6 +2064,7 @@ struct WorldTables {
 }
 
 struct PreparedParts {
+    block_states: Arc<api_values::block_state::Index>,
     blocks: Vec<mod_api::__private::ResolvedBlock>,
     tags: HashMap<String, horizon_world::level::data::BlockSet>,
     parts: Option<mod_api::Parts>,
@@ -22726,7 +22727,9 @@ impl Game<'_> {
             }
             _ => "Mod parts refused".to_owned(),
         })?;
+        let block_states = api_values::prepare_block_states(registry)?;
         Ok(PreparedParts {
+            block_states,
             blocks,
             tags,
             parts,
@@ -22736,6 +22739,7 @@ impl Game<'_> {
         mod_api::__private::install_blocks(prepared.blocks);
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);
+        api_values::install_block_states(prepared.block_states);
         self.resolve_pathfindable();
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
