@@ -190,12 +190,7 @@ impl Game<'_> {
     }
     /// The enchantments item names and tooltips read: a server's, with the
     /// entries its data packs add, else the world's.
-    pub(super) fn enchantments(&self) -> &horizon_client::enchant::Enchantments {
-        match self.remote.as_ref().and_then(|r| r.enchantments.as_ref()) {
-            Some(e) => e,
-            None => &self.stations().enchantments,
-        }
-    }
+
     /// The world's packs' content files, none without packs.
     /// The biome table the world plays with, `None` before a world opens.
     pub(super) fn packed_biomes(&self) -> Option<Arc<Biomes>> {
@@ -413,5 +408,181 @@ impl Game<'_> {
             return Err("world resources are unavailable".into());
         }
         Ok(())
+    }
+}
+
+impl Game<'_> {
+    /// The enchantments item names and tooltips read: a server's, with the
+    /// entries its data packs add, else the world's.
+    pub(super) fn active_enchantment_definitions(&self) -> &horizon_client::enchant::Enchantments {
+        match self.remote.as_ref().and_then(|r| r.enchantments.as_ref()) {
+            Some(e) => e,
+            None => &self.stations().enchantments,
+        }
+    }
+    /// Build and publish one server snapshot for this world load or reload.
+    pub(super) fn load_server_loot(&mut self) {
+        self.server_items = None;
+        let overlay = pack_files(&self.world_tables);
+        let loot = if mod_api::__private::mods().is_empty() {
+            horizon_client::structure_blocks::world_loot_data(
+                &self.options.resources,
+                &overlay,
+                self.res.item_defaults(),
+            )
+        } else {
+            match horizon_world::loot::LootData::load(
+                &self.options.resources,
+                &overlay,
+                self.res.item_defaults(),
+            ) {
+                Ok(mut loot) => {
+                    let context = match lan::server_data_load(
+                        &self.options.resources,
+                        &self.res.core.item_data,
+                    ) {
+                        Ok(context) => context,
+                        Err(error) => {
+                            log::warn!("Horizon: server loot inventory unavailable: {error}");
+                            self.server_loot.set(None);
+                            return;
+                        }
+                    };
+                    loot.apply_native_table_loads(&context);
+                    Some(Arc::new(loot))
+                }
+                Err(e) => {
+                    log::warn!("Horizon: server loot tables unavailable: {e}");
+                    None
+                }
+            }
+        };
+        if !mod_api::__private::mods().is_empty()
+            && let Some(loot) = &loot
+        {
+            let mut items = self.items().clone();
+            items.set_loot_tables(loot.tables().clone());
+            self.server_items = Some(Arc::new(items));
+        }
+        self.server_loot.set(loot);
+    }
+
+    pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
+        let registry = self.pack.assets.registry;
+        let blocks = mod_api::__private::prepare_blocks(|id| {
+            let default = registry.default_state(id)?;
+            let of_block = |state| {
+                registry
+                    .state(BlockStateId(state))
+                    .is_some_and(|s| s.name == id)
+            };
+            let mut first = default.0;
+            while first > 0 && of_block(first - 1) {
+                first -= 1;
+            }
+            let mut last = default.0;
+            while of_block(last + 1) {
+                last += 1;
+            }
+            Some(mod_api::__private::ResolvedBlock {
+                default,
+                states: mod_api::BlockStateRange::new(BlockStateId(first), last - first + 1),
+                block: self.res.behaviours().block(default),
+            })
+        })
+        .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
+        let tags = native_world_read::prepare_block_tags(items, |name| {
+            registry
+                .default_state(name)
+                .map(|state| self.res.behaviours().block(state))
+        });
+        let parts = mod_api::__private::prepare_parts(
+            &items.block_tags,
+            &items.item_tags,
+            mod_api::__private::KnownIds {
+                block: &|id| registry.default_state(id).is_some(),
+                item: &|id| items.items.contains_key(id),
+                state_count: registry.len(),
+                state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
+            },
+        )
+        .map_err(|refused| match refused {
+            mod_api::__private::ResolvePartsError::ItemKeys(errors) => format!(
+                "Mod item keys refused:\n{}",
+                errors
+                    .into_iter()
+                    .map(|e| format!("mod {} requested unknown item {}", e.mod_id, e.id))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            mod_api::__private::ResolvePartsError::Parts(errors) => {
+                format!("Mod parts refused:\n{}", errors.join("\n"))
+            }
+            _ => "Mod parts refused".to_owned(),
+        })?;
+        Ok(PreparedParts {
+            blocks,
+            tags,
+            parts,
+        })
+    }
+    /// Reload the content tables with the world's packs, as
+    /// `/reload` reloads a server's (`ReloadableServerResources`).
+    pub(super) fn prepare_world_reload(
+        &mut self,
+        stack: &functions::PackStack,
+        root: &std::path::Path,
+        data_switched: bool,
+    ) -> Result<PreparedWorldReload> {
+        let (tables, health) = self.build_world_tables(stack, true, root, data_switched)?;
+        let items = tables
+            .as_ref()
+            .map_or_else(|| self.res.items(), |tables| &tables.items);
+        let parts = self.prepare_parts(items)?;
+        let overlay = pack_files(&tables);
+        let kept = self
+            .lan
+            .as_ref()
+            .map(|host| host.hub.lan.shared.sync())
+            .or_else(lan::cached_reload_sync);
+        let wire = if let Some(kept) = kept {
+            let sources = match tables
+                .as_ref()
+                .and_then(|tables| tables.reload_sources.clone())
+            {
+                Some(sources) => sources,
+                None => lan::prepare_server_sources(root, &self.res.core.item_data, &overlay)?,
+            };
+            Some(
+                lan::prepare_wire_reload(root, &self.res.core.item_data, &overlay, &kept, &sources)
+                    .map_err(|error| format!("wire reload: {error}"))?,
+            )
+        } else {
+            None
+        };
+        Ok(PreparedWorldReload {
+            tables,
+            health,
+            parts,
+            wire,
+        })
+    }
+
+    /// Resolve the mods' parts against the tags this game plays with (`/reload` again): mods
+    /// that attach parts to a block or item it doesn't have are an error.
+    pub(super) fn resolve_parts(&self) -> Result<()> {
+        let prepared = self.prepare_parts(self.items())?;
+        self.install_parts(prepared);
+        Ok(())
+    }
+    /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
+    /// on nothing else, so path finding and spawning read it with no dispatch.
+    pub(super) fn resolve_pathfindable(&self) {
+        let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::IsPathfindable);
+        let data = &self.res.rest().mob_data;
+        data.set_pathfindable(asked, |state, kind, mut pathfindable| {
+            self.native_is_pathfindable(state, kind, &mut pathfindable);
+            pathfindable
+        });
     }
 }

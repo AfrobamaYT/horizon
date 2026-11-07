@@ -403,3 +403,47 @@ impl Game<'_> {
         Ok(())
     }
 }
+
+impl Game<'_> {
+    /// Asks the mods about each gameplay mapping a physical input (a key's or a mouse button's
+    /// name) is bound to, before the game acts on it: true when one cancels a press. Only while
+    /// playing, and nothing is asked with no mod listening.
+    pub(super) fn key_mapping_canceled(&mut self, input: Option<&str>, pressed: bool) -> bool {
+        let Some(input) = input else {
+            return false;
+        };
+        if !mod_api::__private::listened(mod_api::HookId::KeyMappingPre)
+            || !gameplay_has_keyboard(self.screen, self.title.is_some(), self.dialog_open())
+        {
+            return false;
+        }
+        let names: Vec<&'static str> = self.settings.keys.translated_mappings(input).collect();
+        let mut canceled = false;
+        for name in names {
+            let mut this = false;
+            self.native_key_mapping_pre(name, pressed, &mut this);
+            canceled |= this;
+        }
+        canceled && pressed
+    }
+    /// `key_mapping_canceled` for a key event, and what a cancel leaves of the key's hold: a first
+    /// press that is cancelled never happened, so `restore_held_keys` must not hold it (nor its
+    /// repeats); a cancelled repeat only drops its own action and keeps the hold an accepted
+    /// press made.
+    pub(super) fn key_press_canceled(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> bool {
+        if !repeat {
+            self.rejected_keys.remove(&key);
+        }
+        let name = horizon_client::keybinds::key_name(key);
+        if !self.key_mapping_canceled(name, pressed) {
+            return false;
+        }
+        if !repeat {
+            self.rejected_keys.insert(key);
+        }
+        if self.rejected_keys.contains(&key) {
+            self.physical_keys.remove(&key);
+        }
+        true
+    }
+}

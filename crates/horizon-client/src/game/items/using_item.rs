@@ -245,3 +245,13 @@ impl Game<'_> {
         self.post_game_event(event, [p.x, p.y, p.z], ctx);
     }
 }
+
+impl Game<'_> {
+    /// Whether the use effects of `stack` ask for interaction vibrations.
+    pub(super) fn use_vibrates(&self, stack: &ItemStack) -> bool {
+        item_use::interact_vibrations(
+            stack,
+            self.items().get(&stack.item).map(|i| i.interact_vibrations),
+        )
+    }
+}

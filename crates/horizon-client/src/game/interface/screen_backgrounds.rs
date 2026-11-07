@@ -9,31 +9,13 @@ impl Game<'_> {
     /// playing with no screen, nor while the server pack prompt hides the
     /// open screen (`hud_layers` draws `Playing` then). Client only,
     /// read-only: what a mod draws is its own.
-    pub(super) fn fire_screen_render_post(&self, batch: &mut HudBatch) {
-        let screen = self.screen;
-        if screen == Screen::Playing || self.server_packs.prompt.is_some() || self.book.is_some() {
-            return;
-        }
-        // slot_count mirrors slots() without allocating; keep them in step.
-        debug_assert_eq!(self.slot_count(), self.slots().len());
-        let view = self.screen_view(batch, screen);
-        self.native_screen_render_post(batch, &view);
-    }
+
     /// `native_screen_render_post` (`ScreenEvent.Render.Post`) for the title's
     /// own screen (`title`, `world_select`, `world_create`, `multiplayer`…),
     /// once a frame, after it has drawn and before the toasts. Not when a
     /// screen of the game's own is over the title (Options draws and fires
     /// its own), nor while a dialog, a prompt or a connect or load hides it.
     /// Client only, read-only: what a mod draws is its own.
-    pub(super) fn fire_title_screen_render_post(&self, batch: &mut HudBatch) {
-        if self.screen != Screen::Playing || self.screen_over_playing() || self.remote_loading() {
-            return;
-        }
-        let Some(view) = self.title_screen_view(batch) else {
-            return;
-        };
-        self.native_screen_render_post(batch, &view);
-    }
 
     /// The frame shows the title's panorama, not a level: the title screen, or a
     /// LevelLoadingScreen (Reason.OTHER), which draws it too.
@@ -173,5 +155,79 @@ impl Game<'_> {
                 .transforms(&self.border_state, camera, millis),
             sides: BorderRenderer::sides(&self.border_state, camera, distance),
         })
+    }
+}
+
+impl Game<'_> {
+    /// `ScreenEvent.Render.Foreground` (only when the screen `drawn`) and
+    /// `Render.Post` for the open screen, once a frame, after it has drawn
+    /// itself and its tooltips, so a native mod draws over it here. Never
+    /// `Playing`: the prompts, books and sign editors drawn over gameplay keep
+    /// it, draw after this point and so over what a mod drew.
+    pub(super) fn draw_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
+        if let Some(view) = self.screen_render_view(batch) {
+            self.screen_render_end(batch, &view, drawn);
+        }
+    }
+    /// `ScreenEvent.Render.Pre` then `Render.Background` for the open screen,
+    /// once a frame, before it draws itself: whether it is drawn (a cancelled
+    /// `Render.Pre` skips it and its Background). The Win and Options screens
+    /// call this on their own path. Client only: what a mod draws is its own.
+    pub(super) fn draw_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
+        match self.screen_render_view(batch) {
+            Some(view) => self.screen_render_begin(batch, &view),
+            None => true,
+        }
+    }
+    /// `draw_screen_with_post_hook` for the title's own screen, once a frame,
+    /// after it has drawn and before the toasts.
+    pub(super) fn draw_title_screen_with_post_hook(&self, batch: &mut HudBatch, drawn: bool) {
+        if let Some(view) = self.title_screen_render_view(batch) {
+            self.screen_render_end(batch, &view, drawn);
+        }
+    }
+    /// `draw_screen_with_pre_hook` for the title's own screens.
+    pub(super) fn draw_title_screen_with_pre_hook(&self, batch: &mut HudBatch) -> bool {
+        match self.title_screen_render_view(batch) {
+            Some(view) => self.screen_render_begin(batch, &view),
+            None => true,
+        }
+    }
+    /// The open screen as the render hooks see it, once a frame: not while
+    /// playing with no screen, nor while the server pack prompt or a book
+    /// hides the open screen (`hud_layers` draws `Playing` then), and None
+    /// with no mod listening to a render hook, so nothing is built then.
+    pub(super) fn screen_render_view(
+        &self,
+        batch: &HudBatch,
+    ) -> Option<mod_api::NativeScreenView<'_>> {
+        let screen = self.screen;
+        if screen == Screen::Playing
+            || self.server_packs.prompt.is_some()
+            || self.book.is_some()
+            || !self.screen_render_listened()
+        {
+            return None;
+        }
+        // slot_count mirrors slots() without allocating; keep them in step.
+        debug_assert_eq!(self.slot_count(), self.slots().len());
+        Some(self.screen_view(batch, screen))
+    }
+    /// The title's own screen as the render hooks see it, once a frame: not
+    /// when a screen of the game's own is over the title (Options draws and
+    /// fires its own), nor while a dialog, a prompt or a connect or load
+    /// hides it, and None with no mod listening to a render hook.
+    pub(super) fn title_screen_render_view(
+        &self,
+        batch: &HudBatch,
+    ) -> Option<mod_api::NativeScreenView<'_>> {
+        if self.screen != Screen::Playing
+            || self.screen_over_playing()
+            || self.remote_loading()
+            || !self.screen_render_listened()
+        {
+            return None;
+        }
+        self.title_screen_view(batch)
     }
 }
