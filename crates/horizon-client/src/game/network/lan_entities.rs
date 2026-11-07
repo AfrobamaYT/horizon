@@ -161,7 +161,7 @@ impl Game<'_> {
     /// mobs on mobs.
     pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
-        // The server's players in their boats and minecarts.
+        // Players arrive in boarding order; the first rider drives.
         for &(vehicle, guest) in guests {
             riding.add(vehicle as i32, guest);
         }
