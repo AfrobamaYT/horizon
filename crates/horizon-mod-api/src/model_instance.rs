@@ -130,6 +130,8 @@ impl InstanceGroupRef {
         Ok(Self(generation, slot))
     }
     /// Atomically overwrite a range, extending length up to reserved capacity.
+    /// Only that range's cached render records are converted again. Visible copies still
+    /// enter the shared per-view GPU upload on every frame.
     pub fn write(
         self,
         host: &dyn crate::ClientHost,
@@ -145,7 +147,8 @@ impl InstanceGroupRef {
     /// Atomically replace the row-major 3x4 group pose (identity by default).
     /// World position = origin + group_transform * (copy_transform * local).
     /// The origin stays in world space; transformed bounds are used for culling.
-    /// Non-finite components return [`GroupError::NonFinite`].
+    /// Non-finite components return [`GroupError::NonFinite`]. Rebuilds all reserved
+    /// copies' cached render records; it does not allocate or rewrite the API copies.
     pub fn set_group_transform(
         self,
         host: &dyn crate::ClientHost,

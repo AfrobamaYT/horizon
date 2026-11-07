@@ -28,13 +28,11 @@ impl Group {
             let copy = self.copies[i];
             let local = self.transform * row_major_3x4(copy.transform);
             let m = local.to_cols_array_2d();
-            self.composed[i] = ModelInstance {
-                transform: [
-                    m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1],
-                    m[0][2], m[1][2], m[2][2], m[3][2],
-                ],
-                ..copy
-            };
+            self.composed[i] = copy;
+            self.composed[i].transform = [
+                m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1], m[0][2],
+                m[1][2], m[2][2], m[3][2],
+            ];
             let mut record = builder.instance(
                 local,
                 DVec3::ZERO,
@@ -230,5 +228,66 @@ impl Game<'_> {
         )?;
         draw.mark_group(handle);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn range_cache_preserves_other_records_and_world_origins() {
+        let copy = ModelInstance::at([10.0, 20.0, 30.0], 0xFFFF_FFFF);
+        let mut group = Group {
+            generation: 1,
+            owner: None,
+            model: mod_api::__private::built::model_ref(1, 0),
+            copies: vec![copy; 2],
+            len: 2,
+            transform: row_major_3x4([0.0, -2.0, 0.0, 3.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 2.0, 5.0]),
+            composed: vec![copy; 2],
+            records: vec![
+                PreparedModelInstance::new(
+                    Mat4::IDENTITY,
+                    DVec3::ZERO,
+                    DVec3::ZERO,
+                    [1.0; 4],
+                    0
+                );
+                2
+            ],
+            converted_bytes: 0,
+        };
+        group.rewrite(0..2);
+        let untouched = group.records[0];
+        group.copies[1].transform[3] = 1.0;
+        group.copies[1].transform[7] = 2.0;
+        group.copies[1].transform[11] = 3.0;
+        group.rewrite(1..2);
+        assert_eq!(group.records[0].model, untouched.model);
+        assert_eq!(
+            group.records[1]
+                .matrix()
+                .transform_point3(glam::Vec3::new(2.0, 3.0, 4.0)),
+            glam::Vec3::new(-7.0, 10.0, 19.0)
+        );
+        assert_eq!(group.composed[1].origin, [10.0, 20.0, 30.0]);
+        assert_eq!(
+            group.converted_bytes,
+            3 * std::mem::size_of::<PreparedModelInstance>()
+        );
+        let handle = mod_api::__private::built::instance_group_ref(1, 0);
+        let mut storage = InstanceGroupStorage {
+            next: 1,
+            groups: vec![Some(group)],
+        };
+        assert!(storage.get(handle, 1).is_ok());
+        assert!(matches!(storage.get(handle, 2), Err(GroupError::Stale)));
+        let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+            id: "other",
+            hook: "test",
+            part: None,
+        });
+        assert!(matches!(storage.get(handle, 1), Err(GroupError::Stale)));
     }
 }

@@ -128,10 +128,8 @@ impl WorldGeometry {
             return Err(InstanceError::CapacityExceeded);
         }
         validate_instances(instances)?;
-        {
-            let mut stage = stage;
-            self.submit_validated_model(batch, instances, cull, |_, copy| stage(copy))
-        }
+        let mut stage = stage;
+        self.submit_validated_model(batch, instances, cull, |_, copy| stage(copy))
     }
     /// Submit copies validated when written into persistent storage.
     pub fn submit_validated_model(
