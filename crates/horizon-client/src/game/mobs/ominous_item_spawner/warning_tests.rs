@@ -186,3 +186,62 @@ fn taken_spawner_tick_keeps_survivors_before_both_spawns() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_spawner_commands_unload_park_and_remote_metadata() {
+    use crate::game::{
+        commands::Target,
+        entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle},
+    };
+    use horizon_protocol::{
+        connection::Pipe,
+        entity_data::{Value, serializer},
+        item::Stack,
+    };
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.ominous_spawners.clear();
+            for &(id, at) in entries {
+                game.add_remote_ominous_item_spawner(id, at);
+            }
+        },
+        ids: |game| game.ominous_spawners.iter().map(|s| s.id).collect(),
+        target: Target::Spawner,
+        unloads_with_chunk: true,
+        remote: Some(RemoteLifecycle {
+            prepare: |game| {
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "Lifecycle").unwrap();
+            },
+            apply: |game, remove, update| {
+                let item = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:item")
+                    .unwrap()
+                    .id("minecraft:emerald")
+                    .unwrap();
+                game.remote_object_data(
+                    update as i32,
+                    &[(
+                        8,
+                        serializer::ITEM_STACK,
+                        Value::Item(Some(Stack::new(item, 7))),
+                    )],
+                );
+                let changed = game
+                    .ominous_spawners
+                    .iter()
+                    .find(|s| s.id == update)
+                    .unwrap();
+                assert_eq!(changed.item.item.as_ref(), "minecraft:emerald");
+                assert_eq!(changed.item.count, 7);
+                game.remove_remote_object(remove);
+            },
+        }),
+    }
+    .run();
+}

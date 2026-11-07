@@ -2523,6 +2523,26 @@ mod tests {
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn lifecycle_cloud_commands_and_parked_owners() {
+        super::super::entity::taken_pass_tests::LifecycleFixture {
+            seed: |game, entries| {
+                game.breath_clouds.clear();
+                for &(id, at) in entries {
+                    game.spawn_creeper_cloud(at, Vec::new(), Vec::new(), Vec::new(), 0);
+                    let i = game.breath_clouds.len() - 1;
+                    game.breath_clouds.update(i, |c| c.id = id);
+                }
+            },
+            ids: |game| game.breath_clouds.iter().map(|c| c.id).collect(),
+            target: super::super::commands::Target::Cloud,
+            unloads_with_chunk: false,
+            remote: None,
+        }
+        .run();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn taken_breath_tick_keeps_both_spawns_before_survivors() {
         cloud_spawns_during_pass(false);
     }
