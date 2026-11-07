@@ -1876,7 +1876,7 @@ impl Game<'_> {
     ) {
         self.fire_ender_pearl_teleport(call);
     }
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -1886,7 +1886,8 @@ impl Game<'_> {
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. `consumed` is the stack captured before use, including its
     /// count and components. The player's state is swapped in
-    /// (`native_acting_player`). Foxes are not heard.
+    /// (`native_acting_player`); a fox's full-host callback runs at its inline
+    /// consumption boundary, before living AI and movement.
     pub(in crate::game) fn native_item_consumption_teleport(
         &mut self,
         consumer: mod_api::LivingRef,

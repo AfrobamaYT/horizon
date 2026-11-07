@@ -1,6 +1,6 @@
 //! Finishing a consumable (`Consumable.onConsume` and the use remainder),
 //! its particles and sounds, and `TeleportRandomlyConsumeEffect` (chorus
-//! fruit) for the local player. The level random stands in for the player's
+//! fruit) for players and foxes. The level random stands in for the player's
 //! own, as for every other player draw.
 use super::{Dim, Game};
 use horizon_client::{

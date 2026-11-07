@@ -266,6 +266,8 @@ impl Consumption {
     /// replace the mouth item, counter or pre-attempt position under a pending effect.
     pub fn still_valid_at(&self, m: &Mob, expected: Vec3) -> bool {
         self.same_item_use(m)
+            && m.species() == Species::Fox
+            && !m.no_ai
             && m.position == expected
             && m.ai.target.is_none()
             && m.on_ground
@@ -302,6 +304,8 @@ pub fn decide_consumption(m: &Mob, w: &MobWorld) -> Option<Consumption> {
     let stack = m.extra.main_hand_stack()?;
     if !m.alive()
         || m.removed
+        || m.no_ai
+        || m.species() != Species::Fox
         || m.extra.ints[TICKS_SINCE_EATEN] <= 600
         || !eats(w, &stack.item)
         || m.ai.target.is_some()
