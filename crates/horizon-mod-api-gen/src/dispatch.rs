@@ -637,7 +637,7 @@ struct StackCrossing {
     after: String,
 }
 
-/// Only stack-bearing declared argument types select this seam. Event records
+/// Declared owned-value arguments select this guarded conversion seam. Event records
 /// are built explicitly at their game call sites, not inferred from game bodies.
 fn stack_crossing(
     args: &[(String, &Type)],
