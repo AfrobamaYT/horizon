@@ -4642,162 +4642,171 @@ impl Game<'_> {
                 } else {
                     Vec::new()
                 };
-                let p = &mut projectiles[i];
-                if vanish
-                    && matches!(p.kind, ProjectileKind::EnderPearl)
-                    && p.owner == Some(Who::Player)
-                    && p.guest.map_or(host_dead, |c| dead_guests.contains(&c))
-                {
-                    keep_flags[i] = false;
-                    continue;
-                }
-                // The projectile as it was, to fly on if a mod cancels its impact.
-                let before = (hear && !p.stuck).then(|| p.clone());
-                let mob_shot = !matches!(p.owner, Some(Who::Player));
-                // A player's arrows, snowballs and eggs meet every player; a
-                // guest's flies from that guest (Projectile.getOwner), not
-                // from the host, until it has left them.
-                let pvp = !mob_shot && super::lan_pvp::meets_players(&p.kind);
-                let shooter = p
-                    .guest
-                    .filter(|_| pvp)
-                    .and_then(|c| guest_entities.iter().find(|(g, _)| *g == c))
-                    .map(|&(_, id)| Who::Mob(id));
-                if shooter.is_some() {
-                    p.owner = shooter;
-                }
-                let use_guests = (mob_shot || pvp) && has_guests;
-                let (keep, hit) = match (p.arrow.is_some(), use_guests, winds.is_empty()) {
-                    (true, false, true) => horizon_client::arrows::tick(p, &scene, &pw.targets),
-                    (true, true, true) => {
-                        horizon_client::arrows::tick(p, &scene, &pw_guests.targets)
+                let mut redirect = None;
+                projectiles.update(i, |p| {
+                    if vanish
+                        && matches!(p.kind, ProjectileKind::EnderPearl)
+                        && p.owner == Some(Who::Player)
+                        && p.guest.map_or(host_dead, |c| dead_guests.contains(&c))
+                    {
+                        keep_flags[i] = false;
+                        return;
                     }
-                    (true, with_guests, false) => {
-                        let mut targets = if with_guests {
-                            pw_guests.targets.clone()
-                        } else {
-                            pw.targets.clone()
-                        };
-                        targets.extend(winds);
-                        horizon_client::arrows::tick(p, &scene, &targets)
+                    // The projectile as it was, to fly on if a mod cancels its impact.
+                    let before = (hear && !p.stuck).then(|| p.clone());
+                    let mob_shot = !matches!(p.owner, Some(Who::Player));
+                    // A player's arrows, snowballs and eggs meet every player; a
+                    // guest's flies from that guest (Projectile.getOwner), not
+                    // from the host, until it has left them.
+                    let pvp = !mob_shot && super::lan_pvp::meets_players(&p.kind);
+                    let shooter = p
+                        .guest
+                        .filter(|_| pvp)
+                        .and_then(|c| guest_entities.iter().find(|(g, _)| *g == c))
+                        .map(|&(_, id)| Who::Mob(id));
+                    if shooter.is_some() {
+                        p.owner = shooter;
                     }
-                    (false, false, true) => p.tick(&pw),
-                    (false, true, true) => p.tick(&pw_guests),
-                    (false, pvp_shot, false) => {
-                        let mut targets = if pvp_shot {
-                            pw_guests.targets.clone()
-                        } else {
-                            pw.targets.clone()
-                        };
-                        targets.extend(winds);
-                        p.tick(&ProjWorld {
-                            w: if pvp_shot { pw_guests.w } else { pw.w },
-                            targets,
-                            border,
-                        })
+                    let use_guests = (mob_shot || pvp) && has_guests;
+                    let (keep, hit) = match (p.arrow.is_some(), use_guests, winds.is_empty()) {
+                        (true, false, true) => horizon_client::arrows::tick(p, &scene, &pw.targets),
+                        (true, true, true) => {
+                            horizon_client::arrows::tick(p, &scene, &pw_guests.targets)
+                        }
+                        (true, with_guests, false) => {
+                            let mut targets = if with_guests {
+                                pw_guests.targets.clone()
+                            } else {
+                                pw.targets.clone()
+                            };
+                            targets.extend(winds);
+                            horizon_client::arrows::tick(p, &scene, &targets)
+                        }
+                        (false, false, true) => p.tick(&pw),
+                        (false, true, true) => p.tick(&pw_guests),
+                        (false, pvp_shot, false) => {
+                            let mut targets = if pvp_shot {
+                                pw_guests.targets.clone()
+                            } else {
+                                pw.targets.clone()
+                            };
+                            targets.extend(winds);
+                            p.tick(&ProjWorld {
+                                w: if pvp_shot { pw_guests.w } else { pw.w },
+                                targets,
+                                border,
+                            })
+                        }
+                    };
+                    if (p.is_thrown() && !matches!(p.kind, ProjectileKind::LlamaSpit))
+                        || p.is_arrow() && p.arrow.as_ref().is_none_or(|a| !a.no_physics)
+                    {
+                        for block in horizon_client::powder_snow::contacts(
+                            p.previous,
+                            p.position,
+                            p.bounds(),
+                            false,
+                            |at| w.block_name(at.x, at.y, at.z) == "minecraft:powder_snow",
+                        ) {
+                            snow_contacts.push((block, p.position, p.velocity));
+                        }
                     }
-                };
-                if (p.is_thrown() && !matches!(p.kind, ProjectileKind::LlamaSpit))
-                    || p.is_arrow() && p.arrow.as_ref().is_none_or(|a| !a.no_physics)
-                {
-                    for block in horizon_client::powder_snow::contacts(
-                        p.previous,
-                        p.position,
-                        p.bounds(),
-                        false,
-                        |at| w.block_name(at.x, at.y, at.z) == "minecraft:powder_snow",
-                    ) {
-                        snow_contacts.push((block, p.position, p.velocity));
+                    if shooter.is_some() {
+                        p.owner = Some(Who::Player);
                     }
-                }
-                if shooter.is_some() {
-                    p.owner = Some(Who::Player);
-                }
-                if let Some(at) = p.take_shoot_event() {
-                    shoot_events.push((p.owner, p.guest, [at.x, at.y, at.z]));
-                }
-                // AbstractHurtingProjectile.tick ends with createParticleTrail.
-                if super::remote_projectiles::has_smoke_trail(&p.kind) {
-                    trails.push(p.position);
-                }
-                // ThrownEnderpearl.onAboveBubbleColumn / onInsideBubbleColumn.
-                if keep && hit == Hit::None && matches!(p.kind, ProjectileKind::EnderPearl) {
-                    let (at, h) = (p.position, 0.125);
-                    horizon_client::motion::bubble_column_push_over(
-                        w.world,
-                        w.registry,
-                        w.facts,
-                        w.collision,
-                        Aabb::new(
-                            Vec3::new(at.x - h, at.y, at.z - h),
-                            Vec3::new(at.x + h, at.y + 2.0 * h, at.z + h),
-                        ),
-                        &mut p.velocity,
-                        |pos| bubble_tops.push(pos),
-                    );
-                }
-                let events_from = arrow_events.len();
-                if let Some(a) = p.arrow.as_mut() {
-                    arrow_events.extend(a.events.drain(..).map(|e| (p.position, e)));
-                }
-                let wind = matches!(
-                    p.kind,
-                    ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
-                );
-                // Entity.deflection: a breeze turns every projectile but wind charges away.
-                if let Hit::Entity {
-                    who: Who::Mob(id),
-                    at,
-                } = hit
-                    && !wind
-                    && breezes.contains(&id)
-                {
-                    super::wind::reverse(p);
-                    if p.arrow.is_some() {
-                        horizon_client::arrows::finish_entity_hit(p, &scene, EntityHit::Deflected);
-                        let a = p.arrow.as_mut().expect("an arrow");
+                    if let Some(at) = p.take_shoot_event() {
+                        shoot_events.push((p.owner, p.guest, [at.x, at.y, at.z]));
+                    }
+                    // AbstractHurtingProjectile.tick ends with createParticleTrail.
+                    if super::remote_projectiles::has_smoke_trail(&p.kind) {
+                        trails.push(p.position);
+                    }
+                    // ThrownEnderpearl.onAboveBubbleColumn / onInsideBubbleColumn.
+                    if keep && hit == Hit::None && matches!(p.kind, ProjectileKind::EnderPearl) {
+                        let (at, h) = (p.position, 0.125);
+                        horizon_client::motion::bubble_column_push_over(
+                            w.world,
+                            w.registry,
+                            w.facts,
+                            w.collision,
+                            Aabb::new(
+                                Vec3::new(at.x - h, at.y, at.z - h),
+                                Vec3::new(at.x + h, at.y + 2.0 * h, at.z + h),
+                            ),
+                            &mut p.velocity,
+                            |pos| bubble_tops.push(pos),
+                        );
+                    }
+                    let events_from = arrow_events.len();
+                    if let Some(a) = p.arrow.as_mut() {
                         arrow_events.extend(a.events.drain(..).map(|e| (p.position, e)));
                     }
-                    deflections.push((id, [at.x, at.y, at.z]));
-                    continue;
-                }
-                // AbstractWindCharge.tick: out of the world's top it bursts.
-                if wind && keep && p.position.y > 350.0 {
-                    hits.push((
-                        p.clone(),
-                        Hit::Block {
-                            pos: [0; 3],
-                            at: p.position,
-                            face: [0; 3],
-                        },
-                    ));
-                    keep_flags[i] = false;
-                    continue;
-                }
-                if hit != Hit::None {
-                    if let Some(before) = before {
-                        impacts.push(Impact {
-                            index: i,
-                            before,
-                            hit,
-                            hit_slot: hits.len(),
-                            events: events_from..arrow_events.len(),
-                        });
+                    let wind = matches!(
+                        p.kind,
+                        ProjectileKind::WindCharge | ProjectileKind::BreezeWindCharge
+                    );
+                    // Entity.deflection: a breeze turns every projectile but wind charges away.
+                    if let Hit::Entity {
+                        who: Who::Mob(id),
+                        at,
+                    } = hit
+                        && !wind
+                        && breezes.contains(&id)
+                    {
+                        super::wind::reverse(p);
+                        if p.arrow.is_some() {
+                            horizon_client::arrows::finish_entity_hit(
+                                p,
+                                &scene,
+                                EntityHit::Deflected,
+                            );
+                            let a = p.arrow.as_mut().expect("an arrow");
+                            arrow_events.extend(a.events.drain(..).map(|e| (p.position, e)));
+                        }
+                        deflections.push((id, [at.x, at.y, at.z]));
+                        return;
                     }
-                    hits.push((p.clone(), hit));
-                }
-                keep_flags[i] = keep;
-                // Projectile.onHit: the redirectable projectile it hit (a ghast's
-                // fireball or a wind charge) turns before its own tick.
-                if let Hit::Entity {
-                    who: Who::Mob(id), ..
-                } = hit
-                    && let Some(j) = pickable_projectile_hit(id)
-                {
-                    let (owner, owner_uuid, guest) = (p.owner, p.owner_uuid, p.guest);
+                    // AbstractWindCharge.tick: out of the world's top it bursts.
+                    if wind && keep && p.position.y > 350.0 {
+                        hits.push((
+                            p.clone(),
+                            Hit::Block {
+                                pos: [0; 3],
+                                at: p.position,
+                                face: [0; 3],
+                            },
+                        ));
+                        keep_flags[i] = false;
+                        return;
+                    }
+                    if hit != Hit::None {
+                        if let Some(before) = before {
+                            impacts.push(Impact {
+                                index: i,
+                                before,
+                                hit,
+                                hit_slot: hits.len(),
+                                events: events_from..arrow_events.len(),
+                            });
+                        }
+                        hits.push((p.clone(), hit));
+                    }
+                    keep_flags[i] = keep;
+                    // Projectile.onHit: the redirectable projectile it hit (a ghast's
+                    // fireball or a wind charge) turns before its own tick.
+                    if let Hit::Entity {
+                        who: Who::Mob(id), ..
+                    } = hit
+                        && let Some(j) = pickable_projectile_hit(id)
+                    {
+                        redirect = Some((j, (p.owner, p.owner_uuid, p.guest)));
+                    }
+                });
+                if let Some((j, (owner, owner_uuid, guest))) = redirect {
                     let look = self.owner_look(owner, guest);
-                    let wind = &mut projectiles[j];
-                    super::deflect::aim_deflect(wind, look, owner, owner_uuid, guest);
+                    projectiles.update(j, |wind| {
+                        super::deflect::aim_deflect(wind, look, owner, owner_uuid, guest);
+                    });
                 }
             }
         }
