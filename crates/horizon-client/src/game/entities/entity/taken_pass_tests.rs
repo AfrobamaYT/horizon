@@ -138,6 +138,29 @@ impl LifecycleFixture {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut ids = |game: &mut Game<'_>| {
                 observe(game);
+                use horizon_client::join_seq::Joined;
+                let mut unique = std::collections::HashSet::new();
+                macro_rules! lookup {
+                    ($list:expr) => {
+                        for (index, entity) in $list.iter().enumerate() {
+                            let join = entity.join_seq();
+                            assert!(join.is_joined());
+                            assert!(join < horizon_client::join_seq::JoinSeq::upcoming());
+                            assert!(unique.insert(join), "duplicate owner join");
+                            assert_eq!($list.locate(join), Some(index));
+                        }
+                    };
+                }
+                lookup!(game.others);
+                lookup!(game.fangs.list);
+                lookup!(game.ominous_spawners);
+                lookup!(game.breath_clouds);
+                if let Some(dragon) = game.dragon.as_ref() {
+                    assert!(dragon.join.is_joined());
+                    assert!(dragon.join < horizon_client::join_seq::JoinSeq::upcoming());
+                    assert!(unique.insert(dragon.join));
+                    assert_eq!(game.dragon.locate(dragon.join), Some(0));
+                }
                 (self.ids)(game)
             };
             let root = ScratchDirectory(std::env::temp_dir().join(format!(
@@ -252,4 +275,71 @@ fn lifecycle_fixture_walks_fangs_owners() {
         remote: None,
     }
     .run();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_fixture_walks_other_owners() {
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.others.clear();
+            for &(id, at) in entries {
+                game.others.push(crate::game::commands::OtherEntity {
+                    join: Default::default(),
+                    id,
+                    kind: "minecraft:marker".into(),
+                    position: horizon_core::geometry::Vec3::new(at[0], at[1], at[2]),
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    item_transformation: None,
+                });
+            }
+        },
+        ids: |game| game.others.iter().map(|entity| entity.id).collect(),
+        target: crate::game::commands::Target::Other,
+        unloads_with_chunk: true,
+        remote: None,
+    }
+    .run();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn data_merge_preserves_two_distinct_other_joins_for_every_runtime_kind() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.build_registries();
+        game.set_allow_commands(true);
+        for kind in [
+            "marker",
+            "block_display",
+            "item_display",
+            "text_display",
+            "interaction",
+        ] {
+            game.others.clear();
+            for (tag, x) in [("first", 1), ("second", 8)] {
+                assert!(game.run_command(&format!("summon {kind} {x} 80 1 {{Tags:[\"{tag}\"]}}")));
+            }
+            let expected: Vec<_> = game.others.iter().map(|e| (e.id, e.join)).collect();
+            assert_eq!(expected.len(), 2, "{kind}");
+            assert_ne!(expected[0].1, expected[1].1);
+            assert_ne!(expected[0].1, horizon_client::join_seq::JoinSeq::UNJOINED);
+            for tag in ["first", "second"] {
+                assert!(game.run_command(&format!(
+                    "data merge entity @e[tag={tag},limit=1] {{Rotation:[45.0f,10.0f]}}"
+                )));
+            }
+            assert_eq!(
+                game.others
+                    .iter()
+                    .map(|e| (e.id, e.join))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{kind}"
+            );
+            for (id, join) in expected {
+                assert_eq!(game.others[game.others.locate(join).unwrap()].id, id);
+            }
+        }
+    });
 }

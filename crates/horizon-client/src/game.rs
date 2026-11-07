@@ -17713,6 +17713,28 @@ impl Game<'_> {
         }
         self.render_frame()
     }
+    /// Render the frame, then its two moments after that: `render_frame_post` whatever
+    /// became of it, `flip_frame` once it was presented.
+    fn render_and_flip(&mut self, elapsed: Duration) -> Result<bool> {
+        let rendered = match self.render() {
+            // The callback can fire during this frame; rebuild on
+            // the next redraw rather than exiting on its error.
+            Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => false,
+            result => result?,
+        };
+        self.native_render_frame_post(elapsed);
+        if rendered {
+            // The submit thread may still hold the frame: a listener hears it after the
+            // present, and with none the next frame keeps overlapping it.
+            if mod_api::__private::listened(mod_api::HookId::FlipFrame)
+                && let Some(renderer) = &mut self.renderer
+            {
+                renderer.wait_submissions();
+            }
+            self.native_flip_frame();
+        }
+        Ok(rendered)
+    }
     fn render_frame(&mut self) -> Result<bool> {
         self.render_with(|renderer, frame| {
             horizon_client::spans::time("renderer", || renderer.render(frame))
@@ -21091,15 +21113,7 @@ impl Game<'_> {
                     self.advance_flight();
                     self.tick_world_icon();
                     let ticked = Instant::now();
-                    let rendered = match self.render() {
-                        // The callback can fire during this frame; rebuild on
-                        // the next redraw rather than exiting on its error.
-                        Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => {
-                            false
-                        }
-                        result => result?,
-                    };
-                    self.native_render_frame_post(elapsed);
+                    let rendered = self.render_and_flip(elapsed)?;
                     horizon_client::spans::time("pr_cursor", || self.apply_cursor_icon());
                     // The frame's spans, taken every frame they are recorded so they never
                     // pile up: the slow-frame line's.
