@@ -42,6 +42,10 @@ pub(crate) struct State {
     depth: usize,
     group: usize,
 }
+// SAFETY: frames contain borrowed native objects only while the group mutex is held.
+// They are pushed and popped synchronously on that thread; callbacks borrow the same
+// locked store through a thread-local loan. Between threads the frame stack is empty.
+unsafe impl Send for State {}
 impl Default for State {
     fn default() -> Self {
         Self {
@@ -231,7 +235,7 @@ fn host(
         // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
         unsafe { serve(id, cx, &input, &mut reply) }
-            .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     };
     drop(loan);
     caller.data_mut().imports[depth] = input;

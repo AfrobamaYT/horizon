@@ -5,6 +5,8 @@ fn guest(layout: u64, body: &str) -> Vec<u8> {
         r#"(module
       (@custom "dylink.0" "\01\04\00\00\00\00")
       (import "env" "memory" (memory 1))
+      (import "horizon" "host" (func $host (param i32 i32 i32 i32 i32) (result i32)))
+      (import "horizon" "host_reply" (func $reply (param i32)))
       (func (export "horizon_layout") (result i64) i64.const {layout})
       (func (export "horizon_in") (param i32) (result i32) i32.const 512)
       (func (export "horizon_hook") (param i32 i32 i32) (result i64) {body})
@@ -104,4 +106,63 @@ fn callback_borrows_only_the_lent_context_and_restores_depth() {
     drop(loan);
     assert_eq!(context.data().depth, 1);
     assert_eq!(context.data().cx.frames.len(), 1);
+}
+
+#[test]
+fn import_reply_retry_survives_a_nested_callback() {
+    struct Random(WasmMod);
+    impl mod_api::StructureRandom for Random {
+        fn next_int_bound(&mut self, _: i32) -> i32 {
+            0
+        }
+        fn next_float(&mut self) -> f32 {
+            0.0
+        }
+        fn next_double(&mut self) -> f64 {
+            0.0
+        }
+        fn next_boolean(&mut self) -> bool {
+            false
+        }
+        fn next_long(&mut self) -> i64 {
+            self.0
+                .call(
+                    CallClass::Callback,
+                    Frame::default(),
+                    1,
+                    None,
+                    |w| w.put(&70i64),
+                    |r| r.take::<i64>(),
+                )
+                .unwrap_or(-1)
+                + 1
+        }
+    }
+    let id = crate::boundary::IMPORT_STRUCTURE_RANDOM_NEXT_LONG;
+    let module = module(&format!(
+        r#"
+        local.get 0 i32.const 1 i32.eq
+        if (result i64)
+          i64.const 2199023255560
+        else
+          i32.const {id} i32.const 0 i32.const 0 i32.const 0 i32.const 0 call $host
+          i32.const 8 i32.ne if unreachable end
+          i32.const 1024 call $reply
+          i64.const 4398046511112
+        end"#
+    ));
+    let mut random = Random(module.clone());
+    let mut frame = Frame::default();
+    frame.set_structure_random_mut(&mut random);
+    assert_eq!(
+        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
+        Some(71)
+    );
+}
+
+#[test]
+fn memory_growth_limit_traps_and_poison_is_shared_by_members() {
+    let module = module("i32.const 4096 memory.grow drop i64.const 0");
+    assert_eq!(call(&module), None);
+    assert!(module.running.poisoned.load(Ordering::Relaxed));
 }
