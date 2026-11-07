@@ -3800,8 +3800,8 @@ pub enum PlayerAction {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct PlayerActionSetup {
-    /// The main-hand stack. A zero-count stack means an empty hand.
-    pub stack: ItemStack,
+    /// The main-hand stack, or `None` for an empty hand.
+    pub stack: Option<ItemStack>,
     /// Eye position in world coordinates, using the standing eye height (1.62).
     pub eye: [f64; 3],
     /// Vanilla yaw in degrees.
@@ -3813,7 +3813,13 @@ pub struct PlayerActionSetup {
 }
 impl PlayerActionSetup {
     /// A scoped survival setup with the supplied main-hand stack and viewpoint.
-    pub fn new(stack: ItemStack, eye: [f64; 3], yaw: f32, pitch: f32, secondary_use: bool) -> Self {
+    pub fn new(
+        stack: Option<ItemStack>,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        secondary_use: bool,
+    ) -> Self {
         Self {
             stack,
             eye,
@@ -3867,6 +3873,8 @@ pub enum ActionRefused {
     Protected,
     /// The scoped setup's eye position, rotation or entity hit is not finite.
     InvalidSetup,
+    /// The setup's held stack was refused before swapping player state or running the action.
+    InvalidStack(StackWriteError),
     /// The action's target isn't an entity in the fake's level, or is the fake itself
     /// (`handleInteract`'s "Attempting to attack an invalid entity").
     InvalidTarget,

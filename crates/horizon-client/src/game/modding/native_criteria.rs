@@ -4,10 +4,7 @@
 //! it as it keeps vanilla's, and the mod fires it where its event happens, as
 //! a NeoForge mod calls its own `SimpleCriterionTrigger.trigger`.
 use super::{Game, advancements::item_view};
-use horizon_client::{
-    advancements::{self as adv, EntityView},
-    items::ItemStack,
-};
+use horizon_client::advancements::{self as adv, EntityView};
 use mod_api::{
     CriterionContext, CriterionTest, CriterionTestError, Identifier, PlayerRef,
     TriggerCriterionError,
@@ -32,8 +29,11 @@ impl CriterionContext for NativeCriterion<'_> {
     /// and `damage` components, and the `enchantments` and `damage`
     /// predicates; other components and predicates aren't checked. A missing
     /// key passes, as an absent `Optional<ItemPredicate>` does.
-    fn item(&self, key: &str, stack: &ItemStack) -> bool {
-        adv::item(&self.conditions[key], &item_view(stack), self.world)
+    fn item(&self, key: &str, stack: &mod_api::ItemStack) -> bool {
+        let Ok(stack) = super::api_values::stack_value(stack) else {
+            return false;
+        };
+        adv::item(&self.conditions[key], &item_view(&stack), self.world)
     }
 }
 

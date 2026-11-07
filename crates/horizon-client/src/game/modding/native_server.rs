@@ -7,6 +7,7 @@
 //! player's plain items: count, take, give. They act on the server's own
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
+use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Dim, Game, commands::execute, lan::LanHost};
 use mod_api::__private::game::*;
 pub use mod_api::game::NativeExperienceOrb;
@@ -555,7 +556,7 @@ impl Game<'_> {
         {
             return Err(ActionRefused::InvalidSetup);
         }
-        let mut state = ScopedPlayerState::new(self.motion, setup)?;
+        let mut state = ScopedPlayerState::new(self.motion, self.items(), setup)?;
         let host = self.lan.as_mut().expect("validated fake's host");
         host.hub.guests.update(gi, |guest| state.swap(guest));
         let play = host.play.insert(conn, Default::default());
@@ -567,7 +568,7 @@ impl Game<'_> {
                 .get_mut(guest.selected)
                 .and_then(Option::take)
                 .filter(|s| s.count > 0);
-            let other = guest
+            let other: Vec<horizon_items::items::ItemStack> = guest
                 .inventory
                 .iter_mut()
                 .chain([&mut guest.offhand, &mut guest.carried])
@@ -582,7 +583,16 @@ impl Game<'_> {
         if let Some(play) = play {
             host.play.insert(conn, play);
         }
-        outcome.map(|outcome| ScopedActionResult::new(outcome, held, other))
+        outcome.map(|outcome| {
+            ScopedActionResult::new(
+                outcome,
+                held.try_into_api()
+                    .expect("action results use load-resolved item keys"),
+                other
+                    .try_into_api()
+                    .expect("action results use load-resolved item keys"),
+            )
+        })
     }
 
     fn fake_action_actor(
@@ -1739,7 +1749,11 @@ impl Game<'_> {
                 Arg::Coords(coordinates) => {
                     Value::BlockPos(self.resolve_coords(&coordinates).map(|v| v.floor() as i32))
                 }
-                Arg::Item(input) => Value::Item(self.command_item_stack(&input, 1)?),
+                Arg::Item(input) => Value::Item(
+                    self.command_item_stack(&input, 1)?
+                        .try_into_api()
+                        .expect("command item validation resolves registered items"),
+                ),
                 _ => unreachable!("the native tree contains only registered native argument kinds"),
             };
             arguments.push(CommandArgument::new(argument.name, value));
@@ -1821,6 +1835,7 @@ struct ScopedPlayerState {
 impl ScopedPlayerState {
     fn new(
         resources: &horizon_client::motion::MotionResources,
+        items: &horizon_items::items::Items,
         setup: PlayerActionSetup,
     ) -> Result<Self, ActionRefused> {
         // Standing eye height even for secondary use, just as a freshly positioned fake.
@@ -1836,7 +1851,10 @@ impl ScopedPlayerState {
         .map_err(|_| ActionRefused::InvalidSetup)?;
         motion.shift_key_down = setup.secondary_use;
         let mut inventory = vec![None; 36];
-        inventory[0] = (setup.stack.count > 0).then_some(setup.stack);
+        inventory[0] = setup
+            .stack
+            .try_into_engine(items)
+            .map_err(ActionRefused::InvalidStack)?;
         Ok(Self {
             motion: Some(Box::new(motion)),
             position,

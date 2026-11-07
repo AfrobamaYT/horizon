@@ -3,6 +3,7 @@
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 mod pufferfish_player;
+use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
 use super::{
@@ -686,7 +687,9 @@ impl Game<'_> {
         }
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
+        if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
+            && let Ok(body_snapshot) = body.try_into_api()
+        {
             let kind = self
                 .mobs
                 .iter()
@@ -695,7 +698,7 @@ impl Game<'_> {
                 .unwrap_or_default();
             let mut entries = vec![mod_api::NativeArmorHurt {
                 slot: EquipmentSlot::Body,
-                stack: body.clone(),
+                stack: body_snapshot,
                 damage: super::durability_damage(damage),
                 new_damage: super::durability_damage(damage),
             }];
@@ -2076,6 +2079,9 @@ impl Game<'_> {
                     _ => return choice.chance,
                 };
                 let mut chance = choice.chance;
+                let Ok(stack) = stack.try_into_api() else {
+                    return chance;
+                };
                 self.native_get_equipment_drop_chance(
                     mod_api::__private::GetEquipmentDropChanceCall {
                         entity: id,
@@ -2193,22 +2199,35 @@ impl Game<'_> {
         };
         // Vanilla builds each item entity (and draws its motion) when it
         // collects the drop, before the event sees the list.
-        let mut drops: Vec<NativeItemDrop> = stacks
+        let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| {
-                NativeItemDrop::new(stack, position, velocity(self), pickup_delay)
+            .map(|(stack, position)| super::spill::BlockItemDrop {
+                stack,
+                position,
+                velocity: velocity(self),
+                pickup_delay,
             })
+            .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
             .collect();
         let mut cancel = false;
-        self.native_living_drops(mod_api::__private::LivingDropsCall {
-            entity: dying.entity,
-            kind: dying.kind,
-            player: dying.player,
-            source,
-            recently_hit: dying.recently_hit,
-            drops: &mut drops,
-            cancel: &mut cancel,
-        });
+        if mod_api::__private::listened(mod_api::HookId::LivingDrops)
+            && let Ok(mut snapshots) = drops.try_into_api()
+        {
+            self.native_living_drops(mod_api::__private::LivingDropsCall {
+                entity: dying.entity,
+                kind: dying.kind,
+                player: dying.player,
+                source,
+                recently_hit: dying.recently_hit,
+                drops: &mut snapshots,
+                cancel: &mut cancel,
+            });
+            if let Ok(next) = snapshots.try_into_engine(self.items()) {
+                drops = next;
+            } else {
+                cancel = false;
+            }
+        }
         if cancel {
             return;
         }
