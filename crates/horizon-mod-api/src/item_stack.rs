@@ -49,7 +49,7 @@ impl From<&Components> for Compound {
 pub struct ItemStack {
     item: ItemKey,
     count: NonZeroU32,
-    damage: u32,
+    damage: Option<u32>,
     components: Option<Box<Components>>,
 }
 
@@ -63,7 +63,7 @@ pub struct StackRecord {
     /// A nonzero number of items.
     pub count: u32,
     /// Damage to the item.
-    pub damage: u32,
+    pub damage: Option<u32>,
     /// Component patch, absent for ordinary stacks.
     pub components: Option<Box<Components>>,
 }
@@ -76,12 +76,18 @@ pub enum StackError {
     Empty,
     /// Adding items would overflow the record's count.
     CountOverflow,
+    /// Damage must be a nonnegative integer representable by u32.
+    InvalidDamage,
+    /// A patch and the damage field (or a patch value and removal) disagree.
+    ConflictingDamage,
 }
 impl std::fmt::Display for StackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Empty => f.write_str("an item stack must be nonempty"),
             Self::CountOverflow => f.write_str("item stack count overflow"),
+            Self::InvalidDamage => f.write_str("invalid item damage"),
+            Self::ConflictingDamage => f.write_str("conflicting item damage"),
         }
     }
 }
@@ -109,6 +115,11 @@ pub enum StackWriteError {
     InvalidMaximum,
     /// An engine result contained a zero-count stack instead of an empty slot.
     EmptyEngineStack,
+    /// An engine snapshot's component patch was malformed or conflicted with its damage.
+    InvalidComponents {
+        /// The record-level normalization refusal.
+        reason: StackError,
+    },
 }
 
 impl crate::NoBackend for StackWriteError {
@@ -133,7 +144,7 @@ impl ItemStack {
         Some(Self {
             item,
             count: NonZeroU32::new(count)?,
-            damage: 0,
+            damage: None,
             components: None,
         })
     }
@@ -142,7 +153,7 @@ impl ItemStack {
         Self {
             item,
             count: NonZeroU32::MIN,
-            damage: 0,
+            damage: None,
             components: None,
         }
     }
@@ -159,17 +170,35 @@ impl ItemStack {
         self.count = NonZeroU32::new(count).ok_or(StackError::Empty)?;
         Ok(())
     }
-    /// Damage stored on the stack.
+    /// Stored damage, or zero when no numeric damage override is present.
+    /// A plain stack inherits its item's default. Some(0) is an explicit present zero;
+    /// [`Self::clear_damage`] records removal of the default component instead.
     pub fn damage(&self) -> u32 {
+        self.damage.unwrap_or(0)
+    }
+    /// The numeric damage override: None inherits the prototype unless the patch
+    /// contains an explicit removal; Some(0) is a present zero-damage component.
+    pub fn damage_component(&self) -> Option<u32> {
         self.damage
     }
     /// Set damage. The game checks the effective maximum when accepting this value.
     pub fn set_damage(&mut self, damage: u32) {
-        self.damage = damage;
+        self.damage = Some(damage);
+        if let Some(patch) = &mut self.components {
+            patch.patch.remove(&JavaString::from("!minecraft:damage"));
+            if patch.patch.is_empty() {
+                self.components = None;
+            }
+        }
     }
-    /// Whether any damage is stored on the stack.
+    /// Remove the effective damage component, including an inherited default.
+    /// The patch stores a real NBT removal, never a second numeric damage value.
+    pub fn clear_damage(&mut self) {
+        self.remove_component_value("minecraft:damage", true);
+    }
+    /// Whether a nonzero numeric damage override is stored on the stack.
     pub fn is_damaged(&self) -> bool {
-        self.damage != 0
+        self.damage.is_some_and(|damage| damage != 0)
     }
     /// Add items. Overflow leaves the stack unchanged; registry maxima are checked on writes.
     pub fn grow(&mut self, count: u32) -> Result<(), StackError> {
@@ -221,6 +250,18 @@ impl ItemStack {
     }
     /// Read a component with its typed descriptor.
     pub fn get<C: Component>(&self, component: &C) -> Option<C::Value> {
+        if component.id() == "minecraft:damage" {
+            if self.components.as_ref().is_some_and(|patch| {
+                patch
+                    .patch
+                    .contains_key(&JavaString::from("!minecraft:damage"))
+            }) {
+                return None;
+            }
+            return self
+                .damage
+                .and_then(|damage| component.decode(&unsigned_tag(damage)));
+        }
         component.decode(
             self.components
                 .as_ref()?
@@ -229,16 +270,49 @@ impl ItemStack {
         )
     }
     /// Replace a component value. Only stacks with a patch allocate component storage.
-    pub fn set<C: Component>(&mut self, component: &C, value: C::Value) {
-        self.components
-            .get_or_insert_with(Default::default)
-            .patch
-            .insert(JavaString::from(component.id()), component.encode(value));
+    pub fn set<C: Component>(&mut self, component: &C, value: C::Value) -> Result<(), StackError> {
+        self.set_component_value(component.id(), component.encode(value))
+    }
+    pub(crate) fn set_component_value(&mut self, id: &str, value: Tag) -> Result<(), StackError> {
+        if id == "minecraft:damage" {
+            self.set_damage(damage_value(&value)?);
+            return Ok(());
+        }
+        if id == "!minecraft:damage" {
+            if !matches!(&value, Tag::Compound(value) if value.is_empty()) {
+                return Err(StackError::InvalidDamage);
+            }
+            if self.damage.is_some() {
+                return Err(StackError::ConflictingDamage);
+            }
+        }
+        let patch = &mut self.components.get_or_insert_with(Default::default).patch;
+        patch.remove(&JavaString::from(format!("!{id}").as_str()));
+        patch.insert(JavaString::from(id), value);
+        Ok(())
     }
     /// Remove an override, releasing the patch allocation when its last entry is removed.
     pub fn remove<C: Component>(&mut self, component: &C) {
+        self.remove_component_value(component.id(), false);
+    }
+    pub(crate) fn remove_component_value(&mut self, id: &str, removal: bool) {
+        if id == "minecraft:damage" {
+            self.damage = None;
+        }
+        if removal {
+            self.components.get_or_insert_with(Default::default);
+        }
         if let Some(components) = &mut self.components {
-            components.patch.remove(&JavaString::from(component.id()));
+            components.patch.remove(&JavaString::from(id));
+            components
+                .patch
+                .remove(&JavaString::from(format!("!{id}").as_str()));
+            if removal {
+                components.patch.insert(
+                    JavaString::from(format!("!{id}").as_str()),
+                    Tag::Compound(Compound::new()),
+                );
+            }
             if components.patch.is_empty() {
                 self.components = None;
             }
@@ -249,9 +323,91 @@ impl ItemStack {
         self.components.as_deref()
     }
     /// Replace the component patch at an NBT conversion boundary.
-    pub fn set_components(&mut self, patch: Compound) {
+    /// Damage is normalized into the scalar field. Malformed or conflicting values
+    /// refuse the entire replacement and leave the stack unchanged.
+    pub fn set_components(&mut self, mut patch: Compound) -> Result<(), StackError> {
+        let damage = patch.remove(&JavaString::from("minecraft:damage"));
+        let removal = patch.get(&JavaString::from("!minecraft:damage"));
+        if removal.is_some_and(|value| !matches!(value, Tag::Compound(value) if value.is_empty())) {
+            return Err(StackError::InvalidDamage);
+        }
+        let removed = removal.is_some();
+        let next = match damage {
+            Some(value) => {
+                let value = damage_value(&value)?;
+                if removed || self.damage.is_some_and(|damage| damage != value) {
+                    return Err(StackError::ConflictingDamage);
+                }
+                Some(value)
+            }
+            None => self.damage,
+        };
+        if removed && next.is_some() {
+            return Err(StackError::ConflictingDamage);
+        }
+        self.damage = next;
         self.components = (!patch.is_empty()).then(|| Box::new(Components::from(patch)));
+        Ok(())
     }
+    /// Decode the item NBT escape using this host's load-resolved item ids.
+    /// Unknown ids, zero counts and malformed/conflicting damage return None.
+    /// Effective maxima remain the game's write-boundary responsibility.
+    pub fn from_nbt(host: &dyn crate::Host, value: &Compound) -> Option<Self> {
+        let Tag::String(id) = value.get(&JavaString::from("id"))? else {
+            return None;
+        };
+        let id = crate::Identifier::parse(&id.to_string_lossy()).ok()?;
+        let item = host.item_key(&id)?;
+        let count = match value.get(&JavaString::from("count")) {
+            None => 1,
+            Some(value) => damage_value(value).ok()?,
+        };
+        let mut stack = Self::new(item, count)?;
+        match value.get(&JavaString::from("components")) {
+            Some(Tag::Compound(patch)) => stack.set_components(patch.clone()).ok()?,
+            None => {}
+            _ => return None,
+        }
+        Some(stack)
+    }
+    /// Encode the item NBT escape using this host's canonical id, never a process-local key.
+    /// Returns None when id metadata is unavailable. Only components present on the
+    /// stack are written; effective defaults and maxima belong to the items host area.
+    pub fn to_nbt(&self, host: &dyn crate::Host) -> Option<Compound> {
+        let id = self.item.id(host);
+        if id.is_empty() {
+            return None;
+        }
+        let mut value = Compound::new();
+        value.insert(JavaString::from("id"), Tag::String(id.as_str().into()));
+        value.insert(JavaString::from("count"), unsigned_tag(self.count()));
+        let mut patch = self
+            .components()
+            .map(|patch| patch.as_nbt().clone())
+            .unwrap_or_default();
+        if let Some(damage) = self.damage {
+            patch.insert(JavaString::from("minecraft:damage"), unsigned_tag(damage));
+        }
+        if !patch.is_empty() {
+            value.insert(JavaString::from("components"), Tag::Compound(patch));
+        }
+        Some(value)
+    }
+}
+
+pub(crate) fn unsigned_tag(value: u32) -> Tag {
+    i32::try_from(value).map_or_else(|_| Tag::Long(i64::from(value)), Tag::Int)
+}
+
+fn damage_value(value: &Tag) -> Result<u32, StackError> {
+    let value = match value {
+        Tag::Byte(value) => i64::from(*value),
+        Tag::Short(value) => i64::from(*value),
+        Tag::Int(value) => i64::from(*value),
+        Tag::Long(value) => *value,
+        _ => return Err(StackError::InvalidDamage),
+    };
+    u32::try_from(value).map_err(|_| StackError::InvalidDamage)
 }
 impl From<&ItemStack> for StackRecord {
     fn from(value: &ItemStack) -> Self {
@@ -268,7 +424,9 @@ impl TryFrom<StackRecord> for ItemStack {
     fn try_from(value: StackRecord) -> Result<Self, Self::Error> {
         let mut stack = Self::new(value.item, value.count).ok_or(StackError::Empty)?;
         stack.damage = value.damage;
-        stack.components = value.components.filter(|patch| !patch.patch.is_empty());
+        if let Some(patch) = value.components {
+            stack.set_components(patch.patch)?;
+        }
         Ok(stack)
     }
 }
@@ -310,7 +468,7 @@ mod tests {
     fn splits_conserve_items_without_an_empty_sentinel() {
         for n in [0, 1, 4, 5, u32::MAX] {
             let mut stack = ItemStack::new(ItemKey(0), 4).unwrap();
-            stack.set(&Number, 17);
+            stack.set(&Number, 17).unwrap();
             let split = stack.split(n);
             assert_eq!(split.taken.as_ref().map_or(0, ItemStack::count), n.min(4));
             assert_eq!(
@@ -328,7 +486,7 @@ mod tests {
     fn patches_are_lazy_and_comparisons_ignore_counts() {
         let mut stack = ItemStack::of(ItemKey(0));
         assert!(stack.components().is_none());
-        stack.set(&Number, 19);
+        stack.set(&Number, 19).unwrap();
         let mut other = stack.clone();
         other.grow(3).unwrap();
         assert!(stack.is_stackable_with(&other));

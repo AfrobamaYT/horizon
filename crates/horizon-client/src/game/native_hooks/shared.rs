@@ -1,3 +1,4 @@
+use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
 
 struct ContentsChangedGuard<'a, 'game> {
@@ -1341,12 +1342,15 @@ pub(super) fn incoming_damage(
     let (entity, kind, source) = hurt_server_args(hurting, level.attack());
     let mut canceled = false;
     let attack = level.attack();
+    let Ok(weapon) = attack.weapon_of(source.direct).try_into_api() else {
+        return false;
+    };
     HitLevel(level).native_living_incoming_damage(mod_api::__private::LivingIncomingDamageCall {
         entity,
         kind,
         source: &source,
         victim: &victim,
-        weapon: attack.weapon_of(source.direct),
+        weapon: weapon.as_ref(),
         container,
         canceled: &mut canceled,
     });
@@ -1488,6 +1492,9 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
     let (entity, kind, source) = hurt_server_args(pushed, level.attack());
     let mut canceled = false;
     let [main, off] = &attack.held;
+    let (Ok(main), Ok(off)) = (main.try_into_api(), off.try_into_api()) else {
+        return false;
+    };
     HitLevel(level).native_living_knockback(mod_api::__private::LivingKnockbackCall {
         entity,
         kind,
@@ -2370,6 +2377,12 @@ impl Game<'_> {
             (None, None)
         };
         let (mut successful, mut canceled) = (false, false);
+        let Ok(mut snapshot) = stack.try_into_api() else {
+            return BonemealAsk {
+                crop: None,
+                check: Some(check),
+            };
+        };
         self.native_bonemeal(mod_api::__private::BonemealCall {
             dimension: self.dim.level(),
             player,
@@ -2377,11 +2390,19 @@ impl Game<'_> {
             pos,
             state,
             source: BonemealSource::Interaction,
-            stack,
+            stack: &mut snapshot,
             valid_bonemeal_target: valid,
             successful: &mut successful,
             canceled: &mut canceled,
         });
+        if let Ok(next) = snapshot.try_into_engine(self.items()) {
+            *stack = next;
+        } else {
+            return BonemealAsk {
+                crop: None,
+                check: Some(check),
+            };
+        }
         BonemealAsk {
             crop: canceled.then_some(successful),
             check: Some(check),
@@ -2494,7 +2515,13 @@ impl Game<'_> {
                 use_item,
             };
         }
-        let click = self.block_click(hit, hand, stack);
+        let Ok(snapshot) = stack.try_into_api() else {
+            return BlockClickAnswer::Go {
+                use_block,
+                use_item,
+            };
+        };
+        let click = self.block_click(hit, hand, snapshot.as_ref());
         let (mut result, mut canceled) = (NativeInteractionResult::Pass, false);
         self.native_right_click_block(
             &click,
@@ -2523,7 +2550,8 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::UseItemOnBlock) {
             return None;
         }
-        let click = self.block_click(hit, hand, stack);
+        let snapshot = stack.try_into_api().ok()?;
+        let click = self.block_click(hit, hand, snapshot.as_ref());
         let (mut result, mut canceled) = (NativeInteractionResult::TryWithEmptyHand, false);
         self.native_use_item_on_block(&click, phase, &mut result, &mut canceled);
         if !canceled {
@@ -2559,9 +2587,10 @@ impl Game<'_> {
         if !mod_api::__private::has_part_hook(mod_api::HookId::OnItemUseFirst) {
             return None;
         }
-        let click = self.block_click(hit, hand, Some(stack));
+        let snapshot = stack.try_into_api().ok()?;
+        let click = self.block_click(hit, hand, Some(&snapshot));
         let mut answer = None;
-        self.native_on_item_use_first(stack, &click, &mut answer);
+        self.native_on_item_use_first(&snapshot, &click, &mut answer);
         answer.filter(|answer| *answer != NativeInteractionResult::Pass)
     }
     /// Air use only: a passing block or entity keeps its target, rather than
@@ -2584,6 +2613,7 @@ impl Game<'_> {
             .target_position(super::commands::Target::Player)?
             .map(|v| v.floor() as i32);
         let (player, player_entity_id) = self.native_clicker();
+        let snapshot = stack.try_into_api().ok()?;
         let click = NativeItemClick::from(mod_api::__private::built::NativeItemClick {
             side: if self.remote.is_some() {
                 LogicalSide::Client
@@ -2593,7 +2623,7 @@ impl Game<'_> {
             dimension: self.dim.level(),
             pos,
             hand,
-            stack,
+            stack: &snapshot,
             player,
             player_entity_id,
         });
@@ -2604,29 +2634,6 @@ impl Game<'_> {
             self.with_hand(hand, |game| game.apply_after_use_components(stack));
         }
         canceled.then_some(result)
-    }
-    /// The shared context for a block's behaviour and the click event.
-    pub(super) fn block_click<'a>(
-        &mut self,
-        hit: &super::Hit,
-        hand: Hand,
-        stack: Option<&'a ItemStack>,
-    ) -> NativeBlockClick<'a> {
-        let (player, player_entity_id) = self.native_clicker();
-        NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
-            side: if self.remote.is_some() {
-                LogicalSide::Client
-            } else {
-                LogicalSide::Server
-            },
-            dimension: self.dim.level(),
-            pos: hit.pos,
-            hit: hit.native(),
-            hand,
-            stack,
-            player,
-            player_entity_id,
-        })
     }
     /// `GameRuleChangedEvent` once the server set the rule `name` to `value`
     /// (`GameRules.set` with a server).
@@ -2694,6 +2701,12 @@ impl Game<'_> {
         explosion: Option<f32>,
         drops: &mut Vec<ItemStack>,
     ) {
+        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
+            return;
+        }
+        let Ok(snapshot) = tool.try_into_api() else {
+            return;
+        };
         let items = match &self.world_tables {
             Some(tables) => &tables.items,
             None => self.res.items(),
@@ -2706,7 +2719,7 @@ impl Game<'_> {
             block: Some((pos, state)),
             entity: None,
             player,
-            tool,
+            tool: snapshot.as_ref(),
             explosion,
             used: false,
         });
@@ -2726,6 +2739,12 @@ impl Game<'_> {
         tool: Option<&ItemStack>,
         drops: &mut Vec<ItemStack>,
     ) {
+        if !mod_api::__private::listened(mod_api::HookId::LootDrops) {
+            return;
+        }
+        let Ok(snapshot) = tool.try_into_api() else {
+            return;
+        };
         let context = NativeLootDrops::from(mod_api::__private::built::NativeLootDrops {
             table,
             dimension: self.dim.id(),
@@ -2733,7 +2752,7 @@ impl Game<'_> {
             block,
             entity,
             player,
-            tool,
+            tool: snapshot.as_ref(),
             explosion: None,
             used: true,
         });

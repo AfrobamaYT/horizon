@@ -239,7 +239,8 @@ pub(super) fn emit(
                     .iter()
                     .find(|(arg, _)| arg == key)
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
-                let lookup = match ty.to_token_stream().to_string().as_str() {
+                let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
+                let lookup = match key_type.as_str() {
                     "BlockStateId" if table == "block" => format!("block_state({key})"),
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {

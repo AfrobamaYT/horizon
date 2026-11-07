@@ -10303,13 +10303,13 @@ impl Game<'_> {
         }
         let cost = |g: &Self, c: &play::NetCost| {
             g.to_stack(&Some(c.clone().into()))
-                .map(|stack| mod_api::merchant::ItemCost { stack })
+                .map(|stack| horizon_client::merchant::ItemCost { stack })
         };
         let offers: Vec<_> = p
             .offers
             .iter()
             .filter_map(|o| {
-                let mut offer = mod_api::merchant::MerchantOffer {
+                let mut offer = horizon_client::merchant::MerchantOffer {
                     base_cost_a: cost(self, &o.cost_a)?,
                     cost_b: match &o.cost_b {
                         Some(b) => Some(cost(self, b)?),
