@@ -149,11 +149,14 @@ impl TextField {
         self.scroll_to_cursor();
     }
 
-    /// `EditBox.scrollTo` without the font: back to the cursor when it is left of what shows;
-    /// the game scrolls forward to it when it draws.
+    /// `EditBox.scrollTo` without the font: back to the cursor when it is left of what shows,
+    /// and about a field's width back when it is on the first shown character (all the way, and
+    /// the game scrolls forward until the cursor is at the right edge when it draws).
     fn scroll_to_cursor(&mut self) {
         self.scroll = self.scroll.min(char_len(&self.edit.value));
-        if self.edit.cursor < self.scroll {
+        if self.edit.cursor == self.scroll && self.scroll > 0 {
+            self.scroll = 0;
+        } else if self.edit.cursor < self.scroll {
             self.scroll = self.edit.cursor;
         }
     }

@@ -1462,7 +1462,12 @@ impl EditBox {
     fn scroll_to(&mut self, pos: usize) {
         // EditBox.scrollTo without font access is completed in `layout`.
         self.display = self.display.min(char_len(&self.value));
-        if pos < self.display {
+        if pos == self.display && pos > 0 {
+            // A cursor on the first shown character steps back about a field's width
+            // (`displayPos -= plainSubstrByWidth(value, width, true).length()`): `layout` scrolls
+            // forward from the start until the cursor is at the right edge.
+            self.display = 0;
+        } else if pos < self.display {
             self.display = pos;
         }
     }
@@ -2223,6 +2228,31 @@ mod tests {
         e.click(&atlas, at(&e, "hello "), false, false);
         e.drag_to(&atlas, e.text_x() - 5.0);
         assert_eq!((e.cursor, e.highlight), (0, 6));
+    }
+    /// `EditBox.scrollTo`: a cursor on the first shown character steps back a field's width,
+    /// so replacing all of a scrolled text shows the new text, and walking left past the
+    /// shown start pages back.
+    #[test]
+    fn edit_box_steps_back_when_the_cursor_reaches_the_first_shown_character() {
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
+        let mut e = EditBox::new(0.0, 0.0, 60.0, 20.0);
+        e.set_value("the quick brown fox jumps over");
+        e.layout(&atlas);
+        let scrolled = e.display;
+        assert!(scrolled > 0);
+        assert!(e.key(winit::keyboard::KeyCode::KeyA, true, false));
+        e.insert_text("a");
+        e.layout(&atlas);
+        assert_eq!((e.value.as_str(), e.cursor, e.display), ("a", 1, 0));
+        e.set_value("the quick brown fox jumps over");
+        e.layout(&atlas);
+        e.set_cursor(scrolled, false);
+        e.layout(&atlas);
+        assert!(e.display < scrolled);
+        assert!(e.cursor > e.display);
     }
     #[test]
     fn edit_box_editing() {

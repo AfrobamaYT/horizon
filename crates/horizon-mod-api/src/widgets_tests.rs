@@ -308,6 +308,23 @@ fn a_focused_widget_made_inactive_takes_no_input() {
     assert_eq!(widgets.focused(), Some(b));
 }
 
+/// Replacing all of a scrolled field's text scrolls back to show it (`EditBox.scrollTo` steps
+/// back when the cursor is on the first shown character), instead of leaving it out of view.
+#[test]
+fn replacing_a_scrolled_text_scrolls_back_to_it() {
+    let host = Fake::default();
+    let (mut widgets, [a, ..]) = screen();
+    let mut draw = Recorder::default();
+    widgets.set_focus(&host, Some(a));
+    widgets.text_field_mut(a).unwrap().set_value("hello world");
+    widgets.text_field_mut(a).unwrap().scroll = 6;
+    widgets.key_pressed(&host, "key.keyboard.a", CONTROL);
+    assert_eq!(widgets.char_typed(&host, 'x'), Outcome::Changed(a));
+    widgets.draw(&mut draw, &host, [0.0, 0.0]);
+    assert_eq!(draw.fields[0].value, "x");
+    assert_eq!(draw.fields[0].scroll, 0);
+}
+
 /// A press over no widget is not the first click of a double click (`MouseHandler.onButton`
 /// keeps the time only of a click the screen took): a click on a field right after it only
 /// places the cursor.
