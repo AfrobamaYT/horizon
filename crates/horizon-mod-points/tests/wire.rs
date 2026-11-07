@@ -2,7 +2,7 @@
 //! the generated points compile once for the tests, not again as a unit-test copy of the crate.
 #![cfg(feature = "wasm-host")]
 use mod_points::__private::wire::{Forward, Mismatch, PointHost, Record, Value, Wire, forwarded};
-use mod_points::places::SHAPES;
+use mod_points::places::{NAMES, SHAPES};
 use mod_points::{PointId, ids};
 use std::borrow::Cow;
 
@@ -38,7 +38,15 @@ const CARRIED: &[&str] = &[
 
 #[test]
 fn every_point_of_the_game_crosses_to_a_wasm_mod() {
-    for shape in SHAPES.iter() {
+    for (name, shape) in NAMES.iter().zip(SHAPES.iter()) {
+        // Raw-only returns have no API record; their values use the raw thunks instead.
+        if shape.is_empty() {
+            assert!(
+                name.ends_with("_return"),
+                "an API head is missing its shape: {name}"
+            );
+            continue;
+        }
         let (host, fields) = shape.split_once('|').expect("a shape names its host");
         assert!(
             ["read", "side", "server", "client", "none"].contains(&host),

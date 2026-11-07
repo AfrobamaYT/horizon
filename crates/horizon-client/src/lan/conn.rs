@@ -501,9 +501,17 @@ fn serve_connection(
     let e = |e: horizon_protocol::Error| e.to_string();
     c.reader.set_read_timeout(Some(LOGIN_TIMEOUT)).map_err(e)?;
     let (id, payload) = c.recv().map_err(e)?;
-    let intention = match handshake::Serverbound::decode(id, &payload).map_err(e)? {
-        handshake::Serverbound::Intention(i) => i,
-        _ => return Err("expected a handshake".into()),
+    // Proxy forwarding carries data after the host (for example Floodgate's).
+    let forwarding = shared.config.forwarding_secret.is_some()
+        && shared.config.online.is_none()
+        && !c.is_memory();
+    let intention = if forwarding {
+        handshake::decode_intention(id, &payload, handshake::PROXY_HOST_LIMIT).map_err(e)?
+    } else {
+        match handshake::Serverbound::decode(id, &payload).map_err(e)? {
+            handshake::Serverbound::Intention(i) => i,
+            _ => return Err("expected a handshake".into()),
+        }
     };
     match intention.intent {
         // ServerHandshakePacketListenerImpl: a server that does not reply
