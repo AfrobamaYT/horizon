@@ -101,12 +101,9 @@ impl Game<'_> {
     }
     /// Every entity riding this one, at any depth (`Entity.getIndirectPassengers`): each
     /// passenger in `passengers` order, followed by those riding it.
-    pub(super) fn native_entity_indirect_passengers(
-        &self,
-        entity: EntityRef,
-    ) -> Option<Vec<EntityRef>> {
+    pub(super) fn entity_indirect_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>> {
         let mut all = Vec::new();
-        let mut next = self.native_entity_passengers(entity)?;
+        let mut next = self.entity_passengers(entity)?;
         next.reverse();
         while let Some(passenger) = next.pop() {
             // A chain of riders is short; the check only guards against a loop.
@@ -114,7 +111,7 @@ impl Game<'_> {
                 continue;
             }
             all.push(passenger);
-            if let Some(riders) = self.native_entity_passengers(passenger) {
+            if let Some(riders) = self.entity_passengers(passenger) {
                 next.extend(riders.into_iter().rev());
             }
         }
@@ -160,12 +157,9 @@ impl Game<'_> {
     /// player in a boat, a player on a mount that is ready for one, or a mob on a mob with AI
     /// unless `#non_controlling_rider` names it. `None` when nothing steers it, or for a stale
     /// handle.
-    pub(super) fn native_entity_controlling_passenger(
-        &self,
-        entity: EntityRef,
-    ) -> Option<LivingRef> {
+    pub(super) fn entity_controlling_passenger(&self, entity: EntityRef) -> Option<LivingRef> {
         let vehicle = self.native_entity_target(entity)?;
-        let passengers = self.native_entity_passengers(entity)?;
+        let passengers = self.entity_passengers(entity)?;
         let first = *passengers.first()?;
         let rider = self.native_entity_target(first)?;
         let is_player = matches!(rider, Target::Player | Target::Guest(_));
@@ -194,12 +188,12 @@ impl Game<'_> {
     }
     /// Whether both entities share a root vehicle (`Entity.isPassengerOfSameVehicle`): true for
     /// an entity and itself, false for two entities riding nothing. `None` for a stale handle.
-    pub(super) fn native_entity_is_passenger_of_same_vehicle(
+    pub(super) fn entity_is_passenger_of_same_vehicle(
         &self,
         entity: EntityRef,
         other: EntityRef,
     ) -> Option<bool> {
-        Some(self.native_entity_root_vehicle(entity)? == self.native_entity_root_vehicle(other)?)
+        Some(self.entity_root_vehicle(entity)? == self.entity_root_vehicle(other)?)
     }
     /// Where getting off this vehicle puts `passenger` as it stands now, riding it or not. This
     /// is the game's own placement, from the code `stop_riding` runs, so it can differ from
@@ -212,7 +206,7 @@ impl Game<'_> {
     /// there it is the top of the box. Reads only: no `mob_ride` or dismount veto is asked and
     /// the passenger's pose stays. `None` for a stale handle, a passenger other than a player
     /// or a mob, or a player with no motion state.
-    pub(super) fn native_entity_dismount_location(
+    pub(super) fn entity_dismount_location(
         &self,
         vehicle: EntityRef,
         passenger: LivingRef,
@@ -234,8 +228,8 @@ impl Game<'_> {
         if let Some(at) = at {
             return Some([at.x, at.y, at.z]);
         }
-        let [x, _, z] = self.native_entity_position(vehicle)?;
-        let [_, [_, top, _]] = self.native_entity_bounding_box(vehicle)?;
+        let [x, _, z] = self.entity_position(vehicle)?;
+        let [_, [_, top, _]] = self.entity_bounding_box(vehicle)?;
         Some([x, top, z])
     }
     /// A lead's live holder as a handle: `None` when it is out of reach.
@@ -248,28 +242,26 @@ impl Game<'_> {
             None => LeashHolder::Unleashed,
             Some(Holder::Knot(pos)) => LeashHolder::Knot(pos),
             Some(Holder::Mob(id)) => {
-                let entity = self.native_entity(id)?;
+                let entity = self.entity(id)?;
                 if !matches!(self.native_entity_target(entity), Some(Target::Mob(_))) {
                     return None;
                 }
                 LeashHolder::Entity(entity)
             }
             Some(Holder::Boat(id)) => {
-                let entity = self.native_entity(id)?;
+                let entity = self.entity(id)?;
                 if !matches!(self.native_entity_target(entity), Some(Target::Boat(_))) {
                     return None;
                 }
                 LeashHolder::Entity(entity)
             }
-            Some(Holder::Player) => {
-                LeashHolder::Entity(self.native_player_ref(ints_uuid(player?))?.entity())
-            }
+            Some(Holder::Player) => LeashHolder::Entity(self.player(ints_uuid(player?))?.entity()),
         })
     }
     /// The live holder of a mob's or boat's lead (`Leashable.getLeashHolder`), or `Unleashed`
     /// when no lead exists. `None` means an entity that takes no lead, or that the entity,
     /// holder or saved holder is unavailable, stale or in a parked level. Does not load a level.
-    pub(super) fn native_entity_leash_holder(&self, entity: EntityRef) -> Option<LeashHolder> {
+    pub(super) fn entity_leash_holder(&self, entity: EntityRef) -> Option<LeashHolder> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => {
                 let mob = self.mobs.iter().find(|m| m.id == id)?;
@@ -293,7 +285,7 @@ impl Game<'_> {
     /// there, neither `canBeLeashed` nor the distance is asked: a holder too far away snaps
     /// the lead on the next tick. False for a stale handle, the entity itself, a holder other
     /// than a player, mob or boat, or an entity that takes no lead.
-    pub(super) fn native_entity_leash_to(&mut self, entity: EntityRef, holder: EntityRef) -> bool {
+    pub(super) fn entity_leash_to(&mut self, entity: EntityRef, holder: EntityRef) -> bool {
         let (Some(target), Some(by)) = (
             self.native_entity_target(entity),
             self.native_entity_target(holder),
@@ -314,10 +306,10 @@ impl Game<'_> {
         };
         self.native_set_leash(entity, target, holder, player)
     }
-    /// Ties the mob's or boat's lead to the fence at `pos`, as `native_entity_leash_to` does to
+    /// Ties the mob's or boat's lead to the fence at `pos`, as `entity_leash_to` does to
     /// an entity; the knot is there while a lead hangs on it. False for a stale handle, an
     /// entity that takes no lead, or no fence at `pos`.
-    pub(super) fn native_entity_leash_to_knot(&mut self, entity: EntityRef, pos: [i32; 3]) -> bool {
+    pub(super) fn entity_leash_to_knot(&mut self, entity: EntityRef, pos: [i32; 3]) -> bool {
         let Some(target) = self.native_entity_target(entity) else {
             return false;
         };
@@ -325,7 +317,7 @@ impl Game<'_> {
             .res
             .facts()
             .get(self.world.block(pos[0], pos[1], pos[2]));
-        if !self.block_in_tag("minecraft:fences", &block.name) {
+        if !self.named_block_in_tag("minecraft:fences", &block.name) {
             return false;
         }
         self.native_set_leash(entity, target, Holder::Knot(pos), None)
@@ -340,7 +332,7 @@ impl Game<'_> {
     ) -> bool {
         let leashed = self.set_leash(target, holder, player);
         if leashed {
-            self.native_entity_stop_riding(entity);
+            self.entity_stop_riding(entity);
         }
         leashed
     }
@@ -348,11 +340,7 @@ impl Game<'_> {
     /// (`Leashable.dropLeash`), and is gone without it (`removeLeash`). A mob's removal is heard
     /// by `entity_unleash`. False when no holder has the lead, for a stale handle, or for an
     /// entity that takes no lead. A holder still unresolved from a save is left alone.
-    pub(super) fn native_entity_detach_leash(
-        &mut self,
-        entity: EntityRef,
-        drop_lead: bool,
-    ) -> bool {
+    pub(super) fn entity_detach_leash(&mut self, entity: EntityRef, drop_lead: bool) -> bool {
         self.native_entity_target(entity)
             .is_some_and(|target| self.detach_leash(target, drop_lead))
     }
@@ -771,7 +759,7 @@ mod tests {
     fn add_mob(game: &mut Game<'_>, id: u32, name: &str, at: Vec3) -> EntityRef {
         let kind = game.res.mob_types().get(name).unwrap().clone();
         game.mobs.push(Mob::new(id, kind, at, 0.0));
-        game.native_entity(id).unwrap()
+        game.entity(id).unwrap()
     }
     fn stale(entity: EntityRef) -> EntityRef {
         EntityRef::new(
@@ -859,7 +847,7 @@ mod tests {
             let conn = 1;
             game.boats
                 .push(Boat::new(95, "oak".into(), Vec3::ZERO, 0.0));
-            let boat = game.native_entity(95).unwrap();
+            let boat = game.entity(95).unwrap();
             // A mob in a boat steers nothing, and a player boarding after it goes first.
             let sailor = add_mob(game, 88, "minecraft:zombie", Vec3::ZERO);
             assert!(game.start_riding_target(Target::Mob(88), Target::Boat(95), true));
@@ -936,10 +924,10 @@ mod tests {
     fn get_off(game: &mut Game<'_>, rider: EntityRef, vehicle: EntityRef) -> [f64; 3] {
         let living = LivingRef::new(rider);
         let asked = vehicle.dismount_location(game, living).unwrap();
-        assert!(game.native_entity_start_riding(rider, vehicle, true));
+        assert!(game.entity_start_riding(rider, vehicle, true));
         assert_eq!(vehicle.dismount_location(game, living), Some(asked));
-        assert!(game.native_entity_stop_riding(rider));
-        assert_eq!(game.native_entity_position(rider), Some(asked));
+        assert!(game.entity_stop_riding(rider));
+        assert_eq!(game.entity_position(rider), Some(asked));
         asked
     }
     fn assert_near(at: [f64; 3], expected: [f64; 3]) {
@@ -976,11 +964,11 @@ mod tests {
             assert_near(get_off(game, rider, horse), [-0.49825, 64.0, 0.5]);
             // Ahead of it past a boat's side, `(1.375 * sqrt 2 + 0.6 + 1e-5) / 2` from its centre.
             game.boats.push(Boat::new(106, "oak".into(), at, 0.0));
-            let boat = game.native_entity(106).unwrap();
+            let boat = game.entity(106).unwrap();
             assert_near(get_off(game, rider, boat), [0.5, 64.0, 1.77229]);
             // A cart facing south lets it off to the north.
             game.carts.push(Minecart::new(107, CartKind::Rideable, at));
-            let cart = game.native_entity(107).unwrap();
+            let cart = game.entity(107).unwrap();
             assert_near(get_off(game, rider, cart), [0.5, 64.0, -0.5]);
         });
     }
@@ -1022,11 +1010,11 @@ mod tests {
             let ghast = add_mob(game, 122, "minecraft:happy_ghast", at);
             assert_near(get_off(game, player, ghast), [0.5, 68.0, 0.5]);
             game.boats.push(Boat::new(123, "oak".into(), at, 0.0));
-            let boat = game.native_entity(123).unwrap();
+            let boat = game.entity(123).unwrap();
             assert_near(get_off(game, player, boat), [0.5, 64.0, 1.77229]);
             // Unlike a mob's, a player's search takes a cart's yaw as it is.
             game.carts.push(Minecart::new(124, CartKind::Rideable, at));
-            let cart = game.native_entity(124).unwrap();
+            let cart = game.entity(124).unwrap();
             assert_near(get_off(game, player, cart), [-0.5, 64.0, 0.5]);
         });
     }
@@ -1041,8 +1029,8 @@ mod tests {
             let living = LivingRef::new(rider);
             // Nothing rides a player: the top of its box.
             let player = super::super::native_player_death::tests::add_guest(game).entity();
-            let [_, [_, top, _]] = game.native_entity_bounding_box(player).unwrap();
-            let [x, _, z] = game.native_entity_position(player).unwrap();
+            let [_, [_, top, _]] = game.entity_bounding_box(player).unwrap();
+            let [x, _, z] = game.entity_position(player).unwrap();
             assert_eq!(player.dismount_location(game, living), Some([x, top, z]));
 
             assert_eq!(stale(cow).dismount_location(game, living), None);
@@ -1079,11 +1067,11 @@ mod tests {
                 let holder = add_mob(game, 111, "minecraft:sheep", at);
                 let vehicle = add_mob(game, 112, "minecraft:pig", at);
                 game.boats.push(Boat::new(113, "oak".into(), at, 0.0));
-                let boat = game.native_entity(113).unwrap();
+                let boat = game.entity(113).unwrap();
                 let items = |game: &Game<'_>| game.dropped.len();
 
                 // A mob's lead goes to a mob, and the leashed mob gets off its vehicle.
-                assert!(game.native_entity_start_riding(cow, vehicle, true));
+                assert!(game.entity_start_riding(cow, vehicle, true));
                 assert!(cow.leash_to(game, holder));
                 assert_eq!(cow.leash_holder(game), Some(LeashHolder::Entity(holder)));
                 assert_eq!(cow.vehicle(game), None);
