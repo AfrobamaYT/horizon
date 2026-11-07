@@ -201,6 +201,8 @@ pub use prepared_model::fail_next_prepared_upload;
 pub use prepared_model::{
     PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
+#[cfg(feature = "test-support")]
+pub use prepared_model::{cap_prepared_instance_slots, capped_prepared_room};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -2646,25 +2648,12 @@ impl Renderer {
         self.prepared_draws.extend_from_slice(draws);
     }
 
-    /// Whether `count` copies fit in one instance buffer on this device.
-    pub fn prepared_instances_fit(&self, count: u64) -> bool {
-        prepared_model::instance_slot_capacity(
-            count,
-            std::mem::size_of::<PreparedModelInstance>() as u64,
-            self.device.limits().max_buffer_size,
-        )
-        .is_ok()
-    }
-
     /// How many of `incoming` copies still fit after `already` are staged.
     pub fn prepared_instance_room(&self, already: u64, incoming: usize) -> usize {
-        prepared_model::instance_room(
+        prepared_model::prepared_instance_room_for(
             already,
             incoming,
-            prepared_model::max_instance_slots(
-                std::mem::size_of::<PreparedModelInstance>() as u64,
-                self.device.limits().max_buffer_size,
-            ),
+            self.device.limits().max_buffer_size,
         )
     }
 

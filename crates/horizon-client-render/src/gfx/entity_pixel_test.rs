@@ -324,7 +324,11 @@ pub struct PreparedInstanceDraw<'a> {
     pub uploaded: u64,
     pub requested: u64,
     pub slot: u32,
-    pub instance: &'a super::prepared_model::PreparedModelInstance,
+    pub instances: &'a [super::prepared_model::PreparedModelInstance],
+    /// When set, each copy is its own draw. Otherwise they are one run.
+    pub per_copy: bool,
+    /// Colour pass, then the HDR mark. Off draws the colour pass only.
+    pub hdr: bool,
     pub atlas_size: [u32; 2],
     pub atlas: &'a [u8],
     pub view_proj: Mat4,
@@ -338,7 +342,9 @@ pub fn render_instance(draw: PreparedInstanceDraw<'_>) -> std::result::Result<Ve
         uploaded,
         requested,
         slot,
-        instance,
+        instances,
+        per_copy,
+        hdr,
         atlas_size,
         atlas,
         view_proj,
@@ -361,11 +367,12 @@ pub fn render_instance(draw: PreparedInstanceDraw<'_>) -> std::result::Result<Ve
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
-            contents: bytemuck::bytes_of(instance),
+            contents: bytemuck::cast_slice(instances),
             usage: wgpu::BufferUsages::VERTEX,
         });
     let mut encoder = frame.device.create_command_encoder(&Default::default());
-    for (hdr, clear) in [(false, true), (true, false)] {
+    let passes = if hdr { 2 } else { 1 };
+    for (mark, clear) in [(false, true), (true, false)].into_iter().take(passes) {
         let color_view = frame.color.create_view(&Default::default());
         let depth_view = frame.depth.create_view(&Default::default());
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -398,35 +405,33 @@ pub fn render_instance(draw: PreparedInstanceDraw<'_>) -> std::result::Result<Ve
             ..Default::default()
         });
         pass.set_bind_group(0, &frame.group, &[]);
-        models.draw(&mut pass, hdr, &instance, range);
+        let runs = if per_copy {
+            (0..instances.len() as u32)
+                .map(|first| super::prepared_model::InstanceRun { first, count: 1 })
+                .collect::<Vec<_>>()
+        } else {
+            vec![super::prepared_model::InstanceRun {
+                first: 0,
+                count: instances.len() as u32,
+            }]
+        };
+        for run in runs {
+            models.draw_run(&mut pass, mark, &instance, range, run);
+        }
     }
     drop(models);
     readback(&frame, encoder)
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod instance_run {
-    use super::super::prepared_model::{
-        InstanceRun, PreparedModelInstance, PreparedModelVertex, PreparedModels,
-    };
-    use super::super::reuse;
-    use super::{SIZE, software_frame};
+    use super::super::prepared_model::{PreparedModelInstance, PreparedModelVertex};
+    use super::{PreparedInstanceDraw, SIZE};
     use glam::{Mat4, Vec3};
-    use wgpu::util::DeviceExt;
 
-    fn quad() -> [PreparedModelVertex; 4] {
-        let corner = |x: f32, y: f32| PreparedModelVertex {
-            pos: [x, y, 0.5, 1.0],
-            uv: [0.5, 0.5, 0.0, 0.0],
-            normal: [0.0, 0.0, 1.0, 0.0],
-            flags: [1, 0, 0, 0],
-        };
-        [
-            corner(-0.2, -0.2),
-            corner(0.2, -0.2),
-            corner(0.2, 0.2),
-            corner(-0.2, 0.2),
-        ]
+    fn corner(x: f32, y: f32) -> PreparedModelVertex {
+        PreparedModelVertex { pos: [x, y, 0.5, 1.0], uv: [0.5, 0.5, 0.0, 0.0], normal: [0.0, 0.0, 1.0, 0.0], flags: [1, 0, 0, 0] }
     }
 
     fn instance_at(x: f32, tint: [f32; 4]) -> PreparedModelInstance {
@@ -434,98 +439,17 @@ mod instance_run {
         normal[0][0] = 1.0;
         normal[1][1] = 1.0;
         normal[2][2] = 1.0;
-        PreparedModelInstance {
-            model: Mat4::from_translation(Vec3::new(x, 0.0, 0.0)).to_cols_array_2d(),
-            normal,
-            tint,
-            light: 0xff00,
-            _pad: [0; 3],
-        }
+        PreparedModelInstance { model: Mat4::from_translation(Vec3::new(x, 0.0, 0.0)).to_cols_array_2d(), normal, tint, light: 0xff00, _pad: [0; 3] }
     }
 
-    /// One run, or one draw per copy, plus the HDR mark when `hdr` is set.
     fn render(per_copy: bool, hdr: bool) -> Result<Vec<u8>, String> {
-        let instances = [
-            instance_at(-0.45, [1.0, 0.0, 0.0, 1.0]),
-            instance_at(0.45, [0.0, 0.0, 1.0, 1.0]),
-        ];
-        let frame = software_frame([4, 4], &[255, 255, 255, 255].repeat(16), Mat4::IDENTITY)
-            .expect("software Vulkan adapter");
-        let models = PreparedModels::create(
-            &frame.device,
-            &reuse::Reuse::default(),
-            &frame.bindings,
-            wgpu::TextureFormat::Rgba8Unorm,
-            1,
-            &quad(),
-            vec![Some((0, 6))],
-        )
-        .map_err(|error| error.to_string())?;
-        let range = models.indices(1, 0).map_err(|error| error.to_string())?;
-        let buffer = frame
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-        let mut encoder = frame.device.create_command_encoder(&Default::default());
-        for (mark, clear) in
-            [(false, true), (true, false)]
-                .into_iter()
-                .take(if hdr { 2 } else { 1 })
-        {
-            let color_view = frame.color.create_view(&Default::default());
-            let depth_view = frame.depth.create_view(&Default::default());
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear {
-                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: if clear {
-                            wgpu::LoadOp::Clear(0.0)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            pass.set_bind_group(0, &frame.group, &[]);
-            let runs = if per_copy {
-                vec![
-                    InstanceRun { first: 0, count: 1 },
-                    InstanceRun { first: 1, count: 1 },
-                ]
-            } else {
-                vec![InstanceRun {
-                    first: 0,
-                    count: instances.len() as u32,
-                }]
-            };
-            for run in runs {
-                models.draw_run(&mut pass, mark, &buffer, range, run);
-            }
-        }
-        drop(models);
-        let pixels = super::readback(&frame, encoder)?;
-        assert_eq!(pixels.len(), (SIZE * SIZE * 4) as usize);
-        Ok(pixels)
+        let instances = [instance_at(-0.45, [1.0, 0.0, 0.0, 1.0]), instance_at(0.45, [0.0, 0.0, 1.0, 1.0])];
+        let vertices = [corner(-0.2, -0.2), corner(0.2, -0.2), corner(0.2, 0.2), corner(-0.2, 0.2)];
+        super::render_instance(PreparedInstanceDraw {
+            vertices: &vertices, ranges: vec![Some((0, 6))], uploaded: 1, requested: 1, slot: 0,
+            instances: &instances, per_copy, hdr, atlas_size: [4, 4],
+            atlas: &[255, 255, 255, 255].repeat(16), view_proj: Mat4::IDENTITY,
+        })
     }
 
     #[test]
@@ -534,26 +458,11 @@ mod instance_run {
         let per_copy = render(true, true).expect("per-copy software Vulkan draw");
         let instanced = render(false, true).expect("instanced software Vulkan draw");
         assert_eq!(per_copy, instanced);
-        let covered = per_copy
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .filter(|p| p[0] != 0 || p[2] != 0)
-            .count();
+        assert_eq!(per_copy.len(), (SIZE * SIZE * 4) as usize);
+        let covered = per_copy.as_chunks::<4>().0.iter().filter(|p| p[0] != 0 || p[2] != 0).count();
         assert!(covered > 8, "the run covered {covered} pixels");
         let plain = render(false, false).expect("color-only software Vulkan draw");
-        let alpha = |pixels: &[u8]| {
-            pixels
-                .iter()
-                .skip(3)
-                .step_by(4)
-                .copied()
-                .collect::<Vec<_>>()
-        };
-        assert_ne!(
-            alpha(&per_copy),
-            alpha(&plain),
-            "the HDR mark did not change alpha"
-        );
+        let alpha = |pixels: &[u8]| pixels.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+        assert_ne!(alpha(&per_copy), alpha(&plain), "the HDR mark did not change alpha");
     }
 }

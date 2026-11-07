@@ -143,19 +143,6 @@ pub fn fill_instance_ranges(
     }
 }
 
-/// Draws after `fallback` whose cut is at or past its cut move forward by `added`.
-#[cfg(test)]
-fn shift_cuts_after_cpu_fallback(draws: &mut [PreparedModelDraw], fallback: usize, added: u32) {
-    let Some(at) = draws.get(fallback).map(|draw| draw.cpu_vertices) else {
-        return;
-    };
-    for draw in draws.iter_mut().skip(fallback + 1) {
-        if draw.cpu_vertices >= at {
-            draw.cpu_vertices = draw.cpu_vertices.saturating_add(added);
-        }
-    }
-}
-
 /// Draw entity ranges and prepared runs in stream order. An HDR mark follows its color draw.
 pub fn draw_ordered<'a>(
     pass: &mut wgpu::RenderPass<'a>,
@@ -434,6 +421,30 @@ impl PreparedModels {
     }
 }
 
+#[cfg(feature = "test-support")]
+static SLOT_CAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+#[cfg(feature = "test-support")]
+pub fn cap_prepared_instance_slots(slots: u64) {
+    SLOT_CAP.store(slots, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn prepared_instance_room_for(already: u64, incoming: usize, max_buffer: u64) -> usize {
+    let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
+    let device = max_instance_slots(stride, max_buffer);
+    #[cfg(feature = "test-support")]
+    let slots = device.min(SLOT_CAP.load(std::sync::atomic::Ordering::Relaxed));
+    #[cfg(not(feature = "test-support"))]
+    let slots = device;
+    instance_room(already, incoming, slots)
+}
+
+#[cfg(feature = "test-support")]
+pub fn capped_prepared_room(already: u64, incoming: usize) -> Option<usize> {
+    let cap = SLOT_CAP.load(std::sync::atomic::Ordering::Relaxed);
+    (cap != u64::MAX).then(|| prepared_instance_room_for(already, incoming, u64::MAX))
+}
+
 /// How many instances of `stride` bytes fit in `limit`.
 pub fn max_instance_slots(stride: u64, limit: u64) -> u64 {
     if stride == 0 || limit < stride {
@@ -631,57 +642,6 @@ mod tests {
                 .iter()
                 .any(|span| span.run.is_none() && span.end > span.start)
         );
-    }
-
-    #[test]
-    fn a_cpu_segment_between_copies_breaks_the_run() {
-        let mut draws = [
-            draw_at(1, 1, 0),
-            draw_at(1, 1, 0),
-            draw_at(1, 1, 0),
-            draw_at(1, 1, 0),
-        ];
-        shift_cuts_after_cpu_fallback(&mut draws, 1, 8);
-        assert_eq!(draws.map(|draw| draw.cpu_vertices), [0, 0, 8, 8]);
-        let kept = [draws[0], draws[2], draws[3]];
-        let cuts = [
-            kept[0].cpu_vertices,
-            kept[1].cpu_vertices,
-            kept[2].cpu_vertices,
-        ];
-        let mut ranges = Vec::new();
-        fill_instance_ranges(16, &kept, &cuts, 0, &mut ranges);
-        assert_eq!(
-            ranges,
-            vec![run(0, 0, 1), cpu(0, 8), run(8, 1, 2), cpu(8, 16)]
-        );
-    }
-
-    #[test]
-    fn overflow_copies_bake_after_the_instanced_prefix() {
-        assert_eq!(instance_room(0, 5, 2), 2);
-        assert_eq!(instance_room(2, 5, 2), 0);
-        assert_eq!(instance_room(1, 5, 4), 3);
-        let draws = [
-            draw_at(1, 1, 4),
-            draw_at(1, 1, 4),
-            draw_at(1, 1, 4),
-            draw_at(1, 1, 12),
-            draw_at(1, 1, 12),
-        ];
-        let room = instance_room(0, draws.len(), 3);
-        let (prefix, suffix) = draws.split_at(room);
-        assert_eq!(suffix.len(), 2);
-        assert!(
-            suffix
-                .iter()
-                .all(|draw| draw.cpu_vertices >= prefix.last().unwrap().cpu_vertices)
-        );
-        let cuts: Vec<_> = prefix.iter().map(|draw| draw.cpu_vertices).collect();
-        let mut ranges = Vec::new();
-        let vertices = 20 + suffix.len() as u32 * 8;
-        fill_instance_ranges(vertices, prefix, &cuts, 0, &mut ranges);
-        assert_eq!(ranges, vec![cpu(0, 4), run(4, 0, 3), cpu(4, vertices)]);
     }
 
     #[test]
