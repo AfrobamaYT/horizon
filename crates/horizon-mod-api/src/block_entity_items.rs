@@ -15,8 +15,6 @@ pub enum BlockEntityItemError {
         /// Current declared slot count.
         slots: u32,
     },
-    /// The game's item conversion boundary refused the supplied stack.
-    StackRejected(crate::StackWriteError),
     /// The incoming stack has an unregistered item, air or zero count.
     /// Use None to clear a slot.
     InvalidStack,
@@ -27,6 +25,8 @@ pub enum BlockEntityItemError {
         /// Maximum count for this stack.
         limit: u32,
     },
+    /// The game's item conversion boundary refused the supplied stack.
+    StackRejected(crate::StackWriteError),
 }
 
 impl From<crate::StackWriteError> for BlockEntityItemError {
