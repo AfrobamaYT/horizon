@@ -144,7 +144,7 @@ impl Game<'_> {
                 if !self.mobs.iter().any(|m| m.id == id && !m.removed) {
                     return false;
                 }
-                let mut mobs = std::mem::take(&mut self.mobs);
+                let mut mobs = self.mobs.lift();
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
                 let moved = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {

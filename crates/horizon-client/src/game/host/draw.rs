@@ -40,14 +40,16 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_item_stack(&mut *self.surface, &stack, at, size)
     }
     fn gui_paint(&mut self, draws: &[GuiDraw]) {
-        self.game.native_gui_paint(&mut *self.surface, draws)
+        let draws = draws.try_into_engine(&()).unwrap();
+        self.game.native_gui_paint(&mut *self.surface, &draws)
     }
     fn gui_nine_slice(&mut self, sprite: &str, rect: [f32; 4], color: u32) {
         self.game
             .native_gui_nine_slice(&mut *self.surface, sprite, rect, color)
     }
     fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) {
-        self.game.native_gui_tooltip(&mut *self.surface, lines, at)
+        let lines = lines.try_into_engine(&()).unwrap();
+        self.game.native_gui_tooltip(&mut *self.surface, &lines, at)
     }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_text_width(&*self.surface, text)
@@ -75,8 +77,9 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_gui_draw_item_with(&mut *self.surface, &stack, at, text)
     }
     fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+        let label = label.try_into_engine(&()).unwrap();
         self.game
-            .native_widget_button(&mut *self.surface, rect, label, active, highlighted)
+            .native_widget_button(&mut *self.surface, rect, &label, active, highlighted)
     }
     fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
         self.game
@@ -165,8 +168,9 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         self.game.native_draw_model(&mut *self.surface, model, tint)
     }
     fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
+        let text = text.try_into_engine(&()).unwrap();
         self.game
-            .native_draw_text(&mut *self.surface, text, at, color, glowing, outline)
+            .native_draw_text(&mut *self.surface, &text, at, color, glowing, outline)
     }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_draw_text_width(&*self.surface, text)
@@ -182,6 +186,9 @@ pub(crate) struct GameWorldDrawContext<'a, 'g> {
     pub(crate) surface: &'a mut crate::world_geometry::WorldGeometry,
 }
 impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
+    fn draw_instance_group(&mut self, group: InstanceGroupRef) -> Result<(), GroupError> {
+        self.game.draw_instance_group(self.surface, group)
+    }
     fn lines(&mut self, lines: &[WorldLine]) -> Result<(), DrawError> {
         self.game.native_world_draw_lines(&mut *self.surface, lines)
     }

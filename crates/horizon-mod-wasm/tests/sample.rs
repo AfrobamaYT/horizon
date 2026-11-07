@@ -42,7 +42,7 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
 
 /// The chat lines a point's listeners broadcast.
 #[derive(Default)]
-struct Server(Mutex<Vec<String>>);
+struct Server(Mutex<Vec<Text>>);
 
 impl mod_api::prelude::BlockStatesBackend for Server {
     fn fluid_state_definition(&self, key: mod_api::FluidKey) -> Option<mod_api::FluidDefinition> {
@@ -132,7 +132,7 @@ mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
     fn broadcast(&self, line: Text) {
-        self.0.lock().unwrap().push(line.plain());
+        self.0.lock().unwrap().push(line);
     }
 }
 
@@ -247,12 +247,12 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
             replies: &mut replies,
         },
     );
-    assert_eq!(message.plain(), "keys (via mod.wasm)");
+    assert_eq!(message, Text::literal("keys (via mod.wasm)"));
     assert_eq!(
         *server.0.lock().unwrap(),
         [
-            "hello_wasm: 200 server ticks",
-            "hello_wasm: 400 server ticks"
+            Text::literal("hello_wasm: 200 server ticks"),
+            Text::literal("hello_wasm: 400 server ticks")
         ]
     );
 }

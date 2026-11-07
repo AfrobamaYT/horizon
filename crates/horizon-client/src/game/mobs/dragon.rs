@@ -6,6 +6,7 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+use super::api_values::TryIntoApi;
 use super::commands::Target;
 use super::{
     Dim, Game,
@@ -3160,7 +3161,7 @@ impl Game<'_> {
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {
@@ -3214,7 +3215,8 @@ impl Game<'_> {
             }
             true
         });
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
         for (who, amount) in harmed {
             self.as_fight_player(who, |g| {
                 g.dragon_hurts_player("minecraft:indirect_magic", amount);
@@ -3294,6 +3296,7 @@ impl Game<'_> {
             else {
                 return true;
             };
+            let bar = bar.try_into_api().unwrap();
             let mut cancel = false;
             self.native_customize_boss_event_progress(
                 &bar,

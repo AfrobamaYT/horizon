@@ -39,7 +39,7 @@ impl Game<'_> {
         // The pathfinder reads terrain only. Take the mob list so its selected
         // mob can be mutably borrowed alongside the shared MobWorld, just as
         // the mob tick does. No mod hook fires during pathfinding.
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
         let moved = mobs[index].nav_move_to(&self.mob_world_base(&[]), at, speed);
         self.mobs = mobs;
         moved
@@ -210,7 +210,7 @@ mod tests {
             assert!(!stale.move_to(game, [5.0, 65.0, 3.0], 1.0));
             assert!(!stale.stop(game));
             assert_eq!(stale.is_done(game), None);
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert_eq!(mob.is_done(game), None);
             assert!(!mob.stop(game));
             game.mobs = taken;

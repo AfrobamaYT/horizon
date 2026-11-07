@@ -2791,7 +2791,8 @@ mod tests {
                     return mod_api::Flow::Continue;
                 }
                 self.0.lock().unwrap().push(event.source.clone());
-                host.commands().feedback(Text::literal("source answer"));
+                host.commands()
+                    .feedback(mod_api::Text::literal("source answer"));
                 mod_api::Flow::Cancel
             }
         }

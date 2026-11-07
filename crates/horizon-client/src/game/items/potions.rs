@@ -1759,11 +1759,12 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
     }
     /// `AreaEffectCloud.serverTick`: configured lifetime/radius changes and
     /// five-tick doses, with each victim's configured reapplication delay.
@@ -3180,14 +3181,14 @@ mod tests {
                 let initial: Vec<_> = event
                     .tooltip
                     .iter()
-                    .map(|(text, color)| (text.plain(), *color))
+                    .map(|(text, color)| (text.clone(), *color))
                     .collect();
                 if self.case.default_tooltip {
                     assert_eq!(
                         initial,
                         [
-                            (self.case.name.to_owned(), u32::MAX),
-                            ("00:22".to_owned(), u32::MAX)
+                            (mod_api::Text::literal(self.case.name), u32::MAX),
+                            (mod_api::Text::literal("00:22"), u32::MAX)
                         ]
                     );
                 } else {
@@ -3196,7 +3197,9 @@ mod tests {
                 if self.suppress {
                     event.tooltip.clear();
                 } else {
-                    event.tooltip.push((Text::literal("Fast feet"), 0xff55ffff));
+                    event
+                        .tooltip
+                        .push((mod_api::Text::literal("Fast feet"), 0xff55ffff));
                 }
             }
         }

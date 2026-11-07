@@ -34,6 +34,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "Players",
     "ClientSession",
     "RenderAssets",
+    "InstanceGroups",
     "Tags",
     "menu::SlotView",
     "Registrar",
@@ -65,6 +66,7 @@ pub(super) const REACHED: &[(&str, &str, &str)] = &[
     ("Players", "server_host", "Ok(h.players())"),
     ("ClientSession", "client_host", "Ok(h.client_session())"),
     ("RenderAssets", "client_host", "Ok(h.render_assets())"),
+    ("InstanceGroups", "client_host", "Ok(h.instance_groups())"),
     (
         "Tags",
         "",
