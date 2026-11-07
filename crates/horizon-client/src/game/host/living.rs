@@ -185,6 +185,13 @@ impl LivingBackend for Game<'_> {
         );
         self.native_living_used_item_hand(living)
     }
+    fn living_dimensions_for_pose(&self, living: LivingRef, pose: Pose) -> Option<[f64; 3]> {
+        mod_api::__private::check_access(
+            "living_dimensions_for_pose",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_living_dimensions_for_pose(living, pose)
+    }
 }
 impl LivingClientBackend for Game<'_> {
     fn living_effect_blend_factor(

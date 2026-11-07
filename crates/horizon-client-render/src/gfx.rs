@@ -201,6 +201,8 @@ pub use prepared_model::fail_next_prepared_upload;
 pub use prepared_model::{
     PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
+#[cfg(feature = "test-support")]
+pub use prepared_model::{cap_prepared_instance_slots, capped_prepared_room};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -1369,7 +1371,9 @@ pub struct Renderer {
     /// when the draw is not kept, spinning, or claimed by a shader pack.
     prepared_models: Option<PreparedModels>,
     prepared_draws: Vec<PreparedModelDraw>,
-    prepared_ranges: Vec<(u32, u32, Option<usize>)>,
+    /// Ordinary-stream cuts for `prepared_draws`, filled once per frame.
+    prepared_cuts: Vec<u32>,
+    prepared_ranges: Vec<prepared_model::OrderedSpan>,
     prepared_uploaded: Vec<PreparedModelInstance>,
     prepared_instance_buffer: wgpu::Buffer,
     prepared_instance_capacity: u64,
@@ -2655,18 +2659,18 @@ impl Renderer {
         self.prepared_draws.extend_from_slice(draws);
     }
 
-    /// Whether `count` copies fit in one instance buffer on this device.
-    pub fn prepared_instances_fit(&self, count: u64) -> bool {
-        prepared_model::instance_slot_capacity(
-            count,
-            std::mem::size_of::<PreparedModelInstance>() as u64,
+    /// How many of `incoming` copies still fit after `already` are staged.
+    pub fn prepared_instance_room(&self, already: u64, incoming: usize) -> usize {
+        prepared_model::prepared_instance_room_for(
+            already,
+            incoming,
             self.device.limits().max_buffer_size,
         )
-        .is_ok()
     }
 
     fn finish_prepared_frame(&mut self) {
         prepared_model::finish_staged(&mut self.prepared_draws);
+        self.prepared_cuts.clear();
         self.prepared_ranges.clear();
     }
 
@@ -4774,6 +4778,7 @@ impl Renderer {
             entity_bindings,
             prepared_models: None,
             prepared_draws: Vec::new(),
+            prepared_cuts: Vec::new(),
             prepared_ranges: Vec::new(),
             prepared_uploaded: Vec::new(),
             prepared_instance_buffer,
@@ -8869,12 +8874,17 @@ impl Renderer {
         }
         self.prepared_ranges.clear();
         if prepared_count > 0 {
-            prepared_model::fill_ordered_ranges(
+            entity_batch::ordinary_vertices_at_cuts(
+                entities,
+                self.prepared_draws.iter().map(|draw| draw.cpu_vertices),
+                oit_on,
+                &mut self.prepared_cuts,
+            );
+            prepared_model::fill_instance_ranges(
                 entity_quads * 4,
-                self.prepared_draws.iter().map(|draw| {
-                    entity_batch::ordinary_vertices_before(entities, draw.cpu_vertices, oit_on)
-                        .saturating_add(posed)
-                }),
+                &self.prepared_draws,
+                &self.prepared_cuts,
+                posed,
                 &mut self.prepared_ranges,
             );
         }
