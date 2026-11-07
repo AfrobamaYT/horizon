@@ -10,6 +10,7 @@ pub struct Requests {
     pub declared_fluids: HashMap<String, &'static str>,
     pub items: Names,
     pub effects: Names,
+    pub particles: Names,
     pub block_entity_types: Names,
 }
 
@@ -120,6 +121,33 @@ impl Names {
             Err(errors)
         }
     }
+}
+
+/// A particle's resolved engine-independent provider identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParticleKind {
+    /// An index supplied by the game's vanilla particle registry.
+    Vanilla(u32),
+    /// A mod's named sprite provider, addressed by its retained name.
+    Custom,
+}
+
+/// One immutable load result: identities and their resolved providers publish together.
+pub struct Particles {
+    pub names: Names,
+    pub kinds: Vec<ParticleKind>,
+}
+
+/// Resolve each provider once, keeping the same requested-slot lifecycle as other keys.
+pub fn resolve_particles<'a>(
+    requested: &Names,
+    ids: impl IntoIterator<Item = &'a str>,
+    resolve: impl FnMut(&str) -> Option<ParticleKind>,
+) -> Result<Particles, Vec<String>> {
+    let unknown = |owner, id: &str| format!("mod {owner} requested unknown particle {id}");
+    let names = requested.complete(ids, unknown)?;
+    let kinds = names.resolve(resolve, unknown)?;
+    Ok(Particles { names, kinds })
 }
 
 // Tag names are process-lifetime identities; only membership belongs to reloadable data.
