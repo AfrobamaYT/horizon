@@ -563,3 +563,20 @@ mod item_resource_property_tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+mod hot_key_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resolved_keys_select_fuel_and_compost_metadata() {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                let key = |name| mod_api::__private::item_key(name).unwrap();
+                assert_eq!(game.item_burn_time(key("minecraft:coal")), Some(1600));
+                assert_eq!(game.item_burn_time(key("minecraft:stone")), None);
+                assert_eq!(game.item_compost_chance(key("minecraft:wheat")), Some(0.65));
+                assert_eq!(game.item_compost_chance(key("minecraft:stone")), None);
+            });
+        });
+    }
+}

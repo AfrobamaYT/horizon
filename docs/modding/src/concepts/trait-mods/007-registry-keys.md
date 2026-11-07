@@ -81,6 +81,23 @@ carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment ef
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
 and remain strings, as do labels and tags.
 
+### Hot item and block identities
+
+Resolve item and block keys during load and keep them for tick and menu calls.
+`item_burn_time`, `item_compost_chance`, `give`, `enchantment_supports`'s item,
+and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
+`screen_hovered_item` return item keys. `level.block`, `lit_block_name` and
+`NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
+`NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
+carry item keys, not names. Unknown incoming slots are refused at the boundary.
+`block_sprites` takes resolved `BlockStateId` values, preserving properties without
+parsing state strings. The pre-change block event carries resolved `from` / `to`
+states and does not allocate their names. Property names and values in
+`set_block_property` are not block identifiers and remain strings.
+
+These calls remove string transport across wasm. Engine metadata reads may still
+hash borrowed registry names; no formatted identifier is built for these inputs.
+
 ### API-owned values: migration table
 
 | Previous engine value | API-owned value | Mod changes |

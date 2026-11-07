@@ -327,12 +327,12 @@ mod tests {
             );
             assert_eq!(
                 host.block_item(mod_api::__private::part_tests::block_key("minecraft:stone"))
-                    .as_deref(),
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:stone")
             );
             assert_eq!(
                 host.block_item(mod_api::__private::part_tests::block_key("minecraft:water"))
-                    .as_deref(),
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:air")
             );
         });

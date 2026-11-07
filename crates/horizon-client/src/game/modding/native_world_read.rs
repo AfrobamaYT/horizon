@@ -806,10 +806,15 @@ mod tests {
             assert!(!host.fluid_is_same("nope:missing", "nope:missing"));
 
             assert_eq!(
-                host.fluid_bucket("minecraft:flowing_water"),
+                host.fluid_bucket("minecraft:flowing_water")
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:water_bucket")
             );
-            assert_eq!(host.fluid_bucket("lava"), Some("minecraft:lava_bucket"));
+            assert_eq!(
+                host.fluid_bucket("lava")
+                    .and_then(mod_api::__private::item_key_id),
+                Some("minecraft:lava_bucket")
+            );
             assert_eq!(host.fluid_bucket("minecraft:empty"), None);
             assert_eq!(host.fluid_bucket("nope:missing"), None);
 
