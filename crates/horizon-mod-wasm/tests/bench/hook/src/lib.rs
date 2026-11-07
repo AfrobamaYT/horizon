@@ -125,8 +125,14 @@ impl StructureType for Spin {
             pieces: vec![Arc::new(Block { at })],
         })
     }
-    fn load_piece(&self, _: &Compound) -> Option<Arc<dyn StructurePiece>> {
-        None
+    fn load_piece(
+        &self,
+        _: &dyn mod_api::BlockMetadata,
+        _: &Compound,
+    ) -> Result<Arc<dyn StructurePiece>, StructureError> {
+        Err(StructureError(
+            "the benchmark does not load saved pieces".into(),
+        ))
     }
 }
 

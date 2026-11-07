@@ -277,9 +277,12 @@ impl ModStructureType for Adapter {
     }
     fn load_piece(
         &self,
+        registry: &horizon_world::registry::BlockRegistry,
         tag: &Compound,
     ) -> Option<Box<dyn horizon_world::worldgen::structure::legacy::LegacyPiece>> {
-        let piece = self.inner.load_piece(tag)?;
+        let metadata = WorkerResources::get(registry).ok()?.metadata;
+        // Preserve the engine's existing bad-piece refusal. The API loader's diagnostic is typed.
+        let piece = self.inner.load_piece(metadata, tag).ok()?;
         Some(Box::new(ModPiece {
             piece,
             ty: self.inner.clone(),
@@ -359,6 +362,9 @@ impl Adapter {
     }
 }
 
+#[cfg(test)]
+#[path = "../../../../../docs/modding/examples/src/worldgen.rs"]
+mod book_example;
 #[cfg(test)]
 #[path = "native_structure_types/tests.rs"]
 mod tests;

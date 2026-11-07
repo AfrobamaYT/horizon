@@ -62,8 +62,14 @@ pub trait StructureType: Send + Sync + 'static {
     fn find_generation_point(&self, context: &mut dyn GenerationContext) -> Option<FoundStructure>;
     /// The `StructurePieceType` loader: rebuild a saved piece from its tag
     /// (`StructurePieceType.load`), exactly as it was saved. Required: every
-    /// piece type has its loader, and a saved piece is never regenerated.
-    fn load_piece(&self, tag: &Compound) -> Option<Arc<dyn StructurePiece>>;
+    /// piece type has its loader, and a saved piece is never regenerated. Resolve saved block
+    /// states once here, against the same retained metadata the worker contexts borrow.
+    /// Invalid saved blocks, properties or piece data return a typed error, never a panic.
+    fn load_piece(
+        &self,
+        metadata: &dyn BlockMetadata,
+        tag: &Compound,
+    ) -> Result<Arc<dyn StructurePiece>, StructureError>;
     /// `Structure.afterPlace`, run once per chunk after all pieces were
     /// placed, with every piece's current box. Optional: most types place
     /// nothing here.
@@ -273,4 +279,20 @@ pub fn structure_type_declarations() -> Vec<(String, Arc<dyn StructureType>)> {
         .iter()
         .map(|info| (info.id.to_string(), info.ty.clone()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn noise_column_clips_outside_y_without_overflow() {
+        let column = NoiseColumn::new(-2, vec![NoiseBlock::Water, NoiseBlock::Solid]);
+        assert_eq!(column.get(-3), NoiseBlock::Air);
+        assert_eq!(column.get(-2), NoiseBlock::Water);
+        assert_eq!(column.get(-1), NoiseBlock::Solid);
+        assert_eq!(column.get(0), NoiseBlock::Air);
+        let extreme = NoiseColumn::new(i32::MAX, vec![NoiseBlock::Lava]);
+        assert_eq!(extreme.get(i32::MAX), NoiseBlock::Lava);
+        assert_eq!(extreme.get(i32::MIN), NoiseBlock::Air);
+    }
 }

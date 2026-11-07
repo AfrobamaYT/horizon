@@ -523,7 +523,7 @@ mod block_tests {
             assert_eq!(block_key(name), Some(BlockKey(slot)));
         }
         // Replacing Parts replaces the load-owned identities, not a second global registry.
-        crate::install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
+        crate::install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         assert!(block_key("minecraft:air").is_none());
         assert!(BlockKey::from_slot(air.0).is_err());
     }
@@ -547,6 +547,7 @@ mod item_tests {
         crate::install_parts(
             &[ModEntry::new("test", Box::new(Requests))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         assert!(resolve_items(["minecraft:stone"]).is_err());

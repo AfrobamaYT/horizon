@@ -141,8 +141,12 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
         packages.into(),
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
-    mod_api::__private::install_parts(&loaded.mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &loaded.mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
     assert!(mod_api::__private::game_rule_categories().contains(&"alpha:machines".to_owned()));
     {
         let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(

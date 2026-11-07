@@ -43,9 +43,11 @@ pub mod tests {
             }
             fn load_piece(
                 &self,
+                _: &dyn mod_api::BlockMetadata,
                 _: &mod_api::Compound,
-            ) -> Option<std::sync::Arc<dyn mod_api::StructurePiece>> {
-                None
+            ) -> Result<std::sync::Arc<dyn mod_api::StructurePiece>, mod_api::StructureError>
+            {
+                Err(mod_api::StructureError("fixture has no pieces".into()))
             }
         }
         struct Valid;

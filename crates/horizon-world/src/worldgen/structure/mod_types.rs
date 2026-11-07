@@ -40,7 +40,11 @@ pub trait ModStructureType: Send + Sync {
     /// The `StructurePieceType` loader (`StructurePieceType.load`): a saved
     /// piece back exactly as it was saved. There is no rebuild-from-seed
     /// fallback: every piece type has its loader.
-    fn load_piece(&self, tag: &Compound) -> Option<Box<dyn LegacyPiece>>;
+    fn load_piece(
+        &self,
+        registry: &crate::registry::BlockRegistry,
+        tag: &Compound,
+    ) -> Option<Box<dyn LegacyPiece>>;
 }
 
 /// The installed types, `modid:tower` → type. Set once, before any world opens
@@ -97,8 +101,13 @@ mod tests {
     struct Boxed(Vec<[i32; 3]>);
 
     impl ModStructureType for Boxed {
-        fn prepare_config(&self, _: &serde_json::Value) -> std::result::Result<Arc<Tag>, String> {
-            Ok(Arc::new(Tag::End))
+        fn prepare_config(
+            &self,
+            config: &serde_json::Value,
+        ) -> std::result::Result<Arc<Tag>, String> {
+            horizon_core::json_nbt::json_to_tag(config)
+                .map(Arc::new)
+                .map_err(|error| error.to_string())
         }
         fn find_generation_point(
             &self,
@@ -122,7 +131,11 @@ mod tests {
                 .collect();
             Some((origin, pieces))
         }
-        fn load_piece(&self, tag: &Compound) -> Option<Box<dyn LegacyPiece>> {
+        fn load_piece(
+            &self,
+            _registry: &crate::registry::BlockRegistry,
+            tag: &Compound,
+        ) -> Option<Box<dyn LegacyPiece>> {
             let int_array = |key: &str| -> Option<[i32; 3]> {
                 let value = tag.get(&key.into())?;
                 let horizon_core::nbt::Tag::IntArray(a) = value else {
@@ -195,7 +208,7 @@ mod tests {
         let kind = &registry.structures[0].kind;
         assert!(matches!(
             kind,
-            StructureKind::Mod(m) if m.config["type"] == "testmod:boxed"
+            StructureKind::Mod(m) if m.config.get("type") == Some(&Tag::String("testmod:boxed".into()))
         ));
     }
 
@@ -239,7 +252,12 @@ mod tests {
         );
         tag.insert("Min".into(), Tag::IntArray(vec![1, 64, 2]));
         tag.insert("Max".into(), Tag::IntArray(vec![3, 66, 4]));
-        let piece = ty.load_piece(&tag).unwrap();
+        let registry = crate::registry::BlockRegistry::from_facts_json(
+            br#"{"states":[["air",true,false,"","minecraft:air"]],"defaults":{"minecraft:air":0}}"#
+                .as_slice(),
+        )
+        .unwrap();
+        let piece = ty.load_piece(&registry, &tag).unwrap();
         assert_eq!(
             piece.bounding_box(),
             BoundingBox::new([1, 64, 2], [3, 66, 4])

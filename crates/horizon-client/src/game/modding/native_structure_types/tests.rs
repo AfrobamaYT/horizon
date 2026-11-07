@@ -40,12 +40,16 @@ impl StructureType for Boxes {
             })],
         })
     }
-    fn load_piece(&self, tag: &Compound) -> Option<Arc<dyn StructurePiece>> {
+    fn load_piece(
+        &self,
+        _: &dyn BlockMetadata,
+        tag: &Compound,
+    ) -> Result<Arc<dyn StructurePiece>, StructureError> {
         let ints = |key: &str| match tag.get(&key.into()) {
-            Some(Tag::IntArray(a)) if a.len() == 3 => Some([a[0], a[1], a[2]]),
-            _ => None,
+            Some(Tag::IntArray(a)) if a.len() == 3 => Ok([a[0], a[1], a[2]]),
+            _ => Err(StructureError(format!("invalid saved {key}"))),
         };
-        Some(Arc::new(BoxPiece {
+        Ok(Arc::new(BoxPiece {
             min: ints("Min")?,
             max: ints("Max")?,
         }))
@@ -80,13 +84,14 @@ fn the_same_context_gives_the_same_pieces() {
 /// saved tower comes back the same tower, not a rebuilt one.
 #[test]
 fn a_saved_piece_loads_back_the_same() {
+    let resources = test_resources();
     let adapter = Adapter::new("testmod:boxes", Arc::new(Boxes));
     let mut random = WorldgenRandom::new(LegacyRandom::new(0));
     random.set_large_feature_seed(1, 0, 0);
     let (_, pieces) = adapter
         .find_generation_point(
             &mut StubContext,
-            test_resources(),
+            resources,
             ChunkPos::new(0, 0),
             &Arc::new(Tag::Compound(Compound::new())),
             &mut random,
@@ -97,7 +102,8 @@ fn a_saved_piece_loads_back_the_same() {
         tag.get(&"id".into()),
         Some(Tag::String(s)) if s.to_string_lossy() == "testmod:boxes"
     ));
-    let loaded = adapter.load_piece(&tag).unwrap();
+    assert_eq!(tag.get(&"Min".into()), Some(&Tag::IntArray(vec![0, 64, 0])));
+    let loaded = adapter.load_piece(resources.registry, &tag).unwrap();
     assert_eq!(loaded.bounding_box(), pieces[0].bounding_box());
     assert_eq!(loaded.type_name(), "testmod:boxes");
     // And what came back is the saved one, not a fresh generation.
@@ -137,8 +143,12 @@ fn the_engines_after_place_call_reaches_the_type() {
                 })],
             })
         }
-        fn load_piece(&self, _: &Compound) -> Option<Arc<dyn StructurePiece>> {
-            None
+        fn load_piece(
+            &self,
+            _: &dyn BlockMetadata,
+            _: &Compound,
+        ) -> Result<Arc<dyn StructurePiece>, StructureError> {
+            Err(StructureError("fixture has no saved pieces".into()))
         }
         fn after_place(
             &self,
@@ -179,6 +189,7 @@ fn the_engines_after_place_call_reaches_the_type() {
     let mut world = RecordingWorld {
         air,
         writes: Vec::new(),
+        states: Vec::new(),
     };
     let mut piece_random = LegacyRandom::new(3);
     let mut engine = EngineContext {
@@ -274,6 +285,7 @@ impl horizon_world::worldgen::structure::start::StartContext for StubContext {
 struct RecordingWorld {
     air: horizon_world::registry::BlockStateId,
     writes: Vec<[i32; 3]>,
+    states: Vec<horizon_world::registry::BlockStateId>,
 }
 impl horizon_world::worldgen::structure::legacy::PieceWorld for RecordingWorld {
     fn block(&mut self, _: [i32; 3]) -> PieceResult<horizon_world::registry::BlockStateId> {
@@ -282,10 +294,11 @@ impl horizon_world::worldgen::structure::legacy::PieceWorld for RecordingWorld {
     fn set(
         &mut self,
         pos: [i32; 3],
-        _: horizon_world::registry::BlockStateId,
+        state: horizon_world::registry::BlockStateId,
         _: i32,
     ) -> PieceResult<bool> {
         self.writes.push(pos);
+        self.states.push(state);
         Ok(true)
     }
     fn fluid(&mut self, _: [i32; 3]) -> PieceResult<horizon_world::fluid::FluidState> {
@@ -391,6 +404,12 @@ fn test_resources() -> &'static horizon_world::worldgen::structure::StructureRes
         horizon_world::registry::BlockRegistry::from_facts_json(facts.to_string().as_bytes())
             .unwrap();
     crate::game::api_values::resolve_block_definitions(&registry).unwrap();
+    resources_for_registry(registry)
+}
+
+fn resources_for_registry(
+    registry: horizon_world::registry::BlockRegistry,
+) -> &'static horizon_world::worldgen::structure::StructureResources {
     Box::leak(Box::new(
         horizon_world::worldgen::structure::StructureResources::new(
             Box::leak(Box::new(registry)),
@@ -419,6 +438,7 @@ fn a_write_outside_the_chunk_box_is_dropped_silently() {
     let mut world = RecordingWorld {
         air,
         writes: Vec::new(),
+        states: Vec::new(),
     };
     let mut random = horizon_core::random::LegacyRandom::new(7);
     {
@@ -442,4 +462,258 @@ fn a_write_outside_the_chunk_box_is_dropped_silently() {
         assert!(context.set_block([15, 64, 15], stone));
     }
     assert_eq!(world.writes, [[15, 64, 15]]);
+}
+
+#[test]
+fn structure_random_adapter_preserves_vanilla_scalar_draws() {
+    assert_eq!(Draws(&mut LegacyRandom::new(0)).next_int_bound(100), 60);
+    assert_eq!(
+        Draws(&mut LegacyRandom::new(0)).next_long(),
+        -4962768465676381896
+    );
+    assert_eq!(
+        Draws(&mut LegacyRandom::new(0)).next_float().to_bits(),
+        0.73096776_f32.to_bits()
+    );
+    assert_eq!(
+        Draws(&mut LegacyRandom::new(0)).next_double().to_bits(),
+        0.730967787376657_f64.to_bits()
+    );
+    assert!(Draws(&mut LegacyRandom::new(0)).next_boolean());
+    let mut random = LegacyRandom::new(0);
+    let mut draws = Draws(&mut random);
+    assert_eq!(draws.next_int_bound(0), 0);
+    assert_eq!(draws.next_long(), -4962768465676381896);
+}
+
+#[test]
+fn structure_column_projection_keeps_classes_and_resets_reused_output() {
+    use horizon_world::worldgen::structure::start::{NoiseBlock as Engine, NoiseColumnTarget};
+    let mut column = Column(NoiseColumn::default());
+    column.resize(-2, 5);
+    for (index, block) in [
+        Engine::Air,
+        Engine::Water,
+        Engine::Lava,
+        Engine::Solid,
+        Engine::Other,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        column.set(index, block);
+    }
+    assert_eq!(
+        column.0.blocks,
+        [
+            NoiseBlock::Air,
+            NoiseBlock::Water,
+            NoiseBlock::Lava,
+            NoiseBlock::Solid,
+            NoiseBlock::Other
+        ]
+    );
+    column.resize(7, 2);
+    assert_eq!(column.0.min, 7);
+    assert_eq!(column.0.blocks, [NoiseBlock::Air, NoiseBlock::Air]);
+}
+
+struct ConfigObserver(std::sync::Arc<std::sync::Mutex<Vec<Arc<Tag>>>>);
+impl StructureType for ConfigObserver {
+    fn find_generation_point(&self, context: &mut dyn GenerationContext) -> Option<FoundStructure> {
+        self.0.lock().unwrap().push(context.config());
+        None
+    }
+    fn load_piece(
+        &self,
+        _: &dyn BlockMetadata,
+        _: &Compound,
+    ) -> Result<Arc<dyn StructurePiece>, StructureError> {
+        Err(StructureError("fixture has no saved pieces".into()))
+    }
+}
+
+#[test]
+fn structure_config_is_converted_at_load_and_shared_by_starts() {
+    use horizon_world::worldgen::structure::{
+        mod_types::ModStructureTypes,
+        start::{StructureKind, StructureRegistry},
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let types: ModStructureTypes = BTreeMap::from([(
+        "probe:kind".to_owned(),
+        Adapter::new("probe:kind", Arc::new(ConfigObserver(observed.clone()))).into_engine_type(),
+    )]);
+    let mut definitions = BTreeMap::from([(
+        "probe:tower".to_owned(),
+        serde_json::json!({
+            "type":"probe:kind", "biomes":[], "size":32768, "wide":2147483648_i64,
+            "list":[true,128], "nested":{"enabled":true}
+        })
+        .to_string(),
+    )]);
+    let mut registry = StructureRegistry::new(
+        &definitions,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        &|_| Ok(BTreeSet::new()),
+        &types,
+    )
+    .unwrap();
+    let StructureKind::Mod(kind) = &mut registry.structures[0].kind else {
+        panic!("registered kind");
+    };
+    let Tag::Compound(config) = kind.config.as_ref() else {
+        panic!("compound config");
+    };
+    assert_eq!(config.get(&"size".into()), Some(&Tag::Int(32768)));
+    assert_eq!(config.get(&"wide".into()), Some(&Tag::Long(2147483648)));
+    assert_eq!(
+        config.get(&"list".into()),
+        Some(&Tag::List(vec![Tag::Byte(1), Tag::Short(128)]))
+    );
+    assert_eq!(
+        config.get(&"nested".into()),
+        Some(&Tag::compound([("enabled", Tag::Byte(1))]))
+    );
+    // Discard the source text: starts must use the retained prepared value, not a config map.
+    definitions.clear();
+    let resources = test_resources();
+    let mut random = WorldgenRandom::new(LegacyRandom::new(0));
+    for _ in 0..2 {
+        assert!(
+            kind.ty
+                .find_generation_point(
+                    &mut StubContext,
+                    resources,
+                    ChunkPos::new(0, 0),
+                    &kind.config,
+                    &mut random
+                )
+                .is_none()
+        );
+    }
+    let observed = observed.lock().unwrap();
+    assert_eq!(observed.len(), 2);
+    assert!(
+        observed
+            .iter()
+            .all(|config| Arc::ptr_eq(config, &kind.config))
+    );
+}
+
+#[test]
+fn structure_bad_config_refuses_at_load_but_unknown_types_do_not_convert() {
+    use horizon_world::worldgen::structure::{
+        mod_types::ModStructureTypes,
+        start::{StructureKind, StructureRegistry},
+    };
+    use std::collections::{BTreeMap, BTreeSet};
+    let types: ModStructureTypes = BTreeMap::from([(
+        "probe:kind".to_owned(),
+        Adapter::new("probe:kind", Arc::new(ConfigObserver(Default::default()))).into_engine_type(),
+    )]);
+    let definitions = BTreeMap::from([(
+        "probe:tower".to_owned(),
+        serde_json::json!({"type":"probe:kind","biomes":[],"bad":[null]}).to_string(),
+    )]);
+    let error = StructureRegistry::new(
+        &definitions,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        &|_| Ok(BTreeSet::new()),
+        &types,
+    )
+    .err()
+    .expect("refused during definition load");
+    assert_eq!(
+        error.to_string(),
+        "structure probe:tower: probe:kind: JSON-to-NBT does not accept null inside a list or object"
+    );
+    let registry = StructureRegistry::new(
+        &definitions,
+        &BTreeMap::new(),
+        BTreeMap::new(),
+        &|_| Ok(BTreeSet::new()),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(
+        matches!(&registry.structures[0].kind, StructureKind::Unsupported(id) if id == "probe:kind")
+    );
+}
+
+#[test]
+fn compiled_book_piece_resolves_on_worker_load_and_refuses_bad_saved_values() {
+    use horizon_world::worldgen::structure::legacy::{PieceContext as EngineContext, SolidRender};
+    mod_api::__private::part_tests::install_parts_fixture(&[mod_api::ModEntry::new(
+        "mymod",
+        Box::new(book_example::structures::StructureMod),
+    )])
+    .unwrap();
+    let registry = horizon_world::registry::BlockRegistry::from_facts_json(br#"{"defaults":{"minecraft:air":0,"minecraft:oak_log":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"",{"id":"minecraft:oak_log","properties":{"axis":"y"}}],["s",false,false,"",{"id":"minecraft:oak_log","properties":{"axis":"x"}}],["s",false,false,"",{"id":"minecraft:oak_log","properties":{"axis":"z"}}]]}"#.as_slice()).unwrap();
+    crate::game::api_values::resolve_block_definitions(&registry).unwrap();
+    let resources = resources_for_registry(registry);
+    let (_, implementation) = mod_api::__private::structure_type_declarations()
+        .into_iter()
+        .next()
+        .unwrap();
+    std::thread::spawn(move || {
+        assert!(crate::game::api_values::block_state::current().is_err());
+        let metadata = WorkerResources::get(resources.registry).unwrap().metadata;
+        let adapter = Adapter::new("mymod:tower", implementation.clone());
+        let tag = Compound::from([
+            ("block".into(), Tag::String("minecraft:oak_log".into())),
+            ("axis".into(), Tag::String("x".into())),
+            ("min".into(), Tag::IntArray(vec![1, 64, 2])),
+            ("max".into(), Tag::IntArray(vec![1, 66, 2])),
+        ]);
+        for (key, value) in [
+            ("block", Tag::String("minecraft:missing".into())),
+            ("axis", Tag::String("diagonal".into())),
+            ("min", Tag::IntArray(vec![1, 64])),
+        ] {
+            let mut invalid = tag.clone();
+            invalid.insert(key.into(), value);
+            assert!(implementation.load_piece(metadata, &invalid).is_err());
+            assert!(adapter.load_piece(resources.registry, &invalid).is_none());
+        }
+        let piece = adapter.load_piece(resources.registry, &tag).unwrap();
+        assert_eq!(
+            piece.bounding_box(),
+            BoundingBox::new([1, 64, 2], [1, 66, 2])
+        );
+        let saved = piece.save().unwrap();
+        for key in ["block", "axis", "min", "max"] {
+            assert_eq!(saved.get(&key.into()), tag.get(&key.into()));
+        }
+        struct Opaque;
+        impl SolidRender for Opaque {
+            fn solid_render(&self, _: horizon_world::registry::BlockStateId) -> bool {
+                true
+            }
+        }
+        let mut world = RecordingWorld {
+            air: horizon_world::registry::BlockStateId(0),
+            writes: vec![],
+            states: vec![],
+        };
+        let mut random = LegacyRandom::new(9);
+        piece
+            .post_process(&mut EngineContext {
+                world: &mut world,
+                resources,
+                blocks: &Opaque,
+                random: &mut random,
+                chunk_box: BoundingBox::new([0, -64, 0], [15, 320, 15]),
+                chunk: ChunkPos::new(0, 0),
+                reference: [8, 64, 8],
+            })
+            .unwrap();
+        assert_eq!(world.writes, [[1, 64, 2], [1, 65, 2], [1, 66, 2]]);
+        assert_eq!(world.states, [horizon_world::registry::BlockStateId(2); 3]);
+    })
+    .join()
+    .unwrap();
 }

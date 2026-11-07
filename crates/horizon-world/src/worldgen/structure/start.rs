@@ -113,14 +113,13 @@ pub enum StructureKind {
 /// `find_generation_point` reads.
 pub struct ModType {
     pub ty: Arc<dyn ModStructureType>,
-    pub config: Arc<Value>,
-    /// The mod's API config, prepared once while decoding this definition.
-    pub prepared_config: Arc<horizon_core::nbt::Tag>,
+    /// The mod's config, prepared once while decoding this definition.
+    pub config: Arc<horizon_core::nbt::Tag>,
 }
 impl std::fmt::Debug for ModType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ModType")
-            .field("type", &self.config["type"])
+            .field("type", &self.config.get("type"))
             .finish()
     }
 }
@@ -450,10 +449,9 @@ impl StructureRegistry {
                 other => match mod_types.get(other) {
                     Some(ty) => StructureKind::Mod(ModType {
                         ty: ty.clone(),
-                        prepared_config: ty.prepare_config(&v).map_err(|error| {
+                        config: ty.prepare_config(&v).map_err(|error| {
                             DecodeError::Registry(format!("structure {name}: {error}"))
                         })?,
-                        config: Arc::new(v.clone()),
                     }),
                     None => StructureKind::Unsupported(other.to_owned()),
                 },
@@ -1470,7 +1468,7 @@ fn generate(
                 context,
                 resources,
                 chunk,
-                &mod_type.prepared_config,
+                &mod_type.config,
                 &mut random,
             )?;
             (position, pieces.into_iter().map(Piece::Legacy).collect())

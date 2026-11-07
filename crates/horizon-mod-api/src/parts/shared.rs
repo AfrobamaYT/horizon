@@ -842,6 +842,7 @@ pub mod tests {
         install_parts(
             &[ModEntry::new("lookup", Box::new(Unknown))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         assert_eq!(
@@ -873,6 +874,7 @@ pub mod tests {
         let errors = install_parts(
             &[ModEntry::new("lookup", Box::new(Invalid))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap_err();
         assert_eq!(errors.len(), 3);

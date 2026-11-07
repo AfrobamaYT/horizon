@@ -401,4 +401,63 @@ mod tests {
             })
         );
     }
+    #[test]
+    fn dimension_shape_edges_refuse_before_install_with_exact_mod_message() {
+        struct Shape(DimensionSettings);
+        #[mod_api::__subscriptions]
+        impl Hooks for Shape {
+            fn register(&self, registrar: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
+                registrar.register_dimension("edge", self.0.clone());
+            }
+        }
+        for (min_y, height, logical_height) in [
+            (-2032, 16, 0),
+            (-2032, 4064, 4064),
+            (2016, 16, 16),
+            (-64, 384, 384),
+        ] {
+            let settings = DimensionSettings {
+                min_y,
+                height,
+                logical_height,
+                ..Default::default()
+            };
+            install_parts(&[ModEntry::new(
+                "shape_mod",
+                Box::new(Shape(settings.clone())),
+            )])
+            .unwrap();
+            assert_eq!(
+                mod_api::__private::dimension_declarations(),
+                vec![("shape_mod:edge".into(), settings)]
+            );
+        }
+        let retained = mod_api::__private::dimension_declarations();
+        for (min_y, height, logical_height) in [
+            (-2048, 16, 0),
+            (-63, 16, 0),
+            (0, 0, 0),
+            (0, 17, 0),
+            (0, 16, -1),
+            (0, 16, 17),
+            (2016, 32, 0),
+            (2016, 2147483632, 0),
+        ] {
+            let settings = DimensionSettings {
+                min_y,
+                height,
+                logical_height,
+                ..Default::default()
+            };
+            let error = install_parts(&[ModEntry::new("shape_mod", Box::new(Shape(settings)))])
+                .unwrap_err();
+            assert_eq!(
+                error,
+                vec![format!(
+                    "shape_mod registered dimension shape_mod:edge with a build height the game refuses: min_y {min_y}, height {height}, logical_height {logical_height}"
+                )]
+            );
+            assert_eq!(mod_api::__private::dimension_declarations(), retained);
+        }
+    }
 }

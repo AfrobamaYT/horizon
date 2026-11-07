@@ -235,6 +235,7 @@ pub mod tests {
                 ModEntry::new("owner", Box::new(Declare(keys.clone()))),
             ],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         let types = |names: &[&str]| {
@@ -307,6 +308,7 @@ pub mod tests {
         let errors = install_parts(
             &[ModEntry::new("test", Box::new(Invalid))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap_err();
         assert_eq!(errors.len(), 4);
