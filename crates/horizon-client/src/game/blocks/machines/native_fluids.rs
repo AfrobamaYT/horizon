@@ -591,11 +591,11 @@ mod tests {
         use super::{CauldronFluids, FluidAt, FluidStack, game_holds};
         mod_api::__private::part_tests::game_thread();
         let potion = |fluid| {
-            let mut components = horizon_core::nbt::Compound::new();
-            components.insert(
-                "minecraft:potion_contents".into(),
-                horizon_core::nbt::Tag::String("minecraft:healing".into()),
-            );
+            use horizon_core::nbt::{Compound, Tag};
+            let mut potion = Compound::new();
+            potion.insert("potion".into(), Tag::String("minecraft:healing".into()));
+            let mut components = Compound::new();
+            components.insert("minecraft:potion_contents".into(), Tag::Compound(potion));
             FluidStack {
                 components: Some(Box::new(components.into())),
                 ..FluidStack::new(mod_api::__private::fluid_key(fluid).unwrap(), 1000)
