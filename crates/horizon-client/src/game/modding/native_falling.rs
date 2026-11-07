@@ -118,13 +118,13 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn falling_tick_preserves_its_owner_on_success_and_collision_error() {
         bound_falling_case(false, |game, _| {
-            game.tick_one_falling(0).unwrap();
+            game.tick_one_falling(0, &[]).unwrap();
             assert_eq!(game.falling[0].age, 1);
             assert!(game.falling[0].position.y < 70.0);
             // A corrupt resident palette makes the real collision lookup fail.
             Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
             let position = game.falling[0].position;
-            assert!(game.tick_one_falling(0).is_err());
+            assert!(game.tick_one_falling(0, &[]).is_err());
             assert_eq!(game.falling[0].position, position);
             assert_eq!(game.falling[0].age, 1);
         });
@@ -159,7 +159,7 @@ mod tests {
     fn falling_parked_swap_preserves_state_and_owner_until_discard() {
         bound_falling_case(false, |game, index| {
             let home = game.dim;
-            game.tick_one_falling(0).unwrap();
+            game.tick_one_falling(0, &[]).unwrap();
             let position = game.falling[0].position;
             game.enter_level(super::super::Dim::Nether).unwrap();
             assert!(game.falling.is_empty());
