@@ -2,10 +2,116 @@ use super::{TryIntoApi, TryIntoEngine};
 
 impl TryIntoApi for horizon_client_core::text::Text {
     type Api = mod_api::text::Text;
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(captured_text(&self.component_view()))
+        validate_engine_depth(self)?;
+        let component = self.component_view();
+        let result = (|| {
+            let text = captured_text(&component);
+            let form = mod_api::text::TextForm::try_from(&text)?;
+            mod_api::text::Text::try_from(form)
+        })();
+        if let std::borrow::Cow::Owned(component) = component {
+            horizon_client_core::component::discard_component(component);
+        }
+        result
     }
+}
+
+fn validate_engine_depth(
+    text: &horizon_client_core::text::Text,
+) -> Result<(), mod_api::text::TextFormError> {
+    let mut pending = vec![(text, 1)];
+    while let Some((text, depth)) = pending.pop() {
+        if depth > mod_api::text::MAX_TEXT_DEPTH {
+            return Err(mod_api::text::TextFormError::TooDeep);
+        }
+        if let Some(source) = text.source_component() {
+            validate_component_depth(source, depth)?;
+        } else {
+            let span_depth = depth + usize::from(text.spans.len() > 1);
+            for span in &text.spans {
+                if span_depth > mod_api::text::MAX_TEXT_DEPTH {
+                    return Err(mod_api::text::TextFormError::TooDeep);
+                }
+                if let Some(hover) = &span.style.hover {
+                    pending.push((hover, span_depth + 1));
+                }
+                if let Some(entity) = &span.style.hover_entity
+                    && let Some(name) = entity.get("name")
+                {
+                    validate_component_depth(name, span_depth + 1)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_component_depth(
+    value: &serde_json::Value,
+    depth: usize,
+) -> Result<(), mod_api::text::TextFormError> {
+    use serde_json::Value;
+    let mut pending = vec![(value, depth)];
+    while let Some((value, depth)) = pending.pop() {
+        if depth > mod_api::text::MAX_TEXT_DEPTH {
+            return Err(mod_api::text::TextFormError::TooDeep);
+        }
+        match value {
+            Value::Array(a) => {
+                if let Some((first, rest)) = a.split_first() {
+                    pending.push((first, depth));
+                    pending.extend(rest.iter().map(|v| (v, depth + 1)));
+                }
+            }
+            Value::Object(o) => {
+                if let Some(Value::Array(a)) = o.get("extra") {
+                    pending.extend(a.iter().map(|v| (v, depth + 1)));
+                }
+                let kind = o.get("object").and_then(Value::as_str);
+                let object = matches!(kind, Some("player") | None) && o.contains_key("player")
+                    || matches!(kind, Some("atlas") | None)
+                        && o.get("sprite").is_some_and(Value::is_string);
+                if object {
+                    if let Some(v) = o.get("fallback") {
+                        pending.push((v, depth + 1));
+                    }
+                } else if !o.contains_key("text") {
+                    if o.get("translate").is_some_and(Value::is_string) {
+                        if let Some(Value::Array(a)) = o.get("with") {
+                            pending.extend(a.iter().map(|v| (v, depth + 1)));
+                        }
+                    } else if o.get("selector").is_some_and(Value::is_string)
+                        || o.get("nbt").is_some_and(Value::is_string)
+                    {
+                        if let Some(v) = o.get("separator") {
+                            pending.push((v, depth + 1));
+                        }
+                    }
+                }
+                if let Some(e) = horizon_client_core::component::style_event_object(
+                    o,
+                    "hover_event",
+                    "hoverEvent",
+                ) {
+                    let child = match e.get("action").and_then(Value::as_str) {
+                        Some("show_text") => e
+                            .get("value")
+                            .or_else(|| e.get("contents"))
+                            .or_else(|| e.get("text")),
+                        Some("show_entity") => e.get("name"),
+                        _ => None,
+                    };
+                    if let Some(v) = child {
+                        pending.push((v, depth + 1));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 fn captured_node<'a>(
@@ -250,9 +356,11 @@ fn captured_text_style<'a>(
 
 impl<C: ?Sized> TryIntoEngine<C> for mod_api::text::Text {
     type Engine = horizon_client_core::text::Text;
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
-        Ok(owned_text_component(self).into())
+        let form = mod_api::text::TextForm::try_from(self)?;
+        let text = mod_api::text::Text::try_from(form)?;
+        Ok(owned_text_component(&text).into())
     }
 }
 
@@ -734,7 +842,7 @@ mod text_encoding_tests {
             .insert("test:context".into(), json!({"value":null}));
         text.children.push(Text::literal("first"));
         text.children.push(Text::literal("second"));
-        let engine: Result<horizon_client_core::text::Text, std::convert::Infallible> =
+        let engine: Result<horizon_client_core::text::Text, mod_api::text::TextFormError> =
             text.try_into_engine(&());
         assert_eq!(
             engine.unwrap().component(),
@@ -883,9 +991,9 @@ mod iterative_tests {
     #[test]
     fn recursive_fields_survive_512_nodes_on_256_kib() {
         std::thread::Builder::new().stack_size(256 * 1024).spawn(|| {
-            for relation in 0..8 {
+            for (relation, depth) in (0..9).flat_map(|r| [(r, 512), (r, 513)]) {
                 let mut source = json!({"text":"leaf", "bold":false, "test:metadata":17});
-                for _ in 1..512 {
+                for _ in 1..depth {
                     let mut parent = match relation {
                         0 => json!({"text":"parent"}),
                         1 => json!({"translate":"test:translation", "fallback":"%s"}),
@@ -893,6 +1001,7 @@ mod iterative_tests {
                         3 => json!({"object":"atlas", "sprite":"test:icon"}),
                         6 => json!({"nbt":"name", "storage":"test:data", "interpret":true}),
                         7 => json!({"object":"player", "player":{"name":"test"}}),
+                        8 => json!({"text":""}),
                         _ => json!({"text":"parent"}),
                     };
                     let fields = parent.as_object_mut().unwrap();
@@ -908,18 +1017,68 @@ mod iterative_tests {
                     source = parent;
                 }
                 let engine = horizon_client_core::text::Text::empty().with_component(source);
+                if depth == 513 {
+                    assert!(matches!(engine.try_into_api(), Err(mod_api::text::TextFormError::TooDeep)));
+                    let api = captured_text(&engine.component_view());
+                    assert!(matches!(api.try_into_engine(&()), Err(mod_api::text::TextFormError::TooDeep)));
+                    std::mem::forget((engine, api));
+                    continue;
+                }
                 let api = engine.try_into_api().unwrap();
                 let expected = TextForm::try_from(&api).unwrap();
                 assert_eq!(expected.nodes.len(), 512);
                 assert!(expected.nodes.last().unwrap().data.contains("leaf"));
-                let emitted = owned_text_component(&api);
-                let restored = captured_text(&emitted);
+                let emitted = api.try_into_engine(&()).unwrap();
+                let restored = emitted.try_into_api().unwrap();
                 let actual = TextForm::try_from(&restored).unwrap();
                 assert_eq!(actual, expected);
                 // Recursive ownership operations are not the crossing guarantee.
                 std::mem::forget((engine, api, emitted, restored));
             }
         }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    fn span_only_hover_sources_are_validated_and_materialized_iteratively() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                use horizon_client_core::text::{Span, Style, Text as Engine};
+                for depth in [512, 513] {
+                    let mut text = Engine::empty();
+                    text.spans.push(Span {
+                        text: "leaf".into(),
+                        style: Style::default(),
+                    });
+                    for _ in 1..depth {
+                        let mut parent = Engine::empty();
+                        parent.spans.push(Span {
+                            text: "parent".into(),
+                            style: Style {
+                                hover: Some(std::sync::Arc::new(text)),
+                                ..Style::default()
+                            },
+                        });
+                        text = parent;
+                    }
+                    let api = text.try_into_api();
+                    if depth == 513 {
+                        assert!(matches!(api, Err(mod_api::text::TextFormError::TooDeep)));
+                    } else {
+                        assert_eq!(
+                            TextForm::try_from(api.as_ref().unwrap())
+                                .unwrap()
+                                .nodes
+                                .len(),
+                            512
+                        );
+                    }
+                    std::mem::forget((text, api));
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
