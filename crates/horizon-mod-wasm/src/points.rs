@@ -8,7 +8,7 @@ use horizon_mod_package::manifest::{
     InjectionKind, Manifest,
     inject::{Access, Inject, Kind},
 };
-use mod_api::__private::wasm_host::{CallHost, Exports};
+use mod_api::__private::wasm_host::{CallHost, Exports, LoadError};
 use mod_points::__private::wire::{Forward, HostKind, PointHost, Record, Value};
 use mod_points::PointId;
 use mod_points::places::{IDS, NAMES, SHAPES, TARGETS};
@@ -144,6 +144,15 @@ impl Listening {
     }
 }
 
+fn export_refusal(error: LoadError, point: &str) -> Refusal {
+    match error {
+        LoadError::MissingExport(_) => Refusal::UnfilledPoint {
+            point: point.into(),
+        },
+        other => Refusal::Load(other),
+    }
+}
+
 /// Checks a loaded wasm mod's listeners against its manifest and this game's points: the listeners
 /// to register, none for a mod whose manifest lists no injections.
 pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Listening>, Refusal> {
@@ -167,17 +176,17 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         "{}-listeners",
         horizon_mod_package::manifest::export_prefix(&manifest.id)
     );
-    let unfilled = || Refusal::UnfilledPoint {
-        point: declared
-            .first_key_value()
-            .expect("nonempty inject declarations")
-            .0
-            .to_string(),
+    let refused = |error| {
+        export_refusal(
+            error,
+            declared
+                .first_key_value()
+                .expect("nonempty inject declarations")
+                .0,
+        )
     };
-    let subscribed: Subscribed = exports
-        .func(&interface, "subscribed")
-        .map_err(|_| unfilled())?;
-    let fire: Fire = exports.func(&interface, "fire").map_err(|_| unfilled())?;
+    let subscribed: Subscribed = exports.func(&interface, "subscribed").map_err(refused)?;
+    let fire: Fire = exports.func(&interface, "fire").map_err(refused)?;
     let listed = exports
         .load(|store| Ok(subscribed.call(store, ())?.0))
         .ok_or_else(|| {
@@ -216,6 +225,50 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
 mod tests {
     use super::*;
     use mod_points::places::NAMES;
+
+    #[test]
+    fn a_guest_export_with_the_wrong_type_retains_its_load_refusal() {
+        let mut resolve = wit_parser::Resolve::default();
+        let package = resolve
+            .push_str(
+                "wrong.wit",
+                "package test:wrong; world wrong { export fire: func(); }",
+            )
+            .unwrap();
+        let world = resolve.select_world(&[package], Some("wrong")).unwrap();
+        let mut module =
+            wit_component::dummy_module(&resolve, world, wit_parser::ManglingAndAbi::Standard32);
+        wit_component::embed_component_metadata(
+            &mut module,
+            &resolve,
+            world,
+            wit_component::StringEncoding::UTF8,
+            true,
+        )
+        .unwrap();
+        let bytes = wit_component::ComponentEncoder::default()
+            .module(&module)
+            .unwrap()
+            .encode()
+            .unwrap();
+        let engine = wasmtime::Engine::default();
+        let component = wasmtime::component::Component::new(&engine, bytes).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        let instance = wasmtime::component::Linker::<()>::new(&engine)
+            .instantiate(&mut store, &component)
+            .unwrap();
+        let wrong: Result<Fire, _> = instance.get_typed_func(&mut store, "fire");
+        let error = LoadError::ChangedExport(
+            "test-listeners#fire".into(),
+            wrong.err().unwrap().to_string(),
+        );
+        assert!(
+            matches!(export_refusal(error, "listen"), Refusal::Load(LoadError::ChangedExport(name, _)) if name == "test-listeners#fire")
+        );
+        assert!(
+            matches!(export_refusal(LoadError::MissingExport("test-listeners#fire".into()), "listen"), Refusal::UnfilledPoint { point } if point == "listen")
+        );
+    }
 
     const TICK: &str = "horizon_client::game::Game<'_>::tick";
 
