@@ -605,7 +605,6 @@ mod dispatch;
 mod host_param;
 mod index;
 mod wire;
-pub use wire::generate as generate_wire;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;

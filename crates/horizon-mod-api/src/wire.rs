@@ -14,6 +14,22 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::sync::Arc;
 
+pub use crate::wire_slots::{Id, Slots, Stale};
+
+/// The guest's start-up call: its input is the package list.
+pub const INIT: u32 = 0xFFFF_FF00;
+/// The guest's call to drop the handlers the game let go of: its input is their ids.
+pub const RELEASE: u32 = 0xFFFF_FF01;
+/// The game's import freeing an object the mod held: its input is the id.
+pub const HOST_RELEASE: u32 = 0xFFFF_FF02;
+
+/// The layout of every value and call that crosses, a hash the generator writes: a mod built
+/// for another one is refused when it loads.
+pub use crate::WIRE_LAYOUT as LAYOUT;
+
+#[cfg(any(target_arch = "wasm32", feature = "wasm-guest"))]
+pub use crate::wire_guest as guest;
+
 /// Intern a static API string with bounded process-lifetime storage.
 pub fn intern(value: &str) -> Result<&'static str, WireError> {
     use std::sync::{Mutex, OnceLock};
@@ -89,6 +105,15 @@ impl Writer {
     pub fn clear(&mut self) {
         self.bytes.clear();
     }
+    /// Takes `buffer` as its storage, emptied.
+    pub fn replace(&mut self, mut buffer: Vec<u8>) {
+        buffer.clear();
+        self.bytes = buffer;
+    }
+    /// The bytes written, leaving the writer's storage to the caller.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -104,8 +129,52 @@ impl Writer {
     pub fn put_len(&mut self, len: usize) {
         self.put(&u32::try_from(len).expect("a value longer than the wire carries"));
     }
-    pub fn put<T: Wire + ?Sized>(&mut self, value: &T) {
-        value.put(self);
+    /// An optional borrowed value, written as the `Option` it stands for.
+    pub fn put_opt<T: Put + ?Sized>(&mut self, value: Option<&T>) {
+        match value {
+            Some(value) => {
+                self.put(&1u8);
+                self.put(value);
+            }
+            None => self.put(&0u8),
+        }
+    }
+    pub fn put<T: Put + ?Sized>(&mut self, value: &T) {
+        value.put_to(self);
+    }
+}
+
+/// What can be written: every [`Wire`] value, and the borrowed forms a call passes
+/// (`&str`, `&[T]`, `Option<&T>`), which are written as the owned value they stand for.
+pub trait Put {
+    /// Writes it.
+    fn put_to(&self, out: &mut Writer);
+}
+
+impl<T: Wire> Put for T {
+    fn put_to(&self, out: &mut Writer) {
+        self.put(out);
+    }
+}
+
+impl Put for str {
+    fn put_to(&self, out: &mut Writer) {
+        out.put_str(self);
+    }
+}
+
+impl Put for &str {
+    fn put_to(&self, out: &mut Writer) {
+        out.put_str(self);
+    }
+}
+
+impl<T: Put> Put for [T] {
+    fn put_to(&self, out: &mut Writer) {
+        out.put_len(self.len());
+        for item in self {
+            out.put(item);
+        }
     }
 }
 
