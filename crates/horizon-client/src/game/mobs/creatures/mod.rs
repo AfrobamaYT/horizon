@@ -137,7 +137,7 @@ pub(super) struct NativeSound {
 /// Mob-system state owned by the game.
 #[derive(Default)]
 pub(super) struct Creatures {
-    pub projectiles: horizon_client::join_seq::JoinList<Projectile>,
+    pub projectiles: horizon_client::join_seq::JoinList<Projectile, false>,
     /// The entities a family tells the mods ticked, kept between ticks
     /// (game/modding/native_ticks.rs).
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
@@ -4815,14 +4815,24 @@ impl Game<'_> {
         }
         let listed = keep_flags.clone();
         let mut idx = 0;
-        projectiles.retain(|_| {
-            let k = keep_flags[idx];
-            idx += 1;
-            k
-        });
-        if !impacts.is_empty() {
+        if impacts.is_empty() {
+            projectiles.retain(|_| {
+                let keep = keep_flags[idx];
+                idx += 1;
+                keep
+            });
+        } else {
+            // Keep the owners of impacts that may replay alive until the verdict.
+            let mut removed = projectiles
+                .extract_if(|_| {
+                    let take = !keep_flags[idx];
+                    idx += 1;
+                    take
+                })
+                .collect();
             self.native_settle_impacts(
                 &mut projectiles,
+                &mut removed,
                 &listed,
                 impacts,
                 &mut hits,
@@ -9930,8 +9940,19 @@ mod breeding_tests {
 mod projectile_batch_tests {
     use super::*;
     use horizon_client::{chunk::Chunk, join_seq::JoinSeq};
+    use horizon_mod_runtime::attachments::{
+        AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
+    };
     use mod_api::{Flow, HearsProjectileImpactsEvent, Hooks, ProjectileImpactEvent, ServerHost};
     use std::sync::{Arc, Mutex};
+    static VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "test",
+        name: "projectile_lifetime",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
 
     #[derive(Clone, Default)]
     struct Observed {
@@ -10020,8 +10041,42 @@ mod projectile_batch_tests {
                     game.creatures.projectiles.push(p);
                 }
                 let joins = std::array::from_fn(|i| game.creatures.projectiles[i].join);
+                let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+                let mut maps = [Attachments::default(), Attachments::default()];
+                let registrations: Vec<_> = maps
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(i, values)| {
+                        let holder =
+                            mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), ids[i]);
+                        VALUE
+                            .set(values, Holder::Entity(ids[i]), 10 + i as i32)
+                            .unwrap();
+                        game.creatures.projectiles.update(i, |p| {
+                            p.attachment_lifetime().bind(values, &index, holder);
+                            p.attachment_lifetime().registration().unwrap()
+                        })
+                    })
+                    .collect();
+                let key = ("test".into(), "projectile_lifetime".into());
+                let before = index.lock().unwrap().snapshot(&key);
+                assert_eq!(before.len(), 2);
                 observed.lock().unwrap().remove = remove.then_some(ids[1]);
                 game.tick_projectiles().unwrap();
+                assert_eq!(index.lock().unwrap().snapshot(&key).len(), 2);
+                for (id, original) in ids[..2].iter().zip(&registrations) {
+                    let i = game
+                        .creatures
+                        .projectiles
+                        .iter()
+                        .position(|p| p.id == *id)
+                        .unwrap();
+                    let current = game
+                        .creatures
+                        .projectiles
+                        .update(i, |p| p.attachment_lifetime().registration().unwrap());
+                    assert!(original.same_registration(&current));
+                }
                 let observed = observed.lock().unwrap().clone();
                 assert_eq!(observed.impacts, [ids[0], ids[1]]);
                 assert!(observed.spawned);
@@ -10033,6 +10088,13 @@ mod projectile_batch_tests {
                     .unwrap()
                     .id;
                 test(game, ids, joins, spawned);
+                game.creatures.projectiles.clear();
+                assert!(index.lock().unwrap().snapshot(&key).is_empty());
+                assert!(
+                    before
+                        .iter()
+                        .all(|row| matches!(row.entry.read(&VALUE), Ok(10 | 11)))
+                );
             });
         });
     }
@@ -10048,15 +10110,17 @@ mod projectile_batch_tests {
                 [ids[1], ids[2], spawned, ids[0]]
             );
             for (id, join) in ids.into_iter().zip(joins) {
-                let p = list.iter_mut().find(|p| p.id == id).unwrap();
+                let p = list.iter().find(|p| p.id == id).unwrap();
                 assert_eq!(p.join, join);
                 assert_eq!(p.age, 1);
                 assert!(p.position.x > 2.0);
                 assert!(!p.stuck);
             }
-            let snowball = list.iter_mut().find(|p| p.id == ids[0]).unwrap();
-            assert!(snowball.has_been_shot);
-            assert!(snowball.take_shoot_event().is_none());
+            let snowball = list.iter().position(|p| p.id == ids[0]).unwrap();
+            list.update(snowball, |p| {
+                assert!(p.has_been_shot);
+                assert!(p.take_shoot_event().is_none());
+            });
             let fresh = list.iter().find(|p| p.id == spawned).unwrap();
             assert!(joins.into_iter().all(|join| join < fresh.join));
             assert_eq!(fresh.age, 0);

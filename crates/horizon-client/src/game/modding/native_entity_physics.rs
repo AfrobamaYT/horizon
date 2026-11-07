@@ -80,11 +80,9 @@ mod tests {
             game.creatures.projectiles.push(arrow);
             let arrow = game.native_entity(arrow_id).unwrap();
             assert_eq!(arrow.no_physics(game), Some(false));
-            game.creatures.projectiles[0]
-                .arrow
-                .as_mut()
-                .unwrap()
-                .no_physics = true;
+            game.creatures
+                .projectiles
+                .update(0, |p| p.arrow.as_mut().unwrap().no_physics = true);
             assert_eq!(arrow.no_physics(game), Some(true));
 
             let trident_id = game.take_entity_id();
