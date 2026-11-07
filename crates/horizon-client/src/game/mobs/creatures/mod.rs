@@ -12321,6 +12321,7 @@ mod mob_pearl_hook_tests {
             with_game(|game| {
                 let from = Vec3::new(0.0, 65.0, 0.0);
                 game.player = Some(PlayerMotion::new(game.motion, from).unwrap());
+                game.lan_acting = Some(12);
                 game.lan_acting_uuid = Some(7);
                 game.lan_acting_name = Some("PearlTest".into());
                 game.lan_acting_permission = Some(4);
