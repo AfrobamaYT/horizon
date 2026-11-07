@@ -81,6 +81,54 @@ carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment ef
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
 and remain strings, as do labels and tags.
 
+### Hot item and block identities
+
+Resolve item and block keys during load and keep them for tick and menu calls.
+`item_burn_time`, `item_compost_chance`, `give`, `enchantment_supports`'s item,
+and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
+`screen_hovered_item` return item keys. `level.block`, `lit_block_name` and
+`NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
+`NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
+carry item keys, not names. Unknown incoming slots are refused at the boundary.
+`block_sprites` takes resolved `BlockStateId` values, preserving properties without
+parsing state strings. The pre-change block event carries resolved `from` / `to`
+states and does not allocate their names. Property names and values in
+`set_block_property` are not block identifiers and remain strings.
+
+These calls remove string transport across wasm. Engine metadata reads may still
+hash borrowed registry names; no formatted identifier is built for these inputs.
+
+### Matched recipe lookup
+
+`level.recipe_for(host, &recipe_type, &inputs)` replaces the crafting-only lookup.
+Use `RecipeInput::Crafting { width, height, slots }` for `minecraft:crafting`
+(row-major slots, dimensions 1 through 3), `Single(stack)` for smelting, blasting,
+smoking, campfire cooking and stonecutting, or `Smithing { template, base, addition }`
+for `minecraft:smithing`. Recipe **types** are not serializers: shaped and shapeless
+files both belong to `minecraft:crafting`, and transform/trim both belong to smithing.
+
+The server uses the same engine matchers and assembled outputs as its menus,
+including data-pack overrides of vanilla recipe types. A `RecipeMatch` contains the
+matched recipe identifier, typed output, ordered remaining items, experience and
+processing time. Lookup consumes nothing; the caller applies inventory changes
+transactionally. Keep the result until inputs or the recipe load change.
+
+`Ok(None)` means valid input without a match. Invalid shapes/items and unavailable
+levels are typed errors. A type without an engine matcher returns
+`RecipeLookupError::NotMatchable`, not an empty match. For mod-owned types, retain
+`recipes_of_type` once per load/reload and match that cached data **inside the mod**,
+with zero crossings per tick. Dynamic custom outputs and contextual predicates
+remain mod-owned; the host does not call guest code to match recipes.
+
+At publication, call `ingredient.item_keys(host)` once per ingredient to retain
+`Arc<[ItemKey]>` for local matching. This load-time read returns exactly the plain
+item membership for lists, expanded tags and standard shapes, using the engine
+matcher. It returns `IngredientKeysError::NotEnumerable` if any custom or component
+predicate occurs anywhere in the tree; a displayed item list is not a safe substitute.
+`UnknownItem` refuses a missing registry identity. Do not call this method per tick.
+The sample's `ProcessingRecipes::publish` retains these keys; `result` then checks
+`input.item()` locally, with no `Ingredient::test` host call per candidate.
+
 ### API-owned values: migration table
 
 | Previous engine value | API-owned value | Mod changes |

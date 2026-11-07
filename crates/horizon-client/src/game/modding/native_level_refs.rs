@@ -475,9 +475,9 @@ impl Game<'_> {
     }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
-    pub(super) fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+    pub(super) fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<mod_api::BlockKey> {
         self.level_block_state(level, pos)
-            .map(|state| self.res.facts().get(state).name.to_string())
+            .and_then(|state| mod_api::__private::block_key(&self.res.facts().get(state).name))
     }
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for

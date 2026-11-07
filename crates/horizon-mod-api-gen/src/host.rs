@@ -500,6 +500,10 @@ fn boundary_arguments(
             format!("{conversion}.unwrap()")
         } else if checked_write {
             format!("{conversion}?")
+        } else if result_error(&sig.output).is_some() {
+            format!(
+                "match {conversion} {{ Ok(value) => value, Err(_) => return Err(mod_api::NoBackend::no_backend()) }}"
+            )
         } else {
             format!(
                 "match {conversion} {{ Ok(value) => value, Err(_) => return Default::default() }}"
@@ -907,6 +911,17 @@ mod tests {
 
     fn handles(source: &str) -> BTreeMap<String, String> {
         api_types(source).unwrap().handles
+    }
+
+    #[test]
+    fn immutable_result_arguments_refuse_conversion_with_a_typed_error() {
+        let method = entry(
+            "fn read(&self, ingredient: &Ingredient) -> Result<Arc<[ItemKey]>, IngredientKeysError>;",
+        );
+        let (setup, _, checked_write) = boundary_arguments(&method.sig, "read").unwrap();
+        assert!(!checked_write);
+        assert!(setup.contains("return Err(mod_api::NoBackend::no_backend())"));
+        assert!(!setup.contains("Default::default()"));
     }
 
     #[test]
