@@ -28,7 +28,7 @@ use horizon_mod_package::dependencies;
 
 mod api;
 mod planning;
-pub use planning::routes;
+pub use planning::{routes, PlanInput};
 mod crates;
 mod diagnostics;
 mod inject;
@@ -61,8 +61,8 @@ const STAGING: &str = "private-source-calls-v1";
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
-/// What a native build is compiled for, as the player picks it on the Mods page. `Optimized`, the
-/// default, is the release profile the daily prebuilt game is built with (thin LTO, one codegen
+/// Native build modes: a visible picker starts at Balanced and remembers the instance's choice.
+/// Optimized is the daily prebuilt game's release profile (thin LTO, one codegen
 /// unit): mods that need nothing but the mod API compile against that download in seconds, and
 /// any other set builds the whole game from source with the same profile. `Balanced` is the
 /// workspace's `fast` (16 codegen units, incremental, thin-local LTO only), built on this computer:
@@ -71,17 +71,27 @@ pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 /// about twice as slow. `Balanced` and `Developer` share `native/target/fast/`: every other crate
 /// is built alike, so switching between them recompiles only `horizon-client`, and Cargo keeps
 /// both builds of it. Each profile has its own key, so their builds never mix.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Profile {
-    #[default]
     Optimized,
+    #[default]
     Balanced,
     Developer,
 }
 
 impl Profile {
-    /// The player's choices (the Mods page, `settings native-profile`).
+    /// The player's build-mode choices.
     pub const ALL: [Self; 3] = [Self::Optimized, Self::Balanced, Self::Developer];
 
     pub fn name(self) -> &'static str {
@@ -90,16 +100,6 @@ impl Profile {
             Self::Balanced => "balanced",
             Self::Developer => "developer",
         }
-    }
-
-    /// The profile named `text`.
-    pub fn parse(text: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.name() == text.trim())
-    }
-
-    /// The settings' profile, or the default when unset.
-    pub fn chosen(settings: &crate::backend::Settings) -> Self {
-        settings.native_profile.unwrap_or_default()
     }
 
     /// The Cargo profile it compiles with (its folder in `native/target/`), and what it sets over
@@ -4240,7 +4240,8 @@ mod tests {
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");
         fs::write(&marker, b"unchanged").unwrap();
-        denied(routes(&folder, None));
+        denied(routes(PlanInput::Installed(&folder), None));
+        denied(routes(PlanInput::Folder(&folder), None));
         assert_eq!(
             fs::read(&marker).unwrap(),
             b"unchanged",
@@ -4261,20 +4262,6 @@ mod tests {
         assert!(backend::Settings::load().native_mods_allowed_at.is_some());
         require_consent().unwrap();
         original.save().unwrap();
-    }
-
-    #[test]
-    fn the_setting_picks_the_profile() {
-        let mut settings = crate::backend::Settings::default();
-        assert_eq!(Profile::chosen(&settings), Profile::Optimized);
-        settings.native_profile = Some(Profile::Developer);
-        assert_eq!(Profile::chosen(&settings), Profile::Developer);
-        assert_eq!(Profile::parse("balanced"), Some(Profile::Balanced));
-        assert_eq!(Profile::parse("fast"), None);
-        assert_eq!(Profile::parse(" optimized "), Some(Profile::Optimized));
-        assert_eq!(Profile::parse("release"), None);
-        let text = serde_json::to_string(&settings).unwrap();
-        assert!(text.contains("\"native_profile\":\"developer\""), "{text}");
     }
 
     /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early

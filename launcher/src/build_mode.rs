@@ -121,6 +121,7 @@ impl Launcher {
         let t = self.theme;
         let pal = Pal::of(&t);
         let instance = self.selected_instance()?;
+        let routes = self.native_routes(cx);
         let state = self.native_state_of(instance);
         let mine = self.native_for.as_deref() == Some(instance.id.as_str());
         let building = self.native_step.as_ref().filter(|_| mine);
@@ -130,7 +131,9 @@ impl Launcher {
             .flex_col()
             .gap(px(12.))
             .child(self.mode_head(state, error, mine, pal, cx))
-            .child(self.mode_cards(self.native_step.is_some(), cx));
+            .when(native_mods::needs_picker(&routes, false, false), |card| {
+                card.child(self.mode_cards(self.native_step.is_some(), cx))
+            });
         card = match building {
             Some(step) => card.child(self.panel().child(self.building_card(step, pal, cx))),
             None => card.child(self.mode_status(error, mine, pal, cx)),
@@ -141,11 +144,37 @@ impl Launcher {
         Some(card)
     }
 
+    pub(super) fn native_profile(&self) -> Profile {
+        self.selected_instance()
+            .map_or(Profile::Balanced, |instance| instance.native_profile)
+    }
+
+    pub(super) fn choose_native_profile(&mut self, profile: Profile) {
+        let Some(id) = self.selected_instance().map(|instance| instance.id.clone()) else {
+            return;
+        };
+        match instances::edit(&id, |meta| meta.native_profile = Some(profile)) {
+            Ok(_) => {
+                self.native_done = None;
+                self.reload_instances();
+            }
+            Err(error) => self.native_error = Some(error),
+        }
+    }
+
     /// Where the instance's native mods stand, read again only when what it depends on changes.
     fn native_state_of(&self, instance: &instances::Instance) -> State {
         let version = self.version_of(instance).cloned();
         let home = self.mods.home();
-        let profile = Profile::chosen(&self.settings);
+        let profile = self
+            .mods
+            .native_routes
+            .borrow()
+            .as_ref()
+            .and_then(|memo| memo.result.as_ref()?.as_ref().ok())
+            .map_or(Profile::Optimized, |routes| {
+                instance.native_profile.for_picker(routes, false, false)
+            });
         let key = format!(
             "{}{profile:?}",
             native_status::fingerprint(&home, version.as_deref())
@@ -235,7 +264,7 @@ impl Launcher {
     fn mode_cards(&self, locked: bool, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let pal = Pal::of(&t);
-        let chosen = Profile::chosen(&self.settings);
+        let chosen = self.native_profile();
         div()
             .flex()
             .gap(px(10.))
@@ -309,9 +338,7 @@ impl Launcher {
                         if this.native_step.is_some() {
                             return;
                         }
-                        this.settings.native_profile = Some(profile);
-                        this.native_done = None;
-                        this.save_settings();
+                        this.choose_native_profile(profile);
                         cx.notify();
                     },
                 ))
@@ -496,7 +523,8 @@ impl Launcher {
         });
         drop(memo);
         let work = cx.background_executor().spawn(async move {
-            native_mods::routes(&home, base.as_deref()).map_err(String::from)
+            native_mods::routes(native_mods::PlanInput::Installed(&home), base.as_deref())
+                .map_err(String::from)
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
@@ -526,7 +554,7 @@ impl Launcher {
             .iter()
             .find(|(id, _)| id == mod_id)
             .map(|(_, r)| r)?;
-        let profile = Profile::chosen(&self.settings);
+        let profile = self.native_profile();
         let last = self
             .version_of(instance)
             .and_then(|v| native_status::built_secs(v))

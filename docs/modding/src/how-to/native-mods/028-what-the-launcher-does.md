@@ -3,10 +3,11 @@
 
 ## What the launcher does
 
-**Developing a mod?** Run `horizon-launcher settings native-profile developer` once, or pick Developer in the Mods
-page's "Build mode" card. Developer builds the game crate unoptimized: a mod edit rebuilds about 6× faster than with
-Balanced, while game logic runs up to about twice as slow. Use it while developing, not for playing; Optimized stays
-the default for players (step 5 below).
+**Developing a mod?** Pick Developer in the Mods page's "Build mode" card, or pass `--profile developer` to
+`horizon-launcher native-build`. The choice is remembered for that instance, not shared with other instances.
+Developer builds the game crate unoptimized: a mod edit rebuilds about 6× faster than with Balanced, while game
+logic runs up to about twice as slow. Use it while developing, not for playing. A needed build picker starts at
+Balanced until a choice is saved; automatic prebuilt builds still use the release profile.
 
 In the window: install a native mod from the Mods page, into the instance picked on the left ("Installs into
 {instance}", shown even with one instance). The first one shows a trust notice once (native mods aren't sandboxed; the
@@ -67,8 +68,8 @@ trusting native code is the player's decision, never an agent's.
 
    | Mode | Cargo profile | Use |
    |---|---|---|
-   | `optimized` (the default) | `release`, the release's own (game-build.yml: thin LTO, one codegen unit) | The mode for playing: mods that need nothing but the mod API compile against the prebuilt game, built with this profile, in seconds; any other set builds the whole game from source with it |
-   | `balanced` | `fast`, the workspace's own: `codegen-units = 16`, incremental, and `lto = false`, Cargo's default, which is thin-local LTO across one crate's codegen units, none across crates | Always builds the game on this computer: a rebuild recompiles and links only what changed, and the game plays a little slower than Optimized |
+   | `optimized` | `release`, the release's own (game-build.yml: thin LTO, one codegen unit) | The mode for playing: mods that need nothing but the mod API compile against the prebuilt game, built with this profile, in seconds; any other set builds the whole game from source with it |
+   | `balanced` (initial picker choice) | `fast`, the workspace's own: `codegen-units = 16`, incremental, and `lto = false`, Cargo's default, which is thin-local LTO across one crate's codegen units, none across crates | Always builds the game on this computer: a rebuild recompiles and links only what changed, and the game plays a little slower than Optimized |
    | `developer` | `fast` with `horizon-client` at opt-level 0 (`--config profile.fast.package.horizon-client.opt-level=0`) | Developing a mod: the quickest rebuild after an edit, but the game runs about twice as slow, so iterate with it rather than play |
 
    Only Optimized uses the prebuilt game. The Mods page shows how each native mod reaches the game: a bolt for
@@ -79,8 +80,10 @@ trusting native code is the player's decision, never an agent's.
    about 6× faster than with Balanced, and a tick took up to about twice as long. `dev` lowers only `horizon-client`, so an edit in another workspace
    crate (`horizon-client-lib`, `-render`, `-world`) still compiles at opt-level 3, as with Balanced. The
    launcher sets it with `--config` (`native_mods::Profile`), so the workspace's own `[profile.fast]` builds stay
-   as they are. The Mods page's "Build mode" card, `horizon-launcher settings native-profile optimized|balanced|developer`
-   or `native-build --profile ...` pick one. `native-mods.json` records the profile.
+   as they are. The Mods page's "Build mode" card or `native-build --profile ...` picks and remembers the
+   instance's choice. Without a source-build reason or explicit CLI choice, installed mods use the automatic
+   prebuilt route; a saved preference is applied only when a picker is needed. `native-mods.json` records the
+   effective profile.
 
    Each profile is in the build's key, so their builds never mix and may all stay. `balanced` and `developer` share
    `native/target/fast/`: every crate but `horizon-client` is built with the same settings, so switching between

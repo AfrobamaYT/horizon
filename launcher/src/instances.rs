@@ -143,6 +143,9 @@ pub struct Meta {
     /// launcher's own version, which follows updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// This instance's saved native build choice; no choice starts at Balanced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_profile: Option<crate::native_mods::Profile>,
     /// Seconds played in it, every run started by the launcher (the window or `play`) added up.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub played_secs: u64,
@@ -245,6 +248,8 @@ pub struct Instance {
     pub group: Option<String>,
     /// Its pinned Horizon version, if any (`Meta::version`).
     pub version: Option<String>,
+    /// Its saved native build choice, or Balanced before the player chooses one.
+    pub native_profile: crate::native_mods::Profile,
     pub played: Duration,
     pub last_played: Option<SystemTime>,
     /// What runs around the game (`launch::wrap`).
@@ -347,6 +352,9 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
                 icon: meta.icon,
                 group: meta.group,
                 version: meta.version,
+                native_profile: meta
+                    .native_profile
+                    .unwrap_or(crate::native_mods::Profile::Balanced),
                 played: Duration::from_secs(meta.played_secs),
                 last_played: meta
                     .last_played

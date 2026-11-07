@@ -267,7 +267,7 @@ impl Launcher {
     /// on here, so the row picks the profile they build with, as the Mods page does.
     fn native_mods_row(&mut self, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
-        let profile = native_mods::Profile::chosen(&self.settings);
+        let profile = self.native_profile();
         let picker = segments(
             "settings-native-profile",
             &[
@@ -281,9 +281,7 @@ impl Launcher {
                 let this = cx.entity().downgrade();
                 move |choice, _, cx| {
                     let _ = this.update(cx, |this, cx| {
-                        this.settings.native_profile = Some(choice);
-                        this.native_done = None;
-                        this.save_settings();
+                        this.choose_native_profile(choice);
                         cx.notify();
                     });
                 }

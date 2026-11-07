@@ -822,11 +822,11 @@ enum Cmd {
         /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
-        /// The build mode: optimized (the default: the prebuilt game when the mods allow it, else
-        /// the game built with the release profile), balanced (built here, quicker to rebuild) or
-        /// developer (quickest to rebuild a mod, slow game). Default: the native-profile setting
-        #[arg(long, value_parser = ["optimized", "balanced", "developer"])]
-        profile: Option<String>,
+        /// This instance's build mode: optimized, balanced or developer. Remembers an explicit
+        /// choice for this instance; otherwise uses its saved choice, starting at Balanced.
+        /// Without a picker reason or explicit choice, installed mods use the prebuilt route.
+        #[arg(long, value_enum)]
+        profile: Option<native_mods::Profile>,
     },
     /// Show a release's patch notes (default: the newest)
     Notes { tag: Option<String> },
@@ -848,9 +848,7 @@ enum Cmd {
     /// violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any
     /// hue), background PATH (a picture behind Home; "default"
     /// shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit
-    /// in GiB, default 30; 0 disables automatic cleanup), native-profile optimized|balanced|developer (the build mode native
-    /// mods use: optimized uses the prebuilt game when it can, balanced builds here and rebuilds
-    /// quicker, developer rebuilds a mod quickest for a slow game)
+    /// in GiB, default 30; 0 disables automatic cleanup)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -1000,7 +998,7 @@ pub fn command() -> clap::Command {
 pub const AI_COMMANDS: [&str; 2] = ["mcp", "agent-config"];
 
 /// The keys `settings` sets.
-const SETTING_KEYS: [&str; 15] = [
+const SETTING_KEYS: [&str; 14] = [
     "selected-version",
     "minecraft-dir",
     "server-dir",
@@ -1014,7 +1012,6 @@ const SETTING_KEYS: [&str; 15] = [
     "language",
     "accent",
     "background",
-    "native-profile",
     "native-cache-gib",
 ];
 
@@ -1104,16 +1101,6 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
                 ),
             };
         }
-        "native-profile" => {
-            // "default", as for the other settings, goes back to `optimized`.
-            s.native_profile = match value {
-                "default" => None,
-                _ => Some(
-                    native_mods::Profile::parse(value)
-                        .ok_or_else(|| format!("{value}: say optimized, balanced or developer"))?,
-                ),
-            };
-        }
         "proxy" => {
             if value == "default" || value.is_empty() {
                 s.proxy = None;
@@ -1146,7 +1133,6 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "language": s.language.map_or("system", |l| l.code()),
         "accent": s.accent.name(),
         "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
-        "native_profile": native_mods::Profile::chosen(s).name(),
         "native_cache_gib": s.native_cache_gib.unwrap_or(native_mods::DEFAULT_CACHE_GIB),
         "no_ai": backend::no_ai(),
     })
@@ -1331,10 +1317,6 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 return Ok(());
             }
             let started = std::time::Instant::now();
-            let profile = match profile.as_deref().and_then(native_mods::Profile::parse) {
-                Some(profile) => profile,
-                None => native_mods::Profile::chosen(&backend::Settings::load()),
-            };
             let steps = |step: native_mods::Step| {
                 let secs = started.elapsed().as_secs();
                 eprintln!("[{:>2}:{:02}] {}", secs / 60, secs % 60, step.label())
@@ -1354,7 +1336,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     &base,
                     &folder,
                     &output,
-                    profile,
+                    profile.unwrap_or_default(),
                     allow_jar_downloads,
                     steps,
                 )?;
@@ -1377,6 +1359,12 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(name) => instances::find(name)?,
                 None => instances::selected(),
             };
+            let target = match profile {
+                Some(profile) => {
+                    instances::edit(&target.id, |meta| meta.native_profile = Some(profile))?
+                }
+                None => target,
+            };
             let base = match version {
                 Some(v) => backend::resolve_version(Some(&v))?,
                 None => {
@@ -1385,10 +1373,14 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                         .ok_or_else(backend::no_version_installed)?
                 }
             };
+            let explicit = folder.is_some() || profile.is_some();
             let folder = match folder {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
+            let routes = native_mods::routes(native_mods::PlanInput::Folder(&folder), Some(&base))
+                .map_err(String::from)?;
+            let profile = target.native_profile.for_picker(&routes, explicit, false);
             let built =
                 native_mods::build(&base, &folder, &target, profile, steps).map_err(|error| {
                     let error = String::from(error);
@@ -2299,9 +2291,7 @@ fn github_native(
         );
     }
     println!("Build it next: horizon-launcher native-build --trust-native-code");
-    println!(
-        "Developing a mod? horizon-launcher settings native-profile developer (or native-build --profile developer): a mod edit rebuilds about 6× faster, while game logic runs up to about twice as slow. Use it while developing, not for playing."
-    );
+    println!("{}", tr("Developing a mod? Use native-build --profile developer. The choice is remembered for this instance."));
     Ok(())
 }
 
@@ -3937,7 +3927,7 @@ mod tests {
             }) => {
                 assert_eq!(version.as_deref(), Some("v2026.10.13"));
                 assert!(!update);
-                assert_eq!(profile.as_deref(), Some("optimized"));
+                assert_eq!(profile, Some(native_mods::Profile::Optimized));
             }
             _ => panic!("expected native-build"),
         }

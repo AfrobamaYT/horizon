@@ -1206,5 +1206,6 @@
   "Injects outside the slots": "Injects outside the slots",
   "Has a build script": "Has a build script",
   "Uses Cargo features": "Uses Cargo features",
-  "Depends on the crate {crate}": "Depends on the crate {crate}"
+  "Depends on the crate {crate}": "Depends on the crate {crate}",
+  "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance.": "Developing a mod? Use native-build --profile developer. The choice is remembered for this instance."
 }

@@ -1,12 +1,26 @@
 //! Read-only classification of a native mod set, without executing mod or game code.
 use super::*;
 
-/// Plan enabled native mods for an instance. Worker-only filesystem and release reads.
-pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
+/// The inputs owned by a preview or an actual build attempt.
+pub enum PlanInput<'a> {
+    /// Snapshot the enabled packages of this game home.
+    Installed(&'a Path),
+    /// Reuse an already-staged input folder, or a CLI project folder.
+    Folder(&'a Path),
+}
+
+/// Plan native mods against their game. Worker-only filesystem and release reads.
+pub fn routes(input: PlanInput<'_>, base: Option<&str>) -> Result<Routes, Failed> {
     require_consent()?;
     let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
-    let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
-        return Ok(Routes::default());
+    let folder = match input {
+        PlanInput::Installed(home) => {
+            let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
+                return Ok(Routes::default());
+            };
+            folder
+        }
+        PlanInput::Folder(folder) => folder.to_owned(),
     };
     let found = scan_bundles(&folder)?;
     let mut result = Routes::default();

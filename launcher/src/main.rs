@@ -970,12 +970,15 @@ impl Launcher {
         self.native_progress = None;
         self.native_started = Some((Instant::now(), 0));
         self.native_done = None;
-        let profile = native_mods::Profile::chosen(&self.settings);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = native_mods::build(&base, &folder, &instance, profile, |step| {
-                let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
-            });
+            let result = native_mods::routes(native_mods::PlanInput::Folder(&folder), Some(&base))
+                .and_then(|routes| {
+                    let profile = instance.native_profile.for_picker(&routes, false, false);
+                    native_mods::build(&base, &folder, &instance, profile, |step| {
+                        let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
+                    })
+                });
             let _ = tx.send(Msg::Native(result));
         });
     }

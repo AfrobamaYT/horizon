@@ -235,7 +235,7 @@ pub fn built_secs(version: &str) -> Option<u64> {
 
 /// The profile native build `version` was built with (`native-mods.json`'s `profile`).
 pub fn built_profile(version: &str) -> Option<native_mods::Profile> {
-    native_mods::Profile::parse(record(version)?["profile"].as_str()?)
+    serde_json::from_value(record(version)?.get("profile")?.clone()).ok()
 }
 
 /// `state`, once the mode counts: a build made in another mode than `chosen` is not this mode's
