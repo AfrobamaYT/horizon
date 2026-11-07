@@ -364,7 +364,10 @@ fn screen_effect_quads_draw_over_the_level_and_under_the_gui() {
                 use winit::platform::x11::EventLoopBuilderExtX11;
                 builder.with_x11().with_any_thread(true);
             }
-            let event_loop = builder.build().unwrap();
+            let event_loop = builder.build().unwrap_or_else(|error| {
+                eprintln!("screen-effect event loop error: {error}");
+                panic!("screen-effect event loop creation failed")
+            });
             #[allow(deprecated)]
             let window = Arc::new(
                 event_loop

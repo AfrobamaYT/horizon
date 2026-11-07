@@ -5,6 +5,7 @@ mod exports;
 mod game_modules;
 #[doc(hidden)]
 pub use dispatch_fixtures::layout as dispatch_fixture_layout;
+pub use game_modules::materialize_game_modules;
 mod host;
 mod layout;
 mod parts;
