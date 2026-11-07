@@ -9958,6 +9958,7 @@ mod projectile_batch_tests {
     struct Observed {
         impacts: Vec<u32>,
         spawned: bool,
+        buffered: bool,
         remove: Option<u32>,
     }
 
@@ -9965,6 +9966,27 @@ mod projectile_batch_tests {
 
     #[mod_api::__subscriptions]
     impl Hooks for CancelImpacts {
+        fn vanilla_game_event(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut mod_api::VanillaGameEventEvent<'_>,
+        ) -> Flow {
+            if event.event == "minecraft:projectile_shoot" {
+                let mut observed = self.0.lock().unwrap();
+                if !observed.buffered {
+                    // Shoot events fire after settlement while the tick batch is taken.
+                    let _ = host.summon(
+                        event.dimension,
+                        "minecraft:snowball",
+                        [9.5, 70.0, 0.5],
+                        Default::default(),
+                    );
+                    observed.buffered = true;
+                }
+            }
+            Flow::Continue
+        }
+
         fn hears_projectile_impacts(
             &self,
             _: &dyn mod_api::Host,
@@ -9998,7 +10020,10 @@ mod projectile_batch_tests {
         }
     }
 
-    fn with_batch(remove: bool, test: impl FnOnce(&mut Game<'_>, [u32; 3], [JoinSeq; 3], u32)) {
+    fn with_batch(
+        remove: bool,
+        test: impl FnOnce(&mut Game<'_>, [u32; 3], [JoinSeq; 3], u32, u32),
+    ) {
         let observed = Arc::new(Mutex::new(Observed::default()));
         let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
             "cancel-projectile-batch",
@@ -10079,15 +10104,23 @@ mod projectile_batch_tests {
                 }
                 let observed = observed.lock().unwrap().clone();
                 assert_eq!(observed.impacts, [ids[0], ids[1]]);
-                assert!(observed.spawned);
+                assert!(observed.spawned && observed.buffered);
                 let spawned = game
                     .creatures
                     .projectiles
                     .iter()
-                    .find(|p| !ids.contains(&p.id))
+                    .find(|p| p.position.x == 8.5)
                     .unwrap()
                     .id;
-                test(game, ids, joins, spawned);
+                let buffered = game
+                    .creatures
+                    .projectiles
+                    .iter()
+                    .find(|p| p.position.x == 9.5)
+                    .unwrap();
+                assert_eq!(buffered.age, 0);
+                let buffered = buffered.id;
+                test(game, ids, joins, spawned, buffered);
                 game.creatures.projectiles.clear();
                 assert!(index.lock().unwrap().snapshot(&key).is_empty());
                 assert!(
@@ -10102,12 +10135,12 @@ mod projectile_batch_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn canceled_impacts_keep_projectile_batch_joins_and_survivor_order() {
-        with_batch(false, |game, ids, joins, spawned| {
+        with_batch(false, |game, ids, joins, spawned, buffered| {
             let list = &mut game.creatures.projectiles;
             // The replayed snowball is appended; the arrow keeps its original slot.
             assert_eq!(
                 list.iter().map(|p| p.id).collect::<Vec<_>>(),
-                [ids[1], ids[2], spawned, ids[0]]
+                [buffered, ids[1], ids[2], spawned, ids[0]]
             );
             for (id, join) in ids.into_iter().zip(joins) {
                 let p = list.iter().find(|p| p.id == id).unwrap();
@@ -10130,17 +10163,17 @@ mod projectile_batch_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_projectile_removed_in_its_impact_hook_stays_removed_after_replay() {
-        with_batch(true, |game, ids, joins, spawned| {
+        with_batch(true, |game, ids, joins, spawned, buffered| {
             // Pending removal refuses the handle already, even before the physical sweep.
             assert!(game.native_entity(ids[1]).is_none());
             game.native_removals_flush();
             let list = &game.creatures.projectiles;
             assert_eq!(
                 list.iter().map(|p| p.id).collect::<Vec<_>>(),
-                [ids[2], spawned, ids[0]]
+                [buffered, ids[2], spawned, ids[0]]
             );
-            assert_eq!(list[0].join, joins[2]);
-            assert_eq!(list[2].join, joins[0]);
+            assert_eq!(list[1].join, joins[2]);
+            assert_eq!(list[3].join, joins[0]);
             game.tick_projectiles().unwrap();
             assert!(!game.creatures.projectiles.iter().any(|p| p.id == ids[1]));
         });
