@@ -3,6 +3,7 @@
 //! rules used by the enchanting table, display names, and evaluation of the
 //! value/attribute effect components (`LevelBasedValue`, `EnchantmentValueEffect`
 //! and the loot-condition subset that enchantment requirements use).
+use crate::item_data::Levels;
 use crate::items::{ItemStack, Items};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
@@ -587,12 +588,31 @@ impl Enchantments {
         cost: i32,
         pool: &[Arc<str>],
     ) -> Vec<(Arc<str>, u32)> {
+        self.select_with_value(items, random, item, cost, pool, self.enchantable(item))
+    }
+
+    /// Select with the enchantability of the stack after its component patch.
+    pub fn select_with_value<R: RandomSource>(
+        &self,
+        items: &Items,
+        random: &mut R,
+        item: &str,
+        cost: i32,
+        pool: &[Arc<str>],
+        value: u32,
+    ) -> Levels {
         let mut results = Vec::new();
-        let value = self.enchantable(item) as i32;
+        let Ok(value) = i32::try_from(value) else {
+            return results;
+        };
         if value == 0 {
             return results;
         }
-        let mut cost = cost + 1 + next_int(random, value / 4 + 1) + next_int(random, value / 4 + 1);
+        let bound = value / 4 + 1;
+        let mut cost = cost
+            .wrapping_add(1)
+            .wrapping_add(next_int(random, bound))
+            .wrapping_add(next_int(random, bound));
         let span = (random.next_float() + random.next_float() - 1.0) * 0.15;
         cost = ((cost as f32 + cost as f32 * span).round() as i32).max(1);
         let mut available = self.available_results(items, cost, item, pool);

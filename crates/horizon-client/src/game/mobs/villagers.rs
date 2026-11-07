@@ -619,11 +619,14 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return;
         };
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut events = Vec::new();
         villager::stop_sleeping(&mut mobs[i], &self.mob_world_base(&[]), &mut events);
         villager_brain::woken(&mut mobs[i], self.world.game_time);
-        self.mobs = mobs;
+        self.mobs
+            .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
         if let Err(e) = self.handle_mob_events(events) {
             log::warn!("waking villager {id}: {e}");
         }
@@ -642,5 +645,30 @@ mod entity_event_particle_tests {
         assert_eq!(kind("villager", 42), Some("splash"));
         assert_eq!(kind("dolphin", 38), Some("happy_villager"));
         assert_eq!(kind("villager", 2), None);
+    }
+}
+
+#[cfg(test)]
+mod nested_spawn_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn lifted_mob_callback_keeps_nested_spawns_until_the_next_pass() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                99,
+                kind,
+                horizon_core::geometry::Vec3::new(0.5, 80.0, 0.5),
+                0.0,
+            ));
+            crate::game::entity::taken_pass_tests::assert_mob_spawn_survives(game, |game| {
+                game.wake_villager(99);
+            });
+        });
     }
 }

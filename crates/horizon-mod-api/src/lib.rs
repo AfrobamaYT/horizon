@@ -1874,6 +1874,39 @@ impl MobRef {
     }
 }
 
+/// A mob the game has made but not yet added to a level (`finalize_spawn`'s mob), lent to one
+/// hook call. It is not an [`EntityRef`]: the mob is in no level yet, so no entity lookup finds
+/// it. Reads take `&dyn Host` (`mob.kind(host)`); the [`UnspawnedMobEdits`] handed out with it
+/// makes the edits. Every read and edit after the hook returns, or with another lend's handle,
+/// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct UnspawnedMobRef {
+    epoch: NativeWorldEpoch,
+    lend: u64,
+}
+
+impl UnspawnedMobRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, lend: u64) -> Self {
+        Self { epoch, lend }
+    }
+    /// The open of the world the handle belongs to.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+    /// Which of that world's lends it names.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn lend(self) -> u64 {
+        self.lend
+    }
+}
+
 /// The player, or mobs of the given species: the class filter of a
 /// [`NativeGoal::NearestTarget`] and of a [`NativeGoal::AvoidEntity`]. The
 /// species ids are namespaced (`minecraft:zombie`); a bare id reads as
@@ -2193,6 +2226,26 @@ impl DisplayRef {
 pub struct ProjectileRef(EntityRef);
 
 impl ProjectileRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
+/// A cast fishing hook of the open world (vanilla's `FishingHook`), narrowed
+/// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
+/// [`ProjectileRef`]: a hook's owner is always the player who cast it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct FishingHookRef(EntityRef);
+
+impl FishingHookRef {
     /// Create a handle for the game.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
@@ -3005,6 +3058,53 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The world's respawn data (`LevelData.RespawnData`): where a player without a spawn point of
+/// their own appears, and facing which way. Horizon keeps it in the Overworld.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct RespawnData {
+    /// The spawn block.
+    pub pos: [i32; 3],
+    /// The yaw in degrees, -180 to 180 (`Mth.wrapDegrees`).
+    pub yaw: f32,
+    /// The pitch in degrees, -90 to 90.
+    pub pitch: f32,
+}
+
+/// A map's saved data (`MapItemSavedData`) as it stands: where it is, how far it reaches and
+/// its pixels. The markers (players, banners, frames) are not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct MapState {
+    /// The centre block `[x, z]`.
+    pub center: [i32; 2],
+    /// A map pixel is `1 << scale` blocks, 0 to 4.
+    pub scale: u8,
+    /// The dimension it shows, `minecraft:overworld`.
+    pub dimension: String,
+    /// A locked map (a cartography table's glass pane) no longer reveals the world.
+    pub locked: bool,
+    /// Whether it shows its holders' markers.
+    pub tracking: bool,
+    /// Whether it shows them however far away they are.
+    pub unlimited: bool,
+    /// 128 by 128 map colour ids, row by row (`x + z * 128`).
+    pub colors: Vec<u8>,
+}
+
+/// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
+/// `ProjectileUtil.getEntityHitResult` tests for each candidate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct EntityRayHit {
+    /// The entity hit, a handle of the level the ray ran in.
+    pub entity: EntityRef,
+    /// Where the ray enters the entity's box, grown by the ray's margin, in blocks.
+    pub location: [f64; 3],
+    /// How far `location` is from the ray's start, in blocks.
+    pub distance: f64,
+}
+
 /// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
 /// current interaction ranges. Entity handles belong to the current client
 /// level's epoch, including dragon parts; a replacement level invalidates them.
@@ -3809,8 +3909,8 @@ pub enum PlayerAction {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct PlayerActionSetup {
-    /// The main-hand stack. A zero-count stack means an empty hand.
-    pub stack: ItemStack,
+    /// The main-hand stack, or `None` for an empty hand.
+    pub stack: Option<ItemStack>,
     /// Eye position in world coordinates, using the standing eye height (1.62).
     pub eye: [f64; 3],
     /// Vanilla yaw in degrees.
@@ -3822,7 +3922,13 @@ pub struct PlayerActionSetup {
 }
 impl PlayerActionSetup {
     /// A scoped survival setup with the supplied main-hand stack and viewpoint.
-    pub fn new(stack: ItemStack, eye: [f64; 3], yaw: f32, pitch: f32, secondary_use: bool) -> Self {
+    pub fn new(
+        stack: Option<ItemStack>,
+        eye: [f64; 3],
+        yaw: f32,
+        pitch: f32,
+        secondary_use: bool,
+    ) -> Self {
         Self {
             stack,
             eye,
@@ -3879,6 +3985,8 @@ pub enum ActionRefused {
     /// The action's target isn't an entity in the fake's level, or is the fake itself
     /// (`handleInteract`'s "Attempting to attack an invalid entity").
     InvalidTarget,
+    /// The setup's held stack was refused before swapping player state or running the action.
+    InvalidStack(StackWriteError),
 }
 
 /// An error a handle method answers when its host has no game behind it (a mod's test double):
@@ -4452,10 +4560,10 @@ pub trait LevelHost {
     fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
-    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
-    /// a tag. An empty stack tests `minecraft:air`.
-    fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
-        unimplemented!("LevelHost::item_stack_in_tag")
+    /// The merged-tag service for this level's owning-thread context.
+    /// Not on wasm: a frame resource; its methods are the imports.
+    fn tags(&self) -> &dyn Tags {
+        unimplemented!("LevelHost::tags")
     }
     /// `BlockGetter.getFluidState`: the fluid at `pos`, the empty fluid where there is none.
     /// None where the position is not loaded or outside the build height; it never loads a chunk.
@@ -4891,7 +4999,7 @@ mod tests {
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
     }
 
     /// Claims a use on stone, after telling the player what the block is.
@@ -5058,12 +5166,7 @@ mod tests {
     }
 
     fn stick() -> ItemStack {
-        ItemStack {
-            item: Arc::from("minecraft:stick"),
-            count: 1,
-            damage: 0,
-            extra: None,
-        }
+        crate::parts::tests::stack("minecraft:stick", 1, 0)
     }
 
     #[test]
@@ -5286,7 +5389,7 @@ mod tests {
         mark_game_thread();
         let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mut claimed = false;
         dispatch_use_on(
@@ -5502,7 +5605,7 @@ mod tests {
                 .fished
                 .drops
                 .iter()
-                .any(|s| &*s.item == "minecraft:cod");
+                .any(|s| s.item() == crate::parts::tests::fixture_item_key("minecraft:cod"));
             if cod { Flow::Cancel } else { Flow::Continue }
         }
     }
@@ -5525,6 +5628,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("cod-keeper", Box::new(CodKeeper)),
@@ -5532,7 +5636,7 @@ mod tests {
         ];
         install(mods.into());
         let ask = |host: &mut FakeHost, item: &str| {
-            let drops = [ItemStack::new(item, 1)];
+            let drops = [crate::parts::tests::stack(item, 1, 0)];
             let fished = NativeItemFished {
                 hook: 9,
                 position: [0.5, 62.0, 0.5],
@@ -5545,7 +5649,7 @@ mod tests {
         assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
         let mods: Vec<ModEntry> = vec![ModEntry::new("cod-keeper", Box::new(CodKeeper))];
         install(mods.into());
-        let drops = [ItemStack::new("minecraft:salmon", 1)];
+        let drops = [crate::parts::tests::stack("minecraft:salmon", 1, 0)];
         let fished = NativeItemFished {
             hook: 9,
             position: [0.5, 62.0, 0.5],
@@ -6021,3 +6125,13 @@ pub(crate) mod built {
 }
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
+
+#[cfg(test)]
+mod brewing_dispatch_tests {
+    include!("brewing_dispatch_tests.rs");
+}
+
+#[cfg(test)]
+mod item_model_dispatch_tests {
+    include!("item_model_dispatch_tests.rs");
+}
