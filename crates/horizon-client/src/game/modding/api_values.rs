@@ -144,6 +144,42 @@ impl<T: TryIntoApi, E: Clone> TryIntoApi for Result<T, E> {
     }
 }
 
+impl<T: TryIntoApi, const N: usize> TryIntoApi for [T; N] {
+    type Api = [T::Api; N];
+    type Error = T::Error;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        let mut output: [Option<T::Api>; N] = std::array::from_fn(|_| None);
+        for (target, source) in output.iter_mut().zip(self) {
+            *target = Some(source.try_into_api()?);
+        }
+        Ok(output.map(|value| value.expect("every array element converted")))
+    }
+}
+impl<T: TryIntoEngine, const N: usize> TryIntoEngine for [T; N] {
+    type Engine = [T::Engine; N];
+    type Error = T::Error;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        let mut output: [Option<T::Engine>; N] = std::array::from_fn(|_| None);
+        for (target, source) in output.iter_mut().zip(self) {
+            *target = Some(source.try_into_engine(items)?);
+        }
+        Ok(output.map(|value| value.expect("every array element converted")))
+    }
+}
+impl<T: TryIntoApi> TryIntoApi for [T] {
+    type Api = Vec<T::Api>;
+    type Error = T::Error;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        self.iter().map(TryIntoApi::try_into_api).collect()
+    }
+}
+impl<T: TryIntoApi> TryIntoApi for std::sync::Arc<[T]> {
+    type Api = std::sync::Arc<[T::Api]>;
+    type Error = T::Error;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(self.as_ref().try_into_api()?.into())
+    }
+}
 impl<T: TryIntoApi> TryIntoApi for Vec<T> {
     type Api = Vec<T::Api>;
     type Error = T::Error;
@@ -182,6 +218,60 @@ impl<A: TryIntoEngine, B: TryIntoEngine<Error = A::Error>> TryIntoEngine for (A,
             self.0.try_into_engine(items)?,
             self.1.try_into_engine(items)?,
         ))
+    }
+}
+
+impl TryIntoApi for horizon_client::merchant::ItemCost {
+    type Api = mod_api::ItemCost;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::ItemCost::new(self.stack.try_into_api()?))
+    }
+}
+impl TryIntoEngine for mod_api::ItemCost {
+    type Engine = horizon_client::merchant::ItemCost;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            stack: self.stack.try_into_engine(items)?,
+        })
+    }
+}
+impl TryIntoApi for horizon_client::merchant::MerchantOffer {
+    type Api = mod_api::MerchantOffer;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        let mut offer = mod_api::MerchantOffer::new(
+            self.base_cost_a.try_into_api()?,
+            self.cost_b.try_into_api()?,
+            self.result.try_into_api()?,
+            self.max_uses,
+            self.xp,
+            self.price_multiplier,
+        );
+        offer.uses = self.uses;
+        offer.reward_exp = self.reward_exp;
+        offer.special_price_diff = self.special_price_diff;
+        offer.demand = self.demand;
+        Ok(offer)
+    }
+}
+impl TryIntoEngine for mod_api::MerchantOffer {
+    type Engine = horizon_client::merchant::MerchantOffer;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            base_cost_a: self.base_cost_a.try_into_engine(items)?,
+            cost_b: self.cost_b.try_into_engine(items)?,
+            result: self.result.try_into_engine(items)?,
+            uses: self.uses,
+            max_uses: self.max_uses,
+            reward_exp: self.reward_exp,
+            special_price_diff: self.special_price_diff,
+            demand: self.demand,
+            price_multiplier: self.price_multiplier,
+            xp: self.xp,
+        })
     }
 }
 

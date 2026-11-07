@@ -16,7 +16,7 @@ impl GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         entity: &ModBlockEntity,
-        drops: &mut Vec<mod_api::ItemStack>,
+        drops: &mut Vec<ItemStack>,
     ) {
         self.fire_pre_remove_side_effects(pos, state, entity, drops);
     }
