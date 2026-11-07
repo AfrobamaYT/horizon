@@ -262,6 +262,19 @@ impl ModelNormals {
         }
         self
     }
+    fn part_rotated(mut self, pose: [f32; 9], rotation: glam::Mat3) -> Self {
+        self.matrix *= rotation;
+        let scale = glam::Vec3::new(pose[6], pose[7], pose[8]);
+        if scale.x.abs() == scale.y.abs() && scale.x.abs() == scale.z.abs() {
+            if scale.min_element() < 0.0 {
+                self.matrix *= glam::Mat3::from_diagonal(scale.signum());
+            }
+        } else {
+            self.matrix *= glam::Mat3::from_diagonal(scale.recip());
+            self.trusted = false;
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1395,6 +1408,9 @@ pub struct Extra {
     /// `getFirstPassenger`).
     pub mount: Option<u32>,
     pub rider: Option<u32>,
+    /// This rider's place in its vehicle's `getPassengers`, beside `Guest.vehicle_order`: the
+    /// lowest goes first. Passengers that load together keep 0 and their list order.
+    pub vehicle_order: i64,
     /// Where `positionRider` last seated this rider: its own vehicle
     /// attachment (`getPassengerRidingPosition(this).y` is its feet plus this)
     /// and the vehicle's box (`Mob.getAttackBoundingBox`, `getHitbox`).
@@ -1590,6 +1606,7 @@ fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
         amplifier,
         ambient: false,
         show_particles: true,
+        show_icon: true,
     };
     vec![
         ConsumeEffect::ClearAllEffects,
@@ -2776,8 +2793,33 @@ pub struct Seen {
     pub hurt_recently: bool,
     /// `Hoglin.canBeHunted`: an adult hoglin without `CannotBeHunted`.
     pub huntable: bool,
+    /// A happy ghast's `isOnStillTimeout` (a player on its back holds it).
+    pub still: bool,
+    /// `Entity.isVehicle`: something rides it.
+    pub carrying: bool,
 }
 impl Seen {
+    /// Whether `canBeCollidedWith` can ever hold for this kind: the slots
+    /// [`MobWorld::others_solid`] lists.
+    pub fn may_block_mobs(&self) -> bool {
+        matches!(self.species, Species::Shulker | Species::HappyGhast)
+    }
+    /// `canBeCollidedWith(mover)` for a mob of species `mover` moving into
+    /// it (`EntityGetter.getEntityCollisions`): a living shulker
+    /// (`Shulker`), or an adult happy ghast held still, or carrying someone
+    /// when the mover is a happy ghast too (`HappyGhast`). Every other mob
+    /// keeps `Entity`'s false.
+    pub fn blocks_mob(&self, mover: Species) -> bool {
+        match self.species {
+            Species::Shulker => self.alive,
+            Species::HappyGhast => {
+                self.alive
+                    && !self.baby
+                    && (self.still || (self.carrying && mover == Species::HappyGhast))
+            }
+            _ => false,
+        }
+    }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
         self.effects.contains(&effect)
@@ -2971,6 +3013,8 @@ impl Mob {
             lying: m.species() == Species::Cat && (m.extra.flag || m.extra.relax_one),
             ridden: m.rider.is_some() || m.extra.rider.is_some() || m.extra.mount.is_some(),
             is_vehicle: equine::is_vehicle(m),
+            still: m.species() == Species::HappyGhast && happy_ghast::on_still_timeout(m),
+            carrying: m.rider.is_some() || m.extra.rider.is_some(),
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
@@ -3375,6 +3419,9 @@ pub struct MobWorld<'a> {
     /// keeps them (the mob ticks: a slot keeps its mob, and its species, all
     /// tick). Each zombie looking for a village read every slot.
     pub others_villagers: Option<&'a [u32]>,
+    /// The slots of `others` that may stop a moving mob
+    /// ([`Seen::may_block_mobs`]), when the caller keeps them; None: any.
+    pub others_solid: Option<&'a [u32]>,
     pub daylight: bool,
     /// The `gameplay/monsters_burn` attribute: the overworld day timeline's
     /// step track, false in every other dimension.
@@ -4460,7 +4507,6 @@ impl Mob {
         // including a weaker incoming instance saved behind the active effect.
         incoming.id = effect;
         let index = self.extra.effects.iter().position(|e| e.id == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
             let stored = &self.extra.effects[i];
             let mut active = crate::effects::EffectInstance {
@@ -4470,6 +4516,7 @@ impl Mob {
                 amplifier: stored.amplifier,
                 ambient: false,
                 visible: true,
+                show_icon: true,
                 client_blend: (false, false),
                 hidden: None,
             };
@@ -4501,8 +4548,8 @@ impl Mob {
         if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
-        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
-            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        if effect == "minecraft:absorption" {
+            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
         }
         self.effects_dirty |= changed;
         changed
@@ -4675,15 +4722,15 @@ impl Mob {
         amplifier: i32,
         scale: f64,
     ) {
-        let amp = amplifier.clamp(0, 30);
+        let shift = amplifier as u32;
         if harm != inverted {
             self.damage(
                 level,
-                (scale * f64::from(6i32 << amp)) as i32 as f32,
+                (scale * f64::from(6i32.wrapping_shl(shift))) as i32 as f32,
                 Damage::of(DamageKind::Magic),
             );
         } else {
-            let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
+            let heal = (scale * f64::from(4i32.wrapping_shl(shift).max(0))) as i32 as f32;
             self.heal(context, heal);
         }
     }
@@ -4752,11 +4799,10 @@ impl Mob {
         if self.species() == Species::HappyGhast {
             return 1.0;
         }
-        // Parrot.getVoicePitch: `getPitch(random)`, the plain range, so a baby
-        // parrot does not take the 1.5 that AgeableMob raises a baby by.
-        if self.species() == Species::Parrot {
-            return (self.random.next_float() - self.random.next_float()) * 0.2 + 1.0;
-        }
+        // Parrot.getVoicePitch is `getPitch(random)`, the plain 1.0 ± 0.2 an
+        // adult gets below: a parrot is never a baby (`Parrot.canBeABaby`), so
+        // the 1.5 `AgeableMob` gives a baby cannot reach it and the override
+        // needs no arm of its own.
         // ZombieVillager.getVoicePitch: babies are 2.0, not 1.5.
         let baby = if self.species() == Species::ZombieVillager {
             2.0
@@ -5873,6 +5919,20 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn absorption_refills_on_equal_and_weaker_adds() {
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 1, false, true);
+        m.absorption = 0.0;
+        assert!(!m.add_effect_with("absorption", 100, 1, false, true));
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 0.0;
+        m.add_effect("minecraft:absorption", 50, 0);
+        assert_eq!(m.absorption, 4.0);
+        assert_eq!(m.extra.effects[0].amplifier, 1);
+        assert_eq!(m.extra.effects[0].duration, 200);
+    }
+
+    #[test]
     fn absorption_downgrade_keeps_spent_hearts() {
         // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
         // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
@@ -6383,6 +6443,7 @@ mod totem_tests {
                     amplifier: 1,
                     ambient: false,
                     show_particles: true,
+                    show_icon: true,
                 }],
             };
             mob.apply_death_effect(&mut level.level(), &effect);

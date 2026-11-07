@@ -421,7 +421,7 @@ mod tests {
         game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
         let mut dragon = crate::game::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 14;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
     }
 
     fn read(game: &Game<'_>, id: u32, name: &str) -> (Option<f64>, Option<f64>) {
