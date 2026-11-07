@@ -379,6 +379,10 @@ fn manifest_listener_loads_at_its_declared_place() {
     assert!(listen(&manifest, &exports).unwrap().is_some());
     manifest.inject[0].priority = 1;
     assert!(listen(&manifest, &exports).unwrap().is_some());
+    manifest.internals[0].hash = "changed".into();
+    assert!(
+        matches!(listen(&manifest, &exports), Err(crate::Refusal::ChangedInternal { path }) if path == "Counter")
+    );
 }
 mod build_script {
     include!(concat!(
