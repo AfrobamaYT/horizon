@@ -790,6 +790,12 @@ mod tests {
     fn a_bolt_away_from_players_starts_no_fire() {
         use horizon_client::gamerules::Value;
         super::super::native_entity_refs::tests::with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
             let stone = game
                 .pack
                 .assets
