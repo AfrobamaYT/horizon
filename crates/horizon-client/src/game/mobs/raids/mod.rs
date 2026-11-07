@@ -1719,7 +1719,7 @@ mod entity_ticking_tests {
             }));
             let centers = HashSet::new();
             let level = Lvl {
-                game: &game,
+                game,
                 difficulty: 2,
                 centers: &centers,
             };
