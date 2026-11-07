@@ -32,6 +32,17 @@ def main():
         shape = shape[shape.index("/// The explosion"):shape.index("/// An `ItemStackTemplate`")]
         identifier = (API / "unresolved_fluid.rs").read_text()
         identifier = identifier[identifier.index("fn namespaced_id("):]
+        engine = (ROOT / "crates/horizon-mod-package/src/content.rs").read_text()
+        engine = engine[engine.index("pub fn namespaced_id("):engine.index("fn vanilla_id(")]
+        identifier += "\nmod engine {\n" + engine + "\n}\n"
+        identifier += '''
+#[test]
+fn engine_identifier_samples_match() {
+    for id in ["minecraft:water", "mod:flowing/water", "n.s-0:x_y", "UPPER:path", ":path", "mod:", "a:b:c", "a/b:c", "mod:café"] {
+        assert_eq!(namespaced_id(id), engine::namespaced_id(id), "{id}");
+    }
+}
+'''
         for name, source, old, new in [
             ("namespaced identifiers", identifier, "ok(b) || b == b'/'", "ok(b)"),
             ("key contexts", key, "    InGame,\n", "    InGame = 2,\n"),
