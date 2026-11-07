@@ -8,7 +8,6 @@ use mod_api::{
 
 /// Copies of resolved models accepted for one view. Reserved once, never grown in a frame.
 pub(crate) const INSTANCE_CAPACITY: u32 = 16_384;
-static NEXT_VIEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// One accepted copy, already checked. `light` and `overlay` are the renderer's vanilla packing.
 #[derive(Clone, Copy)]
@@ -39,8 +38,7 @@ pub struct WorldGeometry {
     lines: [Vec<[f32; 8]>; 2],
     quads: [Vec<Vertex>; 2],
     copies: Vec<ModelCopy>,
-    view_id: u64,
-    groups: u32,
+    groups: std::collections::HashSet<mod_api::InstanceGroupRef>,
     accepted_models: u32,
     model_cut: u32,
 }
@@ -53,8 +51,7 @@ impl Default for WorldGeometry {
             lines: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize)),
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
-            view_id: NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            groups: 0,
+            groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
             accepted_models: 0,
             model_cut: 0,
         }
@@ -70,8 +67,7 @@ impl WorldGeometry {
         self.quads.iter_mut().for_each(Vec::clear);
         self.clear_copies();
         self.model_cut = 0;
-        self.groups = 0;
-        self.view_id = NEXT_VIEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.groups.clear();
     }
     /// Entity-stream cut used by directly staged instances in this view.
     pub fn set_model_cut(&mut self, cut: u32) {
@@ -162,13 +158,13 @@ impl WorldGeometry {
         Ok(())
     }
     pub fn group_room(&self) -> bool {
-        self.groups < INSTANCE_CAPACITY
+        self.groups.len() < INSTANCE_CAPACITY as usize
     }
-    pub fn view_id(&self) -> u64 {
-        self.view_id
+    pub fn has_group(&self, group: mod_api::InstanceGroupRef) -> bool {
+        self.groups.contains(&group)
     }
-    pub fn mark_group(&mut self) {
-        self.groups += 1;
+    pub fn mark_group(&mut self, group: mod_api::InstanceGroupRef) {
+        self.groups.insert(group);
     }
     pub fn copy_count(&self) -> usize {
         self.copies.len()

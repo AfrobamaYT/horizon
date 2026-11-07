@@ -11,7 +11,6 @@ struct Group {
     model: ModelRef,
     copies: Vec<ModelInstance>,
     len: usize,
-    last_view: u64,
 }
 
 #[derive(Default)]
@@ -75,7 +74,6 @@ impl InstanceGroups for Game<'_> {
             model,
             copies: vec![ModelInstance::at([0.0; 3], 0xFFFF_FFFF); capacity as usize],
             len: 0,
-            last_view: 0,
         };
         let index = storage
             .groups
@@ -139,15 +137,14 @@ impl Game<'_> {
     ) -> Result<(), GroupError> {
         let mut storage = self.instance_groups.borrow_mut();
         let group = storage.get(handle, self.standalone_geometry.generation())?;
-        if group.last_view == draw.view_id() {
+        if draw.has_group(handle) {
             return Ok(());
         }
         if !draw.group_room() {
             return Err(GroupError::CapacityExceeded);
         }
         self.draw_validated_model_instances(draw, group.model, &group.copies[..group.len])?;
-        group.last_view = draw.view_id();
-        draw.mark_group();
+        draw.mark_group(handle);
         Ok(())
     }
 }
