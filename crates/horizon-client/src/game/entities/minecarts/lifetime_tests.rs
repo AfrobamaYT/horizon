@@ -82,11 +82,24 @@ fn exploding_a_cart_removes_only_its_owner_and_keeps_a_bound_survivor() {
     bound_cart_case(CartKind::Rideable, |game| {
         let doomed = Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5));
         game.carts.push(doomed.clone());
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let mut values = Attachments::default();
+        VALUE.set(&mut values, Holder::Entity(72), 99).unwrap();
+        game.carts.update(1, |cart| {
+            cart.attachment_lifetime().bind(&mut values, &index, 72u32);
+        });
+        let key = ("test".into(), "cart_lifetime".into());
+        let retained = index.lock().unwrap().snapshot(&key);
+        assert_eq!(retained.len(), 1);
         game.explode_cart(&doomed, 0.0);
         assert_eq!(
             game.carts.iter().map(|cart| cart.id).collect::<Vec<_>>(),
             [71]
         );
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        VALUE.set(&mut values, Holder::Entity(72), 100).unwrap();
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        assert_eq!(retained[0].entry.read(&VALUE), Ok(&99));
         // bound_cart_case also checks the survivor's registration and value.
     });
 }
