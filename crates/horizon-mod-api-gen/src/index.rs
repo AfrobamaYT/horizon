@@ -123,6 +123,10 @@ impl<'a> Index<'a> {
             match &item {
                 Item::Macro(mac) if mac.mac.path.is_ident("include") => {
                     let tokens = mac.mac.tokens.to_string();
+                    // The wire impls are generated from what this reads, so it never reads them.
+                    if tokens.contains("wire_generated.rs") {
+                        continue;
+                    }
                     let (name, source) = self
                         .included
                         .iter()

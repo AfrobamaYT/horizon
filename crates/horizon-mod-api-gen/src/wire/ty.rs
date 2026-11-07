@@ -145,6 +145,8 @@ pub(crate) struct Types<'a> {
     pub(super) views: Vec<(String, Vec<String>)>,
     /// Whether the side being generated is the guest's: only a mod hands a handler over.
     pub(super) guest: std::cell::Cell<bool>,
+    /// The definition being read, which `Self` in its fields names.
+    current: Option<usize>,
 }
 
 impl<'a> Types<'a> {
@@ -176,6 +178,7 @@ impl<'a> Types<'a> {
             exported_via_names,
             views: Vec::new(),
             guest: std::cell::Cell::new(false),
+            current: None,
             defs: Vec::new(),
             refused: Vec::new(),
             by_item: HashMap::new(),
@@ -249,6 +252,11 @@ impl<'a> Types<'a> {
     ) -> Result<Ty, String> {
         let last = path.segments.last().ok_or("empty path")?;
         let name = last.ident.to_string();
+        if path.is_ident("Self")
+            && let Some(current) = self.current
+        {
+            return Ok(Ty::Named(current));
+        }
         if path.segments.len() == 1
             && let Some((_, ty)) = subst.iter().find(|(param, _)| *param == name)
         {
@@ -441,7 +449,10 @@ impl<'a> Types<'a> {
             kind: Kind::Opaque("recursive".into()),
         });
         self.by_item.insert(id, def);
-        let kind = self.kind(id, &item, name, &wit)?;
+        let outer = self.current.replace(def);
+        let kind = self.kind(id, &item, name, &wit);
+        self.current = outer;
+        let kind = kind?;
         let constructor = conversion_method(attrs(&item), "host_constructor")?;
         if constructor.is_some() && (lifetimes != 0 || !matches!(kind, Kind::TupleRecord(_))) {
             return Err(format!(
@@ -449,7 +460,7 @@ impl<'a> Types<'a> {
             ));
         }
         self.defs[def].host_constructor = constructor;
-        self.defs[def].kind = self.chain(def, kind);
+        self.defs[def].kind = kind;
         Ok(Ty::Named(def))
     }
 

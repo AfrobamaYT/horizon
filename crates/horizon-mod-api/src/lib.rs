@@ -6043,6 +6043,7 @@ pub(crate) mod built {
 }
 
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
+include!(concat!(env!("OUT_DIR"), "/wire_generated.rs"));
 
 #[cfg(test)]
 mod brewing_dispatch_tests {

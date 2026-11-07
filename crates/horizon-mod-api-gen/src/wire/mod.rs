@@ -1,6 +1,7 @@
 //! The WebAssembly interface of the mod API: every method of the traits a mod calls (the hosts,
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
 //! capability handlers), as one WIT world and the glue on both sides of it.
+mod emit;
 mod ty;
 
 use crate::capability_providers::key_shapes;
@@ -473,3 +474,47 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
+
+/// The `Wire` impls of the API's plain data, from its sources and its generated files.
+pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<String, String> {
+    let providers = crate::capability_providers::generate(root, included)?.0;
+    let mut with_providers = included.to_vec();
+    with_providers.push(("capability_providers_generated.rs", providers.as_str()));
+    let surface = surface(root, &with_providers)?;
+    Ok(emit::types(&surface.types))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[ignore = "prints the resolved surface"]
+    fn print_surface_stats() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let surface = super::surface(&root, &included).unwrap();
+                let mut kinds = std::collections::BTreeMap::<String, usize>::new();
+                for def in &surface.types.defs {
+                    let kind = format!("{:?}", def.kind);
+                    let kind = kind.split(|c: char| !c.is_alphanumeric()).next().unwrap().to_owned();
+                    *kinds.entry(kind).or_default() += 1;
+                }
+                println!("methods {} unbound {} defs {} kinds {kinds:?}", surface.methods.len(), surface.unbound.len(), surface.types.defs.len());
+                for def in &surface.types.defs {
+                    if let super::ty::Kind::Opaque(why) = &def.kind {
+                        println!("opaque {}: {why}", def.rust);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+}

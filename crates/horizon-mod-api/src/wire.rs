@@ -265,6 +265,29 @@ impl<T: Wire> Wire for Option<T> {
     }
 }
 
+impl<T: Wire, E: Wire> Wire for Result<T, E> {
+    const MIN: usize = 1;
+    fn put(&self, out: &mut Writer) {
+        match self {
+            Ok(value) => {
+                out.put(&0u8);
+                out.put(value);
+            }
+            Err(error) => {
+                out.put(&1u8);
+                out.put(error);
+            }
+        }
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        match u8::take(input)? {
+            0 => T::take(input).map(Ok),
+            1 => E::take(input).map(Err),
+            tag => Err(WireError::Tag(tag.into())),
+        }
+    }
+}
+
 impl<T: Wire> Wire for Box<T> {
     const MIN: usize = T::MIN;
     fn put(&self, out: &mut Writer) {

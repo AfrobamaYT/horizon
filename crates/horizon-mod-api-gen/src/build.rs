@@ -43,6 +43,15 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated_host.rs", generated.host.as_str()),
             ];
             let (providers, sources) = super::capability_providers::generate(root, &included)?;
+            // The resolver recurses through the API's types: give it a deep stack.
+            let wire = std::thread::scope(|scope| {
+                std::thread::Builder::new()
+                    .stack_size(64 << 20)
+                    .spawn_scoped(scope, || super::wire::generate(root, &included))
+                    .map_err(|e| e.to_string())?
+                    .join()
+                    .map_err(|_| "generating the wire impls panicked".to_string())?
+            })?;
             for path in &sources {
                 println!("cargo:rerun-if-changed={}", path.display());
             }
@@ -51,6 +60,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
+                ("wire_generated.rs", wire),
             ]
         }
     };
