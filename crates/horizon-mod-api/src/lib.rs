@@ -4932,7 +4932,7 @@ mod tests {
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
     }
 
     /// Claims a use on stone, after telling the player what the block is.
@@ -5322,7 +5322,7 @@ mod tests {
         mark_game_thread();
         let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mut claimed = false;
         dispatch_use_on(
@@ -5561,6 +5561,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("cod-keeper", Box::new(CodKeeper)),

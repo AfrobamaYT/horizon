@@ -24920,9 +24920,9 @@ pub fn run_with(
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
-    mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
+    api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
-    if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
+    if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
     // The structure types those mods registered, handed to the engine before
@@ -25420,7 +25420,7 @@ mod tests {
         }
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             let stone_key = mod_api::__private::part_tests::block_key("stone");
