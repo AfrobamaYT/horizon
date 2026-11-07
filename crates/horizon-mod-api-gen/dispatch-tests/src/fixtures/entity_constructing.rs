@@ -1,3 +1,3 @@
-mod stubs {
-    pub(super) struct Holder;
+mod api {
+    pub struct Holder;
 }
