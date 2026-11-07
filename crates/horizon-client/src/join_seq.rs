@@ -152,6 +152,12 @@ impl<T> JoinList<T> {
     }
     /// Run an audited state edit without returning a mutable entity reference.
     /// Whole-entity replacement belongs to the owning residency boundary.
+    ///
+    /// ```compile_fail
+    /// use horizon_client_lib::join_seq::JoinList;
+    /// let mut list = JoinList::<u32>::default();
+    /// let escaped = list.update(0, |entity| entity);
+    /// ```
     pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
         edit(&mut self.0[index])
     }
