@@ -74,7 +74,7 @@ impl Hooks for Marker {
 /// One frame's view: the lines it queued, camera relative, and the renderers asked.
 fn frame(game: &mut super::Game<'_>, draw: &mut WorldGeometry) -> (Vec<[f32; 6]>, Vec<String>) {
     let title = game.shows_panorama();
-    game.fill_world_geometry(title, CAMERA, Mat4::IDENTITY, 0.0, draw);
+    game.fill_world_geometry(title, CAMERA, Mat4::IDENTITY, 0.0, draw, &mut Vec::new());
     let lines = draw
         .batch()
         .lines
@@ -205,7 +205,14 @@ fn the_renderer_list_refreshes_with_the_selection_and_leaves_nothing_behind() {
         game.connect_local(pipe, "Steve").unwrap();
         game.handle_packet(login()).unwrap();
         assert_eq!(refreshes(), 1);
-        game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw);
+        game.fill_world_geometry(
+            false,
+            CAMERA,
+            Mat4::IDENTITY,
+            0.0,
+            &mut draw,
+            &mut Vec::new(),
+        );
         ASKED.lock().unwrap().clear();
         assert_eq!(refreshes(), 1, "first world view after login");
     });
@@ -270,18 +277,39 @@ fn invalidation_refreshes(expected: &[&str], change: impl FnOnce(&mut super::Gam
         game.debug_entries.set_status(OTHER, Status::AlwaysOn);
         let mut draw = WorldGeometry::default();
         push(&[SHOWN]);
-        game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw);
+        game.fill_world_geometry(
+            false,
+            CAMERA,
+            Mat4::IDENTITY,
+            0.0,
+            &mut draw,
+            &mut Vec::new(),
+        );
         ASKED.lock().unwrap().clear();
         refreshes();
         push(&[OTHER]);
         change(game);
-        game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw);
+        game.fill_world_geometry(
+            false,
+            CAMERA,
+            Mat4::IDENTITY,
+            0.0,
+            &mut draw,
+            &mut Vec::new(),
+        );
         assert_eq!(
             (refreshes(), std::mem::take(&mut *ASKED.lock().unwrap())),
             (1, expected.iter().map(|id| (*id).to_owned()).collect()),
             "next world view must replace the stale renderer list"
         );
-        game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw);
+        game.fill_world_geometry(
+            false,
+            CAMERA,
+            Mat4::IDENTITY,
+            0.0,
+            &mut draw,
+            &mut Vec::new(),
+        );
         ASKED.lock().unwrap().clear();
         assert_eq!(refreshes(), 0, "no work on an unchanged frame");
     });
@@ -311,7 +339,14 @@ fn same_value_event(event: i8, expected: &[&str]) {
         game.handle_packet(C::EntityEvent(play::EntityEvent { id: 7, event }))
             .unwrap();
         let mut draw = WorldGeometry::default();
-        game.fill_world_geometry(false, CAMERA, Mat4::IDENTITY, 0.0, &mut draw);
+        game.fill_world_geometry(
+            false,
+            CAMERA,
+            Mat4::IDENTITY,
+            0.0,
+            &mut draw,
+            &mut Vec::new(),
+        );
         ASKED.lock().unwrap().clear();
         refreshes();
         push(&[OTHER]);

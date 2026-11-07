@@ -5151,6 +5151,10 @@ impl Game<'_> {
     pub(in crate::game) fn place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String> {
         self.recipe_place(book_id, all)
     }
+    /// Transfer a viewer recipe without learning it.
+    pub(in crate::game) fn transfer_recipe(&mut self, book_id: i32) {
+        self.transfer_viewer_recipe(book_id);
+    }
     /// Creative mode only: gives the player `count` of `item`
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
