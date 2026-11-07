@@ -672,7 +672,13 @@ impl<'a, 'w> Finder<'a, 'w> {
             f64::from(nz) - p.z + (hi.z - lo.z) / 2.0,
         );
         let len = (delta.x * delta.x + delta.y * delta.y + delta.z * delta.z).sqrt();
-        let steps = (len / size).ceil().max(1.0) as i32;
+        // Mod dimensions can be zero or arbitrarily small. Do not let subdivision
+        // turn a single neighbour check into an unbounded collision scan.
+        let steps = if size.is_finite() && size > 0.0 {
+            (len / size).ceil().clamp(1.0, 64.0) as i32
+        } else {
+            1
+        };
         delta = Vec3::new(
             delta.x / f64::from(steps),
             delta.y / f64::from(steps),

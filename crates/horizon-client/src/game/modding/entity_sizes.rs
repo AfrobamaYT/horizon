@@ -277,6 +277,67 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn partial_collision_sizes_complete_navigation() {
+        // Keep this deadline outside the worker: a regression must fail rather than
+        // leaving the test runner in a saturated i32 collision-subdivision loop.
+        let (done, result) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let size = Arc::new(Mutex::new([0.0; 3]));
+            let mods = vec![mod_api::ModEntry::new(
+                "set_size",
+                Box::new(SetSize(size.clone())),
+            )]
+            .into();
+            mod_api::testing::with_mods(mods, || {
+                with_game(|game| {
+                    use horizon_client::mobs::path::{Evaluator, Finder, PathType};
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                    let registry = &game.pack.assets.registry;
+                    let stone = registry.default_state("minecraft:stone").unwrap();
+                    let fence = registry.default_state("minecraft:oak_fence").unwrap();
+                    for x in 0..4 {
+                        for z in 0..4 {
+                            game.world.set(x, 69, z, stone).unwrap();
+                        }
+                    }
+                    game.world.set(0, 70, 0, fence).unwrap();
+                    // At the block corner, even subnormal widths remain represented
+                    // in the box's x/z extents; the fence post is not on the route.
+                    let id = game
+                        .spawn_mob_spawned(
+                            "cow",
+                            [0.0, 70.0, 0.0],
+                            crate::game::creatures::SpawnSite::Plain,
+                        )
+                        .unwrap();
+                    let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+                    let vanilla = game.mobs[i].vanilla_dims();
+                    for answer in [[0.0; 3], [1e-30; 3], [1e-45; 3], vanilla] {
+                        *size.lock().unwrap() = answer;
+                        game.mobs[i].size_answer = None;
+                        game.native_mob_sizes();
+                        let mut mob = game.mobs[i].path_mob();
+                        mob.on_ground = true;
+                        let world = game.mob_world_base(&[]);
+                        let finder = Finder::new(&world, &mob, Evaluator::Walk);
+                        assert_eq!(finder.walk_path_type(0, 70, 0), PathType::Fence);
+                        let path = finder.find(&[[2, 70, 0]], 8.0, 0, 32);
+                        assert!(path.is_some(), "{answer:?}");
+                    }
+                });
+            });
+            done.send(()).unwrap();
+        });
+        result
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("partial-collision navigation must finish within 30 seconds");
+        worker.join().unwrap();
+    }
+
     fn m_pose(game: &crate::game::Game<'_>, i: usize) -> Pose {
         game.mobs[i].pose()
     }
