@@ -6,6 +6,7 @@
 //! the spikes, its parts (head and neck take full damage, the rest a quarter
 //! plus one), wing knockback, block breaking, the death flight and rays, the
 //! exit portal, the egg and the next gateway; and its rendering and boss bar.
+use super::api_values::TryIntoApi;
 use super::commands::Target;
 use super::{
     Dim, Game,
@@ -3289,6 +3290,7 @@ impl Game<'_> {
             else {
                 return true;
             };
+            let bar = bar.try_into_api().unwrap();
             let mut cancel = false;
             self.native_customize_boss_event_progress(
                 &bar,

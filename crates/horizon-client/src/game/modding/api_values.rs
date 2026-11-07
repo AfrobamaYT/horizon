@@ -5,6 +5,24 @@ use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
+impl TryIntoApi for horizon_client::boss_overlay::ModBar {
+    type Output = mod_api::ClientBossBar;
+    type Error = std::convert::Infallible;
+
+    fn try_into_api(self) -> Result<Self::Output, Self::Error> {
+        Ok(mod_api::ClientBossBar {
+            uuid: self.uuid,
+            name: self.name.try_into_api()?,
+            progress: self.progress,
+            color: self.color,
+            overlay: self.overlay,
+            darken_screen: self.darken_screen,
+            play_boss_music: self.play_boss_music,
+            create_world_fog: self.create_world_fog,
+        })
+    }
+}
+
 /// Registry access for generated stack write-back in full and narrowed hook hosts.
 pub(in crate::game) trait ItemBoundary {
     fn boundary_items(&self) -> Option<&Items>;
