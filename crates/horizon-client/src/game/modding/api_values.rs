@@ -11,6 +11,8 @@ pub(in crate::game) use block_state::{
 };
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
+#[path = "api_values/recipe_inputs.rs"]
+pub(in crate::game) mod recipe_inputs;
 
 /// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
 /// Registry definitions do not change on pack reload; world-number mappings are separate.

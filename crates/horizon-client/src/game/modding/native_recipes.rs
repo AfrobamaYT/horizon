@@ -5,7 +5,7 @@
 //! content root's — with the server's recipes of the types its native mods
 //! had it send (`horizon:recipe_content`) in their place, while the known
 //! displays follow the server's book as the recipe book does.
-use super::api_values::{TryIntoApi, TryIntoEngine};
+use super::api_values::TryIntoApi;
 use super::{
     Game,
     native_hooks::{
@@ -123,6 +123,9 @@ impl Game<'_> {
                 processing_time,
             )))
         };
+        let read_stack = |stack: &mod_api::ItemStack| {
+            super::api_values::recipe_inputs::stack(stack, self.items()).map_err(|_| InvalidItem)
+        };
         match kind {
             "crafting" => {
                 let RecipeInput::Crafting {
@@ -141,9 +144,7 @@ impl Game<'_> {
                 let at = |i: usize| (i / w) * size + i % w;
                 let mut grid: [Option<ItemStack>; 9] = Default::default();
                 for (i, stack) in slots.iter().enumerate() {
-                    grid[at(i)] = stack
-                        .try_into_engine(self.items())
-                        .map_err(|_| InvalidItem)?;
+                    grid[at(i)] = stack.as_ref().map(&read_stack).transpose()?;
                 }
                 let grid = &grid[..size * size];
                 let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
@@ -155,22 +156,16 @@ impl Game<'_> {
                     return Ok(None);
                 };
                 let mut placed = recipes.remainders(id, grid, size);
-                let remainders: Vec<_> = (0..w * h).map(|i| placed[at(i)].take()).collect();
-                make(
-                    id,
-                    &output,
-                    remainders.try_into_api().map_err(|_| InvalidItem)?,
-                    0.0,
-                    0,
-                )
+                let remainders = (0..w * h)
+                    .map(|i| placed[at(i)].take().try_into_api().map_err(|_| InvalidItem))
+                    .collect::<Result<Vec<_>, _>>()?;
+                make(id, &output, remainders, 0.0, 0)
             }
             "smelting" | "blasting" | "smoking" | "campfire_cooking" => {
                 let RecipeInput::Single(input) = inputs else {
                     return Err(InvalidInput);
                 };
-                let input = input
-                    .try_into_engine(self.items())
-                    .map_err(|_| InvalidItem)?;
+                let input = read_stack(input)?;
                 let full_kind = match kind {
                     "smelting" => "minecraft:smelting",
                     "blasting" => "minecraft:blasting",
@@ -193,9 +188,7 @@ impl Game<'_> {
                 let RecipeInput::Single(input) = inputs else {
                     return Err(InvalidInput);
                 };
-                let input = input
-                    .try_into_engine(self.items())
-                    .map_err(|_| InvalidItem)?;
+                let input = read_stack(input)?;
                 let Some(recipe) = self
                     .stations()
                     .recipes
@@ -216,15 +209,9 @@ impl Game<'_> {
                 else {
                     return Err(InvalidInput);
                 };
-                let template = template
-                    .try_into_engine(self.items())
-                    .map_err(|_| InvalidItem)?;
-                let base = base
-                    .try_into_engine(self.items())
-                    .map_err(|_| InvalidItem)?;
-                let addition = addition
-                    .try_into_engine(self.items())
-                    .map_err(|_| InvalidItem)?;
+                let template = template.as_ref().map(&read_stack).transpose()?;
+                let base = base.as_ref().map(&read_stack).transpose()?;
+                let addition = addition.as_ref().map(&read_stack).transpose()?;
                 let stations = self.stations();
                 let Some((id, output)) = stations.recipes.smithing_recipe(
                     &self.loop_context,
@@ -723,6 +710,27 @@ mod tests {
                     assert_eq!(made.processing_time, ticks);
                     assert_eq!(made.experience, 0.7);
                 }
+                for (name, ticks) in [
+                    ("minecraft:smoking", 100),
+                    ("minecraft:campfire_cooking", 600),
+                ] {
+                    let made = level
+                        .recipe_for(
+                            game,
+                            &kind(name),
+                            &RecipeInput::Single(stack("beef").unwrap()),
+                        )
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        made.output.item(),
+                        mod_api::__private::item_key("minecraft:cooked_beef").unwrap()
+                    );
+                    assert_eq!(
+                        (made.output.count(), made.processing_time, made.experience),
+                        (1, ticks, 0.35)
+                    );
+                }
                 let cut = level
                     .recipe_for(
                         game,
@@ -736,9 +744,11 @@ mod tests {
                     mod_api::__private::item_key("minecraft:mossy_stone_brick_slab").unwrap()
                 );
                 assert_eq!(cut.output.count(), 2);
+                let mut sword = stack("diamond_sword").unwrap();
+                sword.set_damage(17);
                 let input = RecipeInput::Smithing {
                     template: stack("netherite_upgrade_smithing_template"),
-                    base: stack("diamond_sword"),
+                    base: Some(sword),
                     addition: stack("netherite_ingot"),
                 };
                 let made = level
@@ -749,6 +759,7 @@ mod tests {
                     made.output.item(),
                     mod_api::__private::item_key("minecraft:netherite_sword").unwrap()
                 );
+                assert_eq!(made.output.damage(), 17);
                 let wrong_order = RecipeInput::Smithing {
                     template: stack("netherite_ingot"),
                     base: stack("diamond_sword"),
@@ -844,18 +855,16 @@ mod tests {
             ];
             println!("{} crafting recipes", game.recipes().crafting.len());
             const CALLS: u32 = 10_000;
+            let kind = mod_api::Identifier::parse("minecraft:crafting").unwrap();
             for (name, width, height, grid) in grids {
+                let input = RecipeInput::Crafting {
+                    width,
+                    height,
+                    slots: grid,
+                };
                 let start = std::time::Instant::now();
                 for _ in 0..CALLS {
-                    std::hint::black_box(level.recipe_for(
-                        game,
-                        &mod_api::Identifier::parse("minecraft:crafting").unwrap(),
-                        &RecipeInput::Crafting {
-                            width,
-                            height,
-                            slots: grid.clone(),
-                        },
-                    ));
+                    let _ = std::hint::black_box(level.recipe_for(game, &kind, &input));
                 }
                 println!(
                     "{name}: {:.1} µs a call",

@@ -56,8 +56,8 @@ pub trait ClientRenderClientHost {
     fn block_face_sprite(&self, state: BlockStateId, side: Direction) -> Option<BlockFaceTexture>;
     /// Side: client.
     /// Published asset/data read: available in Setup, Reloading and World.
-    /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
-    /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
+    /// For a client mod: what each resolved block state draws on its six sides, preserving
+    /// its properties without reparsing names. Resolve states once at load. Each face's sprite (array and
     /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,
     /// its tint source and whether it is cut out, translucent or animated; its particle sprite; whether it is a plain
     /// cube. None for a block the game does not know. The model is the state's first random variant. API

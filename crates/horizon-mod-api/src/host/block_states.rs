@@ -42,8 +42,8 @@ pub trait BlockStatesHost {
     #[access(Metadata)]
     fn item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack>;
     /// Side: both.
-    /// `Block.asItem`: the block's item name, including air for a block with
-    /// no item; None if the block name is unknown.
+    /// `Block.asItem`: the block's item identity, including air for a block with
+    /// no item; None if either resolved identity is unavailable.
     #[access(Metadata)]
     fn block_item(&self, block: BlockKey) -> Option<ItemKey>;
 }

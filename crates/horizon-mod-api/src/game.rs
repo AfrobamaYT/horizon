@@ -212,7 +212,7 @@ pub struct NativeHit {
     pub x: f64,
     pub y: f64,
     pub z: f64,
-    /// The block's id (`minecraft:stone`).
+    /// The block's resolved identity, without state properties.
     pub block: BlockKey,
 }
 /// What happened to a mod's claimed item, oldest first.
