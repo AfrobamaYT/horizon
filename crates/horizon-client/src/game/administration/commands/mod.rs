@@ -1096,6 +1096,7 @@ impl Game<'_> {
 
     fn execute_command(&mut self, id: &str, ctx: &Context) -> R<i32> {
         match id {
+            "native_mod_command" => self.run_native_command(ctx.clone()),
             "help" => self.cmd_help(ctx),
             "gamemode" => self.cmd_gamemode(ctx),
             "defaultgamemode" => {

@@ -111,6 +111,7 @@ impl Integrated {
                 g.ui.dispatcher = super::chat::SessionDispatcher(std::sync::Arc::new(
                     vanilla::session_dispatcher(&g.level.rule_registry, &g.level.enabled_features),
                 ));
+                g.restore_native_commands();
                 g.resend_commands_filtered();
             }
         }));
