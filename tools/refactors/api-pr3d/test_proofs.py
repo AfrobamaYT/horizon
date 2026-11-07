@@ -39,6 +39,18 @@ class ProofTests(unittest.TestCase):
         self.assertNotEqual(records(source), records(attributed))
         self.assertNotEqual(records(attributed), records(attributed.replace("Debug", "Clone")))
 
+    def test_records_refuse_multiline_and_comment_separated_attributes(self):
+        source = "\n".join(f"#[allow(missing_docs)]\npub struct {name} {{ x: u32 }}"
+                           for name in EVENTS)
+        records(source)
+        spaced = source.replace("#[allow(missing_docs)]", "#[cfg(any())]\n \n  #[allow(missing_docs)]", 1)
+        self.assertNotEqual(records(source), records(spaced))
+        for prefix in ("#[cfg(\n    any()\n)]\n", "#[cfg(any())]\n// separated\n",
+                       "#[cfg(any())]\n/* separated */\n"):
+            mutated = source.replace("#[allow(missing_docs)]", prefix + "#[allow(missing_docs)]", 1)
+            with self.subTest(prefix=prefix), self.assertRaises(ValueError):
+                records(mutated)
+
 
 if __name__ == "__main__":
     unittest.main()
