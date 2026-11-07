@@ -33,6 +33,7 @@ fn snapshot(
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn saved_placement_respawn_removal_and_reconnect_publish_player_rows() {
     with_guests(|game| {
+        game.world_root = game.save.root.clone();
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
         let guests = &mut game.lan.as_mut().unwrap().hub.guests;
