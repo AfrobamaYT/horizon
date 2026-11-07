@@ -1104,7 +1104,7 @@ mod tests {
             snapshot(&list).iter().map(|e| e.0).collect::<Vec<_>>(),
             [1, 2, 3]
         );
-        drop(list.extract(keys[1].join).unwrap());
+        let _ = list.extract(keys[1].join).unwrap();
         list.retire_extracted(2, keys[1].join);
         assert_eq!(
             changes(&journal),
@@ -1131,7 +1131,7 @@ mod tests {
             let mut taken = list.lift();
             list.push(entity(4));
             let spawned = key(&list[0]);
-            drop(taken.remove(1));
+            let _ = taken.remove(1);
             list.restore(taken, order);
             assert_eq!(
                 changes(&journal),
