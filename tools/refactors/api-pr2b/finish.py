@@ -34,7 +34,7 @@ def finish(api):
             test_only_imports = {
                 'block_entities': ('super::*', 'crate::parts::tests::*'),
                 'blocks': ('crate::parts::tests::*',),
-                'capabilities': ('crate::parts::tests::*',),
+                'capabilities': ('super::*', 'crate::parts::tests::*'),
                 'effects': ('super::*', 'crate::*'),
                 'energy': ('super::*',),
                 'fluids': ('super::*',),
@@ -46,16 +46,6 @@ def finish(api):
             for name in test_only_imports.get(p.stem, ()):
                 b = b.replace(f'    use {name};', f'    #[cfg(test)]\n    use {name};')
             s = a + b
-        if p.name == 'mod.rs':
-            s = s.replace('pub mod tests {', '/// Shared Parts fixtures for engine tests.\npub mod tests {')
-            for kind in ('block_entities', 'blocks', 'shared', 'capabilities'):
-                s = s.replace(f'pub(crate) use super::{kind}::tests::*;', f'pub use super::{kind}::tests::*;')
-            for kind in ('effects', 'game_rules', 'key_mappings', 'structures', 'tickets'):
-                s = s.replace(f'    pub(crate) use super::{kind}::tests::*;\n', '')
-            for kind in ('effects', 'fluids', 'structures', 'tickets'):
-                s = s.replace(f'pub use {kind}::*;', f'pub(crate) use {kind}::*;')
-            for kind in ('energy', 'menus'):
-                s = s.replace(f'pub use {kind}::*;\n', '')
         if p.name == 'energy.rs':
             s = s.replace('use super::*;\n', '#[cfg(test)]\nuse super::*;\n', 1)
         p.write_text(s)

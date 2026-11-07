@@ -28,6 +28,11 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ("mod_api_goal_view_generated.rs", generated.goal_view),
         ],
         Target::Api => {
+            fs::write(
+                out_dir.join(super::parts::OUTPUT),
+                super::parts::source(root)?,
+            )
+            .map_err(|e| e.to_string())?;
             for (name, code) in super::exports::sources(root)? {
                 fs::write(out_dir.join(name), code).map_err(|e| e.to_string())?;
             }

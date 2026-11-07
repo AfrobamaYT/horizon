@@ -87,16 +87,10 @@ def main():
             subprocess.run(['git', 'mv', str(path), str(new / path.name)], check=True)
             (new / path.name).write_text(source)
         root = old_root[:old_root.index('use super::ticket_controller')] + imports
-        for kind in kinds:
-            root += f'mod {kind};\n'
-            root += f'pub use {kind}::*;\n'
+        root += '\ninclude!(concat!(env!("OUT_DIR"), "/parts_modules.rs"));\n'
         for name, bodies in traits.items():
             root += '\n' + envelopes[name].replace('super::', 'crate::') + '{' + ''.join(bodies).replace('super::', 'crate::') + '}\n'
-        root += '\n#[cfg(any(test, feature = "testing"))]\npub mod tests {\n'
-        for kind in kinds:
-            if kind != 'menus':
-                root += f'    pub(crate) use super::{kind}::tests::*;\n'
-        root += '}\n'
+
         (new / 'mod.rs').write_text(root)
         subprocess.run(['git', 'rm', '-f', str(API / 'part_table.rs')], check=True)
         old.rmdir()

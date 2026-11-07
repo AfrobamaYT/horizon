@@ -9,7 +9,13 @@ fn items(input: Vec<Item>) -> Vec<Value> {
         .into_iter()
         .map(|item| {
             let span = item.span();
-            let mut value = json!({"start": span.start().line, "end": span.end().line});
+            let mut value = json!({
+                "start": span.start().line,
+                "end": span.end().line,
+                "import": matches!(&item, Item::Use(_)),
+                "module_declaration": matches!(&item, Item::Mod(m) if m.content.is_none()),
+                "generated_modules": matches!(&item, Item::Macro(m) if m.mac.path.is_ident("include") && m.mac.tokens.to_string().contains("parts_modules.rs")),
+            });
             let members = match &item {
                 Item::Trait(t) => Some(
                     t.items

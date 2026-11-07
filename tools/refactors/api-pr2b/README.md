@@ -7,7 +7,10 @@ The former generator merged repeated `Registrar`, `CapabilityProviders`, their t
 implementations, inherent implementations, and `tests` envelopes in lexical filename
 order. Ordinary Rust modules cannot split a trait implementation across files. The
 move consolidates the two contracts and implementations in `parts/mod.rs`, while
-inherent methods and each kind's code/tests live in its module. `shared.rs` owns the
+inherent methods and each kind's code/tests live in its module. Module declarations,
+re-exports and the fixture aggregator are generated from the folder into
+`parts_modules.rs`; adding a module needs no central discovery-list edit. The
+`a_new_parts_kind_needs_no_shared_list` fixture checks additions and removals. `shared.rs` owns the
 same typed tables and thread-local state as before. No runtime logic moves crates.
 
 ## Replay
@@ -34,10 +37,13 @@ python3 tools/refactors/api-pr2b/moved_lines_check.py BASE
 python3 tools/refactors/api-pr1/gate.py BASE
 ```
 
-`compare_items.py` compares normalized signatures and bodies of all 595 items,
+`compare_items.py` compares normalized signatures and bodies of all 601 items,
 including tests, and lists their destination modules. `moved_lines_check.py`
-compares a multiset of 6,104 canonical lines from the replayed fragments and
-modules (6,080 before #1624).
+compares a multiset of 6,339 canonical lines from the replayed fragments and
+modules. The earlier 595-item / 6,104-line report omitted six functions containing
+local `use` declarations; the corrected checker distinguishes actual imports
+through the syn layout and covers those functions too. `test_proofs.py` pins that
+property by perturbing a function body with a local import.
 Canonical formatting occurs after the declared path/visibility edits so wrapping
 does not manufacture a difference. Both omit use/mod/trait/impl envelope lines;
 comments are excluded from the moved-line check and trait-member rustdoc remains

@@ -37,7 +37,7 @@ def lines(source):
             elif 'members' in item:
                 for member in item['members']:
                     result.update(line.strip() for line in source_lines[member['start']-1:member['end']] if line.strip())
-            elif not re.search(r'(?m)^\s*(?:use |mod \w+;)', text):
+            elif not any(item.get(key) for key in ('import', 'module_declaration', 'generated_modules')):
                 result.update(line.strip() for line in source_lines[start:end] if line.strip())
     walk(layout(source))
     return result

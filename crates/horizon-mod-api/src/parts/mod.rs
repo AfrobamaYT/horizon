@@ -24,32 +24,7 @@ use std::{
     },
 };
 
-mod block_entities;
-pub use block_entities::*;
-mod blocks;
-pub use blocks::*;
-mod capabilities;
-pub use capabilities::*;
-mod effects;
-pub(crate) use effects::*;
-mod energy;
-mod entities;
-pub use entities::*;
-mod fluids;
-pub(crate) use fluids::*;
-mod game_rules;
-pub use game_rules::*;
-mod items;
-pub use items::*;
-mod key_mappings;
-pub use key_mappings::*;
-mod menus;
-mod shared;
-pub use shared::*;
-mod structures;
-pub(crate) use structures::*;
-mod tickets;
-pub(crate) use tickets::*;
+include!(concat!(env!("OUT_DIR"), "/parts_modules.rs"));
 
 impl Registrar for PartRegistrar {
     fn block_entity_type_key(&mut self, id: &str) -> crate::BlockEntityTypeKey {
@@ -708,17 +683,4 @@ pub trait CapabilityProviders {
     ) -> Option<(ItemProviderOf, &'static str, bool)>;
     /// The enabled provider of the item places named `name`, with its mod.
     fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)>;
-}
-
-#[cfg(any(test, feature = "testing"))]
-/// Shared Parts fixtures for engine tests.
-pub mod tests {
-    pub use super::block_entities::tests::*;
-    pub use super::blocks::tests::*;
-    pub use super::capabilities::tests::*;
-    pub(crate) use super::energy::tests::*;
-    pub(crate) use super::entities::tests::*;
-    pub(crate) use super::fluids::tests::*;
-    pub(crate) use super::items::tests::*;
-    pub use super::shared::tests::*;
 }

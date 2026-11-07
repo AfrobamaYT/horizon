@@ -104,11 +104,15 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
         }
         Ok(out)
     }
-    if !source.contains(PREFIX) {
+    let parts = source.contains(super::parts::OUTPUT);
+    if !source.contains(PREFIX) && !parts {
         return Ok(source.to_owned());
     }
     let mut file = syn::parse_file(source).map_err(|e| e.to_string())?;
-    let generated = sources(root)?;
+    let mut generated = sources(root)?;
+    if parts {
+        generated.insert(super::parts::OUTPUT.to_owned(), super::parts::source(root)?);
+    }
     file.items = items(file.items, &generated)?;
     Ok(file.to_token_stream().to_string())
 }

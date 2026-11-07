@@ -37,7 +37,7 @@ def items(source):
                 context = normalize(header[0].split('{')[0]) if header else owner
                 for member in item['members']:
                     yield context + ':' + normalize(member['text'])
-            elif not re.search(r'(?m)^\s*(?:pub(?:\([^)]*\))? )?(?:use |mod \w+;)', text):
+            elif not any(item.get(key) for key in ('import', 'module_declaration', 'generated_modules')):
                 n = normalize(text)
                 if n:
                     yield n
