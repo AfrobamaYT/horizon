@@ -313,9 +313,21 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_bound_tnt_cart_keeps_its_join_when_damage_primes_it() {
     bound_cart_case(CartKind::Tnt, |game| {
+        game.carts.push(Minecart::new(
+            72,
+            CartKind::Rideable,
+            Vec3::new(4.5, 70.0, 0.5),
+        ));
+        let expected: Vec<_> = game.carts.iter().map(|c| (c.id, c.join)).collect();
         let join = game.carts[0].join;
         game.hurt_cart(0, 5.0, false, true);
-        assert_eq!(game.carts.len(), 1);
+        assert_eq!(
+            game.carts
+                .iter()
+                .map(|c| (c.id, c.join))
+                .collect::<Vec<_>>(),
+            expected
+        );
         assert_eq!(game.carts[0].join, join);
         assert_eq!(game.carts.locate(join), Some(0));
         assert!((0..=38).contains(&game.carts[0].fuse));
