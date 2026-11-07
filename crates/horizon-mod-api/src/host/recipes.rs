@@ -25,21 +25,23 @@ pub trait RecipesHost {
     fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]>;
     /// Side: both.
     /// Published asset/data read: available in Setup, Reloading and World.
-    /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
+    /// An ingredient from recipe-file JSON text: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says
     /// whether a stack fits. Items the game doesn't know are left out; None
     /// when nothing is left (an unknown or empty tag, for one) and outside a
     /// world.
+    /// Invalid JSON is refused with `RecipeJsonError::InvalidJson`.
     #[access(PublishedResources)]
-    fn recipe_ingredient(&self, json: &serde_json::Value) -> Option<Ingredient>;
+    fn recipe_ingredient(&self, json: &str) -> Result<Option<Ingredient>, RecipeJsonError>;
     /// Side: both.
     /// Published asset/data read: available in Setup, Reloading and World.
-    /// A stack as a recipe's `result` names it: `id` (a bare one as
+    /// A stack from recipe-file `result` JSON text: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None
     /// without an `id`, for an item the game doesn't know or a count outside
     /// that, and outside a world.
+    /// Invalid JSON is refused with `RecipeJsonError::InvalidJson`.
     #[access(PublishedResources)]
-    fn recipe_result(&self, json: &serde_json::Value) -> Option<ItemStack>;
+    fn recipe_result(&self, json: &str) -> Result<Option<ItemStack>, RecipeJsonError>;
     /// Side: both.
     /// The `book_id`s of the recipes the player's recipe book holds now
     /// (the server's book on a server); empty outside a world.
