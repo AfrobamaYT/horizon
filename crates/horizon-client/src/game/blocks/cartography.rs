@@ -16,6 +16,7 @@ use std::{
 
 /// The level's maps as a menu sees them (`ContainerLevelAccess`): the
 /// states of the maps the click can reach, and the copies it makes.
+#[derive(Clone)]
 pub(super) struct LevelMaps {
     states: RefCell<HashMap<i32, (bool, u8)>>,
     next_id: Cell<i32>,
@@ -24,6 +25,16 @@ pub(super) struct LevelMaps {
 }
 
 impl Maps for LevelMaps {
+    fn with_staged(&self, edit: &mut dyn FnMut(&dyn Maps) -> bool) -> bool {
+        let staged = self.clone();
+        if !edit(&staged) {
+            return false;
+        }
+        self.states.replace(staged.states.into_inner());
+        self.next_id.set(staged.next_id.get());
+        self.made.replace(staged.made.into_inner());
+        true
+    }
     fn state(&self, id: i32) -> Option<(bool, u8)> {
         self.states.borrow().get(&id).copied()
     }
@@ -257,6 +268,74 @@ impl MapData {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn staged_maps_restore_id_reservations_and_pending_copies_on_refusal() {
+        for accepted in [false, true] {
+            let maps = LevelMaps {
+                states: RefCell::new(HashMap::from([(7, (false, 0))])),
+                next_id: Cell::new(42),
+                made: RefCell::new(Vec::new()),
+            };
+            assert_eq!(
+                maps.with_staged(&mut |staged| {
+                    assert_eq!(staged.derive(7, true), Some(42));
+                    assert_eq!(staged.state(42), Some((false, 1)));
+                    accepted
+                }),
+                accepted
+            );
+            assert_eq!(maps.next_id.get(), if accepted { 43 } else { 42 });
+            assert_eq!(maps.state(42), accepted.then_some((false, 1)));
+            assert_eq!(
+                maps.made.borrow().as_slice(),
+                if accepted { &[(42, 7, true)][..] } else { &[] }
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn crafting_map_takes_use_real_saved_maps() {
+        use horizon_client::menu::{Env, Input, Kind, Menu};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for mode in [Input::Swap, Input::Pickup, Input::QuickMove] {
+                let source = game.new_map_id(MapData::fresh(4.5, 4.5, 0, "minecraft:overworld"));
+                let mut input = ItemStack::new("minecraft:filled_map", 1);
+                input.data_mut().map_id = Some(source);
+                let maps = game.level_maps([&input]);
+                let env = Env {
+                    maps: Some(&maps),
+                    ..game.menu_env()
+                };
+                let mut menu = Menu::new(Kind::Crafting);
+                for i in [1, 2, 3, 4, 6, 7, 8, 9] {
+                    menu.set_slot(&env, i, Some(ItemStack::new("minecraft:paper", 1)));
+                }
+                menu.set_slot(&env, 5, Some(input));
+                let preview = menu.slot(0).expect("real scaling recipe admitted");
+                assert_eq!(preview.data().and_then(|d| d.map_id), Some(source));
+                assert_eq!(preview.data().and_then(|d| d.map_post_processing), Some(1));
+                menu.click(&env, 0, if mode == Input::Swap { 2 } else { 0 }, mode)
+                    .unwrap();
+                let output = match mode {
+                    Input::Swap => menu.player_item(2),
+                    Input::Pickup => menu.carried.as_ref(),
+                    _ => menu.player_item(8),
+                }
+                .expect("crafted map remains present");
+                assert_eq!(output.count, 1);
+                assert_eq!(output.data().and_then(|d| d.map_id), Some(source + 1));
+                assert_eq!(output.data().and_then(|d| d.map_post_processing), None);
+                assert!((1..10).all(|i| menu.slot(i).is_none()));
+                game.register_made_maps(maps);
+                let original = game.map(source).unwrap();
+                assert_eq!((original.scale, original.center), (0, [0, 0]));
+                let derived = game.map(source + 1).unwrap();
+                assert_eq!((derived.scale, derived.center), (1, [64, 64]));
+            }
+        });
+    }
+
     use super::*;
     use crate::game::maps::{Decoration, Key};
 
@@ -286,7 +365,7 @@ mod tests {
             y,
             rot,
             name: None,
-            key: Key::Item,
+            key: Key::Remote,
         };
         // The centre, facing north: 8 map pixels wide, nudged by (-0.5, 0.5).
         close(
