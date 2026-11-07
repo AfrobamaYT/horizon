@@ -7,7 +7,7 @@
 use super::{api, dependencies, inject, internals, Profile, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
-use horizon_mods::index::native;
+use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -517,8 +517,8 @@ pub(super) fn compile(
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
         .arg(format!(
-            "horizon_mods={}",
-            library(&deps, "horizon_mods")?.display()
+            "horizon_mod_package={}",
+            library(&deps, "horizon_mod_package")?.display()
         ));
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();
@@ -570,6 +570,30 @@ mod tests {
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         refusal(&[api::Project::read(&bundle).unwrap()], Profile::Optimized)
+    }
+
+    #[test]
+    fn only_the_exact_build_of_the_prebuilt_game_is_accepted() {
+        let dir = super::super::tests::dir("prebuilt-exact-build");
+        let check = |commit: &str, rustc: &str, target: &str, side: &str| {
+            let identity = serde_json::json!({
+                "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
+            });
+            fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
+            check_identity(&dir, "abc123", "x86_64-pc-windows-gnu", Target::Client)
+        };
+        let rustc = format!("rustc x\nrelease: {}\nhost: y", rust_toolchain::VERSION);
+        let host = "x86_64-pc-windows-gnu";
+        assert_eq!(check("abc123", &rustc, host, "client"), Ok(()));
+        assert!(check("abc124", &rustc, host, "client").is_err());
+        assert!(check("abc123", &rustc, "x86_64-unknown-linux-gnu", "client").is_err());
+        assert!(check("abc123", &rustc, host, "server").is_err());
+        assert!(check("abc123", "rustc x\nrelease: 0.0.1", host, "client").is_err());
+        let longer = format!("release: {}.1", rust_toolchain::VERSION);
+        assert!(check("abc123", &longer, host, "client").is_err());
+        fs::remove_file(dir.join(IDENTITY)).unwrap();
+        assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

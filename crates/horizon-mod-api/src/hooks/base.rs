@@ -1,14 +1,11 @@
-//! The hooks and helpers the catalog started with: declarations the mod API generator reads (see `hooks/mod.rs`).
+//! The hooks the catalog started with: declarations the mod API generator reads (see `hooks/mod.rs`).
 
 pub trait DrawContexts {
-    /// What the HUD, screen and tooltip hooks draw with, in GUI pixels: one per hook call.
-    #[draw_context(surface = "crate::hud::HudBatch", name = "DrawContext", prefix = "")]
+    #[draw_context(surface = "crate::hud::HudBatch", name = "DrawContext")]
     fn draw_context();
-    /// What a block entity, mob or player submit hook draws with, in blocks under a pose stack (`PoseStack`): one per hook call.
     #[draw_context(
         surface = "crate::game::native_block_entity_draw::BlockEntityDraw",
-        name = "BlockEntityDrawContext",
-        prefix = "draw_"
+        name = "BlockEntityDrawContext"
     )]
     fn block_entity_draw_context();
 }
@@ -119,20 +116,10 @@ pub trait Hooks {
     #[hook(side = "server", contract = "listen", fabric = ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"], neoforge = "ServerTickEvent.Pre, ServerTickEvent.Post")]
     fn server_tick();
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.START_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Pre"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Pre")]
     fn level_tick_pre();
     /// After a successful authoritative server level tick pass.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.END_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Post"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Post")]
     fn level_tick_post();
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
@@ -442,7 +429,8 @@ pub trait Hooks {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out. Each executable usage keeps its own
+    /// name vanilla has is left out. Asked again after a mod calls
+    /// `host.commands().refresh_commands()`. Each executable usage keeps its own
     /// permission level; a lower-level child only opens traversal through a
     /// shared prefix, not execution of that prefix.
     #[hook(
@@ -452,22 +440,16 @@ pub trait Hooks {
         neoforge = "RegisterCommandsEvent"
     )]
     fn register_commands();
-    /// A player's command on the server (`Commands.performCommand`),
-    /// parsed into `command` with typed, source-resolved arguments, for a command
-    /// a mod registered and the player's level allows: set `ran` when it is yours.
-    /// Missing optional arguments are absent; parsing or resolution failures never
-    /// reach listeners. The player's state is
-    /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `host.commands().feedback()` answers them. A single player's
-    /// owner console (`horizon-ctl command`) reaches it too, as the owner at
-    /// level 4.
+    /// Execute a parsed mod command after permission checks and argument resolution.
+    /// Return `Flow::Cancel` when handled. `source` identifies origin and permission,
+    /// independent of `execute as`. Feedback honours silence, track-output and the swapped-in player.
     #[hook(
         side = "server",
         contract = "cancel",
         out = "ran",
         neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
     )]
-    fn perform_command();
+    fn run_mod_command();
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
@@ -1705,24 +1687,6 @@ pub trait Hooks {
         cancellable = true
     )]
     fn player_command();
-    /// A command a mod registered, typed on the dedicated server's console
-    /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
-    /// typed arguments: set `ran` when it is yours. Relative coordinates and
-    /// selectors use the console at the Overworld spawn, with zero rotation.
-    /// Missing optional arguments are absent; invalid input never reaches listeners.
-    /// There is no player: the source is the console, at
-    /// permission level 4, so `host.players().acting_player()` is None and the
-    /// player-only helpers give nothing; `host.commands().feedback()` answers on the
-    /// console. A name no mod registered goes to vanilla's dispatcher as
-    /// before.
-    #[hook(
-        side = "server",
-        contract = "cancel",
-        out = "ran",
-        neoforge = "none (a command's executor is part of the Brigadier node added in RegisterCommandsEvent; CommandEvent only watches executions)"
-    )]
-    fn perform_console_command();
     /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
     /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
     /// vanilla's name for the key (`key.keyboard.e`) — a key with no name
@@ -2540,7 +2504,7 @@ pub trait Hooks {
     fn living_breathe();
     /// Blocks this mod adds, declared in code rather than one file each
     /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
-    /// push a `horizon_mods::content::Block` per block, the same declaration
+    /// push a `horizon_mod_package::content::Block` per block, the same declaration
     /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
     /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
     /// with its id in your mod's namespace. `item: true` gives it a block
@@ -2572,7 +2536,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn blocks();
     /// Items this mod adds, declared in code (NeoForge's
     /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
-    /// `horizon_mods::content::Item` per item, a content mod's
+    /// `horizon_mod_package::content::Item` per item, a content mod's
     /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
     /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
     /// block's item comes with its block (`item: true`), not from here.
@@ -3637,7 +3601,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// spectator) and before the menu that was open closes. Set `cancel` and
     /// nothing opens: the open menu stays as it was and the click is spent.
     /// The player's state is swapped in for the call, as for
-    /// `native_perform_command`, so `host.players().acting_player()`, `PlayerRef::tell` and
+    /// `native_run_mod_command`, so `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
@@ -3658,7 +3622,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// packet passed vanilla's checks (a creative player, a real slot, a valid
     /// stack) and before the slot changes or the stack drops. Set `cancel`
     /// and the packet is ignored. The player's state is swapped in for the
-    /// call, as for `native_perform_command`, so `host.players().acting_player()`,
+    /// call, as for `native_run_mod_command`, so `host.players().acting_player()`,
     /// `PlayerRef::tell` and the item helpers reach them. Not heard: stacks a
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
@@ -3750,7 +3714,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// death's is placed for good (a bed or anchor, or the world spawn's
     /// free column, after the fallback when a respawn block was gone). The
     /// level of `to` is the one in place, and the player's state is swapped
-    /// in, as for `native_perform_command`: `host.players().acting_player()`,
+    /// in, as for `native_run_mod_command`: `host.players().acting_player()`,
     /// `PlayerRef::tell`, the item helpers and the rest reach them. Heard for:
     /// Nether and End portals (also riding a vehicle, and leaving the End as
     /// its winner), `/execute in ... run tp` and any other command that
@@ -4096,7 +4060,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
     /// server player, whose state is then swapped in (as for
-    /// `native_perform_command`: `host.players().acting_player()`, `PlayerRef::tell` and
+    /// `native_run_mod_command`: `host.players().acting_player()`, `PlayerRef::tell` and
     /// the item helpers reach them; `player` is their UUID), and for one a
     /// server player rode and left, until it has stood still for ten
     /// seconds (`player` is none, nobody is swapped in). It only hears.
@@ -4837,388 +4801,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn living_jump();
 }
 
-pub trait Helpers {
-    #[helper(side = "client")]
-    fn size();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_push"
-    )]
-    fn draw_push();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_pop"
-    )]
-    fn draw_pop();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_translate"
-    )]
-    fn draw_translate();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_rotate_about"
-    )]
-    fn draw_rotate_about();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_scale"
-    )]
-    fn draw_scale();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_keep"
-    )]
-    fn draw_keep();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_partial"
-    )]
-    fn draw_partial();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_game_time"
-    )]
-    fn draw_game_time();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_light"
-    )]
-    fn draw_light();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_set_light"
-    )]
-    fn draw_set_light();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_quad"
-    )]
-    fn draw_quad();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_cube"
-    )]
-    fn draw_cube();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_block"
-    )]
-    fn draw_block();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_draw_item"
-    )]
-    fn draw_item();
-    #[helper(side = "both")]
-    fn attachments();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_mobs::Game<'_>::native_kill_mob"
-    )]
-    fn kill_mob();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_entities::Game<'_>::native_summon"
-    )]
-    fn summon();
-    #[helper(
-        side = "server",
-        service = "players",
-        target = "horizon_client::game::native_server::Game<'_>::native_server_players"
-    )]
-    fn server_players();
-    /// Find a connected real player by account name, ignoring ASCII case.
-    /// Returns None when no player matches; fake players and nicknames are excluded.
-    #[helper(
-        side = "server",
-        service = "players",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_by_name"
-    )]
-    fn player_by_name();
-    /// Enumerate loaded server levels in overworld, nether, end order.
-    /// Returns an empty list before a server world is open.
-    #[helper(
-        side = "server",
-        service = "levels",
-        target = "horizon_client::game::native_entity_refs::Game<'_>::native_list_levels"
-    )]
-    fn list_levels();
-    /// The connection IP without its port (the forwarded address behind a Velocity proxy),
-    /// including displaced connected players. Empty for an acting player with no known
-    /// connection; None for a stale or unavailable player.
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_address"
-    )]
-    fn player_address();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_name"
-    )]
-    fn player_name();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_tell"
-    )]
-    fn player_tell();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_action_bar"
-    )]
-    fn player_action_bar();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_tab_list"
-    )]
-    fn player_tab_list();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_tick_stats"
-    )]
-    fn tick_stats();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_set_sleep_ignored"
-    )]
-    fn player_set_sleep_ignored();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_set_nickname"
-    )]
-    fn player_set_nickname();
-    #[helper(
-        side = "server",
-        service = "messages",
-        target = "horizon_client::game::native_server::Game<'_>::native_text_allowed"
-    )]
-    fn text_allowed();
-    #[helper(
-        side = "server",
-        service = "messages",
-        target = "horizon_client::game::native_server::Game<'_>::native_broadcast"
-    )]
-    fn broadcast();
-    #[helper(
-        side = "server",
-        service = "commands",
-        target = "horizon_client::game::native_server::Game<'_>::native_feedback"
-    )]
-    fn feedback();
-    #[helper(
-        side = "server",
-        service = "players",
-        target = "horizon_client::game::native_server::Game<'_>::native_acting_player"
-    )]
-    fn acting_player();
-    #[helper(
-        side = "server",
-        service = "commands",
-        target = "horizon_client::game::native_server::Game<'_>::native_run_command"
-    )]
-    fn run_command();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_world_dir"
-    )]
-    fn world_dir();
-    #[helper(side = "both")]
-    fn lit_block_name();
-    #[helper(side = "client")]
-    fn flame_particle();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks"
-    )]
-    fn edit_blocks();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_world_columns::Game<'_>::native_surface_heights"
-    )]
-    fn surface_heights();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_world_columns::Game<'_>::native_read_columns"
-    )]
-    fn read_columns();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_biome_colors::Game<'_>::native_refresh_biome_colors"
-    )]
-    fn refresh_biome_colors();
-    #[helper(side = "both")]
-    fn max_stack_size();
-    #[helper(side = "client")]
-    fn item_model();
-    #[helper(side = "client")]
-    fn quad();
-    #[helper(side = "client")]
-    fn mod_screen_open();
-    #[helper(side = "client")]
-    fn mod_screen_close();
-    #[helper(side = "client")]
-    fn mod_screen();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_set_experience_orb"
-    )]
-    fn set_experience_orb();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_server::Game<'_>::native_experience_orbs"
-    )]
-    fn experience_orbs();
-    #[helper(side = "client")]
-    fn clock();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_falling::Game<'_>::native_spawn_falling_block"
-    )]
-    fn spawn_falling_block();
-    #[helper(
-        side = "both",
-        target = "horizon_client::game::native_block_entity_draw::Game<'_>::native_block_state_property"
-    )]
-    fn block_state_property();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_claimed_items::Game<'_>::native_raycast"
-    )]
-    fn raycast();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_claimed_items::Game<'_>::native_view_hit"
-    )]
-    fn view_hit();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_claimed_items::Game<'_>::native_claim_items"
-    )]
-    fn claim_items();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_claimed_items::Game<'_>::native_poll"
-    )]
-    fn poll();
-    #[helper(side = "server")]
-    fn block_entity_sync();
-    #[helper(side = "client")]
-    fn play_local_sound();
-    /// How many particles the client's level has alive (`ParticleEngine.countParticles`): every
-    /// live group, item pickups, firework starters and the elder guardian apparition included.
-    /// Queued particles (including starters and apparitions before their first particle tick)
-    /// and emitters are not counted. 0 once `clear_particles` was asked, and on a server.
-    #[helper(side = "client")]
-    fn particle_count();
-    /// Removes every particle, queued particle and emitter of the client's level
-    /// (`ParticleEngine.clearParticles`), item pickups, firework starters and the elder guardian
-    /// apparition included. It takes `&self`, so a screen or render hook can ask: the clear
-    /// lands before the next frame is drawn or the next particle tick, whichever comes first,
-    /// paused or not. HUD, screen, fog and geometry callbacks clear before that frame's particle
-    /// draws and colored particle lights; a request during particle extraction discards that
-    /// extraction too. Unrelated entity geometry and item/mod lights stay. False on a server.
-    #[helper(side = "client")]
-    fn clear_particles();
-    #[helper(side = "client")]
-    fn fill();
-    #[helper(side = "client")]
-    fn sprite();
-    #[helper(side = "client")]
-    fn item();
-    #[helper(side = "client")]
-    fn screen_title();
-    #[helper(side = "client")]
-    fn cursor();
-    #[helper(side = "client")]
-    fn text();
-    #[helper(side = "both")]
-    fn on();
-    #[helper(side = "client")]
-    fn mod_key();
-    #[helper(side = "both")]
-    fn setting();
-    #[helper(side = "both")]
-    fn set_setting();
-    #[helper(side = "server")]
-    fn set_block_property();
-    #[helper(side = "server")]
-    fn set_block_property_with();
-    #[helper(
-        side = "both",
-        target = "horizon_client::game::native_config_files::Game<'_>::native_is_loaded"
-    )]
-    fn is_loaded();
-    #[helper(
-        side = "both",
-        target = "horizon_client::game::native_config_files::Game<'_>::native_config_files"
-    )]
-    fn config_files();
-    #[helper(side = "client")]
-    fn panel_items();
-    #[helper(side = "both", resource_read = true)]
-    fn recipes_of_type();
-    #[helper(side = "both", resource_read = true)]
-    fn recipe_ingredient();
-    #[helper(side = "both", resource_read = true)]
-    fn recipe_result();
-    #[helper(side = "both")]
-    fn known_recipes();
-    #[helper(side = "client")]
-    fn place_recipe();
-    #[helper(side = "client")]
-    fn give();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_motion::Game<'_>::native_push_player"
-    )]
-    fn push_player();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_net::Game<'_>::native_net_send_to_player"
-    )]
-    fn net_send_to_player();
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_net::Game<'_>::native_net_send_to_server"
-    )]
-    fn net_send_to_server();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::dispenser::Game<'_>::native_dispense_default"
-    )]
-    fn dispense_default();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_menus::Game<'_>::native_open_menu"
-    )]
-    fn open_menu();
-    #[helper(
-        side = "server",
-        target = "horizon_client::game::native_menus::Game<'_>::native_close_menu"
-    )]
-    fn close_menu();
-    #[helper(
-        side = "both",
-        target = "horizon_client::game::machines::native_items::Game<'_>::native_dimension"
-    )]
-    fn dimension();
-    #[helper(
-        side = "server",
-        receiver = "player",
-        target = "horizon_client::game::native_server::Game<'_>::native_player_hide"
-    )]
-    fn player_hide();
-    #[helper(side = "client")]
-    fn item_stack();
-    #[helper(side = "client")]
-    fn mod_image();
-    #[helper(side = "both")]
-    fn instance_dir();
+/// Original upstream notes; the existing fork event above owns this moment.
+pub trait UpstreamNotes {
+    #[notes = r###"a dead player's respawn point: `native_player_respawn_position(player, name, dimension, pos, yaw, pitch)` is heard once per respawn before the player is placed (NeoForge's `PlayerRespawnPositionEvent`, Bukkit's `PlayerRespawnEvent.setRespawnLocation`), with their bed, anchor, forced point or the world spawn. A changed dimension or position places the player exactly there, with no bed or anchor used; yaw and pitch set their look. An unknown dimension or a non-finite value leaves that part unchanged. Bundles that use it need `"hooks": @API:player_respawn_position@`."###]
+    fn player_respawn_position();
 }

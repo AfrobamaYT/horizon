@@ -6,7 +6,7 @@ use horizon_launcher::{
     jars::{self, Permission},
     launch::{self, Launch},
 };
-use horizon_mods::manifest::JarRef;
+use horizon_mod_package::manifest::JarRef;
 use std::{
     process::Command,
     sync::mpsc::{self, Sender},

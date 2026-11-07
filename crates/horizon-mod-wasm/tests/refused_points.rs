@@ -2,8 +2,8 @@
 //! it, and keeps nothing of their group alive. CI builds `tests/groups/counter_lib` and
 //! `tests/points/lib_tail` first and points `HORIZON_WASM_GROUPS`, `HORIZON_WASM_POINTS` and
 //! `HORIZON_WASM_STD` at them; the test is ignored elsewhere.
+use horizon_mod_package::manifest::Manifest;
 use horizon_mod_wasm::{Refusal, WasmPackage};
-use horizon_mods::manifest::Manifest;
 use mod_api::__private::wasm_host::live_groups;
 
 #[test]
@@ -11,20 +11,22 @@ use mod_api::__private::wasm_host::live_groups;
 fn a_listener_refused_with_its_library_keeps_nothing_of_their_group() {
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let read = |package: std::path::PathBuf| WasmPackage {
-        manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-        module: horizon_mods::Package::read_wasm(&package).unwrap(),
+        manifest: horizon_mod_package::Package::read(&package)
+            .unwrap()
+            .manifest,
+        module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
     };
     let mut library =
         read(path("HORIZON_WASM_GROUPS").join("counter_lib/target/horizon-mod/counter_lib.hmod"));
     let tail = read(path("HORIZON_WASM_POINTS").join("lib_tail/target/horizon-mod/lib_tail.hmod"));
-    assert!(!tail.manifest.wasm.as_ref().unwrap().points().is_empty());
+    assert!(!tail.manifest.inject.is_empty());
     // The library lists a point this game doesn't have.
     let wasm = library.manifest.wasm.as_ref().unwrap();
     library.manifest = Manifest::parse(&format!(
         "id = \"counter_lib\"\nname = \"Counter library\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
-         [[native.injection]]\nid = \"gone\"\ntarget = \"horizon_client::game::Game<'_>::gone\"\n\
-         kind = \"HEAD\"\ntrait_method = \"gone\"\n",
+         [[inject]]\nid = \"gone\"\nat = \"horizon_client::game::Game<'_>::gone\"\n\
+         kind = \"head\"\nwith = \"gone\"\nhash = \"signature\"\n",
         wasm.sha512(),
         wasm.toolchain()
     ))

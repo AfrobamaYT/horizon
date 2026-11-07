@@ -27,7 +27,7 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
     ticks::{SavedTick, TickPriority, TickTypeId},
 };
-use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
+use horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -1828,7 +1828,7 @@ fn decode_column(
                     if let Ok(Some(data)) = attachment_compound(e.get(ATTACHMENTS_KEY)) {
                         extras.block_entity_attachments.push((
                             be.0,
-                            horizon_world::attachments::Attachments::from_nbt(data.clone()),
+                            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
                         ));
                     }
                     if let Some(name) = text(e.get("CustomName")) {
@@ -1846,7 +1846,8 @@ fn decode_column(
     }
     if let Tag::Compound(map) = tag {
         if let Ok(Some(data)) = attachment_compound(map.get(&ATTACHMENTS_KEY.into())) {
-            extras.attachments = horizon_world::attachments::Attachments::from_nbt(data.clone());
+            extras.attachments =
+                horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone());
         }
         extras.root = map
             .iter()
@@ -2558,7 +2559,7 @@ impl SaveDir {
     /// own namespace. A file that doesn't read is moved aside to `attachments.dat.corrupt`, with
     /// a warning, and the level opens without them (as vanilla's `SavedDataStorage` starts a
     /// saved data over when its file is broken), so the next save can't overwrite it.
-    pub fn load_attachments(&self) -> horizon_world::attachments::Attachments {
+    pub fn load_attachments(&self) -> horizon_mod_runtime::attachments::Attachments {
         let path = self.attachments_path();
         let data = match try_read_dat(&path) {
             Err(DatIssue::Missing) => return Default::default(),
@@ -2568,7 +2569,7 @@ impl SaveDir {
             },
             Err(DatIssue::Unreadable(why)) => Err(why),
         };
-        data.map(horizon_world::attachments::Attachments::from_nbt)
+        data.map(horizon_mod_runtime::attachments::Attachments::from_nbt)
             .unwrap_or_else(|why| {
                 let aside = path.with_extension("dat.corrupt");
                 log::warn!(
@@ -2584,7 +2585,7 @@ impl SaveDir {
     /// Save this dimension's server-owned mod attachments; nothing while it has none and never had.
     pub fn save_attachments(
         &self,
-        attachments: &horizon_world::attachments::Attachments,
+        attachments: &horizon_mod_runtime::attachments::Attachments,
     ) -> Result<()> {
         let path = self.attachments_path();
         let data = attachments.to_nbt();
@@ -3893,6 +3894,9 @@ pub struct Level {
     pub motion: [f64; 3],
     pub fall_distance: f64,
     pub on_ground: bool,
+    /// `LivingEntity.addAdditionalSaveData`'s `FallFlying`: the player was
+    /// gliding (shared flag 7), so the glide goes on after the load.
+    pub fall_flying: bool,
     pub food_exhaustion: f32,
     pub food_tick_timer: i32,
     /// Abilities.flying: whether creative/spectator flight is active.
@@ -4169,6 +4173,9 @@ impl Level {
         self.selected_slot = n("SelectedItemSlot").unwrap_or(0) as i32;
         self.fall_distance = f("fall_distance").unwrap_or(0.0);
         self.on_ground = n("OnGround").unwrap_or(0) != 0;
+        // LivingEntity.readAdditionalSaveData: `getBooleanOr("FallFlying",
+        // false)` sets shared flag 7; any numeric tag counts, as a byte.
+        self.fall_flying = n("FallFlying").unwrap_or(0) != 0;
         self.seen_credits = n("seenCredits").unwrap_or(0) != 0;
         self.post_effects = match p.get("post_effects") {
             Some(Tag::List(list)) => list
@@ -4414,6 +4421,9 @@ impl Level {
             ("Motion", doubles(&self.motion)),
             ("OnGround", Tag::Byte(i8::from(self.on_ground))),
             ("fall_distance", Tag::Double(self.fall_distance.to_bits())),
+            // LivingEntity.addAdditionalSaveData: `putBoolean("FallFlying",
+            // isFallFlying())`, always written.
+            ("FallFlying", Tag::Byte(i8::from(self.fall_flying))),
             ("Health", Tag::Float(self.health.to_bits())),
             ("AbsorptionAmount", Tag::Float(self.absorption.to_bits())),
             ("foodLevel", Tag::Int(self.food)),
@@ -4434,19 +4444,28 @@ impl Level {
                     self.active_effects
                         .iter()
                         .map(|(id, duration, amplifier, ambient, particles)| {
-                            Tag::compound([
-                                ("id", string(id)),
-                                ("duration", Tag::Int(*duration)),
+                            let mut effect =
+                                vec![("id", string(id)), ("duration", Tag::Int(*duration))];
+                            // MobEffectInstance.Details: amplifier defaults to zero.
+                            if *amplifier != 0 {
                                 // Same unsigned byte the codec writes:
                                 // `Mth.clamp` to 0..=255, then `byteValue`.
-                                (
+                                effect.push((
                                     "amplifier",
                                     Tag::Byte((*amplifier).clamp(0, 255) as u8 as i8),
-                                ),
-                                ("ambient", Tag::Byte(i8::from(*ambient))),
-                                ("show_particles", Tag::Byte(i8::from(*particles))),
-                                ("show_icon", Tag::Byte(i8::from(*particles))),
-                            ])
+                                ));
+                            }
+                            // optionalFieldOf("ambient", false) and
+                            // ("show_particles", true): defaults are not written;
+                            // show_icon is always written.
+                            if *ambient {
+                                effect.push(("ambient", Tag::Byte(1)));
+                            }
+                            if !*particles {
+                                effect.push(("show_particles", Tag::Byte(0)));
+                            }
+                            effect.push(("show_icon", Tag::Byte(i8::from(*particles))));
+                            Tag::compound(effect)
                         })
                         .collect(),
                 ),
@@ -4550,7 +4569,6 @@ impl Level {
                 ("seenCredits", Tag::Byte(0)),
                 ("HurtTime", Tag::Short(0)),
                 ("DeathTime", Tag::Short(0)),
-                ("FallFlying", Tag::Byte(0)),
             ] {
                 map.entry(key.into()).or_insert(value);
             }
@@ -5655,7 +5673,7 @@ mod tests {
 
     #[test]
     fn level_attachments_survive_save_and_load() {
-        use horizon_world::attachments::{
+        use horizon_mod_runtime::attachments::{
             AttachmentCodec, AttachmentError, AttachmentType, Attachments,
         };
         let dir =
@@ -5676,13 +5694,13 @@ mod tests {
             sync: false,
         };
         let mut map = Attachments::default();
-        key.set(&mut map, horizon_world::attachments::Holder::Level, 7)
+        key.set(&mut map, horizon_mod_runtime::attachments::Holder::Level, 7)
             .unwrap();
         save.save_attachments(&map).unwrap();
         assert_eq!(
             key.get(
                 &mut save.load_attachments(),
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(7)
         );
@@ -5691,7 +5709,7 @@ mod tests {
 
     #[test]
     fn chunk_attachments_survive_save_and_load() {
-        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
         let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
             return;
         };
@@ -5719,14 +5737,14 @@ mod tests {
         let mut extras = ChunkExtras::default();
         key.set(
             &mut extras.attachments,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             42,
         )
         .unwrap();
-        let mut block_data = horizon_world::attachments::Attachments::default();
+        let mut block_data = horizon_mod_runtime::attachments::Attachments::default();
         key.set(
             &mut block_data,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             21,
         )
         .unwrap();
@@ -5743,7 +5761,7 @@ mod tests {
         assert_eq!(
             key.get(
                 &mut Arc::make_mut(loaded.saved.as_mut().unwrap()).attachments,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(42)
         );
@@ -5752,7 +5770,7 @@ mod tests {
         assert_eq!(
             key.get(
                 &mut extras.block_entity_attachments[0].1,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(21)
         );
@@ -7607,6 +7625,74 @@ mod tests {
     }
 
     #[test]
+    fn effect_amplifier_default_is_omitted_from_saved_players() {
+        let effects = vec![
+            ("minecraft:luck".into(), -1, 0, false, false),
+            ("minecraft:speed".into(), 200, 1, true, false),
+            ("minecraft:regeneration".into(), 40, 128, false, true),
+            ("minecraft:strength".into(), -1, 255, false, true),
+        ];
+        for raw in [
+            None,
+            Some(Tag::compound([
+                ("H100Keep", Tag::Int(7)),
+                (
+                    "active_effects",
+                    Tag::List(vec![Tag::compound([
+                        ("id", string("minecraft:luck")),
+                        ("amplifier", Tag::Byte(42)),
+                    ])]),
+                ),
+            ])),
+        ] {
+            let level = Level {
+                active_effects: effects.clone(),
+                player_extra: raw.clone(),
+                ..Level::default()
+            };
+            let saved = level.player_tag();
+            let Some(Tag::List(entries)) = saved.get("active_effects") else {
+                panic!("modeled live effects must be saved even without raw input")
+            };
+            assert_eq!(entries.len(), 4);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|e| e.get("amplifier").cloned())
+                    .collect::<Vec<_>>(),
+                vec![
+                    None,
+                    Some(Tag::Byte(1)),
+                    Some(Tag::Byte(-128)),
+                    Some(Tag::Byte(-1))
+                ],
+            );
+            for (entry, (id, duration, _, ambient, particles)) in entries.iter().zip(&effects) {
+                assert_eq!(entry.get("id"), Some(&string(id)));
+                assert_eq!(entry.get("duration"), Some(&Tag::Int(*duration)));
+                // MobEffectInstance.Details.MAP_CODEC leaves out ambient false
+                // and show_particles true.
+                let ambient_tag = ambient.then_some(Tag::Byte(1));
+                assert_eq!(entry.get("ambient"), ambient_tag.as_ref());
+                let particles_tag = (!*particles).then_some(Tag::Byte(0));
+                assert_eq!(entry.get("show_particles"), particles_tag.as_ref());
+                assert_eq!(
+                    entry.get("show_icon"),
+                    Some(&Tag::Byte(i8::from(*particles)))
+                );
+            }
+            assert_eq!(
+                level.active_effects, effects,
+                "saving must not mutate live state"
+            );
+            assert_eq!(
+                saved.get("H100Keep"),
+                raw.as_ref().and_then(|t| t.get("H100Keep"))
+            );
+        }
+    }
+
+    #[test]
     fn effect_amplifier_255_reloads_as_an_unsigned_byte() {
         // `MobEffectInstance.MAX_AMPLIFIER` is 255. `Details.MAP_CODEC` writes
         // it with `ExtraCodecs.UNSIGNED_BYTE`: `255.byteValue()` is -1 and
@@ -8145,7 +8231,7 @@ mod tests {
 
     #[test]
     fn mod_attachments_save_in_horizons_namespace_only_when_some() {
-        use horizon_world::attachments::Attachments;
+        use horizon_mod_runtime::attachments::Attachments;
         let root = std::env::temp_dir().join(format!("horizon-attach-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);

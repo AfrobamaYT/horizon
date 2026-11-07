@@ -312,6 +312,60 @@ fn wasm_listeners(
     }
 }
 
+/// Generate the panicking defaults of a host area from each method's access declaration.
+/// The same declarations drive game forwarders in the build-time API generator.
+#[proc_macro_attribute]
+pub fn host_area(_attribute: TokenStream, input: TokenStream) -> TokenStream {
+    let mut area = parse_macro_input!(input as syn::ItemTrait);
+    let name = area.ident.to_string();
+    let union = [
+        "ClientBackendMut",
+        "BackendMut",
+        "ClientBackend",
+        "ServerHost",
+        "ClientHost",
+        "Backend",
+        "Host",
+    ]
+    .into_iter()
+    .find(|suffix| name.ends_with(suffix))
+    .unwrap_or("Host");
+    let union = if union == "ClientBackend" {
+        "Backend"
+    } else {
+        union
+    };
+    for member in &mut area.items {
+        let syn::TraitItem::Fn(method) = member else {
+            continue;
+        };
+        let Some(index) = method
+            .attrs
+            .iter()
+            .position(|attr| attr.path().is_ident("access"))
+        else {
+            return syn::Error::new_spanned(&method.sig, "host method needs #[access(Level)]")
+                .to_compile_error()
+                .into();
+        };
+        let attr = method.attrs.remove(index);
+        let level = match attr.parse_args::<syn::Ident>() {
+            Ok(level) => level,
+            Err(error) => return error.to_compile_error().into(),
+        };
+        method.attrs.retain(|attr| {
+            !attr.path().is_ident("static_call") && !attr.path().is_ident("service")
+        });
+        let operation = method.sig.ident.to_string();
+        let label = format!("{union}::{operation}");
+        method.default = Some(syn::parse_quote!({
+            crate::phase::unprovided(#label, #operation, crate::phase::LoadAccess::#level)
+        }));
+        method.semi_token = None;
+    }
+    quote!(#area).into()
+}
+
 /// Mark a trait mod or its renderer and derive its hook subscriptions.
 #[proc_macro_attribute]
 pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
@@ -695,7 +749,7 @@ pub fn if_installed(input: TokenStream) -> TokenStream {
         {
             // A `let` takes the attribute where an expression statement can't.
             #[cfg(feature = #name)]
-            let () = if ::mod_api::Host::is_loaded(&*#host, #name) #block;
+            let () = if ::mod_api::prelude::LevelsHost::is_loaded(&*#host, #name) #block;
             #[cfg(not(feature = #name))]
             let _ = &#host;
         }

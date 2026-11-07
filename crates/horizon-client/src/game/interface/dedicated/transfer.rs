@@ -4,7 +4,8 @@
 //! `player-export <uuid> [freeze]` (the source answers with the player's record) and
 //! `player-release <uuid> <hand-over> moved [announce] | abort` (the source lets the player go),
 //! `player-import <uuid> <json>` and `player-confirm <uuid> <hand-over>` (the target takes the
-//! record and lets the held player in). They run
+//! record and lets the held player in), and `transfer-status` (the counts a proxy reads before
+//! it sends players here). They run
 //! between two ticks, on the server thread, so the player is never caught half-way through a
 //! tick. The rules are `lan/arrivals.rs`'s. All of them are refused while `server.toml`'s
 //! `[transfer]` is off.
@@ -37,6 +38,16 @@ impl Game<'_> {
         let (level, line) = arrivals::request_log(verb, name.as_deref(), args, &reply);
         super::log(level, &line);
         reply
+    }
+
+    /// `transfer-status`: the counts a proxy reads before it sends players here
+    /// (`arrivals::status_request`). A proxy asks it every few seconds, so it writes nothing to
+    /// the log.
+    pub(super) fn transfer_status(&self) -> Value {
+        match self.lan.as_ref() {
+            Some(host) => arrivals::status_request(&host.hub, Instant::now()),
+            None => json!({ "error": "the server is not open to players" }),
+        }
     }
 
     fn run_player_request(&mut self, verb: &str, args: &str) -> Value {
@@ -147,8 +158,7 @@ impl Game<'_> {
     }
 
     /// What an import brought that the game keeps itself: the advancements (`PlayerAdvancements
-    /// .applyFrom` drops those this server lacks), the statistics, and the attachments of a whole
-    /// import, which saves copy from the game's own map (`guest_attachments_into`).
+    /// .applyFrom` drops those this server lacks) and the statistics.
     fn take_arrival_records(&mut self, uuid: u128, done: &horizon_client::lan::import::Imported) {
         let tree = self.advancement_tree();
         let host = self.lan.as_mut().expect("server host is present");
@@ -163,9 +173,6 @@ impl Game<'_> {
                     .retain(|id, _| tree.by_id.contains_key(id));
                 g.advancements = progress;
                 g.advancements_loaded = true;
-            }
-            if done.attachments {
-                self.guest_attachments.insert(g.conn, g.attachments.clone());
             }
             if let Some(stats) = &done.stats {
                 let play = host.play.entry(g.conn).or_default();
@@ -227,8 +234,7 @@ impl Game<'_> {
         let _ = self.finish_player_autosaves(true);
         let host = self.lan.as_mut().expect("server host is present");
         let i = host.hub.imported_arrival(uuid, id)?;
-        let mut g = host.hub.guests.remove(i);
-        Self::guest_attachments_into(&self.guest_attachments, &mut g);
+        let g = host.hub.guests.take_for_save(i);
         let written =
             horizon_client::lan::playerdata::save_now(&g, &self.world_root).and_then(|()| {
                 self.write_arrival_records(self.lan.as_ref().expect("server host is present"), &g)
@@ -297,10 +303,6 @@ impl Game<'_> {
                 .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
         }
         host.hub.send_inventory(i);
-        // What a mod attached to the player since it joined, as a save writes it.
-        host.hub.guests.update(i, |g| {
-            Self::guest_attachments_into(&self.guest_attachments, g)
-        });
         let advancements = if self.adv.tree.list.is_empty() {
             Value::Null
         } else {

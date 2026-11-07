@@ -546,7 +546,7 @@ pub(crate) fn load_tag_lists(
     kind: &str,
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let loaded =
         |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
@@ -774,6 +774,40 @@ impl Items {
                 block_for_item
                     .entry(&s.item)
                     .or_insert(BlockStateId(i as u32));
+            }
+        }
+        // Block.getItem is not an inverse of BlockItem.getBlock: several items
+        // may place the same block. Read their normal compiled bindings too.
+        #[derive(Default, serde::Deserialize)]
+        struct Bindings {
+            #[serde(default)]
+            items: HashMap<String, Binding>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Binding {
+            #[serde(default)]
+            class: Vec<String>,
+            #[serde(default)]
+            fields: Fields,
+        }
+        #[derive(Default, serde::Deserialize)]
+        struct Fields {
+            block: Option<String>,
+        }
+        let bindings = match fs::read(root.join("block-behaviours.json")) {
+            Ok(bytes) => serde_json::from_slice::<Bindings>(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Bindings::default(),
+            Err(error) => return Err(error.into()),
+        };
+        for (item, binding) in &bindings.items {
+            if binding.class.iter().any(|name| name == "BlockItem")
+                && let Some(state) = binding
+                    .fields
+                    .block
+                    .as_deref()
+                    .and_then(|block| registry.default_state(block))
+            {
+                block_for_item.entry(item).or_insert(state);
             }
         }
         let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
@@ -2376,6 +2410,62 @@ pub fn bucket_contents(
 }
 
 /// One `MobEffectInstance` of an `apply_effects` consume effect (its codec's defaults).
+/// `DeathProtection.CODEC`: the `death_effects` of a `minecraft:death_protection`
+/// component, in order (`applyEffects` runs each one). A missing or empty
+/// list, as in `death_protection={}`, has none.
+pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
+    component
+        .get("death_effects")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_consume_effect)
+        .collect()
+}
+
+#[cfg(test)]
+mod death_effects_tests {
+    use super::*;
+    #[test]
+    fn the_totems_component_reads_clear_then_three_effects() {
+        let totem = serde_json::json!({"death_effects": [
+            {"type": "minecraft:clear_all_effects"},
+            {"type": "minecraft:apply_effects", "effects": [
+                {"amplifier": 1, "duration": 900, "id": "minecraft:regeneration", "show_icon": true},
+                {"amplifier": 1, "duration": 100, "id": "minecraft:absorption", "show_icon": true},
+                {"duration": 800, "id": "minecraft:fire_resistance", "show_icon": true}
+            ]}
+        ]});
+        let effects = death_effects(&totem);
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0], ConsumeEffect::ClearAllEffects);
+        let ConsumeEffect::ApplyEffects {
+            effects,
+            probability,
+        } = &effects[1]
+        else {
+            panic!("second effect is apply_effects");
+        };
+        assert_eq!(*probability, 1.0);
+        let ids: Vec<_> = effects
+            .iter()
+            .map(|e| (e.id.as_str(), e.duration, e.amplifier))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("minecraft:regeneration", 900, 1),
+                ("minecraft:absorption", 100, 1),
+                ("minecraft:fire_resistance", 800, 0)
+            ]
+        );
+    }
+    #[test]
+    fn an_empty_component_has_no_effects() {
+        assert!(death_effects(&serde_json::json!({})).is_empty());
+    }
+}
+
 fn consume_effect_spec(e: &Value) -> Option<ConsumeEffectSpec> {
     let flag = |key: &str, default: bool| e.get(key).and_then(|v| v.as_bool()).unwrap_or(default);
     Some(ConsumeEffectSpec {
@@ -2549,7 +2639,7 @@ mod tests {
 
     #[test]
     fn tag_conditions_use_enabled_server_ids_before_each_replace_and_reload() {
-        use horizon_mods::{Side, enabled::EnabledMods};
+        use horizon_mod_package::{Side, enabled::EnabledMods};
         let root = std::env::temp_dir().join(format!(
             "horizon-conditional-tags-{}-{}",
             std::process::id(),
@@ -2614,7 +2704,7 @@ mod tests {
         ] {
             let inventory = EnabledMods::new(side.map(|side| ("code_only".into(), side)));
             fs::write(
-                root.join(horizon_mods::enabled::MARKER),
+                root.join(horizon_mod_package::enabled::MARKER),
                 serde_json::to_vec(&inventory).unwrap(),
             )
             .unwrap();

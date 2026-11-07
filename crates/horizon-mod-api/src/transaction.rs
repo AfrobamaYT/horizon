@@ -18,19 +18,19 @@ pub struct Transaction(pub(crate) ());
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
 /// ```
-/// use mod_api::{BlockEntityRef, HostTransaction, ServerHost};
+/// use mod_api::{BlockEntityError, BlockEntityRef, HostTransaction, ServerHost};
 /// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
-///     let _: Result<(), ()> = host.transaction(|host, _tx| {
-///         block.set_changed(host);
+///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }
 /// ```
 /// ```compile_fail
-/// use mod_api::{BlockEntityRef, Host, HostTransaction};
+/// use mod_api::{BlockEntityError, BlockEntityRef, Host, HostTransaction};
 /// fn write(host: &mut dyn Host, block: BlockEntityRef) {
-///     let _: Result<(), ()> = host.transaction(|host, _tx| {
-///         block.set_changed(host);
+///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }
@@ -107,7 +107,8 @@ mod tests {
         closed: Vec<(usize, bool)>,
     }
     impl Host for Journal {}
-    impl ServerHost for Journal {
+    mod_api::impl_host_areas!(Journal);
+    impl mod_api::prelude::ModStateServerHost for Journal {
         fn transaction_open(&mut self, _: TransactionSeal) {
             self.depth += 1;
         }
@@ -116,6 +117,8 @@ mod tests {
             self.depth -= 1;
         }
     }
+    impl ServerHost for Journal {}
+    mod_api::impl_server_host_areas!(Journal, except(mod_state));
 
     #[test]
     fn a_transaction_commits_on_ok_and_aborts_on_err_and_nests() {

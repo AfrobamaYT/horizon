@@ -273,7 +273,7 @@ pub enum ReloadStageError {
     /// The next resource generation or its enabled-package inventory could not be built.
     DataSource(String),
     /// An accepted root's original jars or input record could not be read.
-    OriginalJars(horizon_mods::manifest::JarInputsError),
+    OriginalJars(horizon_mod_package::manifest::JarInputsError),
     /// The listeners could not be ordered.
     Order(ReloadOrderError),
     /// A listener's `prepare` failed.

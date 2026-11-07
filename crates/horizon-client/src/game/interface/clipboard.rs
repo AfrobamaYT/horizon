@@ -18,13 +18,13 @@ impl Game<'_> {
     /// pasting into its own field. None at any other moment (a tick, a frame, a packet),
     /// so no mod reads the clipboard without the player doing something, and None on a
     /// server.
-    pub(super) fn native_clipboard_text(&self) -> Option<String> {
+    pub(super) fn clipboard_text(&self) -> Option<String> {
         (self.native_window() && self.user_input.get()).then(|| self.clipboard.text())
     }
     /// Puts `text` on the clipboard (`KeyboardHandler.setClipboard`) on the same terms as
-    /// `native_clipboard_text` reads it. False, with nothing copied, at any other moment or
+    /// `clipboard_text` reads it. False, with nothing copied, at any other moment or
     /// on a server; empty text copies nothing, as vanilla's.
-    pub(super) fn native_set_clipboard_text(&self, text: &str) -> bool {
+    pub(super) fn set_clipboard_text(&self, text: &str) -> bool {
         if !self.native_window() || !self.user_input.get() {
             return false;
         }
@@ -39,7 +39,7 @@ impl Game<'_> {
             return None;
         }
         let m = self.modifiers;
-        let held = |keys: [KeyCode; 2]| keys.iter().any(|k| self.keys.raw(k));
+        let held = |keys: [KeyCode; 2]| keys.iter().any(|k| self.physical_keys.contains(k));
         clipboard::edit_shortcut(
             clipboard::shortcut_letter(&event.logical_key, event.physical_key),
             self.has_control_down_with_quirk(),
@@ -49,9 +49,11 @@ impl Game<'_> {
     }
     /// `InputWithModifiers.hasControlDownWithQuirk`: the edit shortcuts'
     /// modifier (`InputQuirks.EDIT_SHORTCUT_KEY_MODIFIER`: Cmd on macOS, Ctrl
-    /// elsewhere), held on the keyboard or by an agent.
+    /// elsewhere), held on the keyboard or by an agent. It reads the physical
+    /// keys, never `keys`: a latched sprint or sneak toggle puts Control or
+    /// Shift in `keys` without the key being down.
     pub(super) fn has_control_down_with_quirk(&self) -> bool {
-        let held = |keys: [KeyCode; 2]| keys.iter().any(|k| self.keys.raw(k));
+        let held = |keys: [KeyCode; 2]| keys.iter().any(|k| self.physical_keys.contains(k));
         if cfg!(target_os = "macos") {
             self.modifiers.super_key() || held([KeyCode::SuperLeft, KeyCode::SuperRight])
         } else {

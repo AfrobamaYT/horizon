@@ -13,11 +13,11 @@ pub use {
         connection_kind::ConnectionKind, dimension::Dimension as LevelDimension,
         neighbour_update::NeighbourUpdate,
     },
+    horizon_mod_runtime::attachments::{
+        AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
+        AttachmentType, AttachmentValue, AttachmentWrite, Holder,
+    },
     horizon_world::{
-        attachments::{
-            AttachmentCodec, AttachmentError, AttachmentForm, AttachmentPolicy, AttachmentStore,
-            AttachmentType, AttachmentValue, AttachmentWrite, Holder,
-        },
         level::{BlockId, LandingWrite, PlacementContext},
         loot::{LootStack, NativeLootContext},
         registry::BlockStateId,
@@ -25,4 +25,4 @@ pub use {
 };
 // hidden: the game's maps behind the store, not part of the mod surface
 #[doc(hidden)]
-pub use horizon_world::attachments::{AttachmentAccess, AttachmentHost, Attachments};
+pub use horizon_mod_runtime::attachments::{AttachmentAccess, AttachmentHost, Attachments};

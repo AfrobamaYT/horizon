@@ -21,7 +21,7 @@ mod internals_bench;
 /// One overworld, and nothing else.
 struct World;
 
-impl Host for World {
+impl mod_api::prelude::EntitiesHost for World {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         (dimension == "minecraft:overworld")
             .then(|| LevelRef::new(NativeWorldEpoch::new(1), mod_api::DimensionKey::OVERWORLD))
@@ -30,12 +30,16 @@ impl Host for World {
         None
     }
 }
+impl Host for World {}
+mod_api::impl_host_areas!(World, except(entities));
 
-impl ServerHost for World {
+impl mod_api::prelude::ConfigServerHost for World {
     fn tick_stats(&self) -> (f32, f64) {
         (20.0, 50.0)
     }
 }
+impl ServerHost for World {}
+mod_api::impl_server_host_areas!(World, except(config));
 
 /// One call of the hook `work` names: the server tick for `tick`, else the chat hook with
 /// `work` as the message; what the mod wrote back.
@@ -120,8 +124,10 @@ fn load(budgets: Budgets) -> horizon_mod_wasm::Loaded {
         },
         &std_member,
         vec![horizon_mod_wasm::WasmPackage {
-            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            manifest: horizon_mod_package::Package::read(&package)
+                .unwrap()
+                .manifest,
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
@@ -298,9 +304,9 @@ fn a_wasm_mod_against_the_same_mod_native() {
 }
 
 /// A server's tick for one listener at the tick point.
-fn tick_at_point(listener: &dyn mod_points::Points) -> bool {
+fn tick_at_point(listen: impl FnOnce(mod_api::HostSide<'_>, &mut mod_points::TickArgs)) -> bool {
     let mut args = mod_points::TickArgs::__new();
-    listener.tick(mod_api::HostSide::Server(&mut World), &mut args);
+    listen(mod_api::HostSide::Server(&mut World), &mut args);
     args.cancel
 }
 
@@ -308,27 +314,18 @@ fn tick_at_point(listener: &dyn mod_points::Points) -> bool {
 #[ignore = "needs tests/bench/hook built to mod.wasm and a release build (CI's wasm-bench job)"]
 fn a_point_filled_by_a_wasm_mod() {
     use std::sync::atomic::Ordering;
-    // The bench mod, its manifest listing the tick point it listens at (its own lists none, so
-    // the other tests here load it without registering a listener).
+    // The bench mod and its manifest-generated tick listener.
     let path = |var: &str| std::path::PathBuf::from(std::env::var(var).expect(var));
     let package = path("HORIZON_WASM_BENCH");
-    let built = horizon_mods::Package::read(&package).unwrap().manifest;
-    let wasm = built.wasm.as_ref().unwrap();
-    let manifest = horizon_mods::manifest::Manifest::parse(&format!(
-        "id = \"bench_mod\"\nname = \"Benchmark mod\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
-         capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
-         [[native.injection]]\nid = \"tick\"\ntarget = \"horizon_client::game::Game<'_>::tick\"\n\
-         kind = \"HEAD\"\ntrait_method = \"tick\"\n",
-        wasm.sha512(),
-        wasm.toolchain()
-    ))
-    .unwrap();
+    let manifest = horizon_mod_package::Package::read(&package)
+        .unwrap()
+        .manifest;
     let mut loaded = horizon_mod_wasm::load(
         &horizon_mod_wasm::RuntimeConfig::default(),
         &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),
         vec![horizon_mod_wasm::WasmPackage {
             manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
@@ -343,13 +340,12 @@ fn a_point_filled_by_a_wasm_mod() {
     let empty = timed(1_000_000, || {
         std::hint::black_box(slots[std::hint::black_box(quiet)].load(Ordering::Relaxed));
     });
-    let native: &'static dyn mod_points::Points = Box::leak(Box::new(bench_mod::Mod));
     let native_time = timed(20_000, || {
-        std::hint::black_box(tick_at_point(native));
+        std::hint::black_box(tick_at_point(bench_mod::tick));
     });
     let wasm_time = timed(20_000, || {
         mod_points::__private::fire(mod_points::PointId::Tick, "tick", &mut |listener| {
-            std::hint::black_box(tick_at_point(listener));
+            std::hint::black_box(tick_at_point(|host, args| listener.tick(host, args)));
         });
     });
     let table = format!(

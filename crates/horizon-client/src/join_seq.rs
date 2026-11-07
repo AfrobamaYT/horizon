@@ -9,8 +9,11 @@
 //! LOGS: none. READS-BY: `game/entities/entity.rs` (the join-order walk, the save order).
 //! ENDS-WHEN: kinds share one stored entity list, which is its own order.
 
-use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    ops::{Deref, Index, IndexMut, RangeBounds},
+    slice::SliceIndex,
+};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
@@ -68,54 +71,208 @@ macro_rules! impl_joined {
     )*};
 }
 
-/// One kind's entity list. It is a `Vec` in every way but one: an entity that
-/// is put in without a join number (`push`, `insert`, `extend`) gets the next
-/// one, so a join cannot be missed by a spawn site. One already numbered (taken
-/// out and put back, or a list rebuilt) keeps its number.
+/// One kind's entity list, with explicit structural operations and immutable slice access.
+/// `DIRECT = false` closes mutable element access: state edits are scoped and
+/// whole-value replacement must carry the attachment slot through `store_back`.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// list[0] = 1;
+/// ```
+/// An entity put in without a join number gets the next one; a numbered entity
+/// keeps its number when taken out and put back. Mutable element access is for
+/// entity state; identity changes and whole-entity replacement remain audited
+/// at their owning game boundaries.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// let _: &mut Vec<u32> = &mut list;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// let _: &mut [u32] = &mut list;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// list.iter_mut().as_mut_slice().reverse();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32>::default();
+/// (&mut list).into_iter().as_mut_slice().reverse();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let _: JoinList<u32> = vec![1].into();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let list = JoinList::<u32>::default();
+/// let _: Vec<u32> = list.into();
+/// ```
 #[derive(Clone, Debug)]
-pub struct JoinList<T>(Vec<T>);
+pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
 
-impl<T> Default for JoinList<T> {
+impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-impl<T> JoinList<T> {
+impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
     /// Move a batch back without changing its join numbers or order.
     pub fn append(&mut self, other: &mut Self) {
         self.0.append(&mut other.0);
     }
-}
-
-impl<T> From<Vec<T>> for JoinList<T> {
-    /// A list put back after a tick took it: the same storage, nothing copied
-    /// and nothing renumbered. An entity in it that never joined stays
-    /// unnumbered, which the join-order walk reports.
-    fn from(list: Vec<T>) -> Self {
-        Self(list)
+    pub fn remove(&mut self, index: usize) -> T {
+        self.0.remove(index)
+    }
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        self.0.swap_remove(index)
+    }
+    pub fn pop(&mut self) -> Option<T> {
+        self.0.pop()
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+    pub fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+    pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
+        self.0.retain(keep);
+    }
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
+        self.0.drain(range)
+    }
+    pub fn swap(&mut self, a: usize, b: usize) {
+        self.0.swap(a, b);
     }
 }
 
-impl<T> From<JoinList<T>> for Vec<T> {
-    fn from(list: JoinList<T>) -> Self {
-        list.0
+impl<T> JoinList<T> {
+    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
+        self.0.retain_mut(keep);
+    }
+    /// Run an audited state edit without returning a mutable entity reference.
+    /// Whole-entity replacement belongs to the owning residency boundary.
+    ///
+    /// ```compile_fail
+    /// use horizon_client_lib::join_seq::JoinList;
+    /// let mut list = JoinList::<u32>::default();
+    /// let escaped = list.update(0, |entity| entity);
+    /// ```
+    pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
+        edit(&mut self.0[index])
+    }
+    /// Edit each entity in list order without lending out mutable iteration.
+    pub fn for_each_mut(&mut self, edit: impl FnMut(&mut T)) {
+        self.0.iter_mut().for_each(edit);
+    }
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        IterMut(self.0.iter_mut())
+    }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.0.get_mut(index)
+    }
+    pub fn last_mut(&mut self) -> Option<&mut T> {
+        self.0.last_mut()
+    }
+    /// Borrow distinct entities without lending out a mutable slice.
+    pub fn get_disjoint_mut<const N: usize>(
+        &mut self,
+        indices: [usize; N],
+    ) -> Result<[&mut T; N], std::slice::GetDisjointMutError> {
+        self.0.get_disjoint_mut(indices)
     }
 }
 
-impl<T> Deref for JoinList<T> {
-    type Target = Vec<T>;
-    fn deref(&self) -> &Vec<T> {
+impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, false> {
+    /// Audited state edit; debug assertions detect a changed bound registration.
+    pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
+        checked_edit(&mut self.0[index], edit)
+    }
+    pub fn for_each_mut(&mut self, mut edit: impl FnMut(&mut T)) {
+        for entity in &mut self.0 {
+            checked_edit(entity, &mut edit);
+        }
+    }
+    /// Store a tick clone without dropping the owner's lifetime slot.
+    pub fn store_back(&mut self, index: usize, entity: T) -> bool
+    where
+        T: Joined,
+    {
+        let join = entity.join_seq();
+        let Some(index) = Some(index)
+            .filter(|&i| self.0.get(i).is_some_and(|old| old.join_seq() == join))
+            .or_else(|| self.0.iter().position(|old| old.join_seq() == join))
+        else {
+            return false;
+        };
+        store_back(&mut self.0[index], entity);
+        true
+    }
+}
+
+fn checked_edit<T: horizon_mod_runtime::attachments::HasAttachmentLifetime, R>(
+    entity: &mut T,
+    edit: impl FnOnce(&mut T) -> R,
+) -> R {
+    #[cfg(debug_assertions)]
+    let before = entity.attachment_lifetime().registration();
+    let result = edit(entity);
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        before.is_none_or(|old| entity
+            .attachment_lifetime()
+            .registration()
+            .is_some_and(|current| old.same_registration(&current))),
+        "entity edit overwrote its registration"
+    );
+    result
+}
+
+/// Carry lifetime authority from a stored owner into its unbound tick clone.
+pub fn store_back<T: horizon_mod_runtime::attachments::HasAttachmentLifetime>(
+    old: &mut T,
+    mut new: T,
+) {
+    debug_assert!(!new.attachment_lifetime().is_bound());
+    std::mem::swap(old.attachment_lifetime(), new.attachment_lifetime());
+    *old = new;
+}
+
+impl<T, const DIRECT: bool> Deref for JoinList<T, DIRECT> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
         &self.0
     }
 }
-impl<T> DerefMut for JoinList<T> {
-    fn deref_mut(&mut self) -> &mut Vec<T> {
-        &mut self.0
+impl<T, const DIRECT: bool> AsRef<[T]> for JoinList<T, DIRECT> {
+    fn as_ref(&self) -> &[T] {
+        self
+    }
+}
+impl<T, I: SliceIndex<[T]>, const DIRECT: bool> Index<I> for JoinList<T, DIRECT> {
+    type Output = I::Output;
+    fn index(&self, index: I) -> &Self::Output {
+        &self.0[index]
+    }
+}
+impl<T> IndexMut<usize> for JoinList<T> {
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        &mut self.0[index]
     }
 }
 
-impl<T: Joined> JoinList<T> {
+impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
     fn number(entity: &mut T) {
         if !entity.join_seq().is_joined() {
             entity.set_join_seq(JoinSeq::next());
@@ -136,21 +293,57 @@ impl<T: Joined> JoinList<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a JoinList<T> {
+impl<T: Joined, const DIRECT: bool> FromIterator<T> for JoinList<T, DIRECT> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        let entities = entities.into_iter();
+        let mut list = Self::with_capacity(entities.size_hint().0);
+        list.extend(entities);
+        list
+    }
+}
+
+impl<'a, T, const DIRECT: bool> IntoIterator for &'a JoinList<T, DIRECT> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
 }
-impl<'a, T> IntoIterator for &'a mut JoinList<T> {
+/// Mutable entity iteration without lending out the backing slice.
+/// Unlike `slice::IterMut`, this cannot reorder the remaining list as a slice.
+pub struct IterMut<'a, T>(std::slice::IterMut<'a, T>);
+
+impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
-    type IntoIter = std::slice::IterMut<'a, T>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter_mut()
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.0.nth(n)
     }
 }
-impl<T> IntoIterator for JoinList<T> {
+impl<T> DoubleEndedIterator for IterMut<'_, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.0.nth_back(n)
+    }
+}
+impl<T> ExactSizeIterator for IterMut<'_, T> {}
+impl<T> std::iter::FusedIterator for IterMut<'_, T> {}
+
+impl<'a, T> IntoIterator for &'a mut JoinList<T> {
+    type Item = &'a mut T;
+    type IntoIter = IterMut<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -169,9 +362,124 @@ mod tests {
     }
     crate::impl_joined!(Entity);
 
+    fn entity(value: u32) -> Entity {
+        Entity {
+            join: JoinSeq::UNJOINED,
+            value,
+        }
+    }
+
+    fn snapshot(list: &JoinList<Entity>) -> Vec<(u32, JoinSeq)> {
+        list.iter().map(|e| (e.value, e.join)).collect()
+    }
+
+    #[test]
+    fn scoped_edits_preserve_order_and_keep_results_local_to_each_entity() {
+        let mut list: JoinList<_> = (1..=3).map(entity).collect();
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        assert_eq!(
+            list.update(1, |e| {
+                e.value += 10;
+                e.value
+            }),
+            12
+        );
+        let mut visited = Vec::new();
+        list.for_each_mut(|e| {
+            if e.value == 12 {
+                return;
+            }
+            visited.push(e.value);
+            e.value *= 2;
+        });
+        assert_eq!(visited, [1, 3]);
+        assert_eq!(
+            snapshot(&list),
+            [(2, joins[0]), (12, joins[1]), (6, joins[2])]
+        );
+    }
+
+    #[test]
+    fn collection_insert_and_extend_only_number_new_entities() {
+        let old = JoinSeq::next();
+        let another = JoinSeq::next();
+        let mut list: JoinList<_> = [
+            entity(1),
+            Entity {
+                join: old,
+                value: 2,
+            },
+        ]
+        .into_iter()
+        .collect();
+        let first = list[0].join;
+        list.insert(1, entity(3));
+        let inserted = list[1].join;
+        list.extend([
+            entity(4),
+            Entity {
+                join: another,
+                value: 5,
+            },
+        ]);
+        assert!(old < first && first < inserted && inserted < list[3].join);
+        assert_eq!(
+            snapshot(&list),
+            [
+                (1, first),
+                (3, inserted),
+                (2, old),
+                (4, list[3].join),
+                (5, another)
+            ]
+        );
+    }
+
+    #[test]
+    fn removals_and_retention_preserve_survivor_numbers_and_order() {
+        let mut list: JoinList<_> = (1..=7).map(entity).collect();
+        let before = snapshot(&list);
+        assert_eq!(list.remove(1).value, 2);
+        assert_eq!(list.swap_remove(1).value, 3);
+        list.retain(|e| e.value != 4);
+        list.retain_mut(|e| {
+            e.value *= 10;
+            e.value != 50
+        });
+        assert_eq!(
+            snapshot(&list),
+            [(10, before[0].1), (70, before[6].1), (60, before[5].1)]
+        );
+        let [first, last] = list.get_disjoint_mut([0, 2]).unwrap();
+        first.value += 1;
+        last.value += 1;
+        assert_eq!(
+            snapshot(&list),
+            [(11, before[0].1), (70, before[6].1), (61, before[5].1)]
+        );
+    }
+
+    #[test]
+    fn partial_drain_and_swap_keep_the_remaining_joins() {
+        let mut list: JoinList<_> = (1..=6).map(entity).collect();
+        let before = snapshot(&list);
+        {
+            let mut drain = list.drain(1..4);
+            assert_eq!(drain.next().unwrap().join, before[1].1);
+            // Dropping a partially consumed drain still removes its whole range.
+        }
+        list.swap(0, 2);
+        assert_eq!(snapshot(&list), [before[5], before[4], before[0]]);
+        assert_eq!(list.pop().unwrap().join, before[0].1);
+        list.truncate(1);
+        assert_eq!(snapshot(&list), [before[5]]);
+        list.clear();
+        assert!(list.is_empty());
+    }
+
     #[test]
     fn append_preserves_batch_numbers_and_receiver_order() {
-        let mut list = JoinList::default();
+        let mut list = JoinList::<Entity>::default();
         for value in 1..=2 {
             list.push(Entity {
                 join: JoinSeq::UNJOINED,

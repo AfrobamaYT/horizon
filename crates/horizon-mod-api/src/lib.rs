@@ -4,6 +4,9 @@
 //! Hooks use `&self + Send + Sync` for shared and reentrant calls; see `docs/modding/src/how-to/native-mods.md`.
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 #![deny(missing_docs)]
+// The generated `impl_*_areas!` macros are exported for test doubles outside the crate, and this crate's
+// own test doubles use them by path too.
+#![allow(macro_expanded_macro_exports_accessed_by_absolute_paths)]
 extern crate self as mod_api;
 
 /// A saved fluid name retained for the lifetime of the process.
@@ -60,6 +63,22 @@ pub enum GameRuleError {
     /// The namespace does not belong to the declaring mod.
     ForeignNamespace,
     /// The category is already declared.
+    Duplicate,
+}
+
+/// Why an entity type's attribute declaration was refused
+/// ([`Registrar::declare_entity_attributes`](crate::Registrar)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EntityAttributeError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// The set declares the same attribute twice.
+    DuplicateAttribute,
+    /// A base value is not finite.
+    NotFinite,
+    /// Another declaration already covers the entity type.
     Duplicate,
 }
 
@@ -189,6 +208,17 @@ impl FluidState {
     /// Whether the engine identifies this state as a source.
     pub fn is_source(self) -> bool {
         self.source
+    }
+    /// Match carried vanilla properties locally. Unknown names or noncanonical values
+    /// do not match. Validate against `host.fluid_states()` separately for indexed errors.
+    pub fn matches(self, constraints: &[StateConstraint]) -> bool {
+        constraints.iter().all(|c| match c.name.as_str() {
+            "falling" if !self.is_empty() => c.value == if self.falling { "true" } else { "false" },
+            "level" if !self.is_empty() && !self.source => {
+                (1..=8).contains(&self.amount) && c.value.as_bytes() == [b'0' + self.amount]
+            }
+            _ => false,
+        })
     }
 }
 
@@ -1070,7 +1100,7 @@ pub struct NativeScreenView<'a> {
     /// the inventory menu's). Counted, not listed.
     pub slots: usize,
     /// The pointer in GUI pixels (`Screen.mouseX`, `mouseY`, from the
-    /// window's top left), as `native_cursor` gives it: for hover highlights.
+    /// window's top left), as `cursor` gives it: for hover highlights.
     pub mouse: [f32; 2],
     /// This frame's partial tick (`getGameTimeDeltaPartialTick(false)`, 0 to
     /// 1): what the screen draws animation against.
@@ -1165,7 +1195,7 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// An item the panel shows (`native_panel_items`): its id
+/// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1184,7 +1214,7 @@ pub struct NativeStack {
 #[non_exhaustive]
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
-    /// `native_panel_items`' list.
+    /// `panel_items`' list.
     Clicked {
         /// The item's index in the panel's list.
         index: u32,
@@ -3094,6 +3124,31 @@ impl BossBarOverlay {
     }
 }
 
+/// One boss bar the client shows (vanilla's `LerpingBossEvent`), as
+/// `customize_boss_event_progress` reads it. Any bar the server sends: mob,
+/// raid and `/bossbar` ones alike.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientBossBar {
+    /// The bar's UUID, as the server's boss event packets name it.
+    pub uuid: u128,
+    /// The title drawn above the bar.
+    pub name: Text,
+    /// The fill drawn this frame, 0 to 1 (`getProgress`, eased toward the
+    /// server's value).
+    pub progress: f32,
+    /// The bar's color.
+    pub color: BossBarColor,
+    /// The notches drawn over it.
+    pub overlay: BossBarOverlay,
+    /// Whether it darkens the sky (`shouldDarkenScreen`).
+    pub darken_screen: bool,
+    /// Whether it plays the boss music (`shouldPlayBossMusic`).
+    pub play_boss_music: bool,
+    /// Whether it thickens the fog (`shouldCreateWorldFog`).
+    pub create_world_fog: bool,
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
 ///
@@ -3209,14 +3264,30 @@ pub struct NativePlayerAbilities {
     pub walk_speed: f32,
 }
 
-/// A block entity at a position in an open level. A replacement at the same
-/// position resolves to the new entity, unlike vanilla's object identity.
-/// A removed entity or a handle from an earlier world open reads as `None`.
+/// One block entity in an open level, identified by its lifecycle generation.
+/// Removal, replacement or chunk reload invalidates the handle, even at the same
+/// position. In-place data edits and temporary tick take/put preserve identity.
+/// Stale handles read as `None`; Result-returning methods report `Stale`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
     pub(crate) level: LevelRef,
     pub(crate) position: [i32; 3],
+    pub(crate) generation: u64,
+}
+
+/// Why a block-entity operation could not resolve its target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlockEntityError {
+    /// The entity was removed, replaced, unloaded or belongs to another level epoch.
+    Stale,
+}
+
+impl NoBackend for BlockEntityError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
@@ -3435,7 +3506,7 @@ pub mod testing {
             }
         }
         let controllers: &'static [_] =
-            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
+            Box::leak(super::parts::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
         let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
@@ -4580,6 +4651,14 @@ mod tests {
     #[test]
     fn dimension_keys_name_one_dimension_each() {
         use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(
+            dimension_key("minecraft:overworld"),
+            DimensionKey::OVERWORLD
+        );
+        assert_eq!(
+            dimension_id(DimensionKey::OVERWORLD),
+            Some("minecraft:overworld")
+        );
         assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
         assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
         let first = dimension_key("test:first");
@@ -4595,7 +4674,7 @@ mod tests {
     #[test]
     fn native_host_returns_typed_recipe_rules() {
         struct Recipes(Arc<[Recipe]>);
-        impl Host for Recipes {
+        impl mod_api::prelude::RecipesHost for Recipes {
             fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
                 if kind == "minecraft:crafting_transmute" {
                     self.0.clone()
@@ -4604,6 +4683,8 @@ mod tests {
                 }
             }
         }
+        impl Host for Recipes {}
+        mod_api::impl_host_areas!(Recipes, except(recipes));
         let mut recipe = Recipe::new(
             "test:recipe",
             "minecraft:crafting_transmute",
@@ -4645,7 +4726,9 @@ mod tests {
     fn client_menu_click_refuses_a_host_without_its_backend() {
         struct Empty;
         impl Host for Empty {}
+        mod_api::impl_host_areas!(Empty);
         impl ClientHost for Empty {}
+        mod_api::impl_client_host_areas!(Empty);
         let player = __private::game::player_ref(EntityRef::new(NativeWorldEpoch::new(1), 7), 42);
         let menu = __private::game::menu_ref(player, 0, 1);
         assert!(!menu.click(
@@ -4674,11 +4757,13 @@ mod tests {
     #[test]
     fn an_optional_dependency_runs_only_when_built_with_and_installed() {
         struct Installed(&'static str);
-        impl Host for Installed {
+        impl mod_api::prelude::LevelsHost for Installed {
             fn is_loaded(&self, id: &str) -> bool {
                 id == self.0
             }
         }
+        impl Host for Installed {}
+        mod_api::impl_host_areas!(Installed, except(levels));
         // The `testing` feature stands for a dependency's: without it the block isn't compiled,
         // with it the game is asked.
         let ran = std::cell::Cell::new(0);
@@ -4701,33 +4786,42 @@ mod tests {
         lines: Vec<Text>,
     }
 
-    impl Backend for Reader {
+    impl mod_api::prelude::LevelsBackend for Reader {
         fn level_block(&self, _level: LevelRef, _pos: [i32; 3]) -> Option<String> {
             Some(self.block.to_string())
         }
     }
+    impl Backend for Reader {}
+    mod_api::impl_backend_areas!(Reader, except(levels));
 
-    impl Host for Reader {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
+    impl mod_api::prelude::EntitiesHost for Reader {
         fn level(&self, dimension: &str) -> Option<LevelRef> {
             (dimension == "minecraft:overworld")
                 .then(|| LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD))
         }
     }
+    impl Host for Reader {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    mod_api::impl_host_areas!(Reader, except(entities));
     impl ClientHost for Reader {}
-    impl ServerHost for Reader {
+    mod_api::impl_client_host_areas!(Reader);
+    impl mod_api::prelude::ServicesServerHost for Reader {
         fn players(&self) -> &dyn Players {
             self
         }
         fn commands(&mut self) -> &mut dyn Commands {
             self
         }
+    }
+    impl ServerHost for Reader {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
         }
     }
+    mod_api::impl_server_host_areas!(Reader, except(services));
     impl Commands for Reader {}
     impl Players for Reader {
         fn acting_player(&self) -> Option<PlayerRef> {
@@ -4737,13 +4831,15 @@ mod tests {
             ))
         }
     }
-    impl BackendMut for Reader {
+    impl mod_api::prelude::PlayersBackendMut for Reader {
         fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
             assert_eq!(player.uuid(), 7);
             self.lines.push(line);
             true
         }
     }
+    impl BackendMut for Reader {}
+    mod_api::impl_backend_mut_areas!(Reader, except(players));
 
     #[test]
     fn server_services_forward_commands_messages_and_player_identity() {
@@ -4753,7 +4849,8 @@ mod tests {
             lines: RefCell<Vec<String>>,
         }
         impl Host for Server {}
-        impl ServerHost for Server {
+        mod_api::impl_host_areas!(Server);
+        impl mod_api::prelude::ServicesServerHost for Server {
             fn commands(&mut self) -> &mut dyn Commands {
                 self
             }
@@ -4764,6 +4861,8 @@ mod tests {
                 self
             }
         }
+        impl ServerHost for Server {}
+        mod_api::impl_server_host_areas!(Server, except(services));
         impl Commands for Server {
             fn run_command(&mut self, line: &str) -> bool {
                 self.lines.get_mut().push(line.to_owned());

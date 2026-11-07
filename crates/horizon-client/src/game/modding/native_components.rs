@@ -25,7 +25,7 @@ impl Game<'_> {
     /// packs' and native mods' changes included. Read from the item report's JSON, so a
     /// number is an `Int`, `Long` or `Double` and a boolean a `Byte`. None where the item
     /// hasn't the component, and for an unknown item.
-    pub(super) fn native_item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
+    pub(super) fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
         let prototype = self.pack.item_renderer.models.prototypes.get(item)?;
         Some(horizon_client::scoreboard::json_to_tag(
             prototype.get(component)?,
@@ -34,35 +34,31 @@ impl Game<'_> {
     /// Item `item`'s cooking-fuel burn time in ticks (`FuelValues.burnDuration` of its `cooking_fuel`
     /// component, the data pack's context int provider resolved), None where it is no fuel. API
     /// @API:item_components@.
-    pub(super) fn native_item_burn_time(&self, item: &str) -> Option<i32> {
+    pub(super) fn item_burn_time(&self, item: &str) -> Option<i32> {
         let (time, _) = self.items().get(item)?.fuel.as_ref()?;
         Some(self.res.providers().int_value(time))
     }
     /// Item `item`'s chance to raise a composter's level (its `compostable` component's layers provider
     /// resolved), None where it is not compostable. API @API:item_components@.
-    pub(super) fn native_item_compost_chance(&self, item: &str) -> Option<f32> {
+    pub(super) fn item_compost_chance(&self, item: &str) -> Option<f32> {
         let layers = self.items().get(item)?.compostable.as_ref()?;
         Some(self.res.providers().layer_chance(layers))
     }
     /// The slot `stack` is equipped to (`Equippable.slot`) after its component patch, behind
     /// `ItemResource::equippable_slot`, through the opaque backend. API @API:item_components@.
-    pub(super) fn native_item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
+    pub(in crate::game) fn item_equippable_slot(&self, stack: &ItemStack) -> Option<String> {
         horizon_client::item_sync::equippable_slot(stack, self.items())
     }
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
-    pub(super) fn native_enchantments_compatible(&self, a: &str, b: &str) -> bool {
+    pub(in crate::game) fn enchantments_compatible(&self, a: &str, b: &str) -> bool {
         world_stations!(self).enchantments.compatible(a, b)
     }
     /// Whether an enchantment on `stack` has effect component `effect`, by the world's
     /// enchantment definitions (`EnchantmentHelper.has`), behind
     /// `ItemResource::has_enchantment_effect`, through the opaque backend. API
     /// @API:item_components@.
-    pub(super) fn native_item_has_enchantment_effect(
-        &self,
-        stack: &ItemStack,
-        effect: &str,
-    ) -> bool {
+    pub(super) fn item_has_enchantment_effect(&self, stack: &ItemStack, effect: &str) -> bool {
         world_stations!(self)
             .enchantments
             .has_component(stack, effect)
@@ -151,7 +147,7 @@ mod equippable_slot_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_equippable_slot_follows_the_equippable_component() {
         crate::game::native_entity_refs::tests::with_game(|game| {
-            let slot = |item: &str| game.native_item_equippable_slot(&ItemStack::new(item, 1));
+            let slot = |item: &str| game.item_equippable_slot(&ItemStack::new(item, 1));
             assert_eq!(slot("minecraft:iron_helmet").as_deref(), Some("head"));
             assert_eq!(slot("minecraft:iron_boots").as_deref(), Some("feet"));
             assert_eq!(slot("minecraft:dirt"), None);
@@ -167,14 +163,10 @@ mod enchantment_conflict_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn enchantments_compatible_follows_the_exclusive_sets() {
         crate::game::native_entity_refs::tests::with_game(|game| {
-            assert!(!game.native_enchantments_compatible("minecraft:sharpness", "minecraft:smite"));
-            assert!(
-                !game.native_enchantments_compatible("minecraft:sharpness", "minecraft:sharpness")
-            );
-            assert!(
-                game.native_enchantments_compatible("minecraft:sharpness", "minecraft:unbreaking")
-            );
-            assert!(game.native_enchantments_compatible("minecraft:sharpness", "mod:unknown"));
+            assert!(!game.enchantments_compatible("minecraft:sharpness", "minecraft:smite"));
+            assert!(!game.enchantments_compatible("minecraft:sharpness", "minecraft:sharpness"));
+            assert!(game.enchantments_compatible("minecraft:sharpness", "minecraft:unbreaking"));
+            assert!(game.enchantments_compatible("minecraft:sharpness", "mod:unknown"));
         });
     }
 }

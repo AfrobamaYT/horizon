@@ -33,10 +33,11 @@ use horizon_protocol::{
 use std::sync::{Arc, Mutex, atomic::Ordering};
 use {
     horizon_core::nbt::{JavaString, Tag},
+    horizon_mod_runtime::attachments::Holder,
     horizon_world::{
-        attachments::Holder, block_collision::BlockCollisionRegistry,
-        block_collision_scan::BlockCollisionScan, collision_context::CollisionContext,
-        native_load_context::LoopContext, world_movement::in_range_of_ground,
+        block_collision::BlockCollisionRegistry, block_collision_scan::BlockCollisionScan,
+        collision_context::CollisionContext, native_load_context::LoopContext,
+        world_movement::in_range_of_ground,
     },
 };
 
@@ -156,6 +157,12 @@ pub enum HostEvent {
         Box<horizon_protocol::packets::configuration::ClientInformation>,
         Box<horizon_protocol::packets::configuration::ClientInformation>,
     ),
+    /// An accepted position started a jump, before later gameplay packets.
+    Jump {
+        conn: u32,
+        from: [f64; 3],
+        yaw: f32,
+    },
     /// A guest's client finished loading the level around them.
     PlayerLoaded(u32),
     /// A guest changed recipe book settings.
@@ -1950,15 +1957,22 @@ impl Hub {
     }
     /// Server mods' commands changed: every player gets their tree again.
     pub fn set_mod_commands(&mut self, key: u64, commands: serde_json::Value) {
-        let resend = self.mod_commands.0 != commands;
-        self.mod_commands = (commands, Some(key));
-        if resend {
+        if self.store_mod_commands(key, commands) {
             for i in 0..self.guests.len() {
                 if self.guests[i].placed {
                     self.send_commands(i);
                 }
             }
         }
+    }
+
+    /// [`Hub::set_mod_commands`] without sending: true when the tree changed.
+    /// The caller sends the trees itself (`native_refresh_commands` first asks
+    /// the mods which root commands each player keeps).
+    pub fn store_mod_commands(&mut self, key: u64, commands: serde_json::Value) -> bool {
+        let changed = self.mod_commands.0 != commands;
+        self.mod_commands = (commands, Some(key));
+        changed
     }
 
     /// Commands.sendCommands: the command tree for this player.
@@ -3231,47 +3245,123 @@ impl Hub {
 
     // ---- entities ------------------------------------------------------
 
-    /// `LivingEntity.updateSynchronizedMobEffectParticles`: DATA_EFFECT_PARTICLES
-    /// (10) and DATA_EFFECT_AMBIENCE_ID (11) for the visible `effects`, as
-    /// (effect, ambient). The entries are left out when there is nothing to
-    /// show, which is their default.
-    pub fn effect_meta<'a>(
+    /// `ParticleTypes.STREAM_CODEC`'s value for `options`: the type's
+    /// network id and the data it carries (`state` for the block particles).
+    /// None for a particle whose data isn't sent from here (items, trails).
+    pub fn particle(
         &self,
-        effects: impl IntoIterator<Item = (&'a str, bool)>,
-    ) -> Vec<(u8, i32, Value)> {
-        let mut particles = Vec::new();
-        let mut all_ambient = true;
-        for (effect, ambient) in effects {
-            let effect = effect.trim_start_matches("minecraft:");
-            // MobEffect.particleFactory: the omens have their own particles,
-            // the others an entity effect in their colour (faint if ambient).
-            let (name, data) = match effect {
-                "trial_omen" | "raid_omen" => (effect, None),
-                _ => {
-                    let Some(def) = crate::brewing::effect(effect) else {
-                        continue;
-                    };
-                    let alpha = if ambient { 38 } else { 255 };
-                    let argb = (alpha << 24) | def.color as i32;
-                    ("entity_effect", Some(ParticleData::Color(argb)))
-                }
-            };
-            let Some(id) =
-                self.registry_id("minecraft:particle_type", &format!("minecraft:{name}"))
-            else {
-                continue;
-            };
-            particles.push(Particle { id, data });
-            all_ambient &= ambient;
+        options: &crate::particles::ParticleOptions,
+        state: Option<horizon_world::registry::BlockStateId>,
+    ) -> Option<Particle> {
+        use crate::particles::ParticleType as T;
+        // A native mod's own type: no registry id, so the sentinel and the name.
+        if let Some(name) = &options.mod_particle {
+            return Some(Particle {
+                id: horizon_protocol::entity_data::MOD_PARTICLE_ID,
+                data: Some(ParticleData::Mod(name.clone())),
+            });
         }
-        if particles.is_empty() {
+        let name = format!("minecraft:{}", options.ty.name());
+        let id = self.registry_id("minecraft:particle_type", &name)?;
+        // The options' RGB as an RGB colour (`ARGB.colorFromFloat` without alpha).
+        let rgb_int = |c: [f32; 3]| {
+            let b = |v: f32| ((v.clamp(0.0, 1.0) * 255.0).round() as i32) & 255;
+            (b(c[0]) << 16) | (b(c[1]) << 8) | b(c[2])
+        };
+        let c = options.color;
+        let rgb = rgb_int([c[0], c[1], c[2]]);
+        let data = match options.ty {
+            T::Block | T::BlockMarker | T::FallingDust | T::DustPillar | T::BlockCrumble => {
+                Some(ParticleData::State(state?.0 as i32))
+            }
+            T::Dust => Some(ParticleData::ColorScale(rgb, options.scale)),
+            T::DustColorTransition => Some(ParticleData::ColorScale2(
+                rgb,
+                rgb_int(options.to_color),
+                options.scale,
+            )),
+            T::Effect | T::InstantEffect => Some(ParticleData::ColorPower(rgb, options.scale)),
+            T::EntityEffect | T::TintedLeaves => Some(ParticleData::Color(
+                (((c[3].clamp(0.0, 1.0) * 255.0).round() as i32) << 24) | rgb,
+            )),
+            T::DragonBreath | T::SculkCharge => Some(ParticleData::Scalar(options.scale)),
+            T::Shriek => Some(ParticleData::Delay(options.scale as i32)),
+            T::Geyser | T::GeyserPlume => Some(ParticleData::Geyser(options.geyser?.0)),
+            T::GeyserBase | T::GeyserPoof => {
+                let (water_blocks, burst_impulse_base) = options.geyser?;
+                Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
+            }
+            T::Vibration => {
+                use horizon_protocol::entity_data::PositionSource as NetworkPositionSource;
+                use mod_api::particles::PositionSource;
+                let (source, _, ticks) = options.vibration.as_ref()?;
+                let source = match source {
+                    PositionSource::Block(pos) => NetworkPositionSource::Block(*pos),
+                    PositionSource::Entity { id, y_offset } => NetworkPositionSource::Entity {
+                        id: *id,
+                        y_offset: *y_offset,
+                    },
+                    _ => return None,
+                };
+                Some(ParticleData::Vibration {
+                    source,
+                    ticks: *ticks,
+                })
+            }
+            T::Item | T::Trail => return None,
+            _ => None,
+        };
+        Some(Particle { id, data })
+    }
+
+    /// `LivingEntity.updateSynchronizedMobEffectParticles`: DATA_EFFECT_PARTICLES
+    /// (10) and DATA_EFFECT_AMBIENCE_ID (11) for an entity with `effects`.
+    /// Nothing for an entity without effects (`removeEffectParticles`).
+    pub fn effect_meta(
+        &self,
+        effects: impl IntoIterator<Item = crate::effects::ShownEffect>,
+    ) -> Vec<(u8, i32, Value)> {
+        let mut effects = effects.into_iter().peekable();
+        if effects.peek().is_none() {
             return Vec::new();
         }
-        let mut meta = vec![(10, serializer::PARTICLES, Value::Particles(particles))];
-        if all_ambient {
+        let (particles, ambient) = crate::effects::effect_particles(effects);
+        self.particle_meta(&particles, ambient)
+    }
+
+    /// DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID for `particles` and
+    /// `ambient`, each left out at its default.
+    pub fn particle_meta(
+        &self,
+        particles: &[crate::particles::ParticleOptions],
+        ambient: bool,
+    ) -> Vec<(u8, i32, Value)> {
+        let particles: Vec<_> = (particles.iter())
+            .filter_map(|p| self.particle(p, None))
+            .collect();
+        let mut meta = Vec::new();
+        if !particles.is_empty() {
+            meta.push((10, serializer::PARTICLES, Value::Particles(particles)));
+        }
+        if ambient {
             meta.push((11, serializer::BOOLEAN, Value::Bool(true)));
         }
         meta
+    }
+
+    /// A player's DATA_EFFECT_PARTICLES and DATA_EFFECT_AMBIENCE_ID: vanilla's,
+    /// or while a native mod listens to `effect_particle_modification`
+    /// (`modified`) what the mods made of them. The game asks the mods when
+    /// the effects change; until it has, the last answer goes out (nothing
+    /// before the first), as vanilla's synched data keeps its last value.
+    pub fn player_effect_meta(&self, g: &Guest, modified: bool) -> Vec<(u8, i32, Value)> {
+        if modified {
+            (g.modified_effect_particles.as_ref())
+                .map(|m| m.meta.clone())
+                .unwrap_or_default()
+        } else {
+            self.effect_meta(g.effects.list.iter().map(EffectInstance::shown))
+        }
     }
 
     fn player_state(
@@ -3289,7 +3379,7 @@ impl Hub {
         health: f32,
         equipment: Vec<(u8, Option<horizon_protocol::item::Stack>)>,
         attributes: Vec<play::AttributeSnapshot>,
-        effects: &[EffectInstance],
+        effect_meta: Vec<(u8, i32, Value)>,
     ) -> EntityState {
         let (sneaking, sprinting, sleeping) = flags;
         let shared = shared_flags(sneaking, sprinting, &body);
@@ -3329,14 +3419,7 @@ impl Hub {
         if skin != 0 {
             meta.push((16, serializer::BYTE, Value::Byte(skin as i8)));
         }
-        meta.extend(
-            self.effect_meta(
-                effects
-                    .iter()
-                    .filter(|e| e.visible)
-                    .map(|e| (e.id, e.ambient)),
-            ),
-        );
+        meta.extend(effect_meta);
         EntityState {
             id,
             uuid,
@@ -3445,6 +3528,8 @@ impl Hub {
     /// All entities as one client sees them: the world's and the other players.
     fn track_entities(&mut self, ctx: &mut TickCtx) {
         let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
+        let modified_particles =
+            mod_api::__private::listened(mod_api::HookId::EffectParticleModification);
         let placed: Vec<usize> = (0..self.guests.len())
             .filter(|&i| self.here(&self.guests[i]))
             .collect();
@@ -3484,7 +3569,7 @@ impl Hub {
                         .as_ref()
                         .map(|m| super::attributes::syncable(&m.attributes))
                         .unwrap_or_default(),
-                    &g.effects.list,
+                    self.player_effect_meta(g, modified_particles),
                 );
                 state.spectator = g.spectator();
                 state.watching = g.watching;
@@ -4394,12 +4479,16 @@ impl Hub {
                 S::Chat(c) => self.handle_chat(i, c, events),
                 S::ChatAck(p) => self.chat_ack(i, p.offset, events),
                 S::ChatSessionUpdate(p) => self.chat_session_update(i, p, events),
-                // handlePlayerAction (a dig starting, stopping or finishing) is the
-                // game's, run after this pass. A move queued behind it is checked
-                // against the block the player just broke and falls through, so it
-                // would be sent back; it waits for the next tick, when the block is
-                // gone, as vanilla handles the packets in order.
-                S::PlayerAction(p) if p.action <= 3 => {
+                // handlePlayerAction is the game's, run after this pass, and a move
+                // queued behind it waits for the next tick, as vanilla handles the
+                // packets in order. For a dig starting, stopping or finishing, the
+                // move is checked against the block the player just broke and falls
+                // through, so it would be sent back. A drop, a RELEASE_USE_ITEM (a
+                // bow's arrow, a trident, a spear) and a stab use the player's
+                // position and known movement now (#8423): shot after the move, an
+                // arrow left the position of the tick after the release, a tick
+                // ahead of the camera's instead of a tick behind it.
+                S::PlayerAction(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
                     held = self.move_queued(i);
                 }
@@ -4632,7 +4721,15 @@ impl Hub {
             if g.moves.is_empty() {
                 g.moves_from_ground = g.on_ground;
             }
-            g.moves.push((moved, flags & 1 != 0));
+            let on_ground = flags & 1 != 0;
+            if g.on_ground && !on_ground && moved[1] > 0.0 && !g.spectator() {
+                events.push(HostEvent::Jump {
+                    conn: g.conn,
+                    from: g.previous_position,
+                    yaw: g.yaw,
+                });
+            }
+            g.moves.push((moved, on_ground));
             g.known_movement = moved;
             g.yaw = yaw;
             g.pitch = pitch.clamp(-90.0, 90.0);
@@ -5678,6 +5775,38 @@ mod tests {
         assert!(found, "the first packet resets the client's empty tree");
     }
 
+    /// `store_mod_commands` keeps a new mod tree without sending it (the
+    /// game sends it after the mods filtered it: `native_refresh_commands`),
+    /// and `set_mod_commands` still sends a changed tree, and only a changed one.
+    #[test]
+    fn stored_mod_commands_are_not_sent_until_asked() {
+        let (mut hub, rx) = hub_with_a_guest();
+        let trees = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut sent = 0;
+            while let Ok(out) = rx.try_recv() {
+                if let crate::lan::Out::Packet(body) = out {
+                    let mut r = horizon_protocol::buf::Reader::new(&body);
+                    let pid = r.varint().unwrap();
+                    if let Ok(C::Commands(_)) = C::decode(pid, r.rest()) {
+                        sent += 1;
+                    }
+                }
+            }
+            sent
+        };
+        let first = serde_json::json!({"hello": {}});
+        assert!(hub.store_mod_commands(0, first.clone()));
+        assert!(!hub.store_mod_commands(0, first.clone()));
+        assert_eq!(trees(&rx), 0);
+        assert_eq!(hub.mod_commands_key(), Some(0));
+        hub.set_mod_commands(0, first);
+        assert_eq!(trees(&rx), 0, "an unchanged tree is not sent again");
+        hub.set_mod_commands(0, serde_json::json!({"hello": {}, "bye": {}}));
+        assert_eq!(trees(&rx), 1);
+        hub.resend_commands();
+        assert_eq!(trees(&rx), 1, "every placed player gets their tree again");
+    }
+
     /// `onGameRuleChanged`: a changed `reduced_debug_info` reaches each player
     /// as their own entity event 22 / 23, and an unchanged one sends nothing.
     #[test]
@@ -6110,6 +6239,152 @@ mod tests {
             }
         }
         assert_eq!(slots, Some(vec![1, 6, 7]));
+    }
+
+    /// A mod's named effect particle goes out as id -1, which vanilla's
+    /// `ParticleTypes.STREAM_CODEC` cannot read: the entity data sent to a
+    /// Horizon client has it, a vanilla client's has the rest of the list. As
+    /// the bytes on the wire, when a client starts tracking the entity, when
+    /// the list changes, and when the entity is paired as it joins.
+    #[test]
+    fn a_named_effect_particle_is_sent_only_to_horizon_clients() {
+        // id, name length, name.
+        const NAMED: [u8; 19] = [
+            0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 13, b'e', b'x', b'a', b'm', b'p', b'l', b'e', b':', b's',
+            b'w', b'i', b'r', b'l',
+        ];
+        // ClientboundSetEntityDataPacket: the packet's id, then the entity's.
+        let data = |entity: u8, entries: &[&[u8]]| {
+            let mut body = vec![101, entity];
+            body.extend(entries.concat());
+            body.push(0xFF);
+            body
+        };
+        // Entry 10, PARTICLES (17), then the count.
+        let particles = |list: &[&[u8]]| {
+            let mut entry = vec![10, 17, list.len() as u8];
+            entry.extend(list.concat());
+            entry
+        };
+        let ambient: &[u8] = &[11, 8, 1];
+        let plain: &[u8] = &[0];
+
+        let (mut hub, bob_rx) = hub_with_a_guest();
+        let (tx, ann_rx) = std::sync::mpsc::channel();
+        let mut ann = Guest::new(
+            crate::lan::Joined {
+                conn: 2,
+                uuid: 2,
+                name: "Ann".into(),
+                properties: Vec::new(),
+                info: horizon_protocol::packets::configuration::ClientInformation::new(8),
+                brand: "horizon".into(),
+                sender: crate::lan::PlayerSender::new(tx, std::sync::Arc::default()),
+                latency: std::sync::Arc::default(),
+                address: "127.0.0.1:25566".parse().unwrap(),
+                expected: false,
+            },
+            2,
+            [4.5, 64.0, 0.5],
+            8,
+        );
+        ann.placed = true;
+        ann.dimension = "minecraft:overworld".into();
+        hub.guests.push(ann);
+        hub.guests.update_all(|g| {
+            g.sent_chunks.insert((0, 0));
+        });
+        // The test hub syncs no entity type registry.
+        hub.entity_types.insert("minecraft:zombie".into(), 1);
+
+        // The entity data a client was sent since the last look.
+        let sent = |rx: &std::sync::mpsc::Receiver<crate::lan::Out>| {
+            let mut bodies = Vec::new();
+            while let Ok(out) = rx.try_recv() {
+                match out {
+                    crate::lan::Out::Packet(body) => bodies.push(body),
+                    crate::lan::Out::Packets(list) => bodies.extend(list),
+                    crate::lan::Out::Disconnect(_) => panic!("disconnected"),
+                }
+            }
+            bodies.retain(|body| body.first() == Some(&101));
+            bodies
+        };
+        let zombie = |id: i32, meta: Vec<(u8, i32, Value)>| EntityState {
+            id,
+            uuid: id as u128,
+            kind: "minecraft:zombie".into(),
+            position: [2.5, 64.0, 0.5],
+            meta,
+            ..EntityState::default()
+        };
+        let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 200;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut track = |hub: &mut Hub, state: EntityState| {
+            let entities = [state];
+            hub.track_entities(&mut TickCtx {
+                world: &mut world,
+                entities: &entities,
+                next_entity: &mut next_entity,
+                spawn: [0.5, 64.0, 0.5],
+                difficulty: 2,
+                difficulty_locked: false,
+                clock_rate: 1.0,
+                tick_rate: 20.0,
+                tick_frozen: false,
+                tick_steps: Default::default(),
+                collision: None,
+                border: &border,
+                streaming: None,
+            });
+        };
+
+        // What a listener's replacement becomes.
+        let named = crate::particles::ParticleOptions::named("example:swirl");
+        let only_named = hub.particle_meta(std::slice::from_ref(&named), false);
+        let Value::Particles(list) = &only_named[0].2 else {
+            panic!("expected particles");
+        };
+        let mixed = vec![
+            (
+                10,
+                serializer::PARTICLES,
+                Value::Particles(vec![list[0].clone(), Particle { id: 0, data: None }]),
+            ),
+            (11, serializer::BOOLEAN, Value::Bool(true)),
+        ];
+
+        // Starting to track it.
+        track(&mut hub, zombie(100, mixed.clone()));
+        assert_eq!(
+            sent(&ann_rx),
+            [data(100, &[&particles(&[&NAMED, plain]), ambient])]
+        );
+        assert_eq!(sent(&bob_rx), [data(100, &[&particles(&[plain]), ambient])]);
+
+        // The change leaves only the named particle: vanilla's list empties.
+        let mut changed = only_named.clone();
+        changed.push(mixed[1].clone());
+        track(&mut hub, zombie(100, changed));
+        assert_eq!(sent(&ann_rx), [data(100, &[&particles(&[&NAMED])])]);
+        assert_eq!(sent(&bob_rx), [data(100, &[&particles(&[])])]);
+
+        // No named particle: both clients get the same bytes.
+        let ordinary = vec![(
+            10,
+            serializer::PARTICLES,
+            Value::Particles(vec![Particle { id: 0, data: None }]),
+        )];
+        track(&mut hub, zombie(100, ordinary));
+        let expected = [data(100, &[&particles(&[plain])])];
+        assert_eq!(sent(&ann_rx), expected);
+        assert_eq!(sent(&bob_rx), expected);
+
+        // Paired as it joins, after the tracking pass.
+        hub.note_joined(&[zombie(101, only_named)]);
+        assert_eq!(sent(&ann_rx), [data(101, &[&particles(&[&NAMED])])]);
+        assert_eq!(sent(&bob_rx), [data(101, &[&particles(&[])])]);
     }
 
     /// `handleChatSessionUpdate` shares `chatMessageChain` with chat: a new
@@ -6550,6 +6825,80 @@ mod tests {
                 [(S::MovePlayerRot(_), _)]
             ),
             "the turn did not wait for the next tick"
+        );
+    }
+
+    /// #8423: a RELEASE_USE_ITEM shoots from the player's position and known
+    /// movement of the last move the server handled; the move the client sent
+    /// after it waits for the next tick, as vanilla handles the two in order.
+    #[test]
+    fn a_release_shoots_before_the_move_behind_it() {
+        let (mut hub, _rx) = hub_with_a_guest();
+        let before = (hub.guests[0].position, hub.guests[0].known_movement);
+        hub.guests.update(0, |guest| {
+            guest.load_timeout = 0;
+            let inbox = &mut guest.inbox;
+            inbox.push_back((
+                S::PlayerAction(play::PlayerAction {
+                    action: 6,
+                    pos: [0; 3],
+                    direction: 0,
+                    sequence: 0,
+                }),
+                0,
+            ));
+            inbox.push_back((
+                S::MovePlayerPos(play::MovePlayerPos {
+                    x: before.0[0] + 0.3,
+                    y: before.0[1],
+                    z: before.0[2],
+                    flags: 1,
+                }),
+                0,
+            ));
+        });
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        let events = hub.drain_packets(&mut ctx);
+        let handled: Vec<&S> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::Packet(_, p) => Some(&**p),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(handled[..], [S::PlayerAction(_)]),
+            "the game was handed {handled:?}"
+        );
+        assert!(
+            matches!(
+                hub.guests[0].inbox.iter().collect::<Vec<_>>()[..],
+                [(S::MovePlayerPos(_), _)]
+            ),
+            "the move did not wait for the next tick"
+        );
+        let g = &hub.guests[0];
+        assert_eq!(
+            (g.position, g.known_movement),
+            before,
+            "the shot's position"
         );
     }
 

@@ -1,8 +1,9 @@
 <!-- chapter: Host helpers and remaining gaps -->
 <!-- separator: 1 -->
 
-`Host` exposes the documented `Game` helpers declared in the `Helpers` traits of
-`crates/horizon-mod-api/src/hooks/`, without their `native_` prefix. Each keeps the helper's
+`Host` exposes the documented `Game` helpers declared by area in
+`crates/horizon-mod-api/src/host/<area>.rs`, one trait per area; `Host`, `ServerHost` and `ClientHost` are the
+unions of those traits, so a mod calls through them and never names an area trait. Each helper keeps its
 receiver and documentation; a helper without `self` (`config_files`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
 For item registry facts, `host.item_crafting_remainder(&stack)` returns a count-one
@@ -11,6 +12,13 @@ currently stores only the remainder item id, not a template's count or component
 `host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
+
+For engine contributors, every area method declares its load access once with `#[access(...)]`.
+`Metadata` admits registry facts during setup and reload; `WorldOnly`, `ClientSetup` and
+`PublishedResources` retain their phase-specific contracts. The area's `host_area` attribute
+builds the test-double defaults, and the API generator emits every game forwarder at build time.
+Implement only the inherent `Game` function with the same name, not a hand-written forwarder.
+Static implementations use `#[static_call]`; service accessors use `#[service]`.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
 Adding a handle requires no separate generator registration.
@@ -32,7 +40,7 @@ the wasm runtime's current same-group callback limitation.
 
 The following catalog hooks are not in the trait:
 
-- `player_command`, `perform_console_command`, `item_decorations`,
+- `player_command`, `item_decorations`,
   `client_resources_reloaded`, `camera_shake`, `screen_key_pressed_pre`, `screen_char_typed_pre`,
   `screen_mouse_scrolled_pre`, `use_duration`, `use_animation`, `can_eat`,
   `living_entity_use_item_start`, `living_entity_use_item_finish`, `render_hand`, `shader_params`

@@ -213,7 +213,7 @@ fn clean_fields(fields: &Fields) -> Fields {
     fields
 }
 
-fn shape_signature(item: &Item) -> Option<Item> {
+pub(crate) fn shape_signature(item: &Item) -> Option<Item> {
     match item {
         Item::Struct(value) => {
             let mut value = value.clone();
@@ -244,6 +244,14 @@ fn shape_signature(item: &Item) -> Option<Item> {
         }
         _ => None,
     }
+}
+
+/// A listed signature's hash: what a mod's declaration pins.
+pub(crate) fn signature_hash(signature: &str) -> String {
+    Sha256::digest(signature.as_bytes())[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn configuration(outer: &[String], attrs: &[syn::Attribute]) -> String {
@@ -471,6 +479,9 @@ impl Shapes {
                 };
             }
             "std" | "core" | "alloc" => return Ok(BTreeMap::from([(path.to_owned(), false)])),
+            _ if crate::crossing::foreign(path).is_some() => {
+                return Ok(BTreeMap::from([(path.to_owned(), false)]));
+            }
             _ => {}
         }
         if self
@@ -602,11 +613,7 @@ impl Pass {
         }
         let cfg = configuration(&self.cfg, attrs);
         let signature = tokens.to_token_stream().to_string();
-        let digest = Sha256::digest(signature.as_bytes());
-        let hash = digest[..8]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let hash = signature_hash(&signature);
         let key = (path.to_owned(), kind, cfg.clone());
         self.uses.insert(key.clone(), (module.to_owned(), uses));
         self.entries.insert(
@@ -1364,7 +1371,7 @@ mod tests {
     }
 
     #[test]
-    fn game_area_moves_preserve_internals_points_and_helper_targets() {
+    fn game_area_moves_preserve_internals_and_points() {
         let source = "struct Game; mod feature;";
         let module = "use super::Game; impl Game { fn action(&self) -> u8 { 7 } }";
         let before = Fixture::new(source);
@@ -1381,20 +1388,6 @@ mod tests {
             "crates/horizon-client/src/game/runtime/feature/shared.rs",
             module,
         );
-        fn helpers(root: &Path) -> Vec<String> {
-            let mut methods = Vec::new();
-            crate::game_methods(
-                &root.join("crates/horizon-client/src/game"),
-                "horizon_client::game",
-                &mut methods,
-            )
-            .unwrap();
-            methods
-                .into_iter()
-                .map(|(module, method)| format!("{module}::{}", method.sig.to_token_stream()))
-                .collect()
-        }
-        assert_eq!(helpers(&before.0), helpers(&after.0));
         fn points(root: &Path) -> BTreeSet<String> {
             crate::points::game_files(&root.join("crates/horizon-client/src"), true)
                 .unwrap()
@@ -1483,25 +1476,8 @@ mod tests {
                 "[package]\nname = 'horizon-mod-points'\nversion = '0.1.0'\n",
             );
         }
-        fn inventory(root: &Path) -> (Vec<String>, Vec<serde_json::Value>) {
-            let mut methods = Vec::new();
-            crate::game_methods(
-                &root.join("crates/horizon-client/src/game"),
-                "horizon_client::game",
-                &mut methods,
-            )
-            .unwrap();
-            let methods = methods
-                .into_iter()
-                .map(|(module, method)| {
-                    format!(
-                        "{}::{}",
-                        module.replace("::turns", ""),
-                        method.sig.to_token_stream()
-                    )
-                })
-                .collect();
-            let points = crate::points::game_points(root)
+        fn inventory(root: &Path) -> Vec<serde_json::Value> {
+            crate::points::game_points(root)
                 .unwrap()
                 .into_iter()
                 .map(|point| {
@@ -1510,8 +1486,7 @@ mod tests {
                         .replace("::turns", "");
                     serde_json::from_str(&json).unwrap()
                 })
-                .collect();
-            (methods, points)
+                .collect()
         }
         assert_eq!(inventory(&before.0), inventory(&after.0));
         let old = discover(&before.0).unwrap();
@@ -1772,6 +1747,21 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
         assert!(!game.shape_only);
         assert_eq!(game.refs["Kind"], "horizon_items::kinds::Kind");
         assert_eq!(game.refs["Cell"], "std::cell::Cell");
+    }
+
+    #[test]
+    fn imports_of_crossing_foreign_types_resolve_and_the_rest_of_their_crate_does_not() {
+        let fixture = shapes_fixture(
+            "use winit::keyboard::KeyCode; use winit::event::ElementState as State; use winit::window::Window;\nstruct Game { key: KeyCode, state: State, window: Window }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let game = entries
+            .iter()
+            .find(|e| e.path == "horizon_client::game::Game")
+            .unwrap();
+        assert_eq!(game.refs["KeyCode"], "winit::keyboard::KeyCode");
+        assert_eq!(game.refs["State"], "winit::event::ElementState");
+        assert!(!game.refs.contains_key("Window"));
     }
 
     #[test]
@@ -2294,7 +2284,9 @@ const LABEL: &str = "é"; struct AfterUnicode;
         let error =
             widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
-            error.contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
+            error
+                .replace('\\', "/")
+                .contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

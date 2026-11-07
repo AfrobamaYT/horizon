@@ -6,7 +6,7 @@
 //! <json>` edits the lists as vanilla's management protocol does (management.rs).
 //! `player-expect <uuid> [seconds]`, `player-drop <uuid>`, `player-export <uuid> [freeze]`,
 //! `player-release <uuid> ...`, `player-import <uuid> <json>` and `player-confirm <uuid> ...` are a proxy's,
-//! for a player it moves between two servers (transfer.rs).
+//! for a player it moves between two servers, and `transfer-status` the counts it reads first (transfer.rs).
 use super::{ServerState, capture_log};
 use crate::game::Game;
 use serde_json::{Value, json};
@@ -48,6 +48,8 @@ impl Game<'_> {
             let reply = match request.line.trim().split_once(' ') {
                 _ if request.line.trim() == "server-status" => self.server_status(state),
                 _ if request.line.trim() == "server-mods" => server_mods(),
+                // A proxy reading whether it may send players here (transfer.rs).
+                _ if request.line.trim() == "transfer-status" => self.transfer_status(),
                 Some(("server-events", since)) => {
                     super::events::since(since.trim().parse().unwrap_or(0))
                 }

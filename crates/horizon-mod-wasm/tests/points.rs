@@ -9,7 +9,11 @@ struct Server;
 
 impl mod_api::Host for Server {}
 
+mod_api::impl_host_areas!(Server);
+
 impl mod_api::ServerHost for Server {}
+
+mod_api::impl_server_host_areas!(Server);
 
 /// A native mod appending `N` at the same point.
 struct NativeTail;
@@ -32,8 +36,10 @@ fn native_and_wasm_listeners_at_a_point_run_in_the_installed_order() {
         &horizon_mod_wasm::RuntimeConfig::default(),
         &std::fs::read(path("HORIZON_WASM_STD")).unwrap(),
         vec![horizon_mod_wasm::WasmPackage {
-            manifest: horizon_mods::Package::read(&package).unwrap().manifest,
-            module: horizon_mods::Package::read_wasm(&package).unwrap(),
+            manifest: horizon_mod_package::Package::read(&package)
+                .unwrap()
+                .manifest,
+            module: horizon_mod_package::Package::read_wasm(&package).unwrap(),
         }],
     );
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);

@@ -1,6 +1,6 @@
 # Horizon APIs
 
-Horizon has seven surfaces that other programs and people build on. Each one has an **API** (the contract: what you
+Horizon has eight surfaces that other programs and people build on. Each one has an **API** (the contract: what you
 may call, read or write, and what Horizon promises about it) and an **SDK** (the tools that help you use it). This
 section has one page per surface, plus the rules every surface follows:
 [stability and versioning](stability.md).

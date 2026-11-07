@@ -2713,12 +2713,13 @@ dependencies = [
  "horizon-friends",
  "horizon-mcp",
  "horizon-mod-api-gen",
- "horizon-mods",
+ "horizon-mod-package",
  "horizon-port-pack",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-release-sign",
  "horizon-server-launch",
+ "horizon-shader-api",
  "horizon-system",
  "horizon-theme",
  "horizon-world",
@@ -2777,16 +2778,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "horizon-mods"
+name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
@@ -2803,10 +2795,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-point-shape"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-mod-runtime"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+]
+
+[[package]]
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "horizon-mod-api-gen",
+ "horizon-mod-package",
  "serde",
  "serde_json",
  "sha1",
@@ -2837,6 +2846,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "horizon-core",
+ "horizon-mod-runtime",
  "horizon-world",
  "ipconfig",
  "log",
@@ -2909,6 +2919,7 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
+ "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",

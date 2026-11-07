@@ -16,6 +16,7 @@ horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 winresource = "0.1"
 
 [dependencies]
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
@@ -50,7 +51,7 @@ horizon-friends = { path = "../horizon-friends" }
 horizon-narrator = { path = "../horizon-narrator" }
 # Horizon mods: sandboxed WebAssembly components, off unless installed and turned on (docs/modding/src/how-to/content-mods.md).
 # Their runtime is the `mods` feature.
-horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
+horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
 winit = "0.30.13"
 pollster = "0.4"
