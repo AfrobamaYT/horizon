@@ -278,6 +278,66 @@ fn source_adapter_inputs_compile_and_write_back() {
 }
 
 #[test]
+fn private_source_stage_exports_and_registers_priorities() {
+    use super::{api, internals::Catalog, Bundle};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../target/source-wrapper-{}", std::process::id()));
+    let put = |path: &str, text: &str| {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    put(
+        "crates/horizon-mod-points/Cargo.toml",
+        "[package]\nname='horizon-mod-points'\n",
+    );
+    put(
+        "crates/horizon-client/src/game.rs",
+        "pub struct Game; impl Game { #[inline(always)] fn hidden(&mut self) {} }",
+    );
+    std::fs::create_dir_all(root.join("crates/horizon-mod-api-gen/slots")).unwrap();
+    let target = "horizon_client::game::Game::hidden";
+    put("catalog/points.json", r#"{"points":[],"sites":[]}"#);
+    put(
+        "catalog/internals.json",
+        &serde_json::json!([{
+            "path":target, "kind":"fn", "signature":"impl Game { fn hidden(&mut self) }",
+            "hash":"fingerprint", "cfg":"", "shape_only":false
+        }])
+        .to_string(),
+    );
+    let mut manifest = declaration("one", "high", target, "head");
+    manifest.inject[0].priority = 17;
+    let mut low = manifest.inject[0].clone();
+    low.id = "low".into();
+    low.priority = -3;
+    manifest.inject.push(low);
+    let bundle = Bundle {
+        manifest,
+        dir: root.clone(),
+        injections: vec![],
+    };
+    let catalog_dir = root.join("catalog");
+    stage(&root, &catalog_dir, std::slice::from_ref(&bundle)).unwrap();
+    let catalog = Catalog::read(&catalog_dir).unwrap();
+    assert_eq!(catalog.points.len(), 1);
+    assert!(catalog.points[0].private);
+    let facade = catalog.facade(&bundle.manifest).unwrap();
+    assert!(facade.source.contains("Raw as __HiddenRaw;"));
+    let main = api::main_rs(
+        "/* MOD_SLOTS */",
+        &[&bundle.manifest],
+        &catalog.points,
+        &catalog.sites,
+    );
+    assert_eq!(main.matches("mod_0::callback").count(), 2);
+    for registration in [".ordered(17, \"high\")", ".ordered(-3, \"low\")"] {
+        assert!(main.contains(registration), "{main}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn unsupported_source_signatures_are_refused() {
     for signature in [
         "fn target<T>(value: T)",
