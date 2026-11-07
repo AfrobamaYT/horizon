@@ -130,6 +130,13 @@ pub fn adopt_icon(home: &Path, url: &str) {
     }
 }
 
+// A malformed preference must not invalidate unrelated instance metadata.
+fn saved_profile<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::native_mods::Profile>, D::Error> {
+    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).ok())
+}
+
 /// The player's choices about one instance.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Meta {
@@ -143,8 +150,12 @@ pub struct Meta {
     /// launcher's own version, which follows updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
-    /// This instance's saved native build choice; no choice starts at Balanced.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// This instance's saved native build choice; missing or unknown starts at Balanced.
+    #[serde(
+        default,
+        deserialize_with = "saved_profile",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub native_profile: Option<crate::native_mods::Profile>,
     /// Seconds played in it, every run started by the launcher (the window or `play`) added up.
     #[serde(default, skip_serializing_if = "is_zero")]

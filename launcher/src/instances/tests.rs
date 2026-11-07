@@ -68,7 +68,7 @@ fn player_home(home: &Path) {
 
 #[test]
 fn build_choices_start_balanced_and_are_remembered_per_instance() {
-    use crate::native_mods::{Profile, Route, Routes, SourceReason};
+    use crate::native_mods::Profile;
     let root = scratch("native-build-choices");
     let game = root.join("game");
     let data = root.join("launcher");
@@ -83,45 +83,34 @@ fn build_choices_start_balanced_and_are_remembered_per_instance() {
     };
     choose("first", Profile::Developer);
     choose("second", Profile::Optimized);
-    choose(DEFAULT, Profile::Balanced);
-    let reloaded = list_in(&game, &data);
-    let first = find_in(&reloaded, "first").unwrap();
-    let second = find_in(&reloaded, "second").unwrap();
-    assert_eq!(first.native_profile, Profile::Developer);
-    assert_eq!(second.native_profile, Profile::Optimized);
-    assert_eq!(
-        find_in(&reloaded, DEFAULT).unwrap().native_profile,
-        Profile::Balanced
-    );
-    let structural = Routes {
-        mods: vec![(
-            "source".into(),
-            Route::Game {
-                reason: SourceReason::BuildScript {
-                    mod_id: "source".into(),
-                },
-            },
-        )],
-        unavailable: None,
-    };
-    assert_eq!(
-        Profile::default().for_picker(&structural, false, false),
-        Profile::Balanced
-    );
-    assert_eq!(
-        first.native_profile.for_picker(&structural, false, false),
-        Profile::Developer
-    );
-    assert_eq!(
-        second.native_profile.for_picker(&structural, false, false),
-        Profile::Optimized
-    );
-    assert_eq!(
-        first
-            .native_profile
-            .for_picker(&Routes::default(), false, false),
-        Profile::Optimized
-    );
+    let before = fs::read(data.join("instances.json")).unwrap();
+    for unknown in [serde_json::json!("future"), serde_json::json!(42)] {
+        let mut stored: serde_json::Value = serde_json::from_slice(&before).unwrap();
+        stored["instances"]["first"]["native_profile"] = unknown;
+        stored["instances"]["first"]["version"] = serde_json::json!("kept-version");
+        fs::write(
+            data.join("instances.json"),
+            serde_json::to_vec(&stored).unwrap(),
+        )
+        .unwrap();
+        edit_in(&game, &data, "second", |meta| {
+            meta.name = Some("Still here".into())
+        })
+        .unwrap();
+        let loaded = list_in(&game, &data);
+        assert_eq!(
+            find_in(&loaded, "first").unwrap().native_profile,
+            Profile::Balanced
+        );
+        assert_eq!(
+            find_in(&loaded, "first").unwrap().version.as_deref(),
+            Some("kept-version")
+        );
+        let neighbour = find_in(&loaded, "second").unwrap();
+        assert_eq!(neighbour.native_profile, Profile::Optimized);
+        assert_eq!(neighbour.name, "Still here");
+    }
+    fs::write(data.join("instances.json"), before).unwrap();
     choose("second", Profile::Balanced);
     let again = list_in(&game, &data);
     assert_eq!(

@@ -272,7 +272,6 @@ impl Launcher {
             &[
                 (native_mods::Profile::Optimized, "Optimized"),
                 (native_mods::Profile::Balanced, "Balanced"),
-                (native_mods::Profile::Developer, "Developer"),
             ],
             profile,
             &t,
@@ -296,7 +295,7 @@ impl Launcher {
                 div()
                     .child(trf(
                         "Build-mode preference for {instance}. {detail}",
-                        &[("instance", instance), ("detail", &said)],
+                        &[("instance", instance), ("detail", said)],
                     ))
                     .into_any_element(),
             ),

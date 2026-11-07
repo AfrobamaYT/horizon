@@ -4252,12 +4252,16 @@ mod tests {
             unavailable: None,
         };
         assert_eq!(
-            select_build_profile(Profile::Balanced, None, || Ok(structural.clone())).unwrap(),
+            select_build_profile(Profile::default(), None, || Ok(structural.clone())).unwrap(),
             Profile::Balanced
         );
         assert_eq!(
-            select_build_profile(Profile::Developer, None, || Ok(structural)).unwrap(),
+            Profile::Developer.for_picker(&structural, false, true),
             Profile::Developer
+        );
+        assert_eq!(
+            select_build_profile(Profile::Developer, None, || Ok(structural)).unwrap(),
+            Profile::Balanced
         );
         assert_eq!(
             select_build_profile(Profile::Developer, None, || Ok(Routes::default())).unwrap(),
@@ -4290,6 +4294,29 @@ mod tests {
             CANCELLED
         );
         CANCEL.store(previous, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn automatic_build_does_not_save_its_effective_profile() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        backend::Settings::load().allow_native_mods().unwrap();
+        let file = backend::data_dir().join("instances.json");
+        let previous = fs::read(&file).ok();
+        let stored = br#"{"instances":{"horizon":{"native_profile":"balanced"}}}"#;
+        fs::write(&file, stored).unwrap();
+        let instance = instances::find("horizon").unwrap();
+        let folder = dir("automatic-profile");
+        let error = build("v2099.09.09", &folder, &instance, None, |_| {}).unwrap_err();
+        assert!(String::from(error).contains("is not prepared yet"));
+        assert_eq!(fs::read(&file).unwrap(), stored);
+        if let Some(previous) = previous {
+            fs::write(file, previous).unwrap();
+        } else {
+            fs::remove_file(file).unwrap();
+        }
+        fs::remove_dir_all(folder).unwrap();
+        original.save().unwrap();
     }
 
     #[test]

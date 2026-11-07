@@ -147,6 +147,7 @@ impl Launcher {
     pub(super) fn native_profile(&self) -> Profile {
         self.selected_instance()
             .map_or(Profile::Balanced, |instance| instance.native_profile)
+            .picker_choice(false)
     }
 
     pub(super) fn choose_native_profile(&mut self, profile: Profile) {
@@ -265,10 +266,13 @@ impl Launcher {
         let t = self.theme;
         let pal = Pal::of(&t);
         let chosen = self.native_profile();
+        let offered_profiles = Profile::ALL
+            .into_iter()
+            .filter(|profile| profile.picker_choice(false) == *profile);
         div()
             .flex()
             .gap(px(10.))
-            .children(Profile::ALL.map(|profile| {
+            .children(offered_profiles.map(|profile| {
                 let on = profile == chosen;
                 let kind = match profile {
                     Profile::Optimized => tr("Prebuilt"),
