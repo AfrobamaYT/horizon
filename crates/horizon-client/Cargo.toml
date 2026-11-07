@@ -157,6 +157,10 @@ path = "tests/launch_api.rs"
 name = "mod_api_hooks"
 path = "tests/mod_api_hooks.rs"
 
+[[example]]
+name = "wind_burst_hook_probe"
+path = "examples/wind_burst_hook_probe.rs"
+
 [lints]
 workspace = true
 
