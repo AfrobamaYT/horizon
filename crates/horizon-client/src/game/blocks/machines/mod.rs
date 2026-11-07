@@ -1836,6 +1836,10 @@ mod brewing_fuel_transfer_tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn hopper_brewing_fuel_transfer_respects_stack_components() {
         with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             let hopper_pos = (8, 64, 8);
             let stand_pos = (9, 64, 8);
             for (pos, block) in [
