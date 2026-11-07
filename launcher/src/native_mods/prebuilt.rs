@@ -94,24 +94,49 @@ pub(super) fn source_refusal(
     projects: &[api::Project<'_>],
 ) -> Result<Option<SourceReason>, String> {
     let catalog = internals::Catalog::read(game)?;
-    for project in projects {
-        let manifest = &project.bundle.manifest;
-        if super::slots::routes(&catalog, manifest)
-            .map_err(|error| error.to_string())?
-            .iter()
-            .any(|route| {
-                matches!(
-                    route,
-                    horizon_mod_package::manifest::inject::Route::Source(_)
-                )
-            })
-        {
-            return Ok(Some(SourceReason::Injections {
-                mod_id: manifest.id.clone(),
-            }));
+    for (_, route) in slot_routes(&catalog, projects) {
+        match route {
+            super::Route::Game { reason } => return Ok(Some(reason)),
+            super::Route::Invalid { reason } => return Err(reason),
+            super::Route::Prebuilt => {}
         }
     }
     Ok(None)
+}
+
+/// One slot/source decision per project, including named refusals. Cargo restrictions are
+/// reported separately by `project_refusal`; both consumers use the same slot router here.
+pub(super) fn slot_routes(
+    catalog: &internals::Catalog,
+    projects: &[api::Project<'_>],
+) -> Vec<(String, super::Route)> {
+    projects
+        .iter()
+        .map(|project| {
+            let manifest = &project.bundle.manifest;
+            let route = match super::slots::routes(catalog, manifest) {
+                Ok(routes)
+                    if routes.iter().any(|route| {
+                        matches!(
+                            route,
+                            horizon_mod_package::manifest::inject::Route::Source(_)
+                        )
+                    }) =>
+                {
+                    super::Route::Game {
+                        reason: SourceReason::Injections {
+                            mod_id: manifest.id.clone(),
+                        },
+                    }
+                }
+                Ok(_) => super::Route::Prebuilt,
+                Err(error) => super::Route::Invalid {
+                    reason: error.to_string(),
+                },
+            };
+            (manifest.id.clone(), route)
+        })
+        .collect()
 }
 
 /// Why `project` alone can't build against the prebuilt game, or `None` when it can.
@@ -179,9 +204,7 @@ pub(super) fn fetch(
         return Ok(Err(SourceReason::Host));
     };
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
-    let dir = super::root()
-        .join("prebuilt")
-        .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")));
+    let dir = cache_dir(revision, &name);
     if dir.join(IDENTITY).is_file() {
         return Ok(Ok(dir));
     }
@@ -292,13 +315,53 @@ pub fn prebuilt_availability(revision: &str, target: Target) -> Option<SourceRea
         return Some(SourceReason::Host);
     };
     let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
-    let cached = super::root()
-        .join("prebuilt")
-        .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")));
+    let cached = cache_dir(revision, &name);
     if cached.join(IDENTITY).is_file() {
         return None;
     }
     release_sum(revision, &name).err()
+}
+
+fn cache_dir(revision: &str, name: &str) -> PathBuf {
+    super::root()
+        .join("prebuilt")
+        .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")))
+}
+
+/// Read checked metadata without unpacking or executing the game. The caller holds the native
+/// cache lease; transport begins only after that caller has checked native-code consent.
+pub(super) fn planning_catalog(revision: &str) -> Result<internals::Catalog, SourceReason> {
+    let host = rust_toolchain::host().ok_or(SourceReason::Host)?;
+    let name = native::prebuilt_archive(host.target, false);
+    let game = cache_dir(revision, &name);
+    if game.join(IDENTITY).is_file() {
+        if let Ok(catalog) = internals::Catalog::read(&game) {
+            return Ok(catalog);
+        }
+    }
+    let expected = release_sum(revision, &name)?;
+    let download = |why| SourceReason::Download { why };
+    let cache = super::root()
+        .join("internals-sync")
+        .join(format!("catalog-{revision}-{}", host.target));
+    fs::create_dir_all(&cache).map_err(|error| download(error.to_string()))?;
+    let directory = cap_std::fs::Dir::open_ambient_dir(&cache, cap_std::ambient_authority())
+        .map_err(|error| download(error.to_string()))?;
+    if directory.read_to_string("archive.sha256").ok().as_deref() == Some(expected.as_str()) {
+        if let Ok(catalog) = internals::Catalog::read(&cache) {
+            return Ok(catalog);
+        }
+    }
+    let reader = crate::backend::get(&format!("{}/{name}", release_url(revision)))
+        .map_err(download)?
+        .into_reader();
+    horizon_mod_package::internals::cache_catalogs(&directory, &name, reader, &expected)
+        .map_err(|error| download(error.to_string()))?;
+    let catalog = internals::Catalog::read(&cache).map_err(download)?;
+    directory
+        .write("archive.sha256", expected)
+        .map_err(|error| download(error.to_string()))?;
+    Ok(catalog)
 }
 
 /// `name`'s sum in a `sha256sum` listing.
