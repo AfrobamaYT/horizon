@@ -824,6 +824,15 @@ mod tests {
                 game.create_group(model, 1),
                 Err(GroupError::CapacityExceeded)
             );
+            let other_group = {
+                let _other = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: "unaffected-owner",
+                    hook: "test",
+                    part: None,
+                });
+                assert_eq!(released.set_len(game, 1), Err(GroupError::Stale));
+                game.create_group(model, 1).unwrap()
+            };
             game.settings.mods.disabled.insert("group-owner".into());
             game.sync_native_switches();
             let mut draw = WorldGeometry::default();
@@ -832,6 +841,15 @@ mod tests {
                 Err(GroupError::Stale)
             );
             assert_eq!(draw.copy_count(), 0);
+            {
+                let _other = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: "unaffected-owner",
+                    hook: "test",
+                    part: None,
+                });
+                other_group.set_len(game, 1).unwrap();
+                other_group.destroy(game).unwrap();
+            }
             game.settings.mods.disabled.remove("group-owner");
             game.sync_native_switches();
             assert_eq!(released.set_len(game, 1), Err(GroupError::Stale));
