@@ -11945,10 +11945,11 @@ impl Renderer {
         self.land_frame();
         self.wait_frames();
     }
-    /// The frame on the submit thread submitted: a surface reconfigure waits for the
-    /// device and breaks if a frame is submitted while it waits, and the compositor
-    /// copies views after them. (The end of a frame already lands the frames of the
-    /// turn before; this is the turn's own.)
+    /// The frame on the submit thread submitted and presented: a surface reconfigure waits
+    /// for the device and breaks if a frame is submitted while it waits, the compositor
+    /// copies views after them, and `flip_frame` listeners hear a frame after its present.
+    /// (The end of a frame already lands the frames of the turn before; this is the turn's
+    /// own.)
     pub fn wait_submissions(&mut self) {
         self.queue.wait();
     }
