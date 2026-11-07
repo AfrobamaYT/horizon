@@ -7,12 +7,13 @@ mod.wasm that uses it; an added one breaks none. Only reports: it never fails a 
 """
 import re
 import sys
+from pathlib import Path
 
 
 def functions(path):
     """{interface/function: signature} of a generated mod-api.wit."""
     found, interface = {}, None
-    for line in open(path, encoding="utf-8"):
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
         start = re.match(r"interface ([\w-]+) \{", line)
         if start:
             interface = start.group(1)
@@ -20,7 +21,7 @@ def functions(path):
         if line.startswith("}"):
             interface = None
             continue
-        func = re.match(r"\s+([\w-]+): func(.*);", line)
+        func = re.match(r"\s+%?([\w-]+): func(.*);", line)
         if interface and func:
             found[f"{interface}/{func.group(1)}"] = func.group(2).strip()
     return found
