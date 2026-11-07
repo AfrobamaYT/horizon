@@ -38,7 +38,6 @@ mod package;
 mod prebuilt;
 mod sites;
 mod slots;
-#[cfg(test)]
 mod source;
 #[cfg(all(test, target_os = "linux"))]
 mod source_server;
@@ -2207,7 +2206,10 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => Ok(game),
+                Ok(game) => match prebuilt::source_refusal(&game, &projects)? {
+                    Some(reason) => Err(reason),
+                    None => Ok(game),
+                },
                 Err(reason) => Err(reason),
             },
         };
@@ -2356,7 +2358,6 @@ fn pipeline(
         }
         // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
         // check, as the prebuilt route validates before it creates its output.
-        let listed = real.join("points.json");
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
@@ -2386,6 +2387,8 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        source::stage(&pending, &catalog_dir, &ordered)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
@@ -2393,13 +2396,14 @@ fn pipeline(
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(catalog_dir.join(inject::POINTS), &listed)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(
-            catalog_dir.join(internals::INTERNALS),
-            real.join(internals::INTERNALS),
-        )
-        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        for name in [
+            inject::POINTS,
+            internals::INTERNALS,
+            horizon_mod_api_gen::points::source::FILE,
+        ] {
+            fs::rename(catalog_dir.join(name), real.join(name))
+                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.

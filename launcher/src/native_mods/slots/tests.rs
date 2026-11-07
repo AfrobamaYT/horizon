@@ -115,7 +115,7 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
             } else {
                 "pub const fn run"
             }));
-            let reports = report(&manifest).collect::<Vec<_>>();
+            let reports = report(&catalog, &manifest).collect::<Vec<_>>();
             assert_eq!(reports.len(), 1);
             assert!(reports[0].contains("example:test: game::run -> slot"));
         }
