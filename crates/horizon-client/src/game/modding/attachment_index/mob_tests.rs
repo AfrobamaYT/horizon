@@ -18,7 +18,11 @@ fn mob(uuid: [i32; 4]) -> Tag {
         ("UUID", Tag::IntArray(uuid.to_vec())),
         (
             "Pos",
-            Tag::List(vec![Tag::Double(1.0), Tag::Double(70.0), Tag::Double(3.0)]),
+            Tag::List(vec![
+                Tag::Double(1.0f64.to_bits()),
+                Tag::Double(70.0f64.to_bits()),
+                Tag::Double(3.0f64.to_bits()),
+            ]),
         ),
         (
             horizon_mod_runtime::attachments::ATTACHMENTS_KEY,
@@ -45,7 +49,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         VALUE.set(game, Holder::Entity(id), 7).unwrap();
         let old = game.query_mut(&VALUE).unwrap();
         let row = old.iter().next().unwrap().unwrap();
-        let registration = game.mobs[0].attachment_lifetime.registration().unwrap();
+        let work = index.lock().unwrap().work_count();
         let replacement = game.mobs[0].clone();
         game.mobs.store_back(0, replacement);
         assert!(game.mobs[0].attachment_lifetime.is_bound());
@@ -61,7 +65,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
                 .value,
             &7
         );
-        drop(registration);
+        assert_eq!(index.lock().unwrap().work_count(), work);
         let entity = game.entity(id).unwrap();
         assert!(game.entity_discard(entity));
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
@@ -115,6 +119,49 @@ fn saved_mob_binding_tracks_serialized_transfer_and_parked_levels() {
             Err(mod_api::AttachmentRowError::StaleHolder)
         );
         assert_eq!(*row.value(), 11);
+        game.mobs.clear();
+        assert!(
+            game.attachment_indexes[&Dim::Nether]
+                .lock()
+                .unwrap()
+                .snapshot(&key)
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn saved_mob_binding_rebinds_retained_id_with_a_new_generation() {
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let id = game.load_mob(mob([25, 26, 27, 28]), None).unwrap();
+        VALUE.set(game, Holder::Entity(id), 13).unwrap();
+        let batch = game.query_mut(&VALUE).unwrap();
+        let row = batch.iter().next().unwrap().unwrap();
+        let holder = game.entity(id).unwrap();
+        let source = game.attachment_indexes[&Dim::Overworld].clone();
+        let key = ("test".into(), "mana".into());
+        // The retained-owner route retires before carrying the value to arrival.
+        let mut owner = game.mobs.remove(0);
+        owner.attachment_lifetime.retire();
+        assert!(source.lock().unwrap().snapshot(&key).is_empty());
+        game.enter_level(Dim::Nether).unwrap();
+        game.rebind_transferred_entity(Dim::Overworld, id, &mut owner);
+        game.mobs.push(owner);
+        let current = game.attachment_indexes[&Dim::Nether]
+            .lock()
+            .unwrap()
+            .snapshot(&key);
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].holder, AttachmentHolder::Entity(holder));
+        assert_eq!(current[0].entry.read(&VALUE), Ok(&13));
+        assert_eq!(
+            row.set(game, 14),
+            Err(mod_api::AttachmentRowError::StaleHolder)
+        );
+        assert_eq!(*row.value(), 13);
         game.mobs.clear();
         assert!(
             game.attachment_indexes[&Dim::Nether]
