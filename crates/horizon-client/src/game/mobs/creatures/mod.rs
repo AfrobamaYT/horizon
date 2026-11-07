@@ -5351,6 +5351,10 @@ impl Game<'_> {
             }
             if let Some(m) = game.mobs.iter_mut().find(|m| m.id == id) {
                 m.fall_distance = 0.0;
+                // Entity.teleport's setOldRot: keep the owner's angles without
+                // interpolating from the pre-teleport rotation on the client.
+                m.previous_yaw = m.yaw;
+                m.previous_head_pitch = m.head_pitch;
             }
             game.audio
                 .play("minecraft:entity.player.teleport", Some(target), 1.0, 1.0);
@@ -11354,6 +11358,8 @@ mod mob_pearl_hook_tests {
                     let ty = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                     let mut mob = Mob::new(id, ty, from, 37.0);
                     mob.head_pitch = -12.0;
+                    mob.previous_yaw = -10.0;
+                    mob.previous_head_pitch = 20.0;
                     mob.velocity = Vec3::new(0.5, -0.25, 0.75);
                     mob.fall_distance = 9.0;
                     let health = mob.health;
@@ -11392,6 +11398,7 @@ mod mob_pearl_hook_tests {
                             assert_eq!(m.velocity, Vec3::ZERO);
                             assert_eq!(m.fall_distance, 0.0);
                             assert_eq!((m.yaw, m.head_pitch), (37.0, -12.0));
+                            assert_eq!((m.previous_yaw, m.previous_head_pitch), (37.0, -12.0));
                             assert_eq!(m.health, health);
                         }
                         2 => assert_eq!(mob.unwrap().position, Vec3::new(3.0, 70.0, 3.0)),
