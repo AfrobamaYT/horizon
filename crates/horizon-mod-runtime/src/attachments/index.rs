@@ -1,7 +1,10 @@
 //! Dense attachment membership with immutable, shared-entry snapshots.
 use std::{collections::HashMap, hash::Hash, sync::Arc};
 
-use super::AttachmentEntry;
+use super::{
+    AttachmentEntry,
+    index_key::{BucketKey, Lookup, Named},
+};
 use horizon_core::nbt::JavaString;
 
 /// An already-resolved attachment namespace and name.
@@ -74,6 +77,16 @@ impl<T> AttachmentChange<T> {
     }
 }
 
+impl<H: Copy> AttachmentRow<H> {
+    /// Capture non-forgeable authority to validate this residency before a write.
+    pub fn write_token(&self) -> AttachmentOwner<H> {
+        AttachmentOwner {
+            holder: self.holder,
+            generation: self.generation.clone(),
+        }
+    }
+}
+
 struct Owner {
     generation: Arc<()>,
     slots: HashMap<Arc<AttachmentKey>, usize>,
@@ -104,7 +117,7 @@ fn reclaim_sparse_map<K: Eq + Hash, V>(map: &mut HashMap<K, V>) {
 /// holders must supply a defined registration order rather than HashMap iteration.
 #[non_exhaustive]
 pub struct AttachmentIndex<H> {
-    buckets: HashMap<Arc<AttachmentKey>, Arc<Vec<AttachmentRow<H>>>>,
+    buckets: HashMap<BucketKey, Arc<Vec<AttachmentRow<H>>>>,
     owners: HashMap<H, Owner>,
     empty: Arc<Vec<AttachmentRow<H>>>,
 }
@@ -163,17 +176,37 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Capture current membership and values. Missing keys share the same empty Arc;
     /// acquiring an empty snapshot neither allocates nor registers the key.
     pub fn snapshot(&self, key: &AttachmentKey) -> Arc<Vec<AttachmentRow<H>>> {
-        self.buckets.get(key).unwrap_or(&self.empty).clone()
+        self.buckets
+            .get(key as &dyn Lookup)
+            .unwrap_or(&self.empty)
+            .clone()
+    }
+
+    /// Capture a bucket by UTF-8 names without allocating UTF-16 lookup keys.
+    /// Both present and absent types use expected O(1) lookup, with no full scan.
+    pub fn snapshot_named(&self, namespace: &str, name: &str) -> Arc<Vec<AttachmentRow<H>>> {
+        self.buckets
+            .get(&Named(namespace, name) as &dyn Lookup)
+            .unwrap_or(&self.empty)
+            .clone()
     }
 
     /// Refuse a captured row after unload or re-registration, including in another index.
     /// Call under the same owning-thread access as the subsequent holder write. This
     /// only checks residency; writes must still use the holder's normal journal path.
     pub fn validate_row(&self, row: &AttachmentRow<H>) -> Result<(), super::AttachmentRowError> {
+        self.validate_owner(&row.write_token())
+    }
+
+    /// Check a non-forgeable residency token without inspecting attachment membership.
+    pub fn validate_owner(
+        &self,
+        token: &AttachmentOwner<H>,
+    ) -> Result<(), super::AttachmentRowError> {
         if self
             .owners
-            .get(&row.holder)
-            .is_some_and(|owner| Arc::ptr_eq(&owner.generation, &row.generation))
+            .get(&token.holder)
+            .is_some_and(|owner| Arc::ptr_eq(&owner.generation, &token.generation))
         {
             Ok(())
         } else {
@@ -205,7 +238,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             generation: token.generation.clone(),
         };
         if let Some(&slot) = owner.slots.get(key) {
-            let rows = self.buckets.get_mut(key).unwrap();
+            let rows = self.buckets.get_mut(key as &dyn Lookup).unwrap();
             if !Arc::ptr_eq(&rows[slot].entry, &row.entry)
                 || !Arc::ptr_eq(&rows[slot].generation, &row.generation)
             {
@@ -215,9 +248,12 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         } else {
             let shared_key = self
                 .buckets
-                .get_key_value(key)
-                .map_or_else(|| Arc::new(key.clone()), |(key, _)| key.clone());
-            let rows = self.buckets.entry(shared_key.clone()).or_default();
+                .get_key_value(key as &dyn Lookup)
+                .map_or_else(|| Arc::new(key.clone()), |(key, _)| key.0.clone());
+            let rows = self
+                .buckets
+                .entry(BucketKey(shared_key.clone()))
+                .or_default();
             owner.slots.insert(shared_key, rows.len());
             Arc::make_mut(rows).push(row);
         }
@@ -274,7 +310,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     }
 
     fn remove_membership(&mut self, key: &AttachmentKey, slot: usize) -> Arc<AttachmentEntry> {
-        let rows = Arc::make_mut(self.buckets.get_mut(key).unwrap());
+        let rows = Arc::make_mut(self.buckets.get_mut(key as &dyn Lookup).unwrap());
         let retired = rows.swap_remove(slot).entry;
         if let Some(moved) = rows.get(slot) {
             *self
@@ -286,7 +322,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
                 .unwrap() = slot;
         }
         if rows.is_empty() {
-            self.buckets.remove(key);
+            self.buckets.remove(key as &dyn Lookup);
             reclaim_sparse_map(&mut self.buckets);
         } else if rows.len() < rows.capacity() / 4 {
             rows.shrink_to_fit();
