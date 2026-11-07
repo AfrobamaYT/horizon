@@ -83,6 +83,24 @@ impl Names {
             .map(|entry| entry.id.as_str())
     }
 
+    /// Complete registry identities without changing requested slots. Publish the returned
+    /// table only after every forward reference has resolved.
+    pub fn complete<'a, E>(
+        &self,
+        ids: impl IntoIterator<Item = &'a str>,
+        unknown: impl FnMut(&'static str, &str) -> E,
+    ) -> Result<Self, Vec<E>> {
+        let all: std::collections::BTreeSet<_> = ids.into_iter().collect();
+        self.resolve(|id| all.contains(id).then_some(()), unknown)?;
+        let mut names = self.clone();
+        for id in all {
+            names
+                .request("horizon", id)
+                .expect("registry owns valid ids");
+        }
+        Ok(names)
+    }
+
     pub fn resolve<T, E>(
         &self,
         mut resolve: impl FnMut(&str) -> Option<T>,

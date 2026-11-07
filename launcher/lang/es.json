@@ -1196,5 +1196,8 @@
   "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.",
   "Open in private window": "Abrir en ventana privada",
   "Open this link in a private window to pick another account.": "Abre este enlace en una ventana privada para elegir otra cuenta.",
-  "Use a different Microsoft account": "Usar otra cuenta de Microsoft"
+  "Use a different Microsoft account": "Usar otra cuenta de Microsoft",
+  "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.": "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.",
+  "Rust toolchain archive has {actual} bytes; expected {expected}.": "Rust toolchain archive has {actual} bytes; expected {expected}.",
+  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size."
 }
