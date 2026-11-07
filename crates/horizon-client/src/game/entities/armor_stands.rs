@@ -865,6 +865,9 @@ impl Game<'_> {
                 continue;
             }
             self.armor_stands[i].first_tick = false;
+            // Entity.baseTick: the saved invulnerability window counts down
+            // (#916).
+            self.tick_saved_invulnerable_time(self.armor_stands[i].id);
             self.armor_stand_location_effects(i, false);
             let a = &mut self.armor_stands[i];
             a.previous = a.position;

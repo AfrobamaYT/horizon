@@ -2537,8 +2537,9 @@ pub struct Seen {
     pub bounds: Aabb,
     pub eye_y: f64,
     pub alive: bool,
-    /// `invulnerable_flag`, which `asValidTarget` refuses a target by
-    /// (#1175): a valid-target rule the tick's view asks.
+    /// `Entity.isInvulnerable` (the ability flag or the temporary window,
+    /// #916), which `asValidTarget` refuses a target by (#1175): a
+    /// valid-target rule the tick's view asks.
     pub invulnerable: bool,
     pub baby: bool,
     pub in_love: bool,
@@ -2760,7 +2761,7 @@ impl Mob {
             bounds: m.bounds(),
             eye_y: m.eye_y(),
             alive: m.alive(),
-            invulnerable: m.invulnerable_flag,
+            invulnerable: m.is_invulnerable(),
             baby: m.is_baby(),
             // A villager is "in love" when it is willing to breed (`canBreed`).
             in_love: if villager {
@@ -3537,6 +3538,13 @@ impl Mob {
     pub fn alive(&self) -> bool {
         self.health > 0.0
     }
+    /// `Entity.isInvulnerable` (#916): the permanent `Invulnerable` flag or
+    /// the temporary window `invulnerableTime > 0` — what damage refusal
+    /// (`isInvulnerableToBase`) and enemy targeting (`canBeSeenAsEnemy`)
+    /// both read.
+    pub fn is_invulnerable(&self) -> bool {
+        self.invulnerable_flag || self.invulnerable_time > 0
+    }
     pub fn hostile(&self) -> bool {
         self.kind.category == "monster"
     }
@@ -3609,7 +3617,7 @@ impl Mob {
     pub fn refuses_damage(&self, source: &Damage) -> bool {
         !self.alive()
             || self.removed
-            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+            || (self.is_invulnerable() && !source.kind.bypasses_invulnerability())
     }
     /// `LivingEntity.hurtServer`'s partial mob adapter, with health reductions inline.
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the

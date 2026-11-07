@@ -796,7 +796,26 @@ impl PlayerMotion {
         amount: f32,
         blocking: Option<Blocking>,
     ) -> Result<BlockOutcome> {
-        self.hurt_caused_by(level, resources, rules, source, amount, blocking, false, 0)
+        self.hurt_caused_by(
+            level, resources, rules, source, amount, blocking, false, 0, false,
+        )
+    }
+    /// [`hurt_blocking`](Self::hurt_blocking) from a source whose hit was a
+    /// creative player's (`DamageSource.isCreativePlayer`): it passes the
+    /// invulnerability the victim has (`Entity.isInvulnerableToBase`'s one
+    /// exception, #916).
+    pub fn hurt_blocking_creative(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        resources: &HealthResources,
+        rules: HealthRules,
+        source: DamageTypeId,
+        amount: f32,
+        blocking: Option<Blocking>,
+    ) -> Result<BlockOutcome> {
+        self.hurt_caused_by(
+            level, resources, rules, source, amount, blocking, false, 0, true,
+        )
     }
     /// `hurt_blocking` from a source whose causing entity is a living
     /// non-player (`living_cause`), which the `when_caused_by_living_non_player`
@@ -812,17 +831,8 @@ impl PlayerMotion {
         blocking: Option<Blocking>,
         living_cause: bool,
         causing: i32,
+        creative_source: bool,
     ) -> Result<BlockOutcome> {
-        // `Entity.isInvulnerableToBase` (#916): the permanent flag — for a
-        // player its `Abilities.invulnerable` (the same NBT tag) — past only
-        // for `#bypasses_invulnerability` damage (the void, `/kill`).
-        if self.invulnerable
-            && !resources
-                .damage
-                .in_tag(source, "minecraft:bypasses_invulnerability")
-        {
-            return Ok(BlockOutcome::default());
-        }
         if self.client_side {
             return Ok(BlockOutcome::default());
         }
@@ -836,6 +846,7 @@ impl PlayerMotion {
         let totem_ready = self.health.totem_ready;
         let totem_off_hand = self.health.totem_off_hand;
         let invulnerable = self.invulnerable;
+        let invulnerable_time = self.health.invulnerable_time > 0;
         let victim = self.victim();
         let h = &mut self.health;
         let mut environment = Environment {
@@ -844,6 +855,8 @@ impl PlayerMotion {
             victim,
             causing,
             invulnerable,
+            invulnerable_time,
+            creative_source,
             client_loaded: self.client_loaded,
             rules,
             source,
@@ -958,6 +971,11 @@ pub(crate) struct Environment<'a> {
     pub(crate) causing: i32,
     /// Abilities.invulnerable.
     pub(crate) invulnerable: bool,
+    /// `Entity.invulnerableTime > 0` (#916): the entity-level window.
+    pub(crate) invulnerable_time: bool,
+    /// The hit is a creative player's (`DamageSource.isCreativePlayer`,
+    /// #916): it passes the invulnerability below.
+    pub(crate) creative_source: bool,
     /// The player's client has loaded the world since its last respawn or
     /// level change (`ServerGamePacketListenerImpl.hasClientLoaded`).
     pub(crate) client_loaded: bool,
@@ -1212,16 +1230,16 @@ impl ImmunityWorld for Environment<'_> {
         false
     }
     fn permanently_invulnerable(&mut self) -> io::Result<bool> {
-        Ok(false)
+        Ok(self.invulnerable)
     }
     fn temporarily_invulnerable(&mut self) -> io::Result<bool> {
-        Ok(false)
+        Ok(self.invulnerable_time)
     }
     fn tag(&mut self, tag: ImmunityTag) -> io::Result<bool> {
         Ok(self.source.immunity_tag(tag))
     }
     fn creative_source(&mut self) -> io::Result<bool> {
-        Ok(false)
+        Ok(self.creative_source)
     }
     fn fire_immune(&mut self) -> io::Result<bool> {
         Ok(false)
@@ -1738,7 +1756,7 @@ mod tests {
         };
         let id = health.damage.id("minecraft:mob_attack").unwrap();
         let o = player
-            .hurt_caused_by(level, health, rules, id, 4.0, Some(shield), true, 0)
+            .hurt_caused_by(level, health, rules, id, 4.0, Some(shield), true, 0, false)
             .unwrap();
         assert_eq!(o.blocked, 3.0, "Easy scales 4 to 3 before the shield");
         assert!(o.fully_blocked && !o.knockback);
@@ -1778,6 +1796,7 @@ mod tests {
                     None,
                     living,
                     0,
+                    false,
                 )
                 .unwrap();
             before - player.health.health()
@@ -1927,7 +1946,8 @@ mod tests {
         assert!(doubled.hurt(level, health, rules, id, 5.0).unwrap());
         assert_eq!(doubled.health.health(), 10.0);
         // The causing mob when it is known, else 0.
-        let hurt = player(9013).hurt_caused_by(level, health, rules, id, 5.0, None, false, 44);
+        let hurt =
+            player(9013).hurt_caused_by(level, health, rules, id, 5.0, None, false, 44, false);
         assert!(hurt.unwrap().hurt);
         assert_eq!(seen(9011), [("minecraft:arrow 0".to_owned(), 5.0)]);
         assert_eq!(seen(9013), [("minecraft:arrow 44".to_owned(), 5.0)]);

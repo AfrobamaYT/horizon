@@ -1577,6 +1577,29 @@ impl Game<'_> {
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
             return false;
         };
+        // `Entity.isInvulnerableToBase` over the saved flag and window (#916):
+        // past only for `#bypasses_invulnerability`.
+        {
+            use horizon_core::nbt::Tag;
+            let saved = self.persist.raw.get(&id);
+            let flag = saved.is_some_and(|t| horizon_client::entity_nbt::flag(t, "Invulnerable"));
+            let window = saved.is_some_and(|t| {
+                matches!(
+                    match t {
+                        Tag::Compound(map) => map.get(&"invulnerable_time".into()),
+                        _ => None,
+                    },
+                    Some(Tag::Int(ticks)) if *ticks > 0
+                )
+            });
+            let registry = &self.health_resources.damage;
+            let bypass = registry
+                .id(ty)
+                .is_some_and(|k| registry.in_tag(k, "minecraft:bypasses_invulnerability"));
+            if (flag || window) && !bypass {
+                return false;
+            }
+        }
         if is_fire(kind) {
             let level = super::entity::damage_level_of!(self, scoped);
             let hurt = d.hurt_from(level, BODY, amount, None, shrugs(direct.as_ref()), None);
@@ -2479,6 +2502,11 @@ impl Game<'_> {
     }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
+        // Entity.baseTick: the saved invulnerability window counts down
+        // (#916), before the dragon's own borrow of the game.
+        if let Some(id) = self.dragon.as_ref().map(|d| d.id) {
+            self.tick_saved_invulnerable_time(id);
+        }
         let Some(d) = self.dragon.as_mut() else {
             return;
         };

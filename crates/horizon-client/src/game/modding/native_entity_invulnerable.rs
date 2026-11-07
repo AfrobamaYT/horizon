@@ -182,6 +182,32 @@ impl Game<'_> {
         self.persist.raw.insert(id, Tag::Compound(compound));
         true
     }
+    /// `Entity.baseTick`'s countdown of a non-mob kind's saved
+    /// `invulnerable_time` (#916): one less each tick while it runs, so the
+    /// window an entity carries in its saved data closes like a mob's and a
+    /// player's do.
+    pub(in crate::game) fn tick_saved_invulnerable_time(&mut self, id: u32) {
+        use horizon_core::nbt::Tag;
+        let Some(Tag::Int(ticks)) = self
+            .persist
+            .raw
+            .get(&id)
+            .and_then(|tag| match tag {
+                Tag::Compound(map) => map.get(&"invulnerable_time".into()),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        let ticks = (*ticks - 1).max(0);
+        let mut compound = match self.persist.raw.get(&id) {
+            Some(Tag::Compound(map)) => map.clone(),
+            _ => std::collections::BTreeMap::new(),
+        };
+        compound.insert("invulnerable_time".into(), Tag::Int(ticks));
+        self.persist.raw.insert(id, Tag::Compound(compound));
+    }
+
     /// `LivingEntity.damageCooldownTime`: 20 after a hit, counting down;
     /// while it is above 10 a hit does only what it deals beyond the last
     /// one. Mobs and players.
@@ -410,6 +436,137 @@ mod tests {
                     .unwrap();
             assert!(back.invulnerable_flag);
             assert_eq!(back.invulnerable_time, 9);
+        });
+    }
+
+    /// #916, review: the window really refuses. A mod sets the timer and the
+    /// entity no longer takes damage — nothing but what bypasses
+    /// invulnerability — and enemies no longer see it as a target, until the
+    /// window closes.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_window_refuses_damage_and_hides_the_mob_from_enemies() {
+        use horizon_client::mobs::{Damage, DamageKind, Mob};
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            // The #170 recipe: two zombies on a lit stone floor, kept from
+            // despawning while their tick runs.
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(12, zombie.clone(), Vec3::new(0.5, 64.0, 0.5), 0.0));
+            game.mobs
+                .push(Mob::new(13, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
+            floor(game);
+            let victim = game.native_entity(12).unwrap();
+            let enemy = game.native_entity(13).unwrap();
+            let keep = |game: &mut super::Game<'_>| {
+                let m = game.native_mob_ref(game.native_entity(12).unwrap()).unwrap();
+                m.set_persistence_required(game);
+                m.set_no_action_time(game, 650);
+            };
+            keep(game);
+
+            // The window refuses a hit nothing-bypassing; the void goes
+            // through (`Entity.isInvulnerableToBase`).
+            assert!(game.native_entity_set_invulnerable_time(victim, 60));
+            let before = game.mobs[0].health;
+            assert!(!game.mobs[0].damage(
+                crate::game::entity::damage_level_of!(game),
+                5.0,
+                Damage::of(DamageKind::Generic),
+            ));
+            assert_eq!(game.mobs[0].health, before, "the window refused it");
+            assert!(game.mobs[0].damage(
+                crate::game::entity::damage_level_of!(game),
+                100.0,
+                Damage::of(DamageKind::OutOfWorld),
+            ));
+            assert!(game.mobs[0].health <= 0.0, "the void gets past");
+
+            // `canBeSeenAsEnemy`: the facts enemies ask about carry the window
+            // too (`Mob::seen`, `isInvulnerable`).
+            game.mobs[0].health = 20.0;
+            assert!(game.mobs[0].invulnerable_time > 0);
+            assert!(game.mobs[0].is_invulnerable());
+            assert!(game.mobs[0].seen(None).invulnerable);
+            // ...and once the window has run out, the enemy sees it again.
+            game.mobs[0].invulnerable_time = 1;
+            game.tick_mobs().unwrap();
+            assert_eq!(game.mobs[0].invulnerable_time, 0);
+            assert!(!game.mobs[0].seen(None).invulnerable);
+            let _ = enemy;
+            keep(game);
+        });
+    }
+
+    /// #916, review: a creative player's hit passes the victim's temporary
+    /// window (`isInvulnerableToBase`'s one exception), while the ability
+    /// flag holds even it back, as vanilla `Player.hurtServer` does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_creative_players_hit_passes_the_victims_invulnerability() {
+        use horizon_client::motion::PlayerMotion;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.native_entity(20).unwrap();
+
+            // The window refuses an ordinary hit; a creative player's
+            // `player_attack` passes it (`DamageSource.isCreativePlayer`).
+            assert!(game.native_entity_set_invulnerable_time(player, 60));
+            game.mob_hits_player(5.0, [0.0; 3], "minecraft:player_attack");
+            assert_eq!(
+                game.player.as_ref().unwrap().health.health(),
+                20.0,
+                "the window refused it"
+            );
+            game.mob_hits_player_from(5.0, [0.0; 3], "minecraft:player_attack", true);
+            assert_eq!(
+                game.player.as_ref().unwrap().health.health(),
+                15.0,
+                "a creative player's hit passes the window"
+            );
+
+            // The ability flag is another gate (`Player.hurtServer`): even a
+            // creative player's hit does not pass it, as in vanilla.
+            game.player.as_mut().unwrap().health.invulnerable_time = 0;
+            assert!(game.native_entity_set_invulnerable(player, true));
+            game.mob_hits_player_from(5.0, [0.0; 3], "minecraft:player_attack", true);
+            assert_eq!(
+                game.player.as_ref().unwrap().health.health(),
+                15.0,
+                "the ability flag holds even a creative hit back"
+            );
+        });
+    }
+
+    /// #916, review: a non-mob's saved window counts down each tick, and the
+    /// item damage path refuses by it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_non_mobs_saved_window_counts_down_and_refuses() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_core::geometry::Vec3;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.armor_stands
+                .push(ArmorStand::new(14, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let stand = game.native_entity(14).unwrap();
+            assert!(game.native_entity_set_invulnerable_time(stand, 20));
+            // Entity.baseTick, over the saved tag.
+            game.tick_saved_invulnerable_time(14);
+            game.tick_saved_invulnerable_time(14);
+            assert_eq!(game.native_entity_invulnerable_time(stand), Some(18));
+            // Down to zero it stays, and reads as no window.
+            for _ in 0..18 {
+                game.tick_saved_invulnerable_time(14);
+            }
+            assert_eq!(game.native_entity_invulnerable_time(stand), Some(0));
         });
     }
 }

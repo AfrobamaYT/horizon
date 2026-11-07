@@ -4603,6 +4603,9 @@ impl Game<'_> {
                 round.not_ticked(items[i].id);
                 continue;
             }
+            // Entity.baseTick: the entity-level invulnerability window of
+            // the saved data counts down (#916).
+            self.tick_saved_invulnerable_time(items[i].id);
             let item = &mut items[i];
             // `addFreshEntity`: an entity added this tick ticks from the next
             // one (`EntityTickList`), so a drop's `Age` stays 0 for the tick

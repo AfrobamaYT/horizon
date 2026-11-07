@@ -210,6 +210,15 @@ impl Game<'_> {
                     Some(Target::Mob(i)) => Some(Some(i)),
                     _ => Some(None),
                 };
+                // `DamageSource.isCreativePlayer`: a creative player's hit
+                // passes the victim's invulnerability (#916).
+                let creative_source = match cause.or(by) {
+                    Some(Target::Player) => self.creative,
+                    Some(Target::Guest(conn)) => {
+                        self.command_guest(conn).is_some_and(|g| g.creative())
+                    }
+                    _ => false,
+                };
                 // resolvePlayerResponsibleForDamage: remember the causing player's UUID.
                 let by_player = match cause.or(by) {
                     Some(Target::Player) => self.lan_acting,
@@ -226,7 +235,7 @@ impl Game<'_> {
                     if let Some(name) = named {
                         g.note_direct_entity(&ty, name);
                     }
-                    let hurt = g.hurt_player_from(amount, from, &ty, attacker);
+                    let hurt = g.hurt_player_from(amount, from, &ty, attacker, creative_source);
                     if hurt && let Some(credit) = by_player {
                         g.combat.note_hurt_by_player(credit, now);
                     }
@@ -319,12 +328,23 @@ impl Game<'_> {
             Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
             _ => false,
         };
-        let invulnerable = self
-            .persist
-            .raw
-            .get(&id)
+        let saved = self.persist.raw.get(&id);
+        let invulnerable = saved
             .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        if invulnerable && !creative && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
+        // `Entity.isTemporarilyInvulnerable` (#916): the saved window refuses
+        // like the flag does.
+        let window = saved.is_some_and(|tag| {
+            matches!(
+                match tag {
+                    horizon_core::nbt::Tag::Compound(map) => map.get(&"invulnerable_time".into()),
+                    _ => None,
+                },
+                Some(horizon_core::nbt::Tag::Int(ticks)) if *ticks > 0
+            )
+        });
+        if (invulnerable || window)
+            && !creative
+            && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
             || !self
                 .ui
                 .rules
