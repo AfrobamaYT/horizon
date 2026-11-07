@@ -10020,6 +10020,35 @@ mod projectile_batch_tests {
         sync: false,
     };
 
+    struct BoundProjectiles {
+        _values: [Attachments; 2],
+        index: Arc<Mutex<AttachmentIndex<mod_api::EntityRef>>>,
+        registrations: [horizon_mod_runtime::attachments::AttachmentRegistration; 2],
+    }
+
+    impl BoundProjectiles {
+        fn bind_two(game: &mut Game<'_>) -> Self {
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let mut values = [Attachments::default(), Attachments::default()];
+            let registrations = std::array::from_fn(|i| {
+                let id = game.creatures.projectiles[i].id;
+                let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
+                VALUE
+                    .set(&mut values[i], Holder::Entity(id), 10 + i as i32)
+                    .unwrap();
+                game.creatures.projectiles.update(i, |p| {
+                    p.attachment_lifetime().bind(&mut values[i], &index, holder);
+                    p.attachment_lifetime().registration().unwrap()
+                })
+            });
+            Self {
+                _values: values,
+                index,
+                registrations,
+            }
+        }
+    }
+
     #[derive(Clone, Default)]
     struct Observed {
         impacts: Vec<u32>,
@@ -10132,30 +10161,15 @@ mod projectile_batch_tests {
                     game.creatures.projectiles.push(p);
                 }
                 let joins = std::array::from_fn(|i| game.creatures.projectiles[i].join);
-                let index = Arc::new(Mutex::new(AttachmentIndex::default()));
-                let mut maps = [Attachments::default(), Attachments::default()];
-                let registrations: Vec<_> = maps
-                    .iter_mut()
-                    .enumerate()
-                    .map(|(i, values)| {
-                        let holder =
-                            mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), ids[i]);
-                        VALUE
-                            .set(values, Holder::Entity(ids[i]), 10 + i as i32)
-                            .unwrap();
-                        game.creatures.projectiles.update(i, |p| {
-                            p.attachment_lifetime().bind(values, &index, holder);
-                            p.attachment_lifetime().registration().unwrap()
-                        })
-                    })
-                    .collect();
+                let bound = BoundProjectiles::bind_two(game);
+                let index = &bound.index;
                 let key = ("test".into(), "projectile_lifetime".into());
                 let before = index.lock().unwrap().snapshot(&key);
                 assert_eq!(before.len(), 2);
                 observed.lock().unwrap().remove = remove.then_some(ids[1]);
                 game.tick_projectiles().unwrap();
                 assert_eq!(index.lock().unwrap().snapshot(&key).len(), 2);
-                for (id, original) in ids[..2].iter().zip(&registrations) {
+                for (id, original) in ids[..2].iter().zip(&bound.registrations) {
                     let i = game
                         .creatures
                         .projectiles
@@ -10204,6 +10218,54 @@ mod projectile_batch_tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn no_impact_expiration_retires_only_the_expired_owner() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            for (id, age, x) in [(71, 5999, 0.5), (72, 0, 5.5)] {
+                let mut p =
+                    Projectile::new(ProjectileKind::Snowball, Vec3::new(x, 70.0, 0.5), None);
+                p.id = id;
+                p.age = age;
+                p.velocity = Vec3::new(0.25, 0.0, 0.0);
+                game.creatures.projectiles.push(p);
+            }
+            let bound = BoundProjectiles::bind_two(game);
+            let key = ("test".into(), "projectile_lifetime".into());
+            let before = bound.index.lock().unwrap().snapshot(&key);
+            assert_eq!(before.len(), 2);
+            game.tick_projectiles().unwrap();
+            assert_eq!(
+                game.creatures
+                    .projectiles
+                    .iter()
+                    .map(|p| p.id)
+                    .collect::<Vec<_>>(),
+                [72]
+            );
+            assert_eq!(game.creatures.projectiles[0].age, 1);
+            let current = game
+                .creatures
+                .projectiles
+                .update(0, |p| p.attachment_lifetime().registration().unwrap());
+            assert!(bound.registrations[1].same_registration(&current));
+            let after = bound.index.lock().unwrap().snapshot(&key);
+            assert_eq!(after.len(), 1);
+            assert_eq!(after[0].entry.read(&VALUE), Ok(&11));
+            game.creatures.projectiles.clear();
+            assert!(bound.index.lock().unwrap().snapshot(&key).is_empty());
+            assert!(
+                before
+                    .iter()
+                    .all(|row| matches!(row.entry.read(&VALUE), Ok(10 | 11)))
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn canceled_impacts_keep_projectile_batch_joins_and_survivor_order() {
         with_batch(false, |game, ids, joins, spawned, buffered| {
             let list = &mut game.creatures.projectiles;
@@ -10236,6 +10298,15 @@ mod projectile_batch_tests {
         with_batch(true, |game, ids, joins, spawned, buffered| {
             // Pending removal refuses the handle already, even before the physical sweep.
             assert!(game.entity(ids[1]).is_none());
+            // Refusal must happen before replay, not only at the later removal sweep.
+            let arrow = game
+                .creatures
+                .projectiles
+                .iter()
+                .find(|p| p.id == ids[1])
+                .unwrap();
+            assert!(arrow.stuck);
+            assert!(arrow.position.x < 2.0);
             game.native_removals_flush();
             let list = &game.creatures.projectiles;
             assert_eq!(
