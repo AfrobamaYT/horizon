@@ -2488,18 +2488,22 @@ impl Game<'_> {
                     let raw = message.content.clone();
                     // `PlayerChatMessage.decoratedContent`: the text as a literal.
                     let original = Text::literal(raw.clone());
-                    let mut text = original.try_into_api().unwrap();
+                    let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
-                    self.native_server_chat(mod_api::__private::ServerChatCall {
-                        player_id: id,
-                        player: sender,
-                        username: &name,
-                        raw_text: &raw,
-                        message: &mut text,
-                        replies: &mut replies,
-                        cancel: &mut cancel,
-                    });
+                    if mod_api::__private::listened(mod_api::HookId::ServerChat) {
+                        let mut api_text = text.try_into_api().unwrap();
+                        self.native_server_chat(mod_api::__private::ServerChatCall {
+                            player_id: id,
+                            player: sender,
+                            username: &name,
+                            raw_text: &raw,
+                            message: &mut api_text,
+                            replies: &mut replies,
+                            cancel: &mut cancel,
+                        });
+                        text = api_text.try_into_engine(&()).unwrap();
+                    }
                     // The mods' replies reach the sender alone, as a
                     // command's do, before the message (if any) goes out.
                     if !replies.is_empty() {
@@ -2521,7 +2525,6 @@ impl Game<'_> {
                     if cancel {
                         continue;
                     }
-                    let text = text.try_into_engine(&()).unwrap();
                     let mut line = format!("<{name}> {raw}");
                     if text != original {
                         // `withUnsignedContent`: clients show the mod's text,
