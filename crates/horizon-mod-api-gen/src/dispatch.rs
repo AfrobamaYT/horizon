@@ -854,7 +854,7 @@ mod stack_crossing_tests {
             ),
             (
                 "global_ordinal",
-                production.replace(".get(self.0 as usize)", ".get(0)"),
+                production.replace(".get(state.0 as usize)", ".get(0)"),
                 false,
             ),
         ] {

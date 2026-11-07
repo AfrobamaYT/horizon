@@ -84,7 +84,29 @@ mod boundary {
             BlockState(BlockKey(7), 2).try_into_engine(&()),
             Err(BlockStateError::UnknownState)
         );
-        block_state::bind(&BlockRegistry(vec![Ok(east), Ok(north)])).unwrap();
+        let first = block_state::current().unwrap();
+        let prepared = block_state::prepare(&BlockRegistry(vec![Ok(east), Ok(north)])).unwrap();
+        assert_eq!(
+            BlockStateId(0).try_into_api(),
+            Ok(north),
+            "preparation must not activate the new mapping"
+        );
+        let owner = prepared.clone();
+        std::thread::spawn(move || {
+            assert_eq!(
+                BlockStateId(0).try_into_api(),
+                Err(BlockStateError::Unavailable)
+            );
+            block_state::install(owner);
+            assert_eq!(BlockStateId(0).try_into_api(), Ok(east));
+            assert_eq!(north.try_into_engine(&()), Ok(BlockStateId(1)));
+        })
+        .join()
+        .unwrap();
+        assert_eq!(first.to_api(BlockStateId(0)), Ok(north));
+        assert_eq!(prepared.to_api(BlockStateId(0)), Ok(east));
+        assert!(!std::sync::Arc::ptr_eq(&first, &prepared));
+        block_state::install(prepared);
         assert_eq!(BlockStateId(0).try_into_api(), Ok(east));
         assert_eq!(east.try_into_engine(&()), Ok(BlockStateId(0)));
         assert_eq!(block_state::snapshot().unwrap().as_ref(), &[east, north]);
