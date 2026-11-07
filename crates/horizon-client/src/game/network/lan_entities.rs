@@ -236,7 +236,10 @@ impl Game<'_> {
             out.push(e);
         }
         let improvements = self.minecart_improvements();
-        for c in self.carts.iter_mut().filter(|c| c.id > after) {
+        self.carts.for_each_mut(|c| {
+            if c.id <= after {
+                return;
+            }
             let p = c.position;
             let mut e = state(c.id, c.kind.id(), [p.x, p.y, p.z], c.yaw, c.on_ground());
             e.pitch = c.pitch;
@@ -291,7 +294,7 @@ impl Game<'_> {
                 _ => {}
             }
             out.push(e);
-        }
+        });
         for a in self.armor_stands.iter().filter(|a| a.id > after) {
             let p = a.position;
             let mut e = state(
@@ -612,12 +615,10 @@ impl Game<'_> {
         self.rockets.iter_mut().for_each(|r| give(&mut r.id));
         self.crystals.iter_mut().for_each(|c| give(&mut c.id));
         self.bolts.iter_mut().for_each(|b| give(&mut b.id));
-        self.ominous_spawners
-            .iter_mut()
-            .for_each(|o| give(&mut o.id));
+        self.ominous_spawners.for_each_mut(|o| give(&mut o.id));
         self.potions.thrown_ids().for_each(&mut give);
         self.end.eye_ids().for_each(&mut give);
-        self.breath_clouds.iter_mut().for_each(|b| give(&mut b.id));
+        self.breath_clouds.for_each_mut(|b| give(&mut b.id));
         self.dragon_fireballs
             .iter_mut()
             .for_each(|b| give(&mut b.id));

@@ -92,6 +92,13 @@ impl Game<'_> {
                                 // `new MobEffectInstance(effect, duration, amplifier, false, particles)`.
                                 let changed =
                                     m.add_effect_with(name, duration, amplifier, false, particles);
+                                if new
+                                    && changed
+                                    && let Some(sound) = super::super::potions::sound_on_added(name)
+                                {
+                                    let at = [m.position.x, m.position.y, m.position.z];
+                                    self.audio.play(sound, Some(at), 1.0, 1.0);
+                                }
                                 self.mod_effect_added(name, Some(id as i32), amplifier, new);
                                 changed
                             }

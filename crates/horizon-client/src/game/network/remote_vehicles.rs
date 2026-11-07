@@ -226,8 +226,8 @@ impl Game<'_> {
                 );
                 self.say_system_now(&message);
                 self.titles.set_overlay(message, false);
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == vehicle_id) {
-                    c.passenger_yaw_delta = 0.0;
+                if let Some(i) = self.carts.iter().position(|c| c.id == vehicle_id) {
+                    self.carts.update(i, |c| c.passenger_yaw_delta = 0.0);
                 }
                 if let Some(p) = self.player.as_mut() {
                     p.velocity = Vec3::ZERO;
@@ -370,11 +370,13 @@ impl Game<'_> {
             // transfer the previous vehicle's pending turn.
             let rotate =
                 self.minecart_improvements() && self.settings.file.bool("rotateWithMinecart");
-            if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                c.passenger_yaw_delta = 0.0;
-                if rotate && c.kind == super::minecarts::CartKind::Rideable {
-                    c.rotate_passenger(&mut self.yaw);
-                }
+            if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                self.carts.update(i, |c| {
+                    c.passenger_yaw_delta = 0.0;
+                    if rotate && c.kind == super::minecarts::CartKind::Rideable {
+                        c.rotate_passenger(&mut self.yaw);
+                    }
+                });
             }
             // A minecart: the server moves it, the rider sits in it.
             let cart = self.carts.iter().find(|c| c.id == id).map(|c| {

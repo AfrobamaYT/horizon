@@ -3154,14 +3154,16 @@ impl Game<'_> {
             if r.cart_lerps.contains_key(&id) {
                 // A minecart on NewMinecartBehavior keeps Entity's NO_OP
                 // InterpolationHandler: a teleport puts it there at once.
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-                    if path.is_some() {
-                        c.position = at;
-                    }
-                    if let Some((yaw, pitch)) = rotation {
-                        c.yaw = yaw;
-                        c.pitch = pitch;
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+                    self.carts.update(i, |c| {
+                        if path.is_some() {
+                            c.position = at;
+                        }
+                        if let Some((yaw, pitch)) = rotation {
+                            c.yaw = yaw;
+                            c.pitch = pitch;
+                        }
+                    });
                 }
             } else {
                 // AbstractInterpolationHandler.interpolateTo: without a
@@ -6013,8 +6015,8 @@ impl Game<'_> {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-            c.velocity = v;
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+            self.carts.update(i, |c| c.velocity = v);
         } else if let Some(i) = self
             .creatures
             .projectiles
@@ -8091,12 +8093,11 @@ impl Game<'_> {
             // Minecart.interact resets the passenger's easing baseline on
             // a successful boarding click, not on SetPassengers (commands
             // can mount a player without this interaction).
-            if let Some(c) = self
-                .carts
-                .iter_mut()
-                .find(|c| c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable)
-            {
-                c.player_rotation_offset = c.rotation_offset;
+            if let Some(i) = self.carts.iter().position(|c| {
+                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable
+            }) {
+                self.carts
+                    .update(i, |c| c.player_rotation_offset = c.rotation_offset);
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {
