@@ -250,7 +250,7 @@ pub(super) fn collect_key_mappings<'declared>(
 }
 
 /// The native mods' entity model layers (`native_layer_definitions`), kept
-/// once at start for `native_bake_layer`.
+/// once at start for `bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
     if !role.is_client() {
         return;

@@ -67,12 +67,29 @@ def audit():
         if len(definitions[old]) != 1:
             clashes.append(f"{old} -> {new}: expected one Game definition, found {definitions[old]}")
         for path, line, header in definitions[new]:
+            if new == 'attachments' and header == 'trait':
+                continue  # Public AttachmentHost method stays; inspect its calls separately.
             clashes.append(f"{old} -> {new}: {path}:{line}: {header}")
     if clashes:
         print("REFUSED: rename collisions / unresolved definitions:")
         print("\n".join(clashes))
         return 1
-    print("No rename clashes.")
+    print("No rename clashes (public AttachmentHost method retained).")
+    import sys
+    if '--apply' in sys.argv:
+        table = Path(__file__).with_name('forwarder-renames.tsv')
+        table.write_text(''.join(f'{old}\t{new}\n' for old, new in sorted(targets.items())))
+        pattern = re.compile(r'\b(' + '|'.join(map(re.escape, targets)) + r')\b')
+        for path in ROOT.rglob('*.rs'):
+            if any(part in {'target', '.git', '.local'} for part in path.relative_to(ROOT).parts):
+                continue
+            source = path.read_text()
+            new = pattern.sub(lambda m: targets[m[0]], source)
+            if new != source:
+                path.write_text(new)
+        for path in (GAME / 'game/host').glob('*.rs'):
+            if path.stem not in {'draw', 'services', 'mod'}:
+                path.unlink()  # Every removed impl is now generated from the API declarations.
     return 0
 
 

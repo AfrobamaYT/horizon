@@ -1112,7 +1112,7 @@ impl Game<'_> {
     /// for a layer neither has. A vanilla layer no mob has (a player's, a
     /// chest's) is read from the resources each call, so slow. API
     /// @API:model_layers@.
-    pub(super) fn native_bake_layer(&self, layer: &str) -> Option<ModelPart> {
+    pub(super) fn bake_layer(&self, layer: &str) -> Option<ModelPart> {
         if let Some(definition) = model_layers::registered(layer) {
             return Some(definition.bake_root());
         }
@@ -1162,11 +1162,7 @@ impl Game<'_> {
     /// Property `key` of block state `state` (a machine's `facing`, from the
     /// `state` `native_block_entity_submit` gets), if it has one: no lookup in
     /// the world, so cheap each frame.
-    pub(super) fn native_block_state_property(
-        &self,
-        state: BlockStateId,
-        key: &str,
-    ) -> Option<&str> {
+    pub(super) fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str> {
         self.pack
             .assets
             .registry

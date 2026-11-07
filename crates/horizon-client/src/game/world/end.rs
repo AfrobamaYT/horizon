@@ -1365,7 +1365,7 @@ impl Game<'_> {
         let mobs: Vec<(u32, Vec3, f32, f32)> = self
             .mobs
             .iter()
-            .filter(|m| self.mob_can_use_portal(m))
+            .filter(|m| self.mob_portal_eligible(m))
             .map(|m| (m.id, m.position, m.width(), m.height()))
             .chain(
                 self.boats
@@ -1462,7 +1462,11 @@ impl Game<'_> {
             .dropped
             .iter()
             .map(|e| (e.id, true))
-            .chain(self.mobs.iter().map(|m| (m.id, self.mob_can_use_portal(m))))
+            .chain(
+                self.mobs
+                    .iter()
+                    .map(|m| (m.id, self.mob_portal_eligible(m))),
+            )
             .chain(
                 self.boats
                     .iter()
@@ -1758,7 +1762,7 @@ mod tests {
                 None,
             ));
             let id = game.creatures.projectiles[0].id;
-            let pearl = game.native_entity(id).unwrap();
+            let pearl = game.entity(id).unwrap();
             assert_eq!(pearl.portal_cooldown(game), Some(0));
             let traveller = game.end.gateways.entry(id).or_default();
             traveller.enter(BlockPos::new(0, 64, 0));

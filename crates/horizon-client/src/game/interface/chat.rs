@@ -1412,14 +1412,14 @@ impl Game<'_> {
             Text::translate("gui.entity_tooltip.type", &[kind]),
             u32::MAX,
         ));
-        if let Some(uuid) = entity.get("uuid").and_then(Self::entity_uuid) {
+        if let Some(uuid) = entity.get("uuid").and_then(Self::hover_event_entity_uuid) {
             lines.push((Text::literal(uuid), u32::MAX));
         }
         lines
     }
     /// The UUID of a ShowEntity event: its string, or the int array
     /// `UUIDUtil.CODEC` writes (most significant word first).
-    fn entity_uuid(v: &serde_json::Value) -> Option<String> {
+    fn hover_event_entity_uuid(v: &serde_json::Value) -> Option<String> {
         if let Some(s) = v.as_str() {
             return Some(s.to_owned());
         }

@@ -142,8 +142,8 @@ pub(super) fn mod_holder(game: &mut super::Game<'_>) -> mod_api::BlockEntityRef 
     game.world
         .block_entities
         .insert((1, 64, 1), BlockEntity::Mod(Box::new(holder)));
-    let level = game.native_level("minecraft:overworld").unwrap();
-    game.native_block_entity_ref(level, [1, 64, 1]).unwrap()
+    let level = game.level("minecraft:overworld").unwrap();
+    game.block_entity(level, [1, 64, 1]).unwrap()
 }
 
 #[test]

@@ -54,7 +54,7 @@ impl Game<'_> {
     /// Whether a specific key is currently held down.
     /// `key` is the vanilla physical key name (`key.keyboard.left.shift`, for example).
     /// Unknown names are not down. Modifier combinations use `ClientHost::modifiers`.
-    pub(super) fn native_is_key_down(&self, key: &str) -> bool {
+    pub(super) fn is_key_down(&self, key: &str) -> bool {
         horizon_client::keybinds::key_code(key).is_some_and(|key| self.physical_keys.contains(&key))
     }
 }

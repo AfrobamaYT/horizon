@@ -56,7 +56,7 @@ pub struct EntityMemory {
     /// increasing order), type, and whether the last leave sweep saw it.
     /// Only filled while a mod is loaded.
     pub(super) live: Vec<(u32, String, bool)>,
-    /// Entities a native mod removed (`native_entity_discard`), taken out at
+    /// Entities a native mod removed (`entity_discard`), taken out at
     /// the next sweep of departed entities. Mobs go at once and never wait here.
     pub(super) removals: Vec<super::commands::Target>,
 }
@@ -2479,7 +2479,7 @@ mod interaction_saved_defaults_tests {
             .find(|o| game.persist.uuids.get(&o.id) == Some(&[109, 0, 0, 4]))
             .unwrap()
             .id;
-        let marker_before = game.entity_nbt(Target::Other(marker_id)).unwrap();
+        let marker_before = game.command_target_nbt(Target::Other(marker_id)).unwrap();
         let mut ids = Vec::new();
         for (n, fields) in [
             (1, ""),
@@ -2499,7 +2499,7 @@ mod interaction_saved_defaults_tests {
             ids.push(o.id);
         }
         assert_eq!(
-            game.entity_nbt(Target::Other(marker_id)).unwrap(),
+            game.command_target_nbt(Target::Other(marker_id)).unwrap(),
             marker_before
         );
         for key in ["width", "height", "response"] {
@@ -2511,7 +2511,7 @@ mod interaction_saved_defaults_tests {
             .find(|m| game.persist.uuids.get(&m.id) == Some(&[109, 0, 0, 5]))
             .unwrap()
             .id;
-        let pig = game.entity_nbt(Target::Mob(pig_id)).unwrap();
+        let pig = game.command_target_nbt(Target::Mob(pig_id)).unwrap();
         assert_eq!(pig.get("NoAI"), Some(&Tag::Byte(1)));
         assert_eq!(pig.get("PersistenceRequired"), Some(&Tag::Byte(1)));
         let saved: Vec<_> = game
@@ -2521,7 +2521,7 @@ mod interaction_saved_defaults_tests {
             .collect();
         for (index, id) in ids.iter().enumerate() {
             let uuid = [109, 0, 0, index as i32 + 1];
-            let command_tag = game.entity_nbt(Target::Other(*id)).unwrap();
+            let command_tag = game.command_target_nbt(Target::Other(*id)).unwrap();
             let chunk_tag = saved
                 .iter()
                 .find(|tag| entity_nbt::uuid(tag) == Some(uuid))
@@ -2563,7 +2563,7 @@ mod interaction_saved_defaults_tests {
         }
         // The actual registered identity/position still supplies a fresh save without raw input.
         game.persist.raw.remove(&ids[0]);
-        let fresh = game.entity_nbt(Target::Other(ids[0])).unwrap();
+        let fresh = game.command_target_nbt(Target::Other(ids[0])).unwrap();
         assert_eq!(fresh.get("UUID"), Some(&Tag::IntArray(vec![109, 0, 0, 1])));
         assert_eq!(fresh.get("width"), Some(&Tag::Float(1.0f32.to_bits())));
         assert_eq!(fresh.get("height"), Some(&Tag::Float(1.0f32.to_bits())));

@@ -11,7 +11,7 @@ impl Game<'_> {
     /// False for a target in another level. None for a stale or unavailable
     /// living entity or target, one outside the level in place, or on a
     /// client.
-    pub(super) fn native_living_has_line_of_sight(
+    pub(super) fn living_has_line_of_sight(
         &self,
         living: LivingRef,
         target: EntityRef,
@@ -24,9 +24,9 @@ impl Game<'_> {
         if self.target_level(seen) != self.dim {
             return Some(false);
         }
-        let feet = self.native_entity_position(living.entity())?;
-        let from = self.native_entity_eye_position(living.entity())?;
-        let to = self.native_entity_eye_position(target)?;
+        let feet = self.entity_position(living.entity())?;
+        let from = self.entity_eye_position(living.entity())?;
+        let to = self.entity_eye_position(target)?;
         let w = self.mob_world_base(&[]);
         Some(w.line_of_sight_for(
             Some(feet[1]),
@@ -49,7 +49,7 @@ impl Game<'_> {
     /// True when the entity moved. False when no spot was found, for a
     /// non-finite point, a fake player, a player in another level, an armor
     /// stand or the dragon, a stale handle, or on a client.
-    pub(super) fn native_living_random_teleport(
+    pub(super) fn living_random_teleport(
         &mut self,
         living: LivingRef,
         at: [f64; 3],
@@ -130,8 +130,8 @@ mod tests {
     fn line_of_sight_follows_the_blocks_between() {
         with_game(|game| {
             floor_and_zombies(game);
-            let a = game.native_living(game.native_entity(12).unwrap()).unwrap();
-            let b = game.native_entity(13).unwrap();
+            let a = game.living(game.entity(12).unwrap()).unwrap();
+            let b = game.entity(13).unwrap();
             assert_eq!(a.has_line_of_sight(game, b), Some(true));
             let stone = game
                 .pack
@@ -157,7 +157,7 @@ mod tests {
     fn random_teleport_drops_to_the_ground_and_honours_the_avoid_tag() {
         with_game(|game| {
             floor_and_zombies(game);
-            let zombie = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            let zombie = game.living(game.entity(12).unwrap()).unwrap();
             let at = |game: &Game<'_>| game.mobs.iter().find(|m| m.id == 12).unwrap().position;
             // From six blocks up it lands on the floor, one block lower per
             // step down (`randomTeleport`).
@@ -194,9 +194,7 @@ mod tests {
     fn no_action_time_and_pathfinding_malus_reach_the_mob() {
         with_game(|game| {
             floor_and_zombies(game);
-            let mob = game
-                .native_mob_ref(game.native_entity(12).unwrap())
-                .unwrap();
+            let mob = game.mob(game.entity(12).unwrap()).unwrap();
             assert_eq!(mob.no_action_time(game), Some(0));
             assert!(mob.set_no_action_time(game, 650));
             assert_eq!(

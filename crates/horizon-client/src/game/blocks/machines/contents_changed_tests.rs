@@ -154,14 +154,14 @@ fn with_changes(
         game.world
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-        let level = game.native_level("minecraft:overworld").unwrap();
+        let level = game.level("minecraft:overworld").unwrap();
         test(game, level, changes);
     });
 }
 
 fn place(game: &mut Game<'_>, level: LevelRef, pos: [i32; 3], block: &str) {
     let state = game.pack.assets.registry.default_state(block).unwrap();
-    assert!(game.native_level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE));
+    assert!(game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE));
 }
 
 #[test]
@@ -367,12 +367,7 @@ fn a_double_container_notifies_each_backing_block_once() {
                 let state = game
                     .with_props(base, &[("facing", "north"), ("type", kind)])
                     .unwrap();
-                assert!(game.native_level_set_block(
-                    level,
-                    pos,
-                    state,
-                    NativeBlockUpdateFlags::NONE
-                ));
+                assert!(game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE));
             }
             let items = level.capability(game, &ITEMS, [0, 64, 0], None).unwrap();
             assert_eq!(items.size(game), 54);
@@ -471,7 +466,7 @@ fn a_crafter_notices_its_source_but_not_a_vehicles_placeholder() {
             let state = game
                 .with_props(base, &[("orientation", "down_east")])
                 .unwrap();
-            assert!(game.native_level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE));
+            assert!(game.level_set_block(level, pos, state, NativeBlockUpdateFlags::NONE));
             let Some(BlockEntity::Crafter(crafter)) =
                 game.world.block_entities.get_mut(&(0, 66, 0))
             else {

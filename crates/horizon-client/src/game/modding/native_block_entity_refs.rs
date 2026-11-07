@@ -24,11 +24,7 @@ impl Game<'_> {
 
     /// Find a block entity in a loaded chunk of an open level, or on a client in
     /// the level it shows. An entity taken out for its tick cannot be read in that tick.
-    pub(super) fn native_block_entity_ref(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<BlockEntityRef> {
+    pub(super) fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         let entity = mod_api::__private::game::block_entity_ref(level, pos);
         self.native_block_entity_target(entity).map(|_| entity)
     }
@@ -36,13 +32,9 @@ impl Game<'_> {
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
     /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
     /// open, or an unconnected player such as a fake player.
-    pub(super) fn native_player_open_block_menu(
-        &mut self,
-        player: PlayerRef,
-        entity: BlockEntityRef,
-    ) -> bool {
+    pub(super) fn player_open_menu(&mut self, player: PlayerRef, entity: BlockEntityRef) -> bool {
         if self.player_handle_read(player).is_none()
-            || !self.native_level_in_place(entity.fields().level)
+            || !self.level_in_place(entity.fields().level)
             || self.native_block_entity_target(entity).is_none()
         {
             return false;
@@ -68,10 +60,7 @@ impl Game<'_> {
     }
 
     /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn native_block_entity_kind(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<BlockEntityTypeKey> {
+    pub(super) fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
@@ -79,20 +68,20 @@ impl Game<'_> {
     }
 
     /// The block entity's position.
-    pub(super) fn native_block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
+    pub(super) fn block_entity_position(&self, entity: BlockEntityRef) -> Option<[i32; 3]> {
         self.native_block_entity_target(entity)?;
         Some(entity.fields().position)
     }
 
     /// The block entity's level.
-    pub(super) fn native_block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
+    pub(super) fn block_entity_level(&self, entity: BlockEntityRef) -> Option<LevelRef> {
         self.native_block_entity_target(entity)?;
         Some(entity.fields().level)
     }
 
     /// The data saved without identity or position metadata
     /// (`BlockEntity.saveWithoutMetadata`).
-    pub(super) fn native_block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
+    pub(super) fn block_entity_data(&self, entity: BlockEntityRef) -> Option<Compound> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
@@ -100,7 +89,7 @@ impl Game<'_> {
     }
 
     /// The vanilla lock's item predicate, if present on a loaded block entity.
-    pub(super) fn native_block_entity_lock(&self, entity: BlockEntityRef) -> Option<Compound> {
+    pub(super) fn block_entity_lock(&self, entity: BlockEntityRef) -> Option<Compound> {
         let (world, _) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         match world.block_lock((x, y, z))? {
@@ -110,7 +99,7 @@ impl Game<'_> {
     }
 
     /// Change the lock through the same storage used by container opening and saving.
-    pub(super) fn native_block_entity_set_lock(
+    pub(super) fn block_entity_set_lock(
         &mut self,
         entity: BlockEntityRef,
         lock: Option<Compound>,
@@ -148,7 +137,7 @@ impl Game<'_> {
 
     /// A loaded block entity of the server level in place, when a write may change it.
     fn native_block_entity_write_key(&self, entity: BlockEntityRef) -> Option<(i32, i32, i32)> {
-        if !self.native_level_in_place(entity.fields().level) {
+        if !self.level_in_place(entity.fields().level) {
             return None;
         }
         let pos = entity.fields().position;
@@ -174,10 +163,7 @@ impl Game<'_> {
 
     /// A snapshot of a mod block entity's menu data slots, on the server or in the
     /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
-    pub(super) fn native_block_entity_data_slots(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<Vec<i32>> {
+    pub(super) fn block_entity_data_slots(&self, entity: BlockEntityRef) -> Option<Vec<i32>> {
         let (_, BlockEntity::Mod(block_entity)) = self.native_block_entity_target(entity)? else {
             return None;
         };
@@ -187,7 +173,7 @@ impl Game<'_> {
     /// Set a mod block entity's menu data slot in place, joining the current transaction
     /// and its setChanged notice. False for a stale/client/parked/vanilla entity, an
     /// invalid slot or no change. Does not resize the mod's declared data slots.
-    pub(super) fn native_block_entity_set_data_slot(
+    pub(super) fn block_entity_set_data_slot(
         &mut self,
         entity: BlockEntityRef,
         slot: u32,
@@ -210,7 +196,7 @@ impl Game<'_> {
 
     /// Sizes a mod block entity's menu data explicitly, using the same write
     /// target, journal and Changed notice as scalar data-slot writes.
-    pub(super) fn native_block_entity_set_data_slots(
+    pub(super) fn block_entity_set_data_slots(
         &mut self,
         entity: BlockEntityRef,
         values: Vec<i32>,
@@ -259,7 +245,7 @@ impl Game<'_> {
     }
 
     /// Read a configured mod holder's declared internal item slot, without automation policy.
-    pub(super) fn native_block_entity_item_slot(
+    pub(super) fn block_entity_item_slot(
         &self,
         entity: BlockEntityRef,
         slot: u32,
@@ -276,7 +262,7 @@ impl Game<'_> {
     }
 
     /// Replace internal storage under the existing transaction; external ITEMS routing is separate.
-    pub(super) fn native_block_entity_set_item_slot(
+    pub(super) fn block_entity_set_item_slot(
         &mut self,
         entity: BlockEntityRef,
         tx: &Transaction,
@@ -324,7 +310,7 @@ impl Game<'_> {
     /// handle, a client, another level than the one in place, data nested too deep or that
     /// changes nothing, or a result the block entity can't load. Inside a transaction an
     /// abort puts the block entity, its name, `lock`, loot table roll and attachments back.
-    pub(super) fn native_block_entity_merge_data(
+    pub(super) fn block_entity_merge_data(
         &mut self,
         entity: BlockEntityRef,
         data: Compound,
@@ -335,7 +321,7 @@ impl Game<'_> {
     /// Replaces the saved payload, retaining identity and position metadata.
     /// Uses the same transactional load and client update path as `merge_data`.
     /// False for a missing or stale block entity, unsupported data, or no change.
-    pub(super) fn native_block_entity_replace_data(
+    pub(super) fn block_entity_replace_data(
         &mut self,
         entity: BlockEntityRef,
         data: Compound,
@@ -408,7 +394,7 @@ impl Game<'_> {
     /// `BlockEntity.setChanged`: the chunk is saved again and comparators re-read the
     /// container (`updateNeighbourForOutputSignal`). Inside a transaction it runs once at the
     /// root commit. False for a stale handle, a client or another level than the one in place.
-    pub(super) fn native_block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool {
+    pub(super) fn block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool {
         let Some((key, _)) = self.native_block_entity_write_target(entity) else {
             return false;
         };
@@ -420,7 +406,7 @@ impl Game<'_> {
     /// has none or isn't nameable (chests, barrels, furnaces, hoppers, brewing stands,
     /// banners, beacons, enchanting tables, command blocks...), or for a stale handle or a
     /// client.
-    pub(super) fn native_block_entity_name(&self, entity: BlockEntityRef) -> Option<String> {
+    pub(super) fn block_entity_name(&self, entity: BlockEntityRef) -> Option<String> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         match block_entity {
@@ -435,10 +421,7 @@ impl Game<'_> {
     /// its level, not spectators nor fake players, then the acting player for a menu
     /// their action opened, which the hub records when the action ends. None for a
     /// stale handle or a client.
-    pub(super) fn native_block_entity_viewers(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<Vec<PlayerRef>> {
+    pub(super) fn block_entity_viewers(&self, entity: BlockEntityRef) -> Option<Vec<PlayerRef>> {
         if !self.is_logical_server() {
             return None;
         }
@@ -470,7 +453,7 @@ impl Game<'_> {
                 Some(player_ref(mod_api::EntityRef::new(epoch, id), g.uuid))
             })
             .collect();
-        if self.native_level_in_place(level)
+        if self.level_in_place(level)
             && !self.lan_acting_fake
             && !self.spectator()
             && self
@@ -488,7 +471,7 @@ impl Game<'_> {
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
     /// False for a block entity that isn't nameable, a stale handle, a client or another
     /// level than the one in place. Inside a transaction an abort puts the name back.
-    pub(super) fn native_block_entity_set_name(
+    pub(super) fn block_entity_set_name(
         &mut self,
         entity: BlockEntityRef,
         name: Option<&str>,
@@ -663,24 +646,24 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             for (x, name) in [
                 (0, "minecraft:chest"),
                 (2, "minecraft:furnace"),
                 (4, "minecraft:oak_sign"),
             ] {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 64, 0],
                     state,
                     NativeBlockUpdateFlags::NEIGHBORS
                 ));
             }
-            let player = game.native_player_ref(12).unwrap();
-            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
-            let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
-            let sign = game.native_block_entity_ref(level, [4, 64, 0]).unwrap();
+            let player = game.player(12).unwrap();
+            let chest = game.block_entity(level, [0, 64, 0]).unwrap();
+            let furnace = game.block_entity(level, [2, 64, 0]).unwrap();
+            let sign = game.block_entity(level, [4, 64, 0]).unwrap();
             use super::super::lan_actions::MenuOpen;
             assert!(!player.open_menu(game, sign));
             assert_eq!(game.open_block_menu(999, (0, 64, 0)), MenuOpen::Refused);
@@ -762,15 +745,15 @@ mod tests {
                         .collect(),
                     })
                     .unwrap();
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 64, 0],
                     state,
                     NativeBlockUpdateFlags::NEIGHBORS
                 ));
             }
-            let left = game.native_block_entity_ref(level, [6, 64, 0]).unwrap();
-            let right = game.native_block_entity_ref(level, [7, 64, 0]).unwrap();
+            let left = game.block_entity(level, [6, 64, 0]).unwrap();
+            let right = game.block_entity(level, [7, 64, 0]).unwrap();
             assert!(game.chest_partner((6, 64, 0)).is_some());
             for half in [left, right] {
                 assert!(half.set_lock(game, Some(compound("{items:\"minecraft:stick\"}"))));
@@ -795,7 +778,7 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             let chest = |game: &mut Game<'_>, level, x: i32, kind: &str| {
                 let state = game
                     .pack
@@ -812,13 +795,13 @@ mod tests {
                         .collect(),
                     })
                     .unwrap();
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 64, 0],
                     state,
                     NativeBlockUpdateFlags::NEIGHBORS
                 ));
-                game.native_block_entity_ref(level, [x, 64, 0]).unwrap()
+                game.block_entity(level, [x, 64, 0]).unwrap()
             };
             let single = chest(game, level, 0, "single");
             let left = chest(game, level, 6, "left");
@@ -922,15 +905,15 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
             let states = ["minecraft:chest", "minecraft:daylight_detector"];
             for (i, name) in states.into_iter().enumerate() {
                 let state = game.pack.assets.registry.default_state(name).unwrap();
-                assert!(game.native_level_set_block(level, [i as i32 * 2, 64, 0], state, flags));
+                assert!(game.level_set_block(level, [i as i32 * 2, 64, 0], state, flags));
             }
-            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
-            let sensor = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
+            let chest = game.block_entity(level, [0, 64, 0]).unwrap();
+            let sensor = game.block_entity(level, [2, 64, 0]).unwrap();
             let stick = "{Items:[{Slot:3b,id:\"minecraft:stick\",count:3}]}";
             let slot3 = |game: &Game<'_>| match game.world.block_entities.get(&(0, 64, 0)) {
                 Some(BlockEntity::Chest(items)) => items[3].as_ref().map(|s| s.count),
@@ -1039,11 +1022,11 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             let chest = game.pack.assets.registry.default_state("minecraft:chest");
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            assert!(game.native_level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
-            let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
+            assert!(game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
+            let chest = game.block_entity(level, [0, 64, 0]).unwrap();
             let key = (0, 64, 0);
             let lock = compound("{lock:{items:\"minecraft:stick\"}}");
             let table = compound("{LootTable:\"minecraft:chests/simple_dungeon\"}");

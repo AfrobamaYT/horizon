@@ -1476,7 +1476,7 @@ impl Game<'_> {
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    let left = g.give(ItemStack {
+                    let left = g.add_stack_to_inventory(ItemStack {
                         item: id.as_str().into(),
                         count: size as u32,
                         damage,
