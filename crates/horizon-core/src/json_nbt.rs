@@ -6,7 +6,7 @@
 //! exact float or a double. DynamicOps.convertList calls NbtOps.createList:
 //! JSON arrays remain lists, including empty, numeric and heterogeneous arrays;
 //! they do not use the typed-array collectors used by mergeToList.
-use horizon_core::nbt::Tag;
+use crate::nbt::Tag;
 use serde_json::{Number, Value};
 
 /// JSON metadata refused by vanilla's JsonOps-to-NbtOps conversion.
@@ -35,7 +35,7 @@ pub fn json_to_tag(value: &Value) -> Result<Tag, JsonNbtError> {
 /// Fields use the same nested-null and numeric rules as [`json_to_tag`].
 pub fn json_to_compound(
     values: &serde_json::Map<String, Value>,
-) -> Result<horizon_core::nbt::Compound, JsonNbtError> {
+) -> Result<crate::nbt::Compound, JsonNbtError> {
     values
         .iter()
         .map(|(key, value)| Ok((key.as_str().into(), convert(value, true)?)))
