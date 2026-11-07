@@ -63,6 +63,7 @@ impl GuestList {
                 entity_id: g.entity_id,
                 spectator: g.spectator(),
                 permission: g.permission,
+                horizon: g.is_horizon(),
                 moved: take_moved && std::mem::take(&mut g.moved),
                 position: g.position,
                 view_distance: g.view_distance,
