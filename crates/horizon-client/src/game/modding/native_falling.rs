@@ -175,8 +175,9 @@ mod tests {
     fn falling_lifecycle_commands_unload_park_and_remote() {
         use super::super::{
             commands::Target,
-            entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle},
+            entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle, SlotIdentities},
         };
+        let mut identities = SlotIdentities::default();
         LifecycleFixture {
             seed: |game, entries| {
                 game.falling.clear();
@@ -205,7 +206,13 @@ mod tests {
                 apply: |game, remove, _| game.remove_remote_projectile(remove),
             }),
         }
-        .run();
+        .run_with(|game| {
+            identities.observe(
+                &mut game.falling,
+                game.native_lifecycle.epoch().unwrap(),
+                |f| f.id,
+            );
+        });
     }
 
     fn bound_falling_case(
