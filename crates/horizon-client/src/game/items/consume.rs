@@ -978,6 +978,9 @@ mod fox_consumption_hook_tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
+                // Legacy summon checks the actual server owner as well as
+                // the opened native lifecycle, like the production server does.
+                game.options.dedicated = Some(Vec::new());
                 game.world
                     .chunks
                     .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
