@@ -218,6 +218,15 @@ fn private_build_dependencies_track_only_existing_plans() {
 }
 
 #[test]
+#[ignore = "manual real-game public emitter snapshot"]
+fn public_points_snapshot() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = std::path::PathBuf::from(std::env::var_os("HORIZON_POINT_SNAPSHOT").unwrap());
+    fs::create_dir_all(&out).unwrap();
+    crate::generate_points(&root, &out).unwrap();
+}
+
+#[test]
 fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../../target/private-source-{}",
