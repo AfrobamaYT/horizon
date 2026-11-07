@@ -40,7 +40,124 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
     })
 }
 
+/// Bound the synchronous generator work before constructing its spiral or height vector.
+fn biome_search_within_budget(parameters: mod_api::BiomeSearch, height: i32) -> bool {
+    if parameters.radius < 0
+        || parameters.horizontal_step <= 0
+        || parameters.vertical_step <= 0
+        || height <= 0
+    {
+        return false;
+    }
+    let rings = parameters.radius as u64 / parameters.horizontal_step as u64;
+    let width = 2 * rings + 1;
+    // Clamping the origin into the build interval cannot increase this height count.
+    let heights = (height as u64 - 1) / parameters.vertical_step as u64 + 1;
+    width
+        .checked_mul(width)
+        .and_then(|columns| columns.checked_mul(heights))
+        .is_some_and(|samples| samples <= mod_api::BiomeSearch::MAX_SAMPLES)
+}
+
 impl Game<'_> {
+    /// `ServerLevel.findClosestBiome3d`, using the same generator query as `/locate biome`.
+    pub(super) fn level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: mod_api::BiomeSearch,
+    ) -> Option<mod_api::BiomeSearchResult> {
+        let world = self.native_level_world(level)?;
+        if !biome_search_within_budget(parameters, world.shape.max_y() - world.shape.min_y) {
+            return None;
+        }
+        let terrain = if level.dimension() == self.dim.key() {
+            self.end.locator()
+        } else {
+            self.levels.parked_locator_of(level.dimension_id())
+        }?;
+        let selector = match biome.strip_prefix('#') {
+            Some(tag) => format!("#{}", horizon_client::command::args::normalized(tag)),
+            None => horizon_client::command::args::normalized(biome).into_owned(),
+        };
+        let allowed = |name: &str| self.biome_matches(&selector, name);
+        let query = horizon_world::worldgen::generator::BiomeSearch {
+            allowed: &allowed,
+            origin: parameters.origin,
+            radius: parameters.radius,
+            horizontal: parameters.horizontal_step,
+            vertical: parameters.vertical_step,
+            // Resident columns are padded to the Overworld's storage span.
+            // BiomeSource searches use the dimension's build range instead.
+            min_y: world.shape.min_y,
+            max_y: world.shape.max_y() - 1,
+        };
+        terrain
+            .find_closest_biome(&query)
+            .map(|(biome, position)| mod_api::BiomeSearchResult::new(biome, position))
+    }
+
+    /// `LevelReader.getBiome`: the noise cell selected by this level's BiomeManager zoom.
+    /// Unlike a generating server query, an absent selected column returns None.
+    fn native_read_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let world = self.native_level_read_world(level)?;
+        let streaming = if level.dimension() == self.native_level_key() {
+            &self.streaming
+        } else {
+            self.levels.parked_streaming_of(level.dimension_id())?
+        };
+        let [qx, qy, qz] = streaming.biome_zoom.quart_at_block(block_pos(pos));
+        let chunk = world.chunks.get(&(qx >> 2, qz >> 2))?;
+        // ChunkAccess clamps to the dimension's height, not our padded storage.
+        // Clamp before conversion to preserve signed block-coordinate extremes.
+        let min_qy = world.shape.min_y >> 2;
+        let max_qy = (world.shape.max_y() - 1) >> 2;
+        let y = qy.clamp(min_qy, max_qy) << 2;
+        let biome = chunk.biome(qx << 2, y, qz << 2);
+        Some(world_biomes!(self).get(biome).name.clone())
+    }
+
+    /// The authoritative server's `LevelReader.getBiome`, including parked levels.
+    pub(super) fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// The client's current copy of `LevelReader.getBiome`, never an authoritative server read.
+    pub(super) fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        if self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
+    pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
+        Some(self.native_level_read_world(level)?.shape.logical_height)
+    }
+
+    /// `BlockGetter.getBlockFloorHeight` with an empty collision context.
+    /// Uses the normal dynamic shapes, querying below only when this shape is empty.
+    pub(super) fn level_block_floor_height(
+        &self,
+        level: LevelRef,
+        [x, y, z]: [i32; 3],
+    ) -> Option<f64> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(x, z) || !world.shape.contains_y(y) {
+            return None;
+        }
+        let here = self.block_collision_shape_in(world, [x, y, z]);
+        let below = if here.is_empty() {
+            self.block_collision_shape_in(world, [x, y.checked_sub(1)?, z])
+        } else {
+            horizon_core::geometry::VoxelShape::empty()
+        };
+        Some(horizon_core::geometry::block_floor_height(&here, || &below))
+    }
+
     /// The border of a resident server level, through the handle's lifetime check.
     pub(super) fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
         self.native_level_world(level)?;
@@ -513,6 +630,34 @@ mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+
+    #[test]
+    fn biome_search_budget_bounds_columns_and_heights_before_sampling() {
+        use mod_api::BiomeSearch;
+        let allowed = |radius, horizontal, vertical, height| {
+            super::biome_search_within_budget(
+                BiomeSearch::new([i32::MIN, i32::MAX, i32::MAX], radius, horizontal, vertical),
+                height,
+            )
+        };
+        assert!(allowed(0, 1, i32::MAX, 384));
+        assert!(allowed(i32::MAX, i32::MAX, i32::MAX, 384));
+        assert!(allowed(127, 1, i32::MAX, 256));
+        assert!(!allowed(128, 1, i32::MAX, 256));
+        assert!(allowed(15, 1, 4, 256));
+        assert!(!allowed(16, 1, 4, 256));
+        assert!(!allowed(i32::MAX, 1, 1, i32::MAX));
+        for (radius, horizontal, vertical, height) in [
+            (-1, 1, 1, 384),
+            (0, 0, 1, 384),
+            (0, -1, 1, 384),
+            (0, 1, 0, 384),
+            (0, 1, -1, 384),
+            (0, 1, 1, 0),
+        ] {
+            assert!(!allowed(radius, horizontal, vertical, height));
+        }
+    }
 
     /// A logical server with its worker queue running rather than the
     /// title-screen streamer's paused placeholder.
@@ -1637,6 +1782,487 @@ mod tests {
             let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.key());
             assert_eq!(game.level_brightness(stale, LightLayer::Sky, lit), None);
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
+        });
+    }
+}
+
+#[cfg(test)]
+mod environment_read_tests {
+    use crate::game::{Dim, native_entity_refs::tests::with_game};
+    use horizon_client::chunk::Chunk;
+    use mod_api::{BiomeSearch, LevelRef, NativeWorldEpoch};
+    use std::sync::Arc;
+
+    fn paint_biome(game: &mut crate::game::Game<'_>, name: &str) {
+        let biome = world_biomes!(game).id(name);
+        let mut chunk = Chunk::empty(0, 0);
+        for y in 0..chunk.sections.len() as i32 * 4 {
+            for x in 0..4 {
+                for z in 0..4 {
+                    chunk.set_biome_cell(x, y, z, biome);
+                }
+            }
+        }
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn biome_reads_follow_live_cells_parked_levels_and_client_login_without_loading() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            paint_biome(game, "minecraft:plains");
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:plains")
+            );
+            assert_eq!(overworld.biome_at(game, [31, 64, 31]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            paint_biome(game, "minecraft:desert");
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert")
+            );
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert"),
+                "parked level's cells"
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.biome_at(game, [8, 64, 8]), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "BiomeReadTest").unwrap();
+            assert_eq!(
+                overworld.client_biome(game, [8, 64, 8]),
+                None,
+                "not logged in"
+            );
+            game.remote.as_mut().unwrap().logged_in = true;
+            paint_biome(game, "minecraft:snowy_plains");
+            let client_level = game.level("minecraft:overworld").unwrap();
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:snowy_plains")
+            );
+            assert_eq!(client_level.client_biome(game, [31, 64, 31]), None);
+            let foreign = LevelRef::new(client_level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(foreign.client_biome(game, [8, 64, 8]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.remote.as_mut().unwrap().logged_in = false;
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]),
+                None,
+                "logged out"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn floor_reads_real_collision_shapes_and_refuses_unloaded_positions() {
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let slab = registry.default_state("minecraft:oak_slab").unwrap();
+            let fence = registry.default_state("minecraft:oak_fence").unwrap();
+            for (x, block, height, above) in [
+                (2, stone, 1.0, 0.0),
+                (5, slab, 0.5, f64::NEG_INFINITY),
+                (8, fence, 1.5, 0.5),
+            ] {
+                game.world.set(x, 100, 8, block).unwrap();
+                assert_eq!(level.block_floor_height(game, [x, 100, 8]), Some(height));
+                assert_eq!(level.block_floor_height(game, [x, 101, 8]), Some(above));
+            }
+            assert_eq!(
+                level.block_floor_height(game, [12, 100, 8]),
+                Some(f64::NEG_INFINITY)
+            );
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(level.block_floor_height(game, [32, 100, 8]), None);
+            assert_eq!(
+                level.block_floor_height(game, [8, game.world.top_y(), 8]),
+                None
+            );
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                level.block_floor_height(game, [5, 100, 8]),
+                Some(0.5),
+                "parked collision shapes"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(stale.block_floor_height(game, [5, 100, 8]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sky_and_logical_height_read_the_named_dimension_and_client_state() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_client::chunk::LevelShape;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            assert_eq!(overworld.logical_height(game), Some(384));
+            for time in [0, 6000, 12000, 18000, 24000] {
+                game.world.day_time = time;
+                assert_eq!(overworld.get_sky_darken(game), Some(game.sky_darken()));
+            }
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.0, 0.0);
+            game.world.weather.thunder_level = (0.0, 0.0);
+            game.enter_level(Dim::Nether).unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.height(game),
+                Some((0, 256)),
+                "logical and build heights differ"
+            );
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            // The vanilla fixture records clear midnight as 11 and half-rain noon as 1.
+            // Change the shared state while the Overworld snapshot stays parked at noon.
+            game.world.day_time = 18000;
+            assert_eq!(overworld.day_time(game), Some(18000));
+            assert_eq!(overworld.get_sky_darken(game), Some(11));
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.5, 0.5);
+            assert_eq!(overworld.get_sky_darken(game), Some(1));
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            assert_eq!(game.dim, Dim::Nether, "a read does not swap levels");
+            let parked = game.levels.parked_world_of("minecraft:overworld").unwrap();
+            assert_eq!(
+                parked.day_time, 6000,
+                "the parked snapshot is not rewritten"
+            );
+            assert_eq!(parked.weather.levels(1.0), (0.0, 0.0));
+            game.enter_level(Dim::Overworld).unwrap();
+            game.world.day_time = 6000;
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.get_sky_darken(game),
+                Some(11),
+                "parked level keeps its dimension's sky"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.logical_height(game), None);
+            assert_eq!(stale.get_sky_darken(game), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "SkyReadTest").unwrap();
+            assert_eq!(overworld.logical_height(game), None, "not logged in");
+            game.remote.as_mut().unwrap().logged_in = true;
+            game.world.shape = LevelShape::new(-128, 512, 256, true, false).unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
+            assert_eq!(
+                level.logical_height(game),
+                Some(256),
+                "client's own dimension shape"
+            );
+            assert_eq!(level.get_sky_darken(game), Some(game.sky_darken()));
+            assert_eq!(
+                nether.logical_height(game),
+                None,
+                "another dimension isn't visible to a client"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn closest_biome_uses_the_named_generator_without_loading_resident_chunks() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+
+        with_game(|game| {
+            game.enter_level(Dim::Nether).unwrap();
+            let directory = game.options.resources.join("worldgen");
+            let terrain = VanillaTerrain::for_dimension(
+                TerrainResources {
+                    data: Some(&game.pack.data_changes),
+                    dir: &directory,
+                    registry: game.pack.assets.registry,
+                    biomes: world_biomes!(game),
+                    item_data: &game.res.core.item_data,
+                },
+                12345,
+                "minecraft:the_nether",
+            )
+            .unwrap();
+            game.end.set_locator(Some(Arc::new(terrain)));
+            let nether = game.level("minecraft:the_nether").unwrap();
+            let parameters = BiomeSearch::new([8, 64, 8], 0, 32, 64);
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            let found = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .expect("all Nether source biomes match");
+            assert_eq!(
+                found.position,
+                [8, 64, 8],
+                "vanilla samples the origin first"
+            );
+            assert!(
+                [
+                    "minecraft:nether_wastes",
+                    "minecraft:soul_sand_valley",
+                    "minecraft:crimson_forest",
+                    "minecraft:warped_forest",
+                    "minecraft:basalt_deltas"
+                ]
+                .contains(&found.biome.as_str())
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:plains", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:no_such_biome", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], -1, 32, 64)
+                ),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], 32, 0, 64)
+                ),
+                None
+            );
+            // The old public boundary accepted these calls and could panic or hang.
+            let huge_step = nether
+                .find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], 0, 32, i32::MAX),
+                )
+                .expect("a step larger than the build height samples only the origin");
+            assert_eq!(huge_step.position, [0, 64, 0]);
+            for parameters in [
+                BiomeSearch::new([0, 64, 0], i32::MAX, 1, 1),
+                BiomeSearch::new([0, 64, 0], 128, 1, i32::MAX),
+                BiomeSearch::new([0, 64, 0], 16, 1, 1),
+                BiomeSearch::new([0, 64, 0], 0, 32, 0),
+                BiomeSearch::new([0, 64, 0], 0, 32, -1),
+            ] {
+                assert_eq!(
+                    nether.find_closest_biome(game, "#minecraft:is_nether", parameters),
+                    None,
+                    "invalid or over-budget input must be refused even if the origin matches"
+                );
+            }
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Overworld).unwrap();
+            let parked = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .unwrap();
+            assert_eq!(parked, found, "parked level retains its generator and seed");
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(nether.epoch().get() + 1),
+                nether.dimension(),
+            );
+            assert_eq!(
+                stale.find_closest_biome(game, "#minecraft:is_nether", parameters),
+                None
+            );
+        });
+    }
+
+    /// API results over original fixture worlds, compared with independently recorded vanilla calls.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_environment_reads_match_vanilla_vectors() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+        use serde_json::{Value, json};
+        use std::collections::HashMap;
+
+        let fixture = |name: &str, variable: &str| {
+            let path = std::env::var_os(variable)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../tests/fixtures")
+                        .join(name)
+                });
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let inputs = fixture("level_environment_reads.jsonl", "HORIZON_LEVEL_READ_CASES");
+        let expected = fixture(
+            "level_environment_reads_expected.jsonl",
+            "HORIZON_LEVEL_READ_EXPECTED",
+        );
+        assert!(inputs.len() >= 476);
+        assert_eq!(inputs.len(), expected.len());
+        let position =
+            |value: &Value| std::array::from_fn::<_, 3, _>(|i| value[i].as_i64().unwrap() as i32);
+        with_game(|game| {
+            let mut generators = HashMap::new();
+            for (input, expected) in inputs.iter().zip(&expected) {
+                assert_eq!(input["name"], expected["name"]);
+                let dimension = input["dimension"].as_str().unwrap_or("minecraft:overworld");
+                let dim = Dim::from_id(dimension);
+                if game.dim != dim {
+                    game.enter_level(dim).unwrap();
+                }
+                let kind = input["kind"].as_str().unwrap();
+                match kind {
+                    "biome" => {
+                        game.world.chunks.clear();
+                        let ids = ["minecraft:plains", "minecraft:desert", "minecraft:forest"]
+                            .map(|name| world_biomes!(game).id(name));
+                        for column in input["loaded"].as_array().unwrap() {
+                            let (cx, cz) = (
+                                column[0].as_i64().unwrap() as i32,
+                                column[1].as_i64().unwrap() as i32,
+                            );
+                            let mut chunk = Chunk::empty(cx, cz);
+                            for y in 0..chunk.sections.len() as i32 * 4 {
+                                for x in 0..4 {
+                                    for z in 0..4 {
+                                        let qy = (chunk.min_y() >> 2) + y;
+                                        let index =
+                                            ((cx * 4 + x) * 31 + qy * 7 + (cz * 4 + z) * 17)
+                                                .rem_euclid(3);
+                                        chunk.set_biome_cell(x, y, z, ids[index as usize]);
+                                    }
+                                }
+                            }
+                            game.world.chunks.insert((cx, cz), Arc::new(chunk));
+                        }
+                        game.streaming.biome_zoom = horizon_core::biome::BiomeZoom::new(
+                            input["zoom_seed"].as_i64().unwrap(),
+                        );
+                    }
+                    "floor" => {
+                        game.world.chunks.clear();
+                        game.world
+                            .chunks
+                            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                        for (field, y) in [("here", 100), ("below", 99)] {
+                            let state = game
+                                .pack
+                                .assets
+                                .registry
+                                .default_state(input[field].as_str().unwrap())
+                                .unwrap();
+                            game.world.set(8, y, 8, state).unwrap();
+                        }
+                    }
+                    "sky" => {
+                        game.world.day_time = input["time"].as_i64().unwrap();
+                        let rain = input["rain"].as_f64().unwrap() as f32;
+                        let thunder = input["thunder"].as_f64().unwrap() as f32;
+                        game.world.weather.rain_level = (rain, rain);
+                        game.world.weather.thunder_level = (thunder, thunder);
+                    }
+                    "search" => {
+                        let seed = input["seed"].as_i64().unwrap();
+                        let key = (dimension.to_owned(), seed);
+                        let generator = generators.entry(key).or_insert_with(|| {
+                            let directory = game.options.resources.join("worldgen");
+                            let terrain = VanillaTerrain::for_dimension(
+                                TerrainResources {
+                                    data: Some(&game.pack.data_changes),
+                                    dir: &directory,
+                                    registry: game.pack.assets.registry,
+                                    biomes: world_biomes!(game),
+                                    item_data: &game.res.core.item_data,
+                                },
+                                seed,
+                                dimension,
+                            )
+                            .unwrap();
+                            Arc::new(terrain)
+                        });
+                        game.end.set_locator(Some(generator.clone()));
+                    }
+                    "logical_height" => {}
+                    other => panic!("unknown fixture {other}"),
+                }
+                let level = game.level(dimension).unwrap();
+                let before = (game.world.chunks.len(), game.streaming.pending());
+                let value = match kind {
+                    "biome" => json!(level.biome_at(game, position(&input["position"]))),
+                    "floor" => json!(level.block_floor_height(game, [8, 100, 8]).map(|height| {
+                        if height == f64::NEG_INFINITY {
+                            json!("-Infinity")
+                        } else {
+                            json!(height)
+                        }
+                    })),
+                    "sky" => json!(level.get_sky_darken(game)),
+                    "logical_height" => json!(level.logical_height(game)),
+                    "search" => {
+                        let parameters = BiomeSearch::new(
+                            position(&input["position"]),
+                            input["radius"].as_i64().unwrap() as i32,
+                            input["horizontal"].as_i64().unwrap() as i32,
+                            input["vertical"].as_i64().unwrap() as i32,
+                        );
+                        json!(
+                            level
+                                .find_closest_biome(
+                                    game,
+                                    input["selector"].as_str().unwrap(),
+                                    parameters
+                                )
+                                .map(
+                                    |found| json!({"biome":found.biome,"position":found.position})
+                                )
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    json!({"name":input["name"],"value":value}),
+                    *expected,
+                    "{}",
+                    input["name"]
+                );
+                assert_eq!(
+                    before,
+                    (game.world.chunks.len(), game.streaming.pending()),
+                    "read queued or loaded a chunk: {}",
+                    input["name"]
+                );
+            }
         });
     }
 }

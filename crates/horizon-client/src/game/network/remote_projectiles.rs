@@ -132,30 +132,30 @@ fn shulker_bullet_trail_at(at: Vec3, random: &mut impl RandomSource) -> [f64; 3]
 /// `ClientPacketListener.handleSetEntityData`'s `Fireball.DATA_ITEM_STACK`:
 /// the item the guest draws the fireball as, through `Fireball.setItem`;
 /// a kind that is no `Fireball` has none.
-pub(super) fn remote_projectile_item<'a>(
-    projectiles: impl IntoIterator<Item = &'a mut Projectile>,
+pub(super) fn remote_projectile_item(
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: u32,
     stack: ItemStack,
 ) {
-    if let Some(p) = projectiles
-        .into_iter()
-        .find(|p| p.id == id && p.kind.is_item_fireball())
+    if let Some(i) = projectiles
+        .iter()
+        .position(|p| p.id == id && p.kind.is_item_fireball())
     {
-        p.set_item(stack);
+        projectiles.update(i, |p| p.set_item(stack));
     }
 }
 
 /// `ClientPacketListener.handleProjectilePowerPacket`: the power a hurting
 /// projectile (`AbstractHurtingProjectile`) accelerates by, found by id;
 /// anything else is ignored.
-pub(super) fn remote_projectile_power<'a>(
-    projectiles: impl IntoIterator<Item = &'a mut Projectile>,
+pub(super) fn remote_projectile_power(
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: i32,
     power: f64,
 ) {
-    if let Some(p) = projectiles.into_iter().find(|p| p.id == id as u32)
+    if let Some(i) = projectiles.iter().position(|p| p.id == id as u32)
         && matches!(
-            p.kind,
+            projectiles[i].kind,
             ProjectileKind::SmallFireball
                 | ProjectileKind::LargeFireball { .. }
                 | ProjectileKind::WitherSkull { .. }
@@ -163,7 +163,7 @@ pub(super) fn remote_projectile_power<'a>(
                 | ProjectileKind::BreezeWindCharge
         )
     {
-        p.acceleration = power;
+        projectiles.update(i, |p| p.acceleration = power);
     }
 }
 
@@ -237,13 +237,15 @@ impl Game<'_> {
     /// into twenty particles in its colour. The server turns it into a plain
     /// arrow and does not send the colour again, so it stops here.
     pub(super) fn remote_arrow_puff(&mut self, id: u32) {
-        let Some(p) = self.creatures.projectiles.iter_mut().find(|p| p.id == id) else {
+        let Some(i) = self.creatures.projectiles.iter().position(|p| p.id == id) else {
             return;
         };
-        let Some(a) = p.arrow.as_mut() else {
+        let Some((at, color)) = self.creatures.projectiles.update(i, |p| {
+            let a = p.arrow.as_mut()?;
+            Some((p.position, std::mem::replace(&mut a.effect_color, -1)))
+        }) else {
             return;
         };
-        let (at, color) = (p.position, std::mem::replace(&mut a.effect_color, -1));
         self.arrow_makeparticle(at, color, 20);
     }
 
@@ -318,6 +320,7 @@ impl Game<'_> {
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.
             "minecraft:falling_block" => self.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 id,
@@ -499,10 +502,11 @@ impl Game<'_> {
                 if let (8, Value::Int(fuse)) = (index, value) {
                     t.fuse = *fuse;
                 }
-            } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
+            } else if let Some(i) = self.falling.iter().position(|f| f.id == id) {
                 // FallingBlockEntity.DATA_START_POS (the model's seed).
                 if let (8, Value::Pos(p)) = (index, value) {
-                    f.start_pos = BlockPos::new(p[0], p[1], p[2]);
+                    self.falling
+                        .update(i, |f| f.start_pos = BlockPos::new(p[0], p[1], p[2]));
                 }
             } else if let Some(c) = self.crystals.iter_mut().find(|c| c.id == id) {
                 // EndCrystal.DATA_BEAM_TARGET and DATA_SHOW_BOTTOM.
@@ -522,54 +526,56 @@ impl Game<'_> {
                     (11, Value::Byte(loyalty)) => t.loyalty = u32::from(*loyalty as u8),
                     _ => {}
                 }
-            } else if let Some(p) = self.creatures.projectiles.iter_mut().find(|p| p.id == id) {
-                match (&mut p.kind, index, value) {
-                    // Entity.DATA_SHARED_FLAGS_ID's FLAG_ONFIRE: Entity.isOnFire on
-                    // a client, which draws the flames. A client doesn't count the
-                    // fire down: the flag goes off when the server's fire is out.
-                    (_, 0, Value::Byte(flags)) => {
-                        if let Some(a) = p.arrow.as_mut() {
-                            a.synced_fire = flags & 1 != 0;
+            } else if let Some(i) = self.creatures.projectiles.iter().position(|p| p.id == id) {
+                self.creatures.projectiles.update(i, |p| {
+                    match (&mut p.kind, index, value) {
+                        // Entity.DATA_SHARED_FLAGS_ID's FLAG_ONFIRE: Entity.isOnFire on
+                        // a client, which draws the flames. A client doesn't count the
+                        // fire down: the flag goes off when the server's fire is out.
+                        (_, 0, Value::Byte(flags)) => {
+                            if let Some(a) = p.arrow.as_mut() {
+                                a.synced_fire = flags & 1 != 0;
+                            }
                         }
-                    }
-                    // AbstractArrow.ID_FLAGS (critical) and IN_GROUND.
-                    (ProjectileKind::Arrow { critical, .. }, 8, Value::Byte(flags)) => {
-                        *critical = flags & 1 != 0;
-                        if let Some(a) = p.arrow.as_mut() {
-                            a.no_physics = flags & 2 != 0;
+                        // AbstractArrow.ID_FLAGS (critical) and IN_GROUND.
+                        (ProjectileKind::Arrow { critical, .. }, 8, Value::Byte(flags)) => {
+                            *critical = flags & 1 != 0;
+                            if let Some(a) = p.arrow.as_mut() {
+                                a.no_physics = flags & 2 != 0;
+                            }
                         }
-                    }
-                    (ProjectileKind::Arrow { .. }, 5, Value::Bool(no_gravity)) => {
-                        p.no_gravity = *no_gravity;
-                    }
-                    (ProjectileKind::Arrow { .. }, 10, Value::Bool(in_ground)) => {
-                        // AbstractArrow.onSyncedDataUpdated: IN_GROUND turning true after
-                        // the first tick starts the shake.
-                        if *in_ground
-                            && !p.stuck
-                            && p.age > 0
-                            && let Some(a) = p.arrow.as_mut()
-                            && a.shake <= 0
-                        {
-                            a.shake = 7;
+                        (ProjectileKind::Arrow { .. }, 5, Value::Bool(no_gravity)) => {
+                            p.no_gravity = *no_gravity;
                         }
-                        p.stuck = *in_ground;
-                        if let Some(a) = p.arrow.as_mut() {
-                            a.in_ground = *in_ground;
+                        (ProjectileKind::Arrow { .. }, 10, Value::Bool(in_ground)) => {
+                            // AbstractArrow.onSyncedDataUpdated: IN_GROUND turning true after
+                            // the first tick starts the shake.
+                            if *in_ground
+                                && !p.stuck
+                                && p.age > 0
+                                && let Some(a) = p.arrow.as_mut()
+                                && a.shake <= 0
+                            {
+                                a.shake = 7;
+                            }
+                            p.stuck = *in_ground;
+                            if let Some(a) = p.arrow.as_mut() {
+                                a.in_ground = *in_ground;
+                            }
                         }
-                    }
-                    // Arrow.ID_EFFECT_COLOR.
-                    (ProjectileKind::Arrow { .. }, 11, Value::Int(color)) => {
-                        if let Some(a) = p.arrow.as_mut() {
-                            a.effect_color = *color;
+                        // Arrow.ID_EFFECT_COLOR.
+                        (ProjectileKind::Arrow { .. }, 11, Value::Int(color)) => {
+                            if let Some(a) = p.arrow.as_mut() {
+                                a.effect_color = *color;
+                            }
                         }
+                        // WitherSkull.DATA_DANGEROUS.
+                        (ProjectileKind::WitherSkull { dangerous }, 8, Value::Bool(d)) => {
+                            *dangerous = *d;
+                        }
+                        _ => {}
                     }
-                    // WitherSkull.DATA_DANGEROUS.
-                    (ProjectileKind::WitherSkull { dangerous }, 8, Value::Bool(d)) => {
-                        *dangerous = *d;
-                    }
-                    _ => {}
-                }
+                });
             }
         }
     }
@@ -579,9 +585,11 @@ impl Game<'_> {
         let (id, Some((yaw, pitch))) = (id as u32, rotation) else {
             return;
         };
-        if let Some(p) = self.creatures.projectiles.iter_mut().find(|p| p.id == id) {
-            p.yaw = yaw;
-            p.pitch = pitch;
+        if let Some(i) = self.creatures.projectiles.iter().position(|p| p.id == id) {
+            self.creatures.projectiles.update(i, |p| {
+                p.yaw = yaw;
+                p.pitch = pitch;
+            });
         } else if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id) {
             t.yaw = yaw;
             t.pitch = pitch;
@@ -673,12 +681,12 @@ impl Game<'_> {
         // itself between the server's updates (every 20 ticks), then waits
         // where it lands for the server to place it and remove it.
         let mut falling = std::mem::take(&mut self.falling);
-        for f in &mut falling {
-            if let Ok(FallStep::Landed(_)) = self.fall_step(f, false) {
+        falling.for_each_mut(|f| {
+            if let Ok(FallStep::Landed(_)) = self.fall_step(f, false, &[]) {
                 // Block.updateEntityMovementAfterFallOn, then the air drag.
                 f.velocity = Vec3::new(f.velocity.x * 0.98, 0.0, f.velocity.z * 0.98);
             }
-        }
+        });
         self.falling = falling;
         // Projectiles tick on the client too and fly on between the tracker's
         // updates (10 to 20 ticks apart); a block stops them there, and only
@@ -699,7 +707,7 @@ impl Game<'_> {
                 targets: Vec::new(),
                 border: Some(self.border.bounds()),
             };
-            for p in &mut projectiles {
+            projectiles.for_each_mut(|p| {
                 match p.kind {
                     ProjectileKind::Arrow { .. } => {
                         let _ = horizon_client::arrows::tick_client(p, &arrow_scene);
@@ -719,7 +727,7 @@ impl Game<'_> {
                     }
                     _ => remote_projectile_tick(p, &world),
                 }
-            }
+            });
             for t in &mut tridents {
                 t.remote_tick(&world, self.remote_eye(t.owner));
             }
@@ -842,7 +850,7 @@ impl Game<'_> {
         self.rockets.clear();
         self.crystals.clear();
         // The dragon a server sent goes with its crystals.
-        self.dragon = None;
+        self.dragon.discard();
         self.potions.clear_thrown();
         self.potions.clouds.clear();
         self.dragon_fireballs.clear();
@@ -991,11 +999,14 @@ mod tests {
     fn a_power_packet_gives_a_fireball_the_power_its_next_tick_uses() {
         // ClientPacketListener.handleProjectilePowerPacket: the fireball with
         // id 12 gets the power the server sends bundled with its motion.
-        let mut list = vec![tracked(ProjectileKind::LargeFireball { power: 1 }, 12)];
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> =
+            [tracked(ProjectileKind::LargeFireball { power: 1 }, 12)]
+                .into_iter()
+                .collect();
         remote_projectile_power(&mut list, 12, 0.5);
         assert_eq!(list[0].acceleration, 0.5);
         // AbstractHurtingProjectile.applyInertia: (1.5 + 0.5) * (double) 0.95f.
-        remote_projectile_tick(&mut list[0], &Empty);
+        list.update(0, |p| remote_projectile_tick(p, &Empty));
         assert_eq!(list[0].velocity.x, 1.899_999_976_158_142);
     }
 
@@ -1003,7 +1014,7 @@ mod tests {
     fn a_power_packet_ignores_an_arrow_an_unknown_id_and_a_thrown_item() {
         // Vanilla's instanceof AbstractHurtingProjectile: an arrow and a
         // thrown egg are none, and no entity is id 99.
-        let mut list = vec![
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(
                 ProjectileKind::Arrow {
                     base_damage: 2.0,
@@ -1014,7 +1025,9 @@ mod tests {
             ),
             tracked(ProjectileKind::Egg, 4),
             tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
-        ];
+        ]
+        .into_iter()
+        .collect();
         remote_projectile_power(&mut list, 3, 0.5);
         remote_projectile_power(&mut list, 4, 0.5);
         remote_projectile_power(&mut list, 99, 0.5);
@@ -1029,11 +1042,13 @@ mod tests {
         // `ClientPacketListener.handleSetEntityData` of
         // Fireball.DATA_ITEM_STACK: the item `Fireball.getItem` returns, which
         // is the fire charge the default was until the server says otherwise.
-        let mut list = vec![
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
             tracked(ProjectileKind::SmallFireball, 13),
             tracked(ProjectileKind::Snowball, 14),
-        ];
+        ]
+        .into_iter()
+        .collect();
         remote_projectile_item(&mut list, 12, ItemStack::new("minecraft:diamond", 4));
         assert_eq!(
             list[0].item.as_ref().map(|i| (&*i.item, i.count)),

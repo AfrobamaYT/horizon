@@ -1189,7 +1189,7 @@ impl Game<'_> {
         )
     }
     /// A biome id or `#tag` matched against a biome name.
-    pub(super) fn biome_matches(&self, wanted: &str, biome: &str) -> bool {
+    pub(in crate::game) fn biome_matches(&self, wanted: &str, biome: &str) -> bool {
         match wanted.strip_prefix('#') {
             Some(tag) => self.biome_tag_has(tag, biome),
             None => wanted == biome,

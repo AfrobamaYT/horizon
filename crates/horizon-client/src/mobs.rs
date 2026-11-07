@@ -1590,6 +1590,7 @@ fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
         amplifier,
         ambient: false,
         show_particles: true,
+        show_icon: true,
     };
     vec![
         ConsumeEffect::ClearAllEffects,
@@ -4460,7 +4461,6 @@ impl Mob {
         // including a weaker incoming instance saved behind the active effect.
         incoming.id = effect;
         let index = self.extra.effects.iter().position(|e| e.id == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
             let stored = &self.extra.effects[i];
             let mut active = crate::effects::EffectInstance {
@@ -4470,6 +4470,7 @@ impl Mob {
                 amplifier: stored.amplifier,
                 ambient: false,
                 visible: true,
+                show_icon: true,
                 client_blend: (false, false),
                 hidden: None,
             };
@@ -4501,8 +4502,8 @@ impl Mob {
         if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
-        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
-            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        if effect == "minecraft:absorption" {
+            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
         }
         self.effects_dirty |= changed;
         changed
@@ -4675,15 +4676,15 @@ impl Mob {
         amplifier: i32,
         scale: f64,
     ) {
-        let amp = amplifier.clamp(0, 30);
+        let shift = amplifier as u32;
         if harm != inverted {
             self.damage(
                 level,
-                (scale * f64::from(6i32 << amp)) as i32 as f32,
+                (scale * f64::from(6i32.wrapping_shl(shift))) as i32 as f32,
                 Damage::of(DamageKind::Magic),
             );
         } else {
-            let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
+            let heal = (scale * f64::from(4i32.wrapping_shl(shift).max(0))) as i32 as f32;
             self.heal(context, heal);
         }
     }
@@ -4752,11 +4753,10 @@ impl Mob {
         if self.species() == Species::HappyGhast {
             return 1.0;
         }
-        // Parrot.getVoicePitch: `getPitch(random)`, the plain range, so a baby
-        // parrot does not take the 1.5 that AgeableMob raises a baby by.
-        if self.species() == Species::Parrot {
-            return (self.random.next_float() - self.random.next_float()) * 0.2 + 1.0;
-        }
+        // Parrot.getVoicePitch is `getPitch(random)`, the plain 1.0 ± 0.2 an
+        // adult gets below: a parrot is never a baby (`Parrot.canBeABaby`), so
+        // the 1.5 `AgeableMob` gives a baby cannot reach it and the override
+        // needs no arm of its own.
         // ZombieVillager.getVoicePitch: babies are 2.0, not 1.5.
         let baby = if self.species() == Species::ZombieVillager {
             2.0
@@ -5873,6 +5873,20 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn absorption_refills_on_equal_and_weaker_adds() {
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 1, false, true);
+        m.absorption = 0.0;
+        assert!(!m.add_effect_with("absorption", 100, 1, false, true));
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 0.0;
+        m.add_effect("minecraft:absorption", 50, 0);
+        assert_eq!(m.absorption, 4.0);
+        assert_eq!(m.extra.effects[0].amplifier, 1);
+        assert_eq!(m.extra.effects[0].duration, 200);
+    }
+
+    #[test]
     fn absorption_downgrade_keeps_spent_hearts() {
         // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
         // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
@@ -6383,6 +6397,7 @@ mod totem_tests {
                     amplifier: 1,
                     ambient: false,
                     show_particles: true,
+                    show_icon: true,
                 }],
             };
             mob.apply_death_effect(&mut level.level(), &effect);

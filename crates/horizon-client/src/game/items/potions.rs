@@ -577,10 +577,10 @@ fn thrown_kind(stack: &ItemStack) -> &'static str {
 /// within the player's box grown by 2, and shrink its radius by 0.5.
 pub(super) fn collect_dragon_breath(
     player_box: Aabb,
-    clouds: &mut [super::dragon::Breath],
+    clouds: &mut horizon_client::join_seq::ResidentList<super::dragon::Breath>,
 ) -> bool {
     let search_box = player_box.inflate(Vec3::new(2.0, 2.0, 2.0));
-    if let Some(c) = clouds.iter_mut().find(|c| {
+    if let Some(i) = clouds.iter().position(|c| {
         if !c.from_dragon || c.potion.is_some() || super::dragon::breath_expired(c.age, c.duration)
         {
             return false;
@@ -592,7 +592,7 @@ pub(super) fn collect_dragon_breath(
         );
         search_box.intersects(cloud_box)
     }) {
-        c.radius = (c.radius - 0.5).max(0.0);
+        clouds.update(i, |c| c.radius = (c.radius - 0.5).max(0.0));
         true
     } else {
         false
@@ -1252,6 +1252,16 @@ impl Game<'_> {
         let new = self.potions.effects.get(id).is_none();
         let changed = self.potions.effects.add(effect);
         self.apply_effect_status();
+        // MobEffect.onEffectAdded: an omen's sound when it is new, at the
+        // player's feet (#11373).
+        if new
+            && changed
+            && let Some(sound) = sound_on_added(id)
+            && let Some(p) = self.player.as_ref()
+        {
+            let at = [p.position.x, p.position.y, p.position.z];
+            self.audio.play(sound, Some(at), 1.0, 1.0);
+        }
         if id == "absorption"
             && let Some(p) = self.player.as_mut()
         {
@@ -1607,6 +1617,7 @@ impl Game<'_> {
                     t.age,
                     t.owner.clone(),
                     t.guest,
+                    t.velocity,
                 ));
                 return false;
             }
@@ -1634,7 +1645,7 @@ impl Game<'_> {
                 );
             }
         }
-        for (id, stack, at, mob, block, age, owner, guest) in landed {
+        for (id, stack, at, mob, block, age, owner, guest, motion) in landed {
             // Projectile.onHit (super.onHit of AbstractThrownPotion): a block
             // is heard at its centre, an entity at the hit.
             let heard = if mob.is_some() {
@@ -1652,7 +1663,7 @@ impl Game<'_> {
                 attacker: None,
                 guest,
             };
-            self.splash(&stack, at, mob, block, age, &owner);
+            self.splash(&stack, at, mob, block, age, &owner, motion);
             if item != "minecraft:experience_bottle" {
                 self.native_potion_splash(&item, [at.x, at.y, at.z]);
             }
@@ -1742,7 +1753,9 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = std::mem::take(&mut self.breath_clouds);
+        let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
         self.breath_clouds.append(&mut clouds);
     }
@@ -2174,7 +2187,7 @@ impl Game<'_> {
     /// `AbstractThrownPotion.onHit` with `ThrownSplashPotion.onHitAsPotion`, or
     /// `ThrownLingeringPotion.onHitAsPotion` for a lingering potion, read from
     /// the stack's `potion_contents`; `mob` is where it hit a mob, `hit` the
-    /// block and face it hit, `age` its age.
+    /// block and face it hit, `age` its age, `motion` its motion as it hit.
     pub(super) fn splash(
         &mut self,
         stack: &ItemStack,
@@ -2183,6 +2196,7 @@ impl Game<'_> {
         hit: Option<([i32; 3], Direction)>,
         age: u32,
         owner: &PotionOwner,
+        motion: Vec3,
     ) {
         let block = [at.x, at.y, at.z].map(|v| v.floor() as i32);
         if &*stack.item == "minecraft:experience_bottle" {
@@ -2192,7 +2206,13 @@ impl Game<'_> {
             self.level_event_at(1053, block, 0);
             let r = &mut self.world.random;
             let value = 3 + r.next_int_bound(5).unwrap_or(0) + r.next_int_bound(5).unwrap_or(0);
-            self.spawn_orbs([at.x, at.y, at.z], value as u32);
+            // awardWithDirection: away from the face it hit, or back along
+            // its own motion when it hit an entity (#11388).
+            let roughly = match hit {
+                Some((_, face)) => face.normal().map(f64::from),
+                None => [-motion.x, -motion.y, -motion.z],
+            };
+            self.spawn_orbs_toward([at.x, at.y, at.z], roughly, value as u32);
             self.native_exp_bottle([at.x, at.y, at.z], value as u32);
             return;
         }
@@ -2569,6 +2589,132 @@ mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn lifecycle_cloud_commands_and_parked_owners() {
+        super::super::entity::taken_pass_tests::LifecycleFixture {
+            seed: |game, entries| {
+                game.breath_clouds.clear();
+                for &(id, at) in entries {
+                    game.spawn_creeper_cloud(at, Vec::new(), Vec::new(), Vec::new(), 0);
+                    let i = game.breath_clouds.len() - 1;
+                    game.breath_clouds.update(i, |c| c.id = id);
+                }
+            },
+            ids: |game| game.breath_clouds.iter().map(|c| c.id).collect(),
+            target: super::super::commands::Target::Cloud,
+            unloads_with_chunk: false,
+            remote: None,
+        }
+        .run();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_breath_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(false);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_potion_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(true);
+    }
+
+    fn cloud_spawns_during_pass(potion_pass: bool) {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            for _ in 0..2 {
+                game.spawn_creeper_cloud([0.0, 80.0, 0.0], Vec::new(), Vec::new(), Vec::new(), 0);
+            }
+            if !potion_pass {
+                game.breath_clouds.for_each_mut(|c| c.potion = None);
+            }
+            let first = game.breath_clouds[0].id;
+            let second = game.breath_clouds[1].id;
+            let next = game.next_entity;
+            super::super::entity::taken_pass_tests::with_spawn(
+                |game| {
+                    assert!(game.breath_clouds.is_empty());
+                    for _ in 0..2 {
+                        game.spawn_creeper_cloud(
+                            [0.0, 80.0, 0.0],
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            0,
+                        );
+                    }
+                },
+                || {
+                    if potion_pass {
+                        game.tick_potion_clouds();
+                    } else {
+                        game.tick_breath();
+                    }
+                },
+            );
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(next + 1, 0), (next + 2, 0), (first, 1), (second, 1)]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn residency_cloud_load_expiry_bottling_and_late_ids() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            game.ominous_spawners.clear();
+            let (tag, _) =
+                horizon_core::nbt::parse_snbt("{Pos:[0d,80d,0d],Duration:2,WaitTime:0,Radius:3f}")
+                    .unwrap();
+            let potion = game.load_potion_cloud(&tag).unwrap();
+            for (age, duration) in [(20, 1), (0, 40)] {
+                game.breath_clouds.push(super::super::dragon::Breath {
+                    id: 0,
+                    at: [0.0, 80.0, 0.0],
+                    radius: 3.0,
+                    age,
+                    duration,
+                    from_dragon: false,
+                    victims: Vec::new(),
+                    potion: None,
+                });
+            }
+            game.add_remote_ominous_item_spawner(0, [0.0, 80.0, 0.0]);
+            let before = game.next_entity;
+            assert_eq!(game.breath_clouds[1].id, 0);
+            game.lan_assign_ids();
+            assert_eq!(game.ominous_spawners[0].id, before + 1);
+            assert_eq!(game.breath_clouds[1].id, before + 2);
+            assert_eq!(game.breath_clouds[2].id, before + 3);
+            game.tick_breath();
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(potion, 0), (before + 3, 1)]
+            );
+            game.tick_potion_clouds();
+            game.tick_potion_clouds();
+            assert_eq!(game.breath_clouds.len(), 1);
+            assert_eq!(game.breath_clouds[0].age, 1);
+            game.breath_clouds.update(0, |c| c.from_dragon = true);
+            assert!(collect_dragon_breath(
+                Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
+                &mut game.breath_clouds
+            ));
+            assert_eq!(game.breath_clouds[0].radius, 2.5);
+            game.breath_clouds.clear();
+            assert!(game.breath_clouds.is_empty());
+        });
+    }
 
     fn effect_test_mod() {
         use mod_api::{self, *};
@@ -2841,7 +2987,7 @@ mod tests {
     #[test]
     fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
-        let mut clouds = vec![super::super::dragon::Breath {
+        let mut clouds = [super::super::dragon::Breath {
             id: 1,
             at: [1.0, 64.0, 0.0],
             radius: 5.0,
@@ -2850,7 +2996,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut clouds));
         assert_eq!(clouds[0].radius, 4.5);
         assert!(collect_dragon_breath(player_box, &mut clouds));
@@ -2863,7 +3011,7 @@ mod tests {
     fn glass_bottle_ignores_non_dragon_or_expired_or_out_of_range_clouds() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         // Non-dragon cloud (`from_dragon: false`).
-        let mut non_dragon = vec![super::super::dragon::Breath {
+        let mut non_dragon = [super::super::dragon::Breath {
             id: 1,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2872,12 +3020,14 @@ mod tests {
             from_dragon: false,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut non_dragon));
         assert_eq!(non_dragon[0].radius, 3.0);
 
         // Lingering potion cloud (`potion: Some(...)`).
-        let mut lingering = vec![super::super::dragon::Breath {
+        let mut lingering = [super::super::dragon::Breath {
             id: 2,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2897,13 +3047,15 @@ mod tests {
                 owner: None,
                 guest: None,
             }),
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut lingering));
         assert_eq!(lingering[0].radius, 3.0);
 
         // Its last tick before the wait-shifted end still holds breath
         // (`tickCount - waitTime < duration`).
-        let mut last = vec![super::super::dragon::Breath {
+        let mut last = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2912,12 +3064,14 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut last));
         assert_eq!(last[0].radius, 4.5);
 
         // Expired cloud (`tickCount - waitTime >= duration`).
-        let mut expired = vec![super::super::dragon::Breath {
+        let mut expired = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2926,13 +3080,15 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut expired));
         assert_eq!(expired[0].radius, 5.0);
 
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
         // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
-        let mut far = vec![super::super::dragon::Breath {
+        let mut far = [super::super::dragon::Breath {
             id: 4,
             at: [10.0, 64.0, 0.0],
             radius: 1.0,
@@ -2941,14 +3097,16 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut far));
         assert_eq!(far[0].radius, 1.0);
 
         // Out of vertical reach: cloud at Y=64.0 (Y bounds [64.0, 64.5]),
         // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
         let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
-        let mut ground_cloud = vec![super::super::dragon::Breath {
+        let mut ground_cloud = [super::super::dragon::Breath {
             id: 5,
             at: [0.0, 64.0, 0.0],
             radius: 1.0,
@@ -2957,7 +3115,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
         assert_eq!(ground_cloud[0].radius, 1.0);
     }
@@ -3154,6 +3314,104 @@ mod tests {
                             assert_eq!(calls.load(Ordering::Relaxed), 1);
                         });
                     }
+                }
+            }
+        });
+    }
+}
+
+/// `MobEffect.withSoundOnAdded`: the sound `onEffectAdded` plays when the
+/// effect is new on an entity (`MobEffects`: the three omens).
+pub(super) fn sound_on_added(effect: &str) -> Option<&'static str> {
+    match effect.strip_prefix("minecraft:").unwrap_or(effect) {
+        "bad_omen" => Some("minecraft:event.mob_effect.bad_omen"),
+        "trial_omen" => Some("minecraft:event.mob_effect.trial_omen"),
+        "raid_omen" => Some("minecraft:event.mob_effect.raid_omen"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod sound_on_added_tests {
+    use horizon_client::effects::EffectInstance;
+
+    /// `LivingEntity.addEffect` → `MobEffect.onEffectAdded`: Bad Omen, Trial
+    /// Omen and Raid Omen sound once when they are new on the player, at its
+    /// feet; a renewal and any other effect are silent (#11373).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_new_omen_sounds_once_at_the_feet() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::new(10.5, 64.0, -3.25),
+                )
+                .unwrap(),
+            );
+            game.audio.capture = Some(Vec::new());
+            for (id, amplifier) in [
+                ("bad_omen", 0),
+                ("bad_omen", 1),
+                ("speed", 0),
+                ("trial_omen", 0),
+                ("raid_omen", 0),
+            ] {
+                game.add_player_effect(EffectInstance::new(id, 2400, amplifier));
+            }
+            let played: Vec<(String, [f64; 3])> = game
+                .audio
+                .capture
+                .take()
+                .unwrap()
+                .into_iter()
+                .map(|s| (s.event, s.position))
+                .collect();
+            let feet = [10.5, 64.0, -3.25];
+            assert_eq!(
+                played,
+                [
+                    ("minecraft:event.mob_effect.bad_omen".to_owned(), feet),
+                    ("minecraft:event.mob_effect.trial_omen".to_owned(), feet),
+                    ("minecraft:event.mob_effect.raid_omen".to_owned(), feet),
+                ]
+            );
+        });
+    }
+}
+
+#[cfg(test)]
+mod xp_bottle_tests {
+    use super::*;
+
+    /// `ThrownExperienceBottle.onHit` uses `awardWithDirection`: every fresh
+    /// orb starts 0.25 out from the face it hit, or back along the bottle's
+    /// motion after an entity hit, moving that way (#11388).
+    #[test]
+    #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
+    fn bottle_orbs_start_away_from_what_it_hit() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let bottle = ItemStack::new("minecraft:experience_bottle", 1);
+            let at = Vec3::new(8.5, 70.5, 8.5);
+            // (hit face, the bottle's motion, the axis and sign the orbs leave by)
+            for (face, motion, axis, sign) in [
+                (
+                    Some(([9, 70, 8], Direction::West)),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    0,
+                    -1.0,
+                ),
+                (None, Vec3::new(0.0, 0.0, 1.0), 2, -1.0),
+            ] {
+                game.orbs.clear();
+                game.splash(&bottle, at, None, face, 0, &PotionOwner::default(), motion);
+                assert!(!game.orbs.is_empty());
+                let at = [at.x, at.y, at.z];
+                for o in game.orbs.iter() {
+                    let p = [o.position.x, o.position.y, o.position.z];
+                    let v = [o.velocity.x, o.velocity.y, o.velocity.z];
+                    assert!((p[axis] - (at[axis] + sign * 0.25)).abs() < 1e-9, "{p:?}");
+                    assert!(v[axis] * sign >= 0.0, "{v:?}");
                 }
             }
         });
