@@ -112,3 +112,78 @@ fn singleton_late_dragon_id_reserves_all_eight_parts_once() {
         assert_eq!(game.next_entity, before + 9);
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn singleton_lifecycle_commands_unload_and_parked_owners() {
+    crate::game::entity::taken_pass_tests::LifecycleFixture {
+        seed: |game, entries| {
+            if let Some(id) = game.dragon.as_ref().map(|d| d.id) {
+                game.remove_remote_dragon(id as i32);
+            }
+            for &(id, at) in entries {
+                game.spawn_remote_dragon(id as i32, at, 0.0);
+            }
+        },
+        ids: |game| game.dragon.as_ref().map(|d| vec![d.id]).unwrap_or_default(),
+        target: crate::game::commands::Target::Dragon,
+        unloads_with_chunk: true,
+        remote: None,
+    }
+    .run_singleton();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn singleton_death_fight_scan_and_resets_discard_owners() {
+    with_game(|game| {
+        game.spawn_remote_dragon(601, [1.0, 80.0, 1.0], 0.0);
+        game.dragon.as_mut().unwrap().death_time = 199;
+        game.tick_dragon_death();
+        assert!(game.dragon.is_none(), "death completion");
+        game.spawn_remote_dragon(602, [1.0, 80.0, 1.0], 0.0);
+        game.scan_state();
+        assert!(game.dragon.is_none(), "fight scan without exit portal");
+        game.spawn_remote_dragon(603, [1.0, 80.0, 1.0], 0.0);
+        game.clear_entities();
+        assert!(game.dragon.is_none(), "world reset");
+        game.spawn_remote_dragon(604, [1.0, 80.0, 1.0], 0.0);
+        game.clear_remote_projectiles();
+        assert!(game.dragon.is_none(), "remote reset");
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn singleton_join_rejection_discards_the_installed_dragon() {
+    struct Veto;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Veto {
+        fn entity_join_level(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::EntityJoinLevelEvent<'_>,
+        ) -> mod_api::Flow {
+            if event.kind == "minecraft:ender_dragon" {
+                mod_api::Flow::Cancel
+            } else {
+                mod_api::Flow::Continue
+            }
+        }
+    }
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new("dragon-veto", Box::new(Veto))].into(),
+        || {
+            with_game(|game| {
+                assert!(
+                    game.spawn_dragon_spawned([1.0, 80.0, 1.0], SpawnSite::Plain)
+                        .is_none()
+                );
+                assert!(
+                    game.dragon.is_none(),
+                    "join rejection left its owner installed"
+                );
+            });
+        },
+    );
+}
