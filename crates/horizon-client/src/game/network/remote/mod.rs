@@ -592,7 +592,7 @@ pub(super) struct Remote {
     pub(super) craft_result: Option<ItemStack>,
     /// The open menu's title as the server named it, with its styles.
     menu_title: Option<horizon_client::text::Text>,
-    menu_title_snapshot: Option<mod_api::Text>,
+    menu_title_snapshot: Option<Arc<mod_api::Text>>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
@@ -11449,12 +11449,16 @@ impl ClientMenu {
 
 impl Remote {
     pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
-        self.menu_title_snapshot = title.try_into_api().unwrap();
+        self.menu_title_snapshot = title.try_into_api().unwrap().map(Arc::new);
         self.menu_title = title;
     }
 
     pub(super) fn menu_title_snapshot(&self) -> Option<&mod_api::Text> {
-        self.menu_title_snapshot.as_ref()
+        self.menu_title_snapshot.as_deref()
+    }
+
+    pub(super) fn shared_menu_title_snapshot(&self) -> Option<Arc<mod_api::Text>> {
+        self.menu_title_snapshot.clone()
     }
 
     /// Resolve registry keys only when registries or the dimension change.

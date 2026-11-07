@@ -18,7 +18,7 @@ pub(super) struct ObservedScreen {
     /// it open or close.
     overlay: bool,
     menu: Option<String>,
-    title: Option<mod_api::Text>,
+    title: Option<std::sync::Arc<mod_api::Text>>,
     rect: [f32; 4],
     slots: usize,
     mouse: [f32; 2],
@@ -30,7 +30,7 @@ impl ObservedScreen {
         NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: self.id,
             menu: self.menu.as_deref(),
-            title: self.title.as_ref(),
+            title: self.title.as_deref(),
             rect: self.rect,
             slots: self.slots,
             mouse: self.mouse,
@@ -299,7 +299,9 @@ impl Game<'_> {
             id: view.id,
             overlay,
             menu: view.menu.map(str::to_owned),
-            title: view.title.cloned(),
+            title: view
+                .title
+                .and_then(|_| self.remote.as_ref()?.shared_menu_title_snapshot()),
             rect: view.rect,
             slots: view.slots,
             mouse: view.mouse,
