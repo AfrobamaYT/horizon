@@ -36,7 +36,7 @@ fn native_and_wasm_listeners_at_a_point_run_in_the_installed_order() {
     // The game installs each owner's native/wasm slots in dependency order, not alphabetically.
     mod_points::register(&mod_points::listeners::handle_chat_input(
         "z_native",
-        0,
+        5,
         "tail",
         native_tail::<'N'>,
     ))
@@ -54,5 +54,5 @@ fn native_and_wasm_listeners_at_a_point_run_in_the_installed_order() {
     mod_points::__private::seal();
     let mut args = HandleChatInputArgs::__new("x");
     mod_points::dispatch::handle_chat_input(HostSide::Server(&mut Server), &mut args);
-    assert_eq!(args.message, "xNWM");
+    assert_eq!(args.message, "xVNWM");
 }
