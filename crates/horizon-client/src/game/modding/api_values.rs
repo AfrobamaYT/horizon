@@ -5,6 +5,82 @@ use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
+/// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
+/// Registry definitions do not change on pack reload; world-number mappings are separate.
+pub(in crate::game) fn resolve_block_definitions(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> Result<(), String> {
+    if mod_api::__private::block_definitions().is_some() {
+        return Ok(());
+    }
+    let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
+    for index in 0..registry.len() {
+        let state = registry
+            .state(horizon_world::registry::BlockStateId(index as u32))
+            .expect("registry index is in bounds");
+        blocks
+            .entry(state.name.as_str())
+            .or_default()
+            .push((index, &state.properties));
+    }
+    mod_api::__private::resolve_block_keys(blocks.keys().copied(), |name| {
+        let states = &blocks[name];
+        let default = registry
+            .default_state(name)
+            .expect("registry owns block defaults");
+        let ordinal = states
+            .iter()
+            .position(|(index, _)| *index == default.0 as usize)
+            .expect("default belongs to block");
+        let states: Vec<std::collections::BTreeMap<_, _>> = states
+            .iter()
+            .map(|(_, properties)| {
+                properties
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .collect();
+        let states: Vec<_> = states.iter().collect();
+        horizon_mod_runtime::block_definitions::BlockDefinition::new(&states, ordinal as u16)
+            .map_err(|error| format!("block {name}: {error:?}"))
+    })
+    .map_err(|errors| errors.join("\n"))
+}
+
+#[cfg(test)]
+#[test]
+fn block_definition_import_preserves_defaults_and_is_immutable_after_load() {
+    let facts = r#"{"defaults":{"minecraft:air":0,"minecraft:stairs":2},"states":[
+        ["air",true,false,"","minecraft:air"],
+        ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north"}}],
+        ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east"}}]
+    ]}"#;
+    mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+    let registry =
+        horizon_world::registry::BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+    resolve_block_definitions(&registry).unwrap();
+    let blocks = mod_api::__private::block_definitions().unwrap();
+    let key = blocks.names.slots["minecraft:stairs"] as usize;
+    assert_eq!(blocks.definitions[key].of(&[]), Ok(1));
+    assert_eq!(
+        blocks.definitions[key].property(0, "facing"),
+        Ok(Some("north"))
+    );
+    assert_eq!(
+        blocks.definitions[key].property(1, "facing"),
+        Ok(Some("east"))
+    );
+    let changed = facts.replace("east", "south");
+    let registry =
+        horizon_world::registry::BlockRegistry::from_facts_json(changed.as_bytes()).unwrap();
+    resolve_block_definitions(&registry).unwrap();
+    assert_eq!(
+        mod_api::__private::block_definitions().unwrap().definitions[key].property(1, "facing"),
+        Ok(Some("east"))
+    );
+}
+
 impl TryIntoApi for horizon_client::boss_overlay::ModBar {
     type Api = mod_api::ClientBossBar;
     type Error = std::convert::Infallible;
@@ -40,6 +116,35 @@ impl ItemBoundary for super::GameLevel<'_> {
 impl ItemBoundary for super::native_hooks::HitLevel<'_> {
     fn boundary_items(&self) -> Option<&Items> {
         self.0.tags()
+    }
+}
+
+fn block_metadata_table()
+-> Result<&'static horizon_mod_runtime::block_definitions::Blocks, mod_api::BlockStateError> {
+    mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)
+}
+impl super::Game<'_> {
+    pub(in crate::game) fn block_metadata_property(
+        &self,
+        state: mod_api::BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::property(block_metadata_table()?, state, name)
+    }
+    pub(in crate::game) fn block_metadata_with(
+        &self,
+        state: mod_api::BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::with(block_metadata_table()?, state, name, value)
+    }
+    pub(in crate::game) fn block_metadata_of(
+        &self,
+        block: mod_api::BlockKey,
+        properties: &[mod_api::StateConstraint],
+    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::of(block_metadata_table()?, block, properties)
     }
 }
 
