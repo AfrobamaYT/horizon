@@ -1180,6 +1180,10 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 pub struct Extra {
     /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
     pub from_bucket: bool,
+    /// Tags a mod gave the mob before it joined a level (`finalize_spawn`'s
+    /// `UnspawnedMobEdits`): the level keeps a joined entity's tags with its
+    /// saved data, so they move there when the mob joins.
+    pub spawn_tags: Vec<String>,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
@@ -2373,6 +2377,10 @@ pub enum MobEvent {
         /// The mob whose breaking this is, when it is one `LivingDestroyBlockEvent`
         /// hears (a wither's, a ravager's, a silverfish's, a zombie's).
         by: Option<u32>,
+        /// The entity `destroyBlock` names when that event doesn't hear of it (a
+        /// villager's harvest, a ravager's crop): it asks the mods nothing, and
+        /// its loot's `LootContextParams.THIS_ENTITY` is this one, as `by`'s is.
+        breaker: Option<u32>,
     },
     /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block `state` at
     /// `pos` (it already holds it); the block turns to air unless a mod stops it
