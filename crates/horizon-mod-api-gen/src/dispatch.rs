@@ -790,6 +790,99 @@ mod stack_crossing_tests {
         syn::parse_str::<syn::Block>(&body).unwrap();
     }
     #[test]
+    fn unsubscribed_item_use_never_converts() {
+        let stack: Type = syn::parse_quote!(&ItemStack);
+        let claimed: Type = syn::parse_quote!(&mut bool);
+        let args = [
+            ("stack".to_owned(), &stack),
+            ("claimed".to_owned(), &claimed),
+        ];
+        let crossing = stack_crossing(&args, None, "UseItem", true, &Default::default()).unwrap();
+        let body = format!(
+            "{} mod_api::dispatch_use_item(self, {}); {}",
+            crossing.before,
+            crossing.arguments.join(", "),
+            crossing.after
+        );
+        let source = r#"
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+static SUBSCRIBED: AtomicBool = AtomicBool::new(false);
+static CONVERSIONS: AtomicUsize = AtomicUsize::new(0);
+static DISPATCHES: AtomicUsize = AtomicUsize::new(0);
+pub struct ItemStack;
+pub struct ApiStack;
+pub struct Game;
+mod game { pub mod api_values {
+    pub trait TryIntoApi { fn try_into_api(&self) -> Result<crate::ApiStack, ()>; }
+    impl TryIntoApi for crate::ItemStack {
+        fn try_into_api(&self) -> Result<crate::ApiStack, ()> {
+            crate::CONVERSIONS.fetch_add(1, crate::Ordering::Relaxed);
+            Ok(crate::ApiStack)
+        }
+    }
+} }
+mod mod_api {
+    pub enum HookId { UseItem }
+    pub mod __private {
+        pub fn has_part_hook(_: super::HookId) -> bool {
+            crate::SUBSCRIBED.load(crate::Ordering::Relaxed)
+        }
+    }
+    pub fn dispatch_use_item(_: &mut crate::Game, _: &crate::ApiStack, claimed: &mut bool) {
+        crate::DISPATCHES.fetch_add(1, crate::Ordering::Relaxed);
+        *claimed = true;
+    }
+}
+impl Game {
+    fn fire_use_item(&mut self, stack: &ItemStack, claimed: &mut bool) { FIRE_BODY }
+}
+fn main() {
+    let mut game = Game;
+    let mut claimed = false;
+    for _ in 0..1_000 { game.fire_use_item(&ItemStack, &mut claimed); }
+    assert_eq!(CONVERSIONS.load(Ordering::Relaxed), 0);
+    assert_eq!(DISPATCHES.load(Ordering::Relaxed), 0);
+    assert!(!claimed);
+    SUBSCRIBED.store(true, Ordering::Relaxed);
+    game.fire_use_item(&ItemStack, &mut claimed);
+    assert_eq!(CONVERSIONS.load(Ordering::Relaxed), 1);
+    assert_eq!(DISPATCHES.load(Ordering::Relaxed), 1);
+    assert!(claimed);
+}
+"#
+        .replace("FIRE_BODY", &body);
+        let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = target.join(format!("item-fire-{}-{unique}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let input = directory.join("fire.rs");
+        let output = directory.join(format!("fire{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&input, source).unwrap();
+        let compiler = std::process::Command::new("rustc")
+            .args(["--edition=2024", "--crate-name=item_fire_counter"])
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(
+            compiler.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiler.stderr)
+        );
+        assert!(
+            std::process::Command::new(output)
+                .status()
+                .unwrap()
+                .success()
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn qualified_names_do_not_select_a_root_record_crossing() {
         for ty in [
             syn::parse_quote!(&foreign::ItemStack),

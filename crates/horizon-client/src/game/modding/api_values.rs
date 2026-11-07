@@ -99,6 +99,27 @@ impl StackReadError {
     }
 }
 
+/// Execute a native write and preserve its answer, including unit and original errors.
+pub(in crate::game) fn call_write<W: IntoWriteResult>(
+    call: impl FnOnce() -> W,
+) -> Result<W::Value, W::Error> {
+    call().into_write_result()
+}
+
+/// Convert a successful stack-bearing write answer through its original error channel.
+pub(in crate::game) fn call_stack_write<W>(
+    call: impl FnOnce() -> W,
+) -> Result<<W::Value as TryIntoApi>::Api, W::Error>
+where
+    W: IntoWriteResult,
+    W::Value: TryIntoApi<Error = StackReadError>,
+    W::Error: From<StackWriteError>,
+{
+    call_write(call)?
+        .try_into_api()
+        .map_err(|error| error.into_write_error().into())
+}
+
 macro_rules! scalar_values {
     ($($ty:ty),* $(,)?) => { $(
         impl TryIntoApi for $ty {
@@ -630,7 +651,7 @@ impl TryIntoApi for crate::crafting::Ingredient {
 impl TryIntoEngine for mod_api::Ingredient {
     type Engine = crate::crafting::Ingredient;
     type Error = StackWriteError;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+    fn try_into_engine(&self, _items: &Items) -> Result<Self::Engine, Self::Error> {
         Ok(crate::crafting::Ingredient {
             items: self.items.clone(),
             order: self.order.clone(),
@@ -642,7 +663,7 @@ impl TryIntoEngine for mod_api::Ingredient {
                     Ok((
                         shape.clone(),
                         kids.iter()
-                            .map(|k| k.try_into_engine(items))
+                            .map(|k| k.try_into_engine(_items))
                             .collect::<Result<_, _>>()?,
                     ))
                 })
