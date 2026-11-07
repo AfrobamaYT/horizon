@@ -201,6 +201,8 @@ pub use prepared_model::fail_next_prepared_upload;
 pub use prepared_model::{
     PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
+#[cfg(feature = "test-support")]
+pub use prepared_model::{cap_prepared_instance_slots, capped_prepared_room};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -1369,7 +1371,9 @@ pub struct Renderer {
     /// when the draw is not kept, spinning, or claimed by a shader pack.
     prepared_models: Option<PreparedModels>,
     prepared_draws: Vec<PreparedModelDraw>,
-    prepared_ranges: Vec<(u32, u32, Option<usize>)>,
+    /// Ordinary-stream cuts for `prepared_draws`, filled once per frame.
+    prepared_cuts: Vec<u32>,
+    prepared_ranges: Vec<prepared_model::OrderedSpan>,
     prepared_uploaded: Vec<PreparedModelInstance>,
     prepared_instance_buffer: wgpu::Buffer,
     prepared_instance_capacity: u64,
@@ -2026,9 +2030,10 @@ impl wgpu::rwh::HasDisplayHandle for WindowDisplay {
 }
 /// The backends to open a device on, each tried in turn until one gives a
 /// device. `api` is the player's choice (`GraphicsApi::with_env` applied);
-/// `os` is `std::env::consts::OS`; `wgpu_backend`: whether `WGPU_BACKEND` is set,
-/// which picks the backends itself. Auto tries DirectX 12 first on Windows ARM64,
-/// then Vulkan, based on the device-loss observed in a Windows ARM64 test. Other
+/// `os` is `std::env::consts::OS`; `arch` the machine's (`system::machine_arch`), not the
+/// build's; `wgpu_backend`: whether `WGPU_BACKEND` is set, which picks the backends itself.
+/// Auto tries DirectX 12 first on Windows ARM64, the x64 build emulated there included,
+/// then Vulkan, based on the device losses seen there (#7513). Other
 /// Windows systems try Vulkan, then DirectX 12, then OpenGL; Linux tries Vulkan then
 /// OpenGL. Each is tried when the one before has no surface, adapter or device. A native
 /// crash in the driver can't be
@@ -2183,7 +2188,8 @@ async fn open_device(
     for (order, allow_cpu) in device_search(
         api.with_env(),
         std::env::consts::OS,
-        std::env::consts::ARCH,
+        // The machine's: the x64 build emulated on a Windows ARM64 PC has its GPU too (#7513).
+        horizon_system::system::machine_arch(),
         wgpu_backend,
     ) {
         match open_device_with(window, offscreen, &order, layers, allow_cpu).await {
@@ -2653,18 +2659,18 @@ impl Renderer {
         self.prepared_draws.extend_from_slice(draws);
     }
 
-    /// Whether `count` copies fit in one instance buffer on this device.
-    pub fn prepared_instances_fit(&self, count: u64) -> bool {
-        prepared_model::instance_slot_capacity(
-            count,
-            std::mem::size_of::<PreparedModelInstance>() as u64,
+    /// How many of `incoming` copies still fit after `already` are staged.
+    pub fn prepared_instance_room(&self, already: u64, incoming: usize) -> usize {
+        prepared_model::prepared_instance_room_for(
+            already,
+            incoming,
             self.device.limits().max_buffer_size,
         )
-        .is_ok()
     }
 
     fn finish_prepared_frame(&mut self) {
         prepared_model::finish_staged(&mut self.prepared_draws);
+        self.prepared_cuts.clear();
         self.prepared_ranges.clear();
     }
 
@@ -4772,6 +4778,7 @@ impl Renderer {
             entity_bindings,
             prepared_models: None,
             prepared_draws: Vec::new(),
+            prepared_cuts: Vec::new(),
             prepared_ranges: Vec::new(),
             prepared_uploaded: Vec::new(),
             prepared_instance_buffer,
@@ -8867,12 +8874,17 @@ impl Renderer {
         }
         self.prepared_ranges.clear();
         if prepared_count > 0 {
-            prepared_model::fill_ordered_ranges(
+            entity_batch::ordinary_vertices_at_cuts(
+                entities,
+                self.prepared_draws.iter().map(|draw| draw.cpu_vertices),
+                oit_on,
+                &mut self.prepared_cuts,
+            );
+            prepared_model::fill_instance_ranges(
                 entity_quads * 4,
-                self.prepared_draws.iter().map(|draw| {
-                    entity_batch::ordinary_vertices_before(entities, draw.cpu_vertices, oit_on)
-                        .saturating_add(posed)
-                }),
+                &self.prepared_draws,
+                &self.prepared_cuts,
+                posed,
                 &mut self.prepared_ranges,
             );
         }

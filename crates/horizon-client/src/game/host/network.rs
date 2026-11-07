@@ -16,6 +16,10 @@ impl NetworkServerHost for Game<'_> {
     }
 }
 impl NetworkClientHost for Game<'_> {
+    fn open_chat(&mut self, text: &str) -> Result<(), String> {
+        mod_api::__private::check_access("open_chat", mod_api::__private::LoadAccess::WorldOnly);
+        self.native_open_chat(text)
+    }
     fn net_send_to_server(&mut self, channel: &str, data: &[u8]) -> Result<(), String> {
         mod_api::__private::check_access(
             "net_send_to_server",

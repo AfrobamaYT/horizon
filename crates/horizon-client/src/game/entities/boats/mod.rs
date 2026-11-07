@@ -951,10 +951,10 @@ impl Game<'_> {
         let b = &self.boats[i];
         let mut probe = Boat::new(b.id, b.wood.clone(), b.position, b.yaw);
         let status = self.boat_status(&mut probe);
-        self.boats[i].status = status;
+        self.boats.update(i, |b| b.status = status);
         // `oldStatus = status` runs on every boat, so the next tick has one.
-        self.boats[i].status_known = true;
-        self.boats[i].tick_submersion();
+        self.boats.update(i, |b| b.status_known = true);
+        self.boats.update(i, Boat::tick_submersion);
     }
     /// `BubbleColumnBlock.entityInside`: the bubble columns boat `i` touches
     /// (its box deflated by 1e-5 as `Entity.checkInsideBlocks` does), in x, y,
@@ -992,7 +992,7 @@ impl Game<'_> {
         if !self.boat_can_simulate_movement(self.boats[i].id) {
             return;
         }
-        column.push(&mut self.boats[i].velocity);
+        self.boats.update(i, |b| column.push(&mut b.velocity));
     }
     /// `AbstractBoat.onAboveBubbleColumn`: whether the splash comes up, one
     /// time in a hundred for a boat that is not under water.
@@ -1024,12 +1024,13 @@ impl Game<'_> {
     /// the splash's game event goes to the listeners (its sound and particle
     /// are the client's).
     fn boat_above_bubble_column(&mut self, i: usize, drag_down: bool) {
-        let b = &mut self.boats[i];
-        b.above_bubble_column = true;
-        b.bubble_down = drag_down;
-        if b.bubble_time == 0 {
-            b.bubble_time = BUBBLE_TIME;
-        }
+        self.boats.update(i, |b| {
+            b.above_bubble_column = true;
+            b.bubble_down = drag_down;
+            if b.bubble_time == 0 {
+                b.bubble_time = BUBBLE_TIME;
+            }
+        });
         if !self.boat_splash_roll(i) {
             return;
         }
@@ -1053,13 +1054,14 @@ impl Game<'_> {
         if !self.boat_can_simulate_movement(self.boats[i].id) {
             return;
         }
-        let v = &mut self.boats[i].velocity;
-        if drag_down {
-            // movement.add(0.0, -0.7, 0.0)
-            v.y += -0.7;
-        } else {
-            v.y = 0.6;
-        }
+        self.boats.update(i, |b| {
+            if drag_down {
+                // movement.add(0.0, -0.7, 0.0)
+                b.velocity.y += -0.7;
+            } else {
+                b.velocity.y = 0.6;
+            }
+        });
     }
     /// `Entity.ejectPassengers`: the mobs get out here, this window's player
     /// gets out, and a server's player is asked to
@@ -1070,14 +1072,14 @@ impl Game<'_> {
         if self.riding == Some(id) && self.player.is_some() {
             self.dismount(i);
         } else if self.guest_rides(id) {
-            self.boats[i].eject_riders = true;
+            self.boats.update(i, |b| b.eject_riders = true);
         }
     }
     /// `AbstractBoat.tickBubbleColumn`: on the server, a boat that stays over
     /// a column for `BUBBLE_TIME` ticks is thrown up or pulled down (a down
     /// column lets the riders out first), and every client is told.
     fn tick_boat_bubble_column(&mut self, i: usize) {
-        if let Some(down) = self.boats[i].tick_bubble_countdown() {
+        if let Some(down) = self.boats.update(i, Boat::tick_bubble_countdown) {
             let (id, p) = (self.boats[i].id, self.boats[i].position);
             let event = if down {
                 BUBBLE_DOWN_EVENT
@@ -1099,7 +1101,7 @@ impl Game<'_> {
         let id = self.boats[i].id;
         // An ejection nobody took (its player left the boat first) is void.
         if !self.guest_rides(id) {
-            self.boats[i].eject_riders = false;
+            self.boats.update(i, |b| b.eject_riders = false);
         }
         let touches = self.boat_bubble_columns(i);
         // AbstractBoat.tick calls applyEffectsFromBlocks twice.
@@ -1114,7 +1116,7 @@ impl Game<'_> {
         }
         self.tick_boat_bubble_column(i);
         if self.options.execution_role.is_client() {
-            self.boats[i].tick_bubble_wobble();
+            self.boats.update(i, Boat::tick_bubble_wobble);
         }
     }
     /// `PowderSnowBlock.entityInside` for a boat: the powder snow cells its box, and the box it
@@ -1217,8 +1219,8 @@ impl Game<'_> {
         // (`setDeltaMovement(Vec3.ZERO)`, `deltaRotation = 0`) and is not
         // moved, so a boat is at a standstill when its rider gets out instead
         // of coasting on the velocity of the ride that just ended.
-        self.boats[i].velocity = Vec3::ZERO;
-        self.boats[i].delta_rotation = 0.0;
+        self.boats.update(i, |b| b.velocity = Vec3::ZERO);
+        self.boats.update(i, |b| b.delta_rotation = 0.0);
         let target = self.boat_player_dismount_target(i, self.yaw);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
@@ -1477,9 +1479,11 @@ impl Game<'_> {
                 // not LivingEntity.knockback (no resistance or velocity halving).
                 if !destroyed {
                     let (x, z) = self.extra_knockback_direction();
-                    self.boats[i].velocity.x += f64::from(-(x as f32) * knockback);
-                    self.boats[i].velocity.y += 0.1;
-                    self.boats[i].velocity.z += f64::from(-(z as f32) * knockback);
+                    self.boats
+                        .update(i, |b| b.velocity.x += f64::from(-(x as f32) * knockback));
+                    self.boats.update(i, |b| b.velocity.y += 0.1);
+                    self.boats
+                        .update(i, |b| b.velocity.z += f64::from(-(z as f32) * knockback));
                 }
                 if let Some(player) = self.player.as_mut() {
                     player.velocity.x *= horizon_client::attack_strength::ATTACKER_SLOWDOWN;
@@ -1512,13 +1516,16 @@ impl Game<'_> {
         if cancel {
             return None;
         }
-        let b = &mut self.boats[i];
-        b.hurt_dir = -b.hurt_dir;
-        b.hurt_time = 10;
-        b.damage += damage * 10.0;
-        let destroyed = creative || b.damage > 40.0;
+        let (destroyed, at) = self.boats.update(i, |b| {
+            b.hurt_dir = -b.hurt_dir;
+            b.hurt_time = 10;
+            b.damage += damage * 10.0;
+            (
+                creative || b.damage > 40.0,
+                [b.position.x, b.position.y, b.position.z],
+            )
+        });
         if destroyed {
-            let at = [b.position.x, b.position.y, b.position.z];
             self.native_vehicle_destroy("boat", at);
             self.eject_boat_mobs(i, true);
             let id = self.boats[i].id;
