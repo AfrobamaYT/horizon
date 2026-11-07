@@ -10,9 +10,14 @@ root = Path(__file__).resolve().parents[3]
 game = (root / "crates/horizon-client/src/game.rs").read_text()
 call = next(line.strip() for line in game.splitlines() if "api_values::resolve_block_definitions(" in line)
 source = (root / "crates/horizon-client/src/game/modding/api_values.rs").read_text()
-start = source.index("pub(in crate::game) fn resolve_block_definitions(")
-stop = source.index("/// Registry access for generated stack write-back", start)
-source = source[start:stop].replace("pub(in crate::game)", "pub(crate)")
+def production_function(name):
+    start = source.index(f"fn {name}(")
+    start = source.rfind("\n", 0, start) + 1
+    return source[start:source.index("\n}\n", start) + 3]
+
+source = (production_function("resolve_block_definitions") + "\n#[test]\n" +
+          production_function("block_definition_import_preserves_defaults_and_is_immutable_after_load"))
+source = source.replace("pub(in crate::game)", "pub(crate)")
 fixture = Path(__file__).with_name("block_key_load_boundary.rs").read_text()
 fixture = "mod api_values {\n" + source + "}\n" + fixture
 fixture = fixture.replace("//! Execute", "// Execute")

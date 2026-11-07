@@ -3543,7 +3543,6 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn attribute_tooltip_hooks_hide_modifiers_and_add_lines_after_them() {
-        use horizon_client::text::Text;
         use mod_api::{
             self, AddAttributeTooltipsEvent, ClientHost, GatherSkippedAttributeTooltipsEvent,
             Hooks, ModEntry, Mods,
@@ -3570,7 +3569,9 @@ mod tests {
                 event: &mut AddAttributeTooltipsEvent<'_>,
             ) {
                 assert!(event.shown);
-                event.lines.push((Text::literal("Rune: warding"), u32::MAX));
+                event
+                    .lines
+                    .push((mod_api::Text::literal("Rune: warding"), u32::MAX));
             }
         }
         let mods: Mods = vec![ModEntry::new("runes", Box::new(Mod))].into();
