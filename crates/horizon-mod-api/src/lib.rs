@@ -1245,11 +1245,11 @@ pub struct NativeScreen {
 /// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeStack {
-    /// The item id, such as `minecraft:stick`.
-    pub item: String,
+    /// The item identity, resolved once at load.
+    pub item: ItemKey,
     /// How many are in the stack.
     pub count: u32,
     /// The stack's data components, as the game's JSON form.
@@ -4925,10 +4925,11 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
+            let name = __private::block_key_id(block).unwrap().to_owned();
             player
-                .action_bar(host, Text::literal(block.clone()))
+                .action_bar(host, Text::literal(name.clone()))
                 .unwrap();
-            if block == "minecraft:stone" {
+            if name == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue

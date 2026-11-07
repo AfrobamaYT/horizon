@@ -426,6 +426,7 @@ fn boundary_value(ty: &Type) -> bool {
             "AnvilUpdate",
             "GrindstonePlace",
             "GrindstoneTake",
+            "ParticleOptions",
         ],
     )
 }
@@ -484,7 +485,10 @@ fn boundary_arguments(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let checked_write = mutable && typed.iter().any(|arg| boundary_value(&arg.ty));
+    let checked_write = mutable
+        && typed
+            .iter()
+            .any(|arg| boundary_value(&arg.ty) && !contains_value(&arg.ty, &["ParticleOptions"]));
     let mut setup = String::new();
     let mut args = Vec::new();
     for arg in typed {
@@ -502,10 +506,18 @@ fn boundary_arguments(
         } else {
             format!("{name}.try_into_engine(self.items())")
         };
-        let value = if text {
+        let value = if contains_value(&arg.ty, &["ParticleOptions"]) {
+            format!(
+                "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
+            )
+        } else if text {
             format!("{conversion}?")
         } else if checked_write {
             format!("{conversion}?")
+        } else if result_error(&sig.output).is_some() {
+            format!(
+                "match {conversion} {{ Ok(value) => value, Err(_) => return Err(mod_api::NoBackend::no_backend()) }}"
+            )
         } else {
             format!(
                 "match {conversion} {{ Ok(value) => value, Err(_) => return Default::default() }}"
@@ -913,6 +925,17 @@ mod tests {
 
     fn handles(source: &str) -> BTreeMap<String, String> {
         api_types(source).unwrap().handles
+    }
+
+    #[test]
+    fn immutable_result_arguments_refuse_conversion_with_a_typed_error() {
+        let method = entry(
+            "fn read(&self, ingredient: &Ingredient) -> Result<Arc<[ItemKey]>, IngredientKeysError>;",
+        );
+        let (setup, _, checked_write) = boundary_arguments(&method.sig, "read").unwrap();
+        assert!(!checked_write);
+        assert!(setup.contains("return Err(mod_api::NoBackend::no_backend())"));
+        assert!(!setup.contains("Default::default()"));
     }
 
     #[test]
