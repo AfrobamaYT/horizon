@@ -430,7 +430,57 @@ pub(super) fn emit<'a>(
             let target_path: syn::Path = syn::parse_str(target)
                 .map_err(|error| format!("invalid target for {name}: {error}"))?;
             let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
-            let crossing = if declared.is_empty() {
+            let block_carrier = !declared.is_empty()
+                && carried.iter().any(|(_, ty)| {
+                    ty.to_token_stream()
+                        .to_string()
+                        .split(|c: char| !c.is_alphanumeric())
+                        .any(|word| matches!(word, "BlockState" | "LandingWrite"))
+                });
+            if block_carrier {
+                let engine: Vec<_> = carried
+                    .iter()
+                    .map(|(name, ty)| {
+                        let mut ty = (*ty).clone();
+                        struct EngineTypes;
+                        impl syn::visit_mut::VisitMut for EngineTypes {
+                            fn visit_type_mut(&mut self, ty: &mut Type) {
+                                match ty.to_token_stream().to_string().as_str() {
+                                    "BlockState" => {
+                                        *ty =
+                                            syn::parse_quote!(horizon_world::registry::BlockStateId)
+                                    }
+                                    "LandingWrite" => {
+                                        *ty = syn::parse_quote!(horizon_world::level::LandingWrite)
+                                    }
+                                    _ => syn::visit_mut::visit_type_mut(self, ty),
+                                }
+                            }
+                        }
+                        syn::visit_mut::VisitMut::visit_type_mut(&mut EngineTypes, &mut ty);
+                        (name.clone(), ty)
+                    })
+                    .collect();
+                let refs: Vec<_> = engine.iter().map(|(name, ty)| (name.clone(), ty)).collect();
+                let (fields, generics) = carrier_fields(&refs);
+                fire.push_str(&format!(
+                    "pub(in crate::game) struct {carrier}{generics} {{ {fields} }}\n"
+                ));
+                for arg in &mut signature.inputs {
+                    if let FnArg::Typed(arg) = arg {
+                        if arg.pat.to_token_stream().to_string() == "call" {
+                            arg.ty = Box::new(
+                                syn::parse_str(&format!(
+                                    "{carrier}{}",
+                                    if generics.is_empty() { "" } else { "<'_>" }
+                                ))
+                                .unwrap(),
+                            );
+                        }
+                    }
+                }
+            }
+            let crossing = if declared.is_empty() || block_carrier {
                 stack_crossing(
                     &args,
                     output.as_ref(),
@@ -452,7 +502,7 @@ pub(super) fn emit<'a>(
                         }
                     })
                     .into_iter()
-                    .chain(crossing.arguments.into_iter().map(|argument| {
+                    .chain(crossing.arguments.iter().cloned().map(|argument| {
                         surface_calls
                             .get(argument.as_str())
                             .cloned()
@@ -460,10 +510,33 @@ pub(super) fn emit<'a>(
                     }))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!(
-                    "{} mod_api::{call}({passed}); {}",
-                    crossing.before, crossing.after
-                )
+                if block_carrier {
+                    let names = carried
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let fields = args
+                        .iter()
+                        .chain(output.as_ref())
+                        .zip(&crossing.arguments)
+                        .map(|((name, _), value)| format!("{name}: {value}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let host = host
+                        .as_ref()
+                        .map(|(_, param)| format!("{}, ", param.call))
+                        .unwrap_or_default();
+                    format!(
+                        "let {carrier} {{ {names} }} = call; {} mod_api::{call}({host}mod_api::__private::{carrier} {{ {fields} }}); {}",
+                        crossing.before, crossing.after
+                    )
+                } else {
+                    format!(
+                        "{} mod_api::{call}({passed}); {}",
+                        crossing.before, crossing.after
+                    )
+                }
             } else {
                 format!("mod_api::{call}({passed});")
             };
@@ -762,6 +835,64 @@ fn stack_crossing(
 mod stack_crossing_tests {
     use super::*;
 
+    #[test]
+    fn block_numeric_index_runtime_and_mutants() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let directory = root.join("target/hook-index-proof");
+        std::fs::create_dir_all(&directory).unwrap();
+        let production = std::fs::read_to_string(
+            root.join("crates/horizon-client/src/game/modding/api_values/block_state.rs"),
+        )
+        .unwrap();
+        let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_index.rs");
+        for (name, code, success) in [
+            ("baseline", production.clone(), true),
+            (
+                "stale_mapping",
+                production.replace("    clear();", ""),
+                false,
+            ),
+            (
+                "global_ordinal",
+                production.replace(".get(self.0 as usize)", ".get(0)"),
+                false,
+            ),
+        ] {
+            let index = directory.join(format!("{name}_index.rs"));
+            std::fs::write(&index, code).unwrap();
+            let source = directory.join(format!("{name}.rs"));
+            std::fs::write(
+                &source,
+                fixture.replace("INDEX_PATH", index.to_str().unwrap()),
+            )
+            .unwrap();
+            let binary = directory.join(name);
+            let compiler = std::process::Command::new("rustc")
+                .args(["--edition=2024", "-O"])
+                .arg(&source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                compiler.status.success(),
+                "{}",
+                String::from_utf8_lossy(&compiler.stderr)
+            );
+            let result = std::process::Command::new(binary).output().unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!(
+                "{name}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                if success { "passed" } else { "mutant killed" }
+            );
+        }
+    }
     #[test]
     fn block_crossing_runtime_and_mutants() {
         let state: Type = syn::parse_quote!(&mut BlockState);

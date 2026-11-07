@@ -6,6 +6,8 @@ use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/block_state.rs"]
 mod block_state;
+#[path = "api_values/landing_write.rs"]
+mod landing_write;
 
 /// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
 /// Registry definitions do not change on pack reload; world-number mappings are separate.
