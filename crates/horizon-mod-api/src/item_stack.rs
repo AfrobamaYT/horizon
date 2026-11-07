@@ -87,6 +87,26 @@ impl std::fmt::Display for StackError {
 }
 impl std::error::Error for StackError {}
 
+/// Why the game refused to accept an owned stack at a write boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum StackWriteError {
+    /// The process-local key is not present in this game's item registry.
+    UnknownItem,
+    /// The count is above the effective stack limit.
+    CountExceeded {
+        /// Effective maximum, including component overrides.
+        maximum: u32,
+    },
+    /// The damage is above the effective durability limit.
+    DamageExceeded {
+        /// Effective maximum, including component overrides.
+        maximum: u32,
+    },
+    /// A maximum component is not a valid nonnegative integer.
+    InvalidMaximum,
+}
+
 /// The two nonempty portions of a consuming split. Either portion can be absent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]

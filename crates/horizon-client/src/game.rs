@@ -23179,6 +23179,17 @@ fn load_world_rest(
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
+        mod_api::__private::resolve_items(items.registry_order.iter().map(|id| &**id)).map_err(
+            |errors| {
+                errors
+                    .into_iter()
+                    .map(|error| {
+                        format!("mod {} requested unknown item {}", error.mod_id, error.id)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            },
+        )?;
         log::info!("load items: {:.2}s", started.elapsed().as_secs_f32());
         progress.set(7);
         // The recipe tables, the stations and the recipe book read one folder:
