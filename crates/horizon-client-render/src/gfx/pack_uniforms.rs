@@ -2385,7 +2385,13 @@ pub(super) mod initial_history_tests {
     /// at their targets, the clock from 0; the atlas size it was given stays.
     #[test]
     fn a_reset_forgets_the_uniforms_history_and_keeps_the_pack_s_settings() {
-        let hud = HudBatch::new([16, 16]);
+        let hud = HudBatch::new(
+            [16, 16],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let mut f = frame(&hud);
         let mut uniforms = FrameUniforms {
             atlas: [256, 128],

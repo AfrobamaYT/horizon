@@ -1761,7 +1761,13 @@ mod tests {
         let Some((device, _)) = device() else {
             return;
         };
-        let hud = crate::hud::HudBatch::new([4, 4]);
+        let hud = crate::hud::HudBatch::new(
+            [4, 4],
+            crate::hud::GuiScale {
+                requested: 0,
+                unicode: false,
+            },
+        );
         let mut frame = crate::gfx::pack_uniforms::initial_history_tests::frame(&hud);
         let new = || {
             NativeFrame::new(

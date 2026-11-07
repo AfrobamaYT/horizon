@@ -561,7 +561,6 @@ impl Game<'_> {
         conn: u32,
         p: &horizon_protocol::packets::recipes::PlaceRecipe,
     ) {
-        use horizon_client::menu::place::PostPlace;
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -652,9 +651,7 @@ impl Game<'_> {
         apply: impl FnOnce(&mut Menu, &Env) -> R,
     ) -> Option<R> {
         let conn = self.lan.as_ref()?.hub.guests[gi].conn;
-        let Some(host) = self.lan.as_mut() else {
-            return None;
-        };
+        let host = self.lan.as_mut()?;
         let placed = if container == 0 {
             let crafting = host.play.entry(conn).or_default();
             let mut menu = crafting
@@ -663,17 +660,13 @@ impl Game<'_> {
                 .take()
                 .unwrap_or_else(|| Box::new(Menu::new(Kind::Inventory)));
             let grid = host.hub.guests[gi].craft_grid.clone();
-            let Some(placed) = self.guest_menu_op(gi, &mut menu, |menu, env| {
+            let placed = self.guest_menu_op(gi, &mut menu, |menu, env| {
                 for (k, s) in grid.into_iter().enumerate() {
                     menu.set_slot(env, 1 + k, s);
                 }
                 apply(menu, env)
-            }) else {
-                return None;
-            };
-            let Some(host) = self.lan.as_mut() else {
-                return None;
-            };
+            })?;
+            let host = self.lan.as_mut()?;
             host.hub.guests.update(gi, |g| {
                 for k in 0..4 {
                     g.craft_grid[k] = menu.slot(1 + k).cloned();
@@ -691,13 +684,8 @@ impl Game<'_> {
             else {
                 return None;
             };
-            let Some(placed) = self.guest_menu_op(gi, &mut menu, |menu, env| apply(menu, env))
-            else {
-                return None;
-            };
-            let Some(host) = self.lan.as_mut() else {
-                return None;
-            };
+            let placed = self.guest_menu_op(gi, &mut menu, apply)?;
+            let host = self.lan.as_mut()?;
             host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
             self.lan_send_table_content(conn);
             placed

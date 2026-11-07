@@ -134,7 +134,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::Game;
-    use crate::game::native_machines::tests::server_game;
+    use crate::game::native_entity_refs::tests::with_game;
     use horizon_client::{command::vanilla, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
 
@@ -150,49 +150,50 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn raid_check_finds_a_raid_counting_down_and_the_horn_is_local_only() {
-        let mut game = server_game();
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
-        // RaidCommand needs the owner's permission level (3).
-        game.ui.registries.permission = 4;
-        game.chat_capture = Some(Vec::new());
-        game.audio.capture = Some(Vec::new());
-        let (id, _) = game.raiding.raids.create_or_extend([0, 64, 0], 2, None, 3);
-        assert!(!game.raiding.raids.get(id).unwrap().started);
+        with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+            // RaidCommand needs the owner's permission level (3).
+            game.ui.registries.permission = 4;
+            game.chat_capture = Some(Vec::new());
+            game.audio.capture = Some(Vec::new());
+            let (id, _) = game.raiding.raids.create_or_extend([0, 64, 0], 2, None, 3);
+            assert!(!game.raiding.raids.get(id).unwrap().started);
 
-        assert_eq!(run_dev(&mut game, "raid check"), 1);
-        let lines: Vec<String> = game
-            .chat_capture
-            .take()
-            .unwrap()
-            .iter()
-            .map(|t| t.plain())
-            .collect();
-        assert_eq!(
-            lines,
-            [
-                "Found a started raid!",
-                "Num groups spawned: 0 Raid omen level: 0 Num mobs: 0 Raid health: 0.0 / 0.0",
-            ]
-        );
+            assert_eq!(run_dev(&mut game, "raid check"), 1);
+            let lines: Vec<String> = game
+                .chat_capture
+                .take()
+                .unwrap()
+                .iter()
+                .map(|t| t.plain())
+                .collect();
+            assert_eq!(
+                lines,
+                [
+                    "Found a started raid!",
+                    "Num groups spawned: 0 Raid omen level: 0 Num mobs: 0 Raid health: 0.0 / 0.0",
+                ]
+            );
 
-        run_dev(&mut game, "raid sound global");
-        assert!(game.audio.capture.as_ref().unwrap().is_empty());
-        run_dev(&mut game, "raid sound local");
-        let played: Vec<_> = game
-            .audio
-            .capture
-            .take()
-            .unwrap()
-            .into_iter()
-            .map(|s| (s.event, s.position, s.volume))
-            .collect();
-        assert_eq!(
-            played,
-            [(
-                "minecraft:event.raid.horn".to_owned(),
-                [5.5, 64.0, 0.5],
-                2.0
-            )]
-        );
+            run_dev(&mut game, "raid sound global");
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            run_dev(&mut game, "raid sound local");
+            let played: Vec<_> = game
+                .audio
+                .capture
+                .take()
+                .unwrap()
+                .into_iter()
+                .map(|s| (s.event, s.position, s.volume))
+                .collect();
+            assert_eq!(
+                played,
+                [(
+                    "minecraft:event.raid.horn".to_owned(),
+                    [5.5, 64.0, 0.5],
+                    2.0
+                )]
+            );
+        });
     }
 }

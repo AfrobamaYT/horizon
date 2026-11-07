@@ -1642,9 +1642,7 @@ impl Game<'_> {
                 }
                 if text == "\\b" {
                     title.backspace();
-                } else if let Some(result) = self.type_text_field_input(text) {
-                    result?;
-                } else if let Some(title) = self.title.as_mut() {
+                } else {
                     title.type_text(text);
                 }
                 ok(json!({ "ok": true, "menu": self.title_value() }))

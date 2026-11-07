@@ -649,7 +649,7 @@ impl Game<'_> {
             }
         }
         if let Some((key, fallback)) = self.panel.transfer_warning {
-            let warning = horizon_client::lang::get(key).unwrap_or_else(|| fallback.into());
+            let warning = horizon_client::lang::get_or(key, fallback);
             let lines = [(
                 horizon_client::text::Text::literal(warning.clone()).resolve_legacy(),
                 rgba(255, 100, 100, 255),
