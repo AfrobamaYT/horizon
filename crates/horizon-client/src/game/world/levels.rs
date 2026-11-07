@@ -640,7 +640,10 @@ impl Game<'_> {
         }
         // `ServerTickEnd`: an errored tick or an idle-close failure (at
         // the `?` above) never reaches this site.
-        self.native_lifecycle_server_tick_end(paused);
+        {
+            let _span = horizon_client::spans::guard("mods_server_tick_end");
+            self.native_lifecycle_server_tick_end(paused);
+        }
         Ok(())
     }
 
