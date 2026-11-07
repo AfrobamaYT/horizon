@@ -1537,8 +1537,10 @@ impl Game<'_> {
                             // Return every player loan before ending the world borrow.
                             if seen_guest.is_none() {
                                 base.player = w.player;
-                            } else if let Some(k) = lent {
-                                spare = w.player.map(|v| std::mem::replace(&mut guests[k].1, v));
+                            } else if let Some(k) = lent
+                                && let Some(player) = w.player
+                            {
+                                guests[k].1 = player;
                             }
                             resume_from = from;
                             resume_credit_expiring = credit_expiring;
@@ -11597,7 +11599,7 @@ mod mob_pearl_hook_tests {
             self.owners.lock().unwrap().push(event.owner.id());
             assert_eq!(event.owner.position(host), Some(event.from));
             assert_eq!(
-                *event.damage, 0.0,
+                event.damage, 0.0,
                 "non-player owners take no vanilla fall damage"
             );
             match self.mode.load(Ordering::SeqCst) {
@@ -11632,12 +11634,12 @@ mod mob_pearl_hook_tests {
                 host.players().acting_player().unwrap().entity(),
                 event.owner
             );
-            assert_eq!(*event.damage, 5.0);
+            assert_eq!(event.damage, 5.0);
             if self.0.load(Ordering::SeqCst) == 0 {
                 return Flow::Cancel;
             }
             *event.target = [12.0, 80.0, -4.0];
-            *event.damage = 0.0;
+            event.damage = 0.0;
             Flow::Continue
         }
     }
