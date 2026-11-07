@@ -74,6 +74,7 @@ impl Game<'_> {
         let at = Vec3::new(pos[0], pos[1], pos[2]);
         self.next_entity += 1;
         self.falling.push(FallingBlock {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             id: self.next_entity,
@@ -98,6 +99,72 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_tick_preserves_its_owner_on_success_and_collision_error() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
+        };
+        use std::sync::{Arc, Mutex};
+        static VALUE: AttachmentType<i32> = AttachmentType {
+            namespace: "test",
+            name: "falling_lifetime",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:sand")
+                .unwrap();
+            assert!(game.native_spawn_falling_block(
+                game.dim.id(),
+                state,
+                [0.5, 70.0, 0.5],
+                [0.0; 3],
+                NativeFalling {
+                    drop_item: false,
+                    hurts: false
+                }
+            ));
+            let id = game.falling[0].id;
+            let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let mut values = Attachments::default();
+            VALUE.set(&mut values, Holder::Entity(id), 10).unwrap();
+            let original = game.falling.update(0, |f| {
+                f.attachment_lifetime().bind(&mut values, &index, holder);
+                f.attachment_lifetime().registration().unwrap()
+            });
+            let key = ("test".into(), "falling_lifetime".into());
+            let before = index.lock().unwrap().snapshot(&key);
+            game.tick_one_falling(0).unwrap();
+            assert_eq!(game.falling[0].age, 1);
+            assert!(game.falling[0].position.y < 70.0);
+            // A corrupt resident palette makes the real collision lookup fail.
+            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
+            let position = game.falling[0].position;
+            assert!(game.tick_one_falling(0).is_err());
+            assert_eq!(game.falling[0].position, position);
+            assert_eq!(game.falling[0].age, 1);
+            let current = game
+                .falling
+                .update(0, |f| f.attachment_lifetime().registration().unwrap());
+            assert!(original.same_registration(&current));
+            assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            game.falling.clear();
+            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
+        });
+    }
 
     #[test]
     fn a_throw_is_cut_to_the_largest_speed_and_refuses_what_isnt_finite() {

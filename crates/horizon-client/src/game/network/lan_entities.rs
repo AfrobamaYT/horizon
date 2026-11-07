@@ -606,7 +606,7 @@ impl Game<'_> {
             assign_entity_id(next, id);
         };
         self.tnts.iter_mut().for_each(|t| give(&mut t.id));
-        self.falling.iter_mut().for_each(|f| give(&mut f.id));
+        self.falling.for_each_mut(|f| give(&mut f.id));
         self.creatures
             .projectiles
             .iter_mut()
