@@ -124,7 +124,9 @@ pub fn main_with(
     let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
     mod_api::__private::install(mods.into());
     let mut wasm: std::collections::BTreeMap<_, _> = wasm_listening
-        .into_iter().map(|listeners| (listeners.id(), listeners)).collect();
+        .into_iter()
+        .map(|listeners| (listeners.id(), listeners))
+        .collect();
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {
