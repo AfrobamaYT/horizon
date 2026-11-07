@@ -352,6 +352,45 @@ mod tests {
         assert!(report.dropped >= 1);
     }
     #[test]
+    fn profiler_entry_races_stop_and_restart() {
+        let _serial = SERIAL.lock().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let (barrier, accepted) = (barrier.clone(), accepted.clone());
+                std::thread::spawn(move || {
+                    for _ in 0..8 {
+                        barrier.wait();
+                        for _ in 0..100 {
+                            let guard = enter(call("race", "entry", None));
+                            if guard.is_some() {
+                                accepted.fetch_add(1, SeqCst);
+                            }
+                            drop(guard);
+                        }
+                        barrier.wait();
+                    }
+                })
+            })
+            .collect();
+        let mut recorded = 0;
+        for _ in 0..8 {
+            assert!(start_with_clock(tick));
+            barrier.wait();
+            let report = stop();
+            recorded += report
+                .calls
+                .get(&("race", "entry", None))
+                .map_or(0, |a| a.count);
+            barrier.wait();
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(recorded, accepted.load(SeqCst) as u64);
+    }
+    #[test]
     fn profiler_histogram_and_summary() {
         let mut report = Report::default();
         for nanoseconds in [0, 1, 2, 3, 4, 7, 8, u64::MAX] {
