@@ -3,6 +3,7 @@
 Compile errors are not kills. Each mutant changes one production site; originals
 are restored even on interruption. Logs are private build output under target.
 """
+import argparse
 import os
 from pathlib import Path
 import signal
@@ -31,6 +32,8 @@ cases = [
      'mod_api::NativeWorldEpoch::new(level.epoch().get() + 1), id', arrival),
     ('wrong-destination-index', levels, 'self.attachment_indexes.entry(self.dim)',
      'self.attachment_indexes.entry(source)', arrival),
+    ('keep-source-join', travel,
+     'v.set_join_seq(horizon_client::join_seq::JoinSeq::UNJOINED);', ';', arrival),
 ]
 for name, family in [('b', 'boats'), ('c', 'carts'), ('m', 'mobs')]:
     line = f'self.rebind_transferred_entity(source, id, &mut {name});'
@@ -56,6 +59,11 @@ def baseline(label):
     run(label + '-arrival', arrival, ignored=True)
 
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--only', choices=[case[0] for case in cases])
+selected = parser.parse_args().only
+if selected:
+    cases = [case for case in cases if case[0] == selected]
 baseline('baseline')
 try:
     for label, path, old, new, test in cases:

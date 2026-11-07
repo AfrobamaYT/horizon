@@ -1283,6 +1283,7 @@ mod tests {
 #[cfg(test)]
 mod transfer_lifetime_tests {
     use super::*;
+    use horizon_client::join_seq::Joined;
     use horizon_mod_runtime::attachments::{
         AttachmentLifetime, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
         index::AttachmentIndex,
@@ -1345,6 +1346,12 @@ mod transfer_lifetime_tests {
                         | super::super::commands::Target::Mob(id) => id,
                         _ => panic!("unexpected vehicle target"),
                     };
+                    let old_join = match kind {
+                        "minecraft:minecart" => game.carts[0].join_seq(),
+                        "minecraft:oak_boat" => game.boats[0].join_seq(),
+                        _ => game.mobs[0].join_seq(),
+                    };
+                    assert!(old_join.is_joined());
                     let uuid = game.uuid_for(id);
                     let source = game.dim;
                     let source_ref = game.entity(id).unwrap();
@@ -1383,6 +1390,26 @@ mod transfer_lifetime_tests {
                         mod_api::EntityRef::new(game.level(game.dim.id()).unwrap().epoch(), id);
                     assert_eq!(source_ref, destination_ref);
                     game.arrive_vehicle(source, id, Vec3::ZERO, 0.0);
+                    macro_rules! transferred {
+                        ($list:ident) => {{
+                            let parked = game.levels.parked_mut(source).unwrap();
+                            assert!(
+                                !parked
+                                    .$list
+                                    .iter()
+                                    .any(|e| e.id == id || e.join_seq() == old_join)
+                            );
+                            let arrived = game.$list.iter().find(|e| e.id == id).unwrap();
+                            assert!(arrived.join_seq().is_joined());
+                            assert_ne!(arrived.join_seq(), old_join);
+                            assert!(!game.$list.iter().any(|e| e.join_seq() == old_join));
+                        }};
+                    }
+                    match kind {
+                        "minecraft:minecart" => transferred!(carts),
+                        "minecraft:oak_boat" => transferred!(boats),
+                        _ => transferred!(mobs),
+                    }
                     assert!(source_index.lock().unwrap().snapshot(&key).is_empty());
                     let destination_index =
                         game.attachment_indexes.entry(game.dim).or_default().clone();
