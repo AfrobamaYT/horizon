@@ -9,7 +9,7 @@ use crate::{
 };
 use mod_api::{
     HookId,
-    wire::{Reader, WireError, Writer, slots::Id},
+    wire::{Id, Reader, WireError, Writer},
 };
 use std::{
     cell::Cell,
