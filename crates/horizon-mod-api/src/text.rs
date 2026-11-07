@@ -233,7 +233,9 @@ pub struct TextForm {
     pub tree: String,
 }
 /// Maximum nested JSON containers in a text form, below serde_json's recursion limit.
-pub const MAX_TEXT_FORM_DEPTH: usize = 100;
+pub const MAX_TEXT_DEPTH: usize = 20;
+/// Maximum JSON container nesting, including arbitrary metadata.
+pub const MAX_TEXT_FORM_DEPTH: usize = MAX_TEXT_DEPTH * 5;
 
 /// A text form was too deeply nested or could not be serialized or parsed.
 #[derive(Debug)]
@@ -297,9 +299,61 @@ impl std::io::Write for DepthWriter {
         Ok(())
     }
 }
+impl Text {
+    /// Refuse component trees deeper than [`MAX_TEXT_DEPTH`] nodes.
+    pub fn validate_depth(&self) -> Result<(), TextFormError> {
+        let mut pending = vec![(self, 1)];
+        while let Some((text, depth)) = pending.pop() {
+            if depth > MAX_TEXT_DEPTH {
+                return Err(TextFormError::TooDeep);
+            }
+            macro_rules! push {
+                ($child:expr) => {
+                    pending.push(($child, depth + 1))
+                };
+            }
+            for child in &text.children {
+                push!(child);
+            }
+            match &text.content {
+                TextContent::Translatable { arguments, .. } => {
+                    for child in arguments {
+                        push!(child);
+                    }
+                }
+                TextContent::Selector {
+                    separator: Some(child),
+                    ..
+                }
+                | TextContent::Nbt {
+                    separator: Some(child),
+                    ..
+                }
+                | TextContent::Object(TextObject::Player {
+                    fallback: Some(child),
+                    ..
+                })
+                | TextContent::Object(TextObject::Atlas {
+                    fallback: Some(child),
+                    ..
+                }) => push!(child),
+                _ => {}
+            }
+            match &text.style.hover {
+                Some(TextHover::Text(child))
+                | Some(TextHover::Entity {
+                    name: Some(child), ..
+                }) => push!(child),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
 impl TryFrom<&Text> for TextForm {
     type Error = TextFormError;
     fn try_from(value: &Text) -> Result<Self, Self::Error> {
+        value.validate_depth()?;
         let mut writer = DepthWriter::default();
         if let Err(error) = serde_json::to_writer(&mut writer, value) {
             return Err(if writer.too_deep {
@@ -322,7 +376,9 @@ impl TryFrom<TextForm> for Text {
         writer
             .write_all(value.tree.as_bytes())
             .map_err(|_| TextFormError::TooDeep)?;
-        serde_json::from_str(&value.tree).map_err(TextFormError::Invalid)
+        let text: Text = serde_json::from_str(&value.tree).map_err(TextFormError::Invalid)?;
+        text.validate_depth()?;
+        Ok(text)
     }
 }
 
@@ -366,6 +422,68 @@ mod tests {
         ));
         // Dropping a deeply recursive value is not part of conversion.
         std::mem::forget(deep);
+    }
+    #[test]
+    fn form_refuses_deep_input_and_keeps_all_style_and_source_fields() {
+        let raw = format!("{}0{}", "[".repeat(101), "]".repeat(101));
+        assert!(matches!(
+            Text::try_from(TextForm { tree: raw }),
+            Err(TextFormError::TooDeep)
+        ));
+        let style = TextStyle {
+            color: Some("red".into()),
+            shadow_color: Some(0xff123456),
+            italic: Some(true),
+            underlined: Some(true),
+            strikethrough: Some(true),
+            obfuscated: Some(true),
+            click: Some(TextClick::RunCommand("/test".into())),
+            font: Some("test:font".into()),
+            ..Default::default()
+        };
+        let mut score = Text::literal("").with_style(style);
+        score.content = TextContent::Score {
+            name: "test".into(),
+            objective: "objective".into(),
+        };
+        let mut nbt = Text::literal("");
+        nbt.content = TextContent::Nbt {
+            path: "foo.bar".into(),
+            interpret: true,
+            source: TextNbtSource::Storage("test:data".into()),
+            separator: None,
+        };
+        let text = score.append(nbt);
+        assert_eq!(
+            Text::try_from(TextForm::try_from(&text).unwrap()).unwrap(),
+            text
+        );
+    }
+    #[test]
+    fn text_node_limit_round_trips_worst_wrapped_hover_and_refuses_next_node() {
+        let mut text = Text::literal("leaf");
+        for _ in 1..MAX_TEXT_DEPTH {
+            text = Text::literal("parent").with_style(TextStyle {
+                hover: Some(TextHover::Entity {
+                    kind: "test".into(),
+                    id: [0, 0],
+                    name: Some(Box::new(text)),
+                }),
+                ..Default::default()
+            });
+        }
+        let form = TextForm::try_from(&text).unwrap();
+        assert_eq!(Text::try_from(form).unwrap(), text);
+        let too_deep = Text::literal("root").append(text);
+        assert!(matches!(
+            TextForm::try_from(&too_deep),
+            Err(TextFormError::TooDeep)
+        ));
+        let json = serde_json::to_string(&too_deep).unwrap();
+        assert!(matches!(
+            Text::try_from(TextForm { tree: json }),
+            Err(TextFormError::TooDeep)
+        ));
     }
     #[test]
     fn via_accepts_infallible_and_fallible_forms() {
