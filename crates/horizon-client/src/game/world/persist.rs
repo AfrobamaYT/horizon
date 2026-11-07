@@ -1856,7 +1856,7 @@ impl Game<'_> {
         self.persist.uuids.retain(|id, _| alive.contains(id));
         self.persist.raw.retain(|id, _| alive.contains(id));
     }
-    /// A loaded projectile's `Owner`: a connected guest, else a mob by UUID.
+    /// A loaded projectile's `Owner`: living hit credit and vehicle collision identity.
     fn claim_owner(&self, p: &mut horizon_client::projectiles::Projectile) {
         let Some(uuid) = p.owner_uuid else {
             return;
@@ -1874,6 +1874,12 @@ impl Game<'_> {
         } else if p.owner.is_none() {
             p.owner = self.mob_by_uuid(uuid).map(Who::Mob);
         }
+        use super::commands::Target;
+        p.owner_vehicle =
+            match self.target_by_uuid(horizon_client::lan::playerdata::ints_uuid(uuid)) {
+                Some(Target::Boat(id) | Target::Cart(id)) => Some(id),
+                _ => None,
+            };
     }
     /// Save and remove the entities of chunks that unloaded.
     pub(super) fn unload_entities(&mut self, unloaded: &[Arc<Chunk>]) {

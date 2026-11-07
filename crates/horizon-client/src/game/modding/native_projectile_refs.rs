@@ -438,6 +438,16 @@ mod tests {
                 matches!(returned.tick(&scene).1, Hit::Entity { who: Who::Mob(id), .. } if id == boat_id)
             );
             assert_eq!(p.tick(&scene).1, Hit::None);
+            // Reload mid-flight, before leftOwner: the UUID restores exclusion too.
+            let keys = std::collections::HashSet::from([(-1, 0)]);
+            let (_, tag) = game.save_projectile(0, &keys).unwrap();
+            game.creatures.projectiles.clear();
+            game.load_listed("minecraft:snowball", Some([1, 2, 3, 4]), None, tag)
+                .unwrap();
+            let mut loaded = game.creatures.projectiles[0].clone();
+            assert!(!loaded.left_owner);
+            assert_eq!(loaded.owner, None);
+            assert_eq!(loaded.tick(&scene).1, Hit::None);
         });
     }
 
