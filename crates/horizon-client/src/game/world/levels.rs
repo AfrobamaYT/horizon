@@ -174,6 +174,23 @@ impl Levels {
             .map(|(_, level)| &mut level.streaming)
     }
 
+    /// `ServerLevel.setChunkForced`: force a column in an already open level without changing the acting
+    /// player's level; the same queue and load barrier serve the active level.
+    pub(super) fn force_parked_chunk(
+        &mut self,
+        dimension: &str,
+        x: i32,
+        z: i32,
+        forced: bool,
+    ) -> Option<bool> {
+        let level = self.parked_mut_of(dimension)?;
+        Some(
+            level
+                .streaming
+                .set_forced_loaded(&mut level.world, x, z, forced),
+        )
+    }
+
     pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
         self.parked.get(&dim).map(|level| &level.anims)
     }
@@ -225,7 +242,7 @@ impl Levels {
 
     /// The mobs of a parked level.
     pub(super) fn parked_mobs(&self, dim: Dim) -> Option<&[Mob]> {
-        self.parked.get(&dim).map(|level| level.mobs.as_slice())
+        self.parked.get(&dim).map(|level| &*level.mobs)
     }
 
     /// A parked level's loose entities, for `horizon-report`: items, experience orbs,
@@ -233,11 +250,11 @@ impl Levels {
     pub(super) fn parked_entity_counts(&self, dim: Dim) -> Option<[usize; 5]> {
         self.parked.get(&dim).map(|l| {
             [
-                l.dropped.as_slice().len(),
-                l.orbs.as_slice().len(),
-                l.projectiles.as_slice().len(),
-                l.carts.as_slice().len(),
-                l.boats.as_slice().len(),
+                l.dropped.len(),
+                l.orbs.len(),
+                l.projectiles.len(),
+                l.carts.len(),
+                l.boats.len(),
             ]
         })
     }

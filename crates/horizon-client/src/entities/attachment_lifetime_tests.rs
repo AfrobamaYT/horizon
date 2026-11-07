@@ -8,7 +8,7 @@ use crate::{
 use std::sync::{Arc, Mutex};
 use {
     horizon_core::nbt::Tag,
-    horizon_world::attachments::{
+    horizon_mod_runtime::attachments::{
         AttachmentLifetime, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
         index::AttachmentIndex,
     },
@@ -43,19 +43,15 @@ fn exercise<T: Clone + Joined + HasAttachmentLifetime>(template: T) {
         drop(list.clone());
         assert_eq!(snapshot().len(), 1);
         let old = snapshot();
-        let moved: Vec<T> = list.into();
-        let mut list = JoinList::from(moved);
+        let moved: Vec<T> = list.into_iter().collect();
+        let mut list: JoinList<T> = moved.into_iter().collect();
         VALUE.set(&mut map, Holder::Level, 20).unwrap();
         assert_eq!(snapshot()[0].entry.read(&VALUE), Ok(&20));
         match removal {
-            // Exercise the actual mutable-Vec escape, not a shadow list API.
-            "retain" => {
-                let vec: &mut Vec<T> = &mut list;
-                vec.retain(|_| false);
-            }
+            "retain" => list.retain(|_| false),
             "clear" => list.clear(),
             "drain" => drop(list.drain(..)),
-            "owned_vec" => drop(Vec::from(std::mem::take(&mut list))),
+            "owned_vec" => drop(std::mem::take(&mut list).into_iter().collect::<Vec<_>>()),
             "overwrite" => list[0] = template.clone(),
             _ => unreachable!(),
         }

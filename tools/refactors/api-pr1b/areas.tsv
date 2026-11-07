@@ -28,6 +28,8 @@ block_state_facts	block_state_matches	block_states
 block_state_facts	block_state_replaceable	block_states
 block_state_facts	block_state_sound	block_states
 block_state_facts	block_states_of	block_states
+fluid_states	fluid_state_definition	block_states
+fluid_states	fluid_state_validate	block_states
 block_state_ids	block_item	block_states
 block_state_ids	block_state_default	block_states
 block_state_ids	block_state_id	block_states
@@ -713,3 +715,11 @@ level_reads	level_in_spawnable_bounds	levels
 living_writes	living_used_item_hand	living
 living_writes	living_start_using_item	living
 living_writes	living_release_using_item	living
+mob_refs	mob_set_brain_target	mobs
+local_sounds	sound_state	effects
+local_sounds	sound_stop	effects
+local_sounds	sound_fade	effects
+local_sounds	sound_events	effects
+local_sounds	audio_devices	effects
+local_sounds	audio_device	effects
+base	player_client_brand	players

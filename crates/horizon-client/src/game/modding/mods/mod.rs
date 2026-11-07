@@ -293,6 +293,16 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
 }
+/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
+/// start, before resources load, so `tints` entries on them read the mod's colour.
+pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut sources = Vec::new();
+    Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
+    horizon_assets::item_model::register_tint_sources(sources);
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
@@ -516,7 +526,12 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
-    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
@@ -561,7 +576,8 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+        .map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -1074,6 +1090,25 @@ mod tests {
         }
     }
 
+    /// Runs `test` again in a child process whose working directory is its own
+    /// empty folder: the overlay's `.horizon-cache` lives under the working
+    /// directory, so children sharing one (the temp dir) race on that cache.
+    fn run_in_child(test: &str, mode: &str) {
+        let cwd = std::env::temp_dir().join(format!(
+            "horizon-game-mods-cwd-{}-{mode}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .current_dir(&cwd)
+            .args(["--exact", test, "--nocapture"])
+            .env(mode, "1")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
+        assert!(status.success());
+    }
+
     /// A content mod's living type is a mob of its template's species under
     /// its own id, with its own attributes: it saves its id with every field
     /// its template's class saves, loads back as itself, and rolls its own
@@ -1246,17 +1281,10 @@ mod tests {
     fn content_overlay_validates_dependencies_and_orders_layers() {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args([
-                    "--exact",
-                    "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
-                    "--nocapture",
-                ])
-                .env(MODE, "1")
-                .status()
-                .unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("content-dependencies");
@@ -1393,11 +1421,10 @@ mod tests {
         const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
         if std::env::var_os(MODE).is_none() {
             // Native declarations, like the real startup, belong to one process.
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
-                .env(MODE, "1").status().unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("shared-jar-refusal");

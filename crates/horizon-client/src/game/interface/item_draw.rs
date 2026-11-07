@@ -58,6 +58,15 @@ impl ItemEnv for Env<'_, '_> {
             .native_item_model_select_property(property, stack, &mut value);
         value
     }
+    fn item_tint_source(&self, source: &str, config: &Value, stack: &StackView) -> i32 {
+        if !mod_api::__private::listened(mod_api::HookId::ItemTintSource) {
+            return -1;
+        }
+        let mut color = u32::MAX;
+        self.game
+            .native_item_tint_source(source, config, stack, &mut color);
+        color as i32
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -1000,6 +1009,70 @@ mod tests {
         );
         assert!((lo.y - 65.0).abs() < 1e-6);
         assert!((hi.y - 66.25).abs() < 1e-6);
+    }
+
+    struct Charge;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Charge {
+        fn register_item_tint_sources(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterItemTintSourcesEvent<'_>,
+        ) {
+            event.sources.push("example:charge".into());
+        }
+        fn item_tint_source(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemTintSourceEvent<'_>,
+        ) {
+            if event.source == "example:charge" {
+                event.color = match event.stack.count {
+                    1 => event.config["low"].as_i64().unwrap_or(0) as u32,
+                    _ => 0xFF11_2233,
+                };
+            }
+        }
+    }
+
+    /// A mod registers its item tint source once at start.
+    #[test]
+    fn a_mod_registers_its_item_tint_source() {
+        use mod_api::__private::game::*;
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("charge", Box::new(Charge))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut sources = Vec::new();
+            Game::native_register_item_tint_sources(
+                &mod_api::RegistrationContext::new(),
+                &mut sources,
+            );
+            assert_eq!(sources, ["example:charge"]);
+        });
+    }
+
+    /// The resolver reads a mod's colour per stack, white for another's or with no mod.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_tint_source_reads_the_mods_colour() {
+        let config = serde_json::json!({"type": "example:charge", "low": 0xFFAA_BBCC_u32});
+        let one = StackView::new("minecraft:stick", 1);
+        let two = StackView::new("minecraft:stick", 2);
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("charge", Box::new(Charge))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                let color = |source, stack| env.item_tint_source(source, &config, stack) as u32;
+                assert_eq!(color("example:charge", &one), 0xFFAA_BBCC);
+                assert_eq!(color("example:charge", &two), 0xFF11_2233);
+                assert_eq!(color("other:charge", &one), 0xFFFF_FFFF);
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_tint_source("example:charge", &config, &one), -1);
+            });
+        });
     }
 
     #[test]

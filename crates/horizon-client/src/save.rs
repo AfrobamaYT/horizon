@@ -27,7 +27,7 @@ use horizon_core::{
     position::{BlockPos, ChunkPos},
     ticks::{SavedTick, TickPriority, TickTypeId},
 };
-use horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound};
+use horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
@@ -1828,7 +1828,7 @@ fn decode_column(
                     if let Ok(Some(data)) = attachment_compound(e.get(ATTACHMENTS_KEY)) {
                         extras.block_entity_attachments.push((
                             be.0,
-                            horizon_world::attachments::Attachments::from_nbt(data.clone()),
+                            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
                         ));
                     }
                     if let Some(name) = text(e.get("CustomName")) {
@@ -1846,7 +1846,8 @@ fn decode_column(
     }
     if let Tag::Compound(map) = tag {
         if let Ok(Some(data)) = attachment_compound(map.get(&ATTACHMENTS_KEY.into())) {
-            extras.attachments = horizon_world::attachments::Attachments::from_nbt(data.clone());
+            extras.attachments =
+                horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone());
         }
         extras.root = map
             .iter()
@@ -2558,7 +2559,7 @@ impl SaveDir {
     /// own namespace. A file that doesn't read is moved aside to `attachments.dat.corrupt`, with
     /// a warning, and the level opens without them (as vanilla's `SavedDataStorage` starts a
     /// saved data over when its file is broken), so the next save can't overwrite it.
-    pub fn load_attachments(&self) -> horizon_world::attachments::Attachments {
+    pub fn load_attachments(&self) -> horizon_mod_runtime::attachments::Attachments {
         let path = self.attachments_path();
         let data = match try_read_dat(&path) {
             Err(DatIssue::Missing) => return Default::default(),
@@ -2568,7 +2569,7 @@ impl SaveDir {
             },
             Err(DatIssue::Unreadable(why)) => Err(why),
         };
-        data.map(horizon_world::attachments::Attachments::from_nbt)
+        data.map(horizon_mod_runtime::attachments::Attachments::from_nbt)
             .unwrap_or_else(|why| {
                 let aside = path.with_extension("dat.corrupt");
                 log::warn!(
@@ -2584,7 +2585,7 @@ impl SaveDir {
     /// Save this dimension's server-owned mod attachments; nothing while it has none and never had.
     pub fn save_attachments(
         &self,
-        attachments: &horizon_world::attachments::Attachments,
+        attachments: &horizon_mod_runtime::attachments::Attachments,
     ) -> Result<()> {
         let path = self.attachments_path();
         let data = attachments.to_nbt();
@@ -5672,7 +5673,7 @@ mod tests {
 
     #[test]
     fn level_attachments_survive_save_and_load() {
-        use horizon_world::attachments::{
+        use horizon_mod_runtime::attachments::{
             AttachmentCodec, AttachmentError, AttachmentType, Attachments,
         };
         let dir =
@@ -5693,13 +5694,13 @@ mod tests {
             sync: false,
         };
         let mut map = Attachments::default();
-        key.set(&mut map, horizon_world::attachments::Holder::Level, 7)
+        key.set(&mut map, horizon_mod_runtime::attachments::Holder::Level, 7)
             .unwrap();
         save.save_attachments(&map).unwrap();
         assert_eq!(
             key.get(
                 &mut save.load_attachments(),
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(7)
         );
@@ -5708,7 +5709,7 @@ mod tests {
 
     #[test]
     fn chunk_attachments_survive_save_and_load() {
-        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
         let Some(root) = std::env::var_os("HORIZON_TEST_RESOURCES") else {
             return;
         };
@@ -5736,14 +5737,14 @@ mod tests {
         let mut extras = ChunkExtras::default();
         key.set(
             &mut extras.attachments,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             42,
         )
         .unwrap();
-        let mut block_data = horizon_world::attachments::Attachments::default();
+        let mut block_data = horizon_mod_runtime::attachments::Attachments::default();
         key.set(
             &mut block_data,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             21,
         )
         .unwrap();
@@ -5760,7 +5761,7 @@ mod tests {
         assert_eq!(
             key.get(
                 &mut Arc::make_mut(loaded.saved.as_mut().unwrap()).attachments,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(42)
         );
@@ -5769,7 +5770,7 @@ mod tests {
         assert_eq!(
             key.get(
                 &mut extras.block_entity_attachments[0].1,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(21)
         );
@@ -8230,7 +8231,7 @@ mod tests {
 
     #[test]
     fn mod_attachments_save_in_horizons_namespace_only_when_some() {
-        use horizon_world::attachments::Attachments;
+        use horizon_mod_runtime::attachments::Attachments;
         let root = std::env::temp_dir().join(format!("horizon-attach-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let save = SaveDir::new(root.clone(), LevelShape::OVERWORLD);

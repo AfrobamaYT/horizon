@@ -562,4 +562,26 @@ pub trait MobsBackendMut {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: server.
+    /// `Brain.setMemory(ATTACK_TARGET, target)`, or `eraseMemory` for None:
+    /// the target a brain-driven mob — an axolotl, a breeze, a creaking, a
+    /// hoglin, a piglin or piglin brute, a warden or a zoglin — reads instead
+    /// of `Mob.setTarget`'s (#934). A plain, non-expiring memory write: the
+    /// brain's own behaviours act on it from the next tick (a target the
+    /// species may not attack is dropped there, as vanilla's
+    /// `StopAttackingIfTargetInvalid` drops it), and none of a species' own
+    /// setter effects run — a warden's `setAttackTarget` roar, reach and
+    /// sonic-boom bookkeeping stays with its own sensing. A frog refuses: its
+    /// target belongs to the running tongue attack, which starts from the
+    /// nearest attackable, so a written one would not be pursued.
+    /// False for a fake player, a player in another level, a mob without an
+    /// attack-target brain (`MobRef::set_target` writes those), a stale or
+    /// unavailable mob, the dragon, or on a client.
+    fn mob_set_brain_target(&mut self, mob: MobRef, target: Option<LivingRef>) -> bool {
+        crate::phase::unprovided(
+            "BackendMut::mob_set_brain_target",
+            "mob_set_brain_target",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }

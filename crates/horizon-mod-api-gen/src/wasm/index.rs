@@ -7,6 +7,7 @@ use syn::{Item, UseTree};
 const CRATES: &[(&str, &str)] = &[
     ("mod_api", "crates/horizon-mod-api/src"),
     ("horizon_core", "crates/horizon-core/src"),
+    ("horizon_mod_runtime", "crates/horizon-mod-runtime/src"),
     ("horizon_world", "crates/horizon-world/src"),
     ("horizon_items", "crates/horizon-items/src"),
     ("horizon_client_core", "crates/horizon-client-core/src"),

@@ -42,7 +42,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   executable alternative takes precedence over a denied one; equally valid alternatives keep registration order.
   A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
 
-- **`perform_command` / `perform_console_command`**: `event.command` is an owned `CommandInvocation`
+- **`run_mod_command`**: `event.command` is an owned `CommandInvocation`
   with its literal path and named `CommandArgumentValue` values, not raw command text. Integer, number and boolean
   values retain the dispatcher's types; word and greedy text are strings. Player selectors resolve to a single live
   `PlayerRef`, items become component-bearing stacks of one, and block positions resolve source-relative/local
@@ -79,7 +79,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (`from` and `to` are ids such as `minecraft:overworld` and `minecraft:the_nether`), heard when the move has ended:
   the portal's exit is found and the player stands there, a command's teleport has landed, or a respawn in another
   level than the death's is placed for good. `to` is the level in place and the player's state is swapped in (as in
-  `native_perform_command`), so `host.players().acting_player` and `PlayerRef::tell` reach them. Heard for Nether and End portals
+  `native_run_mod_command`), so `host.players().acting_player` and `PlayerRef::tell` reach them. Heard for Nether and End portals
   (also riding, and leaving the End as its winner), `/execute in ... run tp` and any command teleporting into another
   level, and the death respawn. Not heard: a move within a level (`/tp`, an End gateway), a player who leaves before
   the move ends, a respawn in the dimension of the death, and anything outside a dedicated server.
@@ -135,11 +135,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (a quiet batch drops them). The player's state is not swapped in, and `PlayerRef::tell` and the other helpers that take a
   UUID reach nobody inside this hook: answer through `replies`. Commands may carry secrets (`/msg`, a login plugin's
   password), so don't log them carelessly.
-- **`native_perform_console_command(command, ran)`**: a registered command typed on the dedicated server's console
-  (without its slash), run as the server at level 4: no player, so `host.players().acting_player()` is None and the player-only
-  helpers give nothing. The mod parses the line and sets `ran`; `host.commands().feedback` answers on the console. A name no mod
-  registered goes to vanilla's dispatcher. The single player owner's console (`horizon-ctl command`, the MCP
-  command tool) is a player's: it reaches `native_perform_command` with the owner, at level 4.
+- **`native_run_mod_command(source, command, ran)`**: executes a registered command with typed origin and
+  permission. Feedback honours silence and track-output; set `ran` when handled, otherwise execution fails.
 - **`native_player_respawned(player, name)`**: a dead player came back, once per respawn, on a server: after
   `PlayerList.respawn` reset their health, food and experience and placed them at their bed, anchor or the world spawn
   (NeoForge's `PlayerRespawnEvent`). The player's state is swapped in for the call, as for their other actions, so
@@ -388,10 +385,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_jump(player, name)`**: accepted guest movement made the server player jump from the ground, after movement simulation finishes. The guest's state is swapped in.
 - **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
 - **`native_player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
-- **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
-  their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
-  player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
-  registered command no mod takes answers as vanilla's unknown command.
 - **`native_player_swap_hands(player, name, cancel)`**: a player pressed the swap-hands key (not a spectator), heard
   before the main and off hand items swap. Set `cancel` and they stay where they are; the player's client, which swapped
   them at once, gets its slots back. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the item
@@ -420,7 +413,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (`checkTotemDeathProtection`), heard just before it is used up. Listen only: the health state machine decides before a
   mod is asked, so a mod cannot veto it. The player's state is swapped in, so `host.players().acting_player`, `PlayerRef::tell` and the
   item helpers reach them. Not heard: the host of a LAN world.
-- `host.players().acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
+- `host.players().acting_player()`, the player whose state is swapped in (inside `native_run_mod_command`,
   `native_right_click_block`, `native_use_on`, `native_break_block`...; None elsewhere);
   `host.commands().run_command(line)`, a command run as the server's console (level 4, no output), including during a guest's
   turn. The acting player and other live guests are reachable; displaced outer players are excluded only on this
@@ -699,6 +692,8 @@ handle, an entity the client doesn't track and a level it doesn't show:
   blocks). `chunk.forced(host)` and `level.forced_chunks(host)` read the chunks `/forceload` holds (`/forceload query`);
   `chunk.set_forced(host, bool)` is `/forceload add` or `remove` of one chunk and returns whether the set changed. That
   is the world's own state: it is saved with the level and stays until `/forceload remove`.
+  A newly added forced chunk is loaded before the call returns, including in a parked server level. Repeated adds
+  and removals do not load chunks.
 - Ticket controllers (NeoForge's `TicketController`, registered in `RegisterTicketControllersEvent`): a mod registers
   each one once at startup, from `Hooks::register`, with `r.register_ticket_controller("quarry", validates)` and keeps the
   `TicketController` it returns (it is `Copy`; `Hooks` methods take `&self`, so a `OnceLock` holds it). The id is the
@@ -1016,7 +1011,7 @@ steers a mob through the engine's own controls, each a momentary wish the mob's 
   over the next ticks. Non-finite coordinates are refused. `mob.jump(host)` is `JumpControl.jump`: the mob jumps on its
   next own tick by its own jump path — no velocity is written. No species refuses either: vanilla's brains themselves
   write through these controls (a brain species' `LookAtTargetSink` calls the same `lookAt`), so a mod's wish and the
-  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species). A
+  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species, and `set_brain_target` writes their `ATTACK_TARGET` memory instead). A
   creaking being looked at, an angry bee and an axolotl playing dead hold their look control, and a held creaking its
   jump control, as in vanilla: the wish waits until the control runs again.
 - `mob.navigation_speed(host)` / `set_navigation_speed(host, speed)` read and set `PathNavigation.speedModifier`, the
@@ -1182,10 +1177,34 @@ It's the same record the `play_sound` hook edits, and it goes through the same m
 vanilla's (`minecraft:entity.generic.explode`) or the mod's own: a content mod's `assets/<id>/sounds.json` and
 `assets/<id>/sounds/*.ogg` load with the rest of its assets. A client half that hears from its server half (mod
 messages) where something happened can time the sound to the distance, such as a blast heard when its shock wave reaches
-the player: `after = distance / speed`. It answers false on a server and for a value out of range (an event id that
+the player: `after = distance / speed`. It answers `None` on a server and for a value out of range (an event id that
 isn't namespaced, a position or volume that isn't finite, a negative volume, pitch or repeat gap, `after` past 1200);
 an event the resources lack plays nothing. Diverges from upstream: horizon-rust/horizon's `native_play_local_sound` takes
 `(sound, at, volume, pitch, delay)`.
+
+Otherwise it answers a `SoundRef`, a handle on this one play, never reused. Its methods take the `&dyn ClientHost`, so
+any client hook can call them. Like the play, the writes are queued for the next audio update, while the answers are
+computed at the call:
+- `sound.state(host)` is `Some(SoundState)`: `Waiting` (queued, waiting out `after`, or between a looping sound's
+  repeats), `Playing` (`SoundEngine.isActive`) or `Stopped`. It is `None` on a server.
+- `sound.stop(host)` stops it for good: a waiting sound never starts and a looping one never repeats. A stop asked
+  since the last update already reads `Stopped`.
+- `sound.fade(host, volume, ticks)` moves its volume to `volume` (at or above 0) in equal steps over the next `ticks`
+  unpaused ticks it plays, or at once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut`
+  does. A `SoundPlay` at volume 0 faded up fades in, and a later fade replaces one in progress. While the game is
+  paused the fade waits, as vanilla's tickable sounds do (`SoundEngine.tick(paused)`): an interface or music sound
+  keeps playing at the volume it had (`pauseAllExcept(MUSIC, UI)`), and any other sound pauses with the game.
+
+`stop` and `fade` answer false, changing nothing, once the sound is over. Once it ends, is stopped or faded out, or is
+cleared (leaving or changing levels stops every sound), the handle reads `Stopped` and its writes do nothing. It stays
+valid across a change of output device, which reopens the output on the same mixer and keeps the sounds playing.
+Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while it plays (stop it before
+starting another in its place), or nothing can stop it until the player leaves the level.
+
+`ClientHost::sound_events()` lists every sound event the client's resources have (`SoundManager.getAvailableSounds`).
+`audio_devices()` lists the output devices by name (`SoundEngine.getAvailableSoundDevices`), and `audio_device()` names
+the one the options ask for, empty for the system's default. Both lists are built anew at each call, and listing the
+devices probes each one: ask from setup or a settings screen, not every frame.
 
 ### Falling blocks
 
@@ -1763,7 +1782,7 @@ or transactions. Declarations still go on each event or registrar.
 - Client sounds: `ClientHost::play_local_sound(sound, after)` plays a `SoundPlay`, vanilla's event or the mod's own
   from its `assets/<id>/sounds.json`, for this player only: an interface sound (`SoundPlay::ui`) or one at a place
   (`SoundPlay::at`), now or up to a minute later, so a client mod can click its own buttons or time a blast's sound
-  to its shock wave.
+  to its shock wave. Its `SoundRef` answers whether it plays, and stops or fades it.
 
 - Values for a mod's own shader pack: `native_shader_params(partial, params)` asks each frame for eight `vec4`s that
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
@@ -1821,7 +1840,7 @@ or transactions. Declarations still go on each event or registrar.
 - Giving a whole stack (damage, name, enchantments kept) to any player from a server hook: `insert_any` into
   the player's [`ENTITY_ITEMS`](../concepts/trait-mods.md#an-entitys-items) handler places it as `Inventory.add` does, and answers how many went.
 
-- A mod's command typed on the dedicated server's console: `native_perform_console_command(command, ran)` hears a command a mod registered with `native_register_commands`, without its slash, from the console (permission level 4, no player: `host.players().acting_player` is None), and a mod sets `ran`. `host.commands().feedback` answers on the console. A name no mod registered goes to vanilla's dispatcher; the single player owner's console is not covered.
+- Registered mod commands from every source use `native_run_mod_command(source, command, ran)`. Players retain their swapped-in state; the console has no acting player. Functions are silent, and block/cart feedback follows track-output. Unhandled invocations fail as unknown commands.
 
 - Player-use drops to `native_loot_drops`: shears on a sheep, a mooshroom, a snow golem or a bogged, a brush on an
   armadillo or a suspicious block, carving a pumpkin, picking sweet berries or cave vines, and a player taking an item frame or
@@ -2701,7 +2720,7 @@ registration path.
   server tick, with `world_running`. A frozen world reports false except during a requested step.
 
 - Server commands and players: `native_register_commands` (the commands a mod adds to every player's
-  command tree) and `native_perform_command` (a player's command on the server), with helpers to answer
+  command tree) and `native_run_mod_command` (a player's command on the server), with helpers to answer
   ([Server commands and players](#server-commands-and-players)).
 
 - A player's items for server mods: counting, taking and giving go through the player's
@@ -2867,6 +2886,13 @@ registration path.
   each frame the HUD draws the hearts, `kind` comes in as vanilla's pick (poisoned, withered, frozen or normal) and a mod
   may set another. It runs before `native_health_hud`, whose `inputs.kind` carries the answer; only the heart sprites
   change.
+
+- Where each boss bar is drawn through `native_customize_boss_event_progress` (NeoForge's
+  `CustomizeGuiOverlayEvent.BossEventProgress`): once a frame per bar, in the order the server added them, `x` and
+  `y` come in as the bar's top-left corner (91 left of the centre; 12, then 19 lower for each bar) and `increment` as
+  the spacing to the next (19). The bar and its title are drawn where a mod moved them, and the next bar comes in
+  `increment` below where this one came in. A cancelled bar is not drawn and its increment still applies. Bars stop
+  once the next would start a third of the way down the screen. With no listener nothing is built per bar.
 
 - Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
   each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)

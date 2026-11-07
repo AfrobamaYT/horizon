@@ -1,5 +1,5 @@
-pub(crate) fn resolved_fluids() -> &'static OnceLock<super::registry_keys::Names> {
-    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+pub(crate) fn resolved_fluids() -> &'static OnceLock<horizon_mod_runtime::registry_keys::Names> {
+    static EMPTY: OnceLock<horizon_mod_runtime::registry_keys::Names> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 

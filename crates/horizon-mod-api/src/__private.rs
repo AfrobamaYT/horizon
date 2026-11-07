@@ -143,6 +143,10 @@ pub mod game {
             generation,
         }
     }
+    /// A client mod's sound handle the game names.
+    pub fn sound_ref(id: u64) -> SoundRef {
+        SoundRef { id }
+    }
     /// A boss bar handle the game names.
     pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
         BossBarRef { epoch, uuid }
@@ -220,6 +224,16 @@ pub mod game {
                 position: self.position,
                 generation: self.generation,
             }
+        }
+    }
+
+    pub struct SoundRefFields {
+        pub id: u64,
+    }
+    impl Fields for SoundRef {
+        type Fields<'a> = SoundRefFields;
+        fn fields(&self) -> SoundRefFields {
+            SoundRefFields { id: self.id }
         }
     }
 

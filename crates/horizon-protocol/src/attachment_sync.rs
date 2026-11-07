@@ -8,7 +8,7 @@
 //! removal.
 use {
     horizon_core::{nbt, nbt::Tag},
-    horizon_world::attachments::{AttachmentSync, Holder},
+    horizon_mod_runtime::attachments::{AttachmentSync, Holder},
 };
 
 use crate::{
