@@ -5,7 +5,8 @@ use glam::{DVec3, Mat4, Vec3};
 use horizon_client::mesher::Vertex;
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, RenderLevelStage, WorldDrawUsage, WorldLine,
+    WorldQuad,
 };
 
 impl Game<'_> {
@@ -48,11 +49,20 @@ impl Game<'_> {
         }
         draw.set_model_cut(entities.len() as u32);
         let view = mod_api::WorldRenderView::new(camera, alpha as f32, self.world.game_time);
+        // RenderLevelStageEvent's stages in frame order, so each one's output follows the
+        // last's; custom geometry and the debug renderers draw with the last, AfterLevel.
+        let (last, earlier) = RenderLevelStage::ALL.split_last().expect("stages");
+        for &stage in earlier {
+            draw.begin_stage(stage);
+            self.native_render_level_stage(stage, &view, draw);
+        }
+        draw.begin_stage(*last);
         self.native_submit_custom_geometry(&view, draw);
         self.follow_debug_selection();
         for id in &self.debug_renderers {
             self.native_debug_renderer_draw(id, &view, draw);
         }
+        self.native_render_level_stage(*last, &view, draw);
         self.commit_model_instances(draw, DVec3::from(camera), entities);
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
@@ -84,6 +94,21 @@ impl Game<'_> {
         model: ModelRef,
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
+        if instances.len() > 16_384 {
+            return Err(InstanceError::CapacityExceeded);
+        }
+        horizon_client::world_geometry::validate_instances(instances)?;
+        self.prepared_model_draws
+            .borrow_mut()
+            .reserve(instances.len().min(16_384));
+        self.draw_validated_model_instances(draw, model, instances)
+    }
+    pub(super) fn draw_validated_model_instances(
+        &self,
+        draw: &mut WorldGeometry,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
         if fields.generation != self.standalone_geometry.generation() {
@@ -110,13 +135,14 @@ impl Game<'_> {
         let mut gpu_left = if gpu {
             self.prepared_copy_room(start as u64, instances.len())
                 .unwrap_or(0)
+                .min(staged.capacity() - start)
         } else {
             0
         };
         let cut = draw.model_cut();
         let camera = DVec3::from(draw.camera());
         let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
-        let result = draw.submit_model(
+        let result = draw.submit_validated_model(
             ModelBatch {
                 slot: fields.slot,
                 generation: fields.generation,
@@ -307,6 +333,149 @@ mod tests {
         let generation = mod_api::__private::game::Fields::fields(&model).generation;
         horizon_client::gfx::set_test_prepared_generation(Some(generation));
         model
+    }
+
+    #[test]
+    #[ignore = "needs software Vulkan"]
+    fn persistent_groups_match_batch() {
+        use mod_api::{GroupError, InstanceGroups};
+        let _fixture = horizon_client::models::standalone_fixture(vec![
+            "minecraft:block/grass_block".into(),
+            "minecraft:block/glass".into(),
+        ]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = grass(game);
+            horizon_client::gfx::cap_prepared_instance_slots(16_384);
+            let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                id: "a",
+                hook: "test",
+                part: None,
+            });
+            assert_eq!(
+                game.create_group(model, 16_385),
+                Err(GroupError::CapacityExceeded)
+            );
+            let glass = game
+                .native_model(&Identifier::parse("minecraft:block/glass").unwrap())
+                .unwrap();
+            assert_eq!(game.create_group(glass, 1), Err(GroupError::Translucent));
+            let group = game.create_group(model, 8).unwrap();
+            let near = ModelInstance::at([0.0; 3], 0xFF80_C040);
+            let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
+            group.write(game, 0, &[far, near]).unwrap();
+            assert_eq!(group.write(game, 8, &[near]), Err(GroupError::OutOfRange));
+            let mut bad = near;
+            bad.light.block = 16;
+            assert_eq!(
+                group.write(game, 1, &[far, bad]),
+                Err(GroupError::InvalidLight)
+            );
+            assert_eq!(group.set_len(game, 9), Err(GroupError::OutOfRange));
+            game.view_frustum = Some(horizon_client::gfx::test_frustum([
+                glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+            ]));
+            let mut draw = WorldGeometry::default();
+            {
+                let _other = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: "b",
+                    hook: "test",
+                    part: None,
+                });
+                assert_eq!(group.write(game, 0, &[near]), Err(GroupError::Stale));
+                assert_eq!(group.set_len(game, 0), Err(GroupError::Stale));
+                assert_eq!(group.destroy(game), Err(GroupError::Stale));
+                assert_eq!(
+                    context(game, &mut draw).draw_instance_group(group),
+                    Err(GroupError::Stale)
+                );
+            }
+            let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+            assert_eq!(
+                context(game, &mut draw).draw_model_instances(model, &oversized),
+                Err(InstanceError::CapacityExceeded)
+            );
+            let render = |game: &Game<'_>| {
+                let staged = game.prepared_model_draws.borrow();
+                assert_eq!(staged.len(), 1, "the far copy must be culled");
+                let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+                horizon_client::gfx::entity_pixel_test::render_instance(
+                    horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                        vertices: &vertices,
+                        ranges,
+                        uploaded: model.fields().generation,
+                        requested: model.fields().generation,
+                        slot: model.fields().slot,
+                        instances: &[staged[0].instance],
+                        per_copy: false,
+                        hdr: false,
+                        atlas_size: [game.gui.atlas.width, game.gui.atlas.height],
+                        atlas: &game.gui.atlas.pixels(),
+                        view_proj: Mat4::IDENTITY,
+                    },
+                )
+                .expect("software Vulkan group pixels")
+            };
+            use mod_api::__private::game::Fields;
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[far, near])
+                .unwrap();
+            let expected = render(game);
+            assert!(expected.as_chunks::<4>().0.iter().any(|p| p[..3] != [0; 3]));
+            game.prepared_model_draws.borrow_mut().clear();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(expected, render(game));
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(expected, render(game));
+            let sibling = game.create_group(model, 16_384).unwrap();
+            let third = game.create_group(model, 16_384).unwrap();
+            let fourth = game.create_group(model, 16_384).unwrap();
+            let fifth = game.create_group(model, 16_376).unwrap();
+            assert_eq!(
+                game.create_group(model, 1),
+                Err(GroupError::CapacityExceeded)
+            );
+            for handle in [sibling, third, fourth, fifth] {
+                handle.destroy(game).unwrap();
+            }
+            group.destroy(game).unwrap();
+            assert_eq!(group.set_len(game, 1), Err(GroupError::Stale));
+            assert_eq!(
+                context(game, &mut draw).draw_instance_group(group),
+                Err(GroupError::Stale)
+            );
+            let fresh = game.create_group(model, 8).unwrap();
+            assert_ne!(fresh, group);
+            game.spawn_pack_reload(super::super::packs::ReloadKind::Selection)
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while game.pack_reload.is_some() && std::time::Instant::now() < deadline {
+                game.drive_pack_reload();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_ne!(
+                game.standalone_geometry.generation(),
+                model.fields().generation
+            );
+            assert_eq!(fresh.set_len(game, 1), Err(GroupError::Stale));
+            let after_reload: Vec<_> = (0..4)
+                .map(|_| game.create_group(grass(game), 16_384).unwrap())
+                .collect();
+            assert_ne!(fresh, after_reload[0]);
+            game.native_lifecycle_world_closed();
+            assert_eq!(after_reload[0].destroy(game), Err(GroupError::Stale));
+            assert_ne!(after_reload[0], game.create_group(grass(game), 1).unwrap());
+        });
     }
 
     #[test]
@@ -605,6 +774,92 @@ mod tests {
                 ctx.draw_model_instances(model, &vec![far; 16_384]).unwrap();
                 assert_eq!(ctx.usage().instances_used, 0);
             }
+        });
+    }
+
+    static STAGES_ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// A line one block long at `x`, so each listener's output can be told apart.
+    fn marker(x: f64) -> mod_api::WorldLine {
+        mod_api::WorldLine::new(
+            [x, 0.0, -1.0],
+            [x + 1.0, 0.0, -1.0],
+            0xFF00_FF00,
+            1.0,
+            mod_api::WorldDepth::Tested,
+        )
+    }
+
+    /// Draws at AfterSky, AfterWeather and AfterLevel, and in `submit_custom_geometry`.
+    struct Staged;
+    #[mod_api::__subscriptions]
+    impl Hooks for Staged {
+        fn submit_custom_geometry(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut SubmitCustomGeometryEvent<'_>,
+        ) {
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(30.0)]).unwrap();
+            }
+        }
+        fn render_level_stage(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::RenderLevelStageEvent<'_>,
+        ) {
+            let x = match event.stage {
+                RenderLevelStage::AfterSky => 10.0,
+                RenderLevelStage::AfterWeather => 20.0,
+                RenderLevelStage::AfterLevel => 40.0,
+                _ => return,
+            };
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(x)]).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn each_stage_is_asked_in_frame_order_and_its_lines_draw_there() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            mod_api::__private::install(vec![ModEntry::new("staged", Box::new(Staged))].into());
+            STAGES_ARMED.store(true, Ordering::Relaxed);
+            let mut draw = WorldGeometry::default();
+            game.fill_world_geometry(
+                false,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            STAGES_ARMED.store(false, Ordering::Relaxed);
+            let batch = draw.batch();
+            let starts: Vec<f32> = batch.lines.iter().map(|line| line[0]).collect();
+            assert_eq!(
+                starts,
+                [10.0, 20.0, 30.0, 40.0],
+                "stages in frame order, custom geometry just before AfterLevel"
+            );
+            // AfterSky holds the first line, AfterOpaqueBlocks and AfterTranslucentBlocks none,
+            // AfterWeather the second, AfterLevel the rest.
+            assert_eq!(
+                batch.stage_ends,
+                [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 2, 0]]
+            );
+            // A title view draws no world: nothing, and every stage empty.
+            game.fill_world_geometry(
+                true,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            assert!(draw.batch().is_empty());
+            assert_eq!(draw.batch().stage_ends, [[0; 4]; 4]);
         });
     }
 

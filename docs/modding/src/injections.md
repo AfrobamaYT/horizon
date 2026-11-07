@@ -41,9 +41,17 @@ facade. `head` and `return` use function slots. If no compiled slot exists, nati
 listeners use a private source point and rebuild the game; the callback and its facade record path
 stay unchanged. The log says `source (private slot, reason)` and private rows are never published
 in `points.json`. Targets below `mod_points` are refused because dispatch would create a Cargo cycle.
-`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
-`nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
-`mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
+`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` also use private source calls
+when the canonical callee is absent from every slot list. The launcher validates their exact identity
+against the staged SDK before any game build; missing, moved or ambiguous calls refuse. Listed stale
+calls never fall back to source. `wrap_call` controls whether and how often to invoke the original;
+`wrap_if` runs it only when its condition returns true and requires unit output. The unit check runs
+once the private site's metadata exists, before game compilation. For all call kinds, use the catalog's
+canonical `call`, `nth` and statement `ctx`, not its place fingerprint `hash`.
+The generated `Listener`, `Receiver`, `Args` and `Output` facade names derive from that canonical callee
+and are identical on listed and source routes; physical IDs and dispatch remain distinct. The same
+`with` function therefore compiles on either route without an alias or compatibility export.
+The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
 hash or missing target is refused, not silently redirected. Points order by descending priority,
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
 and inject id order. `modify_arg` and `modify_call_arg` remain typed refusals until their operand
@@ -303,14 +311,15 @@ or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the 
 to the typed API.
 
 ```toml
-[native]
-game = "26.3"
-horizon = "<exact game commit>"
-mixins = "<exact mixins commit>"
 internals = [
     { path = "horizon_client::game::Game", hash = "<written by the tool>" },
     { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
 ]
+
+[native]
+game = "26.3"
+horizon = "<exact game commit>"
+mixins = "<exact mixins commit>"
 
 [[native.injection]]
 id = "count"
@@ -322,7 +331,7 @@ raw = "count"
 Run `cargo horizon-mod internals sync` in the mod's folder after editing its Rust code. It
 checks the mod against a discovery-only copy of the pinned game's source, uses compiler
 warnings to find actual internal uses (including glob imports and macros), and replaces
-`[native].internals` with their exact paths, kinds and hashes. Unused declarations are removed;
+top-level `internals` with their exact paths, kinds and hashes. Unused declarations are removed;
 retained declarations keep their formatting. The command prints added and removed entries.
 It is explicit: a normal build never changes the declarations reviewers and players read.
 
@@ -463,7 +472,7 @@ non-unit site raises `E_SITE_KIND`. These raw sites are not available to wasm mo
 
 ### Wasm raw listeners
 
-A wasm mod uses the same `[native] internals` declarations and `raw` injections beside `[wasm]`,
+A wasm mod uses the same top-level `internals` declarations and `[[inject]]` listeners beside `[wasm]`,
 but omits all three native pins and carries no helper or support-module source. Its generated view
 imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.
 The compiled declaration includes each manifest internal and every named type whose layout it walks.

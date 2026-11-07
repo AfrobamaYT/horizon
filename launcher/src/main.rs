@@ -1317,7 +1317,7 @@ impl Launcher {
                     let last = self.native_step.take();
                     self.native_progress = None;
                     self.native_started = None;
-                    let cancelled = matches!(&result, Err(e) if e == native_mods::CANCELLED);
+                    let cancelled = matches!(&result, Err(native_mods::Failed::Other(error)) if error == native_mods::CANCELLED);
                     self.native_done = match (&result, cancelled) {
                         (Ok(_), _) => last,
                         (Err(_), true) => Some(tr(native_mods::CANCELLED).into()),
@@ -1328,7 +1328,7 @@ impl Launcher {
                     // A build attempt ended: an open panel reads the log it left.
                     self.native_log.stale = true;
                     if let (Err(e), false) = (result, cancelled) {
-                        self.native_error = Some(e);
+                        self.native_error = Some(String::from(e));
                     }
                 }
                 Msg::LauncherProgress(p) => {
@@ -1910,6 +1910,10 @@ impl Launcher {
 
     fn begin_sign_in(&mut self, target: Option<account::Account>) {
         self.cancel_sign_in();
+        // The code page offers a private window: find the default browser meanwhile.
+        std::thread::spawn(|| {
+            horizon_launcher::private_window::detected();
+        });
         self.sign_in = Some(match &target {
             Some(account) => SignIn::start_for(account.clone()),
             None => SignIn::start(),
@@ -3997,6 +4001,11 @@ impl Launcher {
                     &t,
                 )
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Err(error) = this.settings.allow_native_mods() {
+                        this.native_error = Some(error);
+                        cx.notify();
+                        return;
+                    }
                     this.build_native();
                     cx.notify();
                 })),
@@ -4381,7 +4390,22 @@ impl Launcher {
                         .font_family(theme::MONO)
                         .text_color(t.ink)
                         .child(code.user_code.clone()),
-                ),
+                )
+                .when(!microsoft::has_private_window(), |col| {
+                    col.child(tr("Open this link in a private window to pick another account."))
+                })
+                .child({
+                    let uri = code.verification_uri.clone();
+                    div().flex().child(
+                        button(
+                            "sign-in-other",
+                            "Use a different Microsoft account",
+                            Kind::Ghost,
+                            &t,
+                        )
+                        .on_click(move |_, _, cx| microsoft::use_different_account(&uri, cx)),
+                    )
+                }),
             Some(SignInState::Done(Ok(a))) => {
                 div().child(trf("Signed in as {name}.", &[("name", &a.name)]))
             }
@@ -4417,6 +4441,23 @@ impl Launcher {
             None
         } else if let Some(SignInState::Code(code)) = &self.sign_in_state {
             let (uri, user_code) = (code.verification_uri.clone(), code.user_code.clone());
+            let (private_uri, link_uri) = (uri.clone(), uri.clone());
+            // A private window picks the account; without one the link is for the player to carry over.
+            let private = if microsoft::has_private_window() {
+                button(
+                    "sign-in-private",
+                    "Open in private window",
+                    Kind::Secondary,
+                    &t,
+                )
+                .on_click(move |_, _, cx| microsoft::open_private(&private_uri, cx))
+            } else {
+                button("sign-in-copy-link", "Copy link", Kind::Secondary, &t).on_click(
+                    move |_, _, cx| {
+                        copy_to_clipboard(cx, gpui::ClipboardItem::new_string(link_uri.clone()))
+                    },
+                )
+            };
             Some(
                 div()
                     .flex()
@@ -4431,6 +4472,7 @@ impl Launcher {
                             },
                         ),
                     )
+                    .child(private)
                     .child(
                         button("sign-in-open", "Open link", Kind::Secondary, &t)
                             .on_click(move |_, _, cx| cx.open_url(&uri)),

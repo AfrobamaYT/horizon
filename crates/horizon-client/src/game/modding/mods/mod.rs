@@ -218,7 +218,7 @@ fn native_declared() -> &'static NativeDeclared {
         let (mut blocks, mut items) = (Vec::new(), Vec::new());
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
-        let types = mod_api::__private::block_entity_types().to_vec();
+        let types = super::api_values::block_entity_declarations();
         NativeDeclared {
             blocks,
             items,
@@ -267,6 +267,16 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     let mut entries = Vec::new();
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
+}
+/// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
+/// start.
+pub(super) fn register_gui_layers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut layers = Vec::new();
+    Game::native_register_gui_layers(&RegistrationContext::new(), &mut layers);
+    horizon_client::gui_layers::register(layers);
 }
 /// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
 /// refresh of the list (`Game::refresh_debug_renderers`).

@@ -463,17 +463,19 @@ impl Launcher {
             )
     }
 
-    /// Each turned-on native mod's route under the chosen mode, read again when the files or the
-    /// mode change.
+    /// Each turned-on native mod's structural route, read again when files or consent change.
     fn native_routes(&self) -> native_mods::Routes {
         let home = self.mods.home();
-        let profile = Profile::chosen(&self.settings);
-        let key = format!("{}{profile:?}", native_status::fingerprint(&home, None));
+        let key = format!(
+            "{}{:?}",
+            native_status::fingerprint(&home, None),
+            self.settings.native_mods_allowed_at
+        );
         let mut memo = self.mods.native_routes.borrow_mut();
         match memo.as_ref() {
             Some((k, routes)) if *k == key => routes.clone(),
             _ => {
-                let routes = native_mods::routes(&home, profile);
+                let routes = native_mods::routes(&home);
                 *memo = Some((key, routes.clone()));
                 routes
             }
@@ -489,7 +491,11 @@ impl Launcher {
         let busy = self.native_step.is_some();
         let building = busy && self.native_for.as_deref() == Some(instance.id.as_str());
         let routes = self.native_routes();
-        let route = routes.iter().find(|(id, _)| id == mod_id).map(|(_, r)| r)?;
+        let route = routes
+            .mods
+            .iter()
+            .find(|(id, _)| id == mod_id)
+            .map(|(_, r)| r)?;
         let profile = Profile::chosen(&self.settings);
         let last = self
             .version_of(instance)
@@ -524,6 +530,7 @@ impl Launcher {
             )
         } else {
             match route {
+                Route::Invalid { reason } => ("alert-circle", pal.warn, tr("Needs attention"), reason.clone()),
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,
