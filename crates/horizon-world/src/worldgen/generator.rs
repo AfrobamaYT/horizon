@@ -3275,9 +3275,8 @@ pub struct BiomeSearch<'a> {
 
 /// `Mth.outFromOrigin(origin, lower, upper, step)`.
 pub fn out_from_origin(origin: i32, lower: i32, upper: i32, step: i32) -> Vec<i32> {
-    if step <= 0 || lower > upper {
-        return Vec::new();
-    }
+    assert!(lower <= upper, "outFromOrigin requires ordered bounds");
+    assert!(step > 0, "outFromOrigin requires a positive step");
     // Public generator callers may supply any positive i32 step. Intermediates can
     // exceed the coordinate range even though every emitted height stays within it.
     let (lower, upper, step) = (i64::from(lower), i64::from(upper), i64::from(step));
@@ -3871,8 +3870,8 @@ mod tests {
             out_from_origin(0, i32::MIN, i32::MAX, i32::MAX),
             [0, i32::MAX, -i32::MAX]
         );
-        assert!(out_from_origin(0, 0, 8, 0).is_empty());
-        assert!(out_from_origin(0, 8, 0, 1).is_empty());
+        assert!(std::panic::catch_unwind(|| out_from_origin(0, 0, 8, 0)).is_err());
+        assert!(std::panic::catch_unwind(|| out_from_origin(0, 8, 0, 1)).is_err());
     }
 
     #[test]
