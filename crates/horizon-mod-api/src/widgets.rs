@@ -23,6 +23,7 @@
 //! ```
 use crate::{ClientHost, DrawContext, SoundPlay, Text};
 
+#[path = "widgets_text_edit.rs"]
 mod text_edit;
 pub use text_edit::{
     EditKey, TextEdit, byte_index, char_len, filter_text, is_allowed_chat_character,
@@ -600,4 +601,5 @@ fn click_sound(host: &dyn ClientHost) {
 }
 
 #[cfg(test)]
+#[path = "widgets_tests.rs"]
 mod tests;
