@@ -279,6 +279,13 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             });
         }
     }
+    finish_ai_step(m, w, events);
+}
+
+/// The part of `Fox.aiStep` after mouth-item consumption: flags, growl and snow.
+/// Consumption's teleport and RNG draws must finish before this continuation.
+#[inline]
+pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if !m.target_info(w).is_some_and(|t| t.alive) {
         set_flag(m, CROUCHING | INTERESTED, false);
     }
