@@ -394,6 +394,15 @@ pub trait LevelAccess {
     fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
     }
+    /// What a mod's fluid does at `pos`, given what it registered (its `FluidPart`s).
+    fn mod_fluid_rules(
+        &self,
+        _pos: BlockPos,
+        _fluid: crate::fluid::ModFluid,
+        registered: crate::fluid::ModFluidRules,
+    ) -> crate::fluid::ModFluidRules {
+        registered
+    }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
     }

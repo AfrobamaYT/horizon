@@ -614,7 +614,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::Liquid => {
                 let fluid = b.fluid(state);
                 if fluid.is_source() || b.fluid(nstate).is_source() {
-                    let delay = self.fluid_tick_delay(fluid.kind());
+                    let delay = self.fluid_tick_delay(fluid.kind(), pos);
                     self.schedule_fluid_tick(pos, fluid.kind(), delay);
                 }
                 if dir == Direction::Down && self.should_bubble_column_occupy(state) {

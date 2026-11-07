@@ -251,7 +251,11 @@ pub(super) fn tesselate(
     if !render_up && !render_down && !sides.iter().any(|&s| s) {
         return;
     }
-    let water = matches!(kind, FluidKind::Water | FluidKind::FlowingWater);
+    // A mod's fluid draws as water until it has a model of its own.
+    let water = matches!(
+        kind,
+        FluidKind::Water | FluidKind::FlowingWater | FluidKind::Mod(_) | FluidKind::ModFlowing(_)
+    );
     let tint = if water {
         water_color & 0xFF_FFFF
     } else {

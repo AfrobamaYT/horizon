@@ -623,27 +623,16 @@ fn read_ticks(
 }
 fn fluid_name(kind: u32) -> Option<String> {
     use horizon_world::fluid::FluidKind;
-    let fluid = *FluidKind::ALL.get(kind as usize)?;
-    Some(
-        match fluid {
-            FluidKind::Empty => return None,
-            FluidKind::FlowingWater => "minecraft:flowing_water",
-            FluidKind::Water => "minecraft:water",
-            FluidKind::FlowingLava => "minecraft:flowing_lava",
-            FluidKind::Lava => "minecraft:lava",
-        }
-        .to_owned(),
-    )
+    match FluidKind::from_tick_id(kind)? {
+        FluidKind::Empty => None,
+        fluid => Some(fluid.name().to_owned()),
+    }
 }
 fn fluid_id(name: &str) -> Option<u32> {
     use horizon_world::fluid::FluidKind;
-    Some(match name {
-        "minecraft:flowing_water" => FluidKind::FlowingWater,
-        "minecraft:water" => FluidKind::Water,
-        "minecraft:flowing_lava" => FluidKind::FlowingLava,
-        "minecraft:lava" => FluidKind::Lava,
-        _ => return None,
-    } as u32)
+    FluidKind::from_name(name)
+        .filter(|kind| *kind != FluidKind::Empty)
+        .map(FluidKind::tick_id)
 }
 
 pub use horizon_items::item_nbt::{
@@ -7030,6 +7019,53 @@ mod tests {
     }
     use super::*;
     use crate::chunk::{MIN_Y, SECTIONS};
+
+    #[test]
+    fn a_mods_fluid_ticks_are_saved_by_name() {
+        use horizon_world::fluid::{FluidKind, ModFluidRules, ModFluidType, register_mod_fluid};
+        let fluid = register_mod_fluid(ModFluidType {
+            id: "savetest:oil".into(),
+            flowing_id: "savetest:flowing_oil".into(),
+            bucket: None,
+            rules: ModFluidRules {
+                tick_delay: 5,
+                drop_off: 1,
+                slope_find_distance: 4,
+                converts_to_source: false,
+            },
+        });
+        let tick = |kind: FluidKind| SavedTick {
+            kind: horizon_core::ticks::TickTypeId(kind.tick_id()),
+            pos: BlockPos::new(1, 64, 2),
+            delay: 3,
+            priority: horizon_core::ticks::TickPriority::Normal,
+        };
+        let ticks = [
+            tick(FluidKind::ModFlowing(fluid)),
+            tick(FluidKind::Mod(fluid)),
+            tick(FluidKind::FlowingWater),
+            tick(FluidKind::Lava),
+        ];
+        let tag = tick_list(&ticks, fluid_name);
+        let names: Vec<_> = match &tag {
+            Tag::List(list) => list.iter().filter_map(|t| text(t.get("i"))).collect(),
+            _ => Vec::new(),
+        };
+        assert_eq!(
+            names,
+            [
+                "savetest:flowing_oil",
+                "savetest:oil",
+                "minecraft:flowing_water",
+                "minecraft:lava"
+            ]
+        );
+        let back = read_ticks(Some(&tag), (0, 0), fluid_id);
+        assert_eq!(
+            back.iter().map(|t| t.kind).collect::<Vec<_>>(),
+            ticks.iter().map(|t| t.kind).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn only_server_disk_records_intern_saved_fluid_names() {
