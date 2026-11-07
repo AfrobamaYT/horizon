@@ -247,6 +247,10 @@ pub(super) fn emit<'a>(
                     .ok_or_else(|| format!("key {key} is not an argument of {name}"))?;
                 let key_type = ty.to_token_stream().to_string().replace("mod_api :: ", "");
                 let lookup = match key_type.as_str() {
+                    "BlockState" if table == "block" => format!("block_value({key})"),
+                    "BlockState" => {
+                        format!("{table}(|| super::registry_keys::block_id({key}.block()))")
+                    }
                     "BlockStateId" if table == "block" => format!("block_state({key})"),
                     "BlockStateId" => {
                         let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
@@ -642,6 +646,7 @@ fn stack_crossing(
         "GameRuleValue",
         "PlacementContext",
     ];
+    const BLOCK_VALUES: &[&str] = &["BlockState", "LandingWrite"];
     const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
     fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
@@ -670,7 +675,9 @@ fn stack_crossing(
     }
     let parameters = args.iter().chain(output).collect::<Vec<_>>();
     if !parameters.iter().any(|(_, ty)| {
-        contains_boundary(ty, STACK_VALUES) || contains_boundary(ty, INFALLIBLE_VALUES)
+        contains_boundary(ty, STACK_VALUES)
+            || contains_boundary(ty, INFALLIBLE_VALUES)
+            || contains_boundary(ty, BLOCK_VALUES)
     }) {
         return None;
     }
@@ -679,7 +686,9 @@ fn stack_crossing(
         "if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} use crate::game::api_values::TryIntoApi; "
     );
     if parameters.iter().any(|(_, ty)| {
-        (contains_boundary(ty, STACK_VALUES) || contains_boundary(ty, INFALLIBLE_VALUES))
+        (contains_boundary(ty, STACK_VALUES)
+            || contains_boundary(ty, INFALLIBLE_VALUES)
+            || contains_boundary(ty, BLOCK_VALUES))
             && matches!(ty, Type::Reference(r) if r.mutability.is_some())
     }) {
         before.push_str("use crate::game::api_values::TryIntoEngine; ");
@@ -694,17 +703,18 @@ fn stack_crossing(
     let mut validations = String::new();
     let mut writes = String::new();
     for (name, ty) in parameters {
+        let block = contains_boundary(ty, BLOCK_VALUES);
         let stack = contains_boundary(ty, STACK_VALUES);
         let infallible = contains_boundary(ty, INFALLIBLE_VALUES);
         let mutable = matches!(ty, Type::Reference(r) if r.mutability.is_some());
-        if surfaces.contains_key(name.as_str()) || (!stack && !infallible && !mutable) {
+        if surfaces.contains_key(name.as_str()) || (!stack && !block && !infallible && !mutable) {
             arguments.push(name.clone());
             continue;
         }
         let local = format!("__api_{name}");
         let value = if infallible {
             format!("{name}.try_into_api().unwrap()")
-        } else if stack {
+        } else if stack || block {
             format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
         } else {
             format!("(*{name}).to_owned()")
@@ -726,6 +736,10 @@ fn stack_crossing(
             let converted = format!("__engine_{name}");
             let value = if infallible {
                 format!("{local}.try_into_engine(&()).unwrap()")
+            } else if block {
+                format!(
+                    "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
+                )
             } else if stack {
                 let result = format!("__checked_{name}");
                 validations.push_str(&format!("let {result}: Result<_, mod_api::StackWriteError> = self.boundary_items().ok_or(mod_api::StackWriteError::Unavailable).and_then(|items| {local}.try_into_engine(items)); "));
@@ -747,6 +761,91 @@ fn stack_crossing(
 #[cfg(test)]
 mod stack_crossing_tests {
     use super::*;
+
+    #[test]
+    fn block_crossing_runtime_and_mutants() {
+        let state: Type = syn::parse_quote!(&mut BlockState);
+        let sibling: Type = syn::parse_quote!(&mut u32);
+        // Sibling first catches early commits even when the checked field follows it.
+        let crossing = stack_crossing(
+            &[("sibling".into(), &sibling), ("state".into(), &state)],
+            None,
+            "BlockProof",
+            true,
+            &Default::default(),
+        )
+        .unwrap();
+        let body = format!(
+            "{} callback(&mut __api_state, &mut __api_sibling); {}",
+            crossing.before, crossing.after
+        );
+        let early = body.replace(
+            "let __engine_sibling = __api_sibling;",
+            "let __engine_sibling = __api_sibling; *sibling = __engine_sibling;",
+        );
+        let guard =
+            "if !mod_api::__private::has_part_hook(mod_api::HookId::BlockProof) { return; }";
+        let unguarded = body.replace(guard, "");
+        assert_ne!(early, body);
+        assert_ne!(unguarded, body);
+        let fixture = include_str!("../../../tools/refactors/api-pr3b/hook_crossing.rs");
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/hook-crossing-proof");
+        std::fs::create_dir_all(&directory).unwrap();
+        for (name, body, success) in [
+            ("baseline", body, true),
+            ("early_commit", early, false),
+            ("no_guard", unguarded, false),
+        ] {
+            let source = directory.join(format!("{name}.rs"));
+            let binary = directory.join(name);
+            std::fs::write(&source, fixture.replace("FIRE_BODY", &body)).unwrap();
+            let compiler = std::process::Command::new("rustc")
+                .args(["--edition=2024", "-O"])
+                .arg(&source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                compiler.status.success(),
+                "{}",
+                String::from_utf8_lossy(&compiler.stderr)
+            );
+            let result = std::process::Command::new(binary).output().unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!(
+                "{name}: {}{}",
+                String::from_utf8_lossy(&result.stdout),
+                if success { "passed" } else { "mutant killed" }
+            );
+        }
+    }
+
+    #[test]
+    fn landing_writes_are_checked_and_staged_with_siblings() {
+        let writes: Type = syn::parse_quote!(&mut Vec<LandingWrite>);
+        let sibling: Type = syn::parse_quote!(&mut bool);
+        let crossing = stack_crossing(
+            &[("sibling".into(), &sibling), ("writes".into(), &writes)],
+            None,
+            "BlockLanding",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(crossing.before.contains("writes.try_into_api()"));
+        assert!(!crossing.before.contains("ItemBoundary"));
+        assert!(
+            crossing.after.find("try_into_engine(&*self)").unwrap()
+                < crossing.after.find("*sibling =").unwrap()
+        );
+    }
 
     #[test]
     fn gui_snapshot_and_writeback_are_guarded_and_context_free() {

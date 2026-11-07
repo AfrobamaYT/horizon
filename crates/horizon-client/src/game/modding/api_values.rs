@@ -4,14 +4,17 @@
 use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
+#[path = "api_values/block_state.rs"]
+mod block_state;
 
 /// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
 /// Registry definitions do not change on pack reload; world-number mappings are separate.
 pub(in crate::game) fn resolve_block_definitions(
     registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<(), String> {
+    block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
-        return Ok(());
+        return block_state::bind(registry);
     }
     let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
     for index in 0..registry.len() {
@@ -45,7 +48,8 @@ pub(in crate::game) fn resolve_block_definitions(
         horizon_mod_runtime::block_definitions::BlockDefinition::new(&states, ordinal as u16)
             .map_err(|error| format!("block {name}: {error:?}"))
     })
-    .map_err(|errors| errors.join("\n"))
+    .map_err(|errors| errors.join("\n"))?;
+    block_state::bind(registry)
 }
 
 #[cfg(test)]
@@ -74,7 +78,7 @@ fn block_definition_import_preserves_defaults_and_is_immutable_after_load() {
     let changed = facts.replace("east", "south");
     let registry =
         horizon_world::registry::BlockRegistry::from_facts_json(changed.as_bytes()).unwrap();
-    resolve_block_definitions(&registry).unwrap();
+    assert!(resolve_block_definitions(&registry).is_err());
     assert_eq!(
         mod_api::__private::block_definitions().unwrap().definitions[key].property(1, "facing"),
         Ok(Some("east"))
@@ -175,22 +179,14 @@ fn block_values_keep_frozen_ordinals_when_world_state_ids_reorder() {
 
 /// Prepare callback data before mesh construction; workers never convert engine records.
 pub(in crate::game) fn mod_tint_values(
-    registry: &horizon_world::registry::BlockRegistry,
+    _registry: &horizon_world::registry::BlockRegistry,
 ) -> Result<Option<crate::mesher::ModTintValues>, String> {
     if !crate::mesher::has_custom_block_tint_sources() {
         return Ok(None);
     }
     let metadata =
         block_metadata_table().map_err(|error| format!("block tint metadata: {error:?}"))?;
-    let states = (0..registry.len())
-        .map(|index| {
-            registry
-                .state(horizon_world::registry::BlockStateId(index as u32))
-                .expect("registry index is in bounds")
-                .try_into_api()
-        })
-        .collect::<Result<_, _>>()
-        .map_err(|error| format!("block tint state: {error:?}"))?;
+    let states = block_state::snapshot().map_err(|error| format!("block tint state: {error:?}"))?;
     Ok(Some(crate::mesher::ModTintValues { states, metadata }))
 }
 
