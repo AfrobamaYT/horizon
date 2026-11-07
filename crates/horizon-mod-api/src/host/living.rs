@@ -342,6 +342,20 @@ pub trait LivingBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// `LivingEntity.getDimensions(Pose)`: the box the living entity has in
+    /// `pose` — its width, height and eye height, `minecraft:scale`
+    /// included, the fixed 0.2 box of a sleeping pose included. The species'
+    /// own state still answers where its `getDefaultDimensions` reads it: a
+    /// digging sniffer or an emerging warden is low in every pose. None for
+    /// a stale or unavailable handle.
+    fn living_dimensions_for_pose(&self, living: LivingRef, pose: Pose) -> Option<[f64; 3]> {
+        crate::phase::unprovided(
+            "Backend::living_dimensions_for_pose",
+            "living_dimensions_for_pose",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' client reads of the `living` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
