@@ -56,7 +56,30 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
             register(&listener.ordered(row.priorities[index], inject)).unwrap();
         }
     }
+    for owner in 0..64 {
+        let id = Box::leak(format!("owner_{owner}").into_boxed_str());
+        // SAFETY: this fixture inspects identity without invoking the pointer.
+        let listener =
+            unsafe { SlotListener::new(id, PointId::TickWorldReturn, native as *const ()) };
+        register(&listener.ordered(owner % 3, "large")).unwrap();
+    }
     seal();
+    let mut owners = Vec::new();
+    fire_raw(PointId::TickWorldReturn, "fixture", &mut |_| {
+        owners.push(mod_api::crash::current_native_mod().unwrap().to_owned());
+    });
+    let expected: Vec<_> = (0..3)
+        .rev()
+        .flat_map(|priority| {
+            (0..64)
+                .filter(move |owner| owner % 3 == priority)
+                .map(|owner| format!("owner_{owner}"))
+        })
+        .collect();
+    assert_eq!(
+        owners, expected,
+        "equal priorities retain dependency order at scale"
+    );
     for row in rows {
         let mut heard = Vec::new();
         fire_raw(row.place, "fixture", &mut |kind| {
