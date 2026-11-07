@@ -722,6 +722,10 @@ pub mod tests {
 
     use std::sync::Arc;
 
+    /// Install fixture parts with the test rule schema.
+    pub fn install_parts_fixture(mods: &[ModEntry]) -> Result<(), Vec<String>> {
+        install_parts(mods, &rule_schema())
+    }
     /// A small independent vanilla-schema fixture for tests without a game.
     pub fn rule_schema() -> crate::__private::RuleSchema<'static> {
         crate::__private::RuleSchema {
