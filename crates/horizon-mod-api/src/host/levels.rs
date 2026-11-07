@@ -168,7 +168,7 @@ pub trait LevelsBackend {
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
     #[access(WorldOnly)]
-    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockKey>;
     /// Side: both.
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for

@@ -63,7 +63,7 @@ pub trait ClientRenderClientHost {
     /// cube. None for a block the game does not know. The model is the state's first random variant. API
     /// 380.
     #[access(PublishedResources)]
-    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>>;
+    fn block_sprites(&self, blocks: &[BlockStateId]) -> Vec<Option<BlockSprites>>;
     /// Side: client.
     /// Published asset/data read: available in Setup, Reloading and World.
     /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no

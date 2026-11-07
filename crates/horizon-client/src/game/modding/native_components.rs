@@ -77,13 +77,15 @@ impl Game<'_> {
     /// Item `item`'s cooking-fuel burn time in ticks (`FuelValues.burnDuration` of its `cooking_fuel`
     /// component, the data pack's context int provider resolved), None where it is no fuel. API
     /// @API:item_components@.
-    pub(super) fn item_burn_time(&self, item: &str) -> Option<i32> {
+    pub(super) fn item_burn_time(&self, item: mod_api::ItemKey) -> Option<i32> {
+        let item = mod_api::__private::item_key_id(item)?;
         let (time, _) = self.items().get(item)?.fuel.as_ref()?;
         Some(self.res.providers().int_value(time))
     }
     /// Item `item`'s chance to raise a composter's level (its `compostable` component's layers provider
     /// resolved), None where it is not compostable. API @API:item_components@.
-    pub(super) fn item_compost_chance(&self, item: &str) -> Option<f32> {
+    pub(super) fn item_compost_chance(&self, item: mod_api::ItemKey) -> Option<f32> {
+        let item = mod_api::__private::item_key_id(item)?;
         let layers = self.items().get(item)?.compostable.as_ref()?;
         Some(self.res.providers().layer_chance(layers))
     }

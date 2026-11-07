@@ -203,10 +203,10 @@ impl Game<'_> {
 
     /// `Block.asItem`: the block's item name, including air for a block with
     /// no item; None if the block name is unknown.
-    pub(super) fn block_item(&self, block: BlockKey) -> Option<String> {
+    pub(super) fn block_item(&self, block: BlockKey) -> Option<mod_api::ItemKey> {
         let behaviours = self.res.behaviours();
         let id = mod_api::__private::resolved_block(block)?.block;
-        Some(behaviours.block_data(id).item.to_string())
+        mod_api::__private::item_key(&behaviours.block_data(id).item)
     }
 }
 

@@ -8648,16 +8648,14 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityChangeBlockPre) {
             return false;
         }
-        let name = |s: BlockStateId| self.res.facts().get(s).name.to_string();
-        let (from, to) = (name(from), name(to));
         let mut cancel = false;
         self.native_entity_change_block_pre(mod_api::__private::EntityChangeBlockPreCall {
             player,
             entity: None,
             kind: "minecraft:player",
             pos: [position.x, position.y, position.z],
-            from: &from,
-            to: &to,
+            from,
+            to,
             cancel: &mut cancel,
         });
         cancel

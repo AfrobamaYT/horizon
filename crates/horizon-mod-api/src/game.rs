@@ -192,7 +192,7 @@ impl Default for NativeFalling {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeHeldItem {
-    pub id: String,
+    pub id: ItemKey,
     pub count: u32,
     /// The inventory slot: 0 to 8, the hotbar (a mod use is the main hand's).
     pub slot: u32,
@@ -213,7 +213,7 @@ pub struct NativeHit {
     pub y: f64,
     pub z: f64,
     /// The block's id (`minecraft:stone`).
-    pub block: String,
+    pub block: BlockKey,
 }
 /// What happened to a mod's claimed item, oldest first.
 #[derive(Clone, Debug, PartialEq)]

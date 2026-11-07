@@ -87,7 +87,7 @@ impl Game<'_> {
         let stack = self.stack_in(slot)?;
         let extra = stack.extra.as_deref();
         Some(NativeHeldItem {
-            id: stack.item.to_string(),
+            id: mod_api::__private::item_key(&stack.item)?,
             count: stack.count,
             slot: slot as u32,
             custom_name: extra
@@ -130,7 +130,7 @@ impl Game<'_> {
                 x: point[0],
                 y: point[1],
                 z: point[2],
-                block: self.res.facts().get(state).name.to_string(),
+                block: mod_api::__private::block_key(&self.res.facts().get(state).name)?,
             },
         ))
     }
@@ -180,7 +180,10 @@ impl Game<'_> {
         let Some(item) = self.mod_held(slot) else {
             return false;
         };
-        let Some(id) = self.native_input.claimant(&item.id).map(str::to_owned) else {
+        let Some(id) = mod_api::__private::item_key_id(item.id)
+            .and_then(|item| self.native_input.claimant(item))
+            .map(str::to_owned)
+        else {
             return false;
         };
         self.native_input.start(&id, item, slot);
@@ -221,7 +224,7 @@ mod input_tests {
 
     fn stick(slot: u32) -> NativeHeldItem {
         NativeHeldItem {
-            id: "minecraft:stick".into(),
+            id: mod_api::__private::item_key("minecraft:stick").unwrap(),
             count: 1,
             slot,
             custom_name: None,

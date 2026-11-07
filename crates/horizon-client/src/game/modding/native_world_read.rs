@@ -196,8 +196,8 @@ impl Game<'_> {
     /// The bucket item that picks `fluid` up (`Fluid.getBucket`), `minecraft:water_bucket` for
     /// water and flowing water. None for `minecraft:empty`, whose bucket is air, and for a name
     /// no fluid has.
-    pub(super) fn fluid_bucket(&self, fluid: &str) -> Option<&'static str> {
-        horizon_world::level::fluid_bucket(fluid_kind(fluid)?)
+    pub(super) fn fluid_bucket(&self, fluid: &str) -> Option<mod_api::ItemKey> {
+        mod_api::__private::item_key(horizon_world::level::fluid_bucket(fluid_kind(fluid)?)?)
     }
 
     /// The sound event a bucket plays as it picks `fluid` up (`Fluid.getPickupSound`),

@@ -704,7 +704,7 @@ impl Game<'_> {
             }
         };
         Some(BrowserStack {
-            item: stack.item.to_string(),
+            item: mod_api::__private::item_key(&stack.item)?,
             count: stack.count,
             components: super::native_recipes::components(&stack),
         })
@@ -734,7 +734,8 @@ pub(super) fn browser_stack(
     items: &horizon_client::items::Items,
     s: &BrowserStack,
 ) -> Option<ItemStack> {
-    items.get(&s.item)?;
+    let item = mod_api::__private::item_key_id(s.item)?;
+    items.get(item)?;
     let (damage, extra) = if s.components.is_empty() {
         (0, None)
     } else {
@@ -743,7 +744,7 @@ pub(super) fn browser_stack(
         })
     };
     Some(ItemStack {
-        item: s.item.as_str().into(),
+        item: item.into(),
         count: s.count.clamp(1, 99),
         damage,
         extra,
@@ -758,7 +759,7 @@ mod tests {
 
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {
-            item: item.into(),
+            item: mod_api::__private::item_key(item).unwrap(),
             count: 1,
             components: String::new(),
         }
