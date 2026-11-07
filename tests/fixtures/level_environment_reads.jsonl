@@ -251,3 +251,12 @@
 {"kind":"biome","name":"biome-123456789-17-2147483647-8","zoom_seed":123456789,"position":[17,2147483647,8],"loaded":[[-1,-1],[-1,0],[-1,1],[0,-1],[0,0],[0,1],[1,-1],[1,1]]}
 {"kind":"biome","name":"biome-123456789-31--2147483648-16","zoom_seed":123456789,"position":[31,-2147483648,16],"loaded":[[-1,-1],[-1,0],[-1,1],[0,-1],[0,0],[0,1],[1,-1],[1,1]]}
 {"kind":"biome","name":"biome-123456789-31-2147483647-16","zoom_seed":123456789,"position":[31,2147483647,16],"loaded":[[-1,-1],[-1,0],[-1,1],[0,-1],[0,0],[0,1],[1,-1],[1,1]]}
+{"kind":"search","name":"search-parameters-minecraft:overworld-0","dimension":"minecraft:overworld","seed":12345,"position":[-17,-128,-16],"selector":"#is_overworld","radius":0,"horizontal":8,"vertical":16}
+{"kind":"search","name":"search-parameters-minecraft:overworld-1","dimension":"minecraft:overworld","seed":12345,"position":[31,1024,-33],"selector":"#is_overworld","radius":0,"horizontal":64,"vertical":32}
+{"kind":"search","name":"search-parameters-minecraft:overworld-2","dimension":"minecraft:overworld","seed":12345,"position":[4096,80,-4096],"selector":"#is_overworld","radius":128,"horizontal":64,"vertical":16}
+{"kind":"search","name":"search-parameters-minecraft:the_nether-0","dimension":"minecraft:the_nether","seed":12345,"position":[-17,-128,-16],"selector":"#is_nether","radius":0,"horizontal":8,"vertical":16}
+{"kind":"search","name":"search-parameters-minecraft:the_nether-1","dimension":"minecraft:the_nether","seed":12345,"position":[31,1024,-33],"selector":"#is_nether","radius":0,"horizontal":64,"vertical":32}
+{"kind":"search","name":"search-parameters-minecraft:the_nether-2","dimension":"minecraft:the_nether","seed":12345,"position":[4096,80,-4096],"selector":"#is_nether","radius":128,"horizontal":64,"vertical":16}
+{"kind":"search","name":"search-parameters-minecraft:the_end-0","dimension":"minecraft:the_end","seed":12345,"position":[-17,-128,-16],"selector":"#is_end","radius":0,"horizontal":8,"vertical":16}
+{"kind":"search","name":"search-parameters-minecraft:the_end-1","dimension":"minecraft:the_end","seed":12345,"position":[31,1024,-33],"selector":"#is_end","radius":0,"horizontal":64,"vertical":32}
+{"kind":"search","name":"search-parameters-minecraft:the_end-2","dimension":"minecraft:the_end","seed":12345,"position":[4096,80,-4096],"selector":"#is_end","radius":128,"horizontal":64,"vertical":16}
