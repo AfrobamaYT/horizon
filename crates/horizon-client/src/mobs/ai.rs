@@ -391,6 +391,41 @@ pub fn brain_target(mob: &Mob) -> Option<Option<Who>> {
     })
 }
 
+/// Whether `Brain.setMemory(ATTACK_TARGET, ...)` reaches what the mob's
+/// brain acts on (#934): every species [`brain_target`] reads but the frog,
+/// whose target belongs to its running tongue attack.
+pub fn writes_brain_target(mob: &Mob) -> bool {
+    match mob.species() {
+        Species::Frog => false,
+        Species::Axolotl => mob.extra.animal_brain.is_some(),
+        _ => brain_target(mob).is_some(),
+    }
+}
+
+/// `Brain.setMemory(ATTACK_TARGET, target)` / `eraseMemory` (#934): the
+/// memory each brain keeps it in, non-expiring, with `ai.target` mirrored
+/// where the brain mirrors it. No species setter side effects. False when
+/// [`writes_brain_target`] is false.
+pub fn set_brain_target(mob: &mut Mob, target: Option<Who>) -> bool {
+    if !writes_brain_target(mob) {
+        return false;
+    }
+    match mob.species() {
+        Species::Warden => super::warden_brain::mem(mob).attack_target.set_opt(target),
+        Species::Breeze | Species::Creaking => {
+            super::monster_brain::set_attack_target(mob, target);
+        }
+        Species::Axolotl => {
+            super::animal_brain::mem(mob).attack_target.set_opt(target);
+            mob.ai.target = target;
+        }
+        // The piglin, piglin brute, hoglin and zoglin brains keep it in the
+        // mob's own target slot (what `brain_target` reads).
+        _ => mob.ai.target = target,
+    }
+    true
+}
+
 pub fn register(m: &mut Mob) {
     constructor_maluses(m);
     // Raider subclasses call super.registerGoals() first.

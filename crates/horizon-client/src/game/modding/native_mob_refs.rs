@@ -264,37 +264,90 @@ impl Game<'_> {
                 return false;
             }
         }
-        let (who, player) = match target {
-            None => (None, None),
-            Some(target) => match self.native_entity_target(target.entity()) {
-                Some(Target::Mob(id)) => (Some(Who::Mob(id)), None),
-                Some(Target::Guest(conn)) if self.lan_acting_uuid.is_none() => {
-                    let Some(guest) = self.lan.as_ref().and_then(|h| h.hub.guest(conn)) else {
-                        return false;
-                    };
-                    if guest.dimension != self.dim.id() {
-                        return false;
-                    }
-                    (Some(Who::Player), Some(conn))
-                }
-                Some(Target::Player) => match self.lan_acting {
-                    Some(conn) if self.lan.is_some() => (Some(Who::Player), Some(conn)),
-                    _ => return false,
-                },
-                _ => return false,
-            },
+        let Some(who) = self.native_mob_bind_target(id, target) else {
+            return false;
         };
-        if let Some(conn) = player {
-            let Some(host) = self.lan.as_mut() else {
-                return false;
-            };
-            host.mob_players.insert(id, conn);
-        }
         let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return false;
         };
         mob.set_target(who);
         true
+    }
+
+    /// The `Who` mob `id` stores for `target`, for either target setter: a
+    /// mob, or a player in the level in place. A player target binds to the
+    /// mob (`mob_players`), so the mob's tick sees that player. None for a
+    /// fake player (the root rule for every mob target setter), a player in
+    /// another level, or anything else (an armor stand, the dragon, a stale
+    /// handle).
+    fn native_mob_bind_target(
+        &mut self,
+        id: u32,
+        target: Option<LivingRef>,
+    ) -> Option<Option<Who>> {
+        let (who, player) = match target {
+            None => (None, None),
+            Some(target) => match self.native_entity_target(target.entity())? {
+                Target::Mob(id) => (Some(Who::Mob(id)), None),
+                t @ Target::Guest(conn) if self.lan_acting_uuid.is_none() => {
+                    self.native_player_facts(t)?;
+                    let guest = self.lan.as_ref()?.hub.guest(conn)?;
+                    if guest.dimension != self.dim.id() {
+                        return None;
+                    }
+                    (Some(Who::Player), Some(conn))
+                }
+                t @ Target::Player => {
+                    self.native_player_facts(t)?;
+                    match self.lan_acting {
+                        Some(conn) if self.lan.is_some() => (Some(Who::Player), Some(conn)),
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            },
+        };
+        if let Some(conn) = player {
+            self.lan.as_mut()?.mob_players.insert(id, conn);
+        }
+        Some(who)
+    }
+
+    /// `Brain.setMemory(ATTACK_TARGET, target)`, or `eraseMemory` for None:
+    /// the target a brain-driven mob — an axolotl, a breeze, a creaking, a
+    /// hoglin, a piglin or piglin brute, a warden or a zoglin — reads instead
+    /// of `Mob.setTarget`'s (#934). A plain, non-expiring memory write: the
+    /// brain's own behaviours act on it from the next tick (a target the
+    /// species may not attack is dropped there, as vanilla's
+    /// `StopAttackingIfTargetInvalid` drops it), and none of a species' own
+    /// setter effects run — a warden's `setAttackTarget` roar, reach and
+    /// sonic-boom bookkeeping stays with its own sensing. A frog refuses: its
+    /// target belongs to the running tongue attack, which starts from the
+    /// nearest attackable, so a written one would not be pursued.
+    /// False for a fake player, a player in another level, a mob without an
+    /// attack-target brain (`MobRef::set_target` writes those), a stale or
+    /// unavailable mob, the dragon, or on a client.
+    pub(super) fn native_mob_set_brain_target(
+        &mut self,
+        mob: MobRef,
+        target: Option<LivingRef>,
+    ) -> bool {
+        let Some(Target::Mob(id)) = self.native_entity_target(mob.entity()) else {
+            return false;
+        };
+        let Some(m) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
+            return false;
+        };
+        if !horizon_client::mobs::ai::writes_brain_target(m) {
+            return false;
+        }
+        let Some(who) = self.native_mob_bind_target(id, target) else {
+            return false;
+        };
+        self.mobs
+            .iter_mut()
+            .find(|m| m.id == id)
+            .is_some_and(|m| horizon_client::mobs::ai::set_brain_target(m, who))
     }
 
     /// The mob flag a handle names: a mob's, or the dragon's own.
@@ -1140,6 +1193,88 @@ mod tests {
             assert_eq!(piglin.target(game), Some(other));
             assert!(piglin.set_target(game, None));
             assert_eq!(piglin.target(game), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn brain_species_take_a_written_attack_target_memory() {
+        with_game(|game| {
+            for (id, name) in [
+                (12, "minecraft:warden"),
+                (13, "minecraft:breeze"),
+                (14, "minecraft:axolotl"),
+                (15, "minecraft:piglin"),
+                (16, "minecraft:hoglin"),
+                (17, "minecraft:creaking"),
+                (18, "minecraft:zoglin"),
+                (19, "minecraft:frog"),
+                (20, "minecraft:zombie"),
+                (21, "minecraft:iron_golem"),
+            ] {
+                let kind = game.res.mob_types().get(name).unwrap().clone();
+                game.mobs.push(Mob::new(id, kind, Vec3::ZERO, 0.0));
+            }
+            let handle = |game: &Game<'_>, id| {
+                game.native_mob_ref(game.native_entity(id).unwrap())
+                    .unwrap()
+            };
+            let golem = game.native_living(game.native_entity(21).unwrap()).unwrap();
+            // Each brain keeps the memory where its behaviours read it, and the
+            // read handle answers it back; clearing erases it.
+            for id in [12, 13, 14, 15, 16, 17, 18] {
+                let mob = handle(game, id);
+                assert!(mob.set_brain_target(game, Some(golem)), "mob {id}");
+                assert_eq!(mob.target(game), Some(golem), "mob {id}");
+                assert_eq!(
+                    mobs::ai::brain_target(game.mobs.iter().find(|m| m.id == id).unwrap()),
+                    Some(Some(Who::Mob(21))),
+                    "mob {id}"
+                );
+                assert!(mob.set_brain_target(game, None), "mob {id}");
+                assert_eq!(mob.target(game), None, "mob {id}");
+            }
+            // A plain memory write: the warden's own setAttackTarget effects
+            // (the sonic-boom cooldown among them) do not run.
+            let warden = handle(game, 12);
+            assert!(warden.set_brain_target(game, Some(golem)));
+            let st = game.mobs.iter().find(|m| m.id == 12).unwrap();
+            assert!(
+                !st.extra
+                    .warden
+                    .as_ref()
+                    .unwrap()
+                    .brain
+                    .mem
+                    .sonic_boom_cooldown
+                    .present()
+            );
+            // The brains act on it: a tick keeps a hoglin's and a breeze's
+            // written target (their target-validity behaviours accept an iron
+            // golem), as a memory their own sensing set would be kept.
+            for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+                let mut chunk = horizon_client::chunk::Chunk::empty(x, z);
+                chunk.lit = true;
+                game.world.chunks.insert((x, z), std::sync::Arc::new(chunk));
+            }
+            for id in [13, 16] {
+                assert!(handle(game, id).set_brain_target(game, Some(golem)));
+            }
+            game.tick_mobs().unwrap();
+            for id in [13, 16] {
+                assert_eq!(
+                    handle(game, id).target(game),
+                    Some(golem),
+                    "mob {id} after a tick"
+                );
+            }
+            // The frog's target belongs to its tongue attack; a mob without
+            // an attack-target brain takes `set_target` instead.
+            assert!(!handle(game, 19).set_brain_target(game, Some(golem)));
+            assert!(!handle(game, 20).set_brain_target(game, Some(golem)));
+            assert!(handle(game, 20).set_target(game, Some(golem)));
+            // The ordinary setter still refuses the brain species.
+            assert!(!handle(game, 13).set_target(game, Some(golem)));
         });
     }
 

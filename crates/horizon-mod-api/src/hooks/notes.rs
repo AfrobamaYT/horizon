@@ -1016,7 +1016,7 @@ steers a mob through the engine's own controls, each a momentary wish the mob's 
   over the next ticks. Non-finite coordinates are refused. `mob.jump(host)` is `JumpControl.jump`: the mob jumps on its
   next own tick by its own jump path — no velocity is written. No species refuses either: vanilla's brains themselves
   write through these controls (a brain species' `LookAtTargetSink` calls the same `lookAt`), so a mod's wish and the
-  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species). A
+  mob's own are one flag, not a brain memory a write could miss (which is why `set_target` refuses brain species, and `set_brain_target` writes their `ATTACK_TARGET` memory instead). A
   creaking being looked at, an angry bee and an axolotl playing dead hold their look control, and a held creaking its
   jump control, as in vanilla: the wish waits until the control runs again.
 - `mob.navigation_speed(host)` / `set_navigation_speed(host, speed)` read and set `PathNavigation.speedModifier`, the
@@ -2891,6 +2891,13 @@ registration path.
   each frame the HUD draws the hearts, `kind` comes in as vanilla's pick (poisoned, withered, frozen or normal) and a mod
   may set another. It runs before `native_health_hud`, whose `inputs.kind` carries the answer; only the heart sprites
   change.
+
+- Where each boss bar is drawn through `native_customize_boss_event_progress` (NeoForge's
+  `CustomizeGuiOverlayEvent.BossEventProgress`): once a frame per bar, in the order the server added them, `x` and
+  `y` come in as the bar's top-left corner (91 left of the centre; 12, then 19 lower for each bar) and `increment` as
+  the spacing to the next (19). The bar and its title are drawn where a mod moved them, and the next bar comes in
+  `increment` below where this one came in. A cancelled bar is not drawn and its increment still applies. Bars stop
+  once the next would start a third of the way down the screen. With no listener nothing is built per bar.
 
 - Where the in-game chat is drawn through `native_customize_chat_overlay` (NeoForge's `CustomizeGuiOverlayEvent.Chat`):
   each frame the chat layer draws, `x` and `y` come in as the chat's bottom-left corner (0 and the GUI height minus 40)
