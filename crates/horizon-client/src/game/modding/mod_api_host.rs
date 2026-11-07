@@ -140,7 +140,7 @@ impl Game<'_> {
             {
                 return Err(AttachmentError::MissingHolder);
             }
-            let level = painting.and_then(|_| self.native_level(self.dim.id()));
+            let level = painting.and_then(|_| self.level(self.dim.id()));
             let uuid = self.uuid_for(id);
             let map = self.entity_attachments.entry(uuid).or_default();
             if let Some(i) = painting {
