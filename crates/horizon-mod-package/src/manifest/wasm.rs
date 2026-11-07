@@ -13,9 +13,6 @@ pub struct Wasm {
     toolchain: String,
     linked: std::collections::BTreeMap<String, String>,
     built_with: Option<String>,
-    /// The same fingerprinted internals declaration used by a native mod.
-    #[serde(skip)]
-    pub(crate) internals: Vec<super::Internal>,
 }
 
 #[derive(Deserialize)]
@@ -47,7 +44,6 @@ impl TryFrom<Fields> for Wasm {
             toolchain: fields.toolchain,
             linked: fields.linked,
             built_with: fields.built_with,
-            internals: Vec::new(),
         })
     }
 }
@@ -115,11 +111,6 @@ impl std::fmt::Display for WasmError {
 impl std::error::Error for WasmError {}
 
 impl Wasm {
-    /// The internals the package declares, checked against the game's generated table at load.
-    pub fn internals(&self) -> &[super::Internal] {
-        &self.internals
-    }
-
     /// The SHA-512 of the package's `mod.wasm`.
     pub fn sha512(&self) -> &str {
         &self.sha512
