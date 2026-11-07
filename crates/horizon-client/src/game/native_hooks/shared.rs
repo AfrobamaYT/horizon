@@ -234,6 +234,10 @@ impl Game<'_> {
             partial_tick: self.clock.fraction() as f32,
         })
     }
+    #[cfg(test)]
+    pub(super) fn test_screen_change_view(&self) -> NativeScreenView<'_> {
+        self.screen_change_view(self.screen)
+    }
     /// A mod's own screen cannot open now: over the title screen, a book, a
     /// sign editor, a dialog or a prompt, with no player or a
     /// world loading, or on a guest's behalf.
