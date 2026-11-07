@@ -1783,24 +1783,6 @@ pub trait Hooks {
         neoforge = "none (NeoForge adds ColorResolvers with RegisterColorHandlersEvent.ColorResolvers; it does not retint a biome's own colours)"
     )]
     fn biome_colors();
-    /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
-    /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
-    /// the world's data packs, and the files mods added through
-    /// `native_data_pack_files`, are what the helpers read from now on.
-    /// `reload` is false on a world's first open, before its chunks and
-    /// players are loaded, and true after `/reload` rebuilt them, once the
-    /// players were sent the new data. The place to
-    /// drop caches derived from the data and to rebind what depends on it.
-    /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it. Runs in Reloading: published
-    /// asset/data queries can rebind caches, including on first open; world
-    /// handles and transactions remain unavailable.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        neoforge = "TagsUpdatedEvent.ServerDataLoad"
-    )]
-    fn server_data_loaded();
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
     /// Only finite values in 1..=179 degrees replace the computed FOV.

@@ -641,23 +641,6 @@ impl Game<'_> {
     pub(in crate::game) fn native_recipes_received(&mut self, recipe_types: &[String]) {
         self.fire_recipes_received(recipe_types);
     }
-    /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
-    /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
-    /// the world's data packs, and the files mods added through
-    /// `native_data_pack_files`, are what the helpers read from now on.
-    /// `reload` is false on a world's first open, before its chunks and
-    /// players are loaded, and true after `/reload` rebuilt them, once the
-    /// players were sent the new data. The place to
-    /// drop caches derived from the data and to rebind what depends on it.
-    /// Server-side (the single player's integrated server included); a client
-    /// connected to a server never fires it.
-    pub(in crate::game) fn native_server_data_loaded(&mut self, reload: bool) {
-        let phase = self.mod_phase.clone();
-        let _reload = phase
-            .reloading()
-            .expect("server data notice on its owning thread");
-        self.fire_server_data_loaded(reload);
-    }
     /// The folders of JSON files native mods read from the data
     /// (`AddServerReloadListenersEvent`): push yours, each a listener id and a
     /// folder under `data/<namespace>/`. Asked at the start of every data load

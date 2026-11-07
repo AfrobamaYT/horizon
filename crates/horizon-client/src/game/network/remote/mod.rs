@@ -515,6 +515,9 @@ pub(super) struct Remote {
     pub(super) builtin: Arc<Builtin>,
     lang: Arc<Language>,
     pub(super) registries: Arc<Dynamic>,
+    /// The block, item and fluid tags of `registries` by name, as native mods read them
+    /// (`install_remote_tags`).
+    pub(super) tags: Option<horizon_client::items::Items>,
     /// The game's enchantments and the server's that it lacks (a data
     /// pack's), from their synced data; `None` when the server has none.
     pub(super) enchantments: Option<Arc<horizon_client::enchant::Enchantments>>,
@@ -1111,6 +1114,7 @@ impl Game<'_> {
                 .unwrap_or_else(|| "Connecting to the server...".into()),
             lang,
             registries: Arc::new(Dynamic::default()),
+            tags: None,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -1349,6 +1353,7 @@ impl Game<'_> {
             status: "Playing Studio Replay".into(),
             lang,
             registries: Arc::new(Dynamic::default()),
+            tags: None,
             enchantments: None,
             joined: false,
             reconfiguring: None,
@@ -3706,6 +3711,8 @@ impl Game<'_> {
                 if let Err(e) = self.resolve_parts() {
                     log::warn!("Horizon: {e}");
                 }
+                // Configuration's tags, over the block ids the parts just bound.
+                self.install_remote_tags();
                 self.refresh_render_visibility();
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
@@ -5204,6 +5211,7 @@ impl Game<'_> {
                     self.ui.registries.custom_completions = r.custom_completions.clone();
                 }
             }
+            C::UpdateTags(p) => self.remote_update_tags(&p),
             C::Commands(p) => {
                 let tree = horizon_client::command::network::from_packet(
                     &p,

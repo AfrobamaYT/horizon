@@ -113,25 +113,23 @@ impl Builtin {
 #[derive(Clone, Debug, Default)]
 pub struct Dynamic {
     pub registries: HashMap<String, Vec<(String, Option<Tag>)>>,
-    /// The `minecraft:dialog` tags the server sent: each tag's entries by id.
-    pub dialog_tags: HashMap<String, Vec<i32>>,
+    /// The tags the server sent, by registry: each tag's entries by id.
+    pub tags: HashMap<String, HashMap<String, Vec<i32>>>,
     /// The peer confirmed the native component registry identity.
     pub custom_components: bool,
 }
 impl Dynamic {
-    /// The dialog tags of a `ClientboundUpdateTagsPacket`.
+    /// A `ClientboundUpdateTagsPacket`: the registries it names replace their
+    /// tags, the others keep theirs.
     pub fn add_tags(&mut self, packet: &UpdateTags) {
-        for r in packet
-            .registries
-            .iter()
-            .filter(|r| r.registry == "minecraft:dialog")
-        {
-            self.dialog_tags = r
-                .tags
-                .iter()
-                .map(|t| (t.name.clone(), t.ids.clone()))
-                .collect();
+        for r in &packet.registries {
+            let tags = r.tags.iter().map(|t| (t.name.clone(), t.ids.clone()));
+            self.tags.insert(r.registry.clone(), tags.collect());
         }
+    }
+    /// The entries of a tag by id.
+    pub fn tag(&self, registry: &str, tag: &str) -> Option<&[i32]> {
+        self.tags.get(registry)?.get(tag).map(Vec::as_slice)
     }
     pub fn add(&mut self, packet: RegistryData) {
         let entries = packet.entries.into_iter().map(|e| (e.id, e.data)).collect();
@@ -285,6 +283,29 @@ pub fn ceil_log2(n: usize) -> u8 {
 mod tests {
     use super::*;
     use crate::packets::configuration::RegistryEntry;
+
+    #[test]
+    fn tags_replace_only_the_registries_a_packet_names() {
+        let packet = |registry: &str, name: &str, ids: Vec<i32>| UpdateTags {
+            registries: vec![crate::packets::configuration::RegistryTags {
+                registry: registry.into(),
+                tags: vec![crate::packets::configuration::TagEntry {
+                    name: name.into(),
+                    ids,
+                }],
+            }],
+        };
+        let mut dynamic = Dynamic::default();
+        dynamic.add_tags(&packet("minecraft:dialog", "minecraft:a", vec![1, 2]));
+        dynamic.add_tags(&packet("minecraft:item", "minecraft:b", vec![3]));
+        dynamic.add_tags(&packet("minecraft:item", "minecraft:c", vec![4]));
+        assert_eq!(
+            dynamic.tag("minecraft:dialog", "minecraft:a"),
+            Some(&[1, 2][..])
+        );
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:b"), None);
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:c"), Some(&[4][..]));
+    }
 
     #[test]
     fn parses_registry_reports() {

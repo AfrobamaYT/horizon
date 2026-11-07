@@ -11245,7 +11245,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.read_raids();
         }
-        self.native_server_data_loaded(false);
+        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: false });
         self.sync_recipe_content();
         reset_world_progress(&mut self.adv, &mut self.stats);
         self.prefetch_advancement_tree(&stack);
