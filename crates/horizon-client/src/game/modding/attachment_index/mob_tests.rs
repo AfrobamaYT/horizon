@@ -56,6 +56,8 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         let replacement = game.mobs[0].clone();
         horizon_client::join_seq::store_back(&mut game.mobs[0], replacement);
         assert!(game.mobs[0].attachment_lifetime.is_bound());
+        let after = index.lock().unwrap().work_count();
+        assert_eq!(after, work);
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(7));
         assert_eq!(
@@ -68,7 +70,6 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
                 .value,
             &7
         );
-        assert_eq!(index.lock().unwrap().work_count(), work);
         let entity = game.entity(id).unwrap();
         assert!(game.entity_discard(entity));
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
