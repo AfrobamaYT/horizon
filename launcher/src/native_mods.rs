@@ -2388,7 +2388,7 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        source::stage(&pending, &catalog_dir, &ordered, &append_log)
+        source::stage(&pending, &catalog_dir, &ordered)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;

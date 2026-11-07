@@ -39,6 +39,17 @@ fn run(functions: bool, private: bool) {
     tar.arg("-xf").arg(archive).arg("-C").arg(&source);
     checked(tar);
     if private {
+        let slots = source.join("crates/horizon-mod-api-gen/slots/horizon.txt");
+        let text = fs::read_to_string(&slots).unwrap();
+        let text = text
+            .lines()
+            .filter(|line| {
+                !line.contains("::next_autosave_interval |")
+                    && !line.contains("::on_tick_rate_changed |")
+            })
+            .map(|line| format!("{line}\n"))
+            .collect::<String>();
+        fs::write(slots, text).unwrap();
         let game = source.join("crates/horizon-client/src/game.rs");
         let text = fs::read_to_string(&game).unwrap();
         fs::write(
@@ -142,16 +153,7 @@ fn run(functions: bool, private: bool) {
             .is_some(),
         private
     );
-    super::source::stage(
-        &source,
-        &catalog_dir,
-        std::slice::from_ref(&bundle),
-        &|line| {
-            eprintln!("{line}");
-            Ok(())
-        },
-    )
-    .unwrap();
+    super::source::stage(&source, &catalog_dir, std::slice::from_ref(&bundle)).unwrap();
     assert_eq!(
         horizon_mod_api_gen::points::source::read(&source)
             .unwrap()
@@ -168,7 +170,9 @@ fn run(functions: bool, private: bool) {
         &catalog
     )
     .unwrap());
-    let target = scratch.join("target");
+    let target = std::env::var_os("HORIZON_TEST_BUILD_TARGET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| scratch.join("target"));
     let mut cargo = Command::new("cargo");
     cargo
         .current_dir(&source)
