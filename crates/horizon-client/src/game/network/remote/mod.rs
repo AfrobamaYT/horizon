@@ -11816,10 +11816,7 @@ mod tests {
                     .shared_menu_title_snapshot()
                     .is_none()
             );
-            assert!(
-                game.observed_screen_view()
-                    .is_none_or(|view| view.title.is_none())
-            );
+            assert!(game.test_observed_title().is_none());
             open(game, chest, "again");
             snapshot(game);
             game.remote_close_container();
@@ -11875,10 +11872,7 @@ mod tests {
                     .shared_menu_title_snapshot()
                     .is_none()
             );
-            assert!(
-                game.observed_screen_view()
-                    .is_none_or(|view| view.title.is_none())
-            );
+            assert!(game.test_observed_title().is_none());
         });
     }
     /// The remote player animation uses the scoped item answer once per tick.
