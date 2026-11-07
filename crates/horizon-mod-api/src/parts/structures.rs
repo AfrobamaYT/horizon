@@ -55,7 +55,8 @@ pub mod tests {
                 r.register_structure_type("tower", Tower);
             }
         }
-        install_parts(&[ModEntry::new("test", Box::new(Valid))]).unwrap();
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Valid))])
+            .unwrap();
         let types = crate::__private::installed_structure_types();
         assert!(types.contains_key("test:tower"));
         assert_eq!(types.len(), 1);
