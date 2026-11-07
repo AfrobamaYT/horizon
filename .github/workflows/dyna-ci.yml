@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
@@ -38,8 +38,9 @@ jobs:
 
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
+  # A draft pull request skips every check below (they all need this job); it runs when marked ready.
   changes:
-    if: github.event_name != 'schedule' && !inputs.prepare-output-check
+    if: github.event_name != 'schedule' && !inputs.prepare-output-check && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
