@@ -10,13 +10,21 @@ root = Path(__file__).resolve().parents[3]
 game = (root / "crates/horizon-client/src/game.rs").read_text()
 call = next(line.strip() for line in game.splitlines() if "api_values::resolve_block_definitions(" in line)
 source = (root / "crates/horizon-client/src/game/modding/api_values.rs").read_text()
-def production_function(name):
-    start = source.index(f"fn {name}(")
+def production_item(header):
+    start = source.index(header)
     start = source.rfind("\n", 0, start) + 1
     return source[start:source.index("\n}\n", start) + 3]
 
-source = (production_function("resolve_block_definitions") + "\n#[test]\n" +
-          production_function("block_definition_import_preserves_defaults_and_is_immutable_after_load"))
+source = "\n".join([
+    production_item("trait TryIntoApi {"),
+    production_item("impl TryIntoApi for horizon_world::chunk::BlockState {"),
+    production_item("fn block_metadata_table("),
+    production_item("fn resolve_block_definitions("),
+    "#[test]",
+    production_item("fn block_definition_import_preserves_defaults_and_is_immutable_after_load("),
+    "#[test]",
+    production_item("fn block_values_keep_frozen_ordinals_when_world_state_ids_reorder("),
+])
 source = source.replace("pub(in crate::game)", "pub(crate)")
 fixture = Path(__file__).with_name("block_key_load_boundary.rs").read_text()
 fixture = "mod api_values {\n" + source + "}\n" + fixture

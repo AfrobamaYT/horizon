@@ -9,12 +9,6 @@ pub trait BlockStatesHost {
     #[access(WorldOnly)]
     fn lit_block_name(&self, pos: [i32; 3]) -> Option<&str>;
     /// Side: both.
-    /// Property `key` of block state `state` (a machine's `facing`, from the
-    /// `state` `native_block_entity_submit` gets), if it has one: no lookup in
-    /// the world, so cheap each frame.
-    #[access(Metadata)]
-    fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str>;
-    /// Side: both.
     /// Resolve a registered fluid identifier.
     #[access(WorldOnly)]
     fn fluid_key(&self, id: &str) -> Option<FluidKey>;

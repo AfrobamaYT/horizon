@@ -152,6 +152,19 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(borrowed, Some("false"));
+        let value = crate::BlockState::of(&metadata, block, &[]).unwrap();
+        let changed = value.with(&metadata, "lit", "true").unwrap();
+        assert_eq!(value.property(&metadata, "lit"), Ok(Some("false")));
+        assert_eq!(changed.property(&metadata, "lit"), Ok(Some("true")));
+        assert_eq!(changed.ordinal(), 1);
+        assert_eq!(
+            changed.with(&metadata, "lit", "invalid"),
+            Err(BlockStateError::InvalidValue(0))
+        );
+        assert_eq!(
+            value.property(&Empty.block_states(), "lit"),
+            Err(BlockStateError::Unavailable)
+        );
         assert_eq!(metadata.property(off, "missing"), Ok(None));
         assert_eq!(
             metadata.with(off, "lit", "bad"),
