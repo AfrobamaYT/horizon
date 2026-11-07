@@ -226,9 +226,11 @@ mod tests {
 
     fn first_colour(pixels: &[u8]) -> [u8; 4] {
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .copied()
             .find(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
-            .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
             .unwrap_or([0; 4])
     }
 
