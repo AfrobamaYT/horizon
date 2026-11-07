@@ -1139,6 +1139,13 @@ mod glue {
     #[test]
     fn refused_menu_button_output_keeps_all_host_state() {
         let mut entity = crate::ModBlockEntity::new("test:counter".into(), Default::default());
+        let stone = crate::ItemStack {
+            item: "minecraft:stone".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        entity.items.push(Some(stone.clone()));
         let revision = entity.revision();
         let context = crate::menu::MenuButtonContext {
             player: 0,
@@ -1146,7 +1153,7 @@ mod glue {
             pos: [0; 3],
             id: 0,
         };
-        let mut carried = None;
+        let mut carried = Some(stone.clone());
         let mut event = crate::MenuButtonEvent {
             context: &context,
             entity: crate::ModBlockEntityView::new(&mut entity),
@@ -1159,12 +1166,36 @@ mod glue {
             carried: Some(Some(vec![])),
         };
         assert!(write_menu_button_event(&mut event, output).is_err());
-        assert!(
-            entity.data.is_empty(),
-            "a refused return must apply no earlier writes"
-        );
-        assert_eq!(entity.revision(), revision);
-        assert!(carried.is_none());
+        assert!(event.entity.data.is_empty());
+        assert_eq!(event.entity.entity.revision(), revision);
+        assert_eq!(event.carried.as_ref(), Some(&stone));
+        let mut wire = block_entity_view(&event.entity).unwrap();
+        let stack = wire.entity.fields.items[0].clone();
+        wire.entity.fields.nbt = vec![];
+        let output = horizon::mod_api::types::MenuButtonEventOut {
+            entity: Some(wire),
+            carried: Some(None),
+        };
+        assert!(write_menu_button_event(&mut event, output).is_err());
+        assert_eq!(event.carried.as_ref(), Some(&stone));
+        assert_eq!(event.entity.entity.revision(), revision);
+        let mut wire = block_entity_view(&event.entity).unwrap();
+        wire.entity.fields.data = vec![17];
+        *event.carried = None;
+        let output = horizon::mod_api::types::MenuButtonEventOut {
+            entity: Some(wire),
+            carried: Some(stack),
+        };
+        write_menu_button_event(&mut event, output).unwrap();
+        assert_eq!(event.entity.data, [17]);
+        assert_eq!(event.entity.entity.revision().changes, revision.changes + 1);
+        assert_eq!(event.carried.as_ref(), Some(&stone));
+        let output = horizon::mod_api::types::MenuButtonEventOut {
+            entity: None,
+            carried: Some(None),
+        };
+        write_menu_button_event(&mut event, output).unwrap();
+        assert!(event.carried.is_none());
     }
 
     #[test]
