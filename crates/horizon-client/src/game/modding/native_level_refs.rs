@@ -1657,3 +1657,278 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod environment_read_tests {
+    use crate::game::{Dim, native_entity_refs::tests::with_game};
+    use horizon_client::chunk::Chunk;
+    use mod_api::{BiomeSearch, Host, LevelRef, NativeWorldEpoch};
+    use std::sync::Arc;
+
+    fn paint_biome(game: &mut crate::game::Game<'_>, name: &str) {
+        let biome = world_biomes!(game).id(name);
+        let mut chunk = Chunk::empty(0, 0);
+        for y in 0..chunk.sections.len() as i32 * 4 {
+            for x in 0..4 {
+                for z in 0..4 {
+                    chunk.set_biome_cell(x, y, z, biome);
+                }
+            }
+        }
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn biome_reads_follow_live_cells_parked_levels_and_client_login_without_loading() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            paint_biome(game, "minecraft:plains");
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:plains")
+            );
+            assert_eq!(overworld.biome_at(game, [31, 64, 31]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            paint_biome(game, "minecraft:desert");
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert")
+            );
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert"),
+                "parked level's cells"
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.biome_at(game, [8, 64, 8]), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "BiomeReadTest").unwrap();
+            assert_eq!(
+                overworld.client_biome(game, [8, 64, 8]),
+                None,
+                "not logged in"
+            );
+            game.remote.as_mut().unwrap().logged_in = true;
+            paint_biome(game, "minecraft:snowy_plains");
+            let client_level = game.level("minecraft:overworld").unwrap();
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:snowy_plains")
+            );
+            assert_eq!(client_level.client_biome(game, [31, 64, 31]), None);
+            let foreign = LevelRef::new(client_level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(foreign.client_biome(game, [8, 64, 8]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.remote.as_mut().unwrap().logged_in = false;
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]),
+                None,
+                "logged out"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn floor_reads_real_collision_shapes_and_refuses_unloaded_positions() {
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let slab = registry.default_state("minecraft:oak_slab").unwrap();
+            let fence = registry.default_state("minecraft:oak_fence").unwrap();
+            for (x, block, height) in [(2, stone, 1.0), (5, slab, 0.5), (8, fence, 1.5)] {
+                game.world.set(x, 100, 8, block).unwrap();
+                assert_eq!(level.block_floor_height(game, [x, 100, 8]), Some(height));
+                let above = if height >= 1.0 {
+                    height - 1.0
+                } else {
+                    f64::NEG_INFINITY
+                };
+                assert_eq!(level.block_floor_height(game, [x, 101, 8]), Some(above));
+            }
+            assert_eq!(
+                level.block_floor_height(game, [12, 100, 8]),
+                Some(f64::NEG_INFINITY)
+            );
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(level.block_floor_height(game, [32, 100, 8]), None);
+            assert_eq!(
+                level.block_floor_height(game, [8, game.world.top_y(), 8]),
+                None
+            );
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                level.block_floor_height(game, [5, 100, 8]),
+                Some(0.5),
+                "parked collision shapes"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(stale.block_floor_height(game, [5, 100, 8]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sky_and_logical_height_read_the_named_dimension_and_client_state() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_client::chunk::LevelShape;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            assert_eq!(overworld.logical_height(game), Some(384));
+            for time in [0, 6000, 12000, 18000, 24000] {
+                game.world.day_time = time;
+                assert_eq!(overworld.get_sky_darken(game), Some(game.sky_darken()));
+            }
+            game.enter_level(Dim::Nether).unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.height(game),
+                Some((0, 256)),
+                "logical and build heights differ"
+            );
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            game.enter_level(Dim::Overworld).unwrap();
+            game.world.day_time = 6000;
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.get_sky_darken(game),
+                Some(11),
+                "parked level keeps its dimension's sky"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.logical_height(game), None);
+            assert_eq!(stale.get_sky_darken(game), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "SkyReadTest").unwrap();
+            assert_eq!(overworld.logical_height(game), None, "not logged in");
+            game.remote.as_mut().unwrap().logged_in = true;
+            game.world.shape = LevelShape::new(-128, 512, 256, true, false).unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
+            assert_eq!(
+                level.logical_height(game),
+                Some(256),
+                "client's own dimension shape"
+            );
+            assert_eq!(level.get_sky_darken(game), Some(game.sky_darken()));
+            assert_eq!(
+                nether.logical_height(game),
+                None,
+                "another dimension isn't visible to a client"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn closest_biome_uses_the_named_generator_without_loading_resident_chunks() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+
+        with_game(|game| {
+            game.enter_level(Dim::Nether).unwrap();
+            let directory = game.options.resources.join("worldgen");
+            let terrain = VanillaTerrain::for_dimension(
+                TerrainResources {
+                    data: Some(&game.pack.data_changes),
+                    dir: &directory,
+                    registry: game.pack.assets.registry,
+                    biomes: world_biomes!(game),
+                    item_data: &game.res.core.item_data,
+                },
+                12345,
+                "minecraft:the_nether",
+            )
+            .unwrap();
+            game.end.set_locator(Some(Arc::new(terrain)));
+            let nether = game.level("minecraft:the_nether").unwrap();
+            let parameters = BiomeSearch::new([8, 64, 8], 0, 32, 64);
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            let found = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .expect("all Nether source biomes match");
+            assert_eq!(
+                found.position,
+                [8, 64, 8],
+                "vanilla samples the origin first"
+            );
+            assert!(
+                [
+                    "minecraft:nether_wastes",
+                    "minecraft:soul_sand_valley",
+                    "minecraft:crimson_forest",
+                    "minecraft:warped_forest",
+                    "minecraft:basalt_deltas"
+                ]
+                .contains(&found.biome.as_str())
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:plains", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:no_such_biome", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], -1, 32, 64)
+                ),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], 32, 0, 64)
+                ),
+                None
+            );
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Overworld).unwrap();
+            let parked = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .unwrap();
+            assert_eq!(parked, found, "parked level retains its generator and seed");
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(nether.epoch().get() + 1),
+                nether.dimension(),
+            );
+            assert_eq!(
+                stale.find_closest_biome(game, "#minecraft:is_nether", parameters),
+                None
+            );
+        });
+    }
+}
