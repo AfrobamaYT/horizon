@@ -151,8 +151,7 @@ fn listener(open: &mut Open, id: &'static str) -> usize {
     }
 }
 
-/// A raw listener at one place: a native mod's typed function, or a runtime's erased callback.
-/// Both constructors are `unsafe`: the caller guarantees the slot's pointers are used correctly.
+/// A function or checked endpoint at an API, internals or site slot.
 pub struct SlotListener {
     id: &'static str,
     place: usize,
@@ -175,7 +174,7 @@ impl SlotListener {
             place: place as usize,
             kind: Kind::Raw(RawKind::Typed(function)),
             priority: 0,
-            injection: crate::places::NAMES[place as usize],
+            injection: "",
         }
     }
 
@@ -204,7 +203,7 @@ impl SlotListener {
             place: place as usize,
             kind: Kind::Raw(RawKind::Erased(function)),
             priority: 0,
-            injection: crate::places::NAMES[place as usize],
+            injection: "",
         }
     }
 
@@ -240,7 +239,7 @@ impl SlotListener {
             place: place as usize,
             kind: Kind::Api(ApiKind::Typed(function)),
             priority: 0,
-            injection: crate::places::NAMES[place as usize],
+            injection: "",
         }
     }
 
@@ -257,7 +256,7 @@ impl SlotListener {
             place: place as usize,
             kind: Kind::Api(ApiKind::Forward(forward, index)),
             priority: 0,
-            injection: crate::places::NAMES[place as usize],
+            injection: "",
         }
     }
 
@@ -275,16 +274,16 @@ impl SlotListener {
 }
 
 /// Registers a function or checked endpoint, in the same order for native and wasm owners.
-pub fn register(raw: &SlotListener) -> Result<(), RegisterError> {
+pub fn register(slot: &SlotListener) -> Result<(), RegisterError> {
     let mut open = open()?;
-    let listener = listener(&mut open, raw.id) as u32;
+    let listener = listener(&mut open, slot.id) as u32;
     open.slots.push((
-        raw.place,
+        slot.place,
         Slot {
             listener,
-            kind: raw.kind,
-            priority: raw.priority,
-            injection: raw.injection,
+            kind: slot.kind,
+            priority: slot.priority,
+            injection: slot.injection,
         },
     ));
     Ok(())
