@@ -82,7 +82,7 @@ impl ServerHost for TestHost {}
 impl ClientHost for TestHost {}
 #[allow(dead_code)]
 mod generated {
-    mod horizon_mods {
+    mod horizon_mod_package {
         pub mod content {
             pub struct Block;
             pub struct Item;

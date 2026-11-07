@@ -61,7 +61,9 @@ fn client_packet_hands_a_mod_the_type_and_custom_payload() {
     static HEARD: Mutex<Vec<(String, Vec<u8>)>> = Mutex::new(Vec::new());
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
     impl ClientHost for TestHost {}
+    mod_api::impl_client_host_areas!(TestHost);
     // A plugin-channel listener using only the mod API's plain data.
     #[derive(Default)]
     struct Channels;
@@ -160,6 +162,8 @@ fn an_anvil_update_is_changed_in_turn_and_cancel_stops_later_mods() {
     use mod_api::{AnvilUpdateEvent, Flow, Host, HostSide, ItemStack, ServerHost};
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
+    mod_api::impl_server_host_areas!(TestHost);
     impl ServerHost for TestHost {}
     #[derive(Default)]
     struct Recipe;

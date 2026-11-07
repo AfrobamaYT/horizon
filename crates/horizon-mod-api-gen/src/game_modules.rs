@@ -21,7 +21,11 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
             ));
         }
         if !path.join(".game-area").is_file() {
-            if path.is_dir() && path.file_name().is_none_or(|name| name != "native_hooks") {
+            if path.is_dir()
+                && path
+                    .file_name()
+                    .is_none_or(|name| name != "native_hooks" && name != "host")
+            {
                 return Err(format!("{}: missing .game-area marker", path.display()));
             }
             continue;
@@ -122,7 +126,12 @@ pub(crate) fn lan_action_modules(directory: &Path) -> Result<String, String> {
 pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
     const NATIVE: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));";
     const LAN: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));";
-    if !source.contains(INCLUDE) && !source.contains(NATIVE) && !source.contains(LAN) {
+    const HOST: &str = "include!(concat!(env!(\"OUT_DIR\"), \"/game_host_modules.rs\"));";
+    if !source.contains(INCLUDE)
+        && !source.contains(NATIVE)
+        && !source.contains(LAN)
+        && !source.contains(HOST)
+    {
         return Ok(source.to_owned());
     }
     let file = syn::parse_file(source).map_err(|e| e.to_string())?;
@@ -132,11 +141,18 @@ pub(crate) fn expand(path: &Path, source: &str) -> Result<String, String> {
             && item.mac.path.is_ident("include")
         {
             let line = item.mac.path.segments[0].ident.span().start().line - 1;
-            let declarations = match lines[line].trim_end_matches('\n') {
+            let declarations = match lines[line].trim_end_matches(['\r', '\n']) {
                 INCLUDE => declarations(&path.with_extension(""))?,
                 LAN => {
                     lan_action_modules(path.parent().ok_or("LAN actions source has no parent")?)?
                 }
+                HOST => crate::build::game_host_modules(
+                    path.canonicalize()
+                        .map_err(|e| e.to_string())?
+                        .ancestors()
+                        .nth(6)
+                        .ok_or("game host source outside the game tree")?,
+                )?,
                 NATIVE => crate::build::native_hook_modules(
                     path.canonicalize()
                         .map_err(|e| e.to_string())?
@@ -184,6 +200,23 @@ pub(crate) fn parse(path: &Path, source: &str) -> Result<syn::File, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Git for Windows checks sources out with CRLF by default.
+    #[test]
+    fn an_include_is_expanded_whatever_ends_its_line() {
+        let directory = std::env::temp_dir().join(format!("lan-line-ends-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let root = directory.join("mod.rs");
+        fs::write(directory.join("turns.rs"), "").unwrap();
+        for end in ["\n", "\r\n"] {
+            let source =
+                format!("include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));{end}");
+            fs::write(&root, &source).unwrap();
+            let code = expand(&root, &source).unwrap();
+            assert!(code.contains("mod turns;"), "{end:?}");
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn lan_actions_are_discovered_without_lists_and_reject_shared_methods() {

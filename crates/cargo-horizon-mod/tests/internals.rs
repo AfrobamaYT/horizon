@@ -1,5 +1,5 @@
 //! Exercise both commands without downloads, using the pin-keyed catalog cache.
-use horizon_mods::{Manifest, manifest::MANIFEST};
+use horizon_mod_package::{Manifest, manifest::MANIFEST};
 use std::{
     fs,
     path::PathBuf,

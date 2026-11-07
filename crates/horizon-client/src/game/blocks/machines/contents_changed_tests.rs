@@ -2,6 +2,7 @@ use super::{BlockEntity, Game};
 use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
 use horizon_client::{chunk::Chunk, items::ItemStack};
 use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
+use mod_api::prelude::*;
 use mod_api::*;
 use std::sync::{Arc, Mutex};
 
@@ -116,7 +117,7 @@ impl Hooks for Observed {
     }
 
     fn blocks(&self, _: &RegistrationContext, event: &mut BlocksEvent<'_>) {
-        event.blocks.push(horizon_mods::content::Block {
+        event.blocks.push(horizon_mod_package::content::Block {
             id: DEPOT.into(),
             template: "minecraft:white_banner".into(),
             ..Default::default()

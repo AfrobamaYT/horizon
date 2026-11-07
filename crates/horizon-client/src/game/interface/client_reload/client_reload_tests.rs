@@ -799,7 +799,11 @@ fn refused_client_context_keeps_pack_and_listeners() {
         let root =
             std::env::temp_dir().join(format!("client-reload-refusal-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join(horizon_mods::enabled::MARKER), b"invalid json").unwrap();
+        std::fs::write(
+            root.join(horizon_mod_package::enabled::MARKER),
+            b"invalid json",
+        )
+        .unwrap();
         staged.root = root.clone();
         let applied = Arc::new(AtomicBool::new(false));
         let flag = applied.clone();

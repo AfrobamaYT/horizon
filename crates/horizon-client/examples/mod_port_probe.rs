@@ -82,8 +82,8 @@ fn main() -> Result<()> {
         if !(wanted.is_empty() || wanted.contains(&id)) || !dir.is_dir() {
             continue;
         }
-        let package = horizon_mods::Package::read(&dir)?;
-        let content = horizon_mods::Content::read(&dir, &package.manifest)?;
+        let package = horizon_mod_package::Package::read(&dir)?;
+        let content = horizon_mod_package::Content::read(&dir, &package.manifest)?;
         inventory.push((package.manifest.id.clone(), package.manifest.side));
         mods.push(ContentMod {
             id: package.manifest.id.clone(),
@@ -103,7 +103,7 @@ fn main() -> Result<()> {
         &horizon_client::logging::game_home().join("jars"),
         &mods,
         &root,
-        &horizon_mods::enabled::EnabledMods::new(inventory),
+        &horizon_mod_package::enabled::EnabledMods::new(inventory),
     )
     .map_err(step("content root"))?;
     let built = began.elapsed().as_secs_f64();

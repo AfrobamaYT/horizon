@@ -695,7 +695,7 @@ pub fn if_installed(input: TokenStream) -> TokenStream {
         {
             // A `let` takes the attribute where an expression statement can't.
             #[cfg(feature = #name)]
-            let () = if ::mod_api::Host::is_loaded(&*#host, #name) #block;
+            let () = if ::mod_api::prelude::LevelsHost::is_loaded(&*#host, #name) #block;
             #[cfg(not(feature = #name))]
             let _ = &#host;
         }
