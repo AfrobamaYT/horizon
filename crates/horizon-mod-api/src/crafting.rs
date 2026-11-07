@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 /// A recipe ingredient of a mod's own kind: the entry named a type in a
 /// namespace outside `minecraft:`, and the loader kept it for this call.
-/// The kind and the JSON the file wrote are here; fill `items` with the
+/// The kind and the converted NBT data the file wrote are here; fill `items` with the
 /// item ids the ingredient matches (item ids only: components are not
 /// checked here; a match-time hook follows separately). Duplicates are
 /// removed keeping first-seen order. The load calls it once per occurrence
@@ -18,7 +18,7 @@ use std::collections::HashSet;
 pub fn native_ingredient(
     context: &LoadContext,
     kind: &str,
-    data: &serde_json::Map<String, Value>,
+    data: &horizon_core::nbt::Compound,
     items: &mut Vec<String>,
 ) {
     crate::dispatch_ingredient(&crate::OwningLoad::new(context), kind, data, items);
@@ -62,7 +62,7 @@ pub fn native_recipe_property_sets(
     crate::dispatch_recipe_property_sets(&crate::OwningLoad::new(context), additions);
 }
 /// A mod's own ingredient kind, matching a concrete stack at craft time:
-/// the ingredient's `test` calls here with the kind, its JSON and the
+/// the ingredient's `test` calls here with the kind, its NBT compound and the
 /// stack being matched, `accept` already true (the load-time list named
 /// the item). Set `accept` to false to refuse the stack — its components
 /// are the usual reason. The hook may be called many times a craft; the
@@ -71,7 +71,7 @@ pub fn native_recipe_property_sets(
 pub fn native_ingredient_test(
     context: &horizon_world::native_load_context::LoopContext,
     kind: &str,
-    data: &serde_json::Map<String, Value>,
+    data: &horizon_core::nbt::Compound,
     stack: &ItemStack,
     accept: &mut bool,
 ) {
@@ -96,12 +96,18 @@ fn is_custom(kind: &str) -> bool {
 }
 
 /// Takes the answer `resolve` left out of `data`.
-fn resolved_items(data: &mut serde_json::Map<String, Value>) -> Option<Vec<String>> {
-    let answer = data.remove(RESOLVED_ITEMS)?;
+#[doc(hidden)]
+pub fn resolved_items(data: &mut horizon_core::nbt::Compound) -> Option<Vec<String>> {
+    let answer = data.remove(&RESOLVED_ITEMS.into())?;
+    let horizon_core::nbt::Tag::List(answer) = answer else {
+        return None;
+    };
     answer
-        .as_array()?
         .iter()
-        .map(|i| i.as_str().map(str::to_owned))
+        .map(|i| match i {
+            horizon_core::nbt::Tag::String(s) => s.to_string().ok(),
+            _ => None,
+        })
         .collect()
 }
 /// Keep first-seen order, drop the rest.
@@ -130,15 +136,19 @@ pub struct WalkedIngredient {
     pub order: Vec<String>,
     /// NeoForge's shapes, with their children walked.
     pub children: Option<(Shape, Vec<Self>)>,
-    /// A kind outside the standard shapes: the kind and its JSON, as the
+    /// A kind outside the standard shapes: the kind and its NBT compound, as the
     /// file wrote it, without the wrapper's answer.
-    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    pub custom: Option<(String, horizon_core::nbt::Compound)>,
 }
 /// The wrapper's answer for a kind outside the standard shapes: the ids it
-/// matches, taken out of its JSON, or none to fail the file.
+/// matches, taken out of its metadata, or none to fail the file.
 // hidden: the game-owned ingredient adapter supplies custom ids while walking JSON.
 #[doc(hidden)]
-pub type CustomIds<'a> = &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
+pub type CustomIds<'a> = &'a dyn Fn(&mut horizon_core::nbt::Compound) -> Option<Vec<String>>;
+/// Game-owned JSON-to-NBT boundary for the hidden recipe parser.
+#[doc(hidden)]
+pub type IngredientData<'a> =
+    &'a dyn Fn(&serde_json::Map<String, Value>) -> Option<horizon_core::nbt::Compound>;
 impl WalkedIngredient {
     /// The walk of `v`: the shapes' flat lists in the sources' order, their
     /// children kept for matching a concrete stack.
@@ -146,8 +156,9 @@ impl WalkedIngredient {
         v: &Value,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
+        convert: IngredientData<'_>,
     ) -> Option<Self> {
-        Self::walk_resolved(v, tags, custom, &|id| Some(id.to_owned()))
+        Self::walk_resolved(v, tags, custom, convert, &|id| Some(id.to_owned()))
     }
 
     // hidden: the game-owned adapter resolves ids using its own load-time registry.
@@ -156,6 +167,7 @@ impl WalkedIngredient {
         v: &Value,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
+        convert: IngredientData<'_>,
         resolve: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
@@ -176,7 +188,7 @@ impl WalkedIngredient {
         match v {
             Value::String(s) => add(s),
             Value::Array(a) => a.iter().filter_map(Value::as_str).for_each(&mut add),
-            Value::Object(o) => return Self::walk_object(o, tags, custom, resolve),
+            Value::Object(o) => return Self::walk_object(o, tags, custom, convert, resolve),
             _ => return None,
         }
         valid.then(|| Self::flat(list)).flatten()
@@ -199,6 +211,7 @@ impl WalkedIngredient {
         o: &serde_json::Map<String, Value>,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
+        convert: IngredientData<'_>,
         resolve: &dyn Fn(&str) -> Option<String>,
     ) -> Option<Self> {
         // Current NeoForge marks a custom ingredient with
@@ -218,7 +231,7 @@ impl WalkedIngredient {
             "neoforge:compound" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk_resolved(s, tags, custom, resolve))
+                    .map(|s| Self::walk_resolved(s, tags, custom, convert, resolve))
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
@@ -236,7 +249,7 @@ impl WalkedIngredient {
             "neoforge:intersection" => {
                 let subs: Vec<Self> = children()?
                     .iter()
-                    .map(|s| Self::walk_resolved(s, tags, custom, resolve))
+                    .map(|s| Self::walk_resolved(s, tags, custom, convert, resolve))
                     .collect::<Option<_>>()?;
                 nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
@@ -248,8 +261,9 @@ impl WalkedIngredient {
             }
             // The base's ids without the subtracted's.
             "neoforge:difference" => {
-                let base = Self::walk_resolved(o.get("base")?, tags, custom, resolve)?;
-                let gone = Self::walk_resolved(o.get("subtracted")?, tags, custom, resolve)?;
+                let base = Self::walk_resolved(o.get("base")?, tags, custom, convert, resolve)?;
+                let gone =
+                    Self::walk_resolved(o.get("subtracted")?, tags, custom, convert, resolve)?;
                 nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
                 base.order
                     .iter()
@@ -260,7 +274,7 @@ impl WalkedIngredient {
             // A kind outside these shapes: the wrapper answers it — the
             // item ingredient asks its hook, a fluid one fails the file.
             k if is_custom(k) => {
-                let mut data = o.clone();
+                let mut data = convert(o)?;
                 let list = custom(&mut data)?;
                 return (!list.is_empty()).then(|| Self {
                     set: list.iter().cloned().collect(),
@@ -281,21 +295,143 @@ impl WalkedIngredient {
 }
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
+#[horizon_mod_api_macros::wasm(via = IngredientForm)]
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
     pub items: HashSet<String>,
     /// The same items in `HolderSet` order (`display`).
     pub order: Vec<String>,
     /// A mod's own kind, for matching at craft time: the kind and its
-    /// JSON, as the load-time hook saw them (`native_ingredient_test`).
-    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    /// NBT compound, as the load-time hook saw them (`native_ingredient_test`).
+    pub custom: Option<(String, horizon_core::nbt::Compound)>,
     /// NeoForge's shapes, with their children parsed: matching a concrete
     /// stack asks each child its own `test` (a mod's kind among them),
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
 }
+/// Flat generated-codec form of an ingredient tree, with root at node zero.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct IngredientForm {
+    /// Nodes in parent-before-child order; every non-root node has one parent.
+    pub nodes: Vec<IngredientNode>,
+}
+/// One ingredient's own data, with child indices instead of recursive records.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct IngredientNode {
+    /// Accepted ids, independent of display order.
+    pub items: HashSet<String>,
+    /// Display order of accepted ids.
+    pub order: Vec<String>,
+    /// Mod kind and metadata converted once at recipe load.
+    pub custom: Option<(String, horizon_core::nbt::Compound)>,
+    /// Shape and its child indices, in matching order.
+    pub children: Option<(Shape, Vec<u64>)>,
+}
+/// Ingredient node-depth budget, from serde_json's default recursion budget
+/// of 128 on the former JSON boundary. Counts ingredient nodes, not the extra
+/// object/tuple/list wrappers in that former wire encoding.
+const MAX_INGREDIENT_DEPTH: u16 = 128;
+
+/// A flat ingredient form could not be reconstructed safely.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IngredientFormError {
+    /// Empty, cyclic, shared, orphaned, invalid-index or out-of-order nodes.
+    Malformed,
+    /// More than 128 ingredient nodes on a root-to-leaf path.
+    TooDeep,
+}
+impl std::fmt::Display for IngredientFormError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Malformed => "invalid ingredient tree",
+            Self::TooDeep => "ingredient tree exceeds depth 128",
+        })
+    }
+}
+impl std::error::Error for IngredientFormError {}
+impl From<&Ingredient> for IngredientForm {
+    fn from(root: &Ingredient) -> Self {
+        let mut pending = vec![root];
+        let mut nodes = Vec::new();
+        let mut at = 0;
+        while at < pending.len() {
+            let ingredient = pending[at];
+            let children = ingredient.children.as_ref().map(|(shape, children)| {
+                let first = pending.len() as u64;
+                pending.extend(children);
+                (shape.clone(), (first..pending.len() as u64).collect())
+            });
+            nodes.push(IngredientNode {
+                items: ingredient.items.clone(),
+                order: ingredient.order.clone(),
+                custom: ingredient.custom.clone(),
+                children,
+            });
+            at += 1;
+        }
+        Self { nodes }
+    }
+}
+impl TryFrom<IngredientForm> for Ingredient {
+    type Error = IngredientFormError;
+    fn try_from(form: IngredientForm) -> Result<Self, Self::Error> {
+        // Validate the entire flat graph before constructing any recursive
+        // value, so refusing malformed or deep input cannot recursively drop
+        // a partially built tree either.
+        if form.nodes.is_empty() {
+            return Err(IngredientFormError::Malformed);
+        }
+        let mut depths = vec![0u16; form.nodes.len()];
+        depths[0] = 1;
+        for (index, node) in form.nodes.iter().enumerate() {
+            if depths[index] == 0 {
+                return Err(IngredientFormError::Malformed);
+            }
+            if let Some((_, children)) = &node.children {
+                for &child in children {
+                    let child =
+                        usize::try_from(child).map_err(|_| IngredientFormError::Malformed)?;
+                    if child <= index || child >= depths.len() || depths[child] != 0 {
+                        return Err(IngredientFormError::Malformed);
+                    }
+                    let depth = depths[index] + 1;
+                    if depth > MAX_INGREDIENT_DEPTH {
+                        return Err(IngredientFormError::TooDeep);
+                    }
+                    depths[child] = depth;
+                }
+            }
+        }
+        let mut built: Vec<Option<Self>> = vec![None; form.nodes.len()];
+        for (index, node) in form.nodes.into_iter().enumerate().rev() {
+            let children = node.children.map(|(shape, indices)| {
+                let children = indices
+                    .into_iter()
+                    .map(|child| {
+                        built[child as usize]
+                            .take()
+                            .expect("validated unique child")
+                    })
+                    .collect();
+                (shape, children)
+            });
+            built[index] = Some(Self {
+                items: node.items,
+                order: node.order,
+                custom: node.custom,
+                children,
+            });
+        }
+        let root = built[0].take().expect("validated root");
+        Ok(root)
+    }
+}
+
 /// How a shape's children combine at match time.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
@@ -317,7 +453,8 @@ impl Ingredient {
             children: None,
         }
     }
-    pub fn parse(v: &Value, items: &Items) -> Option<Self> {
+    #[doc(hidden)]
+    pub fn parse(v: &Value, items: &Items, convert: IngredientData<'_>) -> Option<Self> {
         // A mod's own kind: `resolve` asked the hook once at load and left
         // the item list it matches with the occurrence; one no load
         // resolved fails the file.
@@ -325,10 +462,11 @@ impl Ingredient {
             v,
             &items.item_tag_order,
             &resolved_items,
+            convert,
         )?)
     }
     /// The walk of an item ingredient's answer: NeoForge's standard shapes
-    /// keep their children, and a mod's own kind keeps its kind and JSON,
+    /// keep their children, and a mod's own kind keeps its kind and NBT metadata,
     /// since the load-time list only names items and matching a concrete
     /// stack (its components) is the match-time hook's.
     fn of_walked(walked: WalkedIngredient) -> Option<Self> {
@@ -433,3 +571,7 @@ impl CraftResult {
         Self { output, remainders }
     }
 }
+
+#[cfg(test)]
+#[path = "crafting/ingredient_form_tests.rs"]
+mod ingredient_form_tests;
