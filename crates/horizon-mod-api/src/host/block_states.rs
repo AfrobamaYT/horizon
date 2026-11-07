@@ -124,8 +124,8 @@ pub trait BlockStatesBackend {
     #[access(Metadata)]
     fn block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool>;
     /// Side: both.
-    /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
-    /// registry numbers them with. None for an unknown block.
+    /// The states of `block` (`StateDefinition.getPossibleStates`) in immutable local ordinal
+    /// order, independent of world numeric IDs. None for unavailable metadata or an unknown block.
     #[access(Metadata)]
     fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange>;
     /// Side: both.

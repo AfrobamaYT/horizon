@@ -139,7 +139,10 @@ pub mod tests {
                 let index: u32 = if id == "minecraft:stone" { 0 } else { 1 };
                 Some(ResolvedBlock {
                     default: BlockStateId(index + offset),
-                    states: BlockStateRange::new(BlockStateId(index + offset), 1),
+                    states: horizon_world::registry::BlockStateRange::new(
+                        BlockStateId(index + offset),
+                        1,
+                    ),
                     block: BlockId(index as u16),
                 })
             })

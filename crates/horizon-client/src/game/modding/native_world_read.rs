@@ -342,7 +342,7 @@ mod tests {
                 Some(ResolvedBlock {
                     block: resolve(name)?,
                     default: BlockStateId(0),
-                    states: mod_api::BlockStateRange::new(BlockStateId(0), 1),
+                    states: horizon_world::registry::BlockStateRange::new(BlockStateId(0), 1),
                 })
             })
             .unwrap();

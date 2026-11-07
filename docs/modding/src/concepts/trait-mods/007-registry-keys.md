@@ -41,6 +41,12 @@ only copy those values and invoke metadata reads. When world numeric state IDs a
 the game resolves each state's property combination against the published definition, so
 local ordinals retain their meaning across reloads.
 
+`host.block_states().states_of(key)` returns a `BlockStateRange` in that same immutable
+local ordinal order. Its iterator yields owned `BlockState`s; it is not a span of world
+numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the span would
+exceed the u16 ordinal domain, and decoded transport spans obey the same check. Membership
+checks both the block key and the ordinal. A zero-count span is empty.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.

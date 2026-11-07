@@ -22660,7 +22660,10 @@ impl Game<'_> {
             }
             Some(mod_api::__private::ResolvedBlock {
                 default,
-                states: mod_api::BlockStateRange::new(BlockStateId(first), last - first + 1),
+                states: horizon_world::registry::BlockStateRange::new(
+                    BlockStateId(first),
+                    last - first + 1,
+                ),
                 block: self.res.behaviours().block(default),
             })
         })
