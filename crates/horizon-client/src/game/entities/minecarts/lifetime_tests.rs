@@ -308,3 +308,16 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_bound_tnt_cart_keeps_its_join_when_damage_primes_it() {
+    bound_cart_case(CartKind::Tnt, |game| {
+        let join = game.carts[0].join;
+        game.hurt_cart(0, 5.0, false, true);
+        assert_eq!(game.carts.len(), 1);
+        assert_eq!(game.carts[0].join, join);
+        assert_eq!(game.carts.locate(join), Some(0));
+        assert!((0..=38).contains(&game.carts[0].fuse));
+    });
+}

@@ -2478,7 +2478,7 @@ impl Game<'_> {
             } else {
                 self.carts.remove(i)
             };
-            if c.kind == CartKind::Tnt && (fire || speed >= f64::from(0.01f32)) {
+            if tnt_prime {
                 // MinecartTNT.destroy: prime instead of breaking.
                 if c.fuse < 0 {
                     self.prime_cart(&mut c);
