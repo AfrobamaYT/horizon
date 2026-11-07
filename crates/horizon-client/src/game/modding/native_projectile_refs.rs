@@ -95,8 +95,9 @@ impl Game<'_> {
     }
 
     /// The owner fields for `Projectile.setOwner(owner)`. `Who` names the
-    /// owners a hit can be credited to; any other entity is kept by its UUID
-    /// alone, as a saved owner is (`Projectile.getOwner` resolves that). None
+    /// owners used for hit credit and collision exclusion, including vehicles
+    /// represented as `Who::Mob` in projectile targets. Any other entity is
+    /// kept by its UUID alone (`Projectile.getOwner` resolves that). None
     /// for a stale owner, or a fishing hook, which no UUID finds again.
     fn native_projectile_owner_fields(&mut self, owner: Option<EntityRef>) -> Option<OwnerFields> {
         let Some(owner) = owner else {
@@ -105,7 +106,7 @@ impl Game<'_> {
         let (who, guest) = match self.native_entity_target(owner)? {
             Target::Player => (Some(Who::Player), self.lan_acting),
             Target::Guest(conn) => (Some(Who::Player), Some(conn)),
-            Target::Mob(id) => (Some(Who::Mob(id)), None),
+            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => (Some(Who::Mob(id)), None),
             Target::Hook(_) => return None,
             _ => (None, None),
         };
@@ -372,6 +373,57 @@ mod tests {
     use horizon_client::{mobs::Mob, motion::PlayerMotion};
     use horizon_core::random::RandomSource;
     use mod_api::NativeWorldEpoch;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_boat_owned_snowball_excludes_its_owner_until_it_leaves() {
+        use horizon_client::projectiles::{Hit, ProjectileWorld};
+        use horizon_core::geometry::Aabb;
+        struct Air(Vec<(Who, Aabb)>);
+        impl ProjectileWorld for Air {
+            fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+                None
+            }
+            fn in_water(&self, _: Aabb) -> bool {
+                false
+            }
+            fn targets(&self) -> &[(Who, Aabb)] {
+                &self.0
+            }
+        }
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let boat_id = game.take_entity_id();
+            game.boats.push(super::super::boats::Boat::new(
+                boat_id,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.entity(boat_id).unwrap();
+            let id = game.take_entity_id();
+            let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(-1.1, 0.2, 0.0), None);
+            p.id = id;
+            p.velocity = Vec3::new(1.0, 0.0, 0.0);
+            game.creatures.projectiles.push(p);
+            let entity = game.entity(id).unwrap();
+            let projectile = game.projectile(entity).unwrap();
+            assert!(game.projectile_set_owner(projectile, Some(boat)));
+            assert_eq!(game.projectile_owner(projectile), Some(boat));
+            let scene = Air(game.vehicle_targets());
+            let mut p = game.creatures.projectiles[0].clone();
+            assert!(!p.left_owner);
+            let mut control = p.clone();
+            control.owner = Some(Who::Mob(boat_id));
+            assert_eq!(control.tick(&scene).1, Hit::None);
+            let mut returned = p.clone();
+            returned.left_owner = true;
+            assert!(
+                matches!(returned.tick(&scene).1, Hit::Entity { who: Who::Mob(id), .. } if id == boat_id)
+            );
+            assert_eq!(p.tick(&scene).1, Hit::None);
+        });
+    }
 
     fn arrow(owner: Who) -> Projectile {
         let kind = ProjectileKind::Arrow {

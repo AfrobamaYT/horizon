@@ -13,10 +13,7 @@ impl Game<'_> {
 
     /// `FishingHook.getPlayerOwner`: the player who cast it. None for a stale
     /// handle.
-    pub(super) fn fishing_hook_player_owner(
-        &self,
-        hook: FishingHookRef,
-    ) -> Option<EntityRef> {
+    pub(super) fn fishing_hook_player_owner(&self, hook: FishingHookRef) -> Option<EntityRef> {
         self.fishing_hook(hook.entity())?;
         let (_, owner) = self.fishing_hook_by_id(hook.entity().id())?;
         let id = match owner {
@@ -102,6 +99,22 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn a_live_hook_keeps_its_uuid_across_memory_pruning() {
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            let id = game.take_entity_id();
+            game.hook = Some(Hook::remote(id, Vec3::ZERO));
+            let entity = game.entity(id).unwrap();
+            let before = game.entity_uuid(entity).unwrap();
+            game.prune_entity_memory();
+            assert!(game.entity(id).is_some());
+            assert_eq!(game.entity_uuid(entity), Some(before));
+            assert_eq!(game.entity_uuid(entity), Some(before));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn a_hook_belongs_to_the_player_who_cast_it() {
         with_game(|game| {
             game.options.dedicated = Some(Vec::new());
@@ -111,9 +124,7 @@ mod tests {
             let player = game.entity(20).unwrap();
             let id = game.take_entity_id();
             game.hook = Some(Hook::remote(id, Vec3::ZERO));
-            let hook = game
-                .fishing_hook(game.entity(id).unwrap())
-                .unwrap();
+            let hook = game.fishing_hook(game.entity(id).unwrap()).unwrap();
             assert_eq!(hook.player_owner(game), Some(player));
             assert_eq!(hook.open_water(game), Some(true));
         });
