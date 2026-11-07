@@ -414,14 +414,16 @@ impl Game<'_> {
             b.position.y.floor() as i32,
             b.position.z.floor() as i32,
         );
-        crate::structure_blocks::roll_container(
-            &mut self.boats[i].items,
-            loot.as_deref(),
-            table.clone(),
-            seed,
-            pos,
-            &biome,
-        );
+        self.boats.update(i, |b| {
+            crate::structure_blocks::roll_container(
+                &mut b.items,
+                loot.as_deref(),
+                table.clone(),
+                seed,
+                pos,
+                &biome,
+            )
+        });
         self.trigger_loot_table(&table);
     }
 

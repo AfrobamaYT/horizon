@@ -98,20 +98,24 @@ impl Game<'_> {
             let mut steps = Vec::new();
             if let Some(paddles) = case.paddles {
                 self.riding = None;
-                self.boats[0].paddles = paddles.initial;
+                self.boats.update(0, |b| b.paddles = paddles.initial);
                 for step in paddles.steps {
-                    self.boats[0].paddling = step.flags;
-                    self.boats[0].paddle_controller = step.occupied && step.first_player;
+                    self.boats.update(0, |b| b.paddling = step.flags);
+                    self.boats.update(0, |b| {
+                        b.paddle_controller = step.occupied && step.first_player
+                    });
                     self.riding = step.owned.then_some(1);
                     if step.owned {
-                        self.boats[0].input = [
-                            step.flags[1] && !step.flags[0],
-                            step.flags[0] && !step.flags[1],
-                            step.flags[0] && step.flags[1],
-                            false,
-                        ];
+                        self.boats.update(0, |b| {
+                            b.input = [
+                                step.flags[1] && !step.flags[0],
+                                step.flags[0] && !step.flags[1],
+                                step.flags[0] && step.flags[1],
+                                false,
+                            ]
+                        });
                         let boat = self.tick_boat(self.boats[0].clone(), true);
-                        self.boats[0] = boat;
+                        self.boats.store_back(0, boat);
                     }
                     self.tick_remote_boat_bubbles();
                     let boat = &self.boats[0];

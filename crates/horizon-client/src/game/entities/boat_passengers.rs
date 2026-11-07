@@ -332,8 +332,8 @@ impl Game<'_> {
             };
             for _ in 0..usize::from(touched) + usize::from(pushes) {
                 if count == 0 {
-                    let b = &mut self.boats[i];
-                    b.velocity = b.velocity.subtract(v);
+                    self.boats
+                        .update(i, |b| b.velocity = b.velocity.subtract(v));
                 }
                 if own && let Some(p) = self.player.as_mut() {
                     p.velocity = p.velocity.add_vector(v);
@@ -349,10 +349,12 @@ impl Game<'_> {
                 continue;
             };
             if count == 0 {
-                self.boats[i].velocity = self.boats[i].velocity.subtract(v);
+                self.boats
+                    .update(i, |b| b.velocity = b.velocity.subtract(v));
             }
             if self.boat_passengers(self.boats[k].id) == 0 {
-                self.boats[k].velocity = self.boats[k].velocity.add_vector(v);
+                self.boats
+                    .update(k, |b| b.velocity = b.velocity.add_vector(v));
             }
         }
         let guest_carts = self.guest_vehicles();
@@ -365,7 +367,8 @@ impl Game<'_> {
                 continue;
             };
             if count == 0 {
-                self.boats[i].velocity = self.boats[i].velocity.subtract(v);
+                self.boats
+                    .update(i, |b| b.velocity = b.velocity.subtract(v));
             }
             let cid = self.carts[c].id;
             let ridden = self.riding == Some(cid)
@@ -386,8 +389,8 @@ impl Game<'_> {
             return;
         };
         if count == 0 {
-            let b = &mut self.boats[i];
-            b.velocity = b.velocity.subtract(v);
+            self.boats
+                .update(i, |b| b.velocity = b.velocity.subtract(v));
         }
         let m = &mut self.mobs[j];
         if moved_by_push(m) {

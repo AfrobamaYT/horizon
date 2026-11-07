@@ -3826,9 +3826,11 @@ impl Game<'_> {
                 };
                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.source as u32) {
                     m.extra.leash = holder;
-                } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == p.source as u32) {
-                    // A leashed boat or raft (AbstractBoat is Leashable).
-                    b.leash = holder;
+                } else if let Some(i) = self.boats.iter().position(|b| b.id == p.source as u32) {
+                    self.boats.update(i, |b| {
+                        // A leashed boat or raft (AbstractBoat is Leashable).
+                        b.leash = holder;
+                    });
                 }
             }
             C::MoveVehicle(p) => self.remote_move_vehicle(p.position, p.yaw),

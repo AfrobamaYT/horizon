@@ -530,11 +530,13 @@ impl Game<'_> {
                 }
             }
             Target::Boat(id) if yaw.is_finite() => {
-                if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                    b.yaw = yaw;
-                    if let Some(pitch) = pitch {
-                        b.pitch = pitch;
-                    }
+                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                    self.boats.update(i, |b| {
+                        b.yaw = yaw;
+                        if let Some(pitch) = pitch {
+                            b.pitch = pitch;
+                        }
+                    });
                 }
             }
             Target::Cart(id) if yaw.is_finite() => {
