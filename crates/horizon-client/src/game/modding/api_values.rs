@@ -1205,7 +1205,7 @@ mod block_entity_snapshot_tests {
         assert_eq!(third.revision(), entity.try_into_api().unwrap().revision());
         assert_eq!(entity.id(), "test:machine");
         assert_eq!(entity.data, [7, 8]);
-        let other = mod_api::ModBlockEntity::new("test:other".into(), Default::default());
+        let other = mod_api::ModBlockEntity::new("test:machine".into(), Default::default());
         assert_ne!(other.revision(), third.revision());
         entity.data.push(9);
         let fourth = entity.try_into_api().unwrap();
