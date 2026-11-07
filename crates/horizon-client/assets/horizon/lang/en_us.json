@@ -951,7 +951,6 @@
   "horizon.mods.browse.install_failed": "Couldn't install it: %s",
   "horizon.extras.wheel_cycles_list_settings.tooltip": "The scroll wheel over a button in a settings list changes its value. Off, as in vanilla, the wheel scrolls the list.",
   "Play": "Play",
-  "How far a trigger is pulled before it counts as pressed.": "How far a trigger is pulled before it counts as pressed.",
   "horizon.mods.switch.worldgen": "changes world generation",
   "horizon.mods.switch.registries": "adds blocks, items or other registry entries",
   "horizon.mods.switch.restart": "Restart the game to apply %s: they add blocks, items or world generation.",
