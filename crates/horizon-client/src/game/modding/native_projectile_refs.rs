@@ -463,7 +463,7 @@ mod tests {
             assert!(handle.set_owner(game, Some(mob)));
             assert_eq!(handle.owner(game), Some(mob));
             assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(99)));
-            // Any entity may own it; `Who` stays for the owners a hit credits.
+            // Any entity may own it; vehicles also need a collision identity.
             let boat_id = game.take_entity_id();
             game.boats.push(super::super::boats::Boat::new(
                 boat_id,
@@ -474,7 +474,7 @@ mod tests {
             let boat = game.entity(boat_id).unwrap();
             assert!(handle.set_owner(game, Some(boat)));
             assert_eq!(handle.owner(game), Some(boat));
-            assert_eq!(game.creatures.projectiles[0].owner, None);
+            assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(boat_id)));
             let saved = game.uuid_for(boat_id);
             assert_eq!(game.creatures.projectiles[0].owner_uuid, Some(saved));
             assert!(handle.set_owner(game, Some(mob)));
@@ -694,7 +694,7 @@ mod tests {
             assert!(!trident.set_owner(game, Some(boat)));
             assert!(rocket.set_owner(game, Some(boat)));
             assert_eq!(rocket.owner(game), Some(boat));
-            assert_eq!(game.rockets[0].owner, None);
+            assert_eq!(game.rockets[0].owner, Some(Who::Mob(boat_id)));
             let saved = game.uuid_for(boat_id);
             let tag = game.rockets[0].to_nbt([9; 4], None, None);
             let back = Rocket::from_nbt(
