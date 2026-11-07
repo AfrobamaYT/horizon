@@ -385,8 +385,21 @@ impl BrewingStand {
         out.brewed = true;
     }
 }
-/// The `minecraft:brewing_fuel` providers of an item: (uses, speed_multiplier).
+/// `ItemStack.get(BREWING_FUEL)`: the stack's providers (uses, speed_multiplier),
+/// respecting component patches before falling back to the item's defaults.
 pub fn brewing_fuel(items: &Items, stack: &ItemStack) -> Option<(Value, Value)> {
+    if let Some(data) = stack.data() {
+        if data.other("!minecraft:brewing_fuel").is_some() {
+            return None;
+        }
+        if let Some(own) = data.other("minecraft:brewing_fuel") {
+            let component = horizon_client_core::scoreboard::tag_to_json(own);
+            return Some((
+                component["uses"].clone(),
+                component["speed_multiplier"].clone(),
+            ));
+        }
+    }
     items.get(&stack.item).and_then(|i| i.brewing_fuel.clone())
 }
 
@@ -449,6 +462,50 @@ mod tests {
         assert_eq!(recipes.recipes.len(), 1);
         assert_eq!(&*recipes.recipes[0].output.item, "minecraft:emerald");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stack_fuel_controls_brew_duration_and_consumption() {
+        let items = Items::for_tests(Default::default());
+        let brewing = Brewing {
+            reagents: ["minecraft:nether_wart".to_owned()].into_iter().collect(),
+            inputs: HashSet::new(),
+            recipes: vec![BrewingRecipe {
+                id: "awkward".into(),
+                input: PotionIngredient {
+                    items: ["minecraft:potion".to_owned()].into_iter().collect(),
+                    potions: Some(["minecraft:water".to_owned()].into_iter().collect()),
+                },
+                reagent: PotionIngredient {
+                    items: ["minecraft:nether_wart".to_owned()].into_iter().collect(),
+                    potions: None,
+                },
+                output: ItemStack::new("minecraft:potion", 1).with_potion("minecraft:awkward"),
+            }],
+        };
+        let mut fuel = ItemStack::new("minecraft:stone", 2);
+        fuel.data_mut().set_loot_component(
+            "minecraft:brewing_fuel",
+            &serde_json::json!({"uses": 7, "speed_multiplier": 2.5}),
+        );
+        let mut stand = BrewingStand::new();
+        stand.items[0] = Some(ItemStack::new("minecraft:potion", 1).with_potion("minecraft:water"));
+        stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 1));
+        stand.items[4] = Some(fuel);
+        let providers = Providers::empty();
+        stand.tick(&brewing, &items, &providers);
+        assert_eq!((stand.brew_time, stand.fuel, stand.total_fuel), (160, 6, 7));
+        assert_eq!(stand.items[4].as_ref().unwrap().count, 1);
+        for _ in 1..160 {
+            assert!(!stand.tick(&brewing, &items, &providers).brewed);
+        }
+        assert!(stand.tick(&brewing, &items, &providers).brewed);
+        assert_eq!(
+            stand.items[0].as_ref().unwrap().potion(),
+            Some("minecraft:awkward")
+        );
+        assert_eq!(stand.fuel, 6);
+        assert_eq!(stand.items[4].as_ref().unwrap().count, 1);
     }
 
     #[test]
@@ -630,14 +687,8 @@ mod tests {
     }
 
     use mod_api::Flow;
+    use mod_api::testing::FakeHost;
     use std::sync::{Arc, Mutex};
-
-    /// A server host that answers nothing: the hooks here don't call it.
-    struct NoHost;
-    impl mod_api::Host for NoHost {}
-    mod_api::impl_host_areas!(NoHost);
-    impl mod_api::ServerHost for NoHost {}
-    mod_api::impl_server_host_areas!(NoHost);
 
     /// Cancels every brew and leaves its own slots; records what it saw.
     struct BrewSwapper(Arc<Mutex<Vec<String>>>);
@@ -718,9 +769,9 @@ mod tests {
             stand.items[3] = Some(ItemStack::new("minecraft:nether_wart", 2));
             stand
         };
-        let mut host = NoHost;
+        let mut host = FakeHost::new();
         // What `tick_brewing_stand` does once the brew is due.
-        let brew = |host: &mut NoHost, stand: &mut BrewingStand| {
+        let brew = |host: &mut FakeHost, stand: &mut BrewingStand| {
             let mut stacks = stand.items.clone();
             let mut cancel = false;
             mod_api::dispatch_potion_brew_pre(host, [1, 2, 3], &mut stacks, &mut cancel);
