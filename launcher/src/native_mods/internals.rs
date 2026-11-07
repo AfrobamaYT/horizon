@@ -572,7 +572,7 @@ pub mod raw {
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
-            "mod_0_internals::raw::tick(\"example\", mod_0::count), // injection \"count\""
+            "mod_0_internals::raw::tick(\"example\", mod_0::count).ordered(0, \"count\"), // injection \"count\""
         ));
         assert!(!main.contains("/* MOD_SLOTS */"));
         assert!(!main.contains("mod_0::__horizon_points"));

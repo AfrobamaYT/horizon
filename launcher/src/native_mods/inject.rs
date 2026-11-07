@@ -97,7 +97,11 @@ mod tests {
             "[[inject]]\nid = 'hook'\nat = 'horizon_client::game::tick'\nkind = 'head'\nwith = 'tick_hook'\nhash = 'signature'\n",
         );
         // The callback remains in the mod crate; only the support module reaches the tool.
-        fs::write(root.join("src/lib.rs"), "pub fn tick_hook() {}\n").unwrap();
+        fs::write(
+            root.join("src/lib.rs"),
+            "mod runtime; pub fn tick_hook() { runtime::bump(&mut 0); }\n",
+        )
+        .unwrap();
         fs::write(
             root.join("src/runtime.rs"),
             "pub(crate) fn bump(value: &mut i32) { *value += 1; }\n",

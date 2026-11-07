@@ -13,7 +13,7 @@ my_mod/
   data/my_mod/
   Cargo.toml             # one crate; Cargo metadata is not mod identity
   src/lib.rs             # impl Hooks
-  src/frame.rs           # optional raw injection helper
+  src/frame.rs           # optional injection callback module
 ```
 
 Without `Cargo.toml`, it is a content mod. Code requires both `Cargo.toml` and `[native]`;
