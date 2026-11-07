@@ -8,8 +8,10 @@ pub trait Hooks {
     /// and the entity's box and eyes take it; later mods see earlier mods' edits. The answer
     /// holds while the entity keeps that pose and vanilla size; the next change asks again,
     /// starting from vanilla's. Changing the width or height leaves the eye height as it is:
-    /// set it too. A negative or non-finite size is ignored. `host` reads the side that asks;
-    /// the entity may be new, so read only what you need of it.
+    /// set it too. An answer is ignored if any component is non-finite, zero, negative or
+    /// greater than 32 blocks. This bounds collision and pathfinding work while allowing
+    /// sizes larger than naturally occurring vanilla entities. `host` reads the side that
+    /// asks; the entity may be new, so read only what you need of it.
     ///
     /// Asked on the server for its mobs (before and after their ticks) and for each LAN
     /// guest's player (once a tick), and on a client for its own player (after its tick):

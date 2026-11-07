@@ -29,8 +29,11 @@ impl Game<'_> {
         let old = previous.map_or(vanilla, |answer| answer.effective());
         let mut size = vanilla;
         self.native_entity_size(entity, pose, old, &mut size);
-        // A size no box can take (negative, NaN, infinite) is not used.
-        let usable = size.iter().all(|v| v.is_finite() && *v >= 0.0);
+        // Bound mod answers once, before collision/pathfinding consume them. 32 blocks
+        // exceeds even the dragon's natural width (16), while capping a path node's
+        // bounding-box scan at 33^3 cells and keeping integer extents representable.
+        // Invalid answers retain vanilla size, just like non-finite answers.
+        let usable = size.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 32.0);
         Some(SizeAnswer {
             pose,
             vanilla,
@@ -184,6 +187,70 @@ mod tests {
                 assert_eq!(calls.len(), 2);
                 assert_eq!(calls[1].1, grown);
                 assert_eq!(calls[1].2, game.mobs[i].vanilla_dims());
+            })
+        });
+    }
+
+    struct SetSize(Arc<Mutex<[f32; 3]>>);
+
+    #[mod_api::__subscriptions]
+    impl Hooks for SetSize {
+        fn entity_size(&self, _: &dyn Host, event: &mut EntitySizeEvent<'_>) {
+            *event.size = *self.0.lock().unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn invalid_size_answers_leave_the_mobs_default_box() {
+        let size = Arc::new(Mutex::new([1.0; 3]));
+        let mods = vec![mod_api::ModEntry::new(
+            "set_size",
+            Box::new(SetSize(size.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let id = game
+                    .spawn_mob_spawned(
+                        "cow",
+                        [1.0, 70.0, 3.0],
+                        crate::game::creatures::SpawnSite::Plain,
+                    )
+                    .unwrap();
+                let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+                let vanilla = game.mobs[i].vanilla_dims();
+                let default_dims = game.mobs[i].dims();
+                for invalid in [
+                    f32::NAN,
+                    f32::INFINITY,
+                    f32::NEG_INFINITY,
+                    0.0,
+                    -1.0,
+                    32.001,
+                    1e30,
+                ] {
+                    for axis in 0..3 {
+                        let mut answer = vanilla;
+                        answer[axis] = invalid;
+                        *size.lock().unwrap() = answer;
+                        game.mobs[i].size_answer = None;
+                        game.native_mob_sizes();
+                        let mob = &game.mobs[i];
+                        assert_eq!(mob.size_answer.unwrap().effective(), vanilla, "{answer:?}");
+                        assert_eq!(mob.dims(), default_dims, "{answer:?}");
+                    }
+                }
+                // The reported crash input must never become a pathfinding extent.
+                *size.lock().unwrap() = [1e30; 3];
+                game.mobs[i].size_answer = None;
+                game.native_mob_sizes();
+                assert_eq!(game.mobs[i].dims(), default_dims);
+                // The inclusive upper bound still permits oversized mod entities.
+                *size.lock().unwrap() = [32.0; 3];
+                game.mobs[i].size_answer = None;
+                game.native_mob_sizes();
+                assert_eq!(game.mobs[i].dims(), (32.0, 32.0, 32.0));
             })
         });
     }
