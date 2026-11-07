@@ -302,3 +302,50 @@ fn lifecycle_fixture_walks_other_owners() {
     }
     .run();
 }
+
+/// Inject a nested spawn into an actual lifted mob operation, then exercise the
+/// next real entity pass with just that new owner so the caller's other state
+/// remains available for its own assertions.
+pub(in crate::game) fn assert_mob_spawn_survives(
+    game: &mut Game<'_>,
+    action: impl FnOnce(&mut Game<'_>),
+) {
+    const SPAWNED: u32 = 1_900_000_000;
+    fn spawn(game: &mut Game<'_>) {
+        let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+        let mut mob = horizon_client::mobs::Mob::new(
+            SPAWNED,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 80.0, 0.5),
+            0.0,
+        );
+        mob.no_ai = true;
+        game.mobs.push(mob);
+    }
+    with_spawn(spawn, || action(game));
+    let index = game
+        .mobs
+        .iter()
+        .position(|m| m.id == SPAWNED)
+        .expect("nested spawn was dropped");
+    assert_eq!(game.mobs[index].age, 0, "spawn ticked in the current pass");
+    let join = game.mobs[index].join;
+    let mut original = game.mobs.lift();
+    let spawned = original.extract(join).unwrap();
+    game.mobs.push(spawned);
+    if !game.world.chunks.contains_key(&(0, 0)) {
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+    }
+    game.tick_creature_entities().unwrap();
+    assert_eq!(game.mobs[0].id, SPAWNED);
+    assert_eq!(game.mobs[0].join, join);
+    assert_eq!(game.mobs[0].age, 1, "spawn missed the next entity pass");
+    game.mobs.clear();
+    game.mobs.restore(
+        original,
+        horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+    );
+}
