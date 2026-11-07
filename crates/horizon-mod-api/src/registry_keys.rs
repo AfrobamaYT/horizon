@@ -3,6 +3,50 @@ use crate::{
     BlockEntityTypeKey, BlockKey, BlockStateId, DimensionKey, EffectKey, FluidKey, ItemKey,
 };
 
+impl BlockKey {
+    /// Validate an incoming slot against declarations, not a world's resolved mappings.
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            registering
+                .map(|requests| &requests.blocks)
+                .unwrap_or_else(|| block_names())
+                .id(slot)
+                .ok_or("unknown BlockKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl FluidKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.fluids,
+                None => crate::parts::resolved_fluids()
+                    .get()
+                    .unwrap_or(&crate::parts::requested_keys().fluids),
+            };
+            names.id(slot).ok_or("unknown FluidKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl ItemKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.items,
+                None => resolved_items()
+                    .get()
+                    .unwrap_or(&crate::parts::requested_keys().items),
+            };
+            names.id(slot).ok_or("unknown ItemKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
 fn resolved_items() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> {
     static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> =
         std::sync::OnceLock::new();
@@ -77,6 +121,39 @@ pub fn item_key_by_identifier(id: &crate::Identifier) -> Option<ItemKey> {
     Some(ItemKey(*resolved_items().get()?.identifiers.get(id)?))
 }
 
+impl EffectKey {
+    /// Resolved effects also expose registry entries no mod explicitly requested.
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.effects,
+                None => crate::parts::resolved_effects()
+                    .get()
+                    .map_or(&crate::parts::requested_keys().effects, |effects| {
+                        &effects.names
+                    }),
+            };
+            names.id(slot).ok_or("unknown EffectKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
+impl BlockEntityTypeKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.block_entity_types,
+                None => crate::parts::resolved_block_entity_types()
+                    .get()
+                    .unwrap_or(&crate::parts::requested_keys().block_entity_types),
+            };
+            names.id(slot).ok_or("unknown BlockEntityTypeKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
 impl DimensionKey {
     /// `minecraft:overworld`.
     pub const OVERWORLD: Self = Self(0);
@@ -84,6 +161,12 @@ impl DimensionKey {
     pub const NETHER: Self = Self(1);
     /// `minecraft:the_end`.
     pub const END: Self = Self(2);
+
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        let key = Self(slot);
+        dimension_id(key).ok_or("unknown DimensionKey slot")?;
+        Ok(key)
+    }
 }
 
 /// The key of dimension `id`, numbering it when the game meets it for the first time.
@@ -335,6 +418,18 @@ pub fn effect_key(index: usize) -> Option<EffectKey> {
         .get(index)
         .copied()
         .map(EffectKey)
+}
+
+impl crate::BoolGameRuleKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|keys| {
+            keys.unwrap_or(crate::parts::requested_keys())
+                .game_rules
+                .id(slot)
+                .ok_or("unknown bool rule slot")?;
+            Ok(Self(slot))
+        })
+    }
 }
 
 #[cfg(test)]

@@ -59,6 +59,14 @@ impl From<ModBlockEntitySnapshot> for ModBlockEntity {
         }
     }
 }
+impl ModBlockEntity {
+    /// Apply returned mutable state through the native revision path, never its identity.
+    pub(crate) fn apply_snapshot(&mut self, snapshot: ModBlockEntitySnapshot) {
+        if self.fields != snapshot.fields {
+            *std::ops::DerefMut::deref_mut(self) = snapshot.fields;
+        }
+    }
+}
 
 impl ModRevision {
     // hidden: the game verifies callback snapshots still name their engine entity

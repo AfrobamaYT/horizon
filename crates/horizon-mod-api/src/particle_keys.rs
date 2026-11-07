@@ -11,6 +11,20 @@ fn resolved() -> &'static OnceLock<Particles> {
     static EMPTY: OnceLock<Particles> = OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |parts| &parts.particles)
 }
+impl ParticleKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|registering| {
+            let names = match registering {
+                Some(requests) => &requests.particles,
+                None => resolved()
+                    .get()
+                    .map_or(&crate::parts::requested_keys().particles, |p| &p.names),
+            };
+            names.id(slot).ok_or("unknown ParticleKey slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
 
 /// Resolve provider names once at load, before publishing either names or providers.
 // hidden: only the game supplies the completed particle registry.

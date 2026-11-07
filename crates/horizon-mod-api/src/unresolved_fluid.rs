@@ -26,6 +26,13 @@ impl FluidIdentity {
 }
 
 impl UnresolvedFluid {
+    pub(crate) fn from_slot(slot: u64) -> Result<Self, &'static str> {
+        let table = TABLE.read().unwrap();
+        (slot < table.names.len() as u64)
+            .then_some(Self(slot))
+            .ok_or("unknown unresolved fluid")
+    }
+
     /// The original stored name, read from the host's process-lifetime table.
     pub fn id(self, host: &dyn Host) -> String {
         host.unresolved_fluid_id(self)

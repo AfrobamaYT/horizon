@@ -25,6 +25,14 @@ pub struct BlockKey(u32);
 // exhaustive: private fields; only the engine resolves model handles
 pub struct ModelRef(u64, u32);
 
+impl ModelRef {
+    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
+        if generation == 0 {
+            return Err("unpublished model generation");
+        }
+        Ok(Self(generation, slot))
+    }
+}
 
 /// Why a standalone model could not be resolved or drawn. Errors append no geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
