@@ -571,6 +571,16 @@ pub trait LevelsBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// Every loaded chunk of an open server level as handles, ordered by chunk x then z. None for
+    /// a stale handle or on a client. Loads nothing.
+    fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>> {
+        crate::phase::unprovided(
+            "Backend::level_loaded_chunks",
+            "level_loaded_chunks",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

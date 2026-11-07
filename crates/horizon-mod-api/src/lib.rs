@@ -4619,6 +4619,14 @@ mod tests {
     #[test]
     fn dimension_keys_name_one_dimension_each() {
         use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(
+            dimension_key("minecraft:overworld"),
+            DimensionKey::OVERWORLD
+        );
+        assert_eq!(
+            dimension_id(DimensionKey::OVERWORLD),
+            Some("minecraft:overworld")
+        );
         assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
         assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
         let first = dimension_key("test:first");
