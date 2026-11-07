@@ -3008,6 +3008,10 @@ impl PreparedModelFace {
         }
     }
 
+    pub(super) fn positions(&self) -> [[f32; 3]; 4] {
+        self.positions
+    }
+
     pub(super) fn gpu_vertex(&self, corner: usize) -> horizon_client::gfx::PreparedModelVertex {
         let normal = horizon_client::item_render::direction_vector(self.facing);
         horizon_client::gfx::PreparedModelVertex {
