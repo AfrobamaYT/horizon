@@ -67,6 +67,16 @@ impl InstanceGroupStorage {
     pub(super) fn clear(&mut self) {
         self.groups.clear();
     }
+    pub(super) fn retire_disabled(&mut self, disabled: &std::collections::BTreeSet<String>) {
+        for slot in &mut self.groups {
+            if slot
+                .as_ref()
+                .is_some_and(|g| g.owner.is_some_and(|id| disabled.contains(id)))
+            {
+                *slot = None;
+            }
+        }
+    }
     fn get(
         &mut self,
         handle: InstanceGroupRef,
