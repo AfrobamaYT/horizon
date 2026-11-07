@@ -125,9 +125,9 @@ impl Game<'_> {
         let held = match t {
             Target::Cart(_) => self
                 .carts
-                .iter_mut()
-                .find(|c| c.id == id)
-                .and_then(|c| take(c.position, &mut c.items)),
+                .iter()
+                .position(|c| c.id == id)
+                .and_then(|i| self.carts.update(i, |c| take(c.position, &mut c.items))),
             _ => self
                 .boats
                 .iter()

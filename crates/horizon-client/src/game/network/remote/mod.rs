@@ -8090,12 +8090,11 @@ impl Game<'_> {
             // Minecart.interact resets the passenger's easing baseline on
             // a successful boarding click, not on SetPassengers (commands
             // can mount a player without this interaction).
-            if let Some(c) = self
-                .carts
-                .iter_mut()
-                .find(|c| c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable)
-            {
-                c.player_rotation_offset = c.rotation_offset;
+            if let Some(i) = self.carts.iter().position(|c| {
+                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable
+            }) {
+                self.carts
+                    .update(i, |c| c.player_rotation_offset = c.rotation_offset);
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {
