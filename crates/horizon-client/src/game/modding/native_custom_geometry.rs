@@ -562,7 +562,7 @@ mod tests {
                 0.5, 0.0, 0.0, 0.125, 0.0, 0.5, 0.0, 0.25, 0.0, 0.0, 0.5, 0.0,
             ];
             group.set_group_transform(game, pose).unwrap();
-            assert_eq!(bytes() - before, 9 * stride); // one copy, then eight reserved copies
+            assert_eq!(bytes() - before, 3 * stride); // one copy, then two live copies
             let mut precomposed = changed;
             // Independent result of scale(0.5) * (scale_x(2) + translate_x(0.2)).
             precomposed.transform = [
@@ -588,7 +588,16 @@ mod tests {
             assert_eq!(game.prepared_model_draws.borrow().len() * stride, stride);
             let mut outside = pose;
             outside[3] = 40.0;
+            group.set_len(game, 0).unwrap();
+            let count = bytes();
             group.set_group_transform(game, outside).unwrap();
+            assert_eq!(bytes(), count, "no live records to rebuild");
+            group.set_len(game, 2).unwrap();
+            assert_eq!(
+                bytes() - count,
+                2 * stride,
+                "newly exposed records use the current pose"
+            );
             draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
             game.prepared_model_draws.borrow_mut().clear();
             context(game, &mut draw).draw_instance_group(group).unwrap();

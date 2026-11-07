@@ -167,7 +167,7 @@ impl Game<'_> {
             .ok_or(GroupError::OutOfRange)?;
         horizon_client::world_geometry::validate_instances(copies)?;
         group.copies[first as usize..end].copy_from_slice(copies);
-        group.rewrite(first as usize..end);
+        group.rewrite((first as usize).min(group.len)..end);
         group.len = group.len.max(end);
         Ok(())
     }
@@ -182,7 +182,7 @@ impl Game<'_> {
             return Err(GroupError::NonFinite);
         }
         group.transform = row_major_3x4(transform);
-        group.rewrite(0..group.copies.len());
+        group.rewrite(0..group.len);
         Ok(())
     }
     pub(super) fn instance_group_set_len(
@@ -194,6 +194,9 @@ impl Game<'_> {
         let group = storage.get(group, self.standalone_geometry.generation())?;
         if len as usize > group.copies.len() {
             return Err(GroupError::OutOfRange);
+        }
+        if len as usize > group.len {
+            group.rewrite(group.len..len as usize);
         }
         group.len = len as usize;
         Ok(())
