@@ -2071,9 +2071,8 @@ name = "horizon-mod-internals"
 version = "0.1.0"
 dependencies = [
  "horizon-mod-api-gen",
+ "horizon-mod-package",
  "horizon-mod-points",
- "serde",
- "toml",
 ]
 
 [[package]]
