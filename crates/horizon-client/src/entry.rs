@@ -134,11 +134,11 @@ pub fn main_with(
                 std::process::exit(game::exit_code::ERROR);
             }
         }
-        if let Some(listeners) = wasm.remove(id) {
-            if let Err(error) = listeners.register() {
-                eprintln!("Horizon: {id}: {error}");
-                std::process::exit(game::exit_code::ERROR);
-            }
+        if let Some(listeners) = wasm.remove(id)
+            && let Err(error) = listeners.register()
+        {
+            eprintln!("Horizon: {id}: {error}");
+            std::process::exit(game::exit_code::ERROR);
         }
     }
     mod_points::__private::seal();
