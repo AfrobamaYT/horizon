@@ -678,7 +678,7 @@ mod tests {
                 .push(Mob::new(13, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
             floor(game);
             let mob = game.entity(12).unwrap();
-            let mob_ref = game.native_mob_ref(game.entity(12).unwrap()).unwrap();
+            let mob_ref = game.mob(game.entity(12).unwrap()).unwrap();
             assert!(mob_ref.set_persistence_required(game));
             assert!(mob_ref.set_no_action_time(game, 650));
 
@@ -751,7 +751,7 @@ mod tests {
             let victim = game.entity(12).unwrap();
             let enemy = game.entity(13).unwrap();
             let keep = |game: &mut super::Game<'_>| {
-                let m = game.native_mob_ref(game.entity(12).unwrap()).unwrap();
+                let m = game.mob(game.entity(12).unwrap()).unwrap();
                 m.set_persistence_required(game);
                 m.set_no_action_time(game, 650);
             };
@@ -896,7 +896,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let entity = game.entity(15).unwrap();
             assert!(game.entity_set_invulnerable(entity, true));
 

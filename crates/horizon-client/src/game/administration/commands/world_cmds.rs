@@ -292,8 +292,7 @@ impl Game<'_> {
                         if let Some(name) = named {
                             g.note_direct_entity(ty, name);
                         }
-                        let hurt =
-                            g.hurt_player_from(amount, from, ty, attacker, creative_source);
+                        let hurt = g.hurt_player_from(amount, from, ty, attacker, creative_source);
                         if hurt && let Some(credit) = by_player {
                             g.combat.note_hurt_by_player(credit, now);
                         }

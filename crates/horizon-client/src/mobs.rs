@@ -3896,9 +3896,7 @@ impl Mob {
         !self.alive()
             || self.removed
             || (self.is_invulnerable() && !source.kind.bypasses_invulnerability())
-            || (source.is_fire()
-                && self.kind.flags.fire_immune
-                && !self.reflected_fireball(source))
+            || (source.is_fire() && self.kind.flags.fire_immune && !self.reflected_fireball(source))
     }
     /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a
     /// player's return hit.
