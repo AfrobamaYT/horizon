@@ -657,7 +657,11 @@ fn stack_crossing(
                     && path.path.segments.last().is_some_and(|s| {
                         matches!(
                             s.ident.to_string().as_str(),
-                            "ItemStack" | "ItemCost" | "MerchantOffer" | "Suggestion"
+                            "ItemStack"
+                                | "ItemCost"
+                                | "MerchantOffer"
+                                | "Suggestion"
+                                | "GameRuleValue"
                         )
                     });
                 syn::visit::visit_type_path(self, path);
@@ -815,6 +819,27 @@ mod stack_crossing_tests {
             .is_some()
         );
     }
+    #[test]
+    fn rule_hook_gates_before_copying_value() {
+        let ty: Type = syn::parse_quote!(GameRuleValue);
+        let crossing = stack_crossing(
+            &[("value".to_owned(), &ty)],
+            None,
+            "GameRuleChanged",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(
+            crossing
+                .before
+                .starts_with("if !mod_api::__private::listened")
+        );
+        assert!(crossing.before.contains("value.try_into_api()"));
+        assert_eq!(crossing.arguments, ["__api_value"]);
+        assert!(crossing.after.is_empty());
+    }
+
     #[test]
     fn plain_hook_has_no_stack_seam() {
         let scalar: Type = syn::parse_quote!(&mut u32);
