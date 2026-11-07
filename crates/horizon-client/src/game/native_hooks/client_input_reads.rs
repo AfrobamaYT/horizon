@@ -1,4 +1,5 @@
 use super::*;
+use crate::game::api_values::TryIntoApi;
 
 /// Helpers for native mods, kept as stable as the hook points.
 // Native mods use these; nothing in Horizon does.
@@ -27,7 +28,9 @@ impl Game<'_> {
         };
         Some(NativeKeyMapping {
             down,
-            label: keybinds::display_name(self.settings.keys.get(name)),
+            label: keybinds::display_name(self.settings.keys.get(name))
+                .try_into_api()
+                .unwrap(),
         })
     }
 }

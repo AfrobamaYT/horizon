@@ -48,7 +48,8 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_gui_nine_slice(&mut *self.surface, sprite, rect, color)
     }
     fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) {
-        self.game.native_gui_tooltip(&mut *self.surface, lines, at)
+        let lines = lines.try_into_engine(&()).unwrap();
+        self.game.native_gui_tooltip(&mut *self.surface, &lines, at)
     }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_text_width(&*self.surface, text)
