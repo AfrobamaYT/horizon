@@ -405,11 +405,12 @@ impl DebugEntries {
         self.profile == Some(profile)
     }
     /// `getStatus`: never for an entry the statuses leave out. The debug renderers ask every
-    /// frame, so no identifier is built for the lookup.
+    /// frame, so no identifier is built for the lookup; a path with a namespace (a native mod's entry) is
+    /// matched as it is.
     pub fn status(&self, path: &str) -> Status {
         self.statuses
             .iter()
-            .find(|(id, _)| id.strip_prefix("minecraft:") == Some(path))
+            .find(|(id, _)| id.as_str() == path || id.strip_prefix("minecraft:") == Some(path))
             .map_or(Status::Never, |(_, status)| *status)
     }
     /// `setStatus`: the statuses are custom from now on, and saved.
@@ -445,7 +446,7 @@ impl DebugEntries {
     pub fn any_enabled(&self, overlay: bool, reduced: bool) -> bool {
         self.statuses
             .keys()
-            .filter_map(|id| id.strip_prefix("minecraft:"))
+            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
             .any(|path| self.enabled(path, overlay, reduced))
     }
 }

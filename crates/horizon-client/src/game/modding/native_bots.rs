@@ -163,9 +163,7 @@ impl Game<'_> {
         level: mod_api::LevelRef,
         aabb: [f64; 6],
     ) -> Option<Vec<[f64; 6]>> {
-        let Some(bounds) = aabb_of(aabb) else {
-            return None;
-        };
+        let bounds = aabb_of(aabb)?;
         if !self.native_level_in_place(level) {
             return None;
         }

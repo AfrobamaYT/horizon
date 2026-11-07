@@ -6109,6 +6109,4 @@ pub(crate) mod built {
     }
 }
 
-mod player_bots;
-pub use player_bots::{NativePlayerInput, NativeSimulatedMove};
 include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
