@@ -2557,11 +2557,14 @@ mod tests {
         #[mod_api::__subscriptions]
         impl Hooks for Listener {
             fn toast_add(&self, _: &dyn ClientHost, event: &mut ToastAddEvent<'_>) -> Flow {
-                match event.description.as_ref().map(Text::plain).as_deref() {
-                    Some("cancel") => Flow::Cancel,
-                    Some("edit") => {
-                        *event.title = Text::literal("replacement").with_color(0x12_3456);
-                        *event.description = Some(Text::literal("changed"));
+                match event.description.as_ref().map(|text| &text.content) {
+                    Some(mod_api::text::TextContent::Literal(value)) if value == "cancel" => {
+                        Flow::Cancel
+                    }
+                    Some(mod_api::text::TextContent::Literal(value)) if value == "edit" => {
+                        *event.title = mod_api::Text::literal("replacement");
+                        event.title.style.color = Some("#123456".into());
+                        *event.description = Some(mod_api::Text::literal("changed"));
                         Flow::Continue
                     }
                     _ => Flow::Continue,

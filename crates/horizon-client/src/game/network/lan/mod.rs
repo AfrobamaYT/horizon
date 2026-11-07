@@ -9,6 +9,7 @@ use super::{
     native_living_effects::{active_effect, mob_effect},
     shield::OFFHAND_SLOT,
 };
+use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
@@ -2487,7 +2488,7 @@ impl Game<'_> {
                     let raw = message.content.clone();
                     // `PlayerChatMessage.decoratedContent`: the text as a literal.
                     let original = Text::literal(raw.clone());
-                    let mut text = original.clone();
+                    let mut text = original.try_into_api().unwrap();
                     let mut cancel = false;
                     let mut replies = Vec::new();
                     self.native_server_chat(mod_api::__private::ServerChatCall {
@@ -2504,6 +2505,7 @@ impl Game<'_> {
                     if !replies.is_empty() {
                         let host = self.lan.as_ref()?;
                         for line in replies {
+                            let line = line.try_into_engine(&()).unwrap();
                             host.hub.send_to(
                                 conn,
                                 &C::SystemChat(play::SystemChat {
@@ -2519,6 +2521,7 @@ impl Game<'_> {
                     if cancel {
                         continue;
                     }
+                    let text = text.try_into_engine(&()).unwrap();
                     let mut line = format!("<{name}> {raw}");
                     if text != original {
                         // `withUnsignedContent`: clients show the mod's text,
@@ -4608,9 +4611,7 @@ mod tests {
                 super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
                 (meta, defaults)
             };
-            assert!(
-                mob.set_custom_name(game, Some(horizon_client::text::Text::literal("Grumbles")))
-            );
+            assert!(mob.set_custom_name(game, Some(mod_api::Text::literal("Grumbles"))));
             assert!(mob.set_custom_name_visible(game, true));
             let (meta, _) = meta_of(game);
             let sent = horizon_protocol::text::literal("Grumbles");
@@ -4794,7 +4795,7 @@ mod tests {
             ) -> Flow {
                 event
                     .replies
-                    .push(Text::literal(format!("heard {}", event.raw_text)));
+                    .push(mod_api::Text::literal(format!("heard {}", event.raw_text)));
                 if event.raw_text == "secret" {
                     Flow::Cancel
                 } else {
