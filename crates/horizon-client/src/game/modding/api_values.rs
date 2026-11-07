@@ -11,6 +11,8 @@ pub(in crate::game) use block_state::{
 };
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
+#[path = "api_values/recipe_inputs.rs"]
+pub(in crate::game) mod recipe_inputs;
 
 /// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
 /// Registry definitions do not change on pack reload; world-number mappings are separate.
@@ -2835,5 +2837,10 @@ pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::R
 pub(in crate::game) mod damage;
 #[path = "api_values/item_properties.rs"]
 mod item_properties;
+#[path = "api_values/loot_values.rs"]
+mod loot_values;
+#[path = "api_values/particle_values.rs"]
+mod particle_values;
+pub(crate) use loot_values::{dispatch_loot_condition, dispatch_loot_function};
 #[path = "api_values/small_values.rs"]
 mod small_values;

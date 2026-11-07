@@ -2243,7 +2243,7 @@ impl Game<'_> {
         let e: &Enchantments = self.active_enchantment_definitions();
         let color = self.rarity_color(stack);
         let advanced = !nested && self.options_advanced_tooltips();
-        let display = mod_api::item_tooltip::TooltipDisplay::for_stack(stack);
+        let display = horizon_client::item_tooltip::tooltip_display(stack);
         let mut lines = Vec::new();
         // `getTooltipLines`' own branch: a tooltip the stack doesn't hide.
         let shown = !nested && display.name_visible(creative);
@@ -2739,6 +2739,7 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
             && let Ok(stack) = stack.try_into_api()
         {
+            let display = mod_api::item_tooltip::TooltipDisplay::for_stack(&stack);
             let Ok(mut api_lines) = lines.try_into_api() else {
                 return lines;
             };

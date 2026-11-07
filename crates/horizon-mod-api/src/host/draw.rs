@@ -31,7 +31,7 @@ pub trait DrawContext {
     /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
     /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
     /// draws one; false for an unknown item.
-    fn item_model(&mut self, item: &str, model: &str, at: [f32; 2], size: f32) -> bool {
+    fn item_model(&mut self, item: ItemKey, model: &str, at: [f32; 2], size: f32) -> bool {
         unimplemented!("DrawContext::item_model")
     }
     /// A quad of corners `points` (in order round it) in GUI pixels, `argb`:
@@ -53,7 +53,7 @@ pub trait DrawContext {
     }
     /// Item `item`'s icon (`mymod:machine`) with its top left at `at`,
     /// `size` GUI pixels square (16 in a slot); false for an unknown item.
-    fn item(&mut self, item: &str, at: [f32; 2], size: f32) -> bool {
+    fn item(&mut self, item: ItemKey, at: [f32; 2], size: f32) -> bool {
         unimplemented!("DrawContext::item")
     }
     /// A line of text at `(x, y)` in GUI pixels, in `argb` as vanilla's `GuiGraphics` takes it
@@ -230,7 +230,7 @@ pub trait BlockEntityDrawContext {
     /// an entity's place: a block's baked model, with its default tints. A
     /// moving part that is no block is a standalone model
     /// (`native_draw_model`). False for an unknown block or property.
-    fn block(&mut self, block: &str, properties: &[(&str, &str)]) -> bool {
+    fn block(&mut self, block: BlockKey, properties: &[(&str, &str)]) -> bool {
         unimplemented!("BlockEntityDrawContext::draw_block")
     }
     /// Draws `stack` under `draw`'s pose as an item is drawn in the world

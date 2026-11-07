@@ -8,13 +8,67 @@ impl TryIntoApi for horizon_client_core::text::Text {
         let component = self.component_view();
         let result = (|| {
             let text = captured_text(&component);
-            let form = mod_api::text::TextForm::try_from(&text)?;
-            mod_api::text::Text::try_from(form)
+            let form = mod_api::text::TextForm::try_from(&text);
+            discard_api_text(text);
+            mod_api::text::Text::try_from(form?)
         })();
         if let std::borrow::Cow::Owned(component) = component {
             horizon_client_core::component::discard_component(component);
         }
         result
+    }
+}
+
+// Conversion temporaries are boundary-owned, not the mod-owned trees whose
+// ordinary recursive Clone/Eq/Drop are outside the crossing guarantee.
+fn discard_api_text(text: mod_api::Text) {
+    use horizon_client_core::component::discard_component;
+    use mod_api::text::{TextClick, TextContent as C, TextHover as H, TextObject as O};
+    let mut pending = vec![text];
+    while let Some(mut text) = pending.pop() {
+        pending.append(&mut text.children);
+        for value in std::mem::take(&mut text.metadata)
+            .into_values()
+            .chain(std::mem::take(&mut text.style.metadata).into_values())
+        {
+            discard_component(value);
+        }
+        match std::mem::replace(&mut text.content, C::Literal(String::new())) {
+            C::Translatable { arguments, .. } => pending.extend(arguments),
+            C::Selector { separator, .. } | C::Nbt { separator, .. } => {
+                pending.extend(separator.map(|t| *t))
+            }
+            C::Object(object) => {
+                let fallback = match object {
+                    O::Player {
+                        profile, fallback, ..
+                    } => {
+                        discard_component(profile);
+                        fallback
+                    }
+                    O::Atlas { fallback, .. } => fallback,
+                };
+                pending.extend(fallback.map(|t| *t));
+            }
+            _ => {}
+        }
+        match text.style.hover.take() {
+            Some(H::Text(text)) => pending.push(*text),
+            Some(H::Entity { name, .. }) => pending.extend(name.map(|t| *t)),
+            Some(H::Item {
+                components: Some(components),
+                ..
+            }) => discard_component(components),
+            _ => {}
+        }
+        match text.style.click.take() {
+            Some(TextClick::ShowDialog(data))
+            | Some(TextClick::Custom {
+                payload: Some(data),
+                ..
+            }) => discard_component(data),
+            _ => {}
+        }
     }
 }
 
@@ -360,7 +414,9 @@ impl<C: ?Sized> TryIntoEngine<C> for mod_api::text::Text {
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
         let form = mod_api::text::TextForm::try_from(self)?;
         let text = mod_api::text::Text::try_from(form)?;
-        Ok(owned_text_component(&text).into())
+        let component = owned_text_component(&text);
+        discard_api_text(text);
+        Ok(component.into())
     }
 }
 
@@ -689,7 +745,7 @@ fn postorder<T, R>(
         .remove(&(std::ptr::from_ref(root) as usize))
         .expect("root visited")
 }
-fn captured_text(value: &serde_json::Value) -> mod_api::text::Text {
+pub(super) fn captured_text(value: &serde_json::Value) -> mod_api::text::Text {
     postorder(value, captured_node, mod_api::text::Text::default)
 }
 fn owned_text_component(text: &mod_api::text::Text) -> serde_json::Value {

@@ -11,7 +11,10 @@ impl DrawContext for GameDrawContext<'_, '_> {
     fn size(&self) -> [f32; 2] {
         self.game.native_size(&*self.surface)
     }
-    fn item_model(&mut self, item: &str, model: &str, at: [f32; 2], size: f32) -> bool {
+    fn item_model(&mut self, item: ItemKey, model: &str, at: [f32; 2], size: f32) -> bool {
+        let Some(item) = mod_api::__private::item_key_id(item) else {
+            return false;
+        };
         self.game
             .native_item_model(&mut *self.surface, item, model, at, size)
     }
@@ -25,7 +28,10 @@ impl DrawContext for GameDrawContext<'_, '_> {
         self.game
             .native_sprite(&mut *self.surface, name, src, dst, tint)
     }
-    fn item(&mut self, item: &str, at: [f32; 2], size: f32) -> bool {
+    fn item(&mut self, item: ItemKey, at: [f32; 2], size: f32) -> bool {
+        let Some(item) = mod_api::__private::item_key_id(item) else {
+            return false;
+        };
         self.game.native_item(&mut *self.surface, item, at, size)
     }
     fn text(&mut self, text: &str, at: [f32; 2], argb: u32, shadow: bool) {
@@ -150,7 +156,10 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         self.game
             .native_draw_cube(&mut *self.surface, from, to, faces, tint)
     }
-    fn block(&mut self, block: &str, properties: &[(&str, &str)]) -> bool {
+    fn block(&mut self, block: BlockKey, properties: &[(&str, &str)]) -> bool {
+        let Some(block) = mod_api::__private::block_key_id(block) else {
+            return false;
+        };
         self.game
             .native_draw_block(&mut *self.surface, block, properties)
     }

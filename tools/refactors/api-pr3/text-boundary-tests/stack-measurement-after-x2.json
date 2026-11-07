@@ -1,0 +1,46 @@
+{
+  "depth": 512,
+  "resolution_bytes": 4096,
+  "results": [
+    {
+      "relation": "extra",
+      "overflow_bytes": 1249280,
+      "pass_bytes": 1253376
+    },
+    {
+      "relation": "translation argument",
+      "overflow_bytes": 1536000,
+      "pass_bytes": 1540096
+    },
+    {
+      "relation": "hover text",
+      "overflow_bytes": 1105920,
+      "pass_bytes": 1110016
+    },
+    {
+      "relation": "selector separator",
+      "overflow_bytes": 561152,
+      "pass_bytes": 565248
+    },
+    {
+      "relation": "atlas fallback",
+      "overflow_bytes": 913408,
+      "pass_bytes": 917504
+    },
+    {
+      "relation": "entity hover name",
+      "overflow_bytes": 1105920,
+      "pass_bytes": 1110016
+    },
+    {
+      "relation": "NBT separator",
+      "overflow_bytes": 561152,
+      "pass_bytes": 565248
+    },
+    {
+      "relation": "player fallback",
+      "overflow_bytes": 913408,
+      "pass_bytes": 917504
+    }
+  ]
+}
