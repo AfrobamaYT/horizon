@@ -229,7 +229,7 @@ pub fn row_major_3x4(m: [f32; 12]) -> Mat4 {
 
 /// Block-entity vertex light: sky in byte 0 and block in byte 1, both in sixteenths.
 pub fn pack_light(light: mod_api::LightCoords) -> u32 {
-    u32::from(light.sky) * 16 | u32::from(light.block) * 16 << 8
+    (u32::from(light.sky) * 16) | ((u32::from(light.block) * 16) << 8)
 }
 
 /// `LivingEntityRenderer.getOverlayCoords` as the entity shader's overlay code.
