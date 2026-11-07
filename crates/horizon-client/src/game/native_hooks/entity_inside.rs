@@ -93,6 +93,13 @@ mod entity_inside_tests {
                 drops_before + 1,
                 "only drop=true creates dirt resources"
             );
+            let dropped = &game.dropped[drops_before];
+            assert_eq!(dropped.stack.id, "minecraft:dirt");
+            assert_eq!(
+                dropped.position.x.floor() as i32,
+                4,
+                "resources came from drop=true, not the neighboring drop=false block"
+            );
             // Both writes reach the clients (`setBlockAndUpdate` and `destroyBlock` are
             // flag 3); the dropped one sends nothing.
             let log = game.world.block_log.take().unwrap();
