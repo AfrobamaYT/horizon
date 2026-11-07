@@ -188,8 +188,6 @@ impl Game<'_> {
             None => self.res.stations(),
         }
     }
-    /// The enchantments item names and tooltips read: a server's, with the
-    /// entries its data packs add, else the world's.
 
     /// The world's packs' content files, none without packs.
     /// The biome table the world plays with, `None` before a world opens.
@@ -412,8 +410,6 @@ impl Game<'_> {
 }
 
 impl Game<'_> {
-    /// The enchantments item names and tooltips read: a server's, with the
-    /// entries its data packs add, else the world's.
     pub(super) fn active_enchantment_definitions(&self) -> &horizon_client::enchant::Enchantments {
         match self.remote.as_ref().and_then(|r| r.enchantments.as_ref()) {
             Some(e) => e,
