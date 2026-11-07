@@ -13,6 +13,7 @@ RAW_TAKE = re.compile(
     r"(?:std::)?mem::take\s*\(\s*&mut\s+"
     r"(?:self|game|lists)\.(?:" + FIELDS + r")\s*\)"
     r"|std::mem::take\(&mut self\$\(\.\$list\)\+\)"
+    r"|std::mem::take\(\s*projectiles\s*\)"
 )
 
 
@@ -32,6 +33,7 @@ class EntityLifts(unittest.TestCase):
             "std::mem::take(&mut self.mobs)",
             "mem::take(\n &mut game.creatures.projectiles\n)",
             "std::mem::take(&mut self$(.$list)+)",
+            "std::mem::take(projectiles)",
         ):
             with self.subTest(text=text):
                 self.assertIsNotNone(RAW_TAKE.search(text))
