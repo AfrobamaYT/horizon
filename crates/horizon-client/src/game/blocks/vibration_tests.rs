@@ -1,5 +1,5 @@
+//! Game event regressions for server-side block actions.
 use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
-// Game event regressions for server-side block actions.
 use horizon_client::{
     chunk::Chunk,
     containers::BlockEntity,

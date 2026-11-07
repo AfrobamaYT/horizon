@@ -3311,6 +3311,7 @@ struct Game<'a> {
     /// This game is that server thread's (game/world/integrated.rs).
     serving: Option<integrated::Serving>,
     /// The open world is shared behind an invite code (game/network/friends.rs).
+    #[cfg(feature = "friends")]
     friends: Option<friends::Sharing>,
     /// The Social Interactions screen and the players whose chat is hidden (game/network/social.rs).
     social: social::Social,
