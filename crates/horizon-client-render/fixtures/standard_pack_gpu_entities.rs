@@ -27,6 +27,7 @@ use winit::{
 };
 
 static NEEDS_SPANS: AtomicBool = AtomicBool::new(false);
+static CHECK_RAW_RECORD: AtomicBool = AtomicBool::new(false);
 static OBSERVED: AtomicUsize = AtomicUsize::new(0);
 static SLOT_CALLS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
 fn observe_needs(
@@ -42,7 +43,10 @@ fn observe_world(
     >,
 ) {
     SLOT_CALLS[1].fetch_add(1, Ordering::Relaxed);
-    if NEEDS_SPANS.load(Ordering::Relaxed) {
+    if CHECK_RAW_RECORD.load(Ordering::Relaxed) {
+        assert_eq!(event.world.size, [17, 23]);
+        assert_eq!(event.world.camera, glam::DVec3::new(2.0, 3.0, 5.0));
+    } else if NEEDS_SPANS.load(Ordering::Relaxed) {
         assert_eq!(event.world.entities.len(), 12);
         assert_eq!(
             event.world.spans.iter().map(|s| s.id).collect::<Vec<_>>(),
@@ -52,9 +56,13 @@ fn observe_world(
     }
 }
 fn observe_hand(
-    _: &mut native_render::__ModRenderRenderHandDrawnRaw<'_, &mut native_render::HandDrawn<'_>>,
+    event: &mut native_render::__ModRenderRenderHandDrawnRaw<'_, &mut native_render::HandDrawn<'_>>,
 ) {
     SLOT_CALLS[2].fetch_add(1, Ordering::Relaxed);
+    if CHECK_RAW_RECORD.load(Ordering::Relaxed) {
+        assert_eq!(event.hand.size, [29, 31]);
+        assert_eq!(event.hand.camera, glam::DVec3::new(7.0, 11.0, 13.0));
+    }
 }
 
 fn install_observer() {
@@ -191,12 +199,12 @@ fn benchmark_slots() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         color: &color,
         color_view: &color_view,
         color_format: wgpu::TextureFormat::Rgba8Unorm,
-        size: [1, 1],
+        size: [17, 23],
         depth: &depth_view,
         depth_size: [1, 1],
         view_proj: glam::Mat4::IDENTITY,
         jittered: glam::Mat4::IDENTITY,
-        camera: glam::DVec3::ZERO,
+        camera: glam::DVec3::new(2.0, 3.0, 5.0),
         entities: &[],
         spans: &[],
         motion: &[],
@@ -210,6 +218,8 @@ fn benchmark_slots() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             filtered: &sampler,
         }),
     });
+    // Scalar sentinels check delivered records independently of the pixel fixture.
+    CHECK_RAW_RECORD.store(true, Ordering::Relaxed);
     let world_ns = slot_ns(|| native_render::world_drawn(std::hint::black_box(&mut world)));
     let mut hand = native_render::HandDrawn::from(built::HandDrawn {
         device: &device,
@@ -218,16 +228,17 @@ fn benchmark_slots() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
         color: &color,
         color_view: &color_view,
         color_format: wgpu::TextureFormat::Rgba8Unorm,
-        size: [1, 1],
+        size: [29, 31],
         hand: &[],
         view_proj: glam::Mat4::IDENTITY,
-        camera: glam::DVec3::ZERO,
+        camera: glam::DVec3::new(7.0, 11.0, 13.0),
         atlas: None,
         quad_indices: &indices,
     });
     let hand_ns = slot_ns(|| native_render::hand_drawn(std::hint::black_box(&mut hand)));
     let needs_ns =
         slot_ns(|| native_render::render_needs(std::hint::black_box(&mut Default::default())));
+    CHECK_RAW_RECORD.store(false, Ordering::Relaxed);
     Ok(
         serde_json::json!({ "world_drawn_ns": world_ns, "hand_drawn_ns": hand_ns,
         "render_needs_ns": needs_ns, "iterations": 200_000, "profile": "dev",
@@ -261,7 +272,19 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         assert!(native_render::needs().entity_spans);
         assert!(native_render::world_drawn_hooked());
         mod_points::stop("fixture");
+        let stopped_counts = SLOT_CALLS
+            .each_ref()
+            .map(|calls| calls.load(Ordering::Relaxed));
         assert!(!native_render::needs().entity_spans);
+        NEEDS_SPANS.store(false, Ordering::Relaxed);
+        benchmark_slots()?;
+        assert_eq!(
+            SLOT_CALLS
+                .each_ref()
+                .map(|calls| calls.load(Ordering::Relaxed)),
+            stopped_counts,
+            "no slot may call a stopped owner"
+        );
         std::fs::write(
             out.join("raw-slots.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
