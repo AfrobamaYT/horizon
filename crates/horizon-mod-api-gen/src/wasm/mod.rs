@@ -53,6 +53,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "BlockAndTintGetter",
     "ServerReloadResources",
     "CriterionContext",
+    "UnspawnedMobEdits",
 ];
 
 /// Imported traits a call never hands over, each reached through another's method instead.
@@ -1159,6 +1160,41 @@ mod tests {
                         .any(|name| name.starts_with("Commands::")
                             || name.starts_with("Messages::")
                             || name.starts_with("Players::"))
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// `finalize_spawn`'s editor is a shared trait object in its event: the wasm host lends it
+    /// shared for the call, and a mod reaches its edits as imports.
+    #[test]
+    fn finalize_spawn_lends_its_shared_editor() {
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(|| {
+                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+                let generated =
+                    super::super::sources(&root, super::super::FillMode::Require).unwrap();
+                let included = [
+                    ("mod_api_generated.rs", generated.hooks.as_str()),
+                    ("mod_api_generated_host.rs", generated.host.as_str()),
+                    ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ];
+                let wasm = super::generate(&root, &included).unwrap();
+                let mut resolve = wit_parser::Resolve::default();
+                let package = resolve.push_str("mod-api.wit", &wasm.wit).unwrap();
+                let edits = &resolve.interfaces
+                    [resolve.packages[package].interfaces["unspawned-mob-edits"]];
+                assert!(edits.functions.contains_key("set-equipment"));
+                assert!(edits.functions.contains_key("add-tag"));
+                assert!(wasm.host.contains("frame.unspawned_mob_edits(&*p1.edits)"));
+                assert!(
+                    !wasm
+                        .unbound
+                        .iter()
+                        .any(|name| name.starts_with("UnspawnedMobEdits::"))
                 );
             })
             .unwrap()

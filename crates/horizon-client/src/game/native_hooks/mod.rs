@@ -50,6 +50,7 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     text::Text,
 };
+use horizon_client_core::suggestion::Suggestion;
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
@@ -72,8 +73,8 @@ use mod_api::{
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
     LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, UsePhase,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement,
+    UsePhase,
 };
 use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
 use mod_api::{
@@ -106,6 +107,7 @@ use {
 };
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
+pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;

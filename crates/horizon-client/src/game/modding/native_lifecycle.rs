@@ -199,6 +199,7 @@ impl Game<'_> {
     }
 
     pub(super) fn native_lifecycle_open_started(&mut self) {
+        self.entity_initialization = Default::default();
         self.attachment_indexes.clear();
         self.native_lifecycle
             .begin_open(self.native_lifecycle_authority());

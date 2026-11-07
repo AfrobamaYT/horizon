@@ -355,7 +355,7 @@ impl Game<'_> {
     /// show, so a mod's `Cancel` or its own screen doesn't keep it shut (a
     /// mod's screen can't open over the title).
     pub(super) fn show_title(&mut self, mut title: horizon_client::title::Title) {
-        title.set_rule_registry(Arc::new(mod_api::__private::game_rule_registry()));
+        title.set_rule_registry(Arc::new(crate::game::api_values::game_rule_registry()));
         self.show_title_with_registry(title);
     }
     pub(super) fn show_title_with_registry(&mut self, mut title: horizon_client::title::Title) {
@@ -2862,6 +2862,7 @@ impl Game<'_> {
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {
+        self.join_spawn_tags(from);
         // A mod can keep a mob out; it is then taken out and not told of.
         self.native_joins_flush(false, 0);
         for i in from..self.mobs.len() {
@@ -4050,7 +4051,7 @@ mod tests {
             ),
         ]);
         mod_api::__private::install(mods.clone());
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         let base = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let root = super::super::mods::content_root(&base, &Default::default());
         if invalid {
@@ -5190,7 +5191,7 @@ mod item_fall_on_tests {
     fn a_dropped_item_lands_on_a_fall_on_part() {
         let heard = Lands::default();
         let mods: mod_api::Mods = vec![ModEntry::new("lands", Box::new(Mod(heard.clone())))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         let _ = horizon_client::block_contact::HOOKS.set(BLOCK_CONTACT_HOOKS);
         with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
@@ -5532,65 +5533,73 @@ pub(super) mod particle_count_tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
-                let mut builder = winit::event_loop::EventLoop::builder();
-                #[cfg(target_os = "linux")]
-                {
-                    use winit::platform::x11::EventLoopBuilderExtX11;
-                    builder.with_x11().with_any_thread(true);
-                }
-                let event_loop = builder.build().unwrap();
-                #[allow(deprecated)]
-                let window = std::sync::Arc::new(
-                    event_loop
-                        .create_window(
-                            winit::window::Window::default_attributes()
-                                .with_visible(false)
-                                .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
-                        )
-                        .unwrap(),
-                );
-                game.options.offscreen = true;
-                game.renderer = Some(game.new_renderer(window).unwrap());
-                game.title = None;
-                game.settings.extras.dynamic_lights = true;
-                game.settings.horizon.particle_culling =
-                    horizon_client::graphics::ParticleCullingMode::Off;
-                let mut chunk = horizon_client::chunk::Chunk::empty(0, 0);
-                chunk.lit = true;
-                game.world.chunks.insert((0, 0), std::sync::Arc::new(chunk));
-                let mut player =
-                    horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
-                player.position = Vec3::new(0.5, 64.0, 0.5);
-                game.previous_position = player.position;
-                game.player = Some(player);
-                game.particles.camera = [0.5, 65.5, 1.5];
-                // Ordinary (non-particle) entity geometry and an unrelated item light.
-                game.spawn_item(
-                    horizon_client::items::ItemStack::new("minecraft:torch", 1),
-                    [0.5, 65.0, 4.5],
-                    [0.0; 3],
-                    0,
-                );
-                // Only the picked-up stick resolves this custom property. The torch's
-                // ordinary model must survive the clear unchanged.
-                std::sync::Arc::get_mut(&mut game.pack.item_renderer)
-                    .unwrap()
-                    .models
-                    .definitions
-                    .insert(
-                        "minecraft:stick".into(),
-                        horizon_assets::item_model::ClientItem::from_json(
-                            r#"{"model":{
-                        "type":"minecraft:condition", "property":"test:clear",
-                        "on_true":{"type":"minecraft:model","model":"minecraft:item/stick"},
-                        "on_false":{"type":"minecraft:model","model":"minecraft:item/stick"}
-                    }}"#,
-                        )
-                        .unwrap(),
-                    );
+                let _event_loop = frame_scene(game);
                 test(game, &at, &calls);
             });
         });
+    }
+
+    /// A real offscreen renderer and a world for it to draw; the event loop that returns
+    /// holds the window.
+    pub(in crate::game) fn frame_scene(
+        game: &mut super::Game<'_>,
+    ) -> winit::event_loop::EventLoop<()> {
+        let mut builder = winit::event_loop::EventLoop::builder();
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            builder.with_x11().with_any_thread(true);
+        }
+        let event_loop = builder.build().unwrap();
+        #[allow(deprecated)]
+        let window = std::sync::Arc::new(
+            event_loop
+                .create_window(
+                    winit::window::Window::default_attributes()
+                        .with_visible(false)
+                        .with_inner_size(winit::dpi::PhysicalSize::new(320, 240)),
+                )
+                .unwrap(),
+        );
+        game.options.offscreen = true;
+        game.renderer = Some(game.new_renderer(window).unwrap());
+        game.title = None;
+        game.settings.extras.dynamic_lights = true;
+        game.settings.horizon.particle_culling = horizon_client::graphics::ParticleCullingMode::Off;
+        let mut chunk = horizon_client::chunk::Chunk::empty(0, 0);
+        chunk.lit = true;
+        game.world.chunks.insert((0, 0), std::sync::Arc::new(chunk));
+        let mut player =
+            horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+        player.position = Vec3::new(0.5, 64.0, 0.5);
+        game.previous_position = player.position;
+        game.player = Some(player);
+        game.particles.camera = [0.5, 65.5, 1.5];
+        // Ordinary (non-particle) entity geometry and an unrelated item light.
+        game.spawn_item(
+            horizon_client::items::ItemStack::new("minecraft:torch", 1),
+            [0.5, 65.0, 4.5],
+            [0.0; 3],
+            0,
+        );
+        // Only the picked-up stick resolves this custom property. The torch's
+        // ordinary model must survive the clear unchanged.
+        std::sync::Arc::get_mut(&mut game.pack.item_renderer)
+            .unwrap()
+            .models
+            .definitions
+            .insert(
+                "minecraft:stick".into(),
+                horizon_assets::item_model::ClientItem::from_json(
+                    r#"{"model":{
+                "type":"minecraft:condition", "property":"test:clear",
+                "on_true":{"type":"minecraft:model","model":"minecraft:item/stick"},
+                "on_false":{"type":"minecraft:model","model":"minecraft:item/stick"}
+            }}"#,
+                )
+                .unwrap(),
+            );
+        event_loop
     }
 
     fn add_frame_particles(game: &mut super::Game<'_>) {

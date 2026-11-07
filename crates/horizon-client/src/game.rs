@@ -10,7 +10,7 @@ use mod_api::__private::game::PartsLookup;
 macro_rules! world_items {
     ($s:ident) => {
         match (&$s.server_items, &$s.world_tables) {
-            (Some(items), _) => items,
+            (Some(items), _) => &**items,
             (None, Some(t)) => &t.items,
             (None, None) => $s.res.items(),
         }
@@ -814,6 +814,8 @@ struct GameLevel<'w> {
     /// The tool a mod's machine breaks blocks with (`native_machine_destroy_block`):
     /// `Block.dropResources` rolls the loot with it instead of with none.
     drop_tool: Option<ItemStack>,
+    /// The entity `destroyBlock` names (`LootContextParams.THIS_ENTITY`).
+    drop_entity: Option<mod_api::EntityRef>,
     /// Where `Block.dropResources` puts the drops instead of popping them,
     /// while a mod's machine breaks a block (`native_machine_destroy_block`).
     drop_into: Option<Vec<ItemStack>>,
@@ -3032,7 +3034,7 @@ struct Game<'a> {
     world_tables: Option<WorldTables>,
     /// Server-owned loot and item snapshots, independent of client preloads.
     server_loot: horizon_client::structure_blocks::LootSnapshot,
-    server_items: Option<Items>,
+    server_items: Option<Arc<Items>>,
     /// The world is superflat (`ServerLevel.isFlat`, for every dimension).
     world_flat: bool,
     /// The world is the Debug preset (`Level.isDebug`, for every dimension): its blocks
@@ -3244,6 +3246,9 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// The mobs lent to the hook calls running now, before they join a level
+    /// (game/modding/native_unspawned_mob.rs).
+    lent_mobs: RefCell<native_unspawned_mob::LentMobs>,
     /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
     /// Native mods' config files this game loaded (game/modding/native_configs.rs).
@@ -3295,6 +3300,7 @@ struct Game<'a> {
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
@@ -4540,26 +4546,18 @@ impl Game<'_> {
         held: Option<&ItemStack>,
         block_entity: Option<horizon_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
-        let registry = self.pack.assets.registry;
         let dynamic = self.pending.dynamic(pos);
         let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), block_entity);
-        let mut drops =
-            horizon_world::loot::with_native_loot_place(place, || {
-                match world_items!(self).block_loot_sequence(registry, state) {
-                    Some(sequence) => {
-                        let random = self.rand_sequences.get(&sequence, self.level.seed);
-                        world_items!(self)
-                            .block_drops_by_player(registry, state, held, &dynamic, random)
-                    }
-                    None => world_items!(self).block_drops_by_player(
-                        registry,
-                        state,
-                        held,
-                        &dynamic,
-                        &mut self.world.random,
-                    ),
-                }
-            });
+        let (_, entity) = self.native_clicker();
+        let mut drops = horizon_world::loot::with_native_loot_place(place, || {
+            let roll = horizon_client::items::BlockLootRoll {
+                held,
+                dynamic: &dynamic,
+                breaker: true,
+                ..Default::default()
+            };
+            self.roll_block_loot(pos, state, Some(entity as u32), roll)
+        });
         let player = self.native_acting_id();
         self.native_block_loot(pos, state, Some(player), held, None, &mut drops);
         drops
@@ -4627,14 +4625,24 @@ impl Game<'_> {
     /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
     /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
     pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
+        self.drop_stack_from_eyes(stack, false)
+    }
+    /// `Player.drop(stack, false, thrown_from_hand)`: the stack thrown from the eyes along the
+    /// view, the main hand swinging for every drop (`LivingEntity.drop`; `PREDICTED` only keeps
+    /// the swing from being sent back to the player who made it). `thrown_from_hand` names the
+    /// player as the thrower, as the drop key does. The item's id, none for an empty stack or a
+    /// toss a mod canceled.
+    pub(super) fn drop_stack_from_eyes(
+        &mut self,
+        stack: ItemStack,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
         if stack.count == 0 {
             return None;
         }
-        // LivingEntity.drop swings the main hand for every drop (`PREDICTED` only keeps the
-        // swing from being sent back to the player who made it).
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
         let eye = self.eye_position()?;
-        self.throw_from_eyes(stack, eye, false, false)
+        self.throw_from_eyes(stack, eye, false, thrown_from_hand)
     }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
@@ -5207,6 +5215,7 @@ impl Game<'_> {
             native_particles: &mut self.creatures.lan_particles,
             sound_seeds: self.lan.as_ref().map(|host| &host.hub),
             drop_tool: None,
+            drop_entity: None,
             drop_into: None,
         };
         let result = f(self.res.behaviours(), &mut level, &mut self.block_ticks);
@@ -15971,17 +15980,18 @@ impl Game<'_> {
     fn hand_geometry(&mut self, alpha: f64) -> (Vec<Vertex>, Vec<(u32, i32)>) {
         let mut out = Vec::new();
         let mut runs = Vec::new();
-        // GameRenderer.renderItemInHand: F1 hides the hand with the HUD.
-        if self.spectator()
-            || self.ui.hide_gui
-            || self.sleeping.is_some()
-            || !self.camera_type.is_first_person()
-            || self.studio_replay.is_some()
-            || self
-                .player
-                .as_ref()
-                .is_none_or(|p| p.health.dead_or_dying())
-            || self.screen == Screen::Dead
+        // F1 hides both; a native HUD mode may keep the hands visible. A
+        // studio replay never draws them.
+        if self.studio_replay.is_some()
+            || !self.ui.hands_drawn(
+                self.spectator(),
+                self.sleeping.is_some(),
+                self.camera_type.is_first_person(),
+                self.player
+                    .as_ref()
+                    .is_some_and(|p| !p.health.dead_or_dying()),
+                self.screen == Screen::Dead,
+            )
         {
             return (out, runs);
         }
@@ -17703,6 +17713,28 @@ impl Game<'_> {
             return self.render_sequence_frame();
         }
         self.render_frame()
+    }
+    /// Render the frame, then its two moments after that: `render_frame_post` whatever
+    /// became of it, `flip_frame` once it was presented.
+    fn render_and_flip(&mut self, elapsed: Duration) -> Result<bool> {
+        let rendered = match self.render() {
+            // The callback can fire during this frame; rebuild on
+            // the next redraw rather than exiting on its error.
+            Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => false,
+            result => result?,
+        };
+        self.native_render_frame_post(elapsed);
+        if rendered {
+            // The submit thread may still hold the frame: a listener hears it after the
+            // present, and with none the next frame keeps overlapping it.
+            if mod_api::__private::listened(mod_api::HookId::FlipFrame)
+                && let Some(renderer) = &mut self.renderer
+            {
+                renderer.wait_submissions();
+            }
+            self.native_flip_frame();
+        }
+        Ok(rendered)
     }
     fn render_frame(&mut self) -> Result<bool> {
         self.render_with(|renderer, frame| {
@@ -21082,15 +21114,7 @@ impl Game<'_> {
                     self.advance_flight();
                     self.tick_world_icon();
                     let ticked = Instant::now();
-                    let rendered = match self.render() {
-                        // The callback can fire during this frame; rebuild on
-                        // the next redraw rather than exiting on its error.
-                        Err(_) if self.renderer.as_ref().is_some_and(Renderer::device_lost) => {
-                            false
-                        }
-                        result => result?,
-                    };
-                    self.native_render_frame_post(elapsed);
+                    let rendered = self.render_and_flip(elapsed)?;
                     horizon_client::spans::time("pr_cursor", || self.apply_cursor_icon());
                     // The frame's spans, taken every frame they are recorded so they never
                     // pile up: the slow-frame line's.
@@ -21911,6 +21935,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            lent_mobs: Default::default(),
             held_out: Vec::with_capacity(4),
             native_configs: Default::default(),
             mod_phase,
@@ -21923,6 +21948,7 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,
             studio_replay: None,
@@ -22593,7 +22619,7 @@ impl Game<'_> {
         {
             let mut items = self.items().clone();
             items.set_loot_tables(loot.tables().clone());
-            self.server_items = Some(items);
+            self.server_items = Some(Arc::new(items));
         }
         self.server_loot.set(loot);
     }
@@ -23557,6 +23583,14 @@ fn load_world_rest(
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
     let load_items = || -> Result<_> {
+        mod_api::__private::resolve_block_keys((0..registry.len()).map(|index| {
+            registry
+                .state(BlockStateId(index as u32))
+                .expect("registry index is in bounds")
+                .name
+                .as_str()
+        }))
+        .map_err(|errors| errors.join("\n"))?;
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
@@ -24902,9 +24936,9 @@ pub fn run_with(
         .mods
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
-    mod_api::__private::install_packages(options.mods.native.packages(), &options.mods.selected);
+    api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
-    if let Err(refused) = mod_api::__private::install_parts(mod_api::__private::mods()) {
+    if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
     }
     // The structure types those mods registered, handed to the engine before
@@ -25402,7 +25436,7 @@ mod tests {
         }
         let mods: mod_api::Mods =
             vec![mod_api::ModEntry::new("reload", Box::new(ReloadMod))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::__private::install(mods);
         super::native_entity_refs::tests::with_game(|game| {
             let stone_key = mod_api::__private::part_tests::block_key("stone");
