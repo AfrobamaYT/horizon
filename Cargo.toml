@@ -98,6 +98,8 @@ debug = "line-tables-only"
 [profile.dev.package.sha2]
 opt-level = 3
 
+[profile.dev.package.horizon-mod-api-gen]
+opt-level = 3
 [profile.dev.package.syn]
 opt-level = 3
 [profile.dev.package.proc-macro2]
