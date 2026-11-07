@@ -161,21 +161,28 @@ impl Game<'_> {
         menu: &mut Menu,
         op: impl FnOnce(&mut Menu, &Env) -> R,
     ) -> Option<R> {
-        // The cartography table reads and makes the host level's maps.
-        let held = if menu.kind() == Kind::Cartography {
-            let g = &self.lan.as_ref()?.hub.guests[gi];
-            Some(
-                (0..menu.slot_count())
-                    .filter_map(|s| menu.slot(s).cloned())
-                    .chain(g.inventory.iter().flatten().cloned())
-                    .chain(g.carried.clone())
-                    .collect::<Vec<ItemStack>>(),
-            )
-        } else {
-            None
-        };
-        let maps = held.as_ref().map(|held| self.level_maps(held));
         let host = self.lan.as_ref()?;
+        // Crafting and cartography read and derive this level's saved maps.
+        let maps = matches!(
+            menu.kind(),
+            Kind::Cartography | Kind::Crafting | Kind::Inventory
+        )
+        .then(|| {
+            let g = &host.hub.guests[gi];
+            (0..menu.slot_count())
+                .filter_map(|s| menu.slot(s).cloned())
+                .chain(g.inventory.iter().flatten().cloned())
+                .chain(g.carried.clone())
+                .collect::<Vec<_>>()
+        })
+        .filter(|held| {
+            menu.kind() == Kind::Cartography
+                || held
+                    .iter()
+                    .filter_map(super::maps::map_id)
+                    .any(|id| self.map(id).is_some())
+        })
+        .map(|held| self.level_maps(&held));
         let env = Env {
             player: Some(host.hub.guests[gi].uuid),
             player_entity_id: Some(host.hub.guests[gi].entity_id),
