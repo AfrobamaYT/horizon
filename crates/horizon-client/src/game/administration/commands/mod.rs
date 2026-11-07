@@ -3674,6 +3674,7 @@ impl Game<'_> {
             _ => [0.0, 0.0],
         };
         self.set_world_spawn(pos, rot);
+        let rot = self.level.world_spawn_angle;
         let args = [
             Text::literal(pos[0].to_string()),
             Text::literal(pos[1].to_string()),
