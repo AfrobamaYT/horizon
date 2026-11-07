@@ -3453,6 +3453,8 @@ impl Game<'_> {
         let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
+        // GameRule.id(): only the default namespace is omitted in messages.
+        let rule_id = rule.name.strip_prefix("minecraft:").unwrap_or(&rule.name);
         let current = self.ui.rules.get(&rule.name).unwrap_or(rule.default);
         let value = match ctx.get("value") {
             Some(Arg::Bool(b)) => Value::Bool(*b),
@@ -3460,7 +3462,7 @@ impl Game<'_> {
             _ => {
                 self.feedback_unbroadcast(Text::tr(
                     "commands.gamerule.query",
-                    &[&rule.name, &current],
+                    &[&rule_id, &current],
                 ));
                 return Ok(match current {
                     Value::Bool(b) => i32::from(b),
@@ -3469,7 +3471,7 @@ impl Game<'_> {
             }
         };
         if current == value {
-            return Err(err("commands.gamerule.not_set", &[&rule.name, &value]));
+            return Err(err("commands.gamerule.not_set", &[&rule_id, &value]));
         }
         let name = self.lan_acting_name.clone();
         let actor = match (
@@ -3485,7 +3487,7 @@ impl Game<'_> {
             _ => None,
         };
         self.set_game_rule(&rule, value, actor.as_ref());
-        self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
+        self.feedback(Text::tr("commands.gamerule.set", &[&rule_id, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),
             Value::Int(i) => i,
@@ -4927,6 +4929,84 @@ mod selector_bounds_tests {
 
 #[cfg(test)]
 mod query_feedback_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn gamerule_feedback_uses_short_ids_without_changing_registry_identity() {
+        use super::{Arg, Context};
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::{
+            command::ParsedArg,
+            gamerules::{GameRules, Rule, RuleRegistry, Value},
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            let registry = RuleRegistry::with_bool_rules(
+                &["test:feedback".into()],
+                &[Rule {
+                    name: "test:spawn_monsters".into(),
+                    category: "test:feedback".into(),
+                    default: Value::Bool(true),
+                    min: 0,
+                    max: 0,
+                }],
+            )
+            .unwrap();
+            game.ui.rules = GameRules::with_registry(Arc::new(registry), &[]);
+            for (input, display, stored) in [
+                (
+                    "spawn_monsters",
+                    "spawn_monsters",
+                    "minecraft:spawn_monsters",
+                ),
+                (
+                    "minecraft:spawn_monsters",
+                    "spawn_monsters",
+                    "minecraft:spawn_monsters",
+                ),
+                (
+                    "test:spawn_monsters",
+                    "test:spawn_monsters",
+                    "test:spawn_monsters",
+                ),
+            ] {
+                game.ui.rules.set(stored, Value::Bool(true));
+                let mut context = Context {
+                    root: 0,
+                    nodes: Vec::new(),
+                    args: Vec::new(),
+                    command: None,
+                    range: (0, 0),
+                    child: None,
+                    literals: vec!["gamerule".into(), input.into()],
+                };
+                game.chat_capture = Some(Vec::new());
+                assert_eq!(game.cmd_gamerule(&context).unwrap(), 1);
+                let lines = game.chat_capture.take().unwrap();
+                assert_eq!(lines.len(), 1);
+                let component = lines[0].component();
+                assert_eq!(component["translate"], "commands.gamerule.query");
+                assert_eq!(component["with"][0]["text"], display);
+                context.args.push(ParsedArg {
+                    name: "value".into(),
+                    value: Arg::Bool(false),
+                    range: (0, 0),
+                });
+                game.chat_capture = Some(Vec::new());
+                assert_eq!(game.cmd_gamerule(&context).unwrap(), 0);
+                let lines = game.chat_capture.take().unwrap();
+                assert_eq!(lines.len(), 1);
+                let component = lines[0].component();
+                assert_eq!(component["translate"], "commands.gamerule.set");
+                assert_eq!(component["with"][0]["text"], display);
+                let error = game.cmd_gamerule(&context).unwrap_err();
+                assert_eq!(error.key, "commands.gamerule.not_set");
+                assert_eq!(error.message.component()["with"][0]["text"], display);
+                assert_eq!(game.ui.rules.get(stored), Some(Value::Bool(false)));
+                assert_eq!(game.ui.rules.rule(input).unwrap().name, stored);
+            }
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_silent_source_drops_query_results_but_still_stores_them() {
