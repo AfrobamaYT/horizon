@@ -5,7 +5,10 @@ use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/block_state.rs"]
-mod block_state;
+pub(in crate::game) mod block_state;
+pub(in crate::game) use block_state::{
+    install as install_block_states, prepare as prepare_block_states,
+};
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
 

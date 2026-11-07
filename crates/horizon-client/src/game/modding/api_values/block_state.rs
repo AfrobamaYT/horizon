@@ -2,29 +2,35 @@
 use super::{TryIntoApi, TryIntoEngine};
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{BlockState, BlockStateError};
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
-struct Index {
+/// A fully checked index, inert until explicitly installed by the owning game thread.
+pub(crate) struct Index {
     forward: Vec<BlockState>,
     reverse: std::collections::HashMap<mod_api::BlockKey, Vec<Option<BlockStateId>>>,
 }
 thread_local! {
-    static INDEX: RefCell<Option<Index>> = const { RefCell::new(None) };
+    static INDEX: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
 }
 
 pub(super) fn clear() {
     INDEX.with_borrow_mut(|index| *index = None);
 }
 pub(super) fn snapshot() -> Result<Box<[BlockState]>, BlockStateError> {
-    INDEX.with_borrow(|index| {
-        index
-            .as_ref()
-            .map(|index| index.forward.clone().into_boxed_slice())
-            .ok_or(BlockStateError::Unavailable)
-    })
+    Ok(current()?.forward.clone().into_boxed_slice())
 }
 pub(super) fn bind(registry: &BlockRegistry) -> Result<(), String> {
     clear();
+    install(prepare(registry)?);
+    Ok(())
+}
+
+pub(crate) fn install(prepared: Arc<Index>) {
+    INDEX.with_borrow_mut(|index| *index = Some(prepared));
+}
+
+/// Prepare without activating thread-local state. A refused reload keeps its old live tables.
+pub(crate) fn prepare(registry: &BlockRegistry) -> Result<Arc<Index>, String> {
     let forward = (0..registry.len())
         .map(|id| {
             registry
@@ -45,12 +51,34 @@ pub(super) fn bind(registry: &BlockRegistry) -> Result<(), String> {
             return Err("duplicate block state in numeric registry".into());
         }
     }
-    INDEX.with_borrow_mut(|index| *index = Some(Index { forward, reverse }));
-    Ok(())
+    Ok(Arc::new(Index { forward, reverse }))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn numeric_block_index_prepared_token_activates_only_on_fresh_owner() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let facts = r#"{"defaults":{"minecraft:air":0,"minecraft:stone":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"","minecraft:stone"]]}"#;
+        let registry = BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+        super::super::resolve_block_definitions(&registry).unwrap();
+        let stone = BlockStateId(1).try_into_api().unwrap();
+        let prepared = prepare(&registry).unwrap();
+        let reload = prepare(&registry).unwrap();
+        std::thread::spawn(move || {
+            assert_eq!(
+                BlockStateId(1).try_into_api(),
+                Err(BlockStateError::Unavailable)
+            );
+            install(prepared);
+            assert_eq!(BlockStateId(1).try_into_api(), Ok(stone));
+            assert_eq!(stone.try_into_engine(&()), Ok(BlockStateId(1)));
+            install(reload);
+            assert_eq!(BlockStateId(1).try_into_api(), Ok(stone));
+        })
+        .join()
+        .unwrap();
+    }
     #[test]
     fn numeric_block_index_reorders_refuses_and_clears_failed_rebind() {
         mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
@@ -95,6 +123,30 @@ mod tests {
         assert!(snapshot().is_err());
     }
 }
+/// Capture this registry's immutable index explicitly; never resolves on a worker.
+pub(crate) fn current() -> Result<Arc<Index>, BlockStateError> {
+    INDEX.with_borrow(|index| index.clone().ok_or(BlockStateError::Unavailable))
+}
+impl Index {
+    pub(crate) fn to_api(&self, state: BlockStateId) -> Result<BlockState, BlockStateError> {
+        self.forward
+            .get(state.0 as usize)
+            .copied()
+            .ok_or(BlockStateError::UnknownState)
+    }
+    pub(crate) fn to_engine(&self, state: BlockState) -> Result<BlockStateId, BlockStateError> {
+        let states = self
+            .reverse
+            .get(&state.block())
+            .filter(|states| !states.is_empty())
+            .ok_or(BlockStateError::UnknownBlock)?;
+        states
+            .get(state.ordinal() as usize)
+            .copied()
+            .flatten()
+            .ok_or(BlockStateError::UnknownState)
+    }
+}
 impl TryIntoApi for BlockStateId {
     type Api = BlockState;
     type Error = BlockStateError;
@@ -103,10 +155,7 @@ impl TryIntoApi for BlockStateId {
             index
                 .as_ref()
                 .ok_or(BlockStateError::Unavailable)?
-                .forward
-                .get(self.0 as usize)
-                .copied()
-                .ok_or(BlockStateError::UnknownState)
+                .to_api(*self)
         })
     }
 }
@@ -115,17 +164,10 @@ impl<C: ?Sized> TryIntoEngine<C> for BlockState {
     type Error = BlockStateError;
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
         INDEX.with_borrow(|index| {
-            let index = index.as_ref().ok_or(BlockStateError::Unavailable)?;
-            let states = index
-                .reverse
-                .get(&self.block())
-                .filter(|states| !states.is_empty())
-                .ok_or(BlockStateError::UnknownBlock)?;
-            states
-                .get(self.ordinal() as usize)
-                .copied()
-                .flatten()
-                .ok_or(BlockStateError::UnknownState)
+            index
+                .as_ref()
+                .ok_or(BlockStateError::Unavailable)?
+                .to_engine(*self)
         })
     }
 }
