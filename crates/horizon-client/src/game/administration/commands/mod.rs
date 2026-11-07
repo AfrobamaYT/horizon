@@ -3635,6 +3635,25 @@ impl Game<'_> {
         self.feedback(Text::translate(key, &args));
         Ok(targets.len() as i32)
     }
+    /// `LevelData.setRespawnData(RespawnData.of(..))`: the world's spawn (level.dat `spawn`)
+    /// moves to `pos`, its yaw wrapped and its pitch clamped, and `spawn_change` fires.
+    pub(in crate::game) fn set_world_spawn(&mut self, pos: [i32; 3], [yaw, pitch]: [f32; 2]) {
+        let rot = [wrap_degrees(yaw), pitch.clamp(-90.0, 90.0)];
+        let old = self.level.world_spawn.replace(pos);
+        self.level.world_spawn_angle = rot;
+        self.native_spawn_change(pos, rot);
+        // A player whose fallback is the world spawn (no spawnpoint of its
+        // own; a bed or an anchor that is gone falls back to it) respawns at
+        // the new one.
+        let floor = |s: Vec3| [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32];
+        if self.spawn.map(floor) == old {
+            self.spawn = Some(Vec3::new(
+                f64::from(pos[0]) + 0.5,
+                f64::from(pos[1]),
+                f64::from(pos[2]) + 0.5,
+            ));
+        }
+    }
     fn cmd_setworldspawn(&mut self, ctx: &Context) -> R<i32> {
         let pos = if ctx.get("pos").is_some() {
             self.block_pos_arg(ctx, "pos")?
@@ -3650,21 +3669,7 @@ impl Game<'_> {
             Some(Arg::Coords(c)) => c.rotation(self.source_rotation()),
             _ => [0.0, 0.0],
         };
-        // LevelData.setRespawnData: the world's spawn (level.dat `spawn`).
-        let old = self.level.world_spawn.replace(pos);
-        self.level.world_spawn_angle = rot;
-        self.native_spawn_change(pos, rot);
-        // A player whose fallback is the world spawn (no spawnpoint of its
-        // own; a bed or an anchor that is gone falls back to it) respawns at
-        // the new one.
-        let floor = |s: Vec3| [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32];
-        if self.spawn.map(floor) == old {
-            self.spawn = Some(Vec3::new(
-                f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]),
-                f64::from(pos[2]) + 0.5,
-            ));
-        }
+        self.set_world_spawn(pos, rot);
         let args = [
             Text::literal(pos[0].to_string()),
             Text::literal(pos[1].to_string()),

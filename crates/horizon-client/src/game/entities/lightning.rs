@@ -186,7 +186,7 @@ impl Game<'_> {
     /// `findLightningTargetAround`: the closest lightning rod, else a living
     /// entity under open sky in the column (3 blocks around), else the top of
     /// the column.
-    fn lightning_target(&mut self, x: i32, z: i32) -> Option<[i32; 3]> {
+    pub(in crate::game) fn lightning_target(&mut self, x: i32, z: i32) -> Option<[i32; 3]> {
         if !self.world.loaded(x, z) {
             return None;
         }
