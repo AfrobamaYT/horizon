@@ -5295,7 +5295,7 @@ pub(super) mod particle_count_tests {
                 );
                 game.native_render_gui_pre(&mut false);
                 assert_eq!(mod_api::prelude::EffectsClientHost::particle_count(game), 0);
-                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
+                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, None, Vec::new());
                 game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
                 assert!(
                     after.is_empty(),
@@ -5749,6 +5749,6 @@ impl Game<'_> {
         suggestion: &str,
         input: &str,
     ) {
-        self.fire_chat_suggestion_applied(self, original, start, end, suggestion, input);
+        self.fire_chat_suggestion_applied(original, start, end, suggestion, input);
     }
 }
