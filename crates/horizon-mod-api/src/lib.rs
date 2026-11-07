@@ -4856,6 +4856,7 @@ mod tests {
         #[derive(Default)]
         struct Server {
             lines: RefCell<Vec<String>>,
+            messages: RefCell<Vec<Text>>,
         }
         impl Host for Server {}
         mod_api::impl_host_areas!(Server);
@@ -4878,12 +4879,12 @@ mod tests {
                 line == "list"
             }
             fn feedback(&mut self, line: Text) {
-                self.lines.get_mut().push(line.plain());
+                self.messages.get_mut().push(line);
             }
         }
         impl Messages for Server {
             fn broadcast(&self, line: Text) {
-                self.lines.borrow_mut().push(line.plain());
+                self.messages.borrow_mut().push(line);
             }
             fn text_allowed(&self, line: &str) -> Option<bool> {
                 Some(line != "blocked")
@@ -4910,9 +4911,10 @@ mod tests {
         let player = host.players().acting_player().unwrap();
         assert_eq!(host.players().server_players(), [player]);
         assert_eq!((player.uuid(), player.entity().id()), (7, 42));
+        assert_eq!(*server.lines.borrow(), ["list", "missing"]);
         assert_eq!(
-            *server.lines.borrow(),
-            ["list", "missing", "answer", "everyone"]
+            *server.messages.borrow(),
+            [Text::literal("answer"), Text::literal("everyone")]
         );
     }
 
@@ -5253,8 +5255,7 @@ mod tests {
                 },
             );
             assert_eq!(claimed, expected, "{block}");
-            let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
-            assert_eq!(told, [block], "{block}");
+            assert_eq!(host.lines, [Text::literal(block)], "{block}");
         }
     }
 
