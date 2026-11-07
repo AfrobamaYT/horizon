@@ -69,6 +69,9 @@ pub mod points {
 mod host;
 mod native_hooks;
 use event_loop::EventLoopCtl;
+use loading_window::{
+    build_renderer, loading_frame, loading_renderer, prepare_renderer_textures, start_game,
+};
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
 use horizon_client::actions::Action as Mapping;
