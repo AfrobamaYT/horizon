@@ -3904,9 +3904,9 @@ pub(crate) mod tests {
     #[test]
     fn brewing_fuel_slot_and_quick_move_use_stack_components() {
         let items = Items::for_tests(Default::default());
-        let root = crate::resource_source::ResourceRoot::directory("");
+        let root = std::path::Path::new("");
         let recipes = Recipes::empty();
-        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let brewing = Brewing::load(root, &items, &PackOverlay::NONE);
         let banners = Banners::default();
         let station_recipes = crate::stations::StationRecipes::default();
         let enchantments = crate::enchant::Enchantments::default();
