@@ -49,6 +49,7 @@ pub(crate) fn source(root: &Path) -> Result<String, String> {
         for item in &file.items {
             if let Item::Mod(module) = item
                 && module.ident == "tests"
+                && !matches!(module.vis, Visibility::Inherited)
                 && let Some((_, items)) = &module.content
             {
                 fixtures.push_str(&reexport(items, &format!("super::{kind}::tests")));
@@ -74,10 +75,15 @@ mod tests {
         let dir = root.join(DIRECTORY);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("mod.rs"), "").unwrap();
-        fs::write(dir.join("zeta.rs"), "pub struct Last;").unwrap();
+        fs::write(
+            dir.join("zeta.rs"),
+            "pub struct Last; #[cfg(test)] mod tests { fn local_test() {} }",
+        )
+        .unwrap();
         let first = source(&root).unwrap();
         assert!(first.contains("mod zeta;"));
         assert!(first.contains("pub use zeta::*;"));
+        assert!(!first.contains("super::zeta::tests"));
         fs::write(
             dir.join("alpha.rs"),
             "pub struct First; #[cfg(test)] pub mod tests { pub fn fixture() {} }",

@@ -45,6 +45,8 @@ def finish(api):
             }
             for name in test_only_imports.get(p.stem, ()):
                 b = b.replace(f'    use {name};', f'    #[cfg(test)]\n    use {name};')
+            if p.stem == 'key_mappings':
+                b = b.replace('    #[cfg(test)]\n    use super::*;\n', '')
             s = a + b
         if p.name == 'energy.rs':
             s = s.replace('use super::*;\n', '#[cfg(test)]\nuse super::*;\n', 1)

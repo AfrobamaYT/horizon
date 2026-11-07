@@ -11,10 +11,14 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
-use wasmtime::Store;
 use wasmtime::component::{Component, Instance, Linker};
+use wasmtime::{AsContextMut, Store, StoreContextMut};
 
 use crate::wasm_refused::Refused;
+
+#[cfg(test)]
+#[path = "wasm_callback_tests.rs"]
+mod callback_tests;
 
 #[cfg(test)]
 #[path = "wasm_transport_tests.rs"]
@@ -107,6 +111,9 @@ pub const EPOCH: Duration = Duration::from_millis(1);
 /// What a call into a mod is, for its limits and its wait for the group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Call {
+    /// A synchronous predicate callback. May borrow a scoped import store and shares the
+    /// enclosing call's remaining budget; a standalone call uses the hook budget.
+    Callback,
     /// A hook or part call, on the server or client thread: within `Budgets::call`, and
     /// refused past `Budgets::wait` for a group another thread runs.
     Hook,
@@ -360,8 +367,8 @@ impl Drop for Keep {
 // exhaustive: its fields are private
 pub struct Group {
     store: Mutex<Store<State>>,
-    /// The thread running the group now, so a call back into it from that thread refuses
-    /// instead of deadlocking.
+    /// The thread running the group now. Re-entry needs a scoped import store; other
+    /// calls from this thread refuse instead of deadlocking.
     running: AtomicU64,
     poisoned: AtomicBool,
     budgets: Budgets,
@@ -395,7 +402,7 @@ thread_local! {
 pub enum CallRefused {
     /// A trap stopped the group earlier; it runs no more calls.
     Stopped,
-    /// The call came back into the group from inside one of its own calls.
+    /// The call came back into the group without a scoped import store to borrow.
     Reentered,
     /// Another thread is running the group: past the wait, or at once when this thread is
     /// inside another group, since two threads each holding a group and waiting for the
@@ -543,6 +550,82 @@ impl Drop for CallScope {
     }
 }
 
+thread_local! {
+    /// Stores lent by imports on this thread, innermost first. Nodes live on the stack.
+    static CALLBACK_STORE: Cell<*const CallbackStore> = const { Cell::new(std::ptr::null()) };
+}
+
+struct CallbackStore {
+    group: *const Group,
+    store: Cell<*mut StoreContextMut<'static, State>>,
+    previous: *const CallbackStore,
+}
+
+impl Drop for CallbackStore {
+    fn drop(&mut self) {
+        CALLBACK_STORE.set(self.previous);
+    }
+}
+
+/// Lends only the import's store, while native code may synchronously call its handlers.
+/// No borrow of store data or guest memory may remain live across `f`.
+fn with_callback_store<T>(mut store: StoreContextMut<'_, State>, f: impl FnOnce() -> T) -> T {
+    let caller = CALLER.take();
+    let group = caller.as_ref().map(|m| Arc::as_ptr(&m.group));
+    CALLER.set(caller);
+    let Some(group) = group else { return f() };
+    let scope = CallbackStore {
+        group,
+        // Erase the context's lifetime only for the stack-scoped TLS node below.
+        store: Cell::new((&mut store as *mut StoreContextMut<'_, State>).cast()),
+        previous: CALLBACK_STORE.get(),
+    };
+    CALLBACK_STORE.set(&scope);
+    let result = f();
+    drop(scope);
+    result
+}
+
+/// Exclusive loan of a suspended import's context. Removing its pointer prevents another
+/// callback from borrowing it while guest code is running; a nested import lends a new one.
+struct ResumedStore {
+    scope: *const CallbackStore,
+    store: *mut StoreContextMut<'static, State>,
+}
+
+impl ResumedStore {
+    fn take(group: &Group) -> Option<Self> {
+        let mut pointer = CALLBACK_STORE.get();
+        while !pointer.is_null() {
+            // SAFETY: nodes are installed only for `with_callback_store`'s synchronous call,
+            // on this thread, and removed before their stack storage is dropped.
+            let scope = unsafe { &*pointer };
+            if std::ptr::eq(scope.group, group) {
+                let store = scope.store.replace(std::ptr::null_mut());
+                return (!store.is_null()).then_some(Self {
+                    scope: pointer,
+                    store,
+                });
+            }
+            pointer = scope.previous;
+        }
+        None
+    }
+
+    fn context(&mut self) -> StoreContextMut<'_, State> {
+        // SAFETY: `take` exclusively removed this context from its live import scope. The
+        // outer call holds the group lock, and cannot use the context until this loan drops.
+        unsafe { &mut *self.store }.as_context_mut()
+    }
+}
+
+impl Drop for ResumedStore {
+    fn drop(&mut self) {
+        // SAFETY: this loan is used synchronously inside the import scope that owns the node.
+        unsafe { &*self.scope }.store.set(self.store);
+    }
+}
+
 impl Running {
     /// Runs one `call` with `frame`'s hosts, within its group's limits for it. A refused call
     /// or a trap answers `no_answer()`; a trap stops the whole group.
@@ -551,17 +634,35 @@ impl Running {
         mut frame: Frame,
         call: Call,
         no_answer: impl FnOnce() -> T,
-        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+        f: impl FnOnce(&glue::ModExports, &mut StoreContextMut<'_, State>) -> wasmtime::Result<T>,
     ) -> T {
-        let mut entered = match self.group.enter(call) {
-            Ok(entered) => entered,
-            Err(refused) => {
-                log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
-                return no_answer();
+        if self.group.poisoned.load(Ordering::Relaxed) {
+            return no_answer();
+        }
+        let mut resumed = if call == Call::Callback {
+            ResumedStore::take(&self.group)
+        } else {
+            None
+        };
+        let mut entered = if resumed.is_none() {
+            match self.group.enter(call) {
+                Ok(entered) => Some(entered),
+                Err(refused) => {
+                    log::warn!("wasm mod {}: call refused: {refused:?}", self.id);
+                    return no_answer();
+                }
+            }
+        } else {
+            None
+        };
+        let mut store = match &mut resumed {
+            Some(resumed) => resumed.context(),
+            None => {
+                let store = &mut *entered.as_mut().unwrap().store;
+                self.group.budgets.arm(store, call);
+                store.as_context_mut()
             }
         };
-        let store = &mut *entered.store;
-        self.group.budgets.arm(store, call);
         let previous = CURRENT.replace(&mut frame);
         let caller = CALLER.replace(Some(self.clone()));
         let scope = CallScope {
@@ -575,14 +676,15 @@ impl Running {
             false => self
                 .exports
                 .horizon_mod_api_hooks()
-                .call_release_handlers(store, released),
+                .call_release_handlers(&mut store, released),
         }
-        .and_then(|()| f(&self.exports, store));
+        .and_then(|()| f(&self.exports, &mut store));
         drop(scope);
         // Stopped before the group is let go, so no call waiting for it runs on.
         if result.is_err() {
             self.group.poisoned.store(true, Ordering::Relaxed);
         }
+        drop(resumed);
         drop(entered);
         match result {
             Ok(value) => value,
@@ -613,7 +715,7 @@ impl WasmMod {
         frame: Frame,
         call: Call,
         no_answer: impl FnOnce() -> T,
-        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+        f: impl FnOnce(&glue::ModExports, &mut StoreContextMut<'_, State>) -> wasmtime::Result<T>,
     ) -> T {
         self.module.call_or(frame, call, no_answer, f)
     }
@@ -625,7 +727,7 @@ impl WasmHandler {
         frame: Frame,
         call: Call,
         no_answer: impl FnOnce() -> T,
-        f: impl FnOnce(&glue::ModExports, &mut Store<State>) -> wasmtime::Result<T>,
+        f: impl FnOnce(&glue::ModExports, &mut StoreContextMut<'_, State>) -> wasmtime::Result<T>,
     ) -> T {
         self.module.call_or(frame, call, no_answer, f)
     }
@@ -873,7 +975,7 @@ pub fn instantiate(
     let mut linker = Linker::<State>::new(engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .expect("the game's own imports are defined once");
-    glue::add_flat_lists(&mut linker).expect("the flat list imports are defined once");
+    glue::add_store_imports(&mut linker).expect("the store-aware imports are defined once");
     imports(&mut linker);
     let limits = wasmtime::StoreLimitsBuilder::new()
         .memory_size(budgets.memory)
@@ -986,7 +1088,7 @@ impl Exports {
     pub fn call<T>(
         &self,
         host: CallHost<'_>,
-        f: impl FnOnce(&mut Store<State>) -> wasmtime::Result<T>,
+        f: impl FnOnce(&mut StoreContextMut<'_, State>) -> wasmtime::Result<T>,
     ) -> Option<T> {
         let mut frame = Frame::default();
         match host {
@@ -1001,7 +1103,10 @@ impl Exports {
 
     /// Runs `f` as the group's load-phase call, with no host: for the checks the game makes of
     /// a member once, at load.
-    pub fn load<T>(&self, f: impl FnOnce(&mut Store<State>) -> wasmtime::Result<T>) -> Option<T> {
+    pub fn load<T>(
+        &self,
+        f: impl FnOnce(&mut StoreContextMut<'_, State>) -> wasmtime::Result<T>,
+    ) -> Option<T> {
         self.0.call_or(
             Frame::default(),
             Call::Load,

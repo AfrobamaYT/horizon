@@ -8,8 +8,6 @@ pub fn key_mappings() -> &'static [(&'static str, crate::NativeKeyRegistration)]
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     #[cfg(test)]
-    use super::*;
-    #[cfg(test)]
     use crate::*;
 
     #[test]
