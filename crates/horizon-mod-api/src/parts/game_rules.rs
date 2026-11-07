@@ -96,7 +96,6 @@ pub mod tests {
 
     #[test]
     pub(crate) fn bool_rule_declarations_validate_slots_and_fail_atomically() {
-        use super::Registrar;
         let mut refused = super::PartRegistrar::new("example");
         refused
             .game_rule_bool("active", "missing:machines", true)
@@ -131,7 +130,6 @@ pub mod tests {
 
     #[test]
     pub(crate) fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
-        use super::Registrar;
         let mut foreign = super::PartRegistrar::new("example");
         assert_eq!(
             foreign.game_rule_category("foreign:machines"),

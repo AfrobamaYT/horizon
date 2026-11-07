@@ -75,6 +75,13 @@ for (group, owner), methods in traits.items():
     p.write_text(p.read_text() + f'\n{header}pub trait {trait} {{\n' + '\n'.join(methods) + '}\n' + f'\nimpl {trait} for {target} {{\n' + '\n'.join(impls[(group, owner)]) + '}\n')
     print(group, trait, len(methods))
 
+# The area trait is already in these tests' glob scope; the old union imports
+# become unused when the declaring methods move to this file.
+p = DIRECTORY / 'game_rules.rs'
+text = p.read_text()
+assert text.count('        use super::Registrar;\n') == 2
+p.write_text(text.replace('        use super::Registrar;\n', ''))
+
 # Documentation links must name the declaring trait; Rustdoc does not resolve
 # a supertrait's method as Union::method. Object method calls stay unchanged.
 for file, replacements in {
