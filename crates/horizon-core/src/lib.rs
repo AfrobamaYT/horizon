@@ -30,6 +30,7 @@ pub mod release;
 pub mod storage;
 pub mod text;
 pub mod ticks;
+pub mod trading;
 pub mod use_animation;
 pub mod version;
 
