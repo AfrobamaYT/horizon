@@ -2403,8 +2403,8 @@ mod enchantment_snapshot_tests {
         .unwrap();
         game.build_registries();
 
-        let dir =
-            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h024-model");
+        let dir = std::env::temp_dir().join(format!("horizon-h024-model-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
         let pack = dir.join("datapacks/model");
         let tags = pack.join("data/h024/tags/enchantment");
         std::fs::create_dir_all(&tags).unwrap();
