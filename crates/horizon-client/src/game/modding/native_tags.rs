@@ -73,6 +73,39 @@ impl_tags!(super::Game<'_>, game, game.native_tag_items());
 mod tests {
     use super::*;
     #[test]
+    fn empty_stacks_refuse_before_membership_and_air_is_an_explicit_key() {
+        use crate::game::api_values::{StackReadError, TryIntoApi};
+        mod_api::__private::install_parts(&[]).unwrap();
+        mod_api::__private::resolve_items(["minecraft:air", "minecraft:stone"]).unwrap();
+        let air = mod_api::__private::item_key("minecraft:air").unwrap();
+        let stone = mod_api::__private::item_key("minecraft:stone").unwrap();
+        let tag = mod_api::__private::tag_key(&mod_api::Identifier::parse("x").unwrap()).unwrap();
+        let missing =
+            mod_api::__private::tag_key(&mod_api::Identifier::parse("minecraft:y").unwrap())
+                .unwrap();
+        let mut table = Items::for_tests(
+            [(
+                "minecraft:x".to_owned(),
+                ["minecraft:air".to_owned()].into(),
+            )]
+            .into(),
+        );
+        let empty = horizon_client::items::ItemStack::new("minecraft:stone", 0);
+        assert_eq!(empty.try_into_api(), Err(StackReadError::Empty));
+        assert_eq!(is_in_tag(Some(&table), air, tag), Some(true));
+        assert_eq!(is_in_tag(Some(&table), stone, tag), Some(false));
+        assert_eq!(is_in_tag(Some(&table), air, missing), Some(false));
+        table.item_tag_order.insert(
+            "minecraft:x".into(),
+            vec!["minecraft:air".into(), "missing:unloaded".into()],
+        );
+        assert_eq!(
+            items(Some(&table), tag),
+            None,
+            "unresolved members must not produce a partial list"
+        );
+    }
+    #[test]
     fn keys_survive_membership_reload_and_reads_distinguish_unavailable_from_unknown() {
         mod_api::__private::install_parts(&[]).unwrap();
         mod_api::__private::resolve_items(["minecraft:stick", "minecraft:stone"]).unwrap();
