@@ -716,6 +716,7 @@ mod api {
     }
     #[derive(Clone, Copy)]
     pub struct RaidRef;
+    pub struct ClientBossBar;
     #[derive(Clone, Copy)]
     pub enum KeyAction {}
     pub mod fog {
