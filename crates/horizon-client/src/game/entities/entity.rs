@@ -293,7 +293,7 @@ pub(super) trait RenderEntityBounds {
     fn render_id(&self) -> u32;
     fn render_bounds(&self, alpha: f64) -> Aabb;
     fn render_glowing(&self, game: &Game<'_>) -> bool {
-        game.entity_glowing(self.render_id())
+        game.tracked_entity_glowing(self.render_id())
     }
 }
 
@@ -677,6 +677,16 @@ macro_rules! entity_lists {
 }
 pub(crate) use entity_lists;
 
+macro_rules! direct_entity_edit {
+    (Boat) => {
+        false
+    };
+    ($kind:ident) => {
+        true
+    };
+}
+pub(crate) use direct_entity_edit;
+
 macro_rules! define_entity_handles {
     (() $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         /// Every list, borrowed apart from the rest of `Game`, for
@@ -695,7 +705,7 @@ macro_rules! define_entity_handles {
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
         /// world stays readable while the entities change.
         pub(super) struct TakenEntities {
-            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty>,)*
+            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty, { $crate::game::entity::direct_entity_edit!($kind) }>,)*
         }
 
 
@@ -1116,7 +1126,7 @@ impl Entity for Mob {
         Some((self.width(), self.height()))
     }
     fn can_use_portal(&self, game: &Game<'_>) -> bool {
-        game.mob_can_use_portal(self)
+        game.mob_portal_eligible(self)
     }
     /// `PersistentEntitySectionManager.Callback.onRemove`: discard stops
     /// section enumeration immediately, before the entity list is swept.
@@ -2085,7 +2095,7 @@ mod join_order_tests {
         stands: JoinList<ArmorStand>,
         tridents: JoinList<ThrownTrident>,
         rockets: JoinList<Rocket>,
-        boats: JoinList<Boat>,
+        boats: JoinList<Boat, false>,
     }
 
     impl Lists {

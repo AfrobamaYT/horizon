@@ -2,6 +2,8 @@
 //! paddling controls, collisions, riding (`positionRider`, `clampRotation`,
 //! dismounting), `BoatItem` placement, `VehicleEntity.hurtServer` breaking,
 //! saving and `AbstractBoatRenderer` with animated paddles.
+#[cfg(test)]
+mod lifetime_tests;
 mod placement;
 
 use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
@@ -42,6 +44,7 @@ pub(super) struct Boat {
     pub pitch: f32,
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
     pub(super) join: horizon_client::join_seq::JoinSeq,
+    pub(super) attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub id: u32,
     /// Wood type (`oak`, `bamboo` for the raft).
     pub wood: Arc<str>,
@@ -166,6 +169,7 @@ impl Boat {
         Self {
             pitch: 0.0,
             join: Default::default(),
+            attachment_lifetime: Default::default(),
             id,
             wood,
             position,
@@ -829,6 +833,17 @@ impl Game<'_> {
             }
         }
     }
+    /// Refuse a removed tick target before carrying its slot into the clone.
+    pub(super) fn store_boat_back(&mut self, index: usize, boat: Boat) -> bool {
+        if self
+            .persist
+            .removals
+            .contains(&super::commands::Target::Boat(boat.id))
+        {
+            return false;
+        }
+        self.boats.store_back(index, boat)
+    }
     /// Every boat but the ridden one (which ticks with its rider).
     pub(super) fn tick_boats(&mut self) {
         self.vehicles_ticking(true);
@@ -860,7 +875,7 @@ impl Game<'_> {
                         self.with_entity_held_out(id, |game| {
                             let mut b = game.boats[i].clone();
                             game.tick_boat_leash(&mut b);
-                            game.boats[i] = b;
+                            game.store_boat_back(i, b);
                         });
                     }
                     self.boat_server_passes(id, &driven, &ticking, &round);
@@ -884,7 +899,8 @@ impl Game<'_> {
                 };
                 self.with_entity_held_out(id, |game| {
                     let b = game.boats[i].clone();
-                    game.boats[i] = game.tick_boat(b, false);
+                    let b = game.tick_boat(b, false);
+                    game.store_boat_back(i, b);
                 });
                 self.boat_server_passes(id, &driven, &ticking, &round);
                 self.native_tick_post_one(&round, id, &kind);
@@ -1847,3 +1863,4 @@ mod tests {
     }
 }
 horizon_client::impl_joined!(Boat);
+horizon_mod_runtime::impl_attachment_lifetime!(Boat);

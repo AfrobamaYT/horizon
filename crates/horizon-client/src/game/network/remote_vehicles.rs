@@ -361,7 +361,7 @@ impl Game<'_> {
             let clamped = delta.clamp(-105.0, 105.0) - delta;
             self.yaw += clamped;
             self.rope_rot_old.0 += clamped;
-            self.boats[i] = b;
+            self.store_boat_back(i, b);
             // In front of a mob that shares the boat.
             Some(self.player_boat_seat(i))
         } else {
