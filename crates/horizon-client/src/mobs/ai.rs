@@ -3453,7 +3453,12 @@ mod poison_effect_tests {
         golem.attrs.max_health = 100.0;
         golem.health = 60.0;
         golem.add_effect("instant_health", 6, 32);
-        tick_effects(&mut golem, None);
+        tick_effects(
+            &mut golem,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
         assert_eq!(golem.health, 64.0);
     }
 
