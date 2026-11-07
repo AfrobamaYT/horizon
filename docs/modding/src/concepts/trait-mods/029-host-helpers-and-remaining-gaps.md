@@ -12,6 +12,13 @@ currently stores only the remainder item id, not a template's count or component
 `host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
+
+For engine contributors, every area method declares its load access once with `#[access(...)]`.
+`Metadata` admits registry facts during setup and reload; `WorldOnly`, `ClientSetup` and
+`PublishedResources` retain their phase-specific contracts. The area's `host_area` attribute
+builds the test-double defaults, and the API generator emits every game forwarder at build time.
+Implement only the inherent `Game` function with the same name, not a hand-written forwarder.
+Static implementations use `#[static_call]`; service accessors use `#[service]`.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
 Adding a handle requires no separate generator registration.

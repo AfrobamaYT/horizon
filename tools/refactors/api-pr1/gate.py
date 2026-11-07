@@ -17,7 +17,7 @@ Each resolved BASE_COMMIT gets its own worktree and target folder under SCRATCH_
 `target/api-pr1-gate`); delete the folder afterwards.
 """
 import filecmp
-import glob
+import json
 import os
 import subprocess
 import sys
@@ -32,8 +32,14 @@ def build(directory, target, tool=False):
     env = dict(os.environ, CARGO_TARGET_DIR=str(target))
     if tool:
         subprocess.run(["cargo", "build", "-p", "horizon-mod-api-gen", "--bin", "host-manifest"], cwd=directory, env=env, check=True)
-    subprocess.run(["cargo", "build", "-p", "horizon-mod-api"], cwd=directory, env=env, check=True)
-    return Path(max(glob.glob(str(target / "debug/build/horizon-mod-api-*/out")), key=os.path.getmtime))
+    built = subprocess.run(["cargo", "build", "-p", "horizon-mod-api", "--message-format=json"],
+                           cwd=directory, env=env, check=True, capture_output=True, text=True)
+    outputs = [message["out_dir"] for line in built.stdout.splitlines()
+               if (message := json.loads(line)).get("reason") == "build-script-executed"
+               and "/horizon-mod-api#" in message["package_id"]]
+    if len(outputs) != 1:
+        sys.exit(f"expected one mod API build-script output, got {outputs}")
+    return Path(outputs[0])
 
 
 def manifest(tool, files):
