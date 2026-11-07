@@ -3,6 +3,8 @@
 //! capability handlers), as one WIT world and the glue on both sides of it.
 mod calls;
 mod emit;
+mod host;
+pub use host::generate_host;
 mod ty;
 
 use crate::capability_providers::key_shapes;
