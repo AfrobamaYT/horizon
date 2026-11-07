@@ -5,7 +5,8 @@ use glam::{DVec3, Mat4, Vec3};
 use horizon_client::mesher::Vertex;
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, RenderLevelStage, WorldDrawUsage, WorldLine,
+    WorldQuad,
 };
 
 impl Game<'_> {
@@ -48,11 +49,20 @@ impl Game<'_> {
         }
         draw.set_model_cut(entities.len() as u32);
         let view = mod_api::WorldRenderView::new(camera, alpha as f32, self.world.game_time);
+        // RenderLevelStageEvent's stages in frame order, so each one's output follows the
+        // last's; custom geometry and the debug renderers draw with the last, AfterLevel.
+        let (last, earlier) = RenderLevelStage::ALL.split_last().expect("stages");
+        for &stage in earlier {
+            draw.begin_stage(stage);
+            self.native_render_level_stage(stage, &view, draw);
+        }
+        draw.begin_stage(*last);
         self.native_submit_custom_geometry(&view, draw);
         self.follow_debug_selection();
         for id in &self.debug_renderers {
             self.native_debug_renderer_draw(id, &view, draw);
         }
+        self.native_render_level_stage(*last, &view, draw);
         self.commit_model_instances(draw, DVec3::from(camera), entities);
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
@@ -605,6 +615,92 @@ mod tests {
                 ctx.draw_model_instances(model, &vec![far; 16_384]).unwrap();
                 assert_eq!(ctx.usage().instances_used, 0);
             }
+        });
+    }
+
+    static STAGES_ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// A line one block long at `x`, so each listener's output can be told apart.
+    fn marker(x: f64) -> mod_api::WorldLine {
+        mod_api::WorldLine::new(
+            [x, 0.0, -1.0],
+            [x + 1.0, 0.0, -1.0],
+            0xFF00_FF00,
+            1.0,
+            mod_api::WorldDepth::Tested,
+        )
+    }
+
+    /// Draws at AfterSky, AfterWeather and AfterLevel, and in `submit_custom_geometry`.
+    struct Staged;
+    #[mod_api::__subscriptions]
+    impl Hooks for Staged {
+        fn submit_custom_geometry(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut SubmitCustomGeometryEvent<'_>,
+        ) {
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(30.0)]).unwrap();
+            }
+        }
+        fn render_level_stage(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::RenderLevelStageEvent<'_>,
+        ) {
+            let x = match event.stage {
+                RenderLevelStage::AfterSky => 10.0,
+                RenderLevelStage::AfterWeather => 20.0,
+                RenderLevelStage::AfterLevel => 40.0,
+                _ => return,
+            };
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(x)]).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn each_stage_is_asked_in_frame_order_and_its_lines_draw_there() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            mod_api::__private::install(vec![ModEntry::new("staged", Box::new(Staged))].into());
+            STAGES_ARMED.store(true, Ordering::Relaxed);
+            let mut draw = WorldGeometry::default();
+            game.fill_world_geometry(
+                false,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            STAGES_ARMED.store(false, Ordering::Relaxed);
+            let batch = draw.batch();
+            let starts: Vec<f32> = batch.lines.iter().map(|line| line[0]).collect();
+            assert_eq!(
+                starts,
+                [10.0, 20.0, 30.0, 40.0],
+                "stages in frame order, custom geometry just before AfterLevel"
+            );
+            // AfterSky holds the first line, AfterOpaqueBlocks and AfterTranslucentBlocks none,
+            // AfterWeather the second, AfterLevel the rest.
+            assert_eq!(
+                batch.stage_ends,
+                [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 2, 0]]
+            );
+            // A title view draws no world: nothing, and every stage empty.
+            game.fill_world_geometry(
+                true,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            assert!(draw.batch().is_empty());
+            assert_eq!(draw.batch().stage_ends, [[0; 4]; 4]);
         });
     }
 
