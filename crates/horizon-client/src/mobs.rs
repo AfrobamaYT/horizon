@@ -1503,7 +1503,7 @@ impl BoxReach {
 #[derive(Clone, Debug)]
 pub struct Mob {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
@@ -2956,7 +2956,7 @@ pub fn apply_mob_pushes(m: &mut Mob, pending: &mut PendingPushes) {
 /// index `from` on), at once: vanilla sets them on the other entity during
 /// the tick, before the mobs after it tick.
 pub fn apply_brain_events(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
     from: usize,
@@ -6327,7 +6327,7 @@ mod effect_refusal_tests {
     }
 }
 crate::impl_joined!(Mob);
-horizon_world::impl_attachment_lifetime!(Mob);
+horizon_mod_runtime::impl_attachment_lifetime!(Mob);
 
 #[cfg(test)]
 mod named_damage_tests {

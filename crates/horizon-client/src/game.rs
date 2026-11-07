@@ -3208,7 +3208,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
+    entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
@@ -3357,7 +3357,7 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     /// The active player's map; a guest turn moves it from its owning record.
-    player_attachments: horizon_world::attachments::ResidentAttachments,
+    player_attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     /// The name of the guest `lan_acting` acts for (`Player.getName`).
     lan_acting_name: Option<String>,
     /// Their UUID (`Player.getUUID`).
@@ -4795,7 +4795,7 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        let mut kept = Vec::with_capacity(items.len());
+        let mut kept = horizon_client::join_seq::JoinList::with_capacity(items.len());
         for mut item in items {
             let b = item.bounds();
             let touching = b.min_position().x < max[0]
@@ -4864,11 +4864,8 @@ impl Game<'_> {
     /// The item entities `tick_dropped_items` took out, back in the level,
     /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
     /// They keep their join numbers; the spawned ones got theirs on joining.
-    fn put_back_dropped(
-        &mut self,
-        items: impl Into<horizon_client::join_seq::JoinList<ItemEntity>>,
-    ) {
-        let spawned = std::mem::replace(&mut self.dropped, items.into());
+    fn put_back_dropped(&mut self, items: horizon_client::join_seq::JoinList<ItemEntity>) {
+        let spawned = std::mem::replace(&mut self.dropped, items);
         self.dropped.extend(spawned);
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held

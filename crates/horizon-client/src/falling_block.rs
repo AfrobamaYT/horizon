@@ -224,13 +224,18 @@ fn inside_blocks(
         check(to, to, 1);
     }
 }
-pub fn hurt_mobs(level: &mut DamageLevel<'_>, mobs: &mut [Mob], position: Vec3, amount: f32) {
+pub fn hurt_mobs<'a>(
+    level: &mut DamageLevel<'_>,
+    mobs: impl IntoIterator<Item = &'a mut Mob>,
+    position: Vec3,
+    amount: f32,
+) {
     hurt_mobs_with_kind(level, mobs, position, amount, DamageKind::FallingBlock);
 }
 
-pub fn hurt_mobs_with_kind(
+pub fn hurt_mobs_with_kind<'a>(
     level: &mut DamageLevel<'_>,
-    mobs: &mut [Mob],
+    mobs: impl IntoIterator<Item = &'a mut Mob>,
     position: Vec3,
     amount: f32,
     kind: DamageKind,
@@ -246,7 +251,7 @@ pub fn hurt_mobs_with_kind(
         attacker_species: None,
     };
     for mob in mobs
-        .iter_mut()
+        .into_iter()
         .filter(|m| m.alive() && bounds.intersects(m.bounds()))
     {
         mob.damage(level, amount, source);

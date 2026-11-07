@@ -23,7 +23,7 @@
 //! changed by the transaction has its result made again at the root commit.
 use super::{BlockEntity, BlockStateId, Game, machines::HopperState};
 use horizon_client::{items::ItemStack, world::BlockEntityExtras};
-use horizon_world::attachments::{Attachments, Holder};
+use horizon_mod_runtime::attachments::{Attachments, Holder};
 use mod_api::TransactionSeal;
 use std::collections::HashMap;
 
