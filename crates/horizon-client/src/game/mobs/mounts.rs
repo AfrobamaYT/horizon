@@ -8,7 +8,7 @@ use horizon_client::{
     blocks::Fluid,
     hud::HudBatch,
     items::ItemStack,
-    mobs::{MobEvent, Species, Who, equine},
+    mobs::{Mob, MobEvent, Species, Who, equine},
     motion::{MotionWorld, PlayerMotion},
     pose::{Dimensions, Pose},
     sprint::Keys,
@@ -615,23 +615,11 @@ impl Game<'_> {
             self.dismount_happy_ghast(id);
             return;
         }
-        let mount = Mount {
-            species: m.species(),
-            position: m.position,
-            bounds: m.bounds(),
-            width: m.width(),
-            height: m.height(),
-            yaw: m.yaw,
-        };
+        let mount = Mount::of(m);
         let Some(p) = self.player.as_ref() else {
             return;
         };
-        let rider = Rider {
-            yaw: self.yaw,
-            width: p.dimensions.width,
-            poses: rider_poses(p),
-        };
-        let (spot, pose) = dismount_location(&mount, &rider, &GameDismountWorld(self));
+        let (spot, pose) = self.mount_player_dismount(&mount, self.yaw, p);
         if let Some(p) = self.player.as_mut() {
             p.position = spot;
             p.velocity = Vec3::ZERO;
@@ -642,6 +630,40 @@ impl Game<'_> {
                 log::warn!("dismount pose: {e}");
             }
         }
+    }
+    /// Where `mount` lets a player in `p` facing `yaw` off, and the pose they take there.
+    fn mount_player_dismount(
+        &self,
+        mount: &Mount,
+        yaw: f32,
+        p: &PlayerMotion,
+    ) -> (Vec3, Option<Pose>) {
+        let rider = Rider {
+            yaw,
+            width: p.dimensions.width,
+            poses: rider_poses(p),
+        };
+        dismount_location(mount, &rider, &GameDismountWorld(self))
+    }
+    /// Where `stop_riding` sets a player in `p` facing `yaw` down off `vehicle`: None when
+    /// `vehicle` is no boat, cart or mob.
+    pub(in crate::game) fn player_dismount_point(
+        &self,
+        vehicle: u32,
+        yaw: f32,
+        p: &PlayerMotion,
+    ) -> Option<Vec3> {
+        if let Some(i) = self.boats.iter().position(|b| b.id == vehicle) {
+            return Some(self.boat_player_dismount_target(i, yaw));
+        }
+        if let Some(i) = self.carts.iter().position(|c| c.id == vehicle) {
+            return Some(self.cart_player_dismount_target(i));
+        }
+        let mount = self.mobs.iter().find(|m| m.id == vehicle)?;
+        if mount.species() == Species::HappyGhast {
+            return Some(on_top(mount));
+        }
+        Some(self.mount_player_dismount(&Mount::of(mount), yaw, p).0)
     }
     /// `AbstractHorse.tameWithName`: the acting player owns `mob`, then gets
     /// the `tame_animal` trigger.
@@ -853,6 +875,26 @@ struct Mount {
     width: f32,
     height: f32,
     yaw: f32,
+}
+impl Mount {
+    fn of(m: &Mob) -> Self {
+        Self {
+            species: m.species(),
+            position: m.position,
+            bounds: m.bounds(),
+            width: m.width(),
+            height: m.height(),
+            yaw: m.yaw,
+        }
+    }
+}
+/// On top of `m`, where it lets off a rider it has no other rule for.
+pub(super) fn on_top(m: &Mob) -> Vec3 {
+    Vec3::new(
+        m.position.x,
+        m.position.y + f64::from(m.height()),
+        m.position.z,
+    )
 }
 /// The rider getting off: `getYRot`, `getBbWidth`, and
 /// `getLocalBoundsForPose` for each of `Player.getDismountPoses`.

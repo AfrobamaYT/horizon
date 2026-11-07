@@ -946,6 +946,7 @@ impl Game<'_> {
                     && !self.mobs[j].removed
             })
             .collect();
+        riders.sort_by_key(|&j| self.mobs[j].extra.vehicle_order);
         if let Some(driver) = self
             .mobs
             .iter()

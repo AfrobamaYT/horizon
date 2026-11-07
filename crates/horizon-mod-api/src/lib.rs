@@ -1492,11 +1492,11 @@ impl EntityRef {
     }
 }
 
-/// The resolved holder of a mob's leash, or its absence.
+/// The resolved holder of a mob's or a boat's leash, or its absence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum MobLeashHolder {
-    /// The mob is not leashed.
+pub enum LeashHolder {
+    /// The entity is not leashed.
     Unleashed,
     /// A player, mob or boat holds the leash.
     Entity(EntityRef),

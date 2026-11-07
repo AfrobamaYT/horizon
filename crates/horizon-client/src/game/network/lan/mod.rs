@@ -1934,14 +1934,14 @@ impl Game<'_> {
                 return;
             };
             let raw = host.hub.guests[i].saved.clone();
+            let entity = host.hub.guests[i].entity_id as u32;
             let Some(id) = self.restore_saved_vehicle(uuid, raw.as_ref()) else {
                 continue;
             };
+            let order = self.boarding_order(id, entity, true);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            host.hub.seat_order += 1;
-            let order = host.hub.seat_order;
             host.hub.guests.update(i, |g| {
                 if let Some(horizon_core::nbt::Tag::Compound(p)) = &mut g.saved {
                     p.remove(&"RootVehicle".into());
@@ -3080,7 +3080,7 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let mut guests: Vec<(u64, u32, i32)> = host
+                let mut guests: Vec<(i64, u32, i32)> = host
                     .hub
                     .guests
                     .iter()

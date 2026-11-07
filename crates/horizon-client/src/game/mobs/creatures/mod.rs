@@ -839,6 +839,8 @@ impl Game<'_> {
         after(self, &mut mob);
         let id = mob.id;
         self.mobs.push(mob);
+        // ConversionType.SINGLE: `to.startRiding(vehicle, false, false)`.
+        self.seat_mob(id);
         self.native_mobs_joined(self.mobs.len() - 1, false);
         let transformed = self.mobs.iter().find(|m| m.id == id)?;
         let transformed_kind = from_kind.as_ref().map(|_| transformed.kind.id.clone());
@@ -3591,6 +3593,7 @@ impl Game<'_> {
                 }
                 MobEvent::StartRiding { rider, vehicle } => {
                     if horizon_client::mobs::riders::start_riding(&mut self.mobs, rider, vehicle) {
+                        self.seat_mob(rider);
                         // sendEventAndTriggers: the server players already on it.
                         self.note_started_riding(vehicle);
                     }
@@ -3599,7 +3602,9 @@ impl Game<'_> {
                 MobEvent::StartFollowing { .. }
                 | MobEvent::SchoolSize { .. }
                 | MobEvent::PufferfishSting { .. } => {}
-                MobEvent::LeashBreak { mob, drop, sound } => self.break_leash(mob, drop, sound),
+                MobEvent::LeashBreak { mob, drop, sound } => {
+                    self.tick_break_leash(mob, drop, sound)
+                }
                 MobEvent::NotifyLeashHolder { holder } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == holder) {
                         horizon_client::mobs::happy_ghast::notify_leash_holder(m);
