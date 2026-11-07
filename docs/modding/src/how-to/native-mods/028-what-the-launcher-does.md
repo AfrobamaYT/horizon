@@ -3,8 +3,8 @@
 
 ## What the launcher does
 
-**Developing a mod?** With Developer mode on, pick Developer in the Mods page's "Build mode" card, or pass `--profile developer` to
-`horizon-launcher native-build`. The choice is remembered for that instance, not shared with other instances.
+**Developing a mod?** Pass `--profile developer` to `horizon-launcher native-build`.
+The choice is remembered for that instance, not shared with other instances.
 Developer builds the game crate unoptimized for iteration rather than game performance. Use it while developing, not for playing. A needed build picker starts at
 Balanced until a choice is saved; automatic prebuilt builds still use the release profile.
 
