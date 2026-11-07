@@ -362,7 +362,8 @@ pub(super) fn surface<'a>(
         }
         for (module, via, function) in &members {
             let name = function.sig.ident.to_string();
-            if hidden(&function.attrs) || name.ends_with("subscribed") {
+            if hidden(&function.attrs) && !SUBSCRIBED.iter().any(|(o, n)| o == owner && *n == name)
+            {
                 continue;
             }
             if not_on_wasm(&function.attrs) {
@@ -546,7 +547,11 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     let mut guest = calls::guest(&surface.types, &surface.methods, &surface.parts);
     guest.push_str(&calls::hook_names(&surface.hooks));
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
-    let _ = writeln!(wire, "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};", layout(&surface));
+    let _ = writeln!(
+        wire,
+        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
+        layout(&surface)
+    );
     Ok(Generated { wire, guest })
 }
 
@@ -664,7 +669,17 @@ mod tests {
                 println!("classes {classes:?}");
                 let code = super::calls::guest(&surface.types, &surface.methods, &surface.parts);
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
-                for m in super::calls::imports(&surface.methods) { if !super::calls::plain_pub(m) { println!("nonplain {}::{} ({:?}) -> {:?}", m.owner, m.name, m.params.iter().map(|p| &p.1).collect::<Vec<_>>(), m.ret); } }
+                for m in super::calls::imports(&surface.methods) {
+                    if !super::calls::plain_pub(m) {
+                        println!(
+                            "nonplain {}::{} ({:?}) -> {:?}",
+                            m.owner,
+                            m.name,
+                            m.params.iter().map(|p| &p.1).collect::<Vec<_>>(),
+                            m.ret
+                        );
+                    }
+                }
                 let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
                 std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
                 println!(
