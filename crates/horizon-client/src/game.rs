@@ -12121,7 +12121,6 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
-        fov_degrees: f32,
         billboard_frustum: Option<horizon_client::gfx::Frustum>,
         mut out: Vec<Vertex>,
     ) -> (
@@ -17999,7 +17998,7 @@ impl Game<'_> {
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
-                    self.entity_geometry(camera, alpha, fov_degrees, billboard_frustum, entities)
+                    self.entity_geometry(camera, alpha, billboard_frustum, entities)
                 });
             entities = built;
             static_block_entities = static_sections;

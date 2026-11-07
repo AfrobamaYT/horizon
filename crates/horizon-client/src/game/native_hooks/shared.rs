@@ -5749,6 +5749,6 @@ impl Game<'_> {
         suggestion: &str,
         input: &str,
     ) {
-        mod_api::dispatch_chat_suggestion_applied(self, original, start, end, suggestion, input);
+        self.fire_chat_suggestion_applied(self, original, start, end, suggestion, input);
     }
 }

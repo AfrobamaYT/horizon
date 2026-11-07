@@ -10869,6 +10869,9 @@ impl Game<'_> {
     }
     /// Connecting / loading screens; true when it covered the frame.
     pub(super) fn remote_overlay(&mut self, batch: &mut HudBatch) -> bool {
+        if !self.remote_screen_up() {
+            return false;
+        }
         let Some(r) = &self.remote else { return false };
         let loading = r.level_load.is_active();
         if self.player.is_some() && !loading {

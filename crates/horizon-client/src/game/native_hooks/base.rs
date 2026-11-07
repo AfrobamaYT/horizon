@@ -5894,6 +5894,6 @@ impl Game<'_> {
         center: [f64; 3],
         blocks: &mut Vec<[i32; 3]>,
     ) {
-        mod_api::dispatch_wind_burst(self, dimension, center, blocks);
+        self.fire_wind_burst(dimension, center, blocks);
     }
 }
