@@ -533,15 +533,26 @@ fn map_bytes(buffer: &wgpu::Buffer, contents: &[u8]) -> Result<()> {
 }
 
 fn take_forced_failure() -> bool {
-    FAIL_UPLOAD.swap(false, std::sync::atomic::Ordering::Relaxed)
+    #[cfg(feature = "test-support")]
+    {
+        FAIL_UPLOAD.with(|flag| flag.replace(false))
+    }
+    #[cfg(not(feature = "test-support"))]
+    {
+        false
+    }
 }
 
-static FAIL_UPLOAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// The next [`PreparedModels::create`] returns an error and uploads nothing.
+/// The next [`PreparedModels::create`] on this thread returns an error and uploads nothing.
+/// Another thread's upload is left alone, so parallel pixel tests cannot consume each other's failure.
 #[cfg(feature = "test-support")]
 pub fn fail_next_prepared_upload() {
-    FAIL_UPLOAD.store(true, std::sync::atomic::Ordering::Relaxed);
+    FAIL_UPLOAD.with(|flag| flag.set(true));
+}
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    static FAIL_UPLOAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -738,5 +749,15 @@ mod tests {
         })
         .unwrap();
         assert!(mapped);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn forced_upload_failure_stays_on_the_thread_that_set_it() {
+        fail_next_prepared_upload();
+        let stolen = std::thread::scope(|scope| scope.spawn(take_forced_failure).join().unwrap());
+        assert!(!stolen, "another thread consumed the forced upload failure");
+        assert!(take_forced_failure());
+        assert!(!take_forced_failure());
     }
 }

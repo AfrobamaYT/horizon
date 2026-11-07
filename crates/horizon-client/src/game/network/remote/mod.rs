@@ -3051,19 +3051,21 @@ impl Game<'_> {
             // flies them on (`tick_remote_projectiles`). Eased towards it
             // instead, they only moved when an update came, every 10 to 20
             // ticks.
-            if let Some(p) = self
+            if let Some(i) = self
                 .creatures
                 .projectiles
-                .iter_mut()
-                .find(|p| p.id == id as u32)
+                .iter()
+                .position(|p| p.id == id as u32)
             {
-                if path.is_some() {
-                    p.position = Vec3::new(position[0], position[1], position[2]);
-                }
-                if let Some((yaw, pitch)) = rotation {
-                    p.yaw = yaw;
-                    p.pitch = pitch;
-                }
+                self.creatures.projectiles.update(i, |p| {
+                    if path.is_some() {
+                        p.position = Vec3::new(position[0], position[1], position[2]);
+                    }
+                    if let Some((yaw, pitch)) = rotation {
+                        p.yaw = yaw;
+                        p.pitch = pitch;
+                    }
+                });
                 return;
             }
             if path.is_some()
@@ -6016,13 +6018,13 @@ impl Game<'_> {
             o.velocity = v;
         } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
             self.carts.update(i, |c| c.velocity = v);
-        } else if let Some(p) = self
+        } else if let Some(i) = self
             .creatures
             .projectiles
-            .iter_mut()
-            .find(|p| p.id == id as u32)
+            .iter()
+            .position(|p| p.id == id as u32)
         {
-            p.velocity = v;
+            self.creatures.projectiles.update(i, |p| p.velocity = v);
         } else if let Some(b) = self.dragon_fireballs.iter_mut().find(|b| b.id == id as u32) {
             b.velocity = v;
         } else if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id as u32) {

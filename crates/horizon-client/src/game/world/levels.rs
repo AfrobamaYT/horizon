@@ -55,11 +55,11 @@ pub(super) struct Parked {
     others: horizon_client::join_seq::ResidentList<commands::OtherEntity>,
     fangs: super::fangs::FangState,
     pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat, false>,
-    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
+    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart, false>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
-    dragon: Option<dragon::Dragon>,
+    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
@@ -71,7 +71,7 @@ pub(super) struct Parked {
     pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
     knot_ids: HashMap<[i32; 3], u32>,
-    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile>,
+    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile, false>,
     dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     persist: persist::EntityMemory,
@@ -169,6 +169,11 @@ impl Levels {
             .iter()
             .find(|(dim, _)| dim.id() == dimension)
             .map(|(_, level)| &level.streaming)
+    }
+
+    /// A parked level's existing generator query worker, without switching levels.
+    pub(super) fn parked_locator_of(&self, dimension: &str) -> Option<Arc<VanillaTerrain>> {
+        self.parked_of(dimension)?.locator.clone()
     }
 
     /// The streaming of the level not in place whose dimension is `dimension`, to change.
@@ -327,7 +332,7 @@ impl Game<'_> {
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
             crystals: Default::default(),
-            dragon: None,
+            dragon: Default::default(),
             dragon_fireballs: Vec::new(),
             breath_clouds: Default::default(),
             tridents: Default::default(),
