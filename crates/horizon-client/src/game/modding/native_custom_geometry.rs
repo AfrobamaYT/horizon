@@ -117,7 +117,7 @@ impl Game<'_> {
         )
     }
     /// Stage the copies the instance buffer can take, and bake the rest onto the entity stream.
-    fn commit_model_instances(
+    pub(super) fn commit_model_instances(
         &mut self,
         draw: &mut WorldGeometry,
         camera: DVec3,
@@ -166,20 +166,14 @@ impl Game<'_> {
                 entities,
             );
             let shift = (DVec3::from(copy.origin) - camera).as_vec3();
-            let alpha = copy.tint >> 24;
             let (quads, _) = entities[start..].as_chunks_mut::<4>();
-            for (face, quad) in faces.iter().zip(quads) {
+            for quad in quads {
                 for vertex in quad.iter_mut() {
                     vertex.pos = (Vec3::from(vertex.pos) + shift).to_array();
                     vertex.layer = copy.overlay;
                 }
-                if alpha != 255 && face.tint_index >= 0 {
-                    for vertex in quad.iter_mut() {
-                        let scaled = (vertex.color >> 24) * alpha / 255;
-                        vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
-                    }
-                }
             }
+            super::minecarts::scale_tint_alpha(&mut entities[start..], faces, copy.tint);
         }
         draw.clear_copies();
     }

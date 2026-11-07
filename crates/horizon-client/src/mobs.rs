@@ -1590,6 +1590,7 @@ fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
         amplifier,
         ambient: false,
         show_particles: true,
+        show_icon: true,
     };
     vec![
         ConsumeEffect::ClearAllEffects,
@@ -4469,6 +4470,7 @@ impl Mob {
                 amplifier: stored.amplifier,
                 ambient: false,
                 visible: true,
+                show_icon: true,
                 client_blend: (false, false),
                 hidden: None,
             };
@@ -4751,11 +4753,10 @@ impl Mob {
         if self.species() == Species::HappyGhast {
             return 1.0;
         }
-        // Parrot.getVoicePitch: `getPitch(random)`, the plain range, so a baby
-        // parrot does not take the 1.5 that AgeableMob raises a baby by.
-        if self.species() == Species::Parrot {
-            return (self.random.next_float() - self.random.next_float()) * 0.2 + 1.0;
-        }
+        // Parrot.getVoicePitch is `getPitch(random)`, the plain 1.0 ± 0.2 an
+        // adult gets below: a parrot is never a baby (`Parrot.canBeABaby`), so
+        // the 1.5 `AgeableMob` gives a baby cannot reach it and the override
+        // needs no arm of its own.
         // ZombieVillager.getVoicePitch: babies are 2.0, not 1.5.
         let baby = if self.species() == Species::ZombieVillager {
             2.0
@@ -6396,6 +6397,7 @@ mod totem_tests {
                     amplifier: 1,
                     ambient: false,
                     show_particles: true,
+                    show_icon: true,
                 }],
             };
             mob.apply_death_effect(&mut level.level(), &effect);

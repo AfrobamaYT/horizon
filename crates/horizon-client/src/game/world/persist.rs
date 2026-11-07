@@ -761,7 +761,7 @@ impl Game<'_> {
             self.remember_tags(d.id, &tag);
             self.remember_uuid(d.id, uuid, &tag);
             d.join = horizon_client::join_seq::JoinSeq::next();
-            self.dragon = Some(d);
+            assert!(self.dragon.install(d).is_ok());
         }
     }
 
@@ -1407,7 +1407,7 @@ impl Game<'_> {
             keys.iter().map(|k| (*k, Vec::new())).collect();
         // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
         self.save_every_entity(keys, &mut out);
-        if let Some(d) = &self.dragon
+        if let Some(d) = self.dragon.as_ref()
             && keys.contains(&chunk_of(d.position))
         {
             let raw = anon_raw(&self.persist, "minecraft:ender_dragon", d.position);
@@ -1543,7 +1543,7 @@ impl Game<'_> {
             self.ominous_spawners
                 .retain(|s| !gone(Vec3::new(s.position[0], s.position[1], s.position[2])));
             if self.dragon.as_ref().is_some_and(|d| gone(d.position)) {
-                self.dragon = None;
+                self.dragon.discard();
             }
             self.carts.retain(|c| {
                 let keep = !gone(c.position) || Some(c.id) == riding;
