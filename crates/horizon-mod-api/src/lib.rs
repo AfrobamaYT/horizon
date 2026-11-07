@@ -3038,6 +3038,19 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
+/// `ProjectileUtil.getEntityHitResult` tests for each candidate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct EntityRayHit {
+    /// The entity hit, a handle of the level the ray ran in.
+    pub entity: EntityRef,
+    /// Where the ray enters the entity's box, grown by the ray's margin, in blocks.
+    pub location: [f64; 3],
+    /// How far `location` is from the ray's start, in blocks.
+    pub distance: f64,
+}
+
 /// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
 /// current interaction ranges. Entity handles belong to the current client
 /// level's epoch, including dragon parts; a replacement level invalidates them.
