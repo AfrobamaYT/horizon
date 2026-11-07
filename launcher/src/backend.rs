@@ -1099,7 +1099,7 @@ pub(crate) fn download(
 
 /// Saves `reader` as `to` once all of it has arrived and its SHA-256 is `sha256`: until then it
 /// has a temporary name beside `to`, so `to` is never a partial or unchecked file.
-fn save_checked(
+pub(crate) fn save_checked(
     reader: impl Read,
     size: u64,
     name: &str,

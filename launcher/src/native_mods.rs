@@ -4250,37 +4250,27 @@ mod tests {
         use std::net::TcpListener;
         let _guard = TEST_STATE.lock().unwrap();
         let original = backend::Settings::load();
-        let mut settings = backend::Settings::load();
-        settings.native_mods_allowed_at = None;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
-        settings.proxy = Some(format!("http://{}", listener.local_addr().unwrap()));
-        settings.save().unwrap();
+        fs::create_dir_all(backend::data_dir()).unwrap();
+        fs::write(backend::data_dir().join("settings.json"), serde_json::json!({"native_warning": true, "proxy": format!("http://{}", listener.local_addr().unwrap())}).to_string()).unwrap();
         let folder = dir("consent-missing");
         let output = folder.join("export");
         let log_before = fs::read(log_path()).ok();
-        assert!(matches!(
-            build_server(
-                "uninstalled",
-                &folder,
-                &output,
-                Profile::Optimized,
-                false,
-                |_| {}
-            ),
-            Err(Failed::NoConsent)
+        fn denied<T>(result: Result<T, Failed>) {
+            assert!(matches!(result, Err(Failed::NoConsent)));
+        }
+        let profile = Profile::Optimized;
+        let base = "uninstalled";
+        denied(build_server(base, &folder, &output, profile, false, |_| {}));
+        denied(build(
+            base,
+            &folder,
+            &instances::selected(),
+            profile,
+            |_| {},
         ));
-        assert!(matches!(
-            build(
-                "uninstalled",
-                &folder,
-                &instances::selected(),
-                Profile::Optimized,
-                |_| {}
-            ),
-            Err(Failed::NoConsent)
-        ));
-        assert!(matches!(sync_internals(&folder), Err(Failed::NoConsent)));
+        denied(sync_internals(&folder));
         assert!(
             matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
             "zero HTTP requests"
@@ -4291,7 +4281,7 @@ mod tests {
             log_before,
             "no build staging or log writes"
         );
-        settings.allow_native_mods().unwrap();
+        backend::Settings::load().allow_native_mods().unwrap();
         assert!(backend::Settings::load().native_mods_allowed_at.is_some());
         require_consent().unwrap();
         original.save().unwrap();
