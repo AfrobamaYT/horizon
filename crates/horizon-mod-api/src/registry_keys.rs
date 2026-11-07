@@ -440,18 +440,40 @@ mod block_tests {
         crate::install_parts(&[ModEntry::new("test", Box::new(Requests))]).unwrap();
         assert!(resolve_block_keys(["minecraft:air"]).is_err());
         assert!(block_key("minecraft:air").is_none());
-        resolve_block_keys(["minecraft:stone", "minecraft:air", "minecraft:air"]).unwrap();
+        let names = [
+            "test:machine",
+            "minecraft:zombie_head",
+            "minecraft:stone",
+            "minecraft:air",
+            "minecraft:birch_log",
+            "minecraft:air",
+        ];
+        resolve_block_keys(names).unwrap();
         let stone = block_key("minecraft:stone").unwrap();
         let air = block_key("minecraft:air").unwrap();
         assert_eq!(stone, BlockKey(0));
         assert_eq!(air, BlockKey(1));
         assert_eq!(BlockKey::from_slot(air.0), Ok(air));
-        assert!(BlockKey::from_slot(2).is_err());
+        assert_eq!(block_key("minecraft:birch_log"), Some(BlockKey(2)));
+        assert_eq!(block_key("minecraft:zombie_head"), Some(BlockKey(3)));
+        assert_eq!(block_key("test:machine"), Some(BlockKey(4)));
+        assert!(BlockKey::from_slot(5).is_err());
+        for name in [
+            "",
+            "missing:block",
+            "minecraft:不存在",
+            &"x".repeat(100_000),
+        ] {
+            assert_eq!(block_key(name), None);
+        }
         assert_eq!(block_id(air), Some("minecraft:air"));
         let mapping = prepare_blocks(|name| {
             let state = match name {
                 "minecraft:air" => 0,
                 "minecraft:stone" => 1,
+                "minecraft:birch_log" => 2,
+                "minecraft:zombie_head" => 3,
+                "test:machine" => 4,
                 _ => return None,
             };
             Some(ResolvedBlock {
@@ -466,6 +488,18 @@ mod block_tests {
         assert_eq!(block(stone).unwrap().default, BlockStateId(1));
         assert!(prepare_blocks(|_| None).is_err());
         assert_eq!(block(stone).unwrap().default, BlockStateId(1));
+        // Reversing the registry's enumeration cannot change any completed key.
+        crate::install_parts(&[ModEntry::new("test", Box::new(Requests))]).unwrap();
+        resolve_block_keys(names.into_iter().rev()).unwrap();
+        for (name, slot) in [
+            ("minecraft:stone", 0),
+            ("minecraft:air", 1),
+            ("minecraft:birch_log", 2),
+            ("minecraft:zombie_head", 3),
+            ("test:machine", 4),
+        ] {
+            assert_eq!(block_key(name), Some(BlockKey(slot)));
+        }
         // Replacing Parts replaces the load-owned identities, not a second global registry.
         crate::install_parts(&[]).unwrap();
         assert!(block_key("minecraft:air").is_none());
