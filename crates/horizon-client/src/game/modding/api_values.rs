@@ -6,10 +6,10 @@ use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
 impl TryIntoApi for horizon_client::boss_overlay::ModBar {
-    type Output = mod_api::ClientBossBar;
+    type Api = mod_api::ClientBossBar;
     type Error = std::convert::Infallible;
 
-    fn try_into_api(self) -> Result<Self::Output, Self::Error> {
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         Ok(mod_api::ClientBossBar {
             uuid: self.uuid,
             name: self.name.try_into_api()?,
