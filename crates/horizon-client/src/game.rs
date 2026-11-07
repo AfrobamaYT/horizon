@@ -23574,6 +23574,7 @@ fn build_renderer(
         wide_frame,
         shader_pack.draws_flat,
         shader_pack.linear,
+        shader_pack.hdr_float,
     ))?;
     let (prepared_vertices, prepared_ranges) =
         native_block_entity_draw::StandaloneGeometry::new(pack, gui).prepared_upload();
@@ -23651,6 +23652,7 @@ fn loading_renderer(
         // It draws no terrain.
         false,
         // An 8-bit frame, which HDR output takes as well.
+        false,
         false,
         false,
         false,
