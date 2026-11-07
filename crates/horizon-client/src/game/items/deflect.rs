@@ -220,17 +220,18 @@ impl Game<'_> {
     fn turn_projectile(&mut self, i: usize) -> bool {
         let dir = view_vector(self.yaw, self.pitch);
         let (guest, owner_uuid) = (self.lan_acting, Some(self.acting_player_uuid()));
-        let p = &mut self.creatures.projectiles[i];
-        let owner = (Some(Who::Player), owner_uuid, guest);
-        let look = Vec3::new(dir[0], dir[1], dir[2]);
-        if !p.deflect(Turn::Direction(Some(look)), [1.0; 3], owner, true) {
-            return false;
-        }
-        p.yaw = dir[0].atan2(dir[2]).to_degrees() as f32;
-        p.pitch = dir[1].atan2(dir[0].hypot(dir[2])).to_degrees() as f32;
-        // Not into the one who turned it on its way out.
-        p.left_owner = false;
-        true
+        self.creatures.projectiles.update(i, |p| {
+            let owner = (Some(Who::Player), owner_uuid, guest);
+            let look = Vec3::new(dir[0], dir[1], dir[2]);
+            if !p.deflect(Turn::Direction(Some(look)), [1.0; 3], owner, true) {
+                return false;
+            }
+            p.yaw = dir[0].atan2(dir[2]).to_degrees() as f32;
+            p.pitch = dir[1].atan2(dir[0].hypot(dir[2])).to_degrees() as f32;
+            // Not into the one who turned it on its way out.
+            p.left_owner = false;
+            true
+        })
     }
 }
 

@@ -330,7 +330,7 @@ mod tests {
             // The dragon keeps no name: refused, and a stale handle too.
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.entity(14).unwrap();
             assert!(!dragon.set_custom_name(game, Some(mod_api::Text::literal("Puff"))));
             assert!(!dragon.set_custom_name_visible(game, true));
@@ -365,7 +365,7 @@ mod tests {
             assert_eq!(stand.classification(game), Some(MobCategory::Misc));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 28;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.entity(28).unwrap();
             assert_eq!(dragon.classification(game), Some(MobCategory::Monster));
         });

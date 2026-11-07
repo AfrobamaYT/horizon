@@ -792,7 +792,17 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
 /// `ScreenEvent.CharacterTyped.Pre` hook: the characters no mod cancelled,
 /// control ones gone (the key's own handling takes those, and vanilla fires
 /// no `charTyped` for them). `None` when nothing is left to type.
-fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<String> {
+/// With the edit modifier held the key is a shortcut and its characters are
+/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
+/// gets none for Ctrl+A.
+fn chars_to_type(
+    text: &str,
+    types_text: bool,
+    canceled: impl FnMut(char) -> bool,
+) -> Option<String> {
+    if !types_text {
+        return None;
+    }
     let left = screen_text_hooked(text, canceled)?;
     let text: String = left.chars().filter(|c| !c.is_control()).collect();
     (!text.is_empty()).then_some(text)
@@ -858,8 +868,8 @@ impl Game<'_> {
     /// (`HealthHud::layout`, not under F1): `inputs` carries the health,
     /// food, air and vehicle state the layout reads, `wi`/`hi` the screen's
     /// GUI size. A mod that sets `draws` replaces every row — armour,
-    /// hearts, food, air and the heights (`left_height`/`right_height`)
-    /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
+    /// hearts, food and air are the answer's to give; `bubble_pop_sound`
+    /// too.
     /// Nothing set draws Horizon's own.
     /// The hearts the local player's health bar draws (`Gui.HeartType.forPlayer`, then
     /// NeoForge's `PlayerHeartTypeEvent`): poisoned, else withered, else frozen when fully
@@ -1191,16 +1201,16 @@ impl Game<'_> {
             return;
         };
         let modifiers = super::glfw_modifiers(self.modifiers);
-        let Some(text) = chars_to_type(text, |c| {
+        // A held edit modifier makes a shortcut of the key, not text.
+        let Some(text) = chars_to_type(text, self.types_text(), |c| {
             let mut canceled = false;
             self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
             canceled
         }) else {
             return;
         };
-        // A held edit modifier makes a shortcut of the key, not text.
         // `Err` only says no text box of the screen takes the characters.
-        if !self.types_text() || self.type_chars_into_screen(&text).is_err() {
+        if self.type_chars_into_screen(&text).is_err() {
             self.screen_chars_post(&text);
         }
     }
@@ -4628,18 +4638,28 @@ mod tests {
     fn a_cancelled_key_still_types_the_characters_left() {
         // `axb` with 'x' cancelled: the key went no further, `ab` still types.
         assert_eq!(
-            super::chars_to_type("axb", |c| c == 'x').as_deref(),
+            super::chars_to_type("axb", true, |c| c == 'x').as_deref(),
             Some("ab")
         );
         // Backspace, Escape and the like are keys, not text.
         assert_eq!(
-            super::chars_to_type("a\u{7f}\u{1b}b", |_| false).as_deref(),
+            super::chars_to_type("a\u{7f}\u{1b}b", true, |_| false).as_deref(),
             Some("ab")
         );
         // Every character cancelled: the box takes none of them.
-        assert_eq!(super::chars_to_type("ab", |_| true), None);
+        assert_eq!(super::chars_to_type("ab", true, |_| true), None);
         // Nothing typed: nothing to hand over.
-        assert_eq!(super::chars_to_type("", |_| false), None);
+        assert_eq!(super::chars_to_type("", true, |_| false), None);
+        // Ctrl+A is a shortcut: its `a` reaches no hook and no box.
+        let mut offered = Vec::new();
+        assert_eq!(
+            super::chars_to_type("a", false, |c| {
+                offered.push(c);
+                false
+            }),
+            None
+        );
+        assert!(offered.is_empty());
     }
 
     /// A mod's camera replaces vanilla's value by value; one that isn't finite keeps vanilla's.
@@ -5314,7 +5334,7 @@ pub(super) mod particle_count_tests {
                 );
                 game.native_render_gui_pre(&mut false);
                 assert_eq!(mod_api::prelude::EffectsClientHost::particle_count(game), 0);
-                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
+                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, None, Vec::new());
                 game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
                 assert!(
                     after.is_empty(),
@@ -5570,8 +5590,8 @@ pub(super) mod particle_count_tests {
         glowing: Vec<u8>,
         gpu: (usize, usize, u32),
         motion: Vec<(u32, u64)>,
-        spans: Vec<mod_api::render::EntitySpan>,
-        gpu_spans: Vec<mod_api::render::EntitySpan>,
+        spans: Vec<mod_render::render::EntitySpan>,
+        gpu_spans: Vec<mod_render::render::EntitySpan>,
         outlines: (usize, u32),
     }
     fn frame_geometry(frame: &super::super::Frame<'_>) -> FrameGeometry {

@@ -426,6 +426,15 @@ impl Game<'_> {
         let tree = self.adv.tree.clone();
         self.adv.progress = progress;
         self.ui.registries.advancements = tree.list.iter().map(|a| a.id.clone()).collect();
+        // `PlayerAdvancements.checkForAutomaticTriggers`: an advancement with no
+        // criteria is never done (`AdvancementRequirements.test` is false), but
+        // its rewards are granted as the progress loads. Vanilla's `award(holder, "")` finds no `""`
+        // criterion to grant and so returns without a toast or an announcement;
+        // the reward grant is the whole effect, and it happens again on the next
+        // load because there is no criterion to record it.
+        for index in tree.automatic() {
+            self.grant_rewards(&tree.list[index]);
+        }
     }
     pub(super) fn save_advancements(&self) {
         if !self.adv.loaded || self.remote.is_some() || self.no_player_here() {
@@ -1071,35 +1080,7 @@ impl Game<'_> {
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
-        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
-        self.give_experience_points(a.rewards.experience);
-        // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
-        let rewards: Vec<String> = a
-            .rewards
-            .recipes
-            .iter()
-            .filter(|r| world_stations!(self).recipe_index.contains(r))
-            .cloned()
-            .collect();
-        for table in &a.rewards.loot {
-            let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
-            for s in items {
-                // Inventory.add returns false when anything is left, and
-                // AdvancementRewards then drops that remainder with no
-                // pickup sound. A stack the inventory takes whole plays
-                // entity.item.pickup at the player's feet.
-                if let Some(rest) = self.add_stack_to_inventory(s) {
-                    if let Some(eye) = self.eye_position() {
-                        self.spawn_item(rest, eye, [0.0; 3], 0);
-                    }
-                } else {
-                    self.advancement_pickup_sound();
-                }
-            }
-        }
-        if let Some(function) = &a.rewards.function {
-            self.run_advancement_reward_function(function);
-        }
+        let rewards = self.grant_rewards(a);
         if let Some(d) = &a.display {
             // A network player's client shows its own toast.
             if d.show_toast && !self.adv.quiet && self.lan_acting.is_none() {
@@ -1151,7 +1132,47 @@ impl Game<'_> {
                 }
             }
         }
-        self.award_recipes(&rewards);
+        self.recipe_unlocked(&rewards);
+    }
+    /// `AdvancementRewards.grant`: the experience, recipes, loot and function of
+    /// a finished advancement, and the recipes it unlocked for the
+    /// `recipe_unlocked` trigger, which the caller runs after its toast and
+    /// announcement. Returns those recipes.
+    fn grant_rewards(&mut self, a: &adv::Advancement) -> Vec<String> {
+        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
+        self.give_experience_points(a.rewards.experience);
+        // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
+        let rewards: Vec<String> = a
+            .rewards
+            .recipes
+            .iter()
+            .filter(|r| world_stations!(self).recipe_index.contains(r))
+            .cloned()
+            .collect();
+        let (_, unlocked) = self
+            .level
+            .recipe_book
+            .add_recipes(&world_stations!(self).recipe_index, &rewards);
+        for table in &a.rewards.loot {
+            let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
+            for s in items {
+                // Inventory.add returns false when anything is left, and
+                // AdvancementRewards then drops that remainder with no
+                // pickup sound. A stack the inventory takes whole plays
+                // entity.item.pickup at the player's feet.
+                if let Some(rest) = self.add_stack_to_inventory(s) {
+                    if let Some(eye) = self.eye_position() {
+                        self.spawn_item(rest, eye, [0.0; 3], 0);
+                    }
+                } else {
+                    self.advancement_pickup_sound();
+                }
+            }
+        }
+        if let Some(function) = &a.rewards.function {
+            self.run_advancement_reward_function(function);
+        }
+        unlocked
     }
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {

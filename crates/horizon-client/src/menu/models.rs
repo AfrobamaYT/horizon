@@ -2,6 +2,8 @@
 use super::ItemStack;
 /// Operations on the clicked slot, including its placement and take rules.
 pub trait SlotView {
+    /// Run against staged owner state; commit all changes only when accepted.
+    fn with_staged(&mut self, edit: &mut dyn FnMut(&mut dyn SlotView) -> bool) -> bool;
     fn items(&self) -> &horizon_items::items::Items;
     fn item(&self) -> Option<ItemStack>;
     fn may_place(&self, stack: &ItemStack) -> bool;
