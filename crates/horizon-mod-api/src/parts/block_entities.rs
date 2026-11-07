@@ -19,8 +19,9 @@ pub type BlockProvider<T> = dyn BlockCapabilityProvider<T>;
 
 pub use super::capabilities::providers_of::{BlockProviderOf, EntityProviderOf, ItemProviderOf};
 
-/// The block entity types mods registered.
-pub fn block_entity_types() -> &'static [BlockEntityType] {
+/// Owned declarations of the block entity types mods registered.
+/// The game converts these snapshots to its content model when registration freezes.
+pub fn block_entity_types() -> &'static [BlockEntityTypeDecl] {
     installed().map_or(&[], |installed| &installed.block_entity_types)
 }
 
@@ -228,10 +229,13 @@ pub mod tests {
             }
         }
         let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
-        install_parts(&[
-            ModEntry::new("first", Box::new(Request(keys.clone()))),
-            ModEntry::new("owner", Box::new(Declare(keys.clone()))),
-        ])
+        install_parts(
+            &[
+                ModEntry::new("first", Box::new(Request(keys.clone()))),
+                ModEntry::new("owner", Box::new(Declare(keys.clone()))),
+            ],
+            &crate::parts::tests::rule_schema(),
+        )
         .unwrap();
         let types = |names: &[&str]| {
             horizon_client_core::block_entity_types::BlockEntityTypes::new(
@@ -300,7 +304,11 @@ pub mod tests {
                 }
             }
         }
-        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        let errors = install_parts(
+            &[ModEntry::new("test", Box::new(Invalid))],
+            &crate::parts::tests::rule_schema(),
+        )
+        .unwrap_err();
         assert_eq!(errors.len(), 4);
         assert!(
             errors
@@ -506,7 +514,8 @@ impl BlockEntitiesRegistrar for PartRegistrar {
     ) -> crate::BlockEntityTypeKey {
         let id = format!("{}:{path}", self.mod_id);
         let key = self.block_entity_type_key(&id);
-        self.block_entity_types.push(BlockEntityType { id, blocks });
+        self.block_entity_types
+            .push(BlockEntityTypeDecl { id, blocks });
         key
     }
 
