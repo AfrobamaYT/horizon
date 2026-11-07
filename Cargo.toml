@@ -99,6 +99,14 @@ opt-level = 3
 
 [profile.dev.package.syn]
 opt-level = 3
+[profile.dev.package.proc-macro2]
+opt-level = 3
+[profile.release.package.horizon-mod-api-gen]
+opt-level = 3
+[profile.release.package.syn]
+opt-level = 3
+[profile.release.package.proc-macro2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"
