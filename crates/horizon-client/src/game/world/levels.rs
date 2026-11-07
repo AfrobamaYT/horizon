@@ -171,6 +171,11 @@ impl Levels {
             .map(|(_, level)| &level.streaming)
     }
 
+    /// A parked level's existing generator query worker, without switching levels.
+    pub(super) fn parked_locator_of(&self, dimension: &str) -> Option<Arc<VanillaTerrain>> {
+        self.parked_of(dimension)?.locator.clone()
+    }
+
     /// The streaming of the level not in place whose dimension is `dimension`, to change.
     pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
         self.parked
@@ -559,6 +564,7 @@ impl Game<'_> {
                 Dim::Overworld => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
+                Dim::Extra(_) => "level_extra",
             });
             if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
@@ -730,7 +736,7 @@ impl Game<'_> {
             .lan
             .as_ref()
             .map_or(&[][..], |h| h.hub.guests.as_slice());
-        let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
+        let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native mod's tickets.
@@ -851,7 +857,7 @@ impl Game<'_> {
     /// (`MinecraftServer.stopServer`'s `level.close()` loop), in vanilla's
     /// order of its levels: the Overworld, the Nether, the End.
     pub(super) fn native_levels_closing(&mut self) {
-        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+        for dim in Dim::all() {
             self.native_level_closed(dim);
         }
     }

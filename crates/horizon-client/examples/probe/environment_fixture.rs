@@ -67,7 +67,7 @@ pub fn main() -> horizon_client::Result<()> {
         );
         put(
             "gameplay/sky_light_level",
-            format!("{:?}", sky.sky_light_level * 15.0),
+            format!("{:?}", sky.sky_light_level),
         );
         put("visual/fog_start_distance", format!("{:?}", sky.fog_start));
         put("visual/fog_end_distance", format!("{:?}", sky.fog_end));

@@ -22,6 +22,51 @@ pub trait LevelsHost {
 #[horizon_mod_api_macros::host_area]
 pub trait LevelsBackend {
     /// Side: server.
+    /// `ServerLevel.findClosestBiome3d`: search this level's generator for an id or `#tag`.
+    /// The result follows vanilla's sampled spiral and vertical order; it is not a search
+    /// through edited biome cells. Does not load resident chunks or switch parked levels.
+    /// None for no match, a stale/unavailable level, an unavailable generator, a negative
+    /// radius, nonpositive sampling steps, or a potential sample count above
+    /// [`BiomeSearch::MAX_SAMPLES`] (see [`BiomeSearch::new`] for the work formula).
+    /// Positive vertical steps larger than the build height sample only the clamped origin.
+    #[access(WorldOnly)]
+    fn level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: BiomeSearch,
+    ) -> Option<BiomeSearchResult>;
+    /// Side: both.
+    /// `Level.getSkyDarken`: the sky-light reduction from dimension, time and weather.
+    /// Reads any loaded server level, including parked levels, or the current client level.
+    /// None for a stale or unavailable level. Does not load chunks.
+    #[access(WorldOnly)]
+    fn level_get_sky_darken(&self, level: LevelRef) -> Option<i32>;
+    /// Side: both.
+    /// `BlockGetter.getBlockFloorHeight` with the normal collision shapes and an empty
+    /// entity context. The result is relative to the block: negative infinity means no floor.
+    /// None for a stale level, an unloaded column or a position outside build height.
+    /// Reads parked server levels and the current client level without loading chunks.
+    #[access(WorldOnly)]
+    fn level_block_floor_height(&self, level: LevelRef, pos: [i32; 3]) -> Option<f64>;
+    /// Side: server.
+    /// The biome id selected by `LevelReader.getBiome` and this level's biome zoom.
+    /// Reads an active or parked server level. None for a
+    /// stale handle or an unloaded selected noise column. Never generates or loads chunks.
+    #[access(WorldOnly)]
+    fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: client.
+    /// The biome in the client's current level (`LevelReader.getBiome`). None before
+    /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
+    #[access(WorldOnly)]
+    fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    /// Side: both.
+    /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
+    /// from build height. Reads active and parked server levels or the client's current level.
+    /// None for a stale or unavailable level. Does not load chunks.
+    #[access(WorldOnly)]
+    fn level_logical_height(&self, level: LevelRef) -> Option<i32>;
+    /// Side: server.
     /// The level's world border as [min_x, min_z, max_x, max_z], using the
     /// previous size while it moves. Horizon currently shares one border
     /// across its dimensions. None for a stale handle or a closed level.
@@ -431,7 +476,7 @@ pub trait LevelsBackendMut {
         drop: bool,
         tool: Option<&ItemStack>,
         collect: bool,
-    ) -> Option<Vec<ItemStack>>;
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
     /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
@@ -534,7 +579,7 @@ pub trait LevelsBackendMut {
         level: LevelRef,
         pos: [i32; 3],
         stack: ItemStack,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// Spawns `stack` as an item entity at `x y z` (`new ItemEntity(level, x,
     /// y, z, stack)` and `addFreshEntity`): its own random motion (up 0.2, up
@@ -554,7 +599,7 @@ pub trait LevelsBackendMut {
         z: f64,
         stack: ItemStack,
         pickup_delay: u32,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// `spawn_item` with the item entity's motion set to
     /// `motion` (blocks a tick), as `new ItemEntity(level, x, y, z, stack,
@@ -571,7 +616,7 @@ pub trait LevelsBackendMut {
         stack: ItemStack,
         motion: [f64; 3],
         pickup_delay: u32,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// Awards `amount` experience at `x y z` as vanilla's `ExperienceOrb.award`
     /// does: orbs of the largest sizes first (2477, 1237, ... 3, 1), each

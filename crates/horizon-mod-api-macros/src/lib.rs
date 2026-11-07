@@ -87,22 +87,21 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
     let Some((_, trait_path, _)) = &implementation.trait_ else {
         return syn::Error::new_spanned(
             &implementation,
-            "expected an impl of Hooks or RenderHooks",
+            "expected an impl of Hooks or a Part trait",
         )
         .into_compile_error()
         .into();
     };
     let name = &trait_path.segments.last().unwrap().ident;
-    let (render, part) = match name.to_string().as_str() {
-        "Hooks" => (false, None),
-        "RenderHooks" => (true, None),
-        "BlockPart" => (false, Some("block_subscribed")),
-        "BlockEntityPart" => (false, Some("block_entity_subscribed")),
-        "ItemPart" => (false, Some("item_subscribed")),
-        "MenuPart" => (false, Some("menu_subscribed")),
+    let part = match name.to_string().as_str() {
+        "Hooks" => None,
+        "BlockPart" => Some("block_subscribed"),
+        "BlockEntityPart" => Some("block_entity_subscribed"),
+        "ItemPart" => Some("item_subscribed"),
+        "MenuPart" => Some("menu_subscribed"),
         // Entity parts carry no scoped hook yet (#1077): `register_goals` is
         // not one, so its subscriptions stay empty whatever it overrides.
-        "EntityPart" => (false, Some("entity_subscribed_empty")),
+        "EntityPart" => Some("entity_subscribed_empty"),
         _ => {
             return syn::Error::new_spanned(name, "expected a hook or part trait")
                 .into_compile_error()
@@ -128,16 +127,8 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
             cfgs.push(cfg_attributes(method));
         }
     }
-    let id = if render {
-        format_ident!("RenderHookId")
-    } else {
-        format_ident!("HookId")
-    };
-    let ids = if render {
-        format_ident!("render_hook_ids")
-    } else {
-        format_ident!("hook_ids")
-    };
+    let id = format_ident!("HookId");
+    let ids = format_ident!("hook_ids");
     let subscribed_name = format_ident!("{}", part.unwrap_or("subscribed"));
     let subscribed = if subscribed_name == "entity_subscribed_empty" {
         // Entity parts (arismoko/horizon#1077): no scoped hook exists for them
@@ -155,7 +146,7 @@ fn expand(mut implementation: ItemImpl, export: bool) -> TokenStream {
         }
     };
     implementation.items.push(subscribed);
-    let export = if export && !render && part.is_none() {
+    let export = if export && part.is_none() {
         let ty = &implementation.self_ty;
         quote! {
             pub fn hooks() -> Box<dyn mod_api::Hooks> { Box::new(<#ty as Default>::default()) }
@@ -224,7 +215,7 @@ pub fn host_area(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     quote!(#area).into()
 }
 
-/// Mark a trait mod or its renderer and derive its hook subscriptions.
+/// Mark a trait mod and derive its hook subscriptions.
 #[proc_macro_attribute]
 pub fn horizon_mod(_attribute: TokenStream, input: TokenStream) -> TokenStream {
     expand(parse_macro_input!(input as ItemImpl), true)
@@ -303,7 +294,10 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         };
         let plain = format_ident!("__p{i}");
         *typed.pat = syn::parse_quote!(mut #plain);
-        match original.and_then(|name| shape.args.iter().find(|arg| arg.name == name)) {
+        match original
+            .filter(|_| !shape.raw_only)
+            .and_then(|name| shape.args.iter().find(|arg| arg.name == name))
+        {
             Some(arg) => {
                 let name = &arg.name;
                 passed.push(plain);
@@ -375,7 +369,12 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let record = shape.record();
     let outcome = shape.raw_outcome(&function.sig);
     // A raw `result` is the API record's when the API carries the value, else a slot of its own.
-    let api_result = matches!(shape.returns, point_shape::Returns::Value(_));
+    let api_result = !shape.raw_only && matches!(shape.returns, point_shape::Returns::Value(_));
+    let cancel = if shape.raw_only {
+        quote!(__cancel)
+    } else {
+        quote!(__args.cancel)
+    };
     // A native-width value crosses the record as 64 bits.
     let (widen, narrow) = match &shape.returns {
         point_shape::Returns::Value(ty) => match point_shape::wide(ty) {
@@ -407,7 +406,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 quote!(#name: &mut #place)
             });
         let outcome = match outcome {
-            point_shape::RawOutcome::Cancel => quote!(cancel: &mut __args.cancel,),
+            point_shape::RawOutcome::Cancel => quote!(cancel: &mut #cancel,),
             point_shape::RawOutcome::Result(_) => quote!(result: &mut #result_place,),
             point_shape::RawOutcome::None => quote!(),
         };
@@ -459,7 +458,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         syn::Ident::new(&shape.name, proc_macro2::Span::call_site()),
     );
     let head_listened = listened(&head_variant);
-    let head_fire = fire(&head_variant, &head_method, true);
+    let head_fire = fire(&head_variant, &head_method, !shape.raw_only);
     let result_slot = match &outcome {
         point_shape::RawOutcome::Result(_) if shape.raw && !api_result => {
             quote!(let mut __result_slot = None;)
@@ -467,13 +466,13 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         _ => quote!(),
     };
     let stop = match (&shape.returns, &outcome) {
-        (point_shape::Returns::Unit, _) => quote!(if __args.cancel {
+        (point_shape::Returns::Unit, _) => quote!(if #cancel {
             return;
         }),
-        (point_shape::Returns::UnitResult, _) => quote!(if __args.cancel {
+        (point_shape::Returns::UnitResult, _) => quote!(if #cancel {
             return Ok(());
         }),
-        (point_shape::Returns::Value(_), _) => {
+        (point_shape::Returns::Value(_), _) if api_result => {
             quote!(if let Some(__result) = __args.result.take() {
                 return __result #narrow;
             })
@@ -492,7 +491,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         );
         let return_listened = listened(&variant);
         let name = method.to_string();
-        let api = match (&shape.returns, shape.has_return()) {
+        let api = match (&shape.returns, shape.has_return() && !shape.raw_only) {
             (_, false) => quote!(),
             (point_shape::Returns::Value(_), true) => quote! {
                 __args.result = Some(__result #widen);
@@ -553,9 +552,14 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
+    let arguments = if shape.raw_only {
+        quote!(let mut __cancel = false;)
+    } else {
+        quote!(let mut __args = mod_points::#record::__new(#(#passed),*);)
+    };
     outer.block = syn::parse_quote!({
         #[allow(unused_mut)]
-        let mut __args = mod_points::#record::__new(#(#passed),*);
+        #arguments
         #result_slot
         if #head_listened {
             #head_fire
