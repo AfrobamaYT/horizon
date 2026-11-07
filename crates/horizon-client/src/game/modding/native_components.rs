@@ -42,11 +42,20 @@ impl Game<'_> {
         let Some(id) = mod_api::__private::item_key_id(material) else {
             return false;
         };
+        let Some(item) = self.items().get(id) else {
+            return false;
+        };
+        let material = ItemStack {
+            item: item.id.clone(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
         horizon_client::stations::is_valid_repair_item(
             &self.items().enchantments,
             self.items(),
             stack,
-            &ItemStack::new(id, 1),
+            &material,
         )
     }
     /// Item `item`'s default value of component `component`, in its prototype

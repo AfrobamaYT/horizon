@@ -49,5 +49,6 @@ The private reduction array is crate-visible to the generated codec, not public 
 
 All three combat bridges guard before copying the scalar snapshot. Conversion uses fixed arrays
 and scalar assignments, no heap storage. Explicit item metadata queries still pay the existing
-stack boundary conversion; repair checks additionally construct one engine material stack.
-No measured whole-hook timing or allocation claim is made here.
+stack boundary conversion; repair checks construct a plain engine material stack by cloning the
+registry's retained item-name Arc, not allocating another name. No measured whole-hook timing
+or allocation claim is made here.
