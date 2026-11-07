@@ -73,6 +73,7 @@ impl<H: Copy, T: Send + Sync + 'static> AttachmentQuery<'_, H, T> {
 }
 
 /// Borrowing iterator over a batch, not an iterator owning its borrowed values.
+#[non_exhaustive]
 pub struct AttachmentIter<'q, H, T: 'static> {
     rows: slice::Iter<'q, AttachmentRow<H>>,
     key: &'q AttachmentType<T>,

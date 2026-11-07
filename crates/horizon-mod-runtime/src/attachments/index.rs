@@ -125,6 +125,8 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Rebinding invalidates stale save/COW bindings, even when their keys match.
     /// Shared keys keep their dense slots and entry pointers; a new generation
     /// replaces row metadata even when its value is unchanged.
+    /// Any rebind may therefore copy a bucket a retained batch still holds: at
+    /// placement and travel, and after a chunk-extras copy-on-write.
     pub fn register(
         &mut self,
         holder: H,
