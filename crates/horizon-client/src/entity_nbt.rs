@@ -592,6 +592,13 @@ pub fn mob_to_nbt(
         "Invulnerable".into(),
         Tag::Byte(i8::from(m.invulnerable_flag)),
     );
+    // Entity.addAdditionalSaveData: `invulnerable_time` only while it runs
+    // (#916), an int of its own beside the flag.
+    if m.invulnerable_time > 0 {
+        map.insert("invulnerable_time".into(), Tag::Int(m.invulnerable_time));
+    } else {
+        map.remove(&horizon_core::nbt::JavaString::from("invulnerable_time"));
+    }
     map.insert(
         "LeftHanded".into(),
         Tag::Byte(i8::from(m.extra.left_handed)),
@@ -1716,6 +1723,10 @@ pub fn mob_from_nbt(
     }
     m.silent = flag(tag, "Silent");
     m.invulnerable_flag = flag(tag, "Invulnerable");
+    m.invulnerable_time = match tag.get("invulnerable_time") {
+        Some(Tag::Int(ticks)) => *ticks,
+        _ => 0,
+    };
     if m.species() == crate::mobs::Species::Bat {
         // Bat.readAdditionalSaveData: BatFlags bit 0, resting.
         m.extra.flag = number(tag.get("BatFlags")).unwrap_or(0) & 1 != 0;

@@ -618,6 +618,9 @@ pub struct PlayerHealth {
     pub ids: PlayerFloatIds,
     pub food: FoodData,
     pub hurt: State,
+    /// `Entity.invulnerableTime` (#916): the entity-level invulnerability
+    /// window, its own field — never the damage cooldown (`hurt.cooldown`).
+    pub invulnerable_time: i32,
     /// Client hurt animation; fully blocked hits only refresh the server's hurt state.
     pub hurt_animation_time: i32,
     /// `Player.hurtDir` on a client: the yaw `ClientboundHurtAnimationPacket`
@@ -677,6 +680,7 @@ impl PlayerHealth {
                 last_source: None,
                 last_stamp: 0,
             },
+            invulnerable_time: 0,
             hurt_animation_time: 0,
             hurt_dir: 0.0,
             indicated_dir: None,
@@ -713,6 +717,11 @@ impl PlayerHealth {
         self.tick_count = self.tick_count.wrapping_add(1);
         if self.hurt.cooldown > 0 {
             self.hurt.cooldown -= 1;
+        }
+        // Entity.baseTick: the entity-level window counts down too, its own
+        // timer (#916), never the damage cooldown above.
+        if self.invulnerable_time > 0 {
+            self.invulnerable_time -= 1;
         }
         if self.hurt.hurt_time > 0 {
             self.hurt.hurt_time -= 1;
@@ -804,6 +813,16 @@ impl PlayerMotion {
         living_cause: bool,
         causing: i32,
     ) -> Result<BlockOutcome> {
+        // `Entity.isInvulnerableToBase` (#916): the permanent flag — for a
+        // player its `Abilities.invulnerable` (the same NBT tag) — past only
+        // for `#bypasses_invulnerability` damage (the void, `/kill`).
+        if self.invulnerable
+            && !resources
+                .damage
+                .in_tag(source, "minecraft:bypasses_invulnerability")
+        {
+            return Ok(BlockOutcome::default());
+        }
         if self.client_side {
             return Ok(BlockOutcome::default());
         }

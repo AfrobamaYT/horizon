@@ -4415,7 +4415,7 @@ impl Game<'_> {
         }
         self.give_player_effect("minecraft:wither", 40, 0);
     }
-    pub(super) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
+    pub(in crate::game) fn hurt_player_by(&mut self, damage_type: &str, amount: f32) {
         let mut canceled = false;
         let rules = self.world.health_rules;
         if !self.creative

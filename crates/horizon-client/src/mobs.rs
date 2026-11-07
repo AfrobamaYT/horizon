@@ -1523,7 +1523,13 @@ pub struct Mob {
     pub gear_knockback_resistance: Option<f64>,
     pub health: f32,
     pub hurt_time: i32,
+    /// `LivingEntity.damageCooldownTime`: 20 after a hit, counting down;
+    /// while it is above 10 a weaker hit does only the difference.
     pub invulnerable: i32,
+    /// `Entity.invulnerableTime` (#916): the entity-level invulnerability
+    /// window, its own field — never the damage cooldown beside it
+    /// (`Entity.isTemporarilyInvulnerable`), decremented by the base tick.
+    pub invulnerable_time: i32,
     pub death_time: i32,
     pub age: u32,
     pub limb_position: f32,
@@ -3393,6 +3399,7 @@ impl Mob {
             gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
+            invulnerable_time: 0,
             death_time: 0,
             age: 0,
             limb_position: 0.0,
