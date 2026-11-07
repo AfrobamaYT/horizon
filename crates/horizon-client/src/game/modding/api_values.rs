@@ -470,16 +470,25 @@ impl TryIntoApi for crate::crafting::RecipeSnapshot {
 pub(crate) fn install_stack_hooks() {
     crate::native_stack_hooks::install(crate::native_stack_hooks::StackHooks {
         ingredient_test: |context, kind, data, stack, accept| {
+            if !mod_api::__private::listened(mod_api::HookId::IngredientTest) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::crafting::native_ingredient_test(context, kind, data, &stack, accept);
             }
         },
         enchantments: |stack, target, value| {
+            if !mod_api::__private::listened(mod_api::HookId::GetEnchantmentLevel) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::enchantments::native_get_enchantment_level(&stack, target, value);
             }
         },
         attributes: |stack, value| {
+            if !mod_api::__private::listened(mod_api::HookId::ItemAttributeModifier) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::item_attributes::native_item_attribute_modifier(&stack, value);
             }
