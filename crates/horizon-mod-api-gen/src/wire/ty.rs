@@ -732,18 +732,10 @@ impl Types<'_> {
     /// visibility `vis`: a public one, a crate-visible one of `mod_api`'s (`pub(crate)`, or
     /// `pub(super)` in a module at its root), or any of a type
     /// defined at `mod_api`'s root, which the glue is a descendant of.
-    fn reachable(&self, id: ItemId, vis: &syn::Visibility) -> bool {
-        let in_api = self.index.modules[id.module].krate == "mod_api";
-        match vis {
-            syn::Visibility::Public(_) => true,
-            syn::Visibility::Restricted(r) => {
-                in_api
-                    && (r.path.is_ident("crate")
-                        || (r.path.is_ident("super")
-                            && self.index.modules[id.module].path.len() == 1))
-            }
-            syn::Visibility::Inherited => id.module == self.api_root,
-        }
+    /// Whether a field may be built by anyone: only a public one. A private or crate-private
+    /// field is guarded by its type's constructor, which a decoder must go through.
+    fn reachable(&self, _id: ItemId, vis: &syn::Visibility) -> bool {
+        matches!(vis, syn::Visibility::Public(_))
     }
 }
 

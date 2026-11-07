@@ -17,7 +17,11 @@ fn spell(types: &Types<'_>, ty: &Ty) -> Option<String> {
         Ty::List(item, List::Vec) => format!("::std::vec::Vec<{}>", spell(types, item)?),
         Ty::List(item, List::Set(set)) => format!("{set}<{}>", spell(types, item)?),
         Ty::List(item, List::Map(map)) => match &**item {
-            Ty::Tuple(pair) => format!("{map}<{}, {}>", spell(types, &pair[0])?, spell(types, &pair[1])?),
+            Ty::Tuple(pair) => format!(
+                "{map}<{}, {}>",
+                spell(types, &pair[0])?,
+                spell(types, &pair[1])?
+            ),
             _ => return None,
         },
         Ty::Array(item, n) => format!("[{}; {n}]", spell(types, item)?),
@@ -29,7 +33,11 @@ fn spell(types: &Types<'_>, ty: &Ty) -> Option<String> {
         ),
         Ty::Tuple(items) => format!(
             "({},)",
-            items.iter().map(|i| spell(types, i)).collect::<Option<Vec<_>>>()?.join(", ")
+            items
+                .iter()
+                .map(|i| spell(types, i))
+                .collect::<Option<Vec<_>>>()?
+                .join(", ")
         ),
         Ty::Boxed(inner) => format!("::std::boxed::Box<{}>", spell(types, inner)?),
         Ty::Shared(inner) => format!("::std::sync::Arc<{}>", spell(types, inner)?),
@@ -42,7 +50,9 @@ fn spell(types: &Types<'_>, ty: &Ty) -> Option<String> {
 }
 
 fn fields<'f>(types: &Types<'_>, list: &'f [Field]) -> Option<Vec<(&'f str, String)>> {
-    list.iter().map(|f| Some((f.rust.as_str(), spell(types, &f.ty)?))).collect()
+    list.iter()
+        .map(|f| Some((f.rust.as_str(), spell(types, &f.ty)?)))
+        .collect()
 }
 
 /// The impls for every owned def, and for each def it can't write, an assertion that one exists.
@@ -84,21 +94,46 @@ fn imp(rust: &str, min: &str, put: &str, take: &str) -> String {
 }
 
 fn min_of(types: &[String]) -> String {
-    let parts: Vec<String> = types.iter().map(|t| format!("<{t} as crate::wire::Wire>::MIN")).collect();
-    if parts.is_empty() { "0".into() } else { parts.join(" + ") }
+    let parts: Vec<String> = types
+        .iter()
+        .map(|t| format!("<{t} as crate::wire::Wire>::MIN"))
+        .collect();
+    if parts.is_empty() {
+        "0".into()
+    } else {
+        parts.join(" + ")
+    }
 }
 
 fn record(rust: &str, f: &[(&str, String)]) -> String {
-    let put: String = f.iter().map(|(n, _)| format!("out.put(&self.{n});")).collect();
-    let take: String = f.iter().map(|(n, _)| format!("{n}: input.take()?,")).collect();
+    let put: String = f
+        .iter()
+        .map(|(n, _)| format!("out.put(&self.{n});"))
+        .collect();
+    let take: String = f
+        .iter()
+        .map(|(n, _)| format!("{n}: input.take()?,"))
+        .collect();
     let min = min_of(&f.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>());
-    imp(rust, &min, &put, &format!("input.nested(|input| Ok(Self {{ {take} }}))"))
+    imp(
+        rust,
+        &min,
+        &put,
+        &format!("input.nested(|input| Ok(Self {{ {take} }}))"),
+    )
 }
 
 fn tuple_record(rust: &str, t: &[String]) -> String {
-    let put: String = (0..t.len()).map(|i| format!("out.put(&self.{i});")).collect();
+    let put: String = (0..t.len())
+        .map(|i| format!("out.put(&self.{i});"))
+        .collect();
     let take: String = t.iter().map(|_| "input.take()?,".to_string()).collect();
-    imp(rust, &min_of(t), &put, &format!("input.nested(|input| Ok(Self({take})))"))
+    imp(
+        rust,
+        &min_of(t),
+        &put,
+        &format!("input.nested(|input| Ok(Self({take})))"),
+    )
 }
 
 fn unit(rust: &str) -> String {
@@ -128,8 +163,12 @@ fn enumeration(rust: &str, names: &[String]) -> String {
     imp(
         rust,
         "4",
-        &format!("out.put(&match self {{ {put} _ => unreachable!(\"every case was read from the enum's source\") }});"),
-        &format!("Ok(match input.take::<u32>()? {{ {take} tag => return Err(crate::wire::WireError::Tag(tag)) }})"),
+        &format!(
+            "out.put(&match self {{ {put} _ => unreachable!(\"every case was read from the enum's source\") }});"
+        ),
+        &format!(
+            "Ok(match input.take::<u32>()? {{ {take} tag => return Err(crate::wire::WireError::Tag(tag)) }})"
+        ),
     )
 }
 
@@ -149,7 +188,12 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
                 }
                 let binds: Vec<String> = (0..items.len()).map(|j| format!("f{j}")).collect();
                 let puts: String = binds.iter().map(|b| format!("out.put({b});")).collect();
-                writeln!(put, "Self::{name}({}) => {{ out.put(&{i}u32); {puts} }}", binds.join(", ")).unwrap();
+                writeln!(
+                    put,
+                    "Self::{name}({}) => {{ out.put(&{i}u32); {puts} }}",
+                    binds.join(", ")
+                )
+                .unwrap();
                 let takes: String = binds.iter().map(|_| "input.take()?,".to_string()).collect();
                 writeln!(take, "{i} => Self::{name}({takes}),").unwrap();
             }
@@ -157,8 +201,16 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
                 fields(types, list)?;
                 let names: Vec<&str> = list.iter().map(|f| f.rust.as_str()).collect();
                 let puts: String = names.iter().map(|n| format!("out.put({n});")).collect();
-                writeln!(put, "Self::{name} {{ {} }} => {{ out.put(&{i}u32); {puts} }}", names.join(", ")).unwrap();
-                let takes: String = names.iter().map(|n| format!("{n}: input.take()?,")).collect();
+                writeln!(
+                    put,
+                    "Self::{name} {{ {} }} => {{ out.put(&{i}u32); {puts} }}",
+                    names.join(", ")
+                )
+                .unwrap();
+                let takes: String = names
+                    .iter()
+                    .map(|n| format!("{n}: input.take()?,"))
+                    .collect();
                 writeln!(take, "{i} => Self::{name} {{ {takes} }},").unwrap();
             }
         }
@@ -166,7 +218,11 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
     Some(imp(
         rust,
         "4",
-        &format!("match self {{ {put} _ => unreachable!(\"every case was read from the enum's source\") }}"),
-        &format!("input.nested(|input| Ok(match input.take::<u32>()? {{ {take} tag => return Err(crate::wire::WireError::Tag(tag)) }}))"),
+        &format!(
+            "match self {{ {put} _ => unreachable!(\"every case was read from the enum's source\") }}"
+        ),
+        &format!(
+            "input.nested(|input| Ok(match input.take::<u32>()? {{ {take} tag => return Err(crate::wire::WireError::Tag(tag)) }}))"
+        ),
     ))
 }
