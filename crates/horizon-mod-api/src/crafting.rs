@@ -547,4 +547,5 @@ impl CraftResult {
 }
 
 #[cfg(test)]
+#[path = "crafting/ingredient_form_tests.rs"]
 mod ingredient_form_tests;
