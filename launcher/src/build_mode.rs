@@ -484,16 +484,11 @@ impl Launcher {
         );
         let mut memo = self.mods.native_routes.borrow_mut();
         if let Some(previous) = memo.as_ref() {
-            if previous.result.is_none() {
+            let Some(result) = &previous.result else {
                 return native_mods::Routes::default();
-            }
+            };
             if previous.key == key {
-                return previous
-                    .result
-                    .as_ref()
-                    .and_then(|result| result.as_ref().ok())
-                    .cloned()
-                    .unwrap_or_default();
+                return result.as_ref().ok().cloned().unwrap_or_default();
             }
         }
         *memo = Some(RouteMemo {

@@ -5,7 +5,7 @@ use super::*;
 /// snapshot and checked release metadata may require filesystem and network work.
 pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     require_consent()?;
-    let _lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
+    let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
     let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
         return Ok(Routes::default());
     };
@@ -42,7 +42,7 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     {
         result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
     } else {
-        match prebuilt::planning_catalog(&revision) {
+        match prebuilt::planning_catalog(&lease, &revision) {
             Ok(catalog) => {
                 for (id, route) in prebuilt::slot_routes(&catalog, &projects) {
                     if route != Route::Prebuilt {

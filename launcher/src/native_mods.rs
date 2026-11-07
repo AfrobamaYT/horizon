@@ -1068,10 +1068,7 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
 }
 
 fn build_revision(base: &str, built_on: Option<&About>) -> Result<String, String> {
-    match built_on {
-        Some(about) => Ok(about.horizon.clone()),
-        None => revision_of(base),
-    }
+    built_on.map_or_else(|| revision_of(base), |about| Ok(about.horizon.clone()))
 }
 
 fn mismatch_error(list: &str) -> String {
