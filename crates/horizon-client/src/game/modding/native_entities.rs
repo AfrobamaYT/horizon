@@ -405,6 +405,20 @@ mod tests {
             ] {
                 game.summon_with_nbt(kind, [1.0, 70.0, 1.0], nbt).unwrap();
             }
+            // NBT loading assigns ids already. Reinstall unbound values as
+            // the zero-id owners that the pending pass receives from ticks.
+            macro_rules! pending {
+                ($list:expr) => {{
+                    let mut owner = $list.pop().unwrap();
+                    owner.id = 0;
+                    $list.push(owner);
+                }};
+            }
+            pending!(game.tnts);
+            pending!(game.falling);
+            pending!(game.creatures.projectiles);
+            pending!(game.tridents);
+            pending!(game.rockets);
             let base = game.next_entity;
             let joined = game.persist.joined_seq;
             let announced = game.persist.live.clone();
@@ -431,6 +445,125 @@ mod tests {
                 ],
                 ids
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn native_roots_keep_the_loaded_id_and_do_not_allocate_twice() {
+        use horizon_client::chunk::Chunk;
+        for (kind, nbt) in [
+            ("minecraft:tnt", "{fuse:80s}"),
+            (
+                "minecraft:falling_block",
+                "{BlockState:{Name:\"minecraft:sand\"},Time:1}",
+            ),
+            ("minecraft:firework_rocket", "{LifeTime:20}"),
+        ] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
+                game.world
+                    .chunks
+                    .insert((0, 0), std::sync::Arc::new(Chunk::empty(0, 0)));
+                let base = game.next_entity;
+                let (Tag::Compound(tag), _) = horizon_core::nbt::parse_snbt(nbt).unwrap() else {
+                    unreachable!()
+                };
+                let id = game
+                    .summon(game.dim.id(), kind, [1.0, 70.0, 1.0], tag)
+                    .unwrap();
+                assert_eq!(id, base + 1);
+                assert_eq!(game.next_entity, base + 1);
+                assert!(game.entity(id).is_some());
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn portal_ids_follow_only_the_existing_moving_entity_filters() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for _ in 0..3 {
+                game.summon_with_nbt("minecraft:trident", [1.0, 70.0, 1.0], "{}")
+                    .unwrap();
+                game.summon_with_nbt(
+                    "minecraft:firework_rocket",
+                    [1.0, 70.0, 1.0],
+                    "{LifeTime:20}",
+                )
+                .unwrap();
+            }
+            for t in &mut game.tridents {
+                t.id = 0;
+                t.in_ground = true;
+                t.previous = t.position;
+            }
+            game.tridents[0].in_ground = false;
+            game.tridents[2].previous.x -= 1.0;
+            for r in &mut game.rockets {
+                r.id = 0;
+                r.attached = false;
+                r.attached_to = None;
+            }
+            game.rockets[1].attached_to = Some(123);
+            game.rockets[2].attached = true;
+            let base = game.next_entity;
+            game.find_ridden_vehicle_portals(&[999]);
+            assert_eq!(game.next_entity, base);
+            game.find_entity_portals();
+            assert_eq!(
+                game.tridents.iter().map(|t| t.id).collect::<Vec<_>>(),
+                [base + 1, 0, base + 2]
+            );
+            assert_eq!(
+                game.rockets.iter().map(|r| r.id).collect::<Vec<_>>(),
+                [base + 3, 0, 0]
+            );
+            game.find_entity_portals();
+            assert_eq!(game.next_entity, base + 3);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn pending_assignment_refuses_a_bound_zero_owner_before_consuming_an_id() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentType, Attachments, Holder, index::AttachmentIndex,
+        };
+        use std::sync::{Arc, Mutex};
+        static VALUE: AttachmentType<i32> = AttachmentType {
+            namespace: "test",
+            name: "pending_id",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.summon_with_nbt(
+                "minecraft:falling_block",
+                [1.0, 70.0, 1.0],
+                "{BlockState:{Name:\"minecraft:sand\"},Time:1}",
+            )
+            .unwrap();
+            let mut owner = game.falling.pop().unwrap();
+            owner.id = 0;
+            let mut values = Attachments::default();
+            VALUE.set(&mut values, Holder::Entity(0), 7).unwrap();
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            owner.attachment_lifetime.bind(
+                &mut values,
+                &index,
+                mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 0),
+            );
+            game.falling.push(owner);
+            let before = game.next_entity;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                game.assign_pending_join_ids()
+            }));
+            assert!(result.is_err());
+            assert_eq!(game.next_entity, before);
+            assert_eq!(game.falling[0].id, 0);
         });
     }
 
