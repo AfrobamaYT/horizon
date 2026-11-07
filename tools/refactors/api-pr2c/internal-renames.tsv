@@ -24,3 +24,4 @@ tick_stats	tick_player_stat_counters	crates/horizon-client/src/game/interface/st
 transaction_close	close_storage_transaction	crates/horizon-client/src/game/runtime/transactions.rs:174
 transaction_open	open_storage_transaction	crates/horizon-client/src/game/runtime/transactions.rs:165
 translate	translate_with_fallback	crates/horizon-client/src/game/blocks/stations.rs:548
+open_chat	begin_chat_screen	crates/horizon-client/src/game/interface/chat.rs:764

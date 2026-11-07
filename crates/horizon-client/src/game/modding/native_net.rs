@@ -196,14 +196,14 @@ impl Game<'_> {
     /// player edits and sends it, or presses Escape. The box keeps its limit
     /// (256 characters) and its character filter. An error with no player in a
     /// world, or while another screen is open. API @API:open_chat@.
-    pub(super) fn native_open_chat(&mut self, text: &str) -> Result<(), String> {
+    pub(super) fn open_chat(&mut self, text: &str) -> Result<(), String> {
         if self.player.is_none() {
             return Err("no player in a world".into());
         }
         if self.screen != super::Screen::Playing {
             return Err("another screen is open".into());
         }
-        self.open_chat(text);
+        self.begin_chat_screen(text);
         Ok(())
     }
 

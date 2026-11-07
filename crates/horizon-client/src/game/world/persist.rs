@@ -2692,7 +2692,9 @@ mod loaded_tag_tests {
                 expected.len()
             ));
         }
-        let saved = game.entity_nbt(target).expect("actual entity save view");
+        let saved = game
+            .command_target_nbt(target)
+            .expect("actual entity save view");
         assert_eq!(saved.get("Health"), Some(&Tag::Float(10.0_f32.to_bits())));
         assert_eq!(saved.get("NoAI"), Some(&Tag::Byte(1)));
         assert_eq!(saved.get("NoGravity"), Some(&Tag::Byte(1)));

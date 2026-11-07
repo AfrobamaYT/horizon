@@ -14024,7 +14024,7 @@ mod tests {
 
         // No player: the title screen.
         game.player = None;
-        assert!(game.native_open_chat("/tp ").is_err());
+        assert!(game.open_chat("/tp ").is_err());
         assert!(game.ui.chat_screen.is_none());
         game.player = Some(
             horizon_client::motion::PlayerMotion::new(
@@ -14034,14 +14034,14 @@ mod tests {
             .unwrap(),
         );
         game.screen = Screen::Paused;
-        assert!(game.native_open_chat("/tp ").is_err());
+        assert!(game.open_chat("/tp ").is_err());
         assert!(game.ui.chat_screen.is_none());
         game.screen = Screen::Playing;
-        assert!(game.native_open_chat("/tp ").is_ok());
+        assert!(game.open_chat("/tp ").is_ok());
         assert!(game.screen == Screen::Chat);
         assert_eq!(game.ui.chat_screen.as_ref().unwrap().input.value, "/tp ");
         // The chat is a screen too: a second call doesn't replace what's typed.
-        assert!(game.native_open_chat("hello").is_err());
+        assert!(game.open_chat("hello").is_err());
         assert_eq!(game.ui.chat_screen.as_ref().unwrap().input.value, "/tp ");
     }
 

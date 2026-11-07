@@ -24,13 +24,8 @@ pub trait NetworkClientHost {
     /// Opens the chat screen with `text` typed in for the player to finish and
     /// send, as T and / open it; nothing is sent. Returns an error with no
     /// player in a world or while another screen is open.
-    fn open_chat(&mut self, text: &str) -> Result<(), String> {
-        crate::phase::unprovided(
-            "ClientHost::open_chat",
-            "open_chat",
-            crate::phase::LoadAccess::WorldOnly,
-        )
-    }
+    #[access(WorldOnly)]
+    fn open_chat(&mut self, text: &str) -> Result<(), String>;
     /// Side: client.
     /// The client half: sends `data` on `channel` to the server (the same
     /// caps, 32 a tick). An error when the server doesn't carry mod messages

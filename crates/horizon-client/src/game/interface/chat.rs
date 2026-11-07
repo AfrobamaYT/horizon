@@ -758,10 +758,10 @@ impl Game<'_> {
             .as_ref()
             .filter(|d| !command || d.command)
             .map(|d| d.text.clone());
-        self.open_chat(draft.as_deref().unwrap_or(prefix));
+        self.begin_chat_screen(draft.as_deref().unwrap_or(prefix));
         self.ui.chat_draft_shown = draft.is_some() && self.ui.chat_screen.is_some();
     }
-    pub(super) fn open_chat(&mut self, initial: &str) {
+    pub(super) fn begin_chat_screen(&mut self, initial: &str) {
         if self.player.is_none() {
             return;
         }
@@ -874,11 +874,11 @@ impl Game<'_> {
                     .map_or_else(String::new, |s| s.value().to_owned());
                 self.close_chat(ChatExit::Interrupted);
                 if !text.is_empty() {
-                    self.open_chat(&text);
+                    self.begin_chat_screen(&text);
                 }
             }
         } else if self.sleeping.is_some() && self.screen == Screen::Playing {
-            self.open_chat("");
+            self.begin_chat_screen("");
             self.ui.in_bed_chat = self.screen == Screen::Chat;
         }
     }
