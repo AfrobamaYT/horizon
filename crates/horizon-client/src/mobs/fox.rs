@@ -251,17 +251,48 @@ pub struct Consumption {
     ticks_since_eaten: i32,
 }
 impl Consumption {
-    /// Refuse an old decision after the actor, mouth, position or eating state changed.
-    pub fn still_valid(&self, m: &Mob) -> bool {
+    fn same_item_use(&self, m: &Mob) -> bool {
         m.id == self.mob
             && m.alive()
             && !m.removed
-            && m.position == self.from
             && m.extra.main_hand_stack() == Some(&self.stack)
             && m.extra.ints[TICKS_SINCE_EATEN] == self.ticks_since_eaten
+    }
+    /// Refuse an old decision after the actor, mouth, position or eating state changed.
+    pub fn still_valid(&self, m: &Mob) -> bool {
+        self.still_valid_at(m, self.from)
+    }
+    /// A successful earlier effect may move the actor; listener writes may not
+    /// replace the mouth item, counter or pre-attempt position under a pending effect.
+    pub fn still_valid_at(&self, m: &Mob, expected: Vec3) -> bool {
+        self.same_item_use(m)
+            && m.position == expected
             && m.ai.target.is_none()
             && m.on_ground
             && !flag(m, SLEEPING)
+    }
+    /// Finish the original item use after its own effects have moved the actor.
+    /// Refuse a replaced mouth stack or actor instead of overwriting listener writes.
+    pub fn finish(
+        &self,
+        m: &mut Mob,
+        expected: Vec3,
+        remainder: Option<std::sync::Arc<str>>,
+    ) -> bool {
+        if !self.same_item_use(m) || m.position != expected {
+            return false;
+        }
+        if self.stack.count > 1 {
+            let mut remaining = self.stack.clone();
+            remaining.count -= 1;
+            m.extra.set_main_hand_stack(Some(remaining));
+            // LivingEntity.handleExtraItemsCreatedOnUse is empty for a fox:
+            // an additional use remainder is discarded while food remains.
+        } else {
+            m.extra.set_main_hand(remainder);
+        }
+        m.extra.ints[TICKS_SINCE_EATEN] = 0;
+        true
     }
 }
 
@@ -299,14 +330,13 @@ pub fn apply_consumption(
         return false;
     }
     consume(w, m, events, &decision.stack.item);
-    m.extra.set_main_hand(
-        w.items
-            .and_then(|i| i.items.get(&decision.stack.item))
-            .and_then(|i| i.use_remainder.as_deref())
-            .map(Into::into),
-    );
-    m.extra.ints[TICKS_SINCE_EATEN] = 0;
-    true
+    let remainder = w
+        .items
+        .and_then(|i| i.items.get(&decision.stack.item))
+        .and_then(|i| i.use_remainder.as_deref())
+        .map(Into::into);
+    let position = m.position;
+    decision.finish(m, position, remainder)
 }
 
 /// `Fox.tick` and `Fox.aiStep`: eating, and `SoundEvents.FOX_AGGRO`

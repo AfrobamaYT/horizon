@@ -141,6 +141,54 @@ impl Game<'_> {
         let Ok(result) = teleport.apply(&mut Teleporter(self, consumed), dim);
         result
     }
+    /// Apply the paused fox item use with the full host, then leave its tick
+    /// continuation to the owning mob loop. Callback writes and apply share a transaction.
+    pub(super) fn apply_fox_consumption(
+        &mut self,
+        decision: &horizon_client::mobs::fox::Consumption,
+    ) -> bool {
+        if !self.mobs.iter().any(|m| decision.still_valid(m)) {
+            return false;
+        }
+        let Some(consumer) = self.entity(decision.mob).and_then(|e| self.living(e)) else {
+            return false;
+        };
+        let consumable = self
+            .items()
+            .get(&decision.stack.item)
+            .and_then(|info| decision.stack.consumable(Some(info)))
+            .cloned();
+        let remainder = self
+            .items()
+            .get(&decision.stack.item)
+            .and_then(|info| info.use_remainder.as_deref())
+            .map(std::sync::Arc::<str>::from);
+        let dim = self.dim;
+        let result: Result<bool, ()> = mod_api::run_transaction(self, |game, _| {
+            if let Some(consumable) = &consumable {
+                for effect in &consumable.effects {
+                    if let ConsumeEffect::TeleportRandomly(teleport) = effect {
+                        let mut actor = FoxTeleporter {
+                            game,
+                            consumer,
+                            decision,
+                            dim,
+                        };
+                        if teleport.apply(&mut actor, dim).is_err() {
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+            let Some(m) = game.mobs.iter_mut().find(|m| m.id == decision.mob) else {
+                return Ok(false);
+            };
+            let position = m.position;
+            Ok(decision.finish(m, position, remainder))
+        });
+        result.unwrap_or(false)
+    }
+
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: down to the first
     /// block entities can teleport onto, inside the border, in a loaded chunk.
     pub(super) fn random_teleport(&mut self, target: Vec3, avoid: Option<&str>) -> bool {
@@ -471,6 +519,150 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
     }
 }
 
+/// A paused fox as the same `TeleportRandomlyConsumeEffect` user as a player.
+struct FoxTeleporter<'a, 'g> {
+    game: &'a mut Game<'g>,
+    consumer: mod_api::LivingRef,
+    decision: &'a horizon_client::mobs::fox::Consumption,
+    dim: Dim,
+}
+impl FoxTeleporter<'_, '_> {
+    fn at(&self) -> Result<Vec3, ()> {
+        self.game
+            .mobs
+            .iter()
+            .find(|m| m.id == self.decision.mob && m.alive() && !m.removed)
+            .map(|m| m.position)
+            .ok_or(())
+    }
+}
+impl TeleportConsumeWorld for FoxTeleporter<'_, '_> {
+    type Error = ();
+    type Level = Dim;
+    type Random = u32;
+    type Source = LegacyRandom;
+    fn position_field(&self) -> Vec3 {
+        // get_random immediately refuses an absent actor before any draw or apply.
+        self.at().unwrap_or(self.decision.from)
+    }
+    fn get_random(&mut self) -> Result<u32, ()> {
+        self.at()?;
+        Ok(self.decision.mob)
+    }
+    fn random_source(&mut self, id: u32) -> &mut LegacyRandom {
+        &mut self
+            .game
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == id)
+            .expect("get_random validated the actor without an intervening callback")
+            .random
+    }
+    fn min_y(&mut self, _: Dim) -> Result<i32, ()> {
+        Ok(self.game.world.shape.min_y)
+    }
+    fn logical_height(&mut self, _: Dim) -> Result<i32, ()> {
+        Ok(self.game.world.shape.logical_height)
+    }
+    fn is_passenger(&mut self) -> Result<bool, ()> {
+        self.game
+            .mobs
+            .iter()
+            .find(|m| m.id == self.decision.mob)
+            .map(|m| m.extra.passenger)
+            .ok_or(())
+    }
+    fn stop_riding(&mut self) -> Result<(), ()> {
+        self.game.dismount_mob(self.decision.mob);
+        Ok(())
+    }
+    fn position(&mut self) -> Result<Vec3, ()> {
+        self.at()
+    }
+    fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, ()> {
+        let from = self.at()?;
+        let mut to = [target.x, target.y, target.z];
+        let mut cancel = false;
+        self.game.native_item_consumption_teleport(
+            self.consumer,
+            &self.decision.stack,
+            [from.x, from.y, from.z],
+            &mut to,
+            &mut cancel,
+        );
+        if self.game.dim != self.dim
+            || !matches!(self.game.native_living_target(self.consumer),
+                Some(super::commands::Target::Mob(id)) if id == self.decision.mob)
+            || !self
+                .game
+                .mobs
+                .iter()
+                .any(|m| self.decision.still_valid_at(m, from))
+        {
+            return Err(());
+        }
+        if to.iter().all(|v| v.is_finite()) {
+            let shape = self.game.world.shape;
+            let high = shape.min_y + shape.logical_height - 1;
+            *target = Vec3::new(
+                to[0],
+                to[1].clamp(f64::from(shape.min_y), f64::from(high)),
+                to[2],
+            );
+        }
+        Ok(!cancel)
+    }
+    fn random_teleport(&mut self, at: Vec3) -> Result<bool, ()> {
+        Ok(self.game.living_random_teleport(
+            self.consumer,
+            [at.x, at.y, at.z],
+            Some("minecraft:consumable_does_not_teleport_to"),
+        ))
+    }
+    fn teleport_event(&mut self, _: Dim, old: Vec3) -> Result<(), ()> {
+        let ctx = self
+            .game
+            .who_context(Some(Who::Mob(self.decision.mob)), None);
+        self.game
+            .post_game_event("minecraft:teleport", [old.x, old.y, old.z], ctx);
+        Ok(())
+    }
+    fn is_fox(&self) -> bool {
+        true
+    }
+    fn teleport_sound(&mut self, _: Dim, at: Vec3, _: bool) -> Result<(), ()> {
+        self.game.audio.play(
+            "minecraft:entity.fox.teleport",
+            Some([at.x, at.y, at.z]),
+            1.0,
+            1.0,
+        );
+        Ok(())
+    }
+    fn block_position(&mut self) -> Result<BlockPos, ()> {
+        Ok(BlockPos::containing(self.at()?))
+    }
+    fn directional_particles(&mut self, _: Dim, origin: BlockPos, offset: i32) -> Result<(), ()> {
+        self.game
+            .level_event_at(2017, [origin.x, origin.y, origin.z], offset);
+        Ok(())
+    }
+    fn reset_fall_distance(&mut self) -> Result<(), ()> {
+        let m = self
+            .game
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == self.decision.mob)
+            .ok_or(())?;
+        m.fall_distance = 0.0;
+        Ok(())
+    }
+    fn reset_impulse(&mut self) -> Result<(), ()> {
+        // The existing mob model has no separate CurrentImpulseContext state.
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod teleport_hook_tests {
     use super::*;
@@ -551,6 +743,168 @@ mod teleport_hook_tests {
                     "veto ends the effect after the first candidate's three draws"
                 );
                 assert_eq!(game.player.as_ref().unwrap().position, at);
+            })
+        });
+    }
+}
+
+#[cfg(test)]
+mod fox_consumption_hook_tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::mobs::{Mob, fox};
+    use mod_api::{Flow, Hand, Hooks, ItemConsumptionTeleportEvent, ModEntry, ServerHost};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, Ordering},
+    };
+
+    struct Probe {
+        mode: Arc<AtomicU8>,
+        heard: Arc<Mutex<Vec<(u32, ItemStack)>>>,
+    }
+    impl Hooks for Probe {
+        fn item_consumption_teleport(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut ItemConsumptionTeleportEvent<'_>,
+        ) -> Flow {
+            self.heard
+                .lock()
+                .unwrap()
+                .push((event.consumer.entity().id(), event.consumed.clone()));
+            assert_eq!(event.consumer.entity().position(host), Some(event.from));
+            match self.mode.load(Ordering::SeqCst) {
+                0 => Flow::Cancel,
+                1 => {
+                    *event.target = [4.5, 70.0, 4.5];
+                    Flow::Continue
+                }
+                2 => {
+                    assert!(event.consumer.set_hand_item(
+                        host,
+                        Hand::Main,
+                        Some(ItemStack::new("minecraft:stone", 1))
+                    ));
+                    Flow::Continue
+                }
+                3 => {
+                    assert!(
+                        event
+                            .consumer
+                            .entity()
+                            .teleport_to(host, [3.5, 64.0, 3.5], None)
+                    );
+                    Flow::Continue
+                }
+                4 => {
+                    assert!(event.consumer.entity().discard(host));
+                    Flow::Continue
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    fn fox_consumption_adapter_uses_full_host_and_preserves_listener_writes() {
+        let mode = Arc::new(AtomicU8::new(0));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "fox-consumption-proof",
+            Box::new(Probe {
+                mode: Arc::clone(&mode),
+                heard: Arc::clone(&heard),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                for x in 0..16 {
+                    for z in 0..16 {
+                        game.world.set(x, 63, z, stone).unwrap();
+                    }
+                }
+                let ty = game.res.mob_types().get("minecraft:fox").unwrap().clone();
+                for action in 0..5 {
+                    mode.store(action, Ordering::SeqCst);
+                    let id = 60 + u32::from(action);
+                    let from = Vec3::new(8.5, 64.0, 8.5);
+                    let mut actor = Mob::new(id, ty.clone(), from, 0.0);
+                    actor.on_ground = true;
+                    actor.fall_distance = 9.0;
+                    actor.extra.ints[1] = 600;
+                    let mut stack = ItemStack::new("minecraft:chorus_fruit", 7);
+                    stack
+                        .data_mut()
+                        .set_loot_name("minecraft:custom_name", &serde_json::json!("Fox fruit"));
+                    actor.extra.set_main_hand_stack(Some(stack.clone()));
+                    let mut events = Vec::new();
+                    let decision = fox::ai_step_until_consumption(
+                        &mut actor,
+                        &game.mob_world_base(&[]),
+                        &mut events,
+                    )
+                    .expect("pause before effect draws and mouth replacement");
+                    assert!(events.is_empty());
+                    let mut expected_random = actor.random.clone();
+                    for _ in 0..3 {
+                        expected_random.next_double();
+                    }
+                    game.mobs.push(actor);
+                    let applied = game.apply_fox_consumption(&decision);
+                    assert_eq!(applied, action <= 1);
+                    assert_eq!(heard.lock().unwrap().last(), Some(&(id, stack.clone())));
+                    let actor = game.mobs.iter_mut().find(|m| m.id == id && !m.removed);
+                    match action {
+                        0 => {
+                            let m = actor.unwrap();
+                            assert_eq!(m.position, from);
+                            assert_eq!(m.extra.main_hand_stack().unwrap().count, 6);
+                            assert_eq!(m.extra.ints[1], 0);
+                            assert_eq!(m.random.next_long(), expected_random.next_long());
+                        }
+                        1 => {
+                            let m = actor.unwrap();
+                            assert_eq!(m.position, Vec3::new(4.5, 64.0, 4.5));
+                            assert_eq!(m.extra.main_hand_stack().unwrap().count, 6);
+                            assert_eq!(m.fall_distance, 0.0);
+                            assert_eq!(m.random.next_long(), expected_random.next_long());
+                        }
+                        2 => {
+                            let m = actor.unwrap();
+                            assert_eq!(m.position, from);
+                            assert_eq!(
+                                &*m.extra.main_hand_stack().unwrap().item,
+                                "minecraft:stone"
+                            );
+                            assert_eq!(m.random.next_long(), expected_random.next_long());
+                        }
+                        3 => {
+                            let m = actor.unwrap();
+                            assert_eq!(m.position, Vec3::new(3.5, 64.0, 3.5));
+                            assert_eq!(m.extra.main_hand_stack(), Some(&stack));
+                            assert_eq!(m.random.next_long(), expected_random.next_long());
+                        }
+                        4 => assert!(actor.is_none()),
+                        _ => unreachable!(),
+                    }
+                }
+                assert_eq!(
+                    heard.lock().unwrap().len(),
+                    5,
+                    "one callback per first attempt"
+                );
             })
         });
     }
