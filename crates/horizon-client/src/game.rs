@@ -15696,6 +15696,8 @@ impl Game<'_> {
             self.merge_orbs();
         }
         let mut orbs = self.orbs.lift();
+        #[cfg(test)]
+        entity::taken_pass_tests::after_take(self);
         let mut gained = 0;
         let mut taken = Vec::new();
         if let Some((min, max)) = bounds {
@@ -15718,7 +15720,8 @@ impl Game<'_> {
                 true
             });
         }
-        self.orbs = orbs;
+        self.orbs
+            .restore(orbs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
         if gained > 0 {
             gained = self.mending(gained);
         }
@@ -26491,4 +26494,35 @@ fn test_server_load() -> horizon_world::native_load_context::LoadContext {
         Arc::new(LoadInputs::new(Default::default(), Default::default())),
         [],
     )
+}
+
+#[cfg(test)]
+mod nested_orb_spawn_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn experience_pickup_keeps_nested_orbs_until_the_next_ordered_pass() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
+            crate::game::entity::taken_pass_tests::with_spawn(
+                |g| g.add_orb([3.5, 80.0, 3.5], 1),
+                || game.tick_experience(),
+            );
+            assert_eq!(game.orbs.len(), 1);
+            let join = game.orbs[0].join;
+            assert_eq!(game.orbs[0].age, 0);
+            game.ordered.announced = horizon_client::join_seq::JoinSeq::MAX;
+            game.tickets.update(None);
+            game.begin_ordered_ticks();
+            game.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, false)
+                .unwrap();
+            assert_eq!(game.orbs[0].age, 1);
+            assert_eq!(game.orbs[0].join, join);
+        });
+    }
 }

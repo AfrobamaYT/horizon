@@ -70,12 +70,22 @@ fn projectile_restore_entries_keep_the_bound_arrow() {
                 state.pickup = horizon_client::arrows::Pickup::Allowed;
                 game.creatures.projectiles.push(picked);
                 if path == 1 {
-                    game.guest_arrows(0);
+                    crate::game::entity::taken_pass_tests::assert_projectile_spawn_survives(
+                        game,
+                        |game| {
+                            game.guest_arrows(0);
+                        },
+                    );
                 } else {
                     game.player = Some(
                         PlayerMotion::new(game.motion, Vec3::new(at[0], at[1], at[2])).unwrap(),
                     );
-                    game.touch_arrows();
+                    crate::game::entity::taken_pass_tests::assert_projectile_spawn_survives(
+                        game,
+                        |game| {
+                            game.touch_arrows();
+                        },
+                    );
                 }
                 assert_eq!(
                     game.creatures
