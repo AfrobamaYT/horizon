@@ -367,6 +367,42 @@ mod tests {
         std::mem::forget(deep);
     }
     #[test]
+    fn form_refuses_deep_input_and_keeps_all_style_and_source_fields() {
+        let raw = format!("{}0{}", "[".repeat(101), "]".repeat(101));
+        assert!(matches!(
+            Text::try_from(TextForm { tree: raw }),
+            Err(TextFormError::TooDeep)
+        ));
+        let style = TextStyle {
+            color: Some("red".into()),
+            shadow_color: Some(0xff123456),
+            italic: Some(true),
+            underlined: Some(true),
+            strikethrough: Some(true),
+            obfuscated: Some(true),
+            click: Some(TextClick::RunCommand("/test".into())),
+            font: Some("test:font".into()),
+            ..Default::default()
+        };
+        let mut score = Text::literal("").with_style(style);
+        score.content = TextContent::Score {
+            name: "test".into(),
+            objective: "objective".into(),
+        };
+        let mut nbt = Text::literal("");
+        nbt.content = TextContent::Nbt {
+            path: "foo.bar".into(),
+            interpret: true,
+            source: TextNbtSource::Storage("test:data".into()),
+            separator: None,
+        };
+        let text = score.append(nbt);
+        assert_eq!(
+            Text::try_from(TextForm::try_from(&text).unwrap()).unwrap(),
+            text
+        );
+    }
+    #[test]
     fn via_accepts_infallible_and_fallible_forms() {
         #[horizon_mod_api_macros::wasm(via = String)]
         struct Infallible;
