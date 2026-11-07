@@ -11830,6 +11830,24 @@ mod tests {
                     .shared_menu_title_snapshot()
                     .is_none()
             );
+            open(game, chest, "before reject");
+            game.remote_reject_container(7);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            open(game, chest, "before dimension change");
+            spawn_menu_test(game);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
             open(game, chest, "before lectern");
             snapshot(game);
             open(game, lectern, "lectern");
