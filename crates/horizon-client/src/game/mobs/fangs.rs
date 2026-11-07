@@ -37,7 +37,7 @@ pub(super) fn fang_crit(random: &mut impl RandomSource, pos: [f64; 3]) -> ([f64;
 }
 #[derive(Default)]
 pub(super) struct FangState {
-    pub list: Vec<Fangs>,
+    pub list: horizon_client::join_seq::ResidentList<Fangs>,
     model: Option<Arc<Part>>,
 }
 impl Game<'_> {
@@ -86,15 +86,17 @@ impl Game<'_> {
         let sound = self
             .fangs
             .list
-            .iter_mut()
-            .find(|f| f.id == id)
-            .and_then(|f| {
-                if event != 4 {
-                    return None;
-                }
-                f.started = true;
-                let pitch = fang_attack_pitch(&mut f.random);
-                Some((f.pos, pitch))
+            .iter()
+            .position(|f| f.id == id)
+            .and_then(|i| {
+                self.fangs.list.update(i, |f| {
+                    if event != 4 {
+                        return None;
+                    }
+                    f.started = true;
+                    let pitch = fang_attack_pitch(&mut f.random);
+                    Some((f.pos, pitch))
+                })
             });
         if let Some((pos, pitch)) = sound {
             self.audio.play_unshared(
@@ -110,7 +112,7 @@ impl Game<'_> {
     /// At life 14, twelve `crit` particles (`ATTACK_TRIGGER_TICKS`).
     pub(super) fn tick_remote_fangs(&mut self) {
         let mut bursts = Vec::new();
-        for f in &mut self.fangs.list {
+        self.fangs.list.for_each_mut(|f| {
             if f.started {
                 f.life -= 1;
                 if f.life == 14 {
@@ -121,7 +123,7 @@ impl Game<'_> {
                     bursts.push(crits);
                 }
             }
-        }
+        });
         let crit = ParticleOptions::simple(ParticleType::Crit);
         for crits in bursts {
             for (at, velocity) in crits {
@@ -132,7 +134,7 @@ impl Game<'_> {
 
     /// `EvokerFangs.tick`.
     pub(super) fn tick_fangs(&mut self) {
-        let mut list = std::mem::take(&mut self.fangs.list);
+        let mut list = self.fangs.list.take();
         list.retain_mut(|f| {
             f.warmup = f.warmup.wrapping_sub(1);
             if f.warmup >= 0 {
@@ -155,7 +157,7 @@ impl Game<'_> {
             f.life -= 1;
             f.life >= 0
         });
-        self.fangs.list = list;
+        self.fangs.list.restore(list);
     }
     /// `dealDamageTo` everything alive in the fangs' box (0.5 x 0.8,
     /// inflated 0.2 sideways) but the evoker's allies.

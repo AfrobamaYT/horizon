@@ -389,17 +389,18 @@ impl Game<'_> {
                 }
             }
             Target::Other(id) => {
-                let slot = self
+                let i = self
                     .others
-                    .iter_mut()
-                    .find(|o| o.id == id)
+                    .iter()
+                    .position(|o| o.id == id)
                     .ok_or_else(stale)?;
+                let slot = &self.others[i];
                 let new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
                 let is_display = matches!(
                     slot.kind.as_str(),
                     "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
                 );
-                *slot = new;
+                self.others.update(i, |slot| *slot = new);
                 // `EntityDataAccessor.setData` keeps the entity's UUID.
                 set_key(&mut tag, "UUID", Tag::IntArray(self.uuid_for(id).to_vec()));
                 if is_display {
@@ -417,11 +418,14 @@ impl Game<'_> {
             Target::Fangs(id) => {
                 let owner = self.loaded_fangs_owner(&tag);
                 let at = entity_nbt::position(&tag).ok_or_else(stale)?;
-                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
-                    f.pos = [at.x, at.y, at.z];
-                    f.yaw = entity_nbt::rotation(&tag)[0];
-                    f.warmup = horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
-                    f.owner = owner;
+                if let Some(i) = self.fangs.list.iter().position(|e| e.id == id) {
+                    self.fangs.list.update(i, |f| {
+                        f.pos = [at.x, at.y, at.z];
+                        f.yaw = entity_nbt::rotation(&tag)[0];
+                        f.warmup =
+                            horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
+                        f.owner = owner;
+                    });
                 }
             }
             Target::Stand(id) => {
