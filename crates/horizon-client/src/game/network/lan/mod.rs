@@ -1656,7 +1656,7 @@ impl Game<'_> {
         );
         encoder.mod_update_tag = Some(|pos, entity| {
             let mut tag = None;
-            Game::native_block_entity_update_tag(pos, entity, &mut tag);
+            Game::api_block_entity_update_tag(pos, entity, &mut tag);
             tag
         });
         let far = (net.lod_distance > 0)
@@ -3370,6 +3370,7 @@ impl Game<'_> {
         }) else {
             return;
         };
+        self.initialize_server_player(uuid, conn);
         self.native_player_load_from_file(uuid, &name, &playerdata::directory(&root));
         let Some(host) = self.lan.as_mut() else {
             return;
