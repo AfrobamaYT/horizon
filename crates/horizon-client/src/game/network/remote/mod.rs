@@ -501,6 +501,7 @@ enum OwnProfile {
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
+    pub(super) recipe_transfer: bool,
     /// This connection's configured feature flags, carried through reconfiguration.
     pub(super) features: std::sync::Arc<[String]>,
     /// The server announced it runs mods' quiet commands.
@@ -1093,6 +1094,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
+            recipe_transfer: false,
             features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
@@ -3440,6 +3442,9 @@ impl Game<'_> {
                     }
                     Err(e) => log::debug!("Horizon: a bad menu extra payload: {e}"),
                 }
+            }
+            C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
+                self.remote_recipe_transfer(&p.data);
             }
             // An anvil cost the data-slot short cannot hold, after that short.
             C::CustomPayload(p) if p.channel == horizon_protocol::anvil_cost::CHANNEL => {
@@ -6369,6 +6374,8 @@ impl Game<'_> {
         self.tick_hand();
         if running {
             self.tick_particles();
+        } else if self.clock.still() {
+            self.settle_rain_fog();
         }
         self.tick_frame_visuals(running);
         // Under `HORIZON_STILL` they wait for the world too: endermen's and blazes' particles
