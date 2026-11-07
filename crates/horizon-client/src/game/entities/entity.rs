@@ -2247,3 +2247,55 @@ mod set_rotation_tests {
         assert_eq!(orb.rotation(), [0.0, 90.0]);
     }
 }
+
+#[cfg(test)]
+mod scoped_edit_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_walk_skips_only_one_entity_and_keeps_later_kinds() {
+        let mut lists = TakenEntities {
+            mobs: Default::default(),
+            dropped: Default::default(),
+            boats: Default::default(),
+            carts: Default::default(),
+            armor_stands: Default::default(),
+            tnts: Default::default(),
+            falling: Default::default(),
+            orbs: Default::default(),
+            projectiles: Default::default(),
+            rockets: Default::default(),
+            tridents: Default::default(),
+        };
+        lists
+            .boats
+            .push(Boat::new(1, "oak".into(), Vec3::ZERO, 0.0));
+        lists
+            .boats
+            .push(Boat::new(2, "oak".into(), Vec3::ZERO, 0.0));
+        lists.carts.push(Minecart::new(
+            3,
+            super::super::minecarts::CartKind::Rideable,
+            Vec3::ZERO,
+        ));
+        let mut visited = Vec::new();
+        for_each_entity_mut!(lists, entity => {
+            if entity.id() == 1 {
+                return;
+            }
+            visited.push(entity.id());
+            entity.velocity_mut().x = 4.0;
+        });
+        assert_eq!(visited, [2, 3]);
+        assert_eq!(lists.boats[0].velocity.x, 0.0);
+        assert_eq!(lists.boats[1].velocity.x, 4.0);
+        assert_eq!(lists.carts[0].velocity.x, 4.0);
+        let previous = entity_access!(exclusive, lists.boats, 1, boat, {
+            let previous = boat.velocity.x;
+            boat.velocity.x = 7.0;
+            previous
+        });
+        assert_eq!(previous, 4.0);
+        assert_eq!(lists.boats[1].velocity.x, 7.0);
+    }
+}

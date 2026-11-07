@@ -39,45 +39,48 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK);
-        let Some(c) = self
-            .carts
-            .iter()
-            .find(|c| c.id == id && c.kind == CartKind::CommandBlock)
-        else {
-            return false;
-        };
-        if c.command.last_execution == game_time {
-            return false;
-        }
-        if c.command.command.eq_ignore_ascii_case("Searge") {
-            self.edit_command_cart(id, |c| {
+        let dimension = self.dim;
+        let Some(prepared) = self.edit_command_cart(id, |c| {
+            use std::ops::ControlFlow::{Break, Continue};
+            if c.command.last_execution == game_time {
+                return Break(false);
+            }
+            if c.command.command.eq_ignore_ascii_case("Searge") {
                 c.command.last_output = Some(Text::literal("#itzlipofutzli"));
                 c.command.success_count = 1;
-            });
-            return true;
-        }
-        let command = c.command.command.clone();
-        let position = c.position;
-        let yaw = c.yaw;
-        self.edit_command_cart(id, |c| c.command.success_count = 0);
-        if rules_work && !command.is_empty() {
-            self.edit_command_cart(id, |c| c.command.last_output = None);
+                return Break(true);
+            }
+            c.command.success_count = 0;
+            let command = c.command.command.clone();
+            if !rules_work || command.is_empty() {
+                return Continue(None);
+            }
+            c.command.last_output = None;
             // MinecartCommandBase.createCommandSourceStack: the cart's
             // position and rotation at game master level.
             let source = Source {
                 entity: Some(Target::Cart(id)),
-                pos: [position.x, position.y, position.z],
-                rot: [yaw, 0.0],
+                pos: [c.position.x, c.position.y, c.position.z],
+                rot: [c.yaw, 0.0],
                 eyes: false,
                 silent: false,
                 store: None,
-                dimension: self.dim,
-                origin_dimension: self.dim,
+                dimension,
+                origin_dimension: dimension,
                 origin_player: false,
                 level: None,
                 block: None,
                 cart: Some(id),
             };
+            Continue(Some((command, source)))
+        }) else {
+            return false;
+        };
+        let command = match prepared {
+            std::ops::ControlFlow::Break(done) => return done,
+            std::ops::ControlFlow::Continue(command) => command,
+        };
+        if let Some((command, source)) = command {
             let successes = self.run_as_game_master(&command, source);
             self.edit_command_cart(id, |c| c.command.success_count = successes);
         }
@@ -219,5 +222,39 @@ impl Game<'_> {
             };
             self.system_message(Text::translate(key, &[Text::literal(command)]));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_cart_commands_keep_tick_and_self_removal_rules() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world.game_time = 10;
+            game.carts
+                .push(Minecart::new(41, CartKind::CommandBlock, Vec3::ZERO));
+            game.carts
+                .push(Minecart::new(42, CartKind::Rideable, Vec3::ZERO));
+            game.carts.update(0, |c| c.command.set_command("Searge"));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts[0].command.success_count, 1);
+            game.carts.update(0, |c| c.command.set_command(""));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts[0].command.success_count, 0);
+            assert_eq!(game.carts[0].command.last_execution, 10);
+            assert!(!game.perform_cart_command(41));
+            assert!(!game.perform_cart_command(42));
+            assert!(!game.perform_cart_command(99));
+            game.world.game_time = 11;
+            game.carts.update(0, |c| c.command.set_command("kill @s"));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts.len(), 1);
+            assert_eq!(game.carts[0].id, 42);
+            assert_eq!(game.carts[0].command.success_count, 0);
+        });
     }
 }
