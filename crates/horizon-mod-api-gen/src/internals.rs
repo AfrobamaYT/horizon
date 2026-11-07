@@ -2353,8 +2353,17 @@ const LABEL: &str = "é"; struct AfterUnicode;
             hash: i.hash.clone(),
             kind: Some(i.kind.into()),
         };
-        let view = crate::internals_view::generate(entries, &[declaration(method_entry)], &[], &[])
+        let owner = entries
+            .iter()
+            .find(|i| i.kind == "struct" && i.path == "horizon_client::game::Game")
             .unwrap();
+        let view = crate::internals_view::generate(
+            entries,
+            &[declaration(method_entry), declaration(owner)],
+            &[],
+            &[],
+        )
+        .unwrap();
         let parsed = syn::parse_file(&view).unwrap();
         let syn::Item::Mod(module) = &parsed.items[0] else {
             panic!("view module")

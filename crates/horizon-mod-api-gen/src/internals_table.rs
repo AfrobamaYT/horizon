@@ -828,7 +828,7 @@ impl<'r> Gen<'r> {
                     ));
                 }
                 let case = match &named.item {
-                    syn::Item::Enum(item) => {
+                    syn::Item::Enum(item) if !named.guarded => {
                         let cases = item.variants.iter().enumerate().map(|(i, v)| {
                             let ident = &v.ident;
                             let i = i as u64;
@@ -1891,6 +1891,29 @@ pub(crate) mod tests {
                 .success()
         );
         std::fs::remove_dir_all(build).unwrap();
+    }
+
+    #[test]
+    fn guarded_enum_handle_does_not_name_conditional_variants() {
+        let entries = [
+            internal(
+                "horizon_client::Guarded",
+                "enum",
+                "enum Guarded { Present([u64; 32]), #[cfg(feature = \"x\")] Absent }",
+            ),
+            internal(
+                "horizon_client::Guarded::read",
+                "method",
+                "fn read(&self) -> u64",
+            ),
+        ];
+        let (code, counts) = all_table(&entries);
+        assert_eq!(counts.thunks, 1);
+        run_fixture(
+            &code,
+            "pub enum Guarded { Present([u64; 32]) } impl Guarded { fn read(&self) -> u64 { match self { Self::Present(data) => data[0] } } }",
+            "let _ = (std::mem::size_of::<Op>(), std::mem::size_of::<Reply>(), std::mem::size_of::<Value>());",
+        );
     }
 
     #[test]
