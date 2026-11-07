@@ -328,8 +328,7 @@ fn cache_dir(revision: &str, name: &str) -> PathBuf {
         .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")))
 }
 
-/// Read checked metadata without unpacking or executing the game. The caller holds the native
-/// cache lease; transport begins only after that caller has checked native-code consent.
+/// Read checked SDK metadata; the caller owns consent and the native-cache lease.
 pub(super) fn planning_catalog(
     lease: &crate::native_cache::Cache,
     revision: &str,
@@ -755,15 +754,12 @@ mod tests {
     #[test]
     fn a_partial_catalog_pair_cannot_reuse_its_previous_marker() {
         use super::super::{inject::POINTS, internals::INTERNALS};
-        fn packed(internals: &str) -> Vec<u8> {
+        fn packed(internals: &str, points: &str) -> Vec<u8> {
             let mut tar = tar::Builder::new(flate2::write::GzEncoder::new(
                 Vec::new(),
                 flate2::Compression::fast(),
             ));
-            for (name, text) in [
-                ("internals.json", internals),
-                ("points.json", r#"{"points":[],"sites":[]}"#),
-            ] {
+            for (name, text) in [("internals.json", internals), ("points.json", points)] {
                 let mut header = tar::Header::new_gnu();
                 header.set_size(text.len() as u64);
                 header.set_mode(0o644);
@@ -776,7 +772,7 @@ mod tests {
         let lease = crate::native_cache::Cache::acquire(&root).unwrap();
         let directory = lease.directory(&["internals-sync", "catalog"]).unwrap();
         let path = root.join("native/internals-sync/catalog");
-        let old = packed("[]");
+        let old = packed("[]", r#"{"points":[],"sites":[]}"#);
         let old_hash = format!("{:x}", Sha256::digest(&old));
         catalog_pair(&directory, &path, "game", &old_hash, || Ok(old.as_slice())).unwrap();
         directory.remove_file(POINTS).unwrap();
@@ -791,6 +787,7 @@ mod tests {
         directory.create_dir(POINTS).unwrap();
         let new = packed(
             r#"[{"path":"Changed","kind":"struct","signature":"struct Changed","hash":"new"}]"#,
+            r#"{"points":[],"sites":[]}"#,
         );
         let new_hash = format!("{:x}", Sha256::digest(&new));
         assert!(catalog_pair(&directory, &path, "game", &new_hash, || Ok(new.as_slice())).is_err());
@@ -809,6 +806,13 @@ mod tests {
                 .internals
                 .is_empty()
         );
+        let invalid = packed("[]", r#"{"points":"not a list","sites":[]}"#);
+        let invalid_hash = format!("{:x}", Sha256::digest(&invalid));
+        assert!(catalog_pair(&directory, &path, "game", &invalid_hash, || {
+            Ok(invalid.as_slice())
+        })
+        .is_err());
+        assert!(!directory.try_exists("archive.sha256").unwrap());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("internals-sync/catalog", root.join("native/redirect"))

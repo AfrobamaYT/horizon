@@ -7,8 +7,7 @@ use crate::glass_ui as ui;
 use native_mods::{Profile, Route, Stage};
 use native_status::State;
 
-/// A running or completed native plan. Newer inputs wait for an in-flight read to release its
-/// native-cache lease instead of racing another snapshot worker.
+/// The running or finished native snapshot; serialize readers to avoid racing cache leases.
 pub(super) struct RouteMemo {
     key: String,
     result: Option<Result<native_mods::Routes, String>>,

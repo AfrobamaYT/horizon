@@ -1,8 +1,7 @@
 //! Read-only classification of a native mod set, without executing mod or game code.
 use super::*;
 
-/// Plan every enabled native mod against its instance's game. Run only on a worker: the input
-/// snapshot and checked release metadata may require filesystem and network work.
+/// Plan enabled native mods for an instance. Worker-only filesystem and release reads.
 pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     require_consent()?;
     let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
@@ -34,8 +33,7 @@ pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     if let Some(list) = mismatch(&found, &revision) {
         return Err(mismatch_error(&list).into());
     }
-    // Ordinary trait mods need no slot catalog: a small release listing is enough. Existing
-    // SDKs are reused; a cold compiled-slot mod downloads only checked metadata, not a compiler.
+    // Trait mods need only the release listing; compiled slots need a checked SDK catalog.
     if projects
         .iter()
         .all(|project| project.bundle.manifest.inject.is_empty())
