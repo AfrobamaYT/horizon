@@ -1324,7 +1324,13 @@ mod tests {
             event: &mut mod_api::LootDropsEvent<'_>,
         ) {
             if self.edit {
-                *event.drops = vec![ItemStack::new("minecraft:diamond", 1)];
+                *event.drops = vec![
+                    mod_api::ItemStack::new(
+                        mod_api::__private::item_key("minecraft:diamond").unwrap(),
+                        1,
+                    )
+                    .unwrap(),
+                ];
             }
         }
         fn block_drops(
@@ -1337,12 +1343,14 @@ mod tests {
             assert!(event.breaker.is_none() && event.tool.is_none());
             assert_eq!(event.drops.len(), 1);
             assert_eq!(
-                event.drops[0].stack.count, 1,
+                event.drops[0].stack.count(),
+                1,
                 "only this block's contribution"
             );
             if self.edit {
                 assert_eq!(
-                    &*event.drops[0].stack.item, "minecraft:diamond",
+                    mod_api::__private::item_key_id(event.drops[0].stack.item()).unwrap(),
+                    "minecraft:diamond",
                     "loot modifiers ran first"
                 );
                 event.experience = 5;
@@ -1350,7 +1358,11 @@ mod tests {
                     return mod_api::Flow::Cancel;
                 }
                 *event.drops = vec![NativeItemDrop::new(
-                    ItemStack::new("minecraft:emerald", 3),
+                    mod_api::ItemStack::new(
+                        mod_api::__private::item_key("minecraft:emerald").unwrap(),
+                        3,
+                    )
+                    .unwrap(),
                     [7.0, 80.0, 7.0],
                     [0.1, 0.2, 0.3],
                     42,
