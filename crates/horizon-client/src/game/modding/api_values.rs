@@ -81,3 +81,134 @@ impl TryIntoEngine for ApiStack {
         Ok(stack)
     }
 }
+
+impl TryIntoApi for crate::crafting::RecipeRule {
+ type Api = mod_api::RecipeRule;
+ type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+ Ok(match self {
+Self::Stonecutting { input, result } => mod_api::RecipeRule::Stonecutting {
+input: input.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::SmithingTransform { template, base, addition, result } => mod_api::RecipeRule::SmithingTransform {
+template: template.try_into_api()?,
+base: base.try_into_api()?,
+addition: addition.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::SmithingTrim { template, base, addition, pattern } => mod_api::RecipeRule::SmithingTrim {
+template: template.try_into_api()?,
+base: base.try_into_api()?,
+addition: addition.try_into_api()?,
+pattern: pattern.try_into_api()?,
+},
+Self::BannerDuplicate { banner, result } => mod_api::RecipeRule::BannerDuplicate {
+banner: banner.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::ShieldDecoration { banner, target, result } => mod_api::RecipeRule::ShieldDecoration {
+banner: banner.try_into_api()?,
+target: target.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::Transmute { input, material, min, max, add_count, result } => mod_api::RecipeRule::Transmute {
+input: input.try_into_api()?,
+material: material.try_into_api()?,
+min: *min,
+max: *max,
+add_count: *add_count,
+result: result.try_into_api()?,
+},
+Self::Dye { target, dye, result } => mod_api::RecipeRule::Dye {
+target: target.try_into_api()?,
+dye: dye.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::Imbue { source, material, result } => mod_api::RecipeRule::Imbue {
+source: source.try_into_api()?,
+material: material.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::BookCloning { source, material, min, max, result } => mod_api::RecipeRule::BookCloning {
+source: source.try_into_api()?,
+material: material.try_into_api()?,
+min: *min,
+max: *max,
+result: result.try_into_api()?,
+},
+Self::FireworkRocket { shell, fuel, star, result } => mod_api::RecipeRule::FireworkRocket {
+shell: shell.try_into_api()?,
+fuel: fuel.try_into_api()?,
+star: star.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::FireworkStar { dye, fuel, trail, twinkle, shapes, result } => mod_api::RecipeRule::FireworkStar {
+dye: dye.try_into_api()?,
+fuel: fuel.try_into_api()?,
+trail: trail.try_into_api()?,
+twinkle: twinkle.try_into_api()?,
+shapes: shapes.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::FireworkStarFade { dye, target, result } => mod_api::RecipeRule::FireworkStarFade {
+dye: dye.try_into_api()?,
+target: target.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::MapExtending { map, material, result } => mod_api::RecipeRule::MapExtending {
+map: map.try_into_api()?,
+material: material.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::DecoratedPot { back, left, right, front, result } => mod_api::RecipeRule::DecoratedPot {
+back: back.try_into_api()?,
+left: left.try_into_api()?,
+right: right.try_into_api()?,
+front: front.try_into_api()?,
+result: result.try_into_api()?,
+},
+Self::RepairItem => mod_api::RecipeRule::RepairItem,
+})
+ }
+}
+
+impl<T: TryIntoApi<Error = StackReadError>> TryIntoApi for Option<T> {
+ type Api = Option<T::Api>; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api, Self::Error> { self.as_ref().map(TryIntoApi::try_into_api).transpose() }
+}
+impl<T: TryIntoApi<Error = StackReadError>> TryIntoApi for Vec<T> {
+ type Api = Vec<T::Api>; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api, Self::Error> { self.iter().map(TryIntoApi::try_into_api).collect() }
+}
+impl TryIntoApi for crate::crafting::Ingredient {
+ type Api = mod_api::Ingredient; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+ Ok(mod_api::Ingredient { items: self.items.clone(), order: self.order.clone(), custom: self.custom.clone(), children: self.children.as_ref().map(|(shape,kids)| Ok((shape.clone(), kids.try_into_api()?))).transpose()? })
+ }
+}
+impl TryIntoEngine for mod_api::Ingredient {
+ type Engine = crate::crafting::Ingredient; type Error = StackWriteError;
+ fn try_into_engine(&self, items: &Items) -> Result<Self::Engine,Self::Error> {
+ Ok(crate::crafting::Ingredient { items: self.items.clone(), order: self.order.clone(), custom: self.custom.clone(), children: self.children.as_ref().map(|(shape,kids)| Ok((shape.clone(), kids.iter().map(|k| k.try_into_engine(items)).collect::<Result<_,_>>()?))).transpose()? })
+ }
+}
+impl TryIntoApi for crate::crafting::RecipeTemplate {
+ type Api = mod_api::RecipeTemplate; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api,Self::Error> { Ok(mod_api::RecipeTemplate::new(self.item.clone(),self.count,self.components.clone())) }
+}
+impl TryIntoApi for crate::crafting::RecipeTrimPattern {
+ type Api = mod_api::RecipeTrimPattern; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api,Self::Error> { Ok(match self { Self::Reference(id) => mod_api::RecipeTrimPattern::Reference(id.clone()), Self::Inline { asset_id,description,decal } => mod_api::RecipeTrimPattern::Inline { asset_id:asset_id.clone(),description:description.clone(),decal:*decal } }) }
+}
+impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
+ type Api = mod_api::FireworkShapeIngredient; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api,Self::Error> { Ok(mod_api::FireworkShapeIngredient::new(self.shape,self.ingredient.try_into_api()?)) }
+}
+impl TryIntoApi for crate::crafting::RecipeSnapshot {
+ type Api = mod_api::Recipe; type Error = StackReadError;
+ fn try_into_api(&self) -> Result<Self::Api,Self::Error> {
+ let mut result = mod_api::Recipe::new(self.id.clone(), self.kind.clone(),self.json.clone());
+ result.group=self.group.clone(); result.ingredients=self.ingredients.try_into_api()?; result.results=self.results.try_into_api()?; result.cooking_time=self.cooking_time; result.experience=self.experience; result.rule=self.rule.try_into_api()?; Ok(result)
+ }
+}
