@@ -327,7 +327,7 @@ mod tests {
             assert_eq!(game.boss_bar("mod:bar"), Some(bar));
             assert_eq!(game.boss_bars(), vec![bar]);
             assert_eq!(bar.id(game).as_deref(), Some("mod:bar"));
-            assert_eq!(bar.name(game).unwrap().plain(), "Hi");
+            assert_eq!(bar.name(game).unwrap(), mod_api::Text::literal("Hi"));
             assert_eq!(bar.color(game), Some(BossBarColor::White));
             assert_eq!(bar.overlay(game), Some(BossBarOverlay::Progress));
             assert_eq!(bar.visible(game), Some(true));
@@ -344,7 +344,7 @@ mod tests {
             assert_eq!(seen(game, 123), Some((0.0, 6, 0, false, false, false)));
             assert_eq!(seen(game, 456), None);
 
-            assert!(bar.set_name(game, Text::literal("Boss")));
+            assert!(bar.set_name(game, mod_api::Text::literal("Boss")));
             assert!(bar.set_color(game, BossBarColor::Red));
             assert!(bar.set_overlay(game, BossBarOverlay::Notched10));
             assert!(bar.set_darken_screen(game, true));
@@ -352,7 +352,7 @@ mod tests {
             assert!(bar.set_create_world_fog(game, true));
             assert!(bar.set_max(game, 50));
             assert!(bar.set_value(game, 25));
-            assert_eq!(bar.name(game).unwrap().plain(), "Boss");
+            assert_eq!(bar.name(game).unwrap(), mod_api::Text::literal("Boss"));
             assert_eq!(bar.color(game), Some(BossBarColor::Red));
             assert_eq!(bar.overlay(game), Some(BossBarOverlay::Notched10));
             assert_eq!(
@@ -442,7 +442,7 @@ mod tests {
                 .unwrap();
             assert_ne!(again, bar);
             assert_eq!(bar.name(game), None);
-            assert_eq!(again.name(game).unwrap().plain(), "New");
+            assert_eq!(again.name(game).unwrap(), mod_api::Text::literal("New"));
             assert!(game.run_command("bossbar remove mod:bar"));
             assert_eq!(again.id(game), None);
         });
