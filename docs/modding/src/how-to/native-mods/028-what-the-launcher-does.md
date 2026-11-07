@@ -9,7 +9,7 @@ Developer builds the game crate unoptimized for iteration rather than game perfo
 Balanced until a choice is saved; automatic prebuilt builds still use the release profile.
 
 In the window: install a native mod from the Mods page, into the instance picked on the left ("Installs into
-{instance}", shown even with one instance). The first one shows a trust notice once (native mods aren't sandboxed; the
+{instance}", shown even with one instance). The first one shows a trust notice once (native mods aren't sandboxed;
 a build may download Rust and other build tools); `mods install` prints it too. Each
 installed native mod's row says "Installed in {instance}" and has **Open folder** (`<instance>/horizon-native-mods/`).
 The installed list has a **Native build of {instance}** row for the instance picked on the left, never another's:
