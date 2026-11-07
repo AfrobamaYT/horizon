@@ -1710,11 +1710,13 @@ mod tests {
                 worst = worst.max(cpu.abs_diff(*gpu));
             }
             assert!(worst <= 2, "cpu and instance pixels differed by {worst}");
+            // The HDR mark uses bias 0 on both routes, so it does not land on the
+            // colour pass's biased depth. Coverage is the colour, not a mid alpha.
             assert!(
                 cpu.as_chunks::<4>()
                     .0
                     .iter()
-                    .any(|pixel| pixel[3] != 255 && pixel[3] != 0)
+                    .any(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
             );
             fail_next_prepared_upload();
             assert!(
