@@ -225,6 +225,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                join: Default::default(),
                 item_transformation: None,
                 id: 12,
                 kind: "minecraft:marker".into(),
@@ -279,8 +280,12 @@ mod tests {
             with_game(|game| {
                 game.native_joins_skip();
                 let boat_id = game.take_entity_id();
-                game.boats
-                    .push(Boat::new(boat_id, "oak".into(), Vec3::new(0.0, 64.0, 0.0), 0.0));
+                game.boats.push(Boat::new(
+                    boat_id,
+                    "oak".into(),
+                    Vec3::new(0.0, 64.0, 0.0),
+                    0.0,
+                ));
                 let mob_id = game.take_entity_id();
                 let cow = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 game.mobs
