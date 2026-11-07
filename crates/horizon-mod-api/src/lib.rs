@@ -113,6 +113,47 @@ pub enum ToastKind {
     Other,
 }
 
+/// Sampling parameters for `LevelRef::find_closest_biome`, in blocks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BiomeSearch {
+    /// Centre of the sampled spiral, in block coordinates.
+    pub origin: [i32; 3],
+    /// Maximum horizontal search radius in blocks.
+    pub radius: i32,
+    /// Distance between sampled columns in blocks.
+    pub horizontal_step: i32,
+    /// Distance between sampled heights in blocks.
+    pub vertical_step: i32,
+}
+impl BiomeSearch {
+    /// The radius must be nonnegative and both sampling steps positive.
+    pub fn new(origin: [i32; 3], radius: i32, horizontal_step: i32, vertical_step: i32) -> Self {
+        Self {
+            origin,
+            radius,
+            horizontal_step,
+            vertical_step,
+        }
+    }
+}
+
+/// The first matching sample in vanilla's closest-biome search order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct BiomeSearchResult {
+    /// Registry id of the matching biome.
+    pub biome: String,
+    /// Block coordinates of the matching sample.
+    pub position: [i32; 3],
+}
+impl BiomeSearchResult {
+    /// Pair a matching biome with its sampled position.
+    pub fn new(biome: String, position: [i32; 3]) -> Self {
+        Self { biome, position }
+    }
+}
+
 /// Build range and sky properties of a loaded level's dimension type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

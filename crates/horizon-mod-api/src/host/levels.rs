@@ -24,6 +24,79 @@ pub trait LevelsHost {
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LevelsBackend {
+    /// Side: server.
+    /// `ServerLevel.findClosestBiome3d`: search this level's generator for an id or `#tag`.
+    /// The result follows vanilla's sampled spiral and vertical order; it is not a search
+    /// through edited biome cells. Does not load resident chunks or switch parked levels.
+    /// None for no match, a stale/unavailable level, an unavailable generator, a negative
+    /// radius or nonpositive sampling steps.
+    fn level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: BiomeSearch,
+    ) -> Option<BiomeSearchResult> {
+        crate::phase::unprovided(
+            "Backend::level_find_closest_biome",
+            "level_find_closest_biome",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// `Level.getSkyDarken`: the sky-light reduction from dimension, time and weather.
+    /// Reads any loaded server level, including parked levels, or the current client level.
+    /// None for a stale or unavailable level. Does not load chunks.
+    fn level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
+        crate::phase::unprovided(
+            "Backend::level_get_sky_darken",
+            "level_get_sky_darken",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// `BlockGetter.getBlockFloorHeight` with the normal collision shapes and an empty
+    /// entity context. The result is relative to the block: negative infinity means no floor.
+    /// None for a stale level, an unloaded column or a position outside build height.
+    /// Reads parked server levels and the current client level without loading chunks.
+    fn level_block_floor_height(&self, level: LevelRef, pos: [i32; 3]) -> Option<f64> {
+        crate::phase::unprovided(
+            "Backend::level_block_floor_height",
+            "level_block_floor_height",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
+    /// The biome id selected by `LevelReader.getBiome` and this level's biome zoom.
+    /// Reads an active or parked server level. None for a
+    /// stale handle or an unloaded selected noise column. Never generates or loads chunks.
+    fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::level_biome_at",
+            "level_biome_at",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: client.
+    /// The biome in the client's current level (`LevelReader.getBiome`). None before
+    /// login, for a stale or foreign dimension, or an unloaded selected column. Never loads chunks.
+    fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        crate::phase::unprovided(
+            "Backend::level_client_biome",
+            "level_client_biome",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// The dimension's logical height (`ServerLevel.getLogicalHeight`), which may differ
+    /// from build height. Reads active and parked server levels or the client's current level.
+    /// None for a stale or unavailable level. Does not load chunks.
+    fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
+        crate::phase::unprovided(
+            "Backend::level_logical_height",
+            "level_logical_height",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: both.
     /// The name of a dimension's key.
     fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {

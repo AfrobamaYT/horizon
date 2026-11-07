@@ -86,6 +86,36 @@ impl LevelAccess for RainView<'_> {
 }
 
 impl Game<'_> {
+    /// `Level.getSkyDarken`: the same dimension, time and weather calculation used by gameplay.
+    pub(super) fn sky_darken_in(&self, world: &World, dimension: Dim) -> i32 {
+        if dimension == Dim::Nether {
+            return 11;
+        }
+        if dimension == Dim::End {
+            let sky = self
+                .res
+                .end_environment()
+                .sample(world.day_time, None, None);
+            return (15.0 - 15.0 * sky.sky_light_level).round() as i32;
+        }
+        let (rain, thunder) = weather_for_world(world, false);
+        horizon_client::environment::sky_darken(
+            self.res.environment(),
+            world.day_time,
+            rain,
+            thunder,
+        )
+    }
+
+    /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.
+    pub(super) fn native_level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
+        let world = self.native_level_read_world(level)?;
+        if level.dimension() == self.native_level_key() {
+            return Some(self.sky_darken());
+        }
+        Some(self.sky_darken_in(world, Dim::from_id(level.dimension_id())))
+    }
+
     /// The enabled feature flags as this side knows them: a client's are the server's, sent at
     /// join; a server's are its world's `enabled_features`.
     pub(super) fn enabled_feature_ids(&self) -> &Arc<[String]> {

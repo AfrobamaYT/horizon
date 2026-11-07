@@ -12,6 +12,53 @@ impl LevelsHost for Game<'_> {
     }
 }
 impl LevelsBackend for Game<'_> {
+    fn level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: BiomeSearch,
+    ) -> Option<BiomeSearchResult> {
+        mod_api::__private::check_access(
+            "level_find_closest_biome",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_find_closest_biome(level, biome, parameters)
+    }
+    fn level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
+        mod_api::__private::check_access(
+            "level_get_sky_darken",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_get_sky_darken(level)
+    }
+    fn level_block_floor_height(&self, level: LevelRef, pos: [i32; 3]) -> Option<f64> {
+        mod_api::__private::check_access(
+            "level_block_floor_height",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_block_floor_height(level, pos)
+    }
+    fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        mod_api::__private::check_access(
+            "level_biome_at",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_biome_at(level, pos)
+    }
+    fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        mod_api::__private::check_access(
+            "level_client_biome",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_client_biome(level, pos)
+    }
+    fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
+        mod_api::__private::check_access(
+            "level_logical_height",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_logical_height(level)
+    }
     fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::check_access(
             "dimension_key_id",

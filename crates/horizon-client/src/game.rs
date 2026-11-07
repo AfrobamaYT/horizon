@@ -12807,15 +12807,8 @@ impl Game<'_> {
     }
 
     fn sky_darken(&self) -> i32 {
-        if self.dim == Dim::Nether {
-            return 11;
-        }
-        if self.dim == Dim::End {
-            let sky = self
-                .res
-                .end_environment()
-                .sample(self.world.day_time, None, None);
-            return (15.0 - 15.0 * sky.sky_light_level).round() as i32;
+        if self.dim != Dim::Overworld {
+            return self.sky_darken_in(&self.world, self.dim);
         }
         let (rain, thunder) = self.weather_levels(1.0);
         // Sampled once per (time, weather): every mob asks each tick.
@@ -12825,12 +12818,7 @@ impl Game<'_> {
         {
             return darken;
         }
-        let darken = horizon_client::environment::sky_darken(
-            self.res.environment(),
-            self.world.day_time,
-            rain,
-            thunder,
-        );
+        let darken = self.sky_darken_in(&self.world, self.dim);
         self.sky_darken_memo.set(Some((key, darken)));
         darken
     }

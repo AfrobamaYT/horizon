@@ -41,6 +41,102 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
 }
 
 impl Game<'_> {
+    /// `ServerLevel.findClosestBiome3d`, using the same generator query as `/locate biome`.
+    pub(super) fn native_level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: mod_api::BiomeSearch,
+    ) -> Option<mod_api::BiomeSearchResult> {
+        let world = self.native_level_world(level)?;
+        if parameters.radius < 0 || parameters.horizontal_step <= 0 || parameters.vertical_step <= 0
+        {
+            return None;
+        }
+        let terrain = if level.dimension() == self.dim.key() {
+            self.end.locator()
+        } else {
+            self.levels.parked_locator_of(level.dimension_id())
+        }?;
+        let selector = match biome.strip_prefix('#') {
+            Some(tag) => format!("#{}", horizon_client::command::args::normalized(tag)),
+            None => horizon_client::command::args::normalized(biome),
+        };
+        let allowed = |name: &str| self.biome_matches(&selector, name);
+        let query = horizon_world::worldgen::generator::BiomeSearch {
+            allowed: &allowed,
+            origin: parameters.origin,
+            radius: parameters.radius,
+            horizontal: parameters.horizontal_step,
+            vertical: parameters.vertical_step,
+            min_y: world.bottom_y(),
+            max_y: world.top_y() - 1,
+        };
+        terrain
+            .find_closest_biome(&query)
+            .map(|(biome, position)| mod_api::BiomeSearchResult::new(biome, position))
+    }
+
+    /// `LevelReader.getBiome`: the noise cell selected by this level's BiomeManager zoom.
+    /// Unlike a generating server query, an absent selected column returns None.
+    fn native_read_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let world = self.native_level_read_world(level)?;
+        let streaming = if level.dimension() == self.native_level_key() {
+            &self.streaming
+        } else {
+            self.levels.parked_streaming_of(level.dimension_id())?
+        };
+        let [qx, qy, qz] = streaming.biome_zoom.quart_at_block(block_pos(pos));
+        let chunk = world.chunks.get(&(qx >> 2, qz >> 2))?;
+        let biome = chunk.biome(qx << 2, qy << 2, qz << 2);
+        Some(world_biomes!(self).get(biome).name.clone())
+    }
+
+    /// The authoritative server's `LevelReader.getBiome`, including parked levels.
+    pub(super) fn native_level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// The client's current copy of `LevelReader.getBiome`, never an authoritative server read.
+    pub(super) fn native_level_client_biome(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<String> {
+        if self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
+    pub(super) fn native_level_logical_height(&self, level: LevelRef) -> Option<i32> {
+        Some(self.native_level_read_world(level)?.shape.logical_height)
+    }
+
+    /// `BlockGetter.getBlockFloorHeight` with an empty collision context.
+    /// Uses the normal dynamic shapes, querying below only when this shape is empty.
+    pub(super) fn native_level_block_floor_height(
+        &self,
+        level: LevelRef,
+        [x, y, z]: [i32; 3],
+    ) -> Option<f64> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(x, z) || !world.shape.contains_y(y) {
+            return None;
+        }
+        let here = self.block_collision_shape_in(world, [x, y, z]);
+        let below = if here.is_empty() {
+            self.block_collision_shape_in(world, [x, y.checked_sub(1)?, z])
+        } else {
+            horizon_core::geometry::VoxelShape::empty()
+        };
+        Some(horizon_core::geometry::block_floor_height(&here, || &below))
+    }
+
     /// The world a handle names now, or None for a stale or foreign one.
     pub(super) fn native_level_world(&self, level: LevelRef) -> Option<&World> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
