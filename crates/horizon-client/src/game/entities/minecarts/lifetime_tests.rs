@@ -5,6 +5,59 @@ use horizon_mod_runtime::attachments::{
 };
 use std::sync::Mutex;
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_carts_keep_registrations_through_commands_unload_park_and_remote() {
+    use crate::game::entity::taken_pass_tests::{
+        LifecycleFixture, RemoteLifecycle, SlotIdentities,
+    };
+    use horizon_protocol::{
+        connection::Pipe,
+        entity_data::{Value, serializer},
+    };
+    let mut identities = SlotIdentities::default();
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.carts.clear();
+            for &(id, at) in entries {
+                game.carts.push(Minecart::new(
+                    id,
+                    CartKind::Rideable,
+                    Vec3::new(at[0], at[1], at[2]),
+                ));
+            }
+        },
+        ids: |game| game.carts.iter().map(|cart| cart.id).collect(),
+        target: crate::game::commands::Target::Cart,
+        unloads_with_chunk: true,
+        remote: Some(RemoteLifecycle {
+            prepare: |game| {
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "Lifecycle").unwrap();
+            },
+            apply: |game, remove, update| {
+                game.remote_object_data(update as i32, &[(12, serializer::INT, Value::Int(19))]);
+                assert_eq!(
+                    game.carts
+                        .iter()
+                        .find(|cart| cart.id == update)
+                        .unwrap()
+                        .custom_offset,
+                    Some(19)
+                );
+                game.remove_remote_object(remove);
+            },
+        }),
+    }
+    .run_with(|game| {
+        identities.observe(
+            &mut game.carts,
+            game.native_lifecycle.epoch().unwrap(),
+            |cart| cart.id,
+        )
+    });
+}
+
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "test",
     name: "cart_lifetime",
