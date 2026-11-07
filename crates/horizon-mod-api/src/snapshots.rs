@@ -54,8 +54,8 @@ pub struct LootStack {
     pub stew_effects: Vec<(String, i32)>,
     /// Custom or item name components, still unresolved styled trees.
     pub names: Vec<(String, crate::text::Text)>,
-    /// Ordered component patches; null removes a component.
-    pub components: Vec<(String, serde_json::Value)>,
+    /// Ordered component patches; `None` removes a component.
+    pub components: Vec<(String, Option<horizon_core::nbt::Tag>)>,
 }
 
 /// A deferred exploration-map search requested by a loot function.
