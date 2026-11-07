@@ -38,7 +38,7 @@ mod render_tooltip_texture_tests {
         ) {
             assert_eq!(*event.texture, None);
             assert_eq!(
-                (*event.background, *event.border_top, *event.border_bottom),
+                (event.background, event.border_top, event.border_bottom),
                 (0xf0100010, 0x505000ff, 0x5028007f)
             );
             match event.stack {
@@ -46,7 +46,7 @@ mod render_tooltip_texture_tests {
                     *event.texture = Some(Identifier::parse("lobby:gold").unwrap());
                 }
                 Some(_) => {}
-                None => *event.background = 0xffff0000,
+                None => event.background = 0xffff0000,
             }
         }
     }
