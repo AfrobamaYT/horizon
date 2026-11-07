@@ -617,9 +617,7 @@ impl Game<'_> {
                                     .map(|p| p.conn)
                             })
                             .ok_or("boat click: owner not connected")?;
-                        let mut host = g.lan.take().ok_or("boat click: no hub")?;
                         g.lan_guest_packet(
-                            &mut host,
                             conn,
                             horizon_protocol::packets::play::Serverbound::Interact(
                                 horizon_protocol::packets::play::Interact {
@@ -630,7 +628,6 @@ impl Game<'_> {
                                 },
                             ),
                         );
-                        g.lan = Some(host);
                         Ok(())
                     })?;
                 }
@@ -778,7 +775,7 @@ impl Game<'_> {
                 }
                 "map_files" => {
                     let state = self.harness_owner(|g| {
-                        use horizon_world::nbt::Tag;
+                        use horizon_core::nbt::Tag;
                         g.save_maps();
                         let directory = g.world_root.join("data/minecraft/maps");
                         let maps: Vec<_> = op["ids"].as_array().ok_or("map IDs")?.iter().map(|id| {

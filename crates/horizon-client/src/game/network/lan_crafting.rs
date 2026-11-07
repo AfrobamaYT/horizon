@@ -161,14 +161,14 @@ impl Game<'_> {
         menu: &mut Menu,
         op: impl FnOnce(&mut Menu, &Env) -> R,
     ) -> Option<R> {
-        let host = self.lan.as_ref()?;
+        self.lan.as_ref()?;
         // Crafting and cartography read and derive this level's saved maps.
         let maps = matches!(
             menu.kind(),
             Kind::Cartography | Kind::Crafting | Kind::Inventory
         )
         .then(|| {
-            let g = &host.hub.guests[gi];
+            let g = &self.lan.as_ref().unwrap().hub.guests[gi];
             (0..menu.slot_count())
                 .filter_map(|s| menu.slot(s).cloned())
                 .chain(g.inventory.iter().flatten().cloned())
@@ -183,6 +183,7 @@ impl Game<'_> {
                     .any(|id| self.map(id).is_some())
         })
         .map(|held| self.level_maps(&held));
+        let host = self.lan.as_ref()?;
         let env = Env {
             player: Some(host.hub.guests[gi].uuid),
             player_entity_id: Some(host.hub.guests[gi].entity_id),
