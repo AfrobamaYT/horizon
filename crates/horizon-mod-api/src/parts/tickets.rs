@@ -1,43 +1,14 @@
+use super::*;
 /// The ticket controllers registered at startup.
-pub(super) fn installed_controllers() -> &'static [ControllerInfo] {
+pub(crate) fn installed_controllers() -> &'static [ControllerInfo] {
     INSTALLED
         .get()
         .map_or(&[], |installed| installed.controllers.as_slice())
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Register ticket controller `name`, the way NeoForge's `RegisterTicketControllersEvent`
-    /// does once at startup, and keep the handle for `chunk.set_mod_forced`. `name` is
-    /// `quarry` or `mymod:quarry`; the controller's id is in the calling mod's namespace
-    /// (`mymod:quarry`), and another mod's namespace refuses the mods at startup, as does an id
-    /// registered twice. `validates` is whether it validates its saved tickets: the
-    /// `validate_tickets` hook then runs for it when a level loads them (NeoForge's
-    /// `LoadingValidationCallback`). A world's tickets of a controller no loaded mod registers are
-    /// dropped when it loads.
-    fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController;
-}
-
-impl Registrar for PartRegistrar {
-    fn register_ticket_controller(&mut self, name: &str, validates: bool) -> TicketController {
-        ticket_controller::register(
-            &mut self.controllers,
-            &mut self.refused,
-            self.mod_id,
-            name,
-            validates,
-        )
-    }
-}
-
 /// The ticket controllers `mods` register, for a test's mods.
 #[cfg(any(test, feature = "testing"))]
-pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
+pub(crate) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
     if mods.is_empty() {
         return Vec::new();
     }
@@ -46,9 +17,10 @@ pub(super) fn registered_controllers(mods: &[ModEntry]) -> Vec<ControllerInfo> {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    use super::*;
 
     #[test]
-    fn ticket_controllers_get_the_callers_namespace_and_refuse_anothers() {
+    pub(crate) fn ticket_controllers_get_the_callers_namespace_and_refuse_anothers() {
         let mut r = super::PartRegistrar::new("first");
         r.register_ticket_controller("quarry", true);
         r.register_ticket_controller("first:drill", false);
@@ -71,7 +43,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id() {
+    pub(crate) fn a_ticket_controller_registered_twice_refuses_the_mods_naming_mod_and_id() {
         let mut r = super::PartRegistrar::new("first");
         r.register_ticket_controller("quarry", true);
         r.register_ticket_controller("first:quarry", false);

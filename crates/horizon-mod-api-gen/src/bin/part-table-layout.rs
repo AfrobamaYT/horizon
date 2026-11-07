@@ -52,6 +52,10 @@ fn main() -> Result<(), String> {
         .read_to_string(&mut source)
         .map_err(|e| e.to_string())?;
     let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
-    println!("{}", json!(items(file.items)));
+    if std::env::args().any(|arg| arg == "--canonical") {
+        print!("{}", prettyplease::unparse(&file));
+    } else {
+        println!("{}", json!(items(file.items)));
+    }
     Ok(())
 }

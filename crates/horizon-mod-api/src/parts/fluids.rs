@@ -1,66 +1,18 @@
-pub(crate) fn resolved_fluids() -> &'static OnceLock<super::registry_keys::Names> {
-    static EMPTY: OnceLock<super::registry_keys::Names> = OnceLock::new();
+use super::*;
+pub(crate) fn resolved_fluids() -> &'static OnceLock<crate::registry_keys::Names> {
+    static EMPTY: OnceLock<crate::registry_keys::Names> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Request a fluid by canonical registry id, checked when the registry loads.
-    fn fluid_key(&mut self, id: &str) -> super::FluidKey;
-    /// Declare a tank-only fluid in this mod's namespace and return its key.
-    fn declare_fluid(&mut self, path: &str) -> super::FluidKey;
-}
-
-impl Registrar for PartRegistrar {
-    fn fluid_key(&mut self, id: &str) -> super::FluidKey {
-        match self
-            .registry_keys
-            .borrow_mut()
-            .fluids
-            .request(self.mod_id, id)
-        {
-            Ok(slot) => super::FluidKey(slot),
-            Err(error) => {
-                self.refused.push(error);
-                super::FluidKey(u32::MAX)
-            }
-        }
-    }
-
-    fn declare_fluid(&mut self, path: &str) -> super::FluidKey {
-        let id = format!("{}:{path}", self.mod_id);
-        if path.contains(':') || !horizon_mod_package::content::namespaced_id(&id) {
-            self.refused.push(format!(
-                "mod {}: invalid fluid declaration {id:?}",
-                self.mod_id
-            ));
-            return super::FluidKey(u32::MAX);
-        }
-        let previous = self
-            .registry_keys
-            .borrow_mut()
-            .declared_fluids
-            .insert(id.clone(), self.mod_id);
-        if let Some(other) = previous {
-            self.refused.push(format!(
-                "fluid {id} declared by both {other} and {}",
-                self.mod_id
-            ));
-        }
-        self.fluid_key(&id)
-    }
-}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    use super::*;
+    use crate::parts::tests::*;
+    use crate::*;
 
     #[test]
-    fn invalid_and_duplicate_fluid_declarations_are_refused() {
+    pub(crate) fn invalid_and_duplicate_fluid_declarations_are_refused() {
         let mut registrar = super::PartRegistrar::new("maker");
         registrar.declare_fluid("wrong:namespace");
         registrar.declare_fluid("chocolate");
@@ -71,7 +23,7 @@ pub mod tests {
     }
 
     #[test]
-    fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
+    pub(crate) fn fluid_keys_resolve_declarations_after_requests_and_reject_unknown() {
         use crate::registry_keys::{fluid_id, fluid_key, resolve_fluids};
         struct Request;
         #[mod_api::__subscriptions]
@@ -93,7 +45,7 @@ pub mod tests {
             ModEntry::new("maker", Box::new(Declare)),
         ]
         .into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         let error = resolve_fluids(&[]).unwrap_err();
         assert_eq!(
@@ -125,9 +77,9 @@ pub mod tests {
     }
     /// A mod's tank: the game's tank at its position, reached from every side but its top, and
     /// misanswering as `lie` says.
-    struct ModTank {
-        at: BlockSide,
-        lie: Option<Lie>,
+    pub(crate) struct ModTank {
+        pub(crate) at: BlockSide,
+        pub(crate) lie: Option<Lie>,
     }
     impl ResourceHandler<FluidResource> for ModTank {
         fn size(&self, host: &mut dyn ServerHost) -> usize {
@@ -206,30 +158,30 @@ pub mod tests {
     /// half its room, a `short` one gives one less than asked, and a `quarters` one gives and
     /// takes only whole quarter buckets, as a cauldron its thirds.
     #[derive(Clone)]
-    struct GameTank {
-        held: Option<FluidStack>,
-        capacity: u32,
-        fills: bool,
-        drains: bool,
-        halving: bool,
-        half_room: bool,
-        short: bool,
-        quarters: bool,
+    pub(crate) struct GameTank {
+        pub(crate) held: Option<FluidStack>,
+        pub(crate) capacity: u32,
+        pub(crate) fills: bool,
+        pub(crate) drains: bool,
+        pub(crate) halving: bool,
+        pub(crate) half_room: bool,
+        pub(crate) short: bool,
+        pub(crate) quarters: bool,
     }
     #[cfg(test)]
     /// Game tanks by position, and the mod block entity types standing at some.
     #[derive(Clone, Default)]
-    struct TankWorld {
-        tanks: HashMap<[i32; 3], GameTank>,
-        types: HashMap<[i32; 3], &'static str>,
-        kept: Vec<Self>,
+    pub(crate) struct TankWorld {
+        pub(crate) tanks: HashMap<[i32; 3], GameTank>,
+        pub(crate) types: HashMap<[i32; 3], &'static str>,
+        pub(crate) kept: Vec<Self>,
     }
     #[cfg(test)]
-    const SOURCE: [i32; 3] = [0, 64, 0];
+    pub(crate) const SOURCE: [i32; 3] = [0, 64, 0];
     #[cfg(test)]
-    const TANK: [i32; 3] = [1, 64, 0];
+    pub(crate) const TANK: [i32; 3] = [1, 64, 0];
     #[cfg(test)]
-    const OTHER: [i32; 3] = [2, 64, 0];
+    pub(crate) const OTHER: [i32; 3] = [2, 64, 0];
     #[cfg(test)]
     impl TankWorld {
         #[cfg(test)]
@@ -416,7 +368,7 @@ pub mod tests {
     mod_api::impl_server_host_areas!(TankWorld, except(mod_state));
 
     #[cfg(test)]
-    fn potion(amount: u32, potion: &str) -> FluidStack {
+    pub(crate) fn potion(amount: u32, potion: &str) -> FluidStack {
         let mut components = horizon_items::item_data::StackData::default();
         components.potion = Some(Arc::from(potion));
         FluidStack {
@@ -429,7 +381,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_fluid_move_fills_only_with_the_same_fluid_and_components() {
+    pub(crate) fn a_fluid_move_fills_only_with_the_same_fluid_and_components() {
         game_thread();
         let mut world = TankWorld::default();
         world.tank(SOURCE, Some(potion(1500, "minecraft:healing")), true);
@@ -468,7 +420,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_fluid_move_tries_again_with_what_the_target_took_and_loses_nothing() {
+    pub(crate) fn a_fluid_move_tries_again_with_what_the_target_took_and_loses_nothing() {
         game_thread();
         let water = |amount| {
             FluidStack::new(
@@ -521,7 +473,8 @@ pub mod tests {
     }
 
     #[test]
-    fn a_handler_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_fluid() {
+    pub(crate) fn a_handler_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_fluid()
+     {
         game_thread();
         let water = |amount| {
             Some(FluidStack::new(

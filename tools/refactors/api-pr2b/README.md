@@ -1,0 +1,53 @@
+# Parts fragments become modules
+
+Part of #1608. Base used for the initial proof: `5f2ea648d8c02338082aa64def8ec1e98512985e`.
+
+The former generator merged repeated `Registrar`, `CapabilityProviders`, their trait
+implementations, inherent implementations, and `tests` envelopes in lexical filename
+order. Ordinary Rust modules cannot split a trait implementation across files. The
+move consolidates the two contracts and implementations in `parts/mod.rs`, while
+inherent methods and each kind's code/tests live in its module. `shared.rs` owns the
+same typed tables and thread-local state as before. No runtime logic moves crates.
+
+## Replay
+
+Build the existing developer tool with `cargo build -p horizon-mod-api-gen --bin
+part-table-layout`, then run `python3 tools/refactors/api-pr2b/move.py` on an unmoved
+tree. It uses `git mv` and changes only imports, visibility, enclosing scopes and
+paths. A repeated run rewrites paths only, including paths in `horizon-mod-runtime`
+if it exists. This is required on `registry_keys.rs` if #1624 lands first. Do not
+restore an old copy of that file over #1624's work.
+
+The generator edits (removing the join and supporting directory module roots in
+export assembly) are separate and small; apply those from the PR before building.
+`tools/split_part_table.py` remains the historical inverse move, not a current tool.
+
+## Proof
+
+Save the base build's `part_table_generated.rs` outside Cargo's build output before
+rebuilding. Then:
+
+```
+python3 tools/refactors/api-pr2b/compare_items.py SAVED_PART_TABLE --list
+python3 tools/refactors/api-pr2b/moved_lines_check.py BASE
+python3 tools/refactors/api-pr1/gate.py BASE
+```
+
+`compare_items.py` compares normalized signatures and bodies of all 595 items,
+including tests, and lists their destination modules. `moved_lines_check.py`
+compares a multiset of 6,080 canonical lines from the fragments and modules.
+Canonical formatting occurs after the declared path/visibility edits so wrapping
+does not manufacture a difference. Both omit use/mod/trait/impl envelope lines;
+comments are excluded from the moved-line check and trait-member rustdoc remains
+in the item comparison. The only identifier change is the local variable
+`installed` to `installed_parts` in two block test closures, to disambiguate real
+module imports. No bodies, constants, conditions or dispatch logic change.
+
+The PR 1 gate compares WIT, hook dispatch and the host manifest. Also compare
+`mod-api.wit` directly: for this move it is byte-identical, without reordering.
+
+Focused local checks: `cargo test -p horizon-mod-api --lib parts::`,
+`cargo test -p horizon-mod-api-gen exports::tests`, and
+`python3 -m unittest tests.test_mod_api_boundary`. Workspace checks and wasm32 are
+left to CI under the room's no-local-CI rule. No in-game trigger applies to a
+layout-only move.

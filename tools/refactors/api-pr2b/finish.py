@@ -1,0 +1,49 @@
+"""Module boundary visibility and fixture wiring, shared by the replay script."""
+from pathlib import Path
+import re
+
+
+def finish(api):
+    for p in (api / 'parts').glob('*.rs'):
+        s = p.read_text()
+        if p.name != 'mod.rs' and 'pub mod tests {' in s:
+            i = s.index('pub mod tests {')
+            a, b = s[:i], s[i:]
+            b = re.sub(r'^(    )(const|static|mod) ', r'\1pub(crate) \2 ', b, flags=re.M)
+            from move import layout
+            lines = b.splitlines(keepends=True)
+            test = layout(b)[0]
+            for item in test.get('children', []):
+                start, end = item['start'] - 1, item['end']
+                if re.search(r'^    (?:pub(?:\([^)]*\))? )?struct ', ''.join(lines[start:end]), re.M):
+                    for n in range(start, end):
+                        lines[n] = re.sub(r'^(        )(\w+:)', r'\1pub(crate) \2', lines[n])
+            b = ''.join(lines)
+            b = re.sub(r'(pub\(crate\) struct \w+\()([^\n]+)(\);)', lambda m: m[1] + ', '.join('pub(crate) '+x.strip() if not x.strip().startswith('pub') else x.strip() for x in m[2].split(',')) + m[3], b)
+            if p.stem == 'blocks':
+                b = b.replace('let installed = super::TEST_PARTS.get();', 'let installed_parts = super::TEST_PARTS.get();').replace('TEST_PARTS.set(installed)', 'TEST_PARTS.set(installed_parts)')
+            if p.stem == 'shared':
+                b = b.replace('use crate::*;', 'use crate::*;\n    use super::super::items::tests::Cell;')
+            if p.stem in ('effects', 'game_rules', 'key_mappings', 'structures', 'tickets'):
+                b = b.replace('    use crate::parts::tests::*;\n', '')
+            if p.stem == 'tickets':
+                b = b.replace('    use crate::*;\n', '')
+            if p.stem == 'shared':
+                for text in ('    #[cfg(test)]\n    use super::{Attached, KnownIds, resolve_parts};\n', '    #[cfg(test)]\n    use std::any::type_name;\n', '    #[cfg(test)]\n    use std::collections::{HashMap, HashSet};\n'):
+                    b = b.replace(text, '')
+            s = a + b
+        if p.name == 'mod.rs':
+            s = s.replace('pub mod tests {', '/// Shared Parts fixtures for engine tests.\npub mod tests {')
+            for kind in ('blocks', 'shared', 'capabilities'):
+                s = s.replace(f'pub(crate) use super::{kind}::tests::*;', f'pub use super::{kind}::tests::*;')
+            for kind in ('effects', 'game_rules', 'key_mappings', 'structures', 'tickets'):
+                s = s.replace(f'    pub(crate) use super::{kind}::tests::*;\n', '')
+            for kind in ('effects', 'fluids', 'structures', 'tickets'):
+                s = s.replace(f'pub use {kind}::*;', f'pub(crate) use {kind}::*;')
+            for kind in ('energy', 'menus'):
+                s = s.replace(f'pub use {kind}::*;\n', '')
+        if p.name == 'energy.rs':
+            s = s.replace('use super::*;\n', '#[cfg(any(test, feature = "testing"))]\nuse super::*;\n', 1)
+        p.write_text(s)
+    p = api / 'exports/part_table.rs'
+    p.write_text(p.read_text().replace('part_table::', 'parts::'))

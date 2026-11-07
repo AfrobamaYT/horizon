@@ -41,6 +41,11 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
                 let path = root
                     .join("crates/horizon-mod-api/src")
                     .join(format!("{}.rs", module.ident));
+                let path = if path.is_file() {
+                    path
+                } else {
+                    path.with_extension("").join("mod.rs")
+                };
                 let path = path.to_string_lossy();
                 module.attrs.push(syn::parse_quote!(#[path = #path]));
             } else if !matches!(item, Item::Use(_)) {
@@ -99,22 +104,11 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
         }
         Ok(out)
     }
-    let parts = source.contains(super::part_table::OUTPUT);
-    if !source.contains(PREFIX) && !parts {
+    if !source.contains(PREFIX) {
         return Ok(source.to_owned());
     }
     let mut file = syn::parse_file(source).map_err(|e| e.to_string())?;
-    let mut generated = if source.contains(PREFIX) {
-        sources(root)?
-    } else {
-        BTreeMap::new()
-    };
-    if parts {
-        generated.insert(
-            super::part_table::OUTPUT.to_owned(),
-            super::part_table::source(root)?,
-        );
-    }
+    let generated = sources(root)?;
     file.items = items(file.items, &generated)?;
     Ok(file.to_token_stream().to_string())
 }
