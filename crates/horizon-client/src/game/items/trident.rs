@@ -506,6 +506,18 @@ impl Game<'_> {
         .in_source(SoundSource::Players);
         self.play_bound_sound(throw, id, None);
     }
+    /// `settle_dealt_absorbed` for the player who threw a trident: a LAN guest's own
+    /// statistics are only reachable inside `as_guest`, so the host is not credited.
+    fn thrower_dealt_absorbed(&mut self, guest: Option<u32>) {
+        let Some(conn) = guest.filter(|c| self.lan_acting != Some(*c)) else {
+            self.settle_dealt_absorbed(true);
+            return;
+        };
+        let entered = self.as_guest(conn, |g| g.settle_dealt_absorbed(true));
+        if entered.is_none() {
+            self.settle_dealt_absorbed(false);
+        }
+    }
     /// The thrower's `PLAYER_HURT_ENTITY` for a trident hit: run as the
     /// guest that threw it, and not at all once they have left.
     fn thrower_hit(
@@ -597,9 +609,9 @@ impl Game<'_> {
     fn trident_taken(&mut self, t: &ThrownTrident, by: &Catcher) -> bool {
         if !t.creative_only {
             let rest = match by.guest {
-                None => self.give(t.stack.clone()),
+                None => self.add_stack_to_inventory(t.stack.clone()),
                 Some(conn) => {
-                    let rest = self.as_guest(conn, |g| g.give(t.stack.clone()));
+                    let rest = self.as_guest(conn, |g| g.add_stack_to_inventory(t.stack.clone()));
                     let Some(rest) = rest else {
                         return false;
                     };
@@ -868,6 +880,7 @@ impl Game<'_> {
                                 hurt_at = Some([m.position.x, m.position.y, m.position.z]);
                             }
                         }
+                        self.thrower_dealt_absorbed(t.guest);
                         // ThrownTrident.onHitEntity on a boat or minecart:
                         // VehicleEntity.hurtServer takes the damage.
                         let creative = t.guest.is_none() && self.creative;
