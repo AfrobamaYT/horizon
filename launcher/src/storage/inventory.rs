@@ -44,12 +44,18 @@ impl Category {
 
 struct Entry {
     category: Category,
-    root: PathBuf,
+    directory: Option<Dir>,
+    relative: PathBuf,
     path: PathBuf,
 }
 
 impl Entry {
     fn fixed(root: &Path, relative: &Path, category: Category) -> Result<Self, Error> {
+        let directory = match Dir::open_ambient_dir(root, cap_std::ambient_authority()) {
+            Ok(directory) => Some(directory),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
         let mut path = root.to_owned();
         checked(root, true)?;
         if root.exists() && root.canonicalize()? != root {
@@ -68,7 +74,8 @@ impl Entry {
         }
         Ok(Self {
             category,
-            root: root.to_owned(),
+            directory,
+            relative: relative.to_owned(),
             path,
         })
     }
@@ -202,31 +209,32 @@ impl Storage {
                 freed_bytes: 0,
             });
         }
-        for entry in entries {
+        for entry in &entries {
             if all || clear == Some(entry.category) {
-                let freed = if entry.path == self.root.join("native/target") {
-                    self.lease.clear()?
-                } else {
-                    // Recheck the fixed ancestor chain immediately before detaching it.
-                    let checked = Entry::fixed(
-                        &entry.root,
-                        entry
-                            .path
-                            .strip_prefix(&entry.root)
-                            .map_err(|_| Error::Unsafe(entry.path.clone()))?,
-                        entry.category,
-                    )?;
-                    self.trash(&checked.path)?
-                };
-                let row = rows
-                    .iter_mut()
-                    .find(|row| row.category == entry.category)
-                    .unwrap();
-                row.freed_bytes = row.freed_bytes.saturating_add(freed);
+                if entry.path == self.root.join("native/target") {
+                    self.lease.clear()?;
+                } else if let Some(directory) = &entry.directory {
+                    safe::clear_path(directory, &entry.relative)?;
+                }
+            }
+        }
+        for row in &mut rows {
+            if all || clear == Some(row.category) {
+                let mut seen = HashSet::new();
+                let mut remaining = 0u64;
+                for entry in entries
+                    .iter()
+                    .filter(|entry| entry.category == row.category)
+                {
+                    remaining = remaining.saturating_add(walk(&entry.path, &mut seen)?);
+                }
+                row.freed_bytes = row.bytes.saturating_sub(remaining);
             }
         }
         Ok(Report {
-            total_bytes: rows.iter().map(|row| row.bytes).sum(),
+            total_bytes: rows
+                .iter()
+                .fold(0u64, |total, row| total.saturating_add(row.bytes)),
             rows,
         })
     }

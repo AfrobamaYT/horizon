@@ -86,3 +86,24 @@ pub(super) fn clear(dir: &Dir, name: &Path) -> Result<(), Error> {
     }
     Ok(())
 }
+
+pub(super) fn clear_path(directory: &Dir, path: &Path) -> Result<(), Error> {
+    let mut parent = directory.try_clone()?;
+    let mut parts = path.components().peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            match parent.symlink_metadata(part.as_os_str()) {
+                Ok(_) => clear(&parent, Path::new(part.as_os_str()))?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error.into()),
+            }
+        } else {
+            match parent.open_dir_nofollow(part.as_os_str()) {
+                Ok(directory) => parent = directory,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(error) => return Err(error.into()),
+            }
+        }
+    }
+    Ok(())
+}
