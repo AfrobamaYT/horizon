@@ -11,7 +11,6 @@ pub use horizon_items::firework::FireworkShape;
 /// `item` is absent, the result item. Use [`crate::LevelRef::craft`] for an
 /// actual grid's output and remainders.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct RecipeTemplate {
     /// Replacement item, or `None` to keep the rule's input item.
     pub item: Option<String>,
@@ -34,7 +33,6 @@ impl RecipeTemplate {
 
 /// An ingredient that chooses a firework star's explosion shape.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct FireworkShapeIngredient {
     /// Shape selected by this ingredient.
     pub shape: FireworkShape,
@@ -50,7 +48,6 @@ impl FireworkShapeIngredient {
 
 /// A trim pattern registry reference or an inline pattern definition.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum RecipeTrimPattern {
     /// Registry identifier.
     Reference(String),
@@ -74,7 +71,6 @@ pub enum RecipeTrimPattern {
 /// template as a fixed stack. A mod-defined recipe type keeps its raw JSON
 /// instead of inventing a vanilla rule.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum RecipeRule {
     /// A stonecutter input and fixed result.
     Stonecutting {
@@ -245,7 +241,6 @@ pub enum RecipeRule {
 /// not fixed stacks; use [`LevelRef::craft`] to assemble a crafting grid.
 /// A mod's own type leaves these fields empty and keeps its `json`.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct RecipeSnapshot {
     /// `<namespace>:<path>`, its place under `data/<namespace>/recipe/`.
     pub id: String,

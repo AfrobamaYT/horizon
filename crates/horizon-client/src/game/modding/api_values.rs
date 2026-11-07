@@ -1,3 +1,4 @@
+// game-module-visibility: pub(crate)
 //! The game-owned conversion boundary between API records and engine values.
 //! Rust's orphan rule prevents foreign From/TryFrom implementations here.
 use horizon_core::nbt::{JavaString, Tag};
@@ -480,16 +481,25 @@ impl TryIntoApi for crate::crafting::RecipeSnapshot {
 pub(crate) fn install_stack_hooks() {
     crate::native_stack_hooks::install(crate::native_stack_hooks::StackHooks {
         ingredient_test: |context, kind, data, stack, accept| {
+            if !mod_api::__private::listened(mod_api::HookId::IngredientTest) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::crafting::native_ingredient_test(context, kind, data, &stack, accept);
             }
         },
         enchantments: |stack, target, value| {
+            if !mod_api::__private::listened(mod_api::HookId::GetEnchantmentLevel) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::enchantments::native_get_enchantment_level(&stack, target, value);
             }
         },
         attributes: |stack, value| {
+            if !mod_api::__private::listened(mod_api::HookId::ItemAttributeModifier) {
+                return;
+            }
             if let Ok(stack) = stack.try_into_api() {
                 mod_api::item_attributes::native_item_attribute_modifier(&stack, value);
             }
@@ -780,4 +790,167 @@ impl super::Game<'_> {
             self.native_anvil_craft_post(player, name, pos, &api);
         }
     }
+}
+
+#[cfg(test)]
+mod attribute_boundary_tests {
+    use super::EngineStack as ItemStack;
+    use crate::item_attributes::attribute_modifiers_or;
+    use horizon_items::item_data::ModifierRow;
+    use mod_api::{
+        AttributeModifier, AttributeOperation, EquipmentSlotGroup, Hooks, Identifier,
+        ItemAttributeModifierEvent, ModEntry, testing::with_mods,
+    };
+    use std::borrow::Cow;
+    /// Makes a netherite chestplate heavier: +0.4 knockback resistance in
+    /// the chest slot, and no armor toughness.
+    struct Heavy;
+    #[mod_api::__subscriptions]
+    impl Hooks for Heavy {
+        fn item_attribute_modifier(&self, event: &mut ItemAttributeModifierEvent<'_>) {
+            if mod_api::__private::item_key_id(event.stack.item())
+                != Some("minecraft:netherite_chestplate")
+            {
+                return;
+            }
+            let id = |text: &str| Identifier::parse(text).unwrap();
+            let heavy = |amount| {
+                AttributeModifier::new(id("test:heavy"), amount, AttributeOperation::AddValue)
+            };
+            let resistance = id("minecraft:knockback_resistance");
+            assert!(
+                event
+                    .modifiers
+                    .add(resistance.clone(), heavy(0.4), EquipmentSlotGroup::Chest)
+            );
+            // The id is taken on that attribute.
+            assert!(
+                !event
+                    .modifiers
+                    .add(resistance, heavy(1.0), EquipmentSlotGroup::Chest)
+            );
+            assert!(
+                event
+                    .modifiers
+                    .remove_all_for(&id("minecraft:armor_toughness"))
+            );
+        }
+    }
+
+    fn chestplate() -> Vec<ModifierRow> {
+        ["minecraft:armor", "minecraft:armor_toughness"]
+            .map(|attribute| {
+                ModifierRow::new(
+                    attribute,
+                    "minecraft:armor.chestplate",
+                    3.0,
+                    "add_value",
+                    "chest",
+                )
+            })
+            .to_vec()
+    }
+
+    /// A mod's edits are what the stack grants; a stack it leaves alone, and
+    /// any stack with no mod listening, keeps the item's list borrowed.
+    #[test]
+    fn a_mod_edits_what_a_stack_grants() {
+        super::prepare_stack_boundary_tests();
+        let types = chestplate();
+        let netherite = ItemStack::new("minecraft:netherite_chestplate", 1);
+        let diamond = ItemStack::new("minecraft:diamond_chestplate", 1);
+        with_mods(Vec::new().into(), || {
+            assert!(matches!(
+                attribute_modifiers_or(&netherite, &types),
+                Cow::Borrowed(_)
+            ));
+        });
+        with_mods(vec![ModEntry::new("heavy", Box::new(Heavy))].into(), || {
+            assert_eq!(
+                &*attribute_modifiers_or(&netherite, &types),
+                [
+                    types[0].clone(),
+                    ModifierRow::new(
+                        "minecraft:knockback_resistance",
+                        "test:heavy",
+                        0.4,
+                        "add_value",
+                        "chest"
+                    ),
+                ]
+            );
+            assert!(matches!(
+                attribute_modifiers_or(&diamond, &types),
+                Cow::Borrowed(_)
+            ));
+        });
+    }
+}
+
+#[cfg(test)]
+mod enchantment_boundary_tests {
+    use super::EngineStack as ItemStack;
+    use crate::enchantment_levels::get_enchantment_level;
+    use mod_api::{GetEnchantmentLevelEvent, Hooks, Identifier, ModEntry, testing::with_mods};
+    use std::borrow::Cow;
+    use std::sync::Arc;
+    fn id(text: &str) -> Identifier {
+        Identifier::parse(text).unwrap()
+    }
+    /// An iron sword fights as if it had Looting II and no Sharpness.
+    struct Keen;
+    #[mod_api::__subscriptions]
+    impl Hooks for Keen {
+        fn get_enchantment_level(&self, event: &mut GetEnchantmentLevelEvent<'_>) {
+            if mod_api::__private::item_key_id(event.stack.item()) != Some("minecraft:iron_sword") {
+                return;
+            }
+            let looting = id("minecraft:looting");
+            if event.target.is_none_or(|target| *target == looting) {
+                event.enchantments.upgrade(looting, 2);
+            }
+            event.enchantments.set(id("minecraft:sharpness"), 0);
+        }
+    }
+
+    /// Gameplay reads see the mod's levels; the stack's own component, a
+    /// stack the mod leaves alone and every stack with no mod listening
+    /// keep theirs, borrowed.
+    #[test]
+    fn a_mod_changes_the_levels_gameplay_reads() {
+        super::prepare_stack_boundary_tests();
+        let _ = horizon_items::native_enchantment_hooks::install(get_enchantment_level);
+        let mut iron = ItemStack::new("minecraft:iron_sword", 1);
+        iron.enchant("minecraft:sharpness", 3);
+        let mut diamond = ItemStack::new("minecraft:diamond_sword", 1);
+        diamond.enchant("minecraft:sharpness", 3);
+        with_mods(Vec::new().into(), || {
+            assert!(matches!(iron.all_enchantments(), Cow::Borrowed(_)));
+            assert_eq!(iron.enchantment_level("minecraft:sharpness"), 3);
+        });
+        with_mods(vec![ModEntry::new("keen", Box::new(Keen))].into(), || {
+            assert_eq!(
+                &*iron.all_enchantments(),
+                [(Arc::from("minecraft:looting"), 2)]
+            );
+            assert_eq!(iron.enchantment_level("minecraft:looting"), 2);
+            assert_eq!(iron.enchantment_level("minecraft:sharpness"), 0);
+            assert_eq!(iron.tag_enchantment_level("minecraft:sharpness"), 3);
+            assert_eq!(iron.enchantments(), [(Arc::from("minecraft:sharpness"), 3)]);
+            assert!(matches!(diamond.all_enchantments(), Cow::Borrowed(_)));
+            assert_eq!(diamond.enchantment_level("minecraft:sharpness"), 3);
+        });
+    }
+}
+
+#[cfg(test)]
+fn prepare_stack_boundary_tests() {
+    install_stack_hooks();
+    mod_api::__private::resolve_items([
+        "minecraft:iron_sword",
+        "minecraft:diamond_sword",
+        "minecraft:netherite_chestplate",
+        "minecraft:diamond_chestplate",
+    ])
+    .unwrap();
 }

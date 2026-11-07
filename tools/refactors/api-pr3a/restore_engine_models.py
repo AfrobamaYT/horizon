@@ -20,6 +20,9 @@ a = ing.index('    /// `Ingredient.test`')
 b = ing.index('    /// `test` with the loop context')
 ing = ing[:a]+ing[b:]
 ing = ing.replace('pub(crate) fn test_in', 'pub fn test_in')
+a = ing.index('/// How a shape')
+b = ing.index('impl Ingredient', a)
+ing = ing[:a] + ing[b:]
 # Common parsing is shared, not duplicated.
 helpers = s[s.index('/// Where `Ingredient::resolve`'):s.index('/// The walk both ingredient kinds share')]
 walk = s[s.index('/// The walk both ingredient kinds share'):start]
@@ -33,7 +36,7 @@ engine = ('//! Engine recipe ingredients and stack matching.\n'
           'use serde_json::Value;\nuse std::collections::HashSet;\n'
           'use mod_api::crafting::{WalkedIngredient, native_ingredient};\n'
           'pub use mod_api::crafting::Shape;\n'
-          'use crate::native_client_hooks::ingredient_test as native_ingredient_test;\n')
+          'use crate::native_stack_hooks::ingredient_test as native_ingredient_test;\n')
 write(client+'crafting/ingredient.rs', engine+helpers+ing)
 s = read(client+'crafting.rs').replace('use mod_api::__private::game::IngredientTest;\n','').replace('pub use mod_api::crafting::{Ingredient, Shape, native_ingredient, native_ingredient_test};', 'mod ingredient;\npub use ingredient::{Ingredient, Shape};')
 write(client+'crafting.rs',s)
