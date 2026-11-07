@@ -44,24 +44,30 @@ impl Game<'_> {
     /// menus, non-client hosts and a menu whose screen is not open, such as
     /// the inventory menu while playing.
     pub(super) fn menu_close(&mut self, menu: MenuRef) -> bool {
-        if self.is_logical_server() {
-            // `ServerPlayer.closeContainer` of a guest's menu; the inventory menu (window 0) is
-            // never closed.
-            let Some(conn) = self.native_menu_guest(menu).map(|guest| guest.conn) else {
-                return false;
-            };
-            if menu.fields().window == 0 {
-                return false;
-            }
-            self.guest_close_menus_and_tell(conn);
-            return true;
-        }
-        if self.screen != super::Screen::Inventory || self.native_client_menu_name(menu).is_none() {
+        if self.is_logical_server()
+            || self.screen != super::Screen::Inventory
+            || self.native_client_menu_name(menu).is_none()
+        {
             return false;
         }
         self.close_container();
         self.set_screen(super::Screen::Playing);
         self.capture(true);
+        true
+    }
+
+    /// `ServerPlayer.closeContainer` of a guest's menu: every menu they have open closes through
+    /// the path a disconnect and a `stillValid` failure use, then their client is told. Refuses
+    /// clients, stale menus, a player swapped in for a turn, and the inventory menu (window 0),
+    /// which is never closed.
+    pub(super) fn menu_close_container(&mut self, menu: MenuRef) -> bool {
+        if !self.is_logical_server() || menu.fields().window == 0 {
+            return false;
+        }
+        let Some(conn) = self.native_menu_guest(menu).map(|guest| guest.conn) else {
+            return false;
+        };
+        self.guest_close_menus_and_tell(conn);
         true
     }
 
@@ -639,7 +645,7 @@ mod tests {
                 .unwrap();
             let menu = game.player_container_menu(player).unwrap();
             assert_ne!(menu.container_id(game), Some(0));
-            assert!(menu.close(game));
+            assert!(menu.close_container(game));
             let guest = &game.lan.as_ref().unwrap().hub.guests[0];
             assert!(guest.menu.is_none(), "the menu is gone");
             assert!(guest.carried.is_none(), "the cursor stack went back");
@@ -653,18 +659,23 @@ mod tests {
                 4,
                 "to the inventory, none lost or doubled"
             );
-            assert!(!menu.close(game), "a stale menu is refused");
+            assert!(!menu.close_container(game), "a stale menu is refused");
             // The player's own inventory menu is never closed.
             let inventory = game.player_container_menu(player).unwrap();
             assert_eq!(inventory.container_id(game), Some(0));
-            assert!(!inventory.close(game));
+            assert!(!inventory.close_container(game));
         });
     }
 
     #[test]
     #[ignore = "needs prepared resources"]
     fn a_stack_is_thrown_from_the_eyes_as_player_drop_does() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+
         with_game(|game| {
+            // A body to throw from: `with_game` makes none.
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
             let stone = ItemStack::new("minecraft:stone", 3);
             let before = game.dropped.len();
             let id = game.drop_stack_from_eyes(stone.clone(), true).unwrap();

@@ -977,3 +977,72 @@ fn tick_advancement_notice_precedes_recipe_reward() {
     });
     std::fs::remove_dir_all(scratch).unwrap();
 }
+
+/// `PlayerRef::set_selected_slot` from inside the guest's own turn: their state is in place, so
+/// the slot is written there, and their client is still told (`leave_guest` sends nothing).
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn set_selected_slot_tells_an_acting_guests_client() {
+    with_guests(|game| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let host = game.lan.as_mut().unwrap();
+        let index = host.hub.guests.iter().position(|g| g.conn == 13).unwrap();
+        host.hub.guests.update(index, |guest| {
+            guest.sender = PlayerSender::new(tx, Arc::default())
+        });
+        game.as_guest(13, |game| {
+            let player = game.player(13).unwrap();
+            while rx.try_recv().is_ok() {}
+            assert!(player.set_selected_slot(game, 8));
+            assert!(
+                rx.try_recv().is_ok(),
+                "SetHeldSlot reaches the acting guest's client"
+            );
+            assert!(!player.set_selected_slot(game, 9));
+        })
+        .unwrap();
+        assert_eq!(game.lan.as_ref().unwrap().hub.guests[index].selected, 8);
+        // Parked again: the write goes to the guest record and is sent the same way.
+        let player = game.player(13).unwrap();
+        while rx.try_recv().is_ok() {}
+        assert!(player.set_selected_slot(game, 0));
+        assert!(
+            rx.try_recv().is_ok(),
+            "SetHeldSlot reaches a parked guest's client"
+        );
+        assert_eq!(game.lan.as_ref().unwrap().hub.guests[index].selected, 0);
+    });
+}
+
+/// `PlayerRef::drop_stack` hands a refused stack back: an empty one, and one a mod's `item_toss`
+/// vetoes, which the game itself would discard.
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_vetoed_drop_gives_the_stack_back() {
+    use horizon_client::items::ItemStack;
+    use mod_api::{Flow, Hooks, ItemTossEvent, ModEntry, ServerHost, testing::with_mods};
+
+    struct Veto;
+    #[mod_api::__subscriptions]
+    impl Hooks for Veto {
+        fn item_toss(&self, _: &mut dyn ServerHost, _: &mut ItemTossEvent<'_>) -> Flow {
+            Flow::Cancel
+        }
+    }
+    let mods = vec![ModEntry::new("veto", Box::new(Veto))];
+    with_mods(mods.into(), || {
+        with_guests(|game| {
+            let player = game.player(13).unwrap();
+            let stone = ItemStack::new("minecraft:stone", 3);
+            let before = game.dropped.len();
+            assert_eq!(
+                player.drop_stack(game, stone.clone(), true),
+                Some(stone.clone()),
+                "a vetoed toss comes back whole"
+            );
+            assert_eq!(game.dropped.len(), before, "and makes no item entity");
+            let empty = ItemStack::new("minecraft:stone", 0);
+            assert_eq!(player.drop_stack(game, empty.clone(), false), Some(empty));
+        });
+    });
+}

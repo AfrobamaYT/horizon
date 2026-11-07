@@ -447,14 +447,16 @@ pub trait PlayersBackendMut {
     /// first. Nothing is taken from an inventory: the stack is the caller's, taken out through
     /// the item places first, which is what separates it from giving or dropping into the
     /// inventory. `thrown_by_player` names the player as the item's thrower, as the drop key
-    /// does. False for an empty stack, a stale or dead player and a toss a mod canceled.
+    /// does. None when the stack is in the world; otherwise the stack comes back, untouched, for
+    /// the caller to put back: an empty stack, a stale or dead player, or a toss a mod canceled
+    /// (`item_toss`), so a refused drop never loses items.
     #[access(WorldOnly)]
     fn player_drop_stack(
         &mut self,
         player: PlayerRef,
         stack: ItemStack,
         thrown_by_player: bool,
-    ) -> bool;
+    ) -> Option<ItemStack>;
     /// Side: server.
     /// Remove a fake without treating it as a disconnect or saving it.
     #[access(WorldOnly)]

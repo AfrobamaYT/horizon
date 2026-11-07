@@ -979,9 +979,21 @@ impl Game<'_> {
         if slot >= 9 {
             return false;
         }
+        // The connection to tell: a parked guest's, or the acting guest's, whose state is in
+        // place for their turn (`leave_guest` stores the slot back but sends nothing). The host
+        // has none.
         let conn = match self.player_handle_read(player) {
             Some(PlayerRead::Guest(guest)) => Some(guest.conn),
-            _ => None,
+            Some(PlayerRead::Acting { .. }) => self.lan_acting_uuid.and_then(|uuid| {
+                self.lan
+                    .as_ref()?
+                    .hub
+                    .guests
+                    .iter()
+                    .find(|guest| guest.uuid == uuid)
+                    .map(|guest| guest.conn)
+            }),
+            None => None,
         };
         let changed = self.player_selected_slot(player) != Some(slot);
         if !self.native_as_player_handle(player, |game| {
@@ -1009,18 +1021,26 @@ impl Game<'_> {
     /// their view as an item entity with the drop key's pickup delay, the main hand swinging and
     /// `item_toss` asked first. Nothing is taken from an inventory: the stack is the caller's
     /// (take it out through the item places first). `thrown_by_player` names the player as the
-    /// thrower, as the drop key does. False for an empty stack, a stale or dead player and a
-    /// toss a mod canceled.
+    /// thrower, as the drop key does. None once the item is in the world; the stack back,
+    /// untouched, for an empty stack, a stale or dead player and a toss a mod canceled, so a
+    /// refused drop never loses items.
     pub(super) fn player_drop_stack(
         &mut self,
         player: PlayerRef,
         stack: ItemStack,
         thrown_by_player: bool,
-    ) -> bool {
+    ) -> Option<ItemStack> {
+        if stack.count == 0 {
+            return Some(stack);
+        }
+        // `throw_from_eyes` discards a vetoed toss, as `item_toss` always has: keep a copy so
+        // the caller gets it back.
+        let copy = stack.clone();
         let mut dropped = false;
-        self.native_as_player_handle(player, |game| {
+        let ran = self.native_as_player_handle(player, |game| {
             dropped = game.drop_stack_from_eyes(stack, thrown_by_player).is_some();
-        }) && dropped
+        });
+        (!(ran && dropped)).then_some(copy)
     }
 
     /// `Player.isSpectator`; Paper `HumanEntity#getGameMode`.

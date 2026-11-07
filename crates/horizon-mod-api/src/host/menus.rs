@@ -90,16 +90,12 @@ pub trait MenusClientBackendMut {
     /// True means submitted, not accepted by the server: its corrections win.
     #[access(WorldOnly)]
     fn menu_click(&mut self, menu: MenuRef, clicks: &[MenuClick]) -> bool;
-    /// Side: both.
-    /// On a client, close the local player's open container screen as Escape does
+    /// Side: client.
+    /// Close the local player's open container screen as Escape does
     /// (`AbstractContainerScreen.onClose`, `LocalPlayer.closeContainer`): the
     /// server is told (`ContainerClose`) and the screen goes. Refuses stale
-    /// menus and a menu whose screen is not open, such as the inventory menu
-    /// while playing. On a server, close a player's open menu as
-    /// `ServerPlayer.closeContainer` does, running the normal lifecycle once: the
-    /// container's lid, a vehicle's or a trade's stand-in, the carried stack back to the
-    /// inventory, `player_container_close`, and the client's window closed. Refuses stale
-    /// menus and the player's own inventory menu, which is never closed.
+    /// menus, non-client hosts and a menu whose screen is not open, such as
+    /// the inventory menu while playing. A server closes a menu with `close_container`.
     #[access(WorldOnly)]
     fn menu_close(&mut self, menu: MenuRef) -> bool;
     /// Side: client.
@@ -113,4 +109,19 @@ pub trait MenusClientBackendMut {
     /// opened. True means sent, not that the menu took it.
     #[access(WorldOnly)]
     fn menu_click_button(&mut self, menu: MenuRef, button: i32) -> bool;
+}
+/// The handles' server writes of the `menus` area, implemented by the game and reached through [`Backend`].
+// hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
+#[doc(hidden)]
+#[horizon_mod_api_macros::host_area]
+pub trait MenusBackendMut {
+    /// Side: server.
+    /// Close a player's open menu as `ServerPlayer.closeContainer` does, running the normal
+    /// lifecycle once: the container's lid, a vehicle's or a trade's stand-in, the crafting,
+    /// station and mount menus, the carried stack back to the inventory,
+    /// `player_container_close`, then the client's window closed (`ContainerClose`). Refuses
+    /// stale menus, clients, a player whose state is swapped in for a turn, and the player's own
+    /// inventory menu, which is never closed. A client closes its own screen with `close`.
+    #[access(WorldOnly)]
+    fn menu_close_container(&mut self, menu: MenuRef) -> bool;
 }
