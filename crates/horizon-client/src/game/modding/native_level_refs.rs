@@ -707,7 +707,6 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn loaded_chunks_lists_the_level_in_order_without_loading() {
         use horizon_client::chunk::Chunk;
-        use mod_api::Host;
         use std::sync::Arc;
 
         with_game(|game| {
