@@ -277,18 +277,7 @@ pub fn fingerprint(home: &Path, version: Option<&str>) -> String {
     let mut out = format!("{}\n{version:?}\n", home.display());
     // The on/off list (`browser::java::is_enabled`).
     out += &fs::read_to_string(home.join("horizon-mods.txt")).unwrap_or_default();
-    let mut packages = hmods(home);
-    // A wasm mod's declarations also select a source build's internals table.
-    packages.extend(
-        fs::read_dir(home.join(horizon_mod_package::mod_list::DIR))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "hmod")),
-    );
-    packages.sort();
-    for path in packages
+    for path in hmods(home)
         .into_iter()
         .flat_map(|p| [p.clone(), p.with_extension("origin.json")])
         .chain([home.join("mod-browser.json")])
