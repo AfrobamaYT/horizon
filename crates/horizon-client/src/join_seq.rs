@@ -424,11 +424,17 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     /// Extract selected owners eagerly in list order, compacting survivors in place.
     /// The predicate cannot replace an entity or change its identity.
     pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> std::vec::IntoIter<T> {
-        let extracted: Vec<_> = self.0.extract_if(.., |entity| take(entity)).collect();
-        if let Some(binding) = &self.1 {
-            binding.all(&extracted, residency::Change::Remove);
-        }
-        extracted.into_iter()
+        let binding = &self.1;
+        self.0
+            .extract_if(.., |entity| {
+                let removed = take(entity);
+                if removed && let Some(binding) = binding {
+                    binding.entity(entity, residency::Change::Remove);
+                }
+                removed
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         let entity = self.0.swap_remove(index);
@@ -1120,6 +1126,22 @@ mod tests {
             });
             assert_eq!(changes(&journal), expected);
         }
+    }
+
+    #[test]
+    fn journal_panicking_extract_if_keeps_events_and_survivors_in_sync() {
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            list.extract_if(|e| {
+                assert_ne!(e.value, 2, "predicate panic");
+                true
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(changes(&journal), [residency::Change::Remove(keys[0])]);
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), keys[1..]);
     }
 
     #[test]
