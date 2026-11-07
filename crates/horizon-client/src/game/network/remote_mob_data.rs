@@ -5,8 +5,8 @@
 use super::Game;
 use horizon_client::mobs::render::VILLAGER_TYPES;
 use horizon_client::mobs::{
-    Mob, Species, Who, armadillo, bat, bee, camel, creaking, drops, equine, finalize, illusioner,
-    panda, phantom, raider, sniffer, sync, tame, zombie_villager,
+    Mob, Species, Who, armadillo, bat, bee, camel, creaking, equine, finalize, illusioner, panda,
+    phantom, raider, sniffer, species::can_be_a_baby, sync, tame, zombie_villager,
 };
 use horizon_client::particles::{ParticleOptions, ParticleType};
 use horizon_protocol::entity_data::{Particle, ParticleData, Value};
@@ -89,11 +89,7 @@ fn apply(m: &mut Mob, values: &[(u8, i32, Value)], builtin: &Builtin, local_enti
             // AgeableMob.isBaby: `canBeABaby` too, so a parrot or a slime
             // sent as one is still drawn grown.
             (i, Value::Bool(b)) if Some(i) == baby => {
-                m.extra.age = if *b && drops::can_be_baby(species) {
-                    -1
-                } else {
-                    0
-                };
+                m.extra.age = if *b && can_be_a_baby(species) { -1 } else { 0 };
             }
             // AgeableMob.AGE_LOCKED, the entry after DATA_BABY_ID (not
             // Zombie's or Piglin's).
@@ -670,6 +666,7 @@ mod tests {
                     entity_id: 99,
                     spectator: false,
                     permission: 0,
+                    horizon: true,
                     moved: true,
                     position: [0.0; 3],
                     view_distance: 10,
@@ -832,6 +829,7 @@ mod tests {
                     entity_id: 99,
                     spectator: false,
                     permission: 0,
+                    horizon: true,
                     moved: true,
                     position: [0.0; 3],
                     view_distance: 10,

@@ -1,6 +1,6 @@
 use super::*;
 use crate::{assets::Assets, blocks::BlockFacts, items::Items};
-use horizon_mods::manifest::JarRef;
+use horizon_mod_package::manifest::JarRef;
 use horizon_world::native_load_context::DataLoadOrigin;
 
 #[path = "mod_content_block_entity_tests.rs"]
@@ -242,7 +242,7 @@ fn a_missing_jar_refuses_the_whole_load_before_decoded_output() {
     )
     .unwrap_err();
     let missing = error
-        .downcast_ref::<horizon_mods::manifest::MissingJar>()
+        .downcast_ref::<horizon_mod_package::manifest::MissingJar>()
         .unwrap();
     assert_eq!(missing.owners, ["alpha"]);
     assert_eq!(missing.jar, m.jars[0]);
@@ -250,6 +250,202 @@ fn a_missing_jar_refuses_the_whole_load_before_decoded_output() {
     assert!(!root.exists());
     assert!(!scratch.join("root-tables").exists());
     let _ = fs::remove_dir_all(&scratch);
+}
+
+#[test]
+#[ignore = "full content root: run explicitly with prepared resources"]
+fn block_aliases_keep_the_original_item_in_placement_context() {
+    use horizon_core::{
+        geometry::{Direction, Vec3},
+        position::BlockPos,
+        random::LegacyRandom,
+    };
+    use horizon_mod_package::content::{Block, Item};
+    use horizon_world::{
+        level::{
+            Behaviours, LevelAccess, LevelEvent, PlaceContext, PlaceOutcome, PlacementContext,
+            Ticks,
+        },
+        loot::PackOverlay,
+        registry::BlockStateId,
+    };
+    use std::{cell::RefCell, collections::HashMap};
+    let Some(base) = std::env::var_os("HORIZON_TEST_RESOURCES")
+        .map(PathBuf::from)
+        .or_else(prepared)
+    else {
+        return;
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-alias-context-{}", std::process::id()));
+    let mut content = Content::declared("ruby");
+    content
+        .declare(
+            &[Block {
+                id: "ruby:frame".into(),
+                template: "minecraft:stone".into(),
+                item: false,
+                ..Default::default()
+            }],
+            &["empty", "filled"].map(|name| Item {
+                id: format!("ruby:{name}"),
+                template: "minecraft:stick".into(),
+                block: Some("ruby:frame".into()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    build_fixture(
+        &base,
+        Path::new(""),
+        &[ContentMod {
+            id: "ruby".into(),
+            content,
+            jars: Vec::new(),
+        }],
+        &scratch,
+    )
+    .unwrap();
+    let registry = horizon_world::level::data::load_registry(&scratch).unwrap();
+    let facts = BlockFacts::load(&scratch, &registry).unwrap();
+    let defaults = horizon_world::item_defaults::read(&scratch).unwrap();
+    let items = Items::load(&scratch, &registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
+    let b = Behaviours::load(&registry, &scratch).unwrap();
+    let target = registry.default_state("ruby:frame").unwrap();
+    struct Level {
+        air: BlockStateId,
+        blocks: HashMap<BlockPos, BlockStateId>,
+        random: LegacyRandom,
+        asked: RefCell<Vec<String>>,
+        client: bool,
+    }
+    impl LevelAccess for Level {
+        fn block_state(&self, p: BlockPos) -> BlockStateId {
+            self.blocks.get(&p).copied().unwrap_or(self.air)
+        }
+        fn set_raw(&mut self, p: BlockPos, s: BlockStateId) -> Option<BlockStateId> {
+            Some(self.blocks.insert(p, s).unwrap_or(self.air))
+        }
+        fn is_loaded(&self, _: BlockPos) -> bool {
+            true
+        }
+        fn random(&mut self) -> &mut LegacyRandom {
+            &mut self.random
+        }
+        fn game_time(&self) -> i64 {
+            0
+        }
+        fn emit(&mut self, _: LevelEvent) {}
+        fn is_client_side(&self) -> bool {
+            self.client
+        }
+        fn before_state_for_placement(
+            &self,
+            _: BlockStateId,
+            c: &PlacementContext,
+            _: horizon_world::fluid::FluidState,
+            _: &mut Option<Option<BlockStateId>>,
+        ) {
+            self.asked.borrow_mut().push(c.item.clone());
+        }
+    }
+    for client in [false, true] {
+        let mut level = Level {
+            air: facts.air,
+            blocks: HashMap::new(),
+            random: LegacyRandom::new(1),
+            asked: RefCell::default(),
+            client,
+        };
+        for (i, name) in ["ruby:empty", "ruby:filled"].iter().enumerate() {
+            assert_eq!(items.get(name).unwrap().block, Some(target));
+            assert_eq!(b.item_binding(name).unwrap().block, b.block(target));
+            let pos = BlockPos::new(i as i32 * 2, 70, 0);
+            let ctx = PlaceContext {
+                clicked_pos: pos,
+                face: Direction::Up,
+                hit: Vec3::new(f64::from(pos.x) + 0.5, 70.0, 0.5),
+                inside: false,
+                yaw: 0.0,
+                pitch: 0.0,
+                sneaking: false,
+                item: (*name).into(),
+                can_use_game_master_blocks: false,
+            };
+            assert!(
+                matches!(b.place_block(&mut level,&mut Ticks::default(),&ctx),PlaceOutcome::Placed{state,..} if state==target)
+            );
+            assert_eq!(level.asked.borrow().last().map(String::as_str), Some(*name));
+        }
+    }
+    fs::remove_dir_all(scratch).unwrap();
+}
+
+#[test]
+fn block_compiles_ordinary_bindings_without_changing_components() {
+    use horizon_mod_package::content::Item;
+    let (base, mut mods) = block_base(
+        "place-block-bindings",
+        &[r#"{"template":"minecraft:test","item":false}"#],
+    );
+    let item = |id: &str, target: Option<&str>| Item {
+        id: id.into(),
+        template: "minecraft:test".into(),
+        block: target.map(str::to_owned),
+        ..Default::default()
+    };
+    mods[0]
+        .content
+        .declare(
+            &[],
+            &[
+                item("testmod:empty", Some("testmod:test")),
+                item("testmod:filled", Some("testmod:test")),
+                item("testmod:vanilla", Some("minecraft:test")),
+                item("testmod:plain", None),
+            ],
+        )
+        .unwrap();
+    let plan = Plan::new(&base, &mods).unwrap();
+    let mut behaviours:J=serde_json::from_str(r#"{"states":[{},{}],"blocks":[],"items":{"minecraft:test":{"class":["Item"],"fields":{}}}}"#).unwrap();
+    plan.json("block-behaviours.json", &mut behaviours).unwrap();
+    let behaviours = serde_json::to_value(behaviours).unwrap();
+    for name in ["empty", "filled", "vanilla"] {
+        let binding = &behaviours["items"][format!("testmod:{name}")];
+        assert_eq!(binding["class"], serde_json::json!(["BlockItem", "Item"]));
+        assert_eq!(
+            binding["fields"]["block"],
+            if name == "vanilla" {
+                "minecraft:test"
+            } else {
+                "testmod:test"
+            }
+        );
+    }
+    assert_eq!(
+        behaviours["items"]["testmod:plain"]["class"],
+        serde_json::json!(["Item"])
+    );
+    let mut components:J=serde_json::from_str(r#"{"minecraft:test":{"minecraft:max_stack_size":16,"minecraft:item_model":"minecraft:test"}}"#).unwrap();
+    plan.json("items.json", &mut components).unwrap();
+    let components = serde_json::to_value(components).unwrap();
+    assert_eq!(components["testmod:empty"]["minecraft:max_stack_size"], 16);
+    assert_eq!(
+        components["testmod:empty"]["minecraft:item_model"],
+        "testmod:empty"
+    );
+    drop(plan);
+    for target in ["testmod:missing", "testmod:plain", "minecraft:missing"] {
+        mods[0].content.items[0].block = Some(target.into());
+        assert!(
+            Plan::new(&base, &mods)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("not a block")
+        );
+    }
+    fs::remove_dir_all(base.parent().unwrap()).unwrap();
 }
 
 #[test]
@@ -320,7 +516,7 @@ fn item_components_patch_the_template_entry() {
 
 #[test]
 fn creative_tabs_keep_vanilla_items_missing_from_search() {
-    let tab = horizon_mods::content::CreativeTab {
+    let tab = horizon_mod_package::content::CreativeTab {
         id: "test:restricted".into(),
         title: "Restricted".into(),
         icon: "minecraft:barrier".into(),
@@ -816,7 +1012,7 @@ fn ruby_mod_with_pistons(dir: &Path, pistons: bool) -> ContentMod {
             .unwrap();
         }
     }
-    let package = horizon_mods::Package::read(dir).unwrap();
+    let package = horizon_mod_package::Package::read(dir).unwrap();
     ContentMod {
         id: "ruby".into(),
         content: Content::read(dir, &package.manifest).unwrap(),
@@ -1676,7 +1872,7 @@ fn content_root_carries_a_structure_mod() {
         base.join("worldgen/structure/minecraft/village/plains/houses/plains_small_house_1.nbt");
     fs::create_dir_all(dir.join("data/huts/structure")).unwrap();
     fs::copy(&house, dir.join("data/huts/structure/hut.nbt")).unwrap();
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "huts".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -2339,7 +2535,7 @@ fn folder_mod(dir: &Path, files: &[(&str, &str)]) -> ContentMod {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(dir).unwrap();
+    let package = horizon_mod_package::Package::read(dir).unwrap();
     ContentMod {
         id: package.manifest.id.clone(),
         content: Content::read(dir, &package.manifest).unwrap(),
@@ -2505,10 +2701,10 @@ fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
             )
         })
         .collect();
-    let inventory = |side: Option<horizon_mods::Side>| {
-        horizon_mods::enabled::EnabledMods::new(
+    let inventory = |side: Option<horizon_mod_package::Side>| {
+        horizon_mod_package::enabled::EnabledMods::new(
             mods.iter()
-                .map(|m| (m.id.clone(), horizon_mods::Side::Both))
+                .map(|m| (m.id.clone(), horizon_mod_package::Side::Both))
                 .chain(side.map(|side| ("code_only".into(), side))),
         )
     };
@@ -2526,7 +2722,7 @@ fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
         Path::new(""),
         &mods,
         &cache,
-        &inventory(Some(horizon_mods::Side::Both)),
+        &inventory(Some(horizon_mod_package::Side::Both)),
     )
     .unwrap();
     assert_ne!(on, off, "code-only IDs invalidate the flattened tag cache");
@@ -2540,7 +2736,7 @@ fn conditional_tag_layers_replace_only_when_server_inventory_accepts_them() {
         Path::new(""),
         &mods,
         &cache,
-        &inventory(Some(horizon_mods::Side::Client)),
+        &inventory(Some(horizon_mod_package::Side::Client)),
     )
     .unwrap();
     assert_eq!(read(&client)["values"], read(&off)["values"]);
@@ -3026,7 +3222,7 @@ fn connecting_blocks_join_themselves_and_their_tag() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "cable".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -3357,7 +3553,7 @@ fn mod_recipe_results_are_an_item_stack_or_a_bare_item_id() {
         );
         fs::write(dir.join(format!("data/ruby/recipe/{name}.json")), recipe).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "ruby".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -3446,7 +3642,7 @@ fn creative_tabs_come_on_their_own_page() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
-    let package = horizon_mods::Package::read(&dir).unwrap();
+    let package = horizon_mod_package::Package::read(&dir).unwrap();
     let m = ContentMod {
         id: "gems".into(),
         content: Content::read(&dir, &package.manifest).unwrap(),
@@ -5286,7 +5482,7 @@ fn biome_modifiers_take_one_biome_or_a_list() {
 #[test]
 #[ignore = "full content root: CI and pr_ready run it"]
 fn blocks_and_items_declared_in_code_get_ids() {
-    use horizon_mods::content::{Block, Item};
+    use horizon_mod_package::content::{Block, Item};
     let Some(base) = prepared() else {
         return;
     };
@@ -5406,7 +5602,7 @@ fn blocks_and_items_declared_in_code_get_ids() {
 
 #[test]
 fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
-    use horizon_mods::content::Item;
+    use horizon_mod_package::content::Item;
     let item = |id: &str, remainder: Option<&str>| Item {
         id: id.into(),
         template: "minecraft:diamond".into(),
@@ -5423,12 +5619,14 @@ fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
         }
     };
     let mut jar = make("jar", vec![item("jar:tool", Some("jar:jar"))]);
-    jar.content.blocks.push(horizon_mods::content::Block {
-        id: "jar:jar".into(),
-        template: "minecraft:glass".into(),
-        item: true,
-        ..Default::default()
-    });
+    jar.content
+        .blocks
+        .push(horizon_mod_package::content::Block {
+            id: "jar:jar".into(),
+            template: "minecraft:glass".into(),
+            item: true,
+            ..Default::default()
+        });
     let mut mods = vec![
         jar,
         make(
@@ -5997,7 +6195,7 @@ fn sign_text_colors_are_the_signs_dye_ids() {
         .iter()
         .map(|(name, _)| *name)
         .collect();
-    assert_eq!(names, horizon_mods::content::DYE_COLORS);
+    assert_eq!(names, horizon_mod_package::content::DYE_COLORS);
 }
 
 /// A content mod of recipes, a tag and a name, for vanilla's items: what
@@ -6177,7 +6375,7 @@ fn a_data_mod_loads_unloads_and_loads_again() {
 
     // Another set of mods builds its own root beside it and leaves this one as it was.
     let ruby = ruby_mod(&scratch.join("ruby"));
-    let package = horizon_mods::Package::read(&scratch.join("glint")).unwrap();
+    let package = horizon_mod_package::Package::read(&scratch.join("glint")).unwrap();
     let glint_again = ContentMod {
         id: "glint".into(),
         jars: Vec::new(),
@@ -6226,10 +6424,10 @@ fn roots_unused_for_a_day_are_removed() {
 
 // These fixtures accept every listed content package on both sides. Production
 // captures the inventory after admission, including active code-only packages.
-fn fixture_inventory(mods: &[ContentMod]) -> horizon_mods::enabled::EnabledMods {
-    horizon_mods::enabled::EnabledMods::new(
+fn fixture_inventory(mods: &[ContentMod]) -> horizon_mod_package::enabled::EnabledMods {
+    horizon_mod_package::enabled::EnabledMods::new(
         mods.iter()
-            .map(|package| (package.id.clone(), horizon_mods::Side::Both)),
+            .map(|package| (package.id.clone(), horizon_mod_package::Side::Both)),
     )
 }
 fn build_fixture(base: &Path, jars: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>> {
@@ -6242,4 +6440,19 @@ fn resource_root_fixture(
     cache: &Path,
 ) -> Result<PathBuf> {
     super::resource_root(base, jars, mods, cache, &fixture_inventory(mods))
+}
+
+/// Only 26.3's canonical worldgen feature folder is admitted.
+#[test]
+fn worldgen_entry_reads_the_feature_folder() {
+    assert_eq!(
+        worldgen_entry("data/zinc/worldgen/feature/ore_zinc.json"),
+        Some(("worldgen/features.json", "zinc:ore_zinc".to_owned()))
+    );
+    for folder in ["configured_feature", "nope"] {
+        assert_eq!(
+            worldgen_entry(&format!("data/zinc/worldgen/{folder}/ore_zinc.json")),
+            None
+        );
+    }
 }

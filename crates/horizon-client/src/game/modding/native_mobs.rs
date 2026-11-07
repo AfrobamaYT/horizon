@@ -109,7 +109,6 @@ impl Game<'_> {
 const PLAYER_SLOTS: [&str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
 
 /// A mob as a native mod reads it.
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct NativeMob {
     pub(crate) id: u32,
@@ -125,7 +124,6 @@ pub(crate) struct NativeMob {
 }
 
 /// What a mob starts with (`native_spawn_mob`); the default is a plain mob.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct NativeSpawn {
     /// A name over it, shown to everyone.
@@ -152,7 +150,7 @@ fn spawnable(pos: [f64; 3]) -> bool {
 }
 
 // Native mods use these; nothing in Horizon does.
-#[allow(dead_code)]
+#[allow(dead_code, reason = "native mod API (docs/native-mods.md)")]
 impl Game<'_> {
     /// Whether this is a level that simulates (not a client's copy) and the one
     /// in place is `dimension`.
@@ -241,7 +239,7 @@ impl Game<'_> {
     }
     /// Kills mob `id` as `/kill` does: it falls and drops its loot. False for
     /// no such living mob or another dimension.
-    pub(super) fn native_kill_mob(&mut self, dimension: &str, id: u32) -> bool {
+    pub(super) fn kill_mob(&mut self, dimension: &str, id: u32) -> bool {
         if self.native_mob(dimension, id).is_none() {
             return false;
         }

@@ -1,23 +1,9 @@
-//! The player's `Entity.boardingCooldown`: 60 ticks after leaving a vehicle in
-//! which a non-forced `startRiding` (`Entity.canRide`) is refused.
-//! Mobs keep theirs in `extra.boarding_cooldown`; a server's guests keep theirs
-//! in `Guest::boarding_cooldown`, swapped in for their turn like `riding`.
-use super::{Game, boat_passengers::BOARDING_COOLDOWN};
-
-/// `Entity.baseTick`: the cooldown counts down while positive.
-pub(super) fn tick_down(cooldown: i32) -> i32 {
-    (cooldown - 1).max(0)
-}
-
-/// `Entity.removePassenger`: the passenger that left sets its cooldown to 60.
-/// `was` and `now` are its vehicle before and after.
-pub(super) fn after_leaving(cooldown: i32, was: Option<u32>, now: Option<u32>) -> i32 {
-    if was.is_some() && now.is_none() {
-        BOARDING_COOLDOWN
-    } else {
-        cooldown
-    }
-}
+//! A player's `Entity.boardingCooldown` is always 0: `Player.removeVehicle`
+//! zeroes the 60 ticks `Entity.removePassenger` just set (#11158), so
+//! `Entity.canRide` only asks that the player is not sneaking, which each
+//! vehicle's interaction checks. Mobs keep theirs in `extra.boarding_cooldown`
+//! (`boat_passengers::BOARDING_COOLDOWN`).
+use super::Game;
 
 /// `Entity.getIndirectPassengersStream` for `vehicle`: the vehicle and every
 /// vehicle riding it, directly or through another rider. `mounts` holds
@@ -43,7 +29,82 @@ impl Game<'_> {
     /// vehicle carries.
     pub(super) fn start_riding(&mut self, vehicle: u32) {
         self.riding = Some(vehicle);
+        self.seat_acting_player(vehicle);
         self.note_started_riding(vehicle);
+    }
+
+    /// `Entity.passengers` of `vehicle`, first passenger first: each one's place, id and whether
+    /// it is a player. Places tie only for those that never boarded through `addPassenger` (a
+    /// load keeps its list order), players ahead.
+    pub(in crate::game) fn seated_passengers(&self, vehicle: u32) -> Vec<(i64, u32, bool)> {
+        let acting = self.lan_acting.filter(|_| self.player.is_some());
+        let mut acting_listed = false;
+        let mut seats: Vec<(i64, u32, bool)> = self
+            .lan
+            .iter()
+            .flat_map(|h| h.hub.guests.iter())
+            .filter(|g| g.placed && g.dimension == self.dim.id())
+            .filter(|g| {
+                let rides = if acting == Some(g.conn) {
+                    acting_listed = true;
+                    self.riding
+                } else {
+                    g.vehicle
+                };
+                rides == Some(vehicle)
+            })
+            .map(|g| (g.vehicle_order, g.entity_id as u32, true))
+            .collect();
+        // An acting player absent from the placed list has no place kept: it still rides
+        // through `riding`, at the front.
+        if let Some(me) = self.lan_acting_entity
+            && self.lan_acting_uuid.is_some()
+            && !acting_listed
+            && self.player.is_some()
+            && self.riding == Some(vehicle)
+        {
+            seats.push((i64::MIN, me, true));
+        }
+        seats.extend(
+            self.mobs
+                .iter()
+                .filter(|m| m.extra.mount == Some(vehicle) && !m.removed && m.alive())
+                .map(|m| (m.extra.vehicle_order, m.id, false)),
+        );
+        seats.sort_by_key(|&(place, ..)| place);
+        seats
+    }
+    /// `Entity.addPassenger`: the place of `rider` getting on `vehicle`. On a server a player
+    /// goes ahead of a first passenger that is no player; everything else goes last.
+    pub(in crate::game) fn boarding_order(&self, vehicle: u32, rider: u32, player: bool) -> i64 {
+        let mut aboard = self.seated_passengers(vehicle);
+        aboard.retain(|&(_, id, _)| id != rider);
+        match (aboard.first(), aboard.last()) {
+            (Some(&(first, _, false)), _) if player => first - 1,
+            (_, Some(&(last, ..))) => last + 1,
+            _ => 0,
+        }
+    }
+    /// `addPassenger` for the mob `id`, linked to its vehicle just now.
+    pub(in crate::game) fn seat_mob(&mut self, id: u32) {
+        let mount = self.mobs.iter().find(|m| m.id == id);
+        let Some(vehicle) = mount.and_then(|m| m.extra.mount) else {
+            return;
+        };
+        let order = self.boarding_order(vehicle, id, false);
+        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
+            m.extra.vehicle_order = order;
+        }
+    }
+    /// `addPassenger` for the acting guest, now in `vehicle`.
+    pub(in crate::game) fn seat_acting_player(&mut self, vehicle: u32) {
+        let (Some(conn), Some(me)) = (self.lan_acting, self.lan_acting_entity) else {
+            return;
+        };
+        let order = self.boarding_order(vehicle, me, true);
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.update_guest(conn, |g| g.vehicle_order = order);
+        }
     }
 
     /// A rider link changed on `vehicle` (`sendEventAndTriggers`). Every
@@ -63,47 +124,11 @@ impl Game<'_> {
             self.trigger_started_riding(vehicle);
         }
     }
-
-    /// `Entity.canRide` for the player acting now (the host's, or the guest
-    /// whose turn it is): the cooldown has elapsed, and the player did not
-    /// leave a vehicle since the tick began (the tick that starts the
-    /// cooldown has not run yet).
-    pub(super) fn may_board(&self) -> bool {
-        self.boarding_cooldown <= 0 && !(self.riding_at_tick.is_some() && self.riding.is_none())
-    }
-    /// The host's own cooldown, once per tick.
-    pub(super) fn tick_boarding(&mut self) {
-        self.boarding_cooldown = tick_down(self.boarding_cooldown);
-        self.boarding_cooldown =
-            after_leaving(self.boarding_cooldown, self.riding_at_tick, self.riding);
-        self.riding_at_tick = self.riding;
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn leaving_sets_sixty_and_boarding_waits_it_out() {
-        let mut cd = after_leaving(0, Some(7), None);
-        assert_eq!(cd, 60);
-        for _ in 0..59 {
-            cd = tick_down(cd);
-            assert!(cd > 0, "still refused");
-        }
-        cd = tick_down(cd);
-        assert_eq!(cd, 0, "allowed on the sixtieth tick");
-    }
-    #[test]
-    fn staying_or_boarding_does_not_set_it() {
-        assert_eq!(after_leaving(0, Some(7), Some(7)), 0);
-        assert_eq!(after_leaving(0, None, Some(7)), 0);
-        assert_eq!(after_leaving(0, None, None), 0);
-    }
-    #[test]
-    fn never_negative() {
-        assert_eq!(tick_down(0), 0);
-    }
     #[test]
     fn started_riding_reaches_every_rider_of_the_vehicle() {
         // Entity.startRiding: START_RIDING_TRIGGER for every ServerPlayer in

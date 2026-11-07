@@ -58,35 +58,41 @@ hooks this game doesn't have, or has with another type, names the first such imp
 
 ## Listening at points
 
-A wasm mod listens at the game's [points](../injections.md) as a native mod does: the same
-`#[mod_api::horizon_mod] impl mod_points::Points`, and one `[[native.injection]]` per place in
-`horizon-mod.toml`, with no `game` or commit pins beside `[wasm]`. The sample listens at the tick:
+API function slots use `[[inject]]`, with a crate-root function named by `with`, without an implementation trait. The [chat fixture's manifest](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/horizon-mod.toml)
+and [listener](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/src/lib.rs) are compiled examples.
+The function takes the point's host and API record (only the record for a hostless point).
 
-```toml
-[[native.injection]]
-id = "count_ticks"
-target = "horizon_client::game::Game<'_>::tick"
-kind = "HEAD"
-trait_method = "tick"
-```
+A build script parses the manifest once, projects its validated declarations into
+`horizon_mod_api_gen::points::GuestInject`, and calls `guest_exports` with the pinned game's root.
+This generates the one generic listeners export, including its subscriptions and record shapes.
+The [shared fixture build script](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/build.rs) shows the
+complete path; the generator itself has no manifest-crate dependency. Include its output in the guest
+bootstrap, not one hand-written wasm adapter per point.
 
-At load the game checks each place the `mod.wasm` fills against this list and against its own points:
-a place the list doesn't name, a listed place the mod doesn't fill, a `target` this game has no point
-at, or a point whose record changed since the mod was built refuses the mod and names the place. A
-listener changes its record's fields (`cancel`, `result`, the arguments) as a native one does, and the
-game takes them back when it returns. API-typed points use `trait_method`; a raw point uses the
-generated internals view below. A `helper` needs a native mod. A point call costs about as much as a hook call (a few hundred nanoseconds on a
-release build), and a place nobody listens at costs nothing.
+The loader supports API `head` and `return`, including priorities and multiple declarations at one
+place. Each export is checked by inject id and record shape, then registered by its checked export
+index alongside native functions. Missing, undeclared and changed records refuse the mod. Other
+access forms and kinds are explicitly refused pending the remaining wasm routing. Full route/hash
+checks and the rest of the wasm inject kinds follow separately.
+
+A listener changes its record's fields (`cancel`, `result`, the arguments), and the game takes them
+back when it returns. Internals use the view below. Source mixins require a native mod.
 
 ## Declared internals at raw points
 
 For internals that the typed API does not yet cover, add `horizon-mod-internals` (library name
 `mod_internals`) to the mod's Cargo dependencies. Declare each internal with
-`cargo horizon-mod internals add <path>` and use `raw = "<function>"` instead of `trait_method`
-on its injection. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
+`cargo horizon-mod internals add <path>` and use `raw = "<function>"` for its internals declaration.
+Its raw-only schema accepts `id`, `target`, `kind` (`HEAD` or `RETURN`) and `raw`; API functions
+are declared only through `[[inject]]`. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
 `internals.json` and generates `mod_internals::view` for exactly those declarations and the
 types they reach. The generated code stays in Cargo's build directory. Opaque types and
 functions that cannot cross the sandbox are refused at build, naming the declaration.
+GPU, window, input-device and audio types (`wgpu`, `winit`, `gilrs`, `cpal`, `rodio`, `glyphon`)
+are opaque, except these `winit` key and mouse types, which cross by copy: `keyboard::KeyCode`,
+`PhysicalKey`, `NativeKeyCode`, `KeyLocation` and `ModifiersState` (as its `u32` bits), and
+`event::ElementState` and `MouseButton`. `KeyCode` is `#[non_exhaustive]`, so it, `PhysicalKey`
+and anything holding them are read-only.
 
 Call `mod_internals::raw_listeners!(first, second, ...)` once, listing the functions in the
 manifest's raw-injection order. Each takes its generated raw record and an optional receiver:
@@ -160,6 +166,13 @@ counts toward these byte limits too. A value can contain at most 1 MiB of string
 A write is checked against its field's codec before entering the journal. Exceeding these limits returns
 `NotHere("internals budget")`. With fuel enabled, every import costs 1 plus its input and output
 cells; a native thunk call also costs a fixed 1,000 fuel units.
+
+Incoming values are limited to 65,536 cells and 1 MiB of decoded string bytes each.
+String lengths are checked and fuel is charged before their payloads are copied into
+host memory, including strings nested in call arguments and batch writes. A function
+call checks the declared thunk's argument count before lifting those arguments; each
+accepted argument keeps its own value budget. Batches retain the twelve-entry limit
+and per-entry refusals.
 
 **Native work inside a thunk is not interruptible.** Fuel and deadlines limit the wasm listener,
 not the duration of a native function it calls. Daily prebuilts contain thunks only for paths in

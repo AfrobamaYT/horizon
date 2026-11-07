@@ -3,7 +3,6 @@
 use super::Game;
 pub use mod_api::game::{NativeBlockEdit, NativeBlockRun, NativeHeightmap};
 
-#[allow(dead_code)]
 impl Game<'_> {
     /// For a server mod: the runs made at once, straight into the chunks of the authoritative level `dimension`
     /// (the one being ticked, as for `native_set_block`), with what `fill ... strict` does for block entities (a
@@ -13,7 +12,7 @@ impl Game<'_> {
     /// why the edit was left out, with nothing changed: another dimension, a client of a server, a palette entry
     /// or filter that doesn't read or carries NBT (refused), a run naming a palette entry or filter past the end,
     /// or more than 65536 filters.
-    pub(super) fn native_edit_blocks(
+    pub(super) fn edit_blocks(
         &mut self,
         dimension: &str,
         edit: &NativeBlockEdit,
@@ -22,7 +21,7 @@ impl Game<'_> {
             return Err(format!("{dimension} is not the level being ticked"));
         }
         let started = std::time::Instant::now();
-        let changed = self.edit_blocks(edit)?;
+        let changed = self.apply_block_edit(edit)?;
         let ms = started.elapsed().as_secs_f32() * 1000.0;
         if self.options.spikes.is_some_and(|threshold| ms > threshold) {
             log::info!(

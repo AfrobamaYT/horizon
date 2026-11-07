@@ -1,0 +1,227 @@
+//! Load-owned declarations and resolved mappings for registration-slot keys.
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
+
+#[derive(Clone, Default)]
+pub struct Requests {
+    pub game_rules: Names,
+    pub blocks: Names,
+    pub fluids: Names,
+    pub declared_fluids: HashMap<String, &'static str>,
+    pub items: Names,
+    pub effects: Names,
+    pub block_entity_types: Names,
+}
+
+#[derive(Clone, Default)]
+pub struct Names {
+    pub entries: Vec<Request>,
+    pub slots: HashMap<String, u32>,
+    pub utf16_slots: HashMap<Vec<u16>, u32>,
+    pub world_fluids: Vec<Option<u32>>,
+}
+
+#[derive(Clone)]
+pub struct Request {
+    pub id: String,
+    pub mods: Vec<&'static str>,
+}
+
+impl Names {
+    pub fn request(&mut self, mod_id: &'static str, id: &str) -> Result<u32, String> {
+        // Match the registry boundary's identifier classification, including the default namespace.
+        let id = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        if horizon_core::identifier::Identifier::parse_namespaced(&id).is_none() {
+            return Err(format!("mod {mod_id}: invalid registry key {id:?}"));
+        }
+        let slot = *self.slots.entry(id.clone()).or_insert_with(|| {
+            let slot = u32::try_from(self.entries.len()).expect("registry key slots exhausted");
+            self.entries.push(Request {
+                id,
+                mods: Vec::new(),
+            });
+            slot
+        });
+        let mods = &mut self.entries[slot as usize].mods;
+        if !mods.contains(&mod_id) {
+            mods.push(mod_id);
+        }
+        Ok(slot)
+    }
+
+    pub fn id(&self, slot: u32) -> Option<&str> {
+        self.entries
+            .get(slot as usize)
+            .map(|entry| entry.id.as_str())
+    }
+
+    pub fn resolve<T, E>(
+        &self,
+        mut resolve: impl FnMut(&str) -> Option<T>,
+        mut unknown: impl FnMut(&'static str, &str) -> E,
+    ) -> Result<Vec<T>, Vec<E>> {
+        let mut values = Vec::with_capacity(self.entries.len());
+        let mut errors = Vec::new();
+        for entry in &self.entries {
+            match resolve(&entry.id) {
+                Some(value) => values.push(value),
+                None => errors.extend(entry.mods.iter().map(|mod_id| unknown(mod_id, &entry.id))),
+            }
+        }
+        if errors.is_empty() {
+            Ok(values)
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+/// The vanilla dimensions, at the slots of `DimensionKey`'s constants.
+const VANILLA_DIMENSIONS: [&str; 3] = [
+    "minecraft:overworld",
+    "minecraft:the_nether",
+    "minecraft:the_end",
+];
+
+/// The dimensions past vanilla's the game has met, in slot order. Only grows: a key handed out
+/// stays valid until exit, and both of a process's `Game`s number a dimension alike.
+#[derive(Default)]
+struct ExtraDimensions {
+    names: Vec<&'static str>,
+    slots: HashMap<&'static str, u32>,
+}
+
+static EXTRA_DIMENSIONS: LazyLock<RwLock<ExtraDimensions>> = LazyLock::new(RwLock::default);
+
+/// The key of dimension `id`, numbering it when the game meets it for the first time.
+pub fn dimension_slot(id: &str) -> u32 {
+    if let Some(slot) = VANILLA_DIMENSIONS.iter().position(|name| *name == id) {
+        return slot as u32;
+    }
+    let first = VANILLA_DIMENSIONS.len() as u32;
+    if let Some(slot) = EXTRA_DIMENSIONS.read().unwrap().slots.get(id) {
+        return first + slot;
+    }
+    let mut extra = EXTRA_DIMENSIONS.write().unwrap();
+    if let Some(slot) = extra.slots.get(id) {
+        return first + slot;
+    }
+    let slot = extra.names.len() as u32;
+    let name: &'static str = Box::leak(id.to_owned().into_boxed_str());
+    extra.names.push(name);
+    extra.slots.insert(name, slot);
+    first + slot
+}
+
+/// The name of a dimension's key, None for a slot the game never gave out.
+pub fn dimension_id(slot: u32) -> Option<&'static str> {
+    let slot = slot as usize;
+    VANILLA_DIMENSIONS.get(slot).copied().or_else(|| {
+        let extra = EXTRA_DIMENSIONS.read().unwrap();
+        extra.names.get(slot - VANILLA_DIMENSIONS.len()).copied()
+    })
+}
+
+/// The resolved effect slots. Effects remain fixed for the process, as does their registry.
+#[derive(Default)]
+pub struct Effects {
+    pub names: Names,
+    pub indices: Vec<usize>,
+    pub keys: Vec<u32>,
+}
+
+/// A failure to resolve an effect declaration against the complete registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectResolutionError {
+    /// A requesting mod named an effect absent from the registry.
+    UnknownEffect { mod_id: &'static str, id: String },
+    /// The resolver returned an index outside the supplied registry.
+    InvalidIndex {
+        id: String,
+        index: usize,
+        registry_len: usize,
+    },
+}
+
+impl std::fmt::Display for EffectResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownEffect { mod_id, id } => {
+                write!(f, "mod {mod_id} requested unknown effect {id}")
+            }
+            Self::InvalidIndex {
+                id,
+                index,
+                registry_len,
+            } => {
+                write!(
+                    f,
+                    "effect {id} resolved to index {index} outside registry of length {registry_len}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for EffectResolutionError {}
+
+/// Resolve requested effects once, after every mod's content has been registered.
+/// Refuses missing effects and resolver indices outside the supplied registry.
+pub fn resolve_effects<'a>(
+    requests: &Names,
+    ids: impl IntoIterator<Item = &'a str>,
+    mut resolve: impl FnMut(&str) -> Option<usize>,
+) -> Result<Effects, Vec<EffectResolutionError>> {
+    let all: Vec<_> = ids.into_iter().collect();
+    let mut names = requests.clone();
+    // Hooks and effect enumeration may expose entries no mod explicitly requested.
+    for id in &all {
+        names
+            .request("horizon", id)
+            .expect("registry owns valid ids");
+    }
+    let indices = names.resolve(&mut resolve, |mod_id, id| {
+        EffectResolutionError::UnknownEffect {
+            mod_id,
+            id: id.to_owned(),
+        }
+    })?;
+    let mut keys = vec![u32::MAX; all.len()];
+    for (slot, &index) in indices.iter().enumerate() {
+        let Some(key) = keys.get_mut(index) else {
+            return Err(vec![EffectResolutionError::InvalidIndex {
+                id: names.entries[slot].id.clone(),
+                index,
+                registry_len: all.len(),
+            }]);
+        };
+        *key = slot as u32;
+    }
+    Ok(Effects {
+        names,
+        indices,
+        keys,
+    })
+}
+
+/// Resolve all block entity types after registration and content loading.
+pub fn resolve_block_entity_types<'a, T>(
+    requests: &Names,
+    ids: impl IntoIterator<Item = &'a str>,
+    resolve: impl FnMut(&str) -> Option<T>,
+) -> Result<Names, Vec<String>> {
+    let mut names = requests.clone();
+    names.resolve(resolve, |mod_id, id| {
+        format!("mod {mod_id} requested unknown block entity type {id}")
+    })?;
+    for id in ids {
+        names
+            .request("horizon", id)
+            .expect("registry owns valid ids");
+    }
+    Ok(names)
+}

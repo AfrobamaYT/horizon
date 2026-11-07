@@ -1551,6 +1551,8 @@ pub enum Event {
     Close,
     /// Settings changed: apply and save them.
     Changed,
+    /// The reduced-debug-info option rebuilt the debug entry list.
+    DebugEntriesChanged,
     /// A slider is being dragged: apply settings live but defer saving.
     SliderDrag,
     /// A category volume slider (`SoundSource` index) moved to a new value,
@@ -1613,6 +1615,8 @@ pub enum Event {
     PlayMusicTrack(String, String),
     /// Open the recordings folder in the system file browser.
     OpenStudioFolder,
+    /// Start playback from the selected Studio recording.
+    OpenStudioReplay(std::path::PathBuf),
 }
 /// A row of the Music page: the track, and the pool it is played from.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2582,7 +2586,7 @@ impl OptionsUi {
     /// chunks were decoded with: changing it mid-world remaps their ids
     /// (Forge/Fabric freeze the registry before a world opens). One with only
     /// assets and data reloads live, and a native mod toggles live through
-    /// `native_on`, so they stay available.
+    /// `on`, so they stay available.
     fn mod_frozen(&self, installed: &crate::mod_list::Installed) -> bool {
         self.in_world && installed.native.is_none() && !self.mods_live.contains(&installed.id)
     }
@@ -4219,6 +4223,9 @@ impl OptionsUi {
             return match self.studio.click((x, y), size) {
                 StudioAction::None => Vec::new(),
                 StudioAction::Refresh => vec![Event::ButtonClick],
+                StudioAction::OpenReplay(path) => {
+                    vec![Event::ButtonClick, Event::OpenStudioReplay(path)]
+                }
                 StudioAction::OpenFolder => vec![Event::ButtonClick, Event::OpenStudioFolder],
                 StudioAction::Back => {
                     let mut events = vec![Event::ButtonClick];
@@ -4565,6 +4572,9 @@ impl OptionsUi {
     ) -> Vec<Event> {
         let mut events = Vec::new();
         opt.cycle(s, back, framebuffer);
+        if opt == Opt::ReducedDebugInfo {
+            events.push(Event::DebugEntriesChanged);
+        }
         if opt == Opt::Preset {
             apply_preset(s);
         }
@@ -4706,6 +4716,10 @@ impl OptionsUi {
         }
         if Self::graphics_page(self.page()).is_some() {
             self.graphics.scroll(s, size, amount);
+            return;
+        }
+        if self.page() == Page::Studio {
+            self.studio.wheel(amount);
             return;
         }
         if Self::controller_page(self.page()).is_some() {
@@ -7812,7 +7826,7 @@ mod tests {
 
     /// A content mod's set builds the block-state tables an open world's
     /// chunks were decoded with, so its toggle freezes in-world; a native
-    /// mod gates live through `native_on` and one of assets and data reloads
+    /// mod gates live through `on` and one of assets and data reloads
     /// live, so they stay available.
     #[test]
     fn in_a_world_only_live_mod_toggles_stay_active() {

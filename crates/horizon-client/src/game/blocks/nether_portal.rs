@@ -272,7 +272,17 @@ fn arrival_from_tag(a: &Tag) -> Option<Arrival> {
 impl Game<'_> {
     /// The world border's extent.
     pub(super) fn border_bounds(&self) -> BorderBounds {
-        let [min_x, min_z, max_x, max_z] = self.border.bounds();
+        self.border_bounds_of(self.dim)
+    }
+    /// The extent of `dim`'s own border (`ServerLevel.getWorldBorder`), the level in place or a
+    /// parked one.
+    fn border_bounds_of(&self, dim: Dim) -> BorderBounds {
+        let border = if dim == self.dim {
+            &self.border
+        } else {
+            self.levels.parked_border(dim).unwrap_or(&self.border)
+        };
+        let [min_x, min_z, max_x, max_z] = border.bounds();
         BorderBounds {
             min_x,
             min_z,
@@ -332,7 +342,10 @@ impl Game<'_> {
         };
         Plan {
             dim: target,
-            approximate: self.border_bounds().clamp(at.x * scale, at.y, at.z * scale),
+            // getPortalDestination clamps to the border of the level it leads to.
+            approximate: self
+                .border_bounds_of(target)
+                .clamp(at.x * scale, at.y, at.z * scale),
             entry_x_axis,
             offset,
             width,
@@ -435,9 +448,9 @@ impl Game<'_> {
         }
         out
     }
-    /// The exit portal of `plan` in the loaded dimension: the closest one
-    /// within reach, else one built by `PortalForcer.createPortal`.
-    pub(super) fn nether_exit_portal(&mut self, plan: &Plan) -> Option<FoundRectangle> {
+    /// `PortalForcer.findClosestPortalPosition` and the rectangle around it,
+    /// for `plan` in the loaded dimension; builds nothing.
+    pub(super) fn find_exit_portal(&mut self, plan: &Plan) -> Option<(BlockPos, FoundRectangle)> {
         let to_nether = plan.dim == Dim::Nether;
         let radius = if to_nether { 16 } else { 128 };
         let border = self.border_bounds();
@@ -450,21 +463,29 @@ impl Game<'_> {
             &border,
             min_section,
             max_section,
+        )?;
+        let state = self.world.block(found.x, found.y, found.z);
+        let x_axis = self.res.behaviours().portal_axis(state).unwrap_or(true);
+        let rectangle = largest_rectangle_around(
+            found,
+            if x_axis { Axis::X } else { Axis::Z },
+            21,
+            Axis::Y,
+            21,
+            |p| self.world.block(p.x, p.y, p.z) == state,
         );
-        if let Some(found) = found {
+        Some((found, rectangle))
+    }
+    /// The exit portal of `plan` in the loaded dimension: the closest one
+    /// within reach, else one built by `PortalForcer.createPortal`.
+    pub(super) fn nether_exit_portal(&mut self, plan: &Plan) -> Option<FoundRectangle> {
+        let to_nether = plan.dim == Dim::Nether;
+        let border = self.border_bounds();
+        if let Some((found, rectangle)) = self.find_exit_portal(plan) {
             // NetherPortalBlock.getExitPortal: the ticket goes on the chunk
             // of the portal found.
             self.place_portal_ticket((found.x >> 4, found.z >> 4));
-            let state = self.world.block(found.x, found.y, found.z);
-            let x_axis = self.res.behaviours().portal_axis(state).unwrap_or(true);
-            return Some(largest_rectangle_around(
-                found,
-                if x_axis { Axis::X } else { Axis::Z },
-                21,
-                Axis::Y,
-                21,
-                |p| self.world.block(p.x, p.y, p.z) == state,
-            ));
+            return Some(rectangle);
         }
         let logical = if to_nether { 128 } else { 384 };
         let (approximate, x_axis) = (plan.approximate, plan.entry_x_axis);
@@ -734,7 +755,7 @@ impl Game<'_> {
     /// `canUsePortal(false)` of a mob: what the mob itself decides
     /// (`mobs::mob_can_use_portal`), riding nothing, not asleep, and not
     /// carrying the players this side does.
-    pub(super) fn mob_can_use_portal(&self, m: &horizon_client::mobs::Mob) -> bool {
+    pub(super) fn mob_portal_eligible(&self, m: &horizon_client::mobs::Mob) -> bool {
         horizon_client::mobs::mob_can_use_portal(m)
             && m.extra.mount.is_none()
             && self.riding != Some(m.id)
@@ -821,14 +842,14 @@ impl Game<'_> {
             .iter_mut()
             .filter(|t| only.is_none() && (!t.in_ground || t.previous != t.position))
         {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+            super::entity::assign_stored_id(&mut self.next_entity, &mut t.id, None);
         }
         for r in self
             .rockets
             .iter_mut()
             .filter(|r| only.is_none() && r.attached_to.is_none() && !r.attached)
         {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
+            super::entity::assign_stored_id(&mut self.next_entity, &mut r.id, None);
         }
         let mut inside: Vec<(u32, BlockPos)> = Vec::new();
         let mut portal_sections = std::mem::take(&mut self.portals.sections);

@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use horizon_mods::dependencies;
+use horizon_mod_package::dependencies;
 
 mod api;
 mod crates;
@@ -37,16 +37,20 @@ mod isolate;
 mod package;
 mod prebuilt;
 mod sites;
+mod slots;
+mod source;
+#[cfg(all(test, target_os = "linux"))]
+mod source_server;
 mod wasm_internals;
 
 pub use isolate::LeftOut;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "embedded-inventory-packages-v1";
+const STAGING: &str = "private-source-points-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
-pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
+pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
 /// What a native build is compiled for, as the player picks it on the Mods page. `Optimized`, the
 /// default, is the release profile the daily prebuilt game is built with (thin LTO, one codegen
@@ -553,13 +557,13 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
 /// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
-) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, String> {
     internals_sync::check(folder).map_err(|error| error.to_string())
 }
 
 pub const DEFAULT_CACHE_GIB: u64 = 30;
 
-fn cache_error(error: crate::native_cache::Error) -> String {
+pub fn cache_error(error: crate::storage::Error) -> String {
     match error {
         crate::native_cache::Error::Busy => {
             tr("A native build or cache cleanup is running. Try again when it finishes.").into()
@@ -575,40 +579,12 @@ fn cache_error(error: crate::native_cache::Error) -> String {
     }
 }
 
-#[derive(serde::Serialize)]
-pub struct CacheInfo {
-    pub path: PathBuf,
-    pub bytes: u64,
-    pub cleared_bytes: u64,
-    pub limit_gib: u64,
-}
-
-/// Inspect or clear only Cargo's native fast/release outputs, while no build is using them.
-/// This does not remove installed versions, instances, mods, saves, toolchains or downloads.
-pub fn cache_info(clear: bool) -> Result<CacheInfo, String> {
-    let cache = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
-    let bytes = cache.bytes().map_err(cache_error)?;
-    let cleared_bytes = if clear {
-        cache.clear().map_err(cache_error)?
-    } else {
-        0
-    };
-    Ok(CacheInfo {
-        path: root().join("target"),
-        bytes,
-        cleared_bytes,
-        limit_gib: backend::Settings::load()
-            .native_cache_gib
-            .unwrap_or(DEFAULT_CACHE_GIB),
-    })
-}
-
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's `horizon-mod.toml` at the `.hmod` package root.
-const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
+const NATIVE_MANIFEST: &str = horizon_mod_package::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
-pub const INSTALLED: &str = horizon_mods::mod_list::NATIVE_DIR;
+pub const INSTALLED: &str = horizon_mod_package::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
@@ -626,7 +602,7 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
     paths.sort();
     let mut count = 0;
     for path in paths {
-        let bundle = horizon_mods::index::native::Bundle::read(&path)
+        let bundle = horizon_mod_package::index::native::Bundle::read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         if !crate::browser::java::is_enabled(home, &bundle.manifest.id) {
             continue;
@@ -701,14 +677,14 @@ pub fn routes(home: &Path, profile: Profile) -> Routes {
 /// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
-    pub manifest: horizon_mods::manifest::Manifest,
+    pub manifest: horizon_mod_package::manifest::Manifest,
     pub dir: PathBuf,
     /// The typed injection sites projected for conflict warnings.
     pub injections: Vec<Injection>,
 }
 
 impl Bundle {
-    fn native(&self) -> &horizon_mods::manifest::Native {
+    fn native(&self) -> &horizon_mod_package::manifest::Native {
         self.manifest
             .native
             .as_ref()
@@ -716,7 +692,7 @@ impl Bundle {
     }
 
     /// Whether horizon-mixins changes the game's source for it: a helper injection or a module.
-    /// A `trait_method` or `raw` injection listens at a point instead ([`inject`]).
+    /// A raw injection listens at a point instead ([`inject`]).
     fn needs_mixins(&self) -> bool {
         !self.native().module.is_empty()
             || self
@@ -1288,6 +1264,7 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
+    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -1838,7 +1815,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        horizon_mods::index::native::PREBUILT_REPO
+        horizon_mod_package::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -2135,10 +2112,6 @@ fn pipeline(
             ))?;
         }
     }
-    let point_injections: Vec<_> = ordered
-        .iter()
-        .flat_map(|bundle| inject::of(&bundle.manifest))
-        .collect();
     let revision = match &built_on {
         Some(about) => about.horizon.clone(),
         None => revision_of(base)?,
@@ -2148,7 +2121,7 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
     }
     if target == Target::Server {
-        let jars = horizon_mods::manifest::collect_jar_requirements(
+        let jars = horizon_mod_package::manifest::collect_jar_requirements(
             mods.iter()
                 .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
         )
@@ -2206,10 +2179,10 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => {
-                    prebuilt::serves_points(&game, &point_injections)?;
-                    Ok(game)
-                }
+                Ok(game) => match prebuilt::source_refusal(&game, &projects)? {
+                    Some(reason) => Err(reason),
+                    None => Ok(game),
+                },
                 Err(reason) => Err(reason),
             },
         };
@@ -2358,7 +2331,6 @@ fn pipeline(
         }
         // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
         // check, as the prebuilt route validates before it creates its output.
-        let listed = real.join("points.json");
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
@@ -2388,26 +2360,23 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        source::stage(&pending, &catalog_dir, &ordered)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        inject::check(
-            &point_injections,
-            &inject::listed(&catalog_dir.join(inject::POINTS))
-                .map_err(|error| discard(&pending, &catalog_dir, error))?,
-        )
-        .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(catalog_dir.join(inject::POINTS), &listed)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(
-            catalog_dir.join(internals::INTERNALS),
-            real.join(internals::INTERNALS),
-        )
-        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        for name in [
+            inject::POINTS,
+            internals::INTERNALS,
+            horizon_mod_api_gen::points::source::FILE,
+        ] {
+            fs::rename(catalog_dir.join(name), real.join(name))
+                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
@@ -2836,7 +2805,7 @@ fn install(
         package::copy(
             bundle,
             &partial
-                .join(horizon_mods::mod_list::NATIVE_DIR)
+                .join(horizon_mod_package::mod_list::NATIVE_DIR)
                 .join(&bundle.manifest.id),
         )?;
     }
@@ -2880,7 +2849,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
         "Horizon.app",
         "native-mods.json",
         "native-data",
-        horizon_mods::mod_list::NATIVE_DIR,
+        horizon_mod_package::mod_list::NATIVE_DIR,
     ]
     .iter()
     .map(|s| s.to_string())
@@ -3521,8 +3490,8 @@ mod tests {
                 "[[native.injection]]\nid='ordinary'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
             ),
             (
-                "trait_injection",
-                "[[native.injection]]\nid='hook'\ntarget='horizon_client::game::tick'\nkind='HEAD'\ntrait_method='tick'\n",
+                "slot_injection",
+                "[[inject]]\nid='hook'\nat='horizon_client::game::tick'\nkind='head'\nwith='hook'\nhash='signature'\n",
             ),
         ] {
             let project = incoming.join(id);
@@ -3538,12 +3507,12 @@ mod tests {
             }
         }
         let mods = bundles(&incoming).unwrap();
-        // A point injection (`trait_method`) is the launcher's: it never reaches horizon-mixins.
+        // A unified slot declaration is the launcher's: it never reaches horizon-mixins.
         assert!(mods[0].needs_mixins());
         assert!(!mods[1].needs_mixins() && !mods[2].needs_mixins());
         let input = root.join("mixins");
         stage_mixins(&mods, &input).unwrap();
-        assert!(!input.join("plain").exists() && !input.join("trait_injection").exists());
+        assert!(!input.join("plain").exists() && !input.join("slot_injection").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
         assert!(mods
             .iter()
@@ -3812,6 +3781,26 @@ mod tests {
             .unwrap(),
             "the ARM64 toolchain has a separate installed build"
         );
+        let path = d.join("horizon-mod.toml");
+        let original = fs::read_to_string(&path).unwrap();
+        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        fs::write(&path, format!("{original}{declaration}")).unwrap();
+        let source = key(A);
+        assert_ne!(
+            first, source,
+            "source adapters require another game artifact"
+        );
+        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        fs::write(
+            &path,
+            format!(
+                "{original}{}",
+                declaration.replace("id='source'", "id='changed'")
+            ),
+        )
+        .unwrap();
+        assert_ne!(source, key(A), "private point identity is part of the key");
+        fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(
             first,
@@ -4115,7 +4104,7 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
-        let native_dir = horizon_mods::mod_list::NATIVE_DIR;
+        let native_dir = horizon_mod_package::mod_list::NATIVE_DIR;
         fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
         let project = dir("server-runtime-project");
         write_bundle(&project, "exported", "pub fn hook() {}");
@@ -4167,12 +4156,12 @@ mod tests {
         );
         assert!(!package.join("jars").exists());
         assert!(!output.join(native_dir).join("stale").exists());
-        let runtime = horizon_mods::runtime::Runtime::load(
+        let runtime = horizon_mod_package::runtime::Runtime::load(
             &output.join(Target::Server.binary()),
-            &[horizon_mods::runtime::BuiltMod {
+            &[horizon_mod_package::runtime::BuiltMod {
                 id: "exported",
                 version: "0.1.0",
-                side: horizon_mods::Side::Client,
+                side: horizon_mod_package::Side::Client,
             }],
         )
         .unwrap();

@@ -6,38 +6,88 @@ use horizon_client::items::ItemStack;
 use horizon_world::chunk::BlockState;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use mod_api::{
-    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidKey, ItemKey,
-    StateConstraint, StateMatchError, StateProperty,
+    BlockEntityTypeKey, BlockKey, BlockSoundType, BlockStateRange, EffectKey, FluidDefinition,
+    FluidKey, FluidStateError, ItemKey, StateConstraint, StateMatchError, StateProperty,
 };
 use std::sync::{Arc, Mutex};
 
 impl Game<'_> {
+    /// The exported definition of a world fluid, or a tank-only identity.
+    pub(super) fn fluid_state_definition(&self, fluid: FluidKey) -> Option<FluidDefinition> {
+        let id = mod_api::__private::fluid_id(fluid)?;
+        let Some(definition) = self.res.behaviours().fluid_definitions().get(id) else {
+            return Some(FluidDefinition::TankOnly);
+        };
+        let default = super::native_world_read::api_fluid_state(definition.default)?;
+        let properties = definition
+            .properties
+            .iter()
+            .map(|(name, values)| StateProperty::new(name.clone(), values.clone()))
+            .collect();
+        Some(FluidDefinition::World {
+            default,
+            properties,
+        })
+    }
+
+    /// Validate fluid constraints against the exported property definition.
+    pub(super) fn fluid_state_validate(
+        &self,
+        fluid: FluidKey,
+        constraints: &[StateConstraint],
+    ) -> Result<(), FluidStateError> {
+        let definition = mod_api::__private::fluid_id(fluid)
+            .and_then(|id| self.res.behaviours().fluid_definitions().get(id))
+            .ok_or(FluidStateError::NoWorldState)?;
+        for (index, constraint) in constraints.iter().enumerate() {
+            if constraints[..index]
+                .iter()
+                .any(|previous| previous.name == constraint.name)
+            {
+                return Err(FluidStateError::Duplicate(index as u32));
+            }
+            match_state_properties(
+                &definition.properties,
+                true,
+                |_, _| true,
+                std::slice::from_ref(constraint),
+            )
+            .map_err(|error| match error {
+                StateMatchError::UnknownProperty(_) => {
+                    FluidStateError::UnknownProperty(index as u32)
+                }
+                StateMatchError::InvalidValue(_) => FluidStateError::InvalidValue(index as u32),
+                _ => unreachable!("StateMatchError: unhandled variant"),
+            })?;
+        }
+        Ok(())
+    }
     /// Resolve a registered fluid identifier.
-    pub(super) fn native_fluid_key(&self, id: &str) -> Option<FluidKey> {
+    pub(super) fn fluid_key(&self, id: &str) -> Option<FluidKey> {
         mod_api::__private::fluid_key(id)
     }
     /// The canonical block id retained by the load-owned registration slot. An invalid slot
     /// is a boundary error, including when a wasm guest supplies it.
-    pub(super) fn native_block_key_id(&self, key: BlockKey) -> String {
+    pub(super) fn block_key_id(&self, key: BlockKey) -> String {
         mod_api::__private::block_key_id(key)
             .expect("invalid block key slot")
             .to_owned()
     }
     /// The canonical item id retained by the load-owned registration slot.
-    pub(super) fn native_item_key_id(&self, key: ItemKey) -> String {
+    pub(super) fn item_key_id(&self, key: ItemKey) -> String {
         mod_api::__private::item_key_id(key)
             .expect("invalid item key slot")
             .to_owned()
     }
     /// The canonical effect id retained by the load-owned registration slot.
-    pub(super) fn native_effect_key_id(&self, key: EffectKey) -> String {
+    pub(super) fn effect_key_id(&self, key: EffectKey) -> String {
         mod_api::__private::effect_key_id(key)
             .expect("invalid effect key slot")
             .to_owned()
     }
 
     /// The canonical block entity type id retained by the load-owned slot.
-    pub(super) fn native_block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
+    pub(super) fn block_entity_type_key_id(&self, key: BlockEntityTypeKey) -> String {
         mod_api::__private::block_entity_type_name(key)
             .expect("invalid block entity type key slot")
             .to_owned()
@@ -50,7 +100,7 @@ impl Game<'_> {
     /// a property it doesn't have or a value it can't take, or block NBT
     /// (`{...}`); and, as `/setblock`'s argument, for anything after the
     /// block.
-    pub(super) fn native_block_state_id(&self, name: &str) -> Option<BlockStateId> {
+    pub(super) fn block_state_id(&self, name: &str) -> Option<BlockStateId> {
         parse(&self.pack.block_registries, self.pack.assets.registry, name)
     }
     /// The state `state` as `/setblock` takes it back
@@ -58,30 +108,30 @@ impl Game<'_> {
     /// name order, `minecraft:oak_stairs[facing=east,half=bottom,...]`, or
     /// the block alone for one with no properties. None for an id no state
     /// has (`Block.stateById` gives air for one).
-    pub(super) fn native_block_state_string(&self, state: BlockStateId) -> Option<String> {
+    pub(super) fn block_state_string(&self, state: BlockStateId) -> Option<String> {
         self.pack.assets.registry.state(state).map(serialize)
     }
     /// The default state of `block` (`minecraft:oak_stairs`, or `oak_stairs`):
     /// `Block.defaultBlockState`, the one a block takes when nothing else
     /// says. None for an unknown block.
-    pub(super) fn native_block_state_default(&self, block: BlockKey) -> Option<BlockStateId> {
+    pub(super) fn block_state_default(&self, block: BlockKey) -> Option<BlockStateId> {
         Some(mod_api::__private::resolved_block(block)?.default)
     }
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
-    pub(super) fn native_block_state_replaceable(&self, state: BlockStateId) -> Option<bool> {
+    pub(super) fn block_state_replaceable(&self, state: BlockStateId) -> Option<bool> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).replaceable)
     }
     /// `BlockBehaviour.Properties.destroyTime`, as `BlockState.getDestroySpeed` reads it:
     /// stone 1.5, obsidian 50, bedrock -1 (it can't be broken). None for an unknown state.
-    pub(super) fn native_block_state_destroy_speed(&self, state: BlockStateId) -> Option<f32> {
+    pub(super) fn block_state_destroy_speed(&self, state: BlockStateId) -> Option<f32> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).hardness)
     }
     /// `BlockState.getSoundType()`: its volume, pitch and the sound events for breaking,
     /// stepping on, placing, hitting and falling on it. None for an unknown state.
-    pub(super) fn native_block_state_sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
+    pub(super) fn block_state_sound(&self, state: BlockStateId) -> Option<BlockSoundType> {
         self.pack.assets.registry.state(state)?;
         let sounds = &self.res.facts().get(state).sounds;
         Some(BlockSoundType {
@@ -95,21 +145,18 @@ impl Game<'_> {
         })
     }
     /// `BlockState.hasBlockEntity()`. None for an unknown state.
-    pub(super) fn native_block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool> {
+    pub(super) fn block_state_has_block_entity(&self, state: BlockStateId) -> Option<bool> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).block_entity)
     }
     /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
     /// registry numbers them with. None for an unknown block.
-    pub(super) fn native_block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
+    pub(super) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
         Some(mod_api::__private::resolved_block(block)?.states)
     }
 
     /// The properties of a resolved block, copied for the mod as plain data.
-    pub(super) fn native_block_state_definition(
-        &self,
-        block: BlockKey,
-    ) -> Option<Vec<StateProperty>> {
+    pub(super) fn block_state_definition(&self, block: BlockKey) -> Option<Vec<StateProperty>> {
         let resolved = mod_api::__private::resolved_block(block)?;
         let state = self.pack.assets.registry.state(resolved.default)?;
         let properties = self.pack.block_registries.blocks.get(&state.name)?;
@@ -122,7 +169,7 @@ impl Game<'_> {
     }
 
     /// Match against the existing command registry definitions without allocating on the call.
-    pub(super) fn native_block_state_matches(
+    pub(super) fn block_state_matches(
         &self,
         state: BlockStateId,
         block: BlockKey,
@@ -148,7 +195,7 @@ impl Game<'_> {
 
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.
-    pub(super) fn native_item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
+    pub(super) fn item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack> {
         let item = self.res.items().get(&stack.item)?;
         let remainder = item.crafting_remainder.as_deref()?;
         Some(ItemStack::new(remainder, 1))
@@ -156,7 +203,7 @@ impl Game<'_> {
 
     /// `Block.asItem`: the block's item name, including air for a block with
     /// no item; None if the block name is unknown.
-    pub(super) fn native_block_item(&self, block: BlockKey) -> Option<String> {
+    pub(super) fn block_item(&self, block: BlockKey) -> Option<String> {
         let behaviours = self.res.behaviours();
         let id = mod_api::__private::resolved_block(block)?.block;
         Some(behaviours.block_data(id).item.to_string())
@@ -168,7 +215,7 @@ impl Game<'_> {
     /// and content mods included. An empty stack tests `minecraft:air`, an
     /// unknown tag is false. None on a server's client or before the world
     /// has loaded its tags.
-    pub(super) fn native_item_stack_in_tag(&self, stack: &ItemStack, tag: &str) -> Option<bool> {
+    pub(super) fn item_stack_in_tag(&self, stack: &ItemStack, tag: &str) -> Option<bool> {
         Some(super::native_world_read::stack_in_tag(
             self.native_tag_items()?,
             stack,
@@ -293,6 +340,111 @@ mod tests {
                     .as_deref(),
                 Some("minecraft:air")
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fluid_definitions_and_constraints_use_the_loaded_registry() {
+        use mod_api::{Host, HostFluidStates};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let host: &dyn Host = game;
+            let water = host.fluid_key("minecraft:water").unwrap();
+            let flowing = host.fluid_key("minecraft:flowing_water").unwrap();
+            let service = host.fluid_states();
+            for phase in [
+                mod_api::__private::ModPhase::Setup,
+                mod_api::__private::ModPhase::Reloading,
+            ] {
+                let _scope = mod_api::__private::PhaseOwner::scope(phase);
+                assert!(matches!(
+                    service.definition(water),
+                    Some(FluidDefinition::World { .. })
+                ));
+                assert_eq!(service.validate(water, &[]), Ok(()));
+            }
+            let tank = host.fluid_key("horizon:definition_test").unwrap();
+            assert_eq!(service.definition(tank), Some(FluidDefinition::TankOnly));
+            assert_eq!(
+                service.validate(tank, &[]),
+                Err(FluidStateError::NoWorldState)
+            );
+            for (id, amount, source, property_count) in [
+                ("minecraft:empty", 0, false, 0),
+                ("minecraft:water", 8, true, 1),
+                ("minecraft:flowing_water", 1, false, 2),
+                ("minecraft:lava", 8, true, 1),
+                ("minecraft:flowing_lava", 1, false, 2),
+            ] {
+                let key = host.fluid_key(id).unwrap();
+                let FluidDefinition::World {
+                    default,
+                    properties,
+                } = service.definition(key).unwrap()
+                else {
+                    panic!("world definition")
+                };
+                assert_eq!(
+                    (
+                        default.fluid,
+                        default.amount,
+                        default.source,
+                        default.falling
+                    ),
+                    (key, amount, source, amount != 0)
+                );
+                assert_eq!(properties.len(), property_count);
+                assert_eq!(service.validate(key, &[]), Ok(()));
+            }
+            assert_eq!(
+                service.validate(
+                    flowing,
+                    &[
+                        StateConstraint::new("unknown", "true"),
+                        StateConstraint::new("level", "1"),
+                        StateConstraint::new("level", "1")
+                    ]
+                ),
+                Err(FluidStateError::UnknownProperty(0))
+            );
+            let FluidDefinition::World {
+                default,
+                properties,
+            } = service.definition(water).unwrap()
+            else {
+                panic!("world fluid")
+            };
+            assert!(default.is_source());
+            assert!(properties.iter().any(|p| p.name == "falling"));
+            assert_eq!(
+                service.validate(water, &[StateConstraint::new("level", "8")]),
+                Err(FluidStateError::UnknownProperty(0))
+            );
+            assert_eq!(
+                service.validate(flowing, &[StateConstraint::new("level", "9")]),
+                Err(FluidStateError::InvalidValue(0))
+            );
+            assert_eq!(
+                service.validate(
+                    flowing,
+                    &[
+                        StateConstraint::new("level", "8"),
+                        StateConstraint::new("level", "8")
+                    ]
+                ),
+                Err(FluidStateError::Duplicate(1))
+            );
+            assert!(default.matches(&[StateConstraint::new("falling", "true")]));
+            assert!(!default.matches(&[StateConstraint::new("unknown", "true")]));
+            let FluidDefinition::World {
+                default: flowing_default,
+                ..
+            } = service.definition(flowing).unwrap()
+            else {
+                panic!("flowing fluid")
+            };
+            assert!(flowing_default.matches(&[StateConstraint::new("level", "1")]));
+            assert!(!flowing_default.matches(&[StateConstraint::new("level", "8")]));
         });
     }
 

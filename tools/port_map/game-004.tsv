@@ -45,6 +45,8 @@ AgeableMob.defineSynchedData	port	crates/horizon-client/src/game/network/lan/mod
 AgeableMob.getAge	inline	crates/horizon-client/src/game/network/remote_mob_data.rs::apply	m.extra.age on the host; a remote client only learns baby or not (-1 or 0)
 AgeableMob.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	modeled Age, ForcedAge and AgeLocked for baby-capable creatures; zombie nautiluses omit ignored raw age keys
 AgeableMob.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	Age/ForcedAge through NumericTag.intValue; AgeLocked unchanged
+AgeableMob.canBeABaby	port	crates/horizon-client/src/mobs/species.rs::can_be_a_baby	false for the frog, parrot, zombie nautilus, camel husk, slime and magma cube, true for the rest of the ageable tree and for the zombie/piglin/zoglin synced flag
+AgeableMob.isBaby	port	crates/horizon-client/src/mobs/living.rs::Mob::is_baby	canBeABaby && getAge() < 0: a negative Age alone is not a baby, so the box, voice, breeding, growth and loot stay an adult's
 AnimationState.getTimeInMillis	port	crates/horizon-client/src/mobs/keyframes.rs::AnimationState::millis	
 AreaEffectCloud.defineSynchedData	port	crates/horizon-client/src/game/network/lan_entities.rs::Game::lan_projectile_states	radius, waiting and particle for dragon breath and lingering clouds; read back in remote_projectiles.rs::remote_projectile_data
 AreaEffectCloud.setRadius	inline	crates/horizon-client/src/game/items/potions.rs::Game::tick_potion_cloud	loaded radius and nonzero per-tick/per-use changes clamp to 0..32
@@ -70,7 +72,7 @@ Display.createTransformation	port	crates/horizon-client/src/text_display.rs::Tex
 Display.tick	port	crates/horizon-client/src/game/entities/text_displays.rs::RemoteTextDisplay::tick	start tick, interpolation duration and render state refresh; text displays only
 Display.defineSynchedData	port	crates/horizon-client/src/text_display.rs::TextDisplayData::default	the defaults of entries 8 to 22
 Display.readAdditionalSaveData	port	crates/horizon-client/src/text_display.rs::display_data	the synched data entries (ids 8 to 22) of a saved display, matrix transformation included
-Display.setTransformation	port	crates/horizon-client/src/game/modding/native_display_refs.rs::Game::native_display_set_transformation	a display Horizon keeps as a saved tag (block_display, item_display, text_display) takes a transformation from the mod API (DisplayRef::set_transformation), written into the saved compound that the entity data is built from
+Display.setTransformation	port	crates/horizon-client/src/game/modding/native_display_refs.rs::Game::display_set_transformation	a display Horizon keeps as a saved tag (block_display, item_display, text_display) takes a transformation from the mod API (DisplayRef::set_transformation), written into the saved compound that the entity data is built from
 Display.addAdditionalSaveData	missing		minor: no local display entity to save
 Display.getInterpolatedBoundingBox	port	crates/horizon-client/src/text_display.rs::culling_box	width-centred XZ box from y to y+height at the interpolated origin; used by Game::display_in_view
 Display.setBrightnessOverride	missing		minor: server side setter; there is no local display entity

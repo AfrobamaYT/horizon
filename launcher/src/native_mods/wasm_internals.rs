@@ -1,6 +1,6 @@
 //! Only installed, enabled wasm mods opt a from-source game into an internals table.
 use crate::i18n::trf;
-use horizon_mods::{manifest::Package, mod_list};
+use horizon_mod_package::{manifest::Package, mod_list};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -46,12 +46,7 @@ pub(super) fn installed(home: Option<&Path>) -> Result<Declarations, String> {
         }
         let paths = declared.entry(manifest.id.clone()).or_default();
         paths.extend(wasm.internals().iter().map(|i| i.path.clone()));
-        paths.extend(
-            wasm.points()
-                .iter()
-                .filter(|i| i.raw.is_some())
-                .filter_map(|i| i.target.clone()),
-        );
+        paths.extend(wasm.raw_injections().iter().map(|i| i.target.clone()));
     }
     Ok(declared)
 }
@@ -99,7 +94,7 @@ mod tests {
     use super::*;
 
     fn install(home: &Path, id: &str, internals: &str) {
-        let text = format!("id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}", horizon_mods::manifest::sha512_of(b"\0asmfixture"));
+        let text = format!("id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}", horizon_mod_package::manifest::sha512_of(b"\0asmfixture"));
         let bytes = Package::write_files(
             &text,
             &[

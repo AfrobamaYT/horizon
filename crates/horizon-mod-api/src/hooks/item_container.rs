@@ -18,24 +18,3 @@ pub trait Hooks {
     )]
     fn item_container();
 }
-
-pub trait Helpers {
-    #[helper(
-        side = "both",
-        backend = true,
-        target = "horizon_client::game::native_item_container::Game<'_>::native_item_container_slots"
-    )]
-    fn item_container_slots();
-    #[helper(
-        side = "both",
-        backend = true,
-        target = "horizon_client::game::native_item_container::Game<'_>::native_item_container_insert"
-    )]
-    fn item_container_insert();
-    #[helper(
-        side = "both",
-        backend = true,
-        target = "horizon_client::game::native_item_container::Game<'_>::native_item_container_extract"
-    )]
-    fn item_container_extract();
-}

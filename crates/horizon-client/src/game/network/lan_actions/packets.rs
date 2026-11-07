@@ -762,6 +762,9 @@ impl Game<'_> {
             S::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.guest_native_net(conn, &p.data)
             }
+            S::CustomPayload(p) if p.channel == horizon_client::lan::recipes::TRANSFER_CHANNEL => {
+                self.guest_recipe_transfer(conn, &p.data);
+            }
             S::CustomPayload(p) if p.channel == horizon_client::lod_net::CHANNEL => {
                 self.guest_far_terrain(conn, &p.data)
             }
@@ -1071,11 +1074,11 @@ impl Game<'_> {
             .map(|g| g.conn);
         let mut tag = match player {
             Some(player) => self
-                .as_guest(player, |g| g.entity_nbt(Target::Player))
+                .as_guest(player, |g| g.command_target_nbt(Target::Player))
                 .flatten()?,
             None => {
                 let target = self.level_entity(id)?;
-                self.entity_nbt(target)?
+                self.command_target_nbt(target)?
             }
         };
         if let horizon_core::nbt::Tag::Compound(c) = &mut tag {

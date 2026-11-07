@@ -60,16 +60,22 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     crate::install_parts(&[ModEntry::new("boundary", Box::new(Requests))]).unwrap();
-    crate::registry_keys::resolve_effects().unwrap();
-    crate::registry_keys::resolve_block_entity_types(
-        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
-            Default::default(),
-            vec!["test:machine".into()],
-        ),
+    crate::registry_keys::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
     )
     .unwrap();
+    {
+        let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+            Default::default(),
+            vec!["test:machine".into()],
+        );
+        crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+    }
+    .unwrap();
     struct Table(Cell<usize>);
-    impl Backend for Table {
+    impl mod_api::prelude::KeysBackend for Table {
         fn block_key_id(&self, key: BlockKey) -> String {
             self.0.set(self.0.get() + 1);
             crate::registry_keys::block_id(key).unwrap().to_owned()
@@ -85,20 +91,27 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             crate::registry_keys::effect_id(key).unwrap().to_owned()
         }
     }
-    impl Host for Table {
+    impl Backend for Table {}
+    mod_api::impl_backend_areas!(Table, except(keys));
+    impl mod_api::prelude::TagsHost for Table {
         fn unresolved_fluid_id(&self, fluid: crate::UnresolvedFluid) -> String {
             crate::unresolved_fluid::name(fluid)
         }
+    }
+    impl mod_api::prelude::BlockStatesHost for Table {
         fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
             assert_eq!(block.0, 0);
             self.0.set(self.0.get() + 1);
             Some(crate::BlockStateId(19))
         }
+    }
+    impl Host for Table {
         fn backend(&self) -> Option<BackendRef<'_>> {
             Some(BackendRef::of(self))
         }
     }
-    impl crate::BackendMut for Table {
+    mod_api::impl_host_areas!(Table, except(block_states, tags));
+    impl mod_api::prelude::LivingBackendMut for Table {
         fn living_add_effect(
             &mut self,
             _: crate::LivingRef,
@@ -110,11 +123,14 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             true
         }
     }
+    impl crate::BackendMut for Table {}
+    mod_api::impl_backend_mut_areas!(Table, except(living));
     impl crate::ServerHost for Table {
         fn backend_mut(&mut self) -> Option<crate::BackendMutRef<'_>> {
             Some(crate::BackendMutRef::of(self))
         }
     }
+    mod_api::impl_server_host_areas!(Table);
     let mut table = Table(Cell::new(0));
     let mut frame = Frame::default();
     frame.server_host_mut(&mut table);
@@ -149,7 +165,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             .contains("unknown BlockEntityTypeKey slot")
     );
     // Canonical effect enumeration adds host-owned keys not explicitly requested by a mod.
-    let poison = crate::part_table::tests::effect_key("poison");
+    let poison = crate::parts::tests::effect_key("poison");
     assert_ne!(poison.0, 0);
     assert_eq!(
         Imports::effect_key_id(&mut state, poison.0).unwrap(),

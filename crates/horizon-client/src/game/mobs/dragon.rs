@@ -195,6 +195,20 @@ pub(super) struct Crystal {
 }
 horizon_client::impl_joined!(Crystal);
 impl Crystal {
+    /// The start of `time` (the spin and bob) for a crystal at `position`: the random draw
+    /// vanilla makes, or under `HORIZON_STILL` one seeded from the position alone. Which crystal
+    /// gets which draw, and a server's entity ids, follow the order chunks load in, which differs
+    /// between launches; the position is the same in every copy of the world. The draw is made
+    /// either way, so the random stays where it would be.
+    pub(super) fn start_time(position: Vec3, drawn: i32, still: bool) -> i32 {
+        if still {
+            horizon_client::mobs::entity_random(0, position)
+                .next_int_bound(100_000)
+                .unwrap_or(0)
+        } else {
+            drawn
+        }
+    }
     /// `EntityType.END_CRYSTAL`: 2 x 2.
     pub(super) fn bounds(&self) -> Aabb {
         let p = self.position;
@@ -1328,14 +1342,13 @@ impl Game<'_> {
         if let Some(d) = self.dragon.as_mut()
             && d.id == 0
         {
-            d.id = self.next_entity + 1;
-            self.next_entity += 9;
+            super::entity::assign_stored_id(&mut self.next_entity, &mut d.id, None);
+            self.next_entity += 8;
         }
         // The spikes' crystals too (EndCrystal's constructor): an id whether
         // or not a client has tracked them yet, to be aimed at by it.
         for c in self.crystals.iter_mut().filter(|c| c.id == 0) {
-            self.next_entity += 1;
-            c.id = self.next_entity;
+            super::entity::assign_stored_id(&mut self.next_entity, &mut c.id, None);
         }
     }
     /// EndSpikeFeature's crystals (with fire under them on the bedrock).
@@ -1353,7 +1366,8 @@ impl Game<'_> {
             {
                 continue;
             }
-            let time = self.world.random.next_int_bound(100_000).unwrap_or(0);
+            let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+            let time = Crystal::start_time(at, drawn, self.clock.still());
             // EndCrystal's constructor takes an id from the entity counter.
             self.next_entity += 1;
             self.crystals.push(Crystal {
@@ -2626,7 +2640,7 @@ impl Game<'_> {
         self.place_dragon_parts();
         self.dragon_contacts();
         // The chunks the dragon passes through re-save their entity lists.
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             for p in [d.previous, d.position] {
                 self.world
                     .modified
@@ -2690,15 +2704,17 @@ impl Game<'_> {
     pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
         let d = self.dragon.as_ref().filter(|d| d.alive())?;
         let p = d.position;
+        let bounds = Aabb::new(
+            Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+            Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+        );
         Some((
             d.id,
             horizon_client::mobs::TargetInfo {
                 position: p,
                 eye_y: p.y + 6.8,
-                bounds: Aabb::new(
-                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
-                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
-                ),
+                bounds,
+                hitbox: bounds,
                 alive: true,
                 can_be_seen_as_enemy: true,
                 is_player: false,
@@ -2916,7 +2932,7 @@ impl Game<'_> {
                 self.spawn_orbs([p.x, p.y, p.z], (xp as f32 * 0.2) as u32);
             }
             let (id, at) = self.dragon.as_ref().map_or((0, p), |d| (d.id, d.position));
-            self.dragon = None;
+            self.dragon.discard();
             if fight {
                 self.dragon_killed();
             }
@@ -3140,7 +3156,9 @@ impl Game<'_> {
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
-        let mut clouds = std::mem::take(&mut self.breath_clouds);
+        let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
             if c.potion.is_some() {
@@ -3255,16 +3273,33 @@ impl Game<'_> {
     /// `BossHealthOverlay.extractRenderState`: whatever `publish_boss_bars`
     /// (or a server's packets) put on this client's overlay.
     pub(super) fn draw_boss_bars(&self, batch: &mut HudBatch) {
-        let bars = self
-            .boss_overlay
-            .bars(horizon_client::boss_overlay::now_millis());
-        let draws = hud_overlays::boss_overlay(
-            batch.width as i32,
-            batch.height as i32,
-            &bars,
-            &self.gui.atlas.font,
-        );
+        let draws = self.boss_bar_draws(batch.width as i32, batch.height as i32);
         hud_layout::paint(batch, &self.gui.atlas, &draws);
+    }
+    /// The boss bars' draws on a `w` x `h` GUI.
+    pub(super) fn boss_bar_draws(&self, w: i32, h: i32) -> Vec<hud_layout::GuiDraw> {
+        let now = horizon_client::boss_overlay::now_millis();
+        let bars = self.boss_overlay.bars(now);
+        // NeoForge's `CustomizeGuiOverlayEvent.BossEventProgress`, asked per
+        // bar only while a mod listens.
+        let customized = mod_api::__private::listened(mod_api::HookId::CustomizeBossEventProgress);
+        hud_overlays::boss_overlay(w, h, &bars, &self.gui.atlas.font, |index, at| {
+            let Some(bar) = customized
+                .then(|| self.boss_overlay.mod_bar(index, now))
+                .flatten()
+            else {
+                return true;
+            };
+            let mut cancel = false;
+            self.native_customize_boss_event_progress(
+                &bar,
+                &mut at.x,
+                &mut at.y,
+                &mut at.increment,
+                &mut cancel,
+            );
+            !cancel
+        })
     }
     /// The dragon fight's bar for a player at `at`
     /// (`EnderDragonFight.dragonEvent`, visible while the fight is not won
@@ -4052,16 +4087,18 @@ impl Game<'_> {
             return false;
         }
         // EndCrystal's constructor: `this.random.nextInt(100000)`, the crystal's own random.
-        let time = super::dispenser::entity_random()
+        let drawn = super::dispenser::entity_random()
             .next_int_bound(100_000)
             .unwrap_or(0);
+        let at = Vec3::new(x + 0.5, y, z + 0.5);
+        let time = Crystal::start_time(at, drawn, self.clock.still());
         // EndCrystal's constructor takes an id from the entity counter, so
         // the crystal is an entity a command can name (`@e[type=end_crystal]`).
         self.next_entity += 1;
         self.crystals.push(Crystal {
             join: Default::default(),
             id: self.next_entity,
-            position: Vec3::new(x + 0.5, y, z + 0.5),
+            position: at,
             show_bottom: false,
             time,
             beam: None,
@@ -4098,7 +4135,7 @@ impl Game<'_> {
         if self.dragon.as_ref().is_some_and(|d| d.id == id) {
             // Only the fight's own dragon (`dragonFight`) ends it.
             let fight = self.is_fight_dragon();
-            if let Some(d) = self.dragon.take() {
+            if let Some(d) = self.dragon.extract() {
                 // remove, then gameEvent(ENTITY_DIE), before the fight hears of it.
                 self.dragon_died_event(d.id, d.position, d.alive());
             }
@@ -4351,7 +4388,8 @@ impl Game<'_> {
         let at = Vec3::new(f64::from(cx) + 0.5, f64::from(h + 1), f64::from(cz) + 0.5);
         self.crystals
             .retain(|c| c.position.distance_squared(at) > 0.01);
-        let time = self.world.random.next_int_bound(100_000).unwrap_or(0);
+        let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
+        let time = Crystal::start_time(at, drawn, self.clock.still());
         self.crystals.push(Crystal {
             join: Default::default(),
             id: 0,
@@ -4413,7 +4451,7 @@ impl Game<'_> {
         };
         self.next_entity += 9;
         let id = dragon.id;
-        self.dragon = Some(dragon);
+        assert!(self.dragon.install(dragon).is_ok());
         self.fight.dragon_uuid = Some(self.uuid_for(id));
         self.fight.dirty = true;
     }
@@ -4445,7 +4483,7 @@ impl Game<'_> {
                 self.fight.dragon_uuid = Some(self.uuid_for(id));
                 self.fight.killed = false;
                 if !active {
-                    self.dragon = None;
+                    self.dragon.discard();
                     self.fight.dragon_uuid = None;
                 }
             }
@@ -4626,7 +4664,9 @@ impl Game<'_> {
         dragon.id = self.next_entity + 1;
         self.next_entity += 9;
         let id = dragon.id;
-        self.dragon = Some(dragon);
+        // Finalization listeners can install another dragon after the initial
+        // refusal check. Keep the constructor's existing replacement order.
+        self.dragon.replace(dragon);
         self.place_dragon_parts();
         self.native_joins_flush(false, id).then_some(id)
     }
@@ -4640,7 +4680,7 @@ impl Game<'_> {
         d.id = id as u32;
         d.phase = Phase::from_id(10);
         d.join = horizon_client::join_seq::JoinSeq::next();
-        self.dragon = Some(d);
+        self.dragon.replace(d);
         self.place_dragon_parts();
         if let Some(d) = self.dragon.as_mut() {
             for part in &mut d.parts {
@@ -4691,7 +4731,7 @@ impl Game<'_> {
     /// keeps pointing at the same crystal.
     pub(super) fn remove_remote_dragon(&mut self, id: i32) {
         if self.dragon.as_ref().is_some_and(|d| d.id as i32 == id) {
-            self.dragon = None;
+            self.dragon.discard();
             return;
         }
         let Some(index) = self.crystals.iter().position(|c| c.id as i32 == id) else {
@@ -5058,7 +5098,7 @@ mod tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                game.dragon = None;
+                game.dragon.discard();
                 game.native_joins_skip();
                 let at = [4.5, 200.0, 4.5];
                 let id = game
@@ -5079,7 +5119,7 @@ mod tests {
                 assert!(game.spawn_dragon_spawned(at, dispenser).is_none());
                 assert_eq!(joins.lock().unwrap().len(), 1, "no second dragon joins");
 
-                game.dragon = None;
+                game.dragon.discard();
                 cancel.store(true, Ordering::Relaxed);
                 // The dispenser calls the shared constructor directly.
                 assert!(game.spawn_dragon_spawned(at, dispenser).is_none());
@@ -5131,7 +5171,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             for reason in [Reason::SpawnItemUse, Reason::Dispenser] {
                 for answer in [Answer::Keep, Answer::Skip, Answer::Refuse] {
-                    game.dragon = None;
+                    game.dragon.discard();
                     game.world.random = LegacyRandom::new(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let mods: mod_api::Mods = vec![ModEntry::new(
@@ -5153,7 +5193,7 @@ mod tests {
                     // draws the follow-range triangle and handedness roll.
                     let mut expected = LegacyRandom::new(42);
                     let yaw = horizon_client::camera::wrap_degrees(expected.next_float() * 360.0);
-                    if let Some(dragon) = &game.dragon {
+                    if let Some(dragon) = game.dragon.as_ref() {
                         assert_eq!(dragon.yaw, yaw);
                         assert_eq!(dragon.previous_yaw, yaw);
                     }
@@ -5232,7 +5272,7 @@ mod tests {
                     Answer::Refuse,
                     Answer::RefuseJoin,
                 ] {
-                    game.dragon = None;
+                    game.dragon.discard();
                     game.world.random = LegacyRandom::new(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let joins = Arc::new(AtomicUsize::new(0));
@@ -5319,6 +5359,31 @@ mod tests {
         )
     }
 
+    /// Under `HORIZON_STILL` a crystal's spin and bob start from its position, whichever order
+    /// the crystals load in; without it each takes the next draw, as vanilla's do.
+    #[test]
+    fn a_still_crystal_starts_from_its_position_in_any_load_order() {
+        let spikes = [Vec3::new(42.5, 77.0, 0.5), Vec3::new(-33.5, 95.0, 24.5)];
+        let starts = |order: [usize; 2], still: bool| {
+            let mut random = LegacyRandom::new(5);
+            let mut times = [0; 2];
+            for i in order {
+                let drawn = random.next_int_bound(100_000).unwrap();
+                times[i] = Crystal::start_time(spikes[i], drawn, still);
+            }
+            times
+        };
+        let still = starts([0, 1], true);
+        assert_eq!(still, starts([1, 0], true));
+        assert_ne!(still[0], still[1], "each crystal keeps its own phase");
+        let first = LegacyRandom::new(5).next_int_bound(100_000).unwrap();
+        assert_eq!(starts([0, 1], false)[0], first);
+        assert_eq!(
+            starts([1, 0], false)[1],
+            first,
+            "the first loaded takes the first draw"
+        );
+    }
     /// `Mth.wrapDegrees`: `% 360` then one step of 360, exact for a negative angle
     /// (a remainder made positive and back again loses the float's low bits).
     #[test]
@@ -6134,7 +6199,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let state = game.lan_dragon_state().unwrap();
             assert_eq!(
                 state.defaults,
@@ -6147,3 +6212,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "dragon/residency_tests.rs"]
+mod residency_tests;

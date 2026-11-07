@@ -54,19 +54,12 @@ fn send_native_nearby(
         g.placed && g.dimension == dimension && Some(g.conn) != except && within_range(g.position)
     }) {
         // A vanilla client cannot decode a native mod's particle id; see
-        // `mod_particle_only_for_horizon`.
-        if horizon_only && guest.brand != "horizon" {
+        // `Particle::horizon_only`.
+        if horizon_only && !guest.is_horizon() {
             continue;
         }
         guest.sender.send(packet.clone());
     }
-}
-
-/// A native mod's particle travels as `MOD_PARTICLE_ID` (-1) plus its name.
-/// Vanilla reads the id with `IdMap.byIdOrThrow`, which throws on -1 and
-/// drops the connection, so such a particle may only go to Horizon clients.
-fn mod_particle_only_for_horizon(particle: &Particle) -> bool {
-    matches!(particle.data, Some(ParticleData::Mod(_)))
 }
 
 /// One of a packet's `count` particles (`handleParticleEvent`): its position
@@ -109,11 +102,6 @@ pub(super) fn particle_position_source(source: &NetworkPositionSource) -> Positi
 fn rgba(argb: i32) -> [f32; 4] {
     let c = |shift: i32| ((argb >> shift) & 255) as f32 / 255.0;
     [c(16), c(8), c(0), c(24)]
-}
-/// The options' RGB as an RGB colour (`ARGB.colorFromFloat` without alpha).
-fn rgb_int(c: [f32; 3]) -> i32 {
-    let b = |v: f32| ((v.clamp(0.0, 1.0) * 255.0).round() as i32) & 255;
-    (b(c[0]) << 16) | (b(c[1]) << 8) | b(c[2])
 }
 fn rgb(c: [f32; 4]) -> [f32; 3] {
     [c[0], c[1], c[2]]
@@ -200,10 +188,10 @@ pub(super) fn send_hub_level_particles(
     count: u32,
     state: Option<BlockStateId>,
 ) {
-    let Some(particle) = Game::hub_particle(hub, options, state) else {
+    let Some(particle) = hub.particle(options, state) else {
         return;
     };
-    let horizon_only = mod_particle_only_for_horizon(&particle);
+    let horizon_only = particle.horizon_only();
     let packet = C::LevelParticles(play::LevelParticles {
         particle,
         override_limiter: false,
@@ -215,7 +203,7 @@ pub(super) fn send_hub_level_particles(
         randomization: 0,
     });
     for g in hub.guests.iter().filter(|g| hub.here(g)) {
-        if horizon_only && g.brand != "horizon" {
+        if horizon_only && !g.is_horizon() {
             continue;
         }
         // ServerLevel compares the player's block centre, strictly within 32.
@@ -298,11 +286,9 @@ impl Game<'_> {
         let Some(hub) = self.lan.as_ref().map(|h| &h.hub) else {
             return;
         };
-        let Some(particle) = Self::hub_particle(
-            hub,
-            &ParticleOptions::simple(ParticleType::Block),
-            Some(state),
-        ) else {
+        let Some(particle) =
+            hub.particle(&ParticleOptions::simple(ParticleType::Block), Some(state))
+        else {
             return;
         };
         let packet = C::LevelParticles(play::LevelParticles {
@@ -391,68 +377,7 @@ impl Game<'_> {
         options: &ParticleOptions,
         state: Option<BlockStateId>,
     ) -> Option<Particle> {
-        Self::hub_particle(&self.lan.as_ref()?.hub, options, state)
-    }
-
-    /// Convert a particle using the hub's registry.
-    pub(super) fn hub_particle(
-        hub: &Hub,
-        options: &ParticleOptions,
-        state: Option<BlockStateId>,
-    ) -> Option<Particle> {
-        // A native mod's own type: no registry id, so the sentinel and the name.
-        if let Some(name) = &options.mod_particle {
-            return Some(Particle {
-                id: MOD_PARTICLE_ID,
-                data: Some(ParticleData::Mod(name.clone())),
-            });
-        }
-        let name = format!("minecraft:{}", options.ty.name());
-        let id = hub.registry_id("minecraft:particle_type", &name)?;
-        use ParticleType as T;
-        let c = options.color;
-        let data = match options.ty {
-            T::Block | T::BlockMarker | T::FallingDust | T::DustPillar | T::BlockCrumble => {
-                Some(ParticleData::State(state?.0 as i32))
-            }
-            T::Dust => Some(ParticleData::ColorScale(rgb_int(rgb(c)), options.scale)),
-            T::DustColorTransition => Some(ParticleData::ColorScale2(
-                rgb_int(rgb(c)),
-                rgb_int(options.to_color),
-                options.scale,
-            )),
-            T::Effect | T::InstantEffect => {
-                Some(ParticleData::ColorPower(rgb_int(rgb(c)), options.scale))
-            }
-            T::EntityEffect | T::TintedLeaves => Some(ParticleData::Color(
-                (((c[3].clamp(0.0, 1.0) * 255.0).round() as i32) << 24) | rgb_int(rgb(c)),
-            )),
-            T::DragonBreath | T::SculkCharge => Some(ParticleData::Scalar(options.scale)),
-            T::Shriek => Some(ParticleData::Delay(options.scale as i32)),
-            T::Geyser | T::GeyserPlume => Some(ParticleData::Geyser(options.geyser?.0)),
-            T::GeyserBase | T::GeyserPoof => {
-                let (water_blocks, burst_impulse_base) = options.geyser?;
-                Some(ParticleData::GeyserBase(water_blocks, burst_impulse_base))
-            }
-            T::Vibration => {
-                let (source, _, ticks) = options.vibration.as_ref()?;
-                let source = match source {
-                    PositionSource::Block(pos) => NetworkPositionSource::Block(*pos),
-                    PositionSource::Entity { id, y_offset } => NetworkPositionSource::Entity {
-                        id: *id,
-                        y_offset: *y_offset,
-                    },
-                    _ => return None,
-                };
-                Some(ParticleData::Vibration {
-                    source,
-                    ticks: *ticks,
-                })
-            }
-            T::Item | T::Trail => return None,
-            _ => None,
-        };
-        Some(Particle { id, data })
+        self.lan.as_ref()?.hub.particle(options, state)
     }
 
     /// The options a server's particle stands for (None for a type or data
@@ -640,7 +565,7 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let horizon_only = mod_particle_only_for_horizon(&particle);
+        let horizon_only = particle.horizon_only();
         let body = C::LevelParticles(play::LevelParticles {
             particle,
             override_limiter: false,
@@ -1151,12 +1076,8 @@ mod tests {
             })
         );
         assert!(
-            Game::hub_particle(
-                &hub,
-                &ParticleOptions::simple(ParticleType::Vibration),
-                None,
-            )
-            .is_none()
+            hub.particle(&ParticleOptions::simple(ParticleType::Vibration), None)
+                .is_none()
         );
     }
 

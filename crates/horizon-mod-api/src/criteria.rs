@@ -27,9 +27,9 @@ pub trait CriterionContext {
 /// The game calls it synchronously for each open criterion, before testing the criterion's
 /// `player` predicate. It keeps neither the test nor its context after the trigger returns.
 /// The native and wasm interfaces are generated from this trait, not separate implementations.
-/// Currently the wasm runtime refuses a test in a group already executing a hook; triggering
-/// from that group's own hook therefore returns [`CriterionTestError::Unavailable`]. The
-/// generated bindings do not yet enable synchronous same-group callbacks.
+/// Wasm predicates run synchronously through a scoped loan of the triggering import's
+/// store, including in an already running group. They share the outer call's execution
+/// budget and memory limit; the context expires when the predicate returns.
 pub trait CriterionTest: Send + Sync + 'static {
     /// Whether the mod's part of this criterion passes. A callback that cannot run refuses
     /// with a typed error, rather than silently answering that the criterion did not match.
@@ -40,7 +40,7 @@ pub trait CriterionTest: Send + Sync + 'static {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CriterionTestError {
-    /// The test could not run (including a stopped, busy or reentered wasm group).
+    /// The test could not run (including a stopped, busy or unscoped reentrant wasm group).
     Unavailable,
 }
 
@@ -83,7 +83,9 @@ mod tests {
     fn a_trigger_without_a_game_refuses_without_testing() {
         struct TestHost;
         impl Host for TestHost {}
+        mod_api::impl_host_areas!(TestHost);
         impl ServerHost for TestHost {}
+        mod_api::impl_server_host_areas!(TestHost);
         struct Never;
         impl CriterionTest for Never {
             fn test(&self, _: &dyn CriterionContext) -> Result<bool, CriterionTestError> {

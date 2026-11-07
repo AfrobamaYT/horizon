@@ -16,19 +16,15 @@ impl Game<'_> {
     /// chest boat or a minecart with a chest still drops what it holds, and
     /// a boat its lead, as vanilla's `remove` does. False for a player, or a
     /// stale handle.
-    pub(super) fn native_entity_discard(&mut self, entity: EntityRef) -> bool {
-        self.native_entity_remove(entity, NativeRemovalReason::Discarded)
+    pub(super) fn entity_discard(&mut self, entity: EntityRef) -> bool {
+        self.entity_remove(entity, NativeRemovalReason::Discarded)
     }
     /// Removes the entity for `reason` (`Entity.remove`): `Discarded`, as
     /// `discard`, or `Killed`, which also runs a mob's effects that act on
     /// removal (Oozing's slimes, Weaving's cobwebs, Wind Charged's burst),
     /// still with no death and no loot. False for a player, or a stale
     /// handle.
-    pub(super) fn native_entity_remove(
-        &mut self,
-        entity: EntityRef,
-        reason: NativeRemovalReason,
-    ) -> bool {
+    pub(super) fn entity_remove(&mut self, entity: EntityRef, reason: NativeRemovalReason) -> bool {
         let killed = reason == NativeRemovalReason::Killed;
         match self.native_entity_target(entity) {
             None | Some(Target::Player | Target::Guest(_)) => false,
@@ -50,7 +46,7 @@ impl Game<'_> {
     /// default pickup delay: the item entity. None for an empty stack or an
     /// unknown item, a stale handle, a player in another level, or an item a
     /// mod kept out.
-    pub(super) fn native_entity_spawn_at_location(
+    pub(super) fn entity_spawn_at_location(
         &mut self,
         entity: EntityRef,
         stack: ItemStack,
@@ -119,25 +115,28 @@ impl Game<'_> {
         };
         // What an open menu edited goes back to the vehicle first.
         self.release_vehicle_container(id);
+        let take = |at, items: &mut Vec<_>| {
+            if items.iter().all(Option::is_none) {
+                None
+            } else {
+                Some((at, std::mem::take(items)))
+            }
+        };
         let held = match t {
             Target::Cart(_) => self
                 .carts
-                .iter_mut()
-                .find(|c| c.id == id)
-                .map(|c| (c.position, &mut c.items)),
+                .iter()
+                .position(|c| c.id == id)
+                .and_then(|i| self.carts.update(i, |c| take(c.position, &mut c.items))),
             _ => self
                 .boats
-                .iter_mut()
-                .find(|b| b.id == id)
-                .map(|b| (b.position, &mut b.items)),
+                .iter()
+                .position(|b| b.id == id)
+                .and_then(|i| self.boats.update(i, |b| take(b.position, &mut b.items))),
         };
         let Some((at, items)) = held else {
             return;
         };
-        if items.iter().all(Option::is_none) {
-            return;
-        }
-        let items = std::mem::take(items);
         let at = BlockPos {
             x: at.x.floor() as i32,
             y: at.y.floor() as i32,
@@ -156,7 +155,7 @@ impl Game<'_> {
                 Target::Crystal(id) => self.crystals.retain(|c| c.id != id),
                 Target::Dragon(id) => {
                     if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-                        self.dragon = None;
+                        self.dragon.discard();
                     }
                 }
                 Target::Player | Target::Guest(_) | Target::Mob(_) => {}
@@ -172,6 +171,42 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn destroying_a_cart_spills_all_slots_after_the_removal_flush() {
+        use super::super::{
+            minecarts::{CartKind, Minecart},
+            native_entity_refs::tests::with_game,
+        };
+        use super::*;
+        with_game(|game| {
+            let mut cart = Minecart::new(600, CartKind::Chest, Vec3::new(1.0, 70.0, 2.0));
+            cart.items[0] = Some(ItemStack::new("minecraft:stone", 64));
+            cart.items[5] = Some(ItemStack::new("minecraft:stone", 19));
+            cart.items[26] = Some(ItemStack::new("minecraft:sand", 7));
+            game.carts.push(cart);
+            let entity = game.entity(600).unwrap();
+            assert!(game.entity_remove(entity, NativeRemovalReason::Killed));
+            assert!(game.dropped.is_empty());
+            game.native_removals_flush();
+            assert!(game.carts.is_empty());
+            let mut totals = std::collections::BTreeMap::new();
+            for item in game.dropped.iter() {
+                *totals.entry(item.stack.item.to_string()).or_insert(0) += item.stack.count;
+            }
+            assert_eq!(
+                totals,
+                std::collections::BTreeMap::from([
+                    ("minecraft:stone".to_owned(), 83),
+                    ("minecraft:sand".to_owned(), 7),
+                ])
+            );
+            let count = game.dropped.len();
+            game.native_removals_flush();
+            assert_eq!(game.dropped.len(), count);
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources"]
     fn discard_other_clears_nbt_and_saved_entity() {
@@ -207,7 +242,7 @@ mod tests {
                 SaveDir::new(root.clone(), shape).load_entities(0, 0).len(),
                 1
             );
-            let entity = game.native_entity(12).unwrap();
+            let entity = game.entity(12).unwrap();
             assert!(entity.discard(game));
             assert!(!entity.discard(game));
             game.native_removals_flush();
@@ -237,14 +272,14 @@ mod tests {
                 .unwrap()
                 .clone();
             game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
-            let mob = game.native_entity(12).unwrap();
+            let mob = game.entity(12).unwrap();
             assert!(mob.discard(game));
             assert!(game.mobs[0].removed);
             assert!(!mob.discard(game));
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
-            let player = game.native_entity(20).unwrap();
+            let player = game.entity(20).unwrap();
             assert!(!player.discard(game));
             assert!(game.player.is_some());
         });
@@ -266,7 +301,7 @@ mod tests {
                 .clone();
             game.mobs
                 .push(Mob::new(12, kind, Vec3::new(3.5, 70.0, -2.5), 0.0));
-            let mob = game.native_entity(12).unwrap();
+            let mob = game.entity(12).unwrap();
             let item = mob
                 .spawn_at_location(game, ItemStack::new("minecraft:carrot", 2), 0.5)
                 .unwrap();
@@ -338,7 +373,7 @@ mod tests {
                 (13, Vec3::new(0.81875, 65.0, 0.5)),
                 (14, Vec3::new(0.5, 65.0, 0.81875)),
             ] {
-                let entity = game.native_entity(id).unwrap();
+                let entity = game.entity(id).unwrap();
                 let item = entity
                     .spawn_at_location(game, ItemStack::new("minecraft:carrot", 2), 0.5)
                     .unwrap();

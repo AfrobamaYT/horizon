@@ -1,6 +1,9 @@
 use super::*;
 use std::{fs, path::Path, process::Command};
 
+#[path = "slot_lists.rs"]
+mod slot_lists;
+
 struct Case<'a> {
     kind: &'a str,
     body: &'a str,
@@ -62,7 +65,7 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../target/site-adapters-{}", std::process::id()));
     crate::native_mods::tests::write_bundle(&dir, "example", "");
-    let base = fs::read_to_string(dir.join(horizon_mods::manifest::MANIFEST)).unwrap();
+    let base = fs::read_to_string(dir.join(horizon_mod_package::manifest::MANIFEST)).unwrap();
     let mut site: Site = serde_json::from_value(serde_json::json!({
         "name": "Sone", "target": "horizon_client::game::Game::run", "selector": "self.step", "ordinal": 0,
         "hash": "0123456789abcdef", "listener": "horizon_client::game::__SoneListener", "record": "horizon_client::game::__SoneArgs", "output": "u32"
@@ -83,7 +86,7 @@ fn site_routes_validate_freshness_and_execute_every_kind_adapter() {
         let kind = case.kind;
         let text = format!("{base}[[native.injection]]\nid='test'\ntarget=\"horizon_client::game::Game<'_>::run\"\nselector='self . step'\nkind='{kind}'\nraw='hook'\nfingerprint='0123456789abcdef'\n");
         let mut manifest = Manifest::parse(&text).unwrap();
-        assert!(super::super::inject::raw_of(&manifest).is_empty());
+        assert!(super::super::inject::raw_of(&[], &manifest).is_empty());
         let injection = of(&manifest).next().unwrap();
         site.output = case.output.into();
         check(std::slice::from_ref(&site), &manifest, injection).unwrap();

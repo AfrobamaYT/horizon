@@ -113,6 +113,37 @@ impl Game<'_> {
         }
     }
 
+    /// A client-local level request without a packet seed. LocalPlayer.playSound
+    /// asks AtEntity but still creates a positional, not entity-bound, instance.
+    pub(super) fn play_client_local_sound(&mut self, sound: LevelSound<'_>) {
+        let seed = self.audio.next_sound_seed();
+        let at = sound.at;
+        if let Some(heard) = self.ask_level_sound(self.dim.id(), sound) {
+            self.audio.play_on_seeded(
+                heard.source.index(),
+                &heard.name,
+                Some(at),
+                heard.volume,
+                heard.pitch,
+                seed,
+            );
+        }
+    }
+
+    /// `LocalPlayer.playSound`, including inherited step, fall and consume sounds.
+    pub(super) fn play_client_player_sound(&mut self, name: &str, volume: f32, pitch: f32) {
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        let at = [player.position.x, player.position.y, player.position.z];
+        let Some(remote) = self.remote.as_ref() else {
+            return;
+        };
+        let mut sound = LevelSound::new(name, at, volume, pitch).in_source(SoundSource::Players);
+        sound.emitter = Some(remote.entity_id as u32);
+        self.play_client_local_sound(sound);
+    }
+
     /// `ServerLevel.playSeededSound`'s entity overload, `playSound(except,
     /// emitter, ...)`: `sound` plays here and, while the level's sounds are
     /// captured for others, joins the tick's bound sounds. `lan_broadcast_effects` asks
@@ -212,7 +243,7 @@ impl Game<'_> {
         };
         let (mut source_now, mut volume_now, mut pitch_now, mut cancel) =
             (source, volume, pitch, false);
-        let entity = emitter.and_then(|id| self.native_entity(id));
+        let entity = emitter.and_then(|id| self.entity(id));
         // A missing client emitter must not become an AtPosition request.
         if emitter.is_some() && entity.is_none() && !self.is_logical_server() {
             return None;
@@ -231,7 +262,7 @@ impl Game<'_> {
                 },
             ),
             None => {
-                let level = self.native_level(dimension)?;
+                let level = self.level(dimension)?;
                 self.native_play_level_sound_at_position(
                     mod_api::__private::PlayLevelSoundAtPositionCall {
                         level,
@@ -498,8 +529,8 @@ mod tests {
                 let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
                 game.mobs
                     .push(Mob::new(40, kind, Vec3::new(2.0, 64.0, 2.0), 0.0));
-                let cow = game.native_entity(40).unwrap();
-                assert!(game.native_entity_play_bound_sound(
+                let cow = game.entity(40).unwrap();
+                assert!(game.entity_play_bound_sound(
                     cow,
                     "minecraft:entity.player.burp",
                     SoundSource::Neutral,

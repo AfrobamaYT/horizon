@@ -4,10 +4,11 @@
 //! `player-export <uuid> [freeze]` (the source answers with the player's record) and
 //! `player-release <uuid> <hand-over> moved [announce] | abort` (the source lets the player go),
 //! `player-import <uuid> <json>` and `player-confirm <uuid> <hand-over>` (the target takes the
-//! record and lets the held player in). They run
+//! record and lets the held player in), and `transfer-status` (the counts a proxy reads before
+//! it sends players here). They run
 //! between two ticks, on the server thread, so the player is never caught half-way through a
 //! tick. The rules are `lan/arrivals.rs`'s. All of them are refused while `server.toml`'s
-//! `[transfer]` is off.
+//! `[transfer]` is off, and those that bring a player in once the server has begun to stop.
 use crate::game::{Dim, Game};
 use horizon_client::lan::arrivals;
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -37,6 +38,26 @@ impl Game<'_> {
         let (level, line) = arrivals::request_log(verb, name.as_deref(), args, &reply);
         super::log(level, &line);
         reply
+    }
+
+    /// Once a stop has begun (`/stop` from the console, a player or the control endpoint, or a stop
+    /// signal), the transfers know it before the next request is answered: what would bring a player
+    /// in is refused from then on, and the ways out stay open (`arrivals::Transfers::stopping`).
+    pub(super) fn note_stopping(&mut self, stop: bool) {
+        let stopping = stop || horizon_threads::stop_requests() > 0;
+        if let Some(transfers) = self.lan.as_mut().and_then(|h| h.hub.transfers.as_mut()) {
+            transfers.stopping |= stopping;
+        }
+    }
+
+    /// `transfer-status`: the counts a proxy reads before it sends players here
+    /// (`arrivals::status_request`). A proxy asks it every few seconds, so it writes nothing to
+    /// the log.
+    pub(super) fn transfer_status(&self) -> Value {
+        match self.lan.as_ref() {
+            Some(host) => arrivals::status_request(&host.hub, Instant::now()),
+            None => json!({ "error": "the server is not open to players" }),
+        }
     }
 
     fn run_player_request(&mut self, verb: &str, args: &str) -> Value {
@@ -147,8 +168,7 @@ impl Game<'_> {
     }
 
     /// What an import brought that the game keeps itself: the advancements (`PlayerAdvancements
-    /// .applyFrom` drops those this server lacks), the statistics, and the attachments of a whole
-    /// import, which saves copy from the game's own map (`guest_attachments_into`).
+    /// .applyFrom` drops those this server lacks) and the statistics.
     fn take_arrival_records(&mut self, uuid: u128, done: &horizon_client::lan::import::Imported) {
         let tree = self.advancement_tree();
         let host = self.lan.as_mut().expect("server host is present");
@@ -163,9 +183,6 @@ impl Game<'_> {
                     .retain(|id, _| tree.by_id.contains_key(id));
                 g.advancements = progress;
                 g.advancements_loaded = true;
-            }
-            if done.attachments {
-                self.guest_attachments.insert(g.conn, g.attachments.clone());
             }
             if let Some(stats) = &done.stats {
                 let play = host.play.entry(g.conn).or_default();
@@ -227,8 +244,7 @@ impl Game<'_> {
         let _ = self.finish_player_autosaves(true);
         let host = self.lan.as_mut().expect("server host is present");
         let i = host.hub.imported_arrival(uuid, id)?;
-        let mut g = host.hub.guests.remove(i);
-        Self::guest_attachments_into(&self.guest_attachments, &mut g);
+        let g = host.hub.guests.take_for_save(i);
         let written =
             horizon_client::lan::playerdata::save_now(&g, &self.world_root).and_then(|()| {
                 self.write_arrival_records(self.lan.as_ref().expect("server host is present"), &g)
@@ -297,10 +313,6 @@ impl Game<'_> {
                 .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
         }
         host.hub.send_inventory(i);
-        // What a mod attached to the player since it joined, as a save writes it.
-        host.hub.guests.update(i, |g| {
-            Self::guest_attachments_into(&self.guest_attachments, g)
-        });
         let advancements = if self.adv.tree.list.is_empty() {
             Value::Null
         } else {
