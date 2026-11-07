@@ -128,6 +128,15 @@ mod tests {
             );
             assert_eq!(fs::read_to_string(&file).unwrap(), changed);
         }
+        fs::write(&file, text).unwrap();
+        let mut alias = request;
+        alias.selector = "self.step".into();
+        assert!(
+            stage(&root, &entries, &[alias])
+                .unwrap_err()
+                .contains("canonical callee")
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), text);
         fs::remove_dir_all(root).unwrap();
     }
 }
