@@ -301,9 +301,9 @@ impl Game<'_> {
                     self.command_damage_mob(id, amount, damage)
                 }
             }
-            Target::Item(id) => self.command_damage_item(id, amount, &ty, cause.or(by)),
+            Target::Item(id) => self.command_damage_item(id, amount, ty, cause.or(by)),
             Target::Boat(_) | Target::Cart(_) => {
-                self.command_damage_vehicle(target, amount, &ty, cause.or(by))
+                self.command_damage_vehicle(target, amount, ty, cause.or(by))
             }
             Target::Dragon(id) => self.command_damage_dragon(
                 id,
