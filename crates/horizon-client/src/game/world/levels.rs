@@ -171,6 +171,11 @@ impl Levels {
             .map(|(_, level)| &level.streaming)
     }
 
+    /// A parked level's existing generator query worker, without switching levels.
+    pub(super) fn parked_locator_of(&self, dimension: &str) -> Option<Arc<VanillaTerrain>> {
+        self.parked_of(dimension)?.locator.clone()
+    }
+
     /// The streaming of the level not in place whose dimension is `dimension`, to change.
     pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
         self.parked
