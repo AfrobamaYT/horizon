@@ -72,6 +72,11 @@ pub trait RecipesClientHost {
     /// player's book doesn't hold; one missing items shows as a ghost.
     #[access(WorldOnly)]
     fn place_recipe(&mut self, book_id: i32, all: bool) -> Result<(), String>;
+    /// Side: client.
+    /// Move available ingredients for a viewer recipe into the open crafting grid,
+    /// without requiring the recipe to be learned. The screen shows any refusal.
+    #[access(WorldOnly)]
+    fn transfer_recipe(&mut self, book_id: i32);
 }
 /// The handles' reads of the `recipes` area, implemented by the game and reached through [`Backend`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
