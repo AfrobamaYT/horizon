@@ -49,7 +49,7 @@ remain NBT List, never ByteArray/IntArray/LongArray.
 
 Run `python3 tools/refactors/api-pr3/test_json_nbt.py` with the prepared pinned
 26.3 data. It runs a Java oracle, compiles the exact production Rust source in
-a minimal test crate under target/ (no graphics rebuild), and compares all 42
+a minimal test crate under target/ (no graphics rebuild), and compares all 43
 samples structurally, including exact tag IDs and IEEE bits. It also runs four
 focused unit tests. The fixture covers custom data, structure config, Text,
 loot metadata, numeric boundaries, lists, nested containers and refusals.
