@@ -278,8 +278,63 @@ pub fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::te
     }
 }
 
+// Hover entity names can themselves contain components. Clone their retained
+// JSON with a work list rather than Value's recursive Clone implementation.
+pub(crate) fn clone_object(object: &serde_json::Map<String, Value>) -> Value {
+    clone_json(Work::BorrowedObject(object))
+}
+pub(crate) fn clone_value(value: &Value) -> Value {
+    clone_json(Work::Value(value))
+}
+/// Release an owned component without recursive JSON container destruction.
+pub fn discard_component(value: Value) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Array(values) => pending.extend(values),
+            Value::Object(values) => pending.extend(values.into_values()),
+            _ => {}
+        }
+    }
+}
+enum Work<'a> {
+    Value(&'a Value),
+    BorrowedObject(&'a serde_json::Map<String, Value>),
+    Array(usize),
+    Object(Vec<String>),
+}
+fn clone_json(root: Work<'_>) -> Value {
+    let mut pending = vec![root];
+    let mut done = Vec::new();
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Value(Value::Array(a)) => {
+                pending.push(Work::Array(a.len()));
+                pending.extend(a.iter().rev().map(Work::Value));
+            }
+            Work::Value(Value::Object(o)) | Work::BorrowedObject(o) => {
+                pending.push(Work::Object(o.keys().cloned().collect()));
+                pending.extend(o.values().rev().map(Work::Value));
+            }
+            Work::Value(v) => done.push(v.clone()),
+            Work::Array(len) => {
+                let values = done.split_off(done.len() - len);
+                done.push(Value::Array(values));
+            }
+            Work::Object(keys) => {
+                let values = done.split_off(done.len() - keys.len());
+                done.push(Value::Object(keys.into_iter().zip(values).collect()));
+            }
+        }
+    }
+    done.pop().unwrap_or(Value::Null)
+}
+
 /// The style fields of a component object.
-fn object_style(o: &serde_json::Map<String, Value>) -> Style {
+fn object_style<'a>(
+    o: &'a serde_json::Map<String, Value>,
+    child: &mut dyn FnMut(&'a Value) -> Text,
+) -> Style {
     let mut style = Style::default();
     if let Some(c) = o.get("color").and_then(Value::as_str) {
         style.color = named_color(c).or_else(|| hex_color(c));
@@ -306,14 +361,14 @@ fn object_style(o: &serde_json::Map<String, Value>) -> Style {
                     .or_else(|| e.get("contents"))
                     .or_else(|| e.get("text"));
                 if let Some(value) = value {
-                    style.hover = Some(Box::new(to_text(value, &mut |s| Text::literal(s))));
+                    style.hover = Some(std::sync::Arc::new(child(value)));
                 }
             }
             Some("show_item") if e.get("id").is_some_and(Value::is_string) => {
-                style.hover_item = Some(Box::new(Value::Object(e.clone())));
+                style.hover_item = Some(std::sync::Arc::new(clone_object(e)));
             }
             Some("show_entity") if e.get("id").is_some_and(Value::is_string) => {
-                style.hover_entity = Some(Box::new(Value::Object(e.clone())));
+                style.hover_entity = Some(std::sync::Arc::new(clone_object(e)));
             }
             _ => {}
         }
@@ -398,7 +453,11 @@ impl Sourced {
     fn append(self, base: &mut Text, other: Text) {
         match self.0 {
             true => base.push(other),
-            false => base.spans.extend(other.spans),
+            false => {
+                let mut other = other;
+                base.spans.append(&mut other.spans);
+                crate::text::discard_text(other);
+            }
         }
     }
     fn styled(self, mut text: Text, style: &Style) -> Text {
@@ -421,11 +480,145 @@ impl Sourced {
     }
 }
 
+// Continuations preserve lazy content selection and callback order while keeping
+// every component relation off the call stack. Hover decoding has its own policy.
 fn build(
     v: &Value,
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
     sourced: Sourced,
+) -> Text {
+    use std::collections::HashMap;
+    enum Work<'a> {
+        Enter(&'a Value, bool),
+        Styled(&'a Value, bool),
+        Content(&'a Value, bool, Style, Option<Text>),
+        Finish(&'a Value, bool, Style, Text),
+    }
+    let mut pending = vec![Work::Enter(v, false)];
+    let mut done = HashMap::<*const Value, (Text, Style)>::new();
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Enter(value, hover) => match value {
+                Value::Object(o) => {
+                    pending.push(Work::Styled(value, hover));
+                    if let Some(e) = style_event_object(o, "hover_event", "hoverEvent")
+                        && e.get("action").and_then(Value::as_str) == Some("show_text")
+                        && let Some(v) = e
+                            .get("value")
+                            .or_else(|| e.get("contents"))
+                            .or_else(|| e.get("text"))
+                    {
+                        pending.push(Work::Enter(v, true));
+                    }
+                }
+                Value::Array(a) => {
+                    pending.push(Work::Content(value, hover, Style::default(), None));
+                    pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
+                }
+                _ => pending.push(Work::Content(value, hover, Style::default(), None)),
+            },
+            Work::Styled(value, hover) => {
+                let Value::Object(o) = value else {
+                    unreachable!()
+                };
+                let style = object_style(o, &mut |v| {
+                    done.remove(&(v as *const Value))
+                        .map(take_built_text)
+                        .unwrap_or_default()
+                });
+                let overridden = if hover { None } else { contents(o) };
+                let needs_content = overridden.is_none();
+                pending.push(Work::Content(value, hover, style, overridden));
+                if needs_content {
+                    // inline_object evaluates its fallback before selecting the content.
+                    // Arguments are evaluated only for the translation branch.
+                    if inline_object_fields(o).is_none()
+                        && !o.contains_key("text")
+                        && o.get("translate").is_some_and(Value::is_string)
+                        && let Some(Value::Array(a)) = o.get("with")
+                    {
+                        pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
+                    }
+                    if let Some(v) = o.get("fallback") {
+                        pending.push(Work::Enter(v, hover));
+                    }
+                }
+            }
+            Work::Content(value, hover, mut style, overridden) => {
+                let mode = Sourced(sourced.0 || hover);
+                if let Value::Array(a) = value
+                    && let Some(first) = a.first()
+                    && let Some((text, own_style)) = done.get(&(first as *const Value))
+                {
+                    style = if first.is_object() {
+                        own_style.clone()
+                    } else {
+                        text.spans
+                            .first()
+                            .map(|s| s.style.clone())
+                            .unwrap_or_default()
+                    };
+                }
+                let mut literal = |s: &str| Text::literal(s);
+                let resolver: &mut dyn FnMut(&str) -> Text =
+                    if hover { &mut literal } else { resolve };
+                let text = build_node(value, resolver, overridden, mode, &style, &mut |v| {
+                    done.remove(&(v as *const Value))
+                        .map(take_built_text)
+                        .unwrap_or_default()
+                });
+                if let Value::Object(o) = value {
+                    pending.push(Work::Finish(value, hover, style, text));
+                    if let Some(Value::Array(a)) = o.get("extra") {
+                        pending.extend(a.iter().rev().map(|v| Work::Enter(v, hover)));
+                    }
+                } else {
+                    done.insert(value as *const Value, (text, style));
+                }
+            }
+            Work::Finish(value, hover, style, mut text) => {
+                let Value::Object(o) = value else {
+                    unreachable!()
+                };
+                let mode = Sourced(sourced.0 || hover);
+                if let Some(Value::Array(a)) = o.get("extra") {
+                    for v in a {
+                        let extra = done
+                            .remove(&(v as *const Value))
+                            .map(take_built_text)
+                            .unwrap_or_default();
+                        mode.append(&mut text, mode.styled(extra, &style));
+                    }
+                }
+                if mode.0
+                    && (o.contains_key("object")
+                        || o.contains_key("player")
+                        || o.contains_key("sprite"))
+                {
+                    text = text.with_component(clone_object(o));
+                }
+                done.insert(value as *const Value, (text, style));
+            }
+        }
+    }
+    done.remove(&(v as *const Value))
+        .map(take_built_text)
+        .unwrap_or_default()
+}
+
+fn take_built_text((text, style): (Text, Style)) -> Text {
+    crate::text::discard_style(style);
+    text
+}
+
+fn build_node<'a>(
+    v: &'a Value,
+    resolve: &mut dyn FnMut(&str) -> Text,
+    overridden: Option<Text>,
+    sourced: Sourced,
+    style: &Style,
+    child: &mut dyn FnMut(&'a Value) -> Text,
 ) -> Text {
     match v {
         Value::String(s) => sourced.literal(s.clone()),
@@ -436,28 +629,23 @@ fn build(
             let Some((first, rest)) = list.split_first() else {
                 return Text::empty();
             };
-            let mut base = build(first, resolve, contents, sourced);
+            let mut base = child(first);
             // The siblings take the first component's own style, even when
             // its text is empty.
-            let style = match first {
-                Value::Object(o) => object_style(o),
-                _ => base
-                    .spans
-                    .first()
-                    .map(|s| s.style.clone())
-                    .unwrap_or_default(),
-            };
             for sibling in rest {
-                let sibling = build(sibling, resolve, contents, sourced);
+                let sibling = child(sibling);
                 sourced.append(&mut base, sourced.styled(sibling, &style));
             }
             base
         }
         Value::Object(o) => {
-            let style = object_style(o);
-            let content = if let Some(t) = contents(o) {
+            let content = if let Some(t) = overridden {
                 t
-            } else if let Some(object) = inline_object(o, resolve, contents) {
+            } else if let Some(object) = inline_object_with_fallback(
+                o,
+                o.get("object").and_then(Value::as_str),
+                o.get("fallback").map(|v| plain_component(child(v))),
+            ) {
                 let mut text = Text::literal("\u{fffc}");
                 text.spans[0].style.inline_object = Some(object);
                 text
@@ -470,13 +658,13 @@ fn build(
                 let args: Vec<Text> = o
                     .get("with")
                     .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .map(|x| build(x, resolve, contents, sourced))
-                            .collect()
-                    })
+                    .map(|a| a.iter().map(|x| child(x)).collect())
                     .unwrap_or_default();
-                sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args)
+                let text = sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args);
+                for arg in args {
+                    crate::text::discard_text(arg);
+                }
+                text
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
                 resolve(sel)
             } else if let Some(key) = o.get("keybind").and_then(Value::as_str) {
@@ -484,28 +672,16 @@ fn build(
             } else {
                 Text::empty()
             };
-            let mut out = sourced.styled(content, &style);
-            for extra in o
-                .get("extra")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                let extra = build(extra, resolve, contents, sourced);
-                sourced.append(&mut out, sourced.styled(extra, &style));
-            }
-            if sourced.0
-                && (o.contains_key("object")
-                    || o.contains_key("player")
-                    || o.contains_key("sprite"))
-            {
-                out.with_component(Value::Object(o.clone()))
-            } else {
-                out
-            }
+            sourced.styled(content, style)
         }
         Value::Null => Text::empty(),
     }
+}
+
+fn plain_component(text: Text) -> String {
+    let plain = text.plain();
+    crate::text::discard_text(text);
+    plain
 }
 
 /// Decode inline object fields, including the engine's profile and atlas defaults.
@@ -517,7 +693,7 @@ pub fn inline_object(
     let kind = object.get("object").and_then(Value::as_str);
     let fallback = object
         .get("fallback")
-        .map(|value| to_text_with(value, resolve, contents).plain());
+        .map(|value| plain_component(to_text_with(value, resolve, contents)));
     inline_object_with_fallback(object, kind, fallback)
 }
 
@@ -593,6 +769,106 @@ pub fn name_text(tag: &Tag) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_recursive_temporaries_are_released_on_256_kib() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                for hover_text in [false, true] {
+                    for argument in [false, true] {
+                        let mut child = serde_json::json!({"text":"leaf"});
+                        for _ in 1..511 {
+                            let mut event = serde_json::Map::new();
+                            event.insert(
+                                "action".into(),
+                                if hover_text {
+                                    "show_text"
+                                } else {
+                                    "show_entity"
+                                }
+                                .into(),
+                            );
+                            event.insert("id".into(), "minecraft:pig".into());
+                            event.insert("uuid".into(), serde_json::json!([0, 0, 0, 1]));
+                            event.insert(if hover_text { "value" } else { "name" }.into(), child);
+                            let mut fields = serde_json::Map::new();
+                            fields.insert("text".into(), "parent".into());
+                            fields.insert("hover_event".into(), Value::Object(event));
+                            child = Value::Object(fields);
+                        }
+                        let mut fields = serde_json::Map::new();
+                        if argument {
+                            fields.insert("translate".into(), "test:missing".into());
+                            fields.insert("fallback".into(), "unused".into());
+                            fields.insert("with".into(), Value::Array(vec![child]));
+                        } else {
+                            fields.insert("object".into(), "atlas".into());
+                            fields.insert("sprite".into(), "test:icon".into());
+                            fields.insert("fallback".into(), child);
+                        }
+                        let output = spans_of(Value::Object(fields));
+                        assert_eq!(output.plain(), if argument { "unused" } else { "parent" });
+                        std::mem::forget(output);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn iterative_builder_preserves_lazy_content_and_callback_order() {
+        let value = serde_json::json!({"id":"parent", "text":"visible", "with":[{"id":"unused", "selector":"unused"}], "extra":[{"id":"extra", "selector":"@a"}]});
+        let calls = std::cell::RefCell::new(Vec::new());
+        let text = to_text_with(
+            &value,
+            &mut |selector| {
+                calls.borrow_mut().push(selector.to_owned());
+                Text::literal("resolved")
+            },
+            &mut |o| {
+                calls
+                    .borrow_mut()
+                    .push(o["id"].as_str().unwrap().to_owned());
+                None
+            },
+        );
+        assert_eq!(text.plain(), "visibleresolved");
+        assert_eq!(*calls.borrow(), ["parent", "extra", "@a"]);
+        let value = serde_json::json!({"id":"override", "translate":"missing", "with":[{"selector":"unused"}], "fallback":{"selector":"unused"}});
+        let text = to_text_with(&value, &mut |_| panic!("unused branch"), &mut |o| {
+            assert_eq!(o.get("id").and_then(Value::as_str), Some("override"));
+            Some(Text::literal("override"))
+        });
+        assert_eq!(text.plain(), "override");
+    }
+
+    #[test]
+    fn iterative_builder_isolates_hover_resolution_and_empty_array_style() {
+        let value = serde_json::json!({"text":"visible", "hover_event":{"action":"show_text", "value":{"selector":"@p"}}});
+        let text = to_text_with(
+            &value,
+            &mut |_| panic!("hover resolver escaped"),
+            &mut |o| {
+                assert!(o.contains_key("text"));
+                None
+            },
+        );
+        assert_eq!(text.spans[0].style.hover.as_ref().unwrap().plain(), "@p");
+        let value = serde_json::json!({"text":"visible", "hover_event":{"action":"show_text", "value":{"translate":"test:hover"}}});
+        let text = to_text(&value, &mut |_| panic!("hover resolver escaped"));
+        assert_eq!(
+            text.spans[0].style.hover.as_ref().unwrap().component()["translate"],
+            "test:hover"
+        );
+        let text = Text::from(serde_json::json!([[{"text":"", "color":"red"}], "tail"]));
+        assert_eq!(text.plain(), "tail");
+        assert_eq!(text.spans[0].style.color, None);
+        let text = Text::from(serde_json::json!([{"text":"", "color":"red"}, "tail"]));
+        assert_eq!(text.spans[0].style.color, Some(crate::text::RED));
+    }
 
     #[test]
     fn translation_fallback_is_a_literal_template_not_a_second_key() {

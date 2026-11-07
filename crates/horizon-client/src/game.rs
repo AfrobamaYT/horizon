@@ -8649,16 +8649,14 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityChangeBlockPre) {
             return false;
         }
-        let name = |s: BlockStateId| self.res.facts().get(s).name.to_string();
-        let (from, to) = (name(from), name(to));
         let mut cancel = false;
         self.native_entity_change_block_pre(mod_api::__private::EntityChangeBlockPreCall {
             player,
             entity: None,
             kind: "minecraft:player",
             pos: [position.x, position.y, position.z],
-            from: &from,
-            to: &to,
+            from,
+            to,
             cancel: &mut cancel,
         });
         cancel
@@ -24992,7 +24990,7 @@ pub fn run_with(
     // The structure types those mods registered, handed to the engine before
     // any world opens, as its StructureRegistry reads them.
     if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(
-        mod_api::__private::installed_structure_types(),
+        native_structure_types::installed_structure_types(),
     )
     .is_err()
     {
@@ -25000,7 +24998,7 @@ pub fn run_with(
     }
     // The levels they registered, below the data packs of every world opened.
     if horizon_world::worldgen::overrides::install_mod_dimensions(
-        mod_api::__private::installed_dimensions(),
+        native_dimensions::installed_dimensions(),
     )
     .is_err()
     {
@@ -25008,7 +25006,7 @@ pub fn run_with(
     }
     // Their chunk generators, which those levels' and the packs' stems name.
     if horizon_world::worldgen::mod_generators::install_mod_chunk_generators(
-        mod_api::__private::installed_chunk_generators(),
+        native_chunk_generator::installed_chunk_generators(),
     )
     .is_err()
     {

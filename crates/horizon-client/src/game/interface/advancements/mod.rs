@@ -2364,7 +2364,7 @@ pub(super) fn adv_name(a: &adv::Advancement) -> Text {
     };
     let color = frame_color(d.frame);
     let title = text_of(&d.title).with_style(&Style {
-        hover: Some(Box::new(decorate_name(d))),
+        hover: Some(std::sync::Arc::new(decorate_name(d))),
         ..Style::default()
     });
     Text::translate("chat.square_brackets", &[title]).with_color(color)

@@ -81,17 +81,68 @@ carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment ef
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
 and remain strings, as do labels and tags.
 
+### Hot item and block identities
+
+Resolve item and block keys during load and keep them for tick and menu calls.
+`item_burn_time`, `item_compost_chance`, `give`, `enchantment_supports`'s item,
+and GUI `item` / `item_model` take `ItemKey`. `block_item`, `fluid_bucket` and
+`screen_hovered_item` return item keys. `level.block`, `lit_block_name` and
+`NativeHit.block` return block keys; `BlockEntityDrawContext::block` takes one.
+`NativeHeldItem.id` (including use-start/stop events) and `NativeStack.item`
+carry item keys, not names. Unknown incoming slots are refused at the boundary.
+`block_sprites` takes resolved `BlockStateId` values, preserving properties without
+parsing state strings. The pre-change block event carries resolved `from` / `to`
+states and does not allocate their names. Property names and values in
+`set_block_property` are not block identifiers and remain strings.
+
+These calls remove string transport across wasm. Engine metadata reads may still
+hash borrowed registry names; no formatted identifier is built for these inputs.
+
+### Matched recipe lookup
+
+`level.recipe_for(host, &recipe_type, &inputs)` replaces the crafting-only lookup.
+Use `RecipeInput::Crafting { width, height, slots }` for `minecraft:crafting`
+(row-major slots, dimensions 1 through 3), `Single(stack)` for smelting, blasting,
+smoking, campfire cooking and stonecutting, or `Smithing { template, base, addition }`
+for `minecraft:smithing`. Recipe **types** are not serializers: shaped and shapeless
+files both belong to `minecraft:crafting`, and transform/trim both belong to smithing.
+
+The server uses the same engine matchers and assembled outputs as its menus,
+including data-pack overrides of vanilla recipe types. A `RecipeMatch` contains the
+matched recipe identifier, typed output, ordered remaining items, experience and
+processing time. Lookup consumes nothing; the caller applies inventory changes
+transactionally. Keep the result until inputs or the recipe load change.
+
+`Ok(None)` means valid input without a match. Invalid shapes/items and unavailable
+levels are typed errors. A type without an engine matcher returns
+`RecipeLookupError::NotMatchable`, not an empty match. For mod-owned types, retain
+`recipes_of_type` once per load/reload and match that cached data **inside the mod**,
+with zero crossings per tick. Dynamic custom outputs and contextual predicates
+remain mod-owned; the host does not call guest code to match recipes.
+
+At publication, call `ingredient.item_keys(host)` once per ingredient to retain
+`Arc<[ItemKey]>` for local matching. This load-time read returns exactly the plain
+item membership for lists, expanded tags and standard shapes, using the engine
+matcher. It returns `IngredientKeysError::NotEnumerable` if any custom or component
+predicate occurs anywhere in the tree; a displayed item list is not a safe substitute.
+`UnknownItem` refuses a missing registry identity. Do not call this method per tick.
+The sample's `ProcessingRecipes::publish` retains these keys; `result` then checks
+`input.item()` locally, with no `Ingredient::test` host call per candidate.
+
 ### API-owned values: migration table
 
 | Previous engine value | API-owned value | Mod changes |
 | --- | --- | --- |
+| Engine stack in `TooltipDisplay::for_stack` | `mod_api::ItemStack` | Pass the owned API stack supplied to the tooltip event. Its effective tooltip component includes vanilla's implicit defaults. Normal game rendering borrows the engine component without creating an API stack. |
+| Engine loot context and candidate stack | `mod_api::{NativeLootContext, LootStack}` | Contexts own their facts; candidate items are `ItemKey`s. Counts remain signed. Ordered `Option<Tag>` patches preserve removals and NBT types, and names are API `Text` trees. Writeback is atomic. |
+| Engine `ParticleType` and options | `ParticleKey` and API `ParticleOptions` | Retain a key requested through `Registrar::particle_key`. Every parameter-family constructor takes its key; `simple(key)` also replaces string-based custom provider construction. The engine enum is no longer exported. |
 | Engine damage containers | `mod_api::{DamageContainer, DamageValues, Reduction}` | Hooks receive an owned scalar snapshot. Read reductions with `reduction`; edit damage and cooldown through the container setters. Sequencing methods remain game-only. |
 | Engine item property values | `mod_api::{ItemBar, ItemRarity}` | Resource methods retain their signatures; damageability, glint and repair checks use game-owned metadata reads. |
 | Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
 | Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
-| Renderer GUI commands | `mod_api::GuiDraw` | Mods pass API command records to `DrawContext::gui_paint` and HUD hooks. The renderer keeps its own command buffer and engine text; conversion happens at the game boundary. |
+| Renderer GUI commands | `mod_api::GuiDraw` | `DrawContext::gui_paint` returns a typed text-conversion result; handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
 | File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Part of [per-node origin tracking #1738](https://github.com/arismoko/horizon/issues/1738). |
 
 `mod_api::GameRuleValue` owns the `Bool(bool)` and `Int(i32)` cases, in that order.
@@ -129,14 +180,25 @@ rather than flattening it to a string.
 
 `TextForm` crosses the generated wasm boundary as a flat node table. Conversion
 is iterative, refuses component depth above 512 and rejects malformed tables. Each
-node's JSON metadata is still limited to 100 nested containers; a separate Value
-boundary is planned. Component and style metadata remain intact.
+node's JSON metadata is still limited to 100 nested containers pending the typed-node
+replacement. Component and style metadata remain intact. The game boundary also uses
+this flat form and validates component depth before cloning payloads or applying writes.
+Host methods accepting or returning Text return `Result<_, TextFormError>`; mixed
+item/Text writes preserve the refusal in `StackWriteError::Text`, and unspawned-mob
+reads use `UnspawnedMobError::Text`. `TooDeep` means a component exceeds 512 nodes
+along a recursive path. Unavailable backends are distinct from over-depth text.
+A refused hook capture does not dispatch; a refused writeback leaves every field unchanged.
+No subscriber means no conversion or snapshot allocation.
+
+Recursive `Clone`, `Eq` and `Drop` of a tree a mod itself built are ordinary Rust ownership,
+not part of the boundary guarantee. A wasm guest overflowing its own stack on a received
+512-deep tree traps within its dependency group.
 `Text::new(content)` constructs any content kind without exposing an engine value.
 The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
 new cases change the link contract, just as enum-case order does. Mod matches should
 name every case rather than silently treating a new protocol case as an old one.
 Typed content and style fields are authoritative; metadata retains unrecognized
-properties, not overrides of those typed fields. Game-side encoding is infallible
+properties, not overrides of those typed fields. Game-side encoding is fallible
 and reuses the engine's translation-argument and fallback construction rules.
 Capture keeps dynamic contents and metadata rather than flattening the rendered spans.
 It shares the engine's SNBT flag, shadow-colour, click-policy and inline-object parsers.

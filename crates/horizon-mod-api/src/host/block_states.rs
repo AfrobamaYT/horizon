@@ -7,7 +7,7 @@ pub trait BlockStatesHost {
     /// Side: both.
     /// Read a loaded, light-emitting block. No implicit chunk loading.
     #[access(WorldOnly)]
-    fn lit_block_name(&self, pos: [i32; 3]) -> Option<&str>;
+    fn lit_block_name(&self, pos: [i32; 3]) -> Option<BlockKey>;
     /// Side: both.
     /// Resolve a registered fluid identifier.
     #[access(WorldOnly)]
@@ -42,10 +42,10 @@ pub trait BlockStatesHost {
     #[access(Metadata)]
     fn item_crafting_remainder(&self, stack: &ItemStack) -> Option<ItemStack>;
     /// Side: both.
-    /// `Block.asItem`: the block's item name, including air for a block with
-    /// no item; None if the block name is unknown.
+    /// `Block.asItem`: the block's item identity, including air for a block with
+    /// no item; None if either resolved identity is unavailable.
     #[access(Metadata)]
-    fn block_item(&self, block: BlockKey) -> Option<String>;
+    fn block_item(&self, block: BlockKey) -> Option<ItemKey>;
 }
 /// The server host's methods of the `block_states` area, implemented by the game and reached through [`ServerHost`].
 #[horizon_mod_api_macros::host_area]
@@ -80,7 +80,11 @@ pub trait BlockStatesServerHost {
 #[horizon_mod_api_macros::host_area]
 pub trait BlockStatesBackend {
     /// Side: both.
-    /// Borrow an immutable property through the block metadata resource.
+    /// Borrow the canonical block name through the block metadata resource.
+    #[access(Metadata)]
+    fn block_metadata_name(&self, block: BlockKey) -> Result<&str, BlockStateError>;
+    /// Side: both.
+    /// Borrow a property's serialized value from the block metadata resource.
     #[access(Metadata)]
     fn block_metadata_property(
         &self,

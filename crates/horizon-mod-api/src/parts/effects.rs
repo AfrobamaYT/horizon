@@ -34,6 +34,7 @@ pub mod tests {
                 ModEntry::new("second", Box::new(Keys(requested.clone()))),
             ],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         let speed_key = requested.lock().unwrap()[0];

@@ -1582,7 +1582,8 @@ pub(super) mod tests {
             assert!(game.level_is_loaded(level, [0, 127, 0]));
             assert_eq!(game.level_block_state(level, [0, 127, 0]), Some(stone));
             assert_eq!(
-                game.level_block(level, [0, 127, 0]).as_deref(),
+                game.level_block(level, [0, 127, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:stone")
             );
             assert!(game.native_level_write_allowed(level, [0, 127, 0]));

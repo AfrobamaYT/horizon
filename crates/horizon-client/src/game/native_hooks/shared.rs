@@ -4230,8 +4230,9 @@ mod tests {
             assert!(!mod_api::prelude::ClientInputClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward =
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
+            let forward = mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
+                .unwrap()
+                .unwrap();
             assert_eq!(
                 (forward.down, forward.label),
                 (false, mod_api::Text::literal("W"))
@@ -4240,13 +4241,17 @@ mod tests {
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
                     .unwrap()
+                    .unwrap()
                     .down
             );
-            let attack =
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
+            let attack = mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack")
+                .unwrap()
+                .unwrap();
             assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
             assert!(
-                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost")
+                    .unwrap()
+                    .is_none()
             );
         });
     }

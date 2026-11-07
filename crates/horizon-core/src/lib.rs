@@ -20,6 +20,7 @@ pub mod identifier;
 pub mod java_hash_map;
 pub mod jmath;
 pub mod json_nbt;
+pub mod level_id;
 pub mod level_key;
 pub mod nbt;
 pub mod neighbour_update;
