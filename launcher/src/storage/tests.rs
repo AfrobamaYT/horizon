@@ -107,3 +107,44 @@ fn held_open_file_is_kept_for_next_sweep() {
     storage.sweep().unwrap();
     storage.clear(BuildCache::Source).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn root_replacement_cannot_redirect_sweep() {
+    let home = Home::new();
+    let outside = Home::new();
+    outside.seed(".trash-precious/world");
+    let storage = Storage::at(&home.0).unwrap();
+    let moved = home.0.with_extension("moved");
+    fs::rename(&home.0, &moved).unwrap();
+    std::os::unix::fs::symlink(&outside.0, &home.0).unwrap();
+    assert!(storage.sweep().is_err());
+    assert!(outside.0.join(".trash-precious/world").exists());
+    fs::remove_file(&home.0).unwrap();
+    fs::rename(moved, &home.0).unwrap();
+}
+
+#[test]
+fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
+    for (cache, directory) in [
+        (BuildCache::InternalsSync, "native/internals-sync/rev"),
+        (BuildCache::Tools, "native/tools/rev"),
+    ] {
+        let home = Home::new();
+        let lock_path = home.seed(&format!("{directory}/target/debug/.cargo-lock"));
+        let output = home.seed(&format!("{directory}/target/debug/output"));
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        held.lock().unwrap();
+        let storage = Storage::at(&home.0).unwrap();
+        assert!(matches!(storage.clear(cache), Err(Error::Busy)));
+        assert!(output.exists());
+        held.unlock().unwrap();
+        storage.clear(cache).unwrap();
+        assert!(!output.exists());
+        assert!(lock_path.exists());
+    }
+}

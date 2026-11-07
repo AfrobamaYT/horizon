@@ -1,6 +1,9 @@
 //! Disposable launcher storage. Player-owned files are never accepted as cleanup targets.
 pub use crate::native_cache::Error;
 use crate::native_cache::{checked, linked, Cache};
+use cap_fs_ext::DirExt;
+use cap_std::fs::Dir;
+mod safe;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -71,6 +74,7 @@ impl BuildCache {
 pub struct Storage {
     root: PathBuf,
     lease: Cache,
+    directory: Dir,
 }
 
 impl Storage {
@@ -79,11 +83,17 @@ impl Storage {
     }
 
     fn at(root: &Path) -> Result<Self, Error> {
+        checked(root, true)?;
+        fs::create_dir_all(root)?;
+        let directory = Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
         let lease = Cache::acquire(root)?;
-        Ok(Self {
+        let storage = Self {
             root: root.canonicalize()?,
+            directory,
             lease,
-        })
+        };
+        storage.validate_root()?;
+        Ok(storage)
     }
 
     fn path(&self, cache: BuildCache) -> Result<PathBuf, Error> {
@@ -113,35 +123,45 @@ impl Storage {
         self.lease.clear()
     }
 
+    fn validate_root(&self) -> Result<(), Error> {
+        use cap_fs_ext::MetadataExt;
+        checked(&self.root, true)?;
+        let current =
+            Dir::open_ambient_dir(&self.root, cap_std::ambient_authority())?.dir_metadata()?;
+        let held = self.directory.dir_metadata()?;
+        if (current.dev(), current.ino()) != (held.dev(), held.ino()) {
+            return Err(Error::Unsafe(self.root.clone()));
+        }
+        Ok(())
+    }
+
     fn trash(&self, path: &Path) -> Result<u64, Error> {
+        self.validate_root()?;
         let bytes = allocated_bytes(path)?;
         if !path.try_exists()? {
             return Ok(0);
         }
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let trash = path
-            .parent()
-            .ok_or_else(|| Error::Unsafe(path.to_owned()))?
-            .join(format!(
-                ".trash-{}-{}-{}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-        fs::rename(path, &trash)?;
-        remove(&trash)?;
+        let relative = path
+            .strip_prefix(&self.root)
+            .map_err(|_| Error::Unsafe(path.to_owned()))?;
+        let mut parent = self.directory.try_clone()?;
+        let mut parts = relative.components().peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                safe::clear(&parent, Path::new(part.as_os_str()))?;
+            } else {
+                parent = parent.open_dir_nofollow(part.as_os_str())?;
+            }
+        }
         Ok(bytes)
     }
 
     pub fn sweep(&self) -> Result<(), Error> {
-        for entry in fs::read_dir(&self.root)? {
+        self.validate_root()?;
+        for entry in self.directory.entries()? {
             let entry = entry?;
             if entry.file_name().to_string_lossy().starts_with(".trash-") {
-                allocated_bytes(&entry.path())?;
-                remove(&entry.path())?;
+                safe::clear(&self.directory, Path::new(&entry.file_name()))?;
             }
         }
         Ok(())
@@ -217,30 +237,6 @@ fn allocation(path: &Path, _meta: &fs::Metadata) -> Result<((u64, u64), u64), Er
         ),
         standard.AllocationSize as u64,
     ))
-}
-
-fn remove(path: &Path) -> Result<(), Error> {
-    let meta = fs::symlink_metadata(path)?;
-    if linked(&meta) {
-        return Err(Error::Unsafe(path.to_owned()));
-    }
-    if meta.is_dir() {
-        for entry in fs::read_dir(path)? {
-            remove(&entry?.path())?;
-        }
-    }
-    #[cfg(windows)]
-    if meta.permissions().readonly() {
-        let mut permissions = meta.permissions();
-        permissions.set_readonly(false);
-        fs::set_permissions(path, permissions)?;
-    }
-    if meta.is_dir() {
-        fs::remove_dir(path)?;
-    } else {
-        fs::remove_file(path)?;
-    }
-    Ok(())
 }
 
 #[cfg(test)]
