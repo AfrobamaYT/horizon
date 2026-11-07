@@ -117,6 +117,57 @@ impl Journal {
     }
 }
 
+/// Storage-local identity accessor and journal sink, never a Game reference.
+#[derive(Debug)]
+pub(super) struct Binding<T> {
+    journal: Journal,
+    owner: Owner,
+    identity: fn(&T) -> (u32, JoinSeq),
+}
+impl Journal {
+    pub(super) fn bind<T>(&self, owner: Owner, identity: fn(&T) -> (u32, JoinSeq)) -> Binding<T> {
+        Binding {
+            journal: self.clone(),
+            owner,
+            identity,
+        }
+    }
+}
+impl<T> Clone for Binding<T> {
+    fn clone(&self) -> Self {
+        Self {
+            journal: self.journal.clone(),
+            owner: self.owner,
+            identity: self.identity,
+        }
+    }
+}
+impl<T> Binding<T> {
+    pub(super) fn same(&self, other: &Self) -> bool {
+        self.owner == other.owner && Arc::ptr_eq(&self.journal.0, &other.journal.0)
+    }
+    pub(super) fn marker(&self, change: Change) {
+        self.journal.push(Event {
+            owner: self.owner,
+            change,
+        });
+    }
+    pub(super) fn identity(&self, id: u32, join: JoinSeq, change: fn(Identity) -> Change) {
+        if let Some(identity) = Identity::new(id, join) {
+            self.marker(change(identity));
+        }
+    }
+    pub(super) fn entity(&self, entity: &T, change: fn(Identity) -> Change) {
+        let (id, join) = (self.identity)(entity);
+        self.identity(id, join, change);
+    }
+    pub(super) fn all(&self, entities: &[T], change: fn(Identity) -> Change) {
+        for entity in entities {
+            self.entity(entity, change);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

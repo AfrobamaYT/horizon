@@ -141,8 +141,18 @@ macro_rules! impl_joined {
 /// let list = JoinList::<u32>::default();
 /// let _: Vec<u32> = list.into();
 /// ```
-#[derive(Clone, Debug)]
-pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
+#[derive(Debug)]
+pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>, Option<residency::Binding<T>>);
+impl<T: Clone, const DIRECT: bool> Clone for JoinList<T, DIRECT> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), None)
+    }
+}
+impl<T, const DIRECT: bool> Drop for JoinList<T, DIRECT> {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
 
 /// A singleton resident owner with explicit membership operations.
 /// State borrows remain audited: callers must not replace the whole entity or
@@ -271,7 +281,7 @@ impl<T: Joined> ResidentList<T> {
         self.0.retain(keep);
     }
     pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
-        self.0.0.retain_mut(keep);
+        self.0.retain_where(keep);
     }
     pub fn clear(&mut self) {
         self.0.clear();
@@ -318,17 +328,56 @@ impl<'a, T> IntoIterator for &'a ResidentList<T> {
 
 impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
-        Self(Vec::new())
+        Self(Vec::new(), None)
     }
 }
 
 impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
+    /// Associate storage with its owning dimension; old membership leaves first.
+    pub fn bind_residency(
+        &mut self,
+        journal: &residency::Journal,
+        owner: residency::Owner,
+        identity: fn(&T) -> (u32, JoinSeq),
+    ) {
+        self.bind_to(journal.bind(owner, identity));
+    }
+    fn bind_to(&mut self, binding: residency::Binding<T>) {
+        if let Some(old) = &self.1 {
+            old.all(&self.0, residency::Change::Remove);
+        }
+        binding.all(&self.0, residency::Change::Install);
+        self.1 = Some(binding);
+    }
+    /// Report the existing allocator's delayed zero-to-live id assignment.
+    pub fn id_assigned(&self, index: usize) {
+        if let Some(binding) = &self.1 {
+            binding.entity(&self.0[index], residency::Change::Install);
+        }
+    }
+    /// Finish a consumed extraction after its terminal work has completed.
+    pub fn retire_extracted(&self, id: u32, join: JoinSeq) {
+        if let Some(binding) = &self.1 {
+            binding.identity(id, join, residency::Change::Remove);
+        }
+    }
     /// Lift a whole pass, leaving an empty spawn buffer behind.
     pub fn lift(&mut self) -> Self {
-        std::mem::take(self)
+        let taken = std::mem::take(self);
+        self.1 = taken.1.clone();
+        if let Some(binding) = &self.1 {
+            binding.marker(residency::Change::Lifted);
+        }
+        taken
     }
     /// Restore a lifted pass using its established spawn-buffer ordering.
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
+        match (&self.1, &taken.1) {
+            (Some(a), Some(b)) => assert!(a.same(b), "restoring a different entity owner"),
+            (Some(binding), None) => taken.bind_to(binding.clone()),
+            (None, Some(binding)) => self.bind_to(binding.clone()),
+            (None, None) => {}
+        }
         match order {
             RestoreOrder::SurvivorsFirst => {
                 taken.append(self);
@@ -337,39 +386,91 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
             RestoreOrder::SpawnsFirst if self.is_empty() => *self = taken,
             RestoreOrder::SpawnsFirst => self.append(&mut taken),
         }
+        if let Some(binding) = &self.1 {
+            binding.marker(residency::Change::Restored);
+        }
     }
     pub fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
+        Self(Vec::with_capacity(capacity), None)
     }
     /// Move a batch back without changing its join numbers or order.
     pub fn append(&mut self, other: &mut Self) {
+        let same = match (&self.1, &other.1) {
+            (Some(a), Some(b)) => a.same(b),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            if let Some(binding) = &other.1 {
+                binding.all(&other.0, residency::Change::Remove);
+            }
+            if let Some(binding) = &self.1 {
+                binding.all(&other.0, residency::Change::Install);
+            }
+        }
         self.0.append(&mut other.0);
     }
     pub fn remove(&mut self, index: usize) -> T {
-        self.0.remove(index)
+        let entity = self.0.remove(index);
+        if let Some(binding) = &self.1 {
+            binding.entity(&entity, residency::Change::Remove);
+        }
+        entity
     }
     /// Extract selected owners in list order, compacting survivors in place.
     /// The predicate cannot replace an entity or change its identity.
     pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> impl Iterator<Item = T> {
-        self.0.extract_if(.., move |entity| take(entity))
+        let binding = &self.1;
+        self.0.extract_if(.., move |entity| {
+            let removed = take(entity);
+            if removed && let Some(binding) = binding {
+                binding.entity(entity, residency::Change::Remove);
+            }
+            removed
+        })
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
-        self.0.swap_remove(index)
+        let entity = self.0.swap_remove(index);
+        if let Some(binding) = &self.1 {
+            binding.entity(&entity, residency::Change::Remove);
+        }
+        entity
     }
     pub fn pop(&mut self) -> Option<T> {
-        self.0.pop()
+        let entity = self.0.pop()?;
+        if let Some(binding) = &self.1 {
+            binding.entity(&entity, residency::Change::Remove);
+        }
+        Some(entity)
     }
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.truncate(0);
     }
     pub fn truncate(&mut self, len: usize) {
+        if let Some(binding) = &self.1 {
+            binding.all(&self.0[len.min(self.0.len())..], residency::Change::Remove);
+        }
         self.0.truncate(len);
     }
-    pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
-        self.0.retain(keep);
+    pub fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) {
+        self.retain_where(|entity| keep(entity));
+    }
+    fn retain_where(&mut self, mut keep: impl FnMut(&mut T) -> bool) {
+        let binding = &self.1;
+        self.0.retain_mut(|entity| {
+            let retained = keep(entity);
+            if !retained && let Some(binding) = binding {
+                binding.entity(entity, residency::Change::Remove);
+            }
+            retained
+        });
     }
     pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
-        self.0.drain(range)
+        let drained = self.0.drain(range);
+        if let Some(binding) = &self.1 {
+            binding.all(drained.as_slice(), residency::Change::Remove);
+        }
+        drained
     }
     pub fn swap(&mut self, a: usize, b: usize) {
         self.0.swap(a, b);
@@ -378,7 +479,7 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
 
 impl<T> JoinList<T> {
     pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
-        self.0.retain_mut(keep);
+        self.retain_where(keep);
     }
     /// Run an audited state edit without returning a mutable entity reference.
     /// Whole-entity replacement belongs to the owning residency boundary.
@@ -505,13 +606,21 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
     /// Temporarily lift one numbered owner without treating it as a retirement.
     pub fn extract(&mut self, join: JoinSeq) -> Option<T> {
         let index = self.locate(join)?;
-        Some(self.0.remove(index))
+        let entity = self.0.remove(index);
+        if let Some(binding) = &self.1 {
+            binding.entity(&entity, residency::Change::Extract);
+        }
+        Some(entity)
     }
 
     /// Return an extracted owner at its former position, preserving its number.
     /// If other mutations shortened the list, restore it at the end instead.
     pub fn put_back(&mut self, index: usize, entity: T) {
-        self.0.insert(index.min(self.0.len()), entity);
+        let index = index.min(self.0.len());
+        self.0.insert(index, entity);
+        if let Some(binding) = &self.1 {
+            binding.entity(&self.0[index], residency::Change::PutBack);
+        }
     }
 
     fn number(entity: &mut T) {
@@ -522,10 +631,16 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn push(&mut self, mut entity: T) {
         Self::number(&mut entity);
         self.0.push(entity);
+        if let Some(binding) = &self.1 {
+            binding.entity(self.0.last().unwrap(), residency::Change::Install);
+        }
     }
     pub fn insert(&mut self, index: usize, mut entity: T) {
         Self::number(&mut entity);
         self.0.insert(index, entity);
+        if let Some(binding) = &self.1 {
+            binding.entity(&self.0[index], residency::Change::Install);
+        }
     }
     pub fn extend(&mut self, entities: impl IntoIterator<Item = T>) {
         for entity in entities {
@@ -587,8 +702,11 @@ impl<'a, T> IntoIterator for &'a mut JoinList<T> {
 impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+    fn into_iter(mut self) -> Self::IntoIter {
+        if let Some(binding) = &self.1 {
+            binding.all(&self.0, residency::Change::Remove);
+        }
+        std::mem::take(&mut self.0).into_iter()
     }
 }
 
@@ -886,6 +1004,234 @@ mod tests {
             [fresh, joins[0], joins[1]]
         );
         assert!(joins.into_iter().all(|join| join < fresh));
+    }
+
+    fn journal_list() -> (JoinList<Entity>, residency::Journal) {
+        let journal = residency::Journal::default();
+        let mut list: JoinList<_> = (1..=3).map(entity).collect();
+        list.bind_residency(&journal, journal_owner(), |e| (e.value, e.join));
+        (list, journal)
+    }
+    fn journal_owner() -> residency::Owner {
+        residency::Owner {
+            dimension: mod_api::DimensionKey::OVERWORLD,
+            kind: residency::Kind::Mob,
+        }
+    }
+    fn key(entity: &Entity) -> residency::Identity {
+        residency::Identity::new(entity.value, entity.join).unwrap()
+    }
+    fn changes(journal: &residency::Journal) -> Vec<residency::Change> {
+        let mut events = Vec::new();
+        journal.drain_into(&mut events);
+        events
+            .into_iter()
+            .map(|e| {
+                assert_eq!(e.owner, journal_owner());
+                e.change
+            })
+            .collect()
+    }
+
+    #[test]
+    fn journal_records_every_permanent_list_operation_and_only_removed_owners() {
+        use residency::Change::{Install, Remove};
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        assert_eq!(
+            changes(&journal),
+            keys.iter().copied().map(Install).collect::<Vec<_>>()
+        );
+        list.insert(1, entity(4));
+        let inserted = key(&list[1]);
+        assert_eq!(list.remove(1).value, 4);
+        assert_eq!(list.swap_remove(1).value, 2);
+        assert_eq!(list.pop().unwrap().value, 3);
+        list.truncate(100);
+        list.clear();
+        assert!(list.pop().is_none());
+        assert_eq!(
+            changes(&journal),
+            [
+                Install(inserted),
+                Remove(inserted),
+                Remove(keys[1]),
+                Remove(keys[2]),
+                Remove(keys[0])
+            ]
+        );
+        list.extend((5..=8).map(entity));
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        list.retain_mut(|e| e.value != 6);
+        assert_eq!(list.extract_if(|e| e.value == 7).next().unwrap().value, 7);
+        drop(list.drain(..1));
+        list.retain(|_| false);
+        assert!(list.is_empty());
+        assert_eq!(
+            changes(&journal),
+            [
+                Remove(keys[1]),
+                Remove(keys[2]),
+                Remove(keys[0]),
+                Remove(keys[3])
+            ]
+        );
+        list.push(entity(9));
+        let last = key(&list[0]);
+        assert_eq!(list.into_iter().next().unwrap().value, 9);
+        assert_eq!(changes(&journal), [Install(last), Remove(last)]);
+        let (list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        drop(list);
+        assert_eq!(
+            changes(&journal),
+            keys.into_iter().map(Remove).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn journal_extraction_has_distinct_put_back_and_retirement_terminals() {
+        use residency::Change::{Extract, PutBack, Remove};
+        let (mut list, journal) = journal_list();
+        let keys: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let first = list.extract(keys[0].join).unwrap();
+        assert_eq!(list.locate(keys[0].join), None);
+        list.put_back(0, first);
+        assert_eq!(
+            snapshot(&list).iter().map(|e| e.0).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        drop(list.extract(keys[1].join).unwrap());
+        list.retire_extracted(2, keys[1].join);
+        assert_eq!(
+            changes(&journal),
+            [
+                Extract(keys[0]),
+                PutBack(keys[0]),
+                Extract(keys[1]),
+                Remove(keys[1])
+            ]
+        );
+        assert_eq!(list.locate(keys[1].join), None);
+    }
+
+    #[test]
+    fn journal_lift_and_both_restore_orders_never_reinstall_survivors() {
+        use residency::Change::{Install, Lifted, Remove, Restored};
+        for (order, expected) in [
+            (RestoreOrder::SurvivorsFirst, [1, 3, 4]),
+            (RestoreOrder::SpawnsFirst, [4, 1, 3]),
+        ] {
+            let (mut list, journal) = journal_list();
+            let removed = key(&list[1]);
+            changes(&journal);
+            let mut taken = list.lift();
+            list.push(entity(4));
+            let spawned = key(&list[0]);
+            drop(taken.remove(1));
+            list.restore(taken, order);
+            assert_eq!(
+                changes(&journal),
+                [Lifted, Install(spawned), Remove(removed), Restored]
+            );
+            assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn journal_restore_admits_an_unbound_batch_without_reinstalling_the_spawn_buffer() {
+        use residency::Change::{Install, Restored};
+        for (order, expected) in [
+            (RestoreOrder::SurvivorsFirst, [4, 5, 1, 2, 3]),
+            (RestoreOrder::SpawnsFirst, [1, 2, 3, 4, 5]),
+        ] {
+            let (mut list, journal) = journal_list();
+            changes(&journal);
+            let staged: JoinList<_> = (4..=5).map(entity).collect();
+            let admitted: Vec<_> = staged.iter().map(key).collect();
+            list.restore(staged, order);
+            assert_eq!(
+                changes(&journal),
+                [Install(admitted[0]), Install(admitted[1]), Restored]
+            );
+            assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn journal_snapshots_are_detached_and_delayed_ids_install_only_after_assignment() {
+        use residency::Change::{Install, Remove};
+        let (mut list, journal) = journal_list();
+        changes(&journal);
+        let mut snapshot = list.clone();
+        snapshot.clear();
+        snapshot.push(entity(99));
+        drop(snapshot.into_iter());
+        assert!(changes(&journal).is_empty());
+        list.clear();
+        changes(&journal);
+        list.push(entity(0));
+        let join = list[0].join;
+        assert!(changes(&journal).is_empty());
+        list.update(0, |e| e.value = 7);
+        list.id_assigned(0);
+        let assigned = residency::Identity::new(7, join).unwrap();
+        list.clear();
+        assert_eq!(changes(&journal), [Install(assigned), Remove(assigned)]);
+    }
+
+    #[test]
+    fn journal_batch_transfer_changes_dimension_without_changing_identity() {
+        use residency::{
+            Change::{Install, Remove},
+            Event, Kind, Owner,
+        };
+        let (mut source, journal) = journal_list();
+        let keys: Vec<_> = source.iter().map(key).collect();
+        changes(&journal);
+        let destination = Owner {
+            dimension: mod_api::DimensionKey::NETHER,
+            kind: Kind::Mob,
+        };
+        let mut target = JoinList::default();
+        target.bind_residency(&journal, destination, |e: &Entity| (e.value, e.join));
+        target.append(&mut source);
+        assert!(source.is_empty());
+        assert_eq!(target.iter().map(key).collect::<Vec<_>>(), keys);
+        let expected: Vec<_> = keys
+            .iter()
+            .map(|&k| Event {
+                owner: journal_owner(),
+                change: Remove(k),
+            })
+            .chain(keys.iter().map(|&k| Event {
+                owner: destination,
+                change: Install(k),
+            }))
+            .collect();
+        let mut events = Vec::new();
+        journal.drain_into(&mut events);
+        assert_eq!(events, expected);
+        // Opening/resetting a level may rebind retained storage to its dimension.
+        target.bind_residency(&journal, journal_owner(), |e| (e.value, e.join));
+        let expected: Vec<_> = keys
+            .iter()
+            .map(|&k| Event {
+                owner: destination,
+                change: Remove(k),
+            })
+            .chain(keys.iter().map(|&k| Event {
+                owner: journal_owner(),
+                change: Install(k),
+            }))
+            .collect();
+        events.clear();
+        journal.drain_into(&mut events);
+        assert_eq!(events, expected);
+        assert_eq!(target.iter().map(key).collect::<Vec<_>>(), keys);
     }
 }
 
