@@ -35,10 +35,65 @@ fn a_tick_clone_follows_its_join_but_cannot_replace_a_later_resident() {
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_bound_boat_keeps_its_registration_through_ticks_until_discard() {
-    super::super::native_entity_refs::tests::with_game(|game| {
+    bound_boat_case(false, |game, step| {
+        game.tick_boats();
+        assert_eq!(game.boats[0].age, step);
+        assert_eq!(game.boats[0].hurt_time, 6 - step);
+        assert!(game.boats[0].position.y < 70.0);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_bound_boat_commits_the_driven_client_tick() {
+    bound_boat_case(true, |game, step| {
+        game.riding = Some(71);
+        assert!(
+            game.remote_ride(
+                horizon_client::sprint::Keys {
+                    forward: true,
+                    ..Default::default()
+                },
+                0
+            )
+            .unwrap()
+        );
+        assert_eq!(game.boats[0].hurt_time, 6 - step);
+        assert!(game.boats[0].input[2]);
+        assert!(game.boats[0].position.y < 70.0);
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_bound_ridden_boat_commits_the_server_leash_tick() {
+    bound_boat_case(false, |game, step| {
+        game.riding = Some(71);
+        game.tick_boats();
+        assert_eq!(game.boats[0].age, step);
+        assert_eq!(game.boats[0].hurt_time, 6);
+        assert_eq!(game.boats[0].position.y, 70.0);
+    });
+}
+
+fn bound_boat_case(client: bool, tick: impl Fn(&mut Game<'_>, i32)) {
+    let test = |game: &mut Game<'_>| {
+        let _server = if client {
+            let (client, server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "BoatLifetimeTest").unwrap();
+            game.remote.as_mut().unwrap().joined = true;
+            game.remote.as_mut().unwrap().first_passenger = true;
+            Some(server)
+        } else {
+            None
+        };
+        game.tickets.update(None);
         game.boats
             .push(Boat::new(71, "oak".into(), Vec3::new(0.5, 70.0, 0.5), 0.0));
-        let holder = {
+        game.boats.update(0, |boat| boat.hurt_time = 6);
+        let holder = if client {
+            mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 71)
+        } else {
             let host: &dyn mod_api::ServerHost = game;
             host.entity(71).unwrap()
         };
@@ -52,9 +107,8 @@ fn a_bound_boat_keeps_its_registration_through_ticks_until_discard() {
         let key = ("test".into(), "boat_lifetime".into());
         let before = index.lock().unwrap().snapshot(&key);
         assert_eq!(before.len(), 1);
-        for _ in 0..3 {
-            let clone = game.tick_boat(game.boats[0].clone(), false);
-            assert!(game.store_boat_back(0, clone));
+        for step in 1..=3 {
+            tick(game, step);
             let current = game
                 .boats
                 .update(0, |boat| boat.attachment_lifetime().registration().unwrap());
@@ -62,7 +116,6 @@ fn a_bound_boat_keeps_its_registration_through_ticks_until_discard() {
             assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
             assert_eq!(VALUE.get(&mut values, Holder::Entity(71)), Ok(10));
         }
-        assert_eq!(game.boats[0].age, 3);
         let taken = game.take_entities();
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         game.restore_entities(taken);
@@ -84,5 +137,10 @@ fn a_bound_boat_keeps_its_registration_through_ticks_until_discard() {
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
         assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
         assert_eq!(after[0].entry.read(&VALUE), Ok(&20));
-    });
+    };
+    if client {
+        super::super::native_entity_refs::tests::with_client_game(test);
+    } else {
+        super::super::native_entity_refs::tests::with_game(test);
+    }
 }
