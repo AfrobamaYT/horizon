@@ -1024,8 +1024,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerLoggedInEvent",
-        fabric = "ServerPlayerEvents.JOIN"
+        neoforge = "PlayerEvent.PlayerLoggedInEvent"
     )]
     fn player_logged_in();
     /// `player` (`name`) left the game (NeoForge's `PlayerLoggedOutEvent`), by
