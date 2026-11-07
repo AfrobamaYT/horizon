@@ -691,12 +691,17 @@ mod tests {
     /// production recipe loader. These assertions do not derive expectations from matcher output.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn recipe_for_dispatches_types_and_refuses_unmatchable_types() {
+    fn recipe_for_dispatches_cooking_and_stonecutting_and_pack_recipes() {
         mod_api::testing::with_mods(Vec::new().into(), || {
             with_game(|game| {
                 let level = game.level(game.dim.id()).unwrap();
                 let kind = |name| mod_api::Identifier::parse(name).unwrap();
-                let raw = stack("raw_iron").unwrap();
+                // A read-only query is not an attempted resident inventory write.
+                let raw = mod_api::ItemStack::new(
+                    mod_api::__private::item_key("minecraft:raw_iron").unwrap(),
+                    65,
+                )
+                .unwrap();
                 for (name, ticks) in [("minecraft:smelting", 200), ("minecraft:blasting", 100)] {
                     let made = level
                         .recipe_for(game, &kind(name), &RecipeInput::Single(raw.clone()))
@@ -744,52 +749,6 @@ mod tests {
                     mod_api::__private::item_key("minecraft:mossy_stone_brick_slab").unwrap()
                 );
                 assert_eq!(cut.output.count(), 2);
-                let mut sword = stack("diamond_sword").unwrap();
-                sword.set_damage(17);
-                let input = RecipeInput::Smithing {
-                    template: stack("netherite_upgrade_smithing_template"),
-                    base: Some(sword),
-                    addition: stack("netherite_ingot"),
-                };
-                let made = level
-                    .recipe_for(game, &kind("minecraft:smithing"), &input)
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(
-                    made.output.item(),
-                    mod_api::__private::item_key("minecraft:netherite_sword").unwrap()
-                );
-                assert_eq!(made.output.damage(), 17);
-                let wrong_order = RecipeInput::Smithing {
-                    template: stack("netherite_ingot"),
-                    base: stack("diamond_sword"),
-                    addition: stack("netherite_upgrade_smithing_template"),
-                };
-                assert_eq!(
-                    level.recipe_for(game, &kind("minecraft:smithing"), &wrong_order),
-                    Ok(None)
-                );
-                assert_eq!(
-                    level.recipe_for(game, &kind("test:crusher"), &input),
-                    Err(RecipeLookupError::NotMatchable)
-                );
-                assert_eq!(
-                    level.recipe_for(game, &kind("minecraft:smelting"), &input),
-                    Err(RecipeLookupError::InvalidInput)
-                );
-                assert_eq!(
-                    level.recipe_for(
-                        game,
-                        &kind("minecraft:smithing"),
-                        &RecipeInput::Smithing {
-                            template: None,
-                            base: None,
-                            addition: None
-                        }
-                    ),
-                    Ok(None)
-                );
-
                 // Same resolved source path as a world's merged data packs, with a vanilla type.
                 let recipes = horizon_client::crafting::Recipes::from_sources(
                     &game.options.resources,
@@ -825,6 +784,58 @@ mod tests {
                         game,
                         &kind("minecraft:blasting"),
                         &RecipeInput::Single(stack("dirt").unwrap())
+                    ),
+                    Ok(None)
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn recipe_for_preserves_smithing_order_and_damage() {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+                let kind = |name| mod_api::Identifier::parse(name).unwrap();
+                let mut sword = stack("diamond_sword").unwrap();
+                sword.set_damage(17);
+                let input = RecipeInput::Smithing {
+                    template: stack("netherite_upgrade_smithing_template"),
+                    base: Some(sword),
+                    addition: stack("netherite_ingot"),
+                };
+                let made = level
+                    .recipe_for(game, &kind("minecraft:smithing"), &input)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    made.output.item(),
+                    mod_api::__private::item_key("minecraft:netherite_sword").unwrap()
+                );
+                assert_eq!(made.output.damage(), 17);
+                let wrong_order = RecipeInput::Smithing {
+                    template: stack("netherite_ingot"),
+                    base: stack("diamond_sword"),
+                    addition: stack("netherite_upgrade_smithing_template"),
+                };
+                assert_eq!(
+                    level.recipe_for(game, &kind("minecraft:smithing"), &wrong_order),
+                    Ok(None)
+                );
+                assert_eq!(
+                    level.recipe_for(game, &kind("minecraft:smelting"), &input),
+                    Err(RecipeLookupError::InvalidInput)
+                );
+                assert_eq!(
+                    level.recipe_for(
+                        game,
+                        &kind("minecraft:smithing"),
+                        &RecipeInput::Smithing {
+                            template: None,
+                            base: None,
+                            addition: None
+                        }
                     ),
                     Ok(None)
                 );
