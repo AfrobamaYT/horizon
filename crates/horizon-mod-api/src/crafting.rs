@@ -554,21 +554,66 @@ impl Recipe {
     }
 }
 
-/// What a crafting grid makes (`CraftingRecipe.assemble` and `getRemainingItems`), as
-/// [`LevelRef::craft`] answers it.
+/// Typed input to the engine's matched recipe lookup. Slot order is significant.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct CraftResult {
-    /// The stack the recipe makes.
-    pub output: ItemStack,
-    /// What each slot of the grid keeps once the craft takes one item from it, row by row as
-    /// the grid was given: an empty bucket for a milk bucket, `None` for most.
-    pub remainders: Vec<Option<ItemStack>>,
+pub enum RecipeInput {
+    Crafting {
+        width: u32,
+        height: u32,
+        slots: Vec<Option<ItemStack>>,
+    },
+    Single(ItemStack),
+    Smithing {
+        template: Option<ItemStack>,
+        base: Option<ItemStack>,
+        addition: Option<ItemStack>,
+    },
 }
-impl CraftResult {
-    /// New.
-    pub fn new(output: ItemStack, remainders: Vec<Option<ItemStack>>) -> Self {
-        Self { output, remainders }
+/// A refusal distinct from a valid input with no matching recipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RecipeLookupError {
+    InvalidInput,
+    InvalidItem,
+    InvalidRecipe,
+    UnavailableLevel,
+    /// The engine has no matcher for this type. Cache its recipes once per load/reload
+    /// through Host::recipes_of_type and match in mod memory, without per-tick crossings.
+    NotMatchable,
+}
+impl crate::NoBackend for RecipeLookupError {
+    fn no_backend() -> Self {
+        Self::UnavailableLevel
+    }
+}
+/// What the matched recipe assembles; lookup never consumes the input.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RecipeMatch {
+    pub recipe: crate::Identifier,
+    pub output: ItemStack,
+    /// Remaining items in input slot order after consuming one item per occupied slot.
+    pub remainders: Vec<Option<ItemStack>>,
+    pub experience: f32,
+    pub processing_time: u32,
+}
+impl RecipeMatch {
+    /// Build the result of an engine match.
+    pub fn new(
+        recipe: crate::Identifier,
+        output: ItemStack,
+        remainders: Vec<Option<ItemStack>>,
+        experience: f32,
+        processing_time: u32,
+    ) -> Self {
+        Self {
+            recipe,
+            output,
+            remainders,
+            experience,
+            processing_time,
+        }
     }
 }
 

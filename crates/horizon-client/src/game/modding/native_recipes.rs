@@ -5,7 +5,7 @@
 //! content root's — with the server's recipes of the types its native mods
 //! had it send (`horizon:recipe_content`) in their place, while the known
 //! displays follow the server's book as the recipe book does.
-use super::api_values::TryIntoApi;
+use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{
     Game,
     native_hooks::{
@@ -19,7 +19,7 @@ use horizon_client::{
     recipe_book::{Category, Display},
     stations::Smithing,
 };
-use mod_api::{CraftResult, LevelRef};
+use mod_api::{LevelRef, RecipeInput, RecipeLookupError, RecipeMatch};
 use std::{collections::HashMap, sync::Arc};
 
 /// The tables, made once, and the recipe book's known displays with the
@@ -101,42 +101,144 @@ fn recipe(id: String, kind: RecipeKind) -> Recipe {
 }
 
 impl Game<'_> {
-    /// `RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`,
-    /// then the recipe's `assemble` and `getRemainingItems`: what a `width` by `height` grid
-    /// (each 1 to 3, `items` row by row) makes, through the crafting table's matcher, with the
-    /// world's data packs' recipes and the special recipes. None when no recipe matches or it
-    /// makes nothing, for a grid of another size, and off the server.
-    pub(super) fn level_craft(
+    /// The engine's matchers, shared with crafting and station menus; no mod-side rematching.
+    pub(super) fn level_recipe_for(
         &self,
         level: LevelRef,
-        width: u32,
-        height: u32,
-        items: &[Option<ItemStack>],
-    ) -> Option<CraftResult> {
-        self.native_level_world(level)?;
-        let (w, h) = (width as usize, height as usize);
-        if !(1..=3).contains(&w) || !(1..=3).contains(&h) || items.len() != w * h {
-            return None;
+        recipe_type: &mod_api::Identifier,
+        inputs: &RecipeInput,
+    ) -> Result<Option<RecipeMatch>, RecipeLookupError> {
+        use RecipeLookupError::*;
+        self.native_level_world(level).ok_or(UnavailableLevel)?;
+        if recipe_type.namespace() != "minecraft" {
+            return Err(NotMatchable);
         }
-        // The matcher reads a square grid and trims it to what is filled, as `CraftingInput`
-        // does, so the grid sits in the top-left corner of one.
-        let size = w.max(h);
-        let at = |i: usize| (i / w) * size + i % w;
-        let mut grid = vec![None; size * size];
-        for (i, stack) in items.iter().enumerate() {
-            grid[at(i)] = stack.clone().filter(|s| s.count > 0);
+        let kind = recipe_type.path();
+        let make = |id: &str, output: &ItemStack, remainders, experience, processing_time| {
+            Ok(Some(RecipeMatch::new(
+                mod_api::Identifier::parse(id).map_err(|_| InvalidRecipe)?,
+                output.try_into_api().map_err(|_| InvalidItem)?,
+                remainders,
+                experience,
+                processing_time,
+            )))
+        };
+        match kind {
+            "crafting" => {
+                let RecipeInput::Crafting {
+                    width,
+                    height,
+                    slots,
+                } = inputs
+                else {
+                    return Err(InvalidInput);
+                };
+                let (w, h) = (*width as usize, *height as usize);
+                if !(1..=3).contains(&w) || !(1..=3).contains(&h) || slots.len() != w * h {
+                    return Err(InvalidInput);
+                }
+                let size = w.max(h);
+                let at = |i: usize| (i / w) * size + i % w;
+                let mut grid: [Option<ItemStack>; 9] = Default::default();
+                for (i, stack) in slots.iter().enumerate() {
+                    grid[at(i)] = stack
+                        .try_into_engine(self.items())
+                        .map_err(|_| InvalidItem)?;
+                }
+                let grid = &grid[..size * size];
+                let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
+                let recipes = self.recipes();
+                let Some((id, output)) = recipes
+                    .find_with(&self.loop_context, grid, size, &scale)
+                    .filter(|(_, output)| output.count > 0)
+                else {
+                    return Ok(None);
+                };
+                let mut placed = recipes.remainders(id, grid, size);
+                let remainders: Vec<_> = (0..w * h).map(|i| placed[at(i)].take()).collect();
+                make(
+                    id,
+                    &output,
+                    remainders.try_into_api().map_err(|_| InvalidItem)?,
+                    0.0,
+                    0,
+                )
+            }
+            "smelting" | "blasting" | "smoking" | "campfire_cooking" => {
+                let RecipeInput::Single(input) = inputs else {
+                    return Err(InvalidInput);
+                };
+                let input = input
+                    .try_into_engine(self.items())
+                    .map_err(|_| InvalidItem)?;
+                let full_kind = match kind {
+                    "smelting" => "minecraft:smelting",
+                    "blasting" => "minecraft:blasting",
+                    "smoking" => "minecraft:smoking",
+                    _ => "minecraft:campfire_cooking",
+                };
+                let Some(recipe) = self.recipes().cook(&self.loop_context, full_kind, &input)
+                else {
+                    return Ok(None);
+                };
+                make(
+                    &recipe.id,
+                    &recipe.result,
+                    vec![None],
+                    recipe.experience,
+                    recipe.time,
+                )
+            }
+            "stonecutting" => {
+                let RecipeInput::Single(input) = inputs else {
+                    return Err(InvalidInput);
+                };
+                let input = input
+                    .try_into_engine(self.items())
+                    .map_err(|_| InvalidItem)?;
+                let Some(recipe) = self
+                    .stations()
+                    .recipes
+                    .stonecutting
+                    .iter()
+                    .find(|r| r.input.test_in(&self.loop_context, &input))
+                else {
+                    return Ok(None);
+                };
+                make(&recipe.id, &recipe.result, vec![None], 0.0, 0)
+            }
+            "smithing" => {
+                let RecipeInput::Smithing {
+                    template,
+                    base,
+                    addition,
+                } = inputs
+                else {
+                    return Err(InvalidInput);
+                };
+                let template = template
+                    .try_into_engine(self.items())
+                    .map_err(|_| InvalidItem)?;
+                let base = base
+                    .try_into_engine(self.items())
+                    .map_err(|_| InvalidItem)?;
+                let addition = addition
+                    .try_into_engine(self.items())
+                    .map_err(|_| InvalidItem)?;
+                let stations = self.stations();
+                let Some((id, output)) = stations.recipes.smithing_recipe(
+                    &self.loop_context,
+                    &stations.enchantments,
+                    template.as_ref(),
+                    base.as_ref(),
+                    addition.as_ref(),
+                ) else {
+                    return Ok(None);
+                };
+                make(id, &output, vec![None; 3], 0.0, 0)
+            }
+            _ => Err(NotMatchable),
         }
-        let scale = |id: i32| self.maps.data.get(&id).map(|m| m.scale);
-        let recipes = self.recipes();
-        let (recipe, output) = recipes
-            .find_with(&self.loop_context, &grid, size, &scale)
-            .filter(|(_, output)| output.count > 0)?;
-        let mut placed = recipes.remainders(recipe, &grid, size);
-        let remainders: Vec<_> = (0..w * h).map(|i| placed[at(i)].take()).collect();
-        Some(CraftResult::new(
-            output.try_into_api().ok()?,
-            remainders.try_into_api().ok()?,
-        ))
     }
     pub(super) fn registered_recipe_book_category(
         &mut self,
@@ -512,7 +614,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use mod_api::ItemStack;
+    use mod_api::{ItemStack, RecipeInput, RecipeLookupError};
 
     fn stack(item: &str) -> Option<ItemStack> {
         ItemStack::new(
@@ -521,14 +623,26 @@ mod tests {
         )
     }
 
-    /// `level.craft` against vanilla's own recipes: a shaped recipe that hands back buckets, the
+    /// `level.recipe_for` against vanilla's own recipes: a shaped recipe that hands back buckets, the
     /// same shaped recipe from a smaller grid and from a corner of a larger one, a special
     /// recipe, and grids that make nothing.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn craft_matches_the_grid_and_returns_what_each_slot_keeps() {
+    fn recipe_for_matches_the_grid_and_returns_what_each_slot_keeps() {
         with_game(|game| {
             let level = game.level(game.dim.id()).unwrap();
+            let kind = mod_api::Identifier::parse("minecraft:crafting").unwrap();
+            let lookup = |width, height, slots: &[Option<mod_api::ItemStack>]| {
+                level.recipe_for(
+                    game,
+                    &kind,
+                    &RecipeInput::Crafting {
+                        width,
+                        height,
+                        slots: slots.to_vec(),
+                    },
+                )
+            };
             let cake = [
                 stack("milk_bucket"),
                 stack("milk_bucket"),
@@ -540,7 +654,7 @@ mod tests {
                 stack("wheat"),
                 stack("wheat"),
             ];
-            let made = level.craft(game, 3, 3, &cake).unwrap();
+            let made = lookup(3, 3, &cake).unwrap().unwrap();
             assert_eq!(
                 (made.output.item(), made.output.count()),
                 (mod_api::__private::item_key("minecraft:cake").unwrap(), 1)
@@ -551,7 +665,7 @@ mod tests {
             assert_eq!(made.remainders, kept);
 
             let planks = [stack("oak_planks"), stack("oak_planks")];
-            let made = level.craft(game, 1, 2, &planks).unwrap();
+            let made = lookup(1, 2, &planks).unwrap().unwrap();
             assert_eq!(
                 (made.output.item(), made.output.count()),
                 (mod_api::__private::item_key("minecraft:stick").unwrap(), 4)
@@ -560,7 +674,7 @@ mod tests {
             let mut corner = vec![None; 9];
             corner[5] = stack("birch_planks");
             corner[8] = stack("birch_planks");
-            let made = level.craft(game, 3, 3, &corner).unwrap();
+            let made = lookup(3, 3, &corner).unwrap().unwrap();
             assert_eq!(
                 (made.output.item(), made.output.count()),
                 (mod_api::__private::item_key("minecraft:stick").unwrap(), 4)
@@ -568,7 +682,7 @@ mod tests {
             assert_eq!(made.remainders, vec![None; 9]);
 
             let rocket = [stack("paper"), stack("gunpowder")];
-            let made = level.craft(game, 2, 1, &rocket).unwrap();
+            let made = lookup(2, 1, &rocket).unwrap().unwrap();
             assert_eq!(
                 (made.output.item(), made.output.count()),
                 (
@@ -577,14 +691,137 @@ mod tests {
                 )
             );
 
-            assert!(level.craft(game, 1, 1, &[stack("dirt")]).is_none());
-            assert!(level.craft(game, 1, 1, &[None]).is_none());
-            assert!(level.craft(game, 4, 1, &[None, None, None, None]).is_none());
-            assert!(level.craft(game, 1, 2, &planks[..1]).is_none());
+            assert!(lookup(1, 1, &[stack("dirt")]).unwrap().is_none());
+            assert!(lookup(1, 1, &[None]).unwrap().is_none());
+            assert!(
+                lookup(4, 1, &[None, None, None, None]) == Err(RecipeLookupError::InvalidInput)
+            );
+            assert!(lookup(1, 2, &planks[..1]) == Err(RecipeLookupError::InvalidInput));
         });
     }
 
-    /// What one `level.craft` costs, for benchmarks/craft-match-2026-11-04: a grid that matches
+    /// Vanilla expected outputs, ordered smithing, and a data-pack recipe parsed by the
+    /// production recipe loader. These assertions do not derive expectations from matcher output.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn recipe_for_dispatches_types_and_refuses_unmatchable_types() {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+                let kind = |name| mod_api::Identifier::parse(name).unwrap();
+                let raw = stack("raw_iron").unwrap();
+                for (name, ticks) in [("minecraft:smelting", 200), ("minecraft:blasting", 100)] {
+                    let made = level
+                        .recipe_for(game, &kind(name), &RecipeInput::Single(raw.clone()))
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        made.output.item(),
+                        mod_api::__private::item_key("minecraft:iron_ingot").unwrap()
+                    );
+                    assert_eq!(made.output.count(), 1);
+                    assert_eq!(made.processing_time, ticks);
+                    assert_eq!(made.experience, 0.7);
+                }
+                let cut = level
+                    .recipe_for(
+                        game,
+                        &kind("minecraft:stonecutting"),
+                        &RecipeInput::Single(stack("mossy_stone_bricks").unwrap()),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    cut.output.item(),
+                    mod_api::__private::item_key("minecraft:mossy_stone_brick_slab").unwrap()
+                );
+                assert_eq!(cut.output.count(), 2);
+                let input = RecipeInput::Smithing {
+                    template: stack("netherite_upgrade_smithing_template"),
+                    base: stack("diamond_sword"),
+                    addition: stack("netherite_ingot"),
+                };
+                let made = level
+                    .recipe_for(game, &kind("minecraft:smithing"), &input)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    made.output.item(),
+                    mod_api::__private::item_key("minecraft:netherite_sword").unwrap()
+                );
+                let wrong_order = RecipeInput::Smithing {
+                    template: stack("netherite_ingot"),
+                    base: stack("diamond_sword"),
+                    addition: stack("netherite_upgrade_smithing_template"),
+                };
+                assert_eq!(
+                    level.recipe_for(game, &kind("minecraft:smithing"), &wrong_order),
+                    Ok(None)
+                );
+                assert_eq!(
+                    level.recipe_for(game, &kind("test:crusher"), &input),
+                    Err(RecipeLookupError::NotMatchable)
+                );
+                assert_eq!(
+                    level.recipe_for(game, &kind("minecraft:smelting"), &input),
+                    Err(RecipeLookupError::InvalidInput)
+                );
+                assert_eq!(
+                    level.recipe_for(
+                        game,
+                        &kind("minecraft:smithing"),
+                        &RecipeInput::Smithing {
+                            template: None,
+                            base: None,
+                            addition: None
+                        }
+                    ),
+                    Ok(None)
+                );
+
+                // Same resolved source path as a world's merged data packs, with a vanilla type.
+                let recipes = horizon_client::crafting::Recipes::from_sources(
+                    &game.options.resources,
+                    game.items(),
+                    &horizon_world::loot::PackOverlay::NONE,
+                    vec![(
+                        "test:pack_smelting".into(),
+                        serde_json::json!({
+                            "type":"minecraft:smelting", "ingredient":"minecraft:dirt",
+                            "result":{"id":"minecraft:diamond"}, "experience":0.25, "cookingtime":42
+                        }),
+                    )],
+                    game.res.core.item_data.context(),
+                )
+                .unwrap();
+                game.recipe_tables.synced = Some(recipes);
+                let made = level
+                    .recipe_for(
+                        game,
+                        &kind("minecraft:smelting"),
+                        &RecipeInput::Single(stack("dirt").unwrap()),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(made.recipe, kind("test:pack_smelting"));
+                assert_eq!(
+                    made.output.item(),
+                    mod_api::__private::item_key("minecraft:diamond").unwrap()
+                );
+                assert_eq!((made.experience, made.processing_time), (0.25, 42));
+                assert_eq!(
+                    level.recipe_for(
+                        game,
+                        &kind("minecraft:blasting"),
+                        &RecipeInput::Single(stack("dirt").unwrap())
+                    ),
+                    Ok(None)
+                );
+            })
+        });
+    }
+
+    /// What one `level.recipe_for` costs, for benchmarks/craft-match-2026-11-04: a grid that matches
     /// early, one that matches late, a special recipe and a grid no recipe takes (the whole list).
     #[test]
     #[ignore = "a benchmark: run it in release with HORIZON_TEST_RESOURCES"]
@@ -610,7 +847,15 @@ mod tests {
             for (name, width, height, grid) in grids {
                 let start = std::time::Instant::now();
                 for _ in 0..CALLS {
-                    std::hint::black_box(level.craft(game, width, height, &grid));
+                    std::hint::black_box(level.recipe_for(
+                        game,
+                        &mod_api::Identifier::parse("minecraft:crafting").unwrap(),
+                        &RecipeInput::Crafting {
+                            width,
+                            height,
+                            slots: grid.clone(),
+                        },
+                    ));
                 }
                 println!(
                     "{name}: {:.1} µs a call",
