@@ -9,7 +9,6 @@ use crate::*;
 /// identity is fixed at construction and is not part of the mutable fields.
 /// Returned guest snapshots apply only changed mutable fields through the same revision path.
 // exhaustive: its fields are private, so mods cannot build or destructure it
-#[horizon_mod_api_macros::wasm(via = ModBlockEntitySnapshot, writeback = apply_snapshot)]
 pub struct ModBlockEntity {
     pub(crate) id: String,
     pub(crate) fields: ModBlockEntityFields,
@@ -57,14 +56,6 @@ impl From<ModBlockEntitySnapshot> for ModBlockEntity {
             id: snapshot.id,
             fields: snapshot.fields,
             revision: snapshot.revision,
-        }
-    }
-}
-impl ModBlockEntity {
-    /// Apply returned mutable state through the native revision path, never its identity.
-    pub(crate) fn apply_snapshot(&mut self, snapshot: ModBlockEntitySnapshot) {
-        if self.fields != snapshot.fields {
-            *std::ops::DerefMut::deref_mut(self) = snapshot.fields;
         }
     }
 }

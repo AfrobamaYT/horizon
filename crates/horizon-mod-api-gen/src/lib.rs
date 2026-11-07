@@ -599,9 +599,11 @@ enum FillMode {
 }
 
 mod build;
+mod capability_providers;
 pub mod crossing;
 mod dispatch;
 mod host_param;
+mod index;
 pub mod internals;
 pub mod internals_table;
 pub mod internals_view;
@@ -609,12 +611,8 @@ pub mod notes;
 pub mod points;
 pub mod sites;
 pub mod staging;
-mod wasm;
-/// Shared registration emitter for component-model WIT worlds.
-pub mod wasm_imports;
 pub use build::{generate, generate_points, generate_render};
 pub use notes::generate as generate_hook_notes;
-pub use wasm::{Wasm, generate as generate_wasm};
 
 /// Generate the dispatch test fixture without preventing xtask from filling new placeholders.
 #[doc(hidden)]

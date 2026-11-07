@@ -119,7 +119,6 @@ pub enum InstanceError {
 /// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the engine creates handles
-#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
 pub struct InstanceGroupRef(pub(crate) u64, pub(crate) u32);
 
 impl InstanceGroupRef {

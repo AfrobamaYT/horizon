@@ -5,16 +5,7 @@ use crate::{FluidKey, Identifier, ItemKey};
 /// Membership belongs to the current authoritative data reload, not to the key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: the runtime alone creates name slots
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct TagKey(pub(crate) u32);
-
-impl TagKey {
-    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        horizon_mod_runtime::registry_keys::with_tag_name(slot, |id| {
-            id.map(|_| Self(slot)).ok_or("unknown TagKey slot")
-        })
-    }
-}
 
 /// Read merged item and fluid tags without borrowing the game's registry structs.
 /// Unknown tags answer false or an empty member list. Membership reads answer `None`

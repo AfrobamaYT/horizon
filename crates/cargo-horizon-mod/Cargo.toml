@@ -23,10 +23,8 @@ sha2 = "0.10"
 toml = "1.1.6"
 toml_edit = "0.25"
 ureq = { version = "2", default-features = false, features = ["tls"] }
-wasm-encoder = "0.261"
+wasm-encoder = { version = "0.261", features = ["wasmparser"] }
 wasmparser = "0.261"
-wit-component = "0.261"
-wit-parser = "0.261"
 
 [dev-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }

@@ -43,14 +43,11 @@ pub enum RawKind {
 unsafe impl Send for RawKind {}
 unsafe impl Sync for RawKind {}
 
-/// A typed API function or a generic wasm forwarding endpoint.
+/// A typed API function.
 #[derive(Clone, Copy)]
 pub enum ApiKind {
     /// A function checked by the generated typed constructor before erasure.
     Typed(*const ()),
-    /// One checked export index in a wasm mod.
-    #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-    Forward(&'static dyn crate::wire::Forward, u32),
 }
 
 // The pointer is a function; forwarding endpoints are Send + Sync resources.
@@ -259,23 +256,6 @@ impl SlotListener {
             id,
             place: place as usize,
             kind: Kind::Api(ApiKind::Typed(function)),
-            priority: 0,
-            injection: "",
-        }
-    }
-
-    /// A checked wasm API export, forwarded without a per-point proxy.
-    #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-    pub const fn forwarded(
-        id: &'static str,
-        place: PointId,
-        forward: &'static dyn crate::wire::Forward,
-        index: u32,
-    ) -> Self {
-        Self {
-            id,
-            place: place as usize,
-            kind: Kind::Api(ApiKind::Forward(forward, index)),
             priority: 0,
             injection: "",
         }

@@ -12,30 +12,19 @@ extern crate self as mod_api;
 /// A saved fluid name retained for the lifetime of the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only trusted engine boundaries create handles
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct UnresolvedFluid(u64);
 
 /// A block requested once through [`Registrar::block_key`](BlocksRegistrar::block_key). Its load-owned slot survives reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockKey(u32);
 
 /// A baked standalone model resolved through [`RenderAssets::model`].
 /// Retain it between frames; reacquire it after a successful resource reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: private fields; only the engine resolves model handles
-#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
 pub struct ModelRef(u64, u32);
 
-impl ModelRef {
-    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
-        if generation == 0 {
-            return Err("unpublished model generation");
-        }
-        Ok(Self(generation, slot))
-    }
-}
 
 /// Why a standalone model could not be resolved or drawn. Errors append no geometry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,7 +40,6 @@ pub enum ModelError {
 /// A key stays the same dimension until the game exits; `key.id(host)` gives the name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only the game's table creates a key
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct DimensionKey(u32);
 
 /// Why a game rule category declaration was refused.
@@ -85,30 +73,25 @@ pub enum EntityAttributeError {
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BoolGameRuleKey(u32);
 /// A load-owned fluid identity requested through [`Registrar::fluid_key`](FluidsRegistrar::fluid_key) or resolved through
 /// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct FluidKey(u32);
 /// An item requested at registration; its load-owned slot identifies the canonical name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only registration creates a key
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct ItemKey(u32);
 
 /// An effect requested once through [`Registrar::effect_key`](EffectsRegistrar::effect_key). The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct EffectKey(u32);
 
 /// A block entity type requested at registration. Its slot remains stable for the process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the load-owned table creates keys
-#[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BlockEntityTypeKey(u32);
 
 use std::sync::{Arc, OnceLock};
@@ -2681,7 +2664,6 @@ pub enum LightLayer {
 /// A world that names none enables `minecraft:vanilla` alone, as vanilla's default does.
 /// Getting and reading it allocates nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[horizon_mod_api_macros::wasm(via = Vec<String>)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct FeatureFlags(Arc<[String]>);
 

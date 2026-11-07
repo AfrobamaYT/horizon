@@ -10,7 +10,6 @@ use std::{collections::BTreeMap, sync::Arc};
 
 /// An error loading a resource, including the resource that caused it.
 #[derive(Debug)]
-#[horizon_mod_api_macros::wasm(via = (Identifier, String))]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct ReloadResourceError {
     resource: Identifier,

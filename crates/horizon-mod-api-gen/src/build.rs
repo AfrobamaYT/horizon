@@ -42,26 +42,15 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated.rs", hooks.as_str()),
                 ("mod_api_generated_host.rs", generated.host.as_str()),
             ];
-            // The resolver recurses through the API's types: give it a deep stack.
-            let wasm = std::thread::scope(|scope| {
-                std::thread::Builder::new()
-                    .stack_size(64 << 20)
-                    .spawn_scoped(scope, || super::wasm::generate(root, &included))
-                    .map_err(|e| e.to_string())?
-                    .join()
-                    .map_err(|_| "generating the wasm interface panicked".to_string())?
-            })?;
-            for path in &wasm.sources {
+            let (providers, sources) = super::capability_providers::generate(root, &included)?;
+            for path in &sources {
                 println!("cargo:rerun-if-changed={}", path.display());
             }
-            fs::write(out_dir.join("mod-api.wit"), &wasm.wit).map_err(|e| e.to_string())?;
             vec![
                 (host::AREAS_OUTPUT, generated.areas),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
-                ("capability_providers_generated.rs", wasm.providers),
-                ("wasm_guest_generated.rs", wasm.guest),
-                ("wasm_host_generated.rs", wasm.host),
+                ("capability_providers_generated.rs", providers),
             ]
         }
     };

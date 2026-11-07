@@ -9,7 +9,7 @@ pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
     missing_jars,
 };
-pub use wasm::{MAX_WASM, Wasm, WasmError, export_prefix, sha512_of};
+pub use wasm::{MAX_WASM, Wasm, WasmError, sha512_of};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -388,12 +388,6 @@ impl Manifest {
         }
         if m.native.is_some() && m.wasm.is_some() {
             return Err(format!("{MANIFEST}: a mod is [native] or [wasm], not both"));
-        }
-        if m.wasm.is_some() && !wasm::exportable(&m.id) {
-            return Err(format!(
-                "{MANIFEST}: a wasm mod's id is words that each start with a letter (`{}`)",
-                m.id
-            ));
         }
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;

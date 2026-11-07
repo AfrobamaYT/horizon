@@ -1,9 +1,7 @@
 //! Typed native-mod data attached to server-owned holders.
-mod form;
 #[doc(hidden)]
 pub mod index;
 #[doc(hidden)]
-pub use form::AttachmentEntryForm;
 mod index_key;
 mod lifetime;
 #[doc(hidden)]

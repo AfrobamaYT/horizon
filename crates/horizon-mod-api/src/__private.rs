@@ -49,15 +49,6 @@ pub fn backend_read<'a, R>(
 ) -> Option<R> {
     host.backend().map(|backend| read(backend.open()))
 }
-/// The game's side of wasm mods, for `horizon-mod-wasm`.
-#[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-pub mod wasm_host {
-    include!(concat!(
-        env!("OUT_DIR"),
-        "/mod_api_exports_private_wasm_host.rs"
-    ));
-}
-
 /// The trait mods installed, in dispatch order: the game's own list, not part of the mod surface.
 pub fn mods() -> &'static [ModEntry] {
     crate::mods()

@@ -13,9 +13,7 @@ use std::{
 };
 use syn::{ImplItem, Item, Type};
 
-mod guest;
 pub mod source;
-pub use guest::{GuestInject, guest_exports};
 
 /// One point, as `points.json` lists it.
 #[derive(Debug, serde::Serialize)]
@@ -913,43 +911,10 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
     let listeners = points.iter().map(|point| parse(&point.api[0]));
     let variants = points.iter().map(|point| parse(&point.api[1]));
     let dispatch = points.iter().map(|point| parse(&point.api[2]));
-    // Each place's name, function and record shape, in `PointId` order: a point's head, then its
-    // return.
-    let places: Vec<(String, &str, &str)> = points
-        .iter()
-        .flat_map(|point| {
-            let head = (point.name.clone(), &*point.target, &*point.wire_shape);
-            let back = (
-                format!("{}_return", point.name),
-                &*point.target,
-                if point.at_return {
-                    &*point.wire_shape
-                } else {
-                    ""
-                },
-            );
-            // A raw-only return has a place too, but no API wire shape.
-            std::iter::once(head).chain((point.at_return || point.raw).then_some(back))
-        })
-        .collect();
-    let mut places = places;
-    for point in sources {
-        places.push((point.name.clone(), &point.target, ""));
-        places.push((format!("{}_return", point.name), &point.target, ""));
-    }
     let private_variants = sources.iter().map(|point| {
         let head = quote::format_ident!("{}", point_shape::camel(&point.name));
         let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
         quote!(#head, #back,)
-    });
-    let names = places.iter().map(|place| &place.0);
-    let targets = places.iter().map(|place| place.1);
-    let shapes = places.iter().map(|place| place.2);
-    let ids = places.iter().map(|place| {
-        proc_macro2::Ident::new(
-            &point_shape::camel(&place.0),
-            proc_macro2::Span::call_site(),
-        )
     });
     quote! {
         #(#records)*
@@ -967,21 +932,6 @@ pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String
         /// The game's typed dispatch, not part of the API a mod is written against.
         #[doc(hidden)]
         pub mod dispatch { use super::*; #(#dispatch)* }
-        /// Each place's name, function and record shape, by `PointId`: what the game checks a
-        /// wasm mod's listeners against at load.
-        #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
-        #[doc(hidden)]
-        pub mod places {
-            use super::{POINT_COUNT, PointId};
-            /// Each place.
-            pub static IDS: [PointId; POINT_COUNT] = [#(PointId::#ids),*];
-            /// Each place's catalog name.
-            pub static NAMES: [&str; POINT_COUNT] = [#(#names),*];
-            /// Each place's function, as an injection's `target` names it.
-            pub static TARGETS: [&str; POINT_COUNT] = [#(#targets),*];
-            /// Each place's record shape.
-            pub static SHAPES: [&str; POINT_COUNT] = [#(#shapes),*];
-        }
     }
     .to_string()
 }

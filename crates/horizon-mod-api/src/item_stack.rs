@@ -19,7 +19,6 @@ pub trait Component {
 /// An owned component patch, independent of the engine's component representation.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
-#[horizon_mod_api_macros::wasm(via = Compound)]
 pub struct Components {
     patch: Compound,
 }
@@ -50,28 +49,11 @@ impl From<&Components> for Compound {
 /// including storage writes, commands and messages, are not undone by output validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-#[horizon_mod_api_macros::wasm(via = StackRecord)]
 pub struct ItemStack {
     item: ItemKey,
     count: NonZeroU32,
     damage: Option<u32>,
     components: Option<Box<Components>>,
-}
-
-/// Plain-data representation of an owned stack at serialization boundaries.
-/// Decoding validates count through [`ItemStack::new`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct StackRecord {
-    /// Process-local registry key; not a persistent Minecraft item identifier.
-    pub item: ItemKey,
-    /// A nonzero number of items.
-    pub count: u32,
-    /// Numeric override: None inherits the prototype unless the patch explicitly
-    /// removes damage; Some(0) is a present zero-damage component.
-    pub damage: Option<u32>,
-    /// Component patch, absent for ordinary stacks.
-    pub components: Option<Box<Components>>,
 }
 
 /// A stack operation could not represent the requested count.
@@ -410,28 +392,6 @@ fn damage_value(value: &Tag) -> Result<u32, StackError> {
     };
     u32::try_from(value).map_err(|_| StackError::InvalidDamage)
 }
-impl From<&ItemStack> for StackRecord {
-    fn from(value: &ItemStack) -> Self {
-        Self {
-            item: value.item,
-            count: value.count(),
-            damage: value.damage,
-            components: value.components.clone(),
-        }
-    }
-}
-impl TryFrom<StackRecord> for ItemStack {
-    type Error = StackError;
-    fn try_from(value: StackRecord) -> Result<Self, Self::Error> {
-        let mut stack = Self::new(value.item, value.count).ok_or(StackError::Empty)?;
-        stack.damage = value.damage;
-        if let Some(patch) = value.components {
-            stack.set_components(patch.patch)?;
-        }
-        Ok(stack)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,19 +458,5 @@ mod tests {
         assert!(other.components().is_none());
         stack.remove(&Number);
         assert!(stack.is_stackable_with(&other));
-    }
-
-    #[test]
-    fn record_decode_refuses_zero_and_normalizes_empty_patches() {
-        let mut record = StackRecord::from(&ItemStack::of(ItemKey(0)));
-        record.components = Some(Box::default());
-        assert!(
-            ItemStack::try_from(record.clone())
-                .unwrap()
-                .components()
-                .is_none()
-        );
-        record.count = 0;
-        assert_eq!(ItemStack::try_from(record), Err(StackError::Empty));
     }
 }

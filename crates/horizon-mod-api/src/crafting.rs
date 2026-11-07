@@ -297,7 +297,6 @@ impl WalkedIngredient {
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
-#[horizon_mod_api_macros::wasm(via = IngredientForm)]
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
     pub items: HashSet<String>,
@@ -311,127 +310,6 @@ pub struct Ingredient {
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
 }
-/// Flat generated-codec form of an ingredient tree, with root at node zero.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub struct IngredientForm {
-    /// Nodes in parent-before-child order; every non-root node has one parent.
-    pub nodes: Vec<IngredientNode>,
-}
-/// One ingredient's own data, with child indices instead of recursive records.
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub struct IngredientNode {
-    /// Accepted ids, independent of display order.
-    pub items: HashSet<String>,
-    /// Display order of accepted ids.
-    pub order: Vec<String>,
-    /// Mod kind and metadata converted once at recipe load.
-    pub custom: Option<(String, horizon_core::nbt::Compound)>,
-    /// Shape and its child indices, in matching order.
-    pub children: Option<(Shape, Vec<u64>)>,
-}
-/// Ingredient node-depth budget, from serde_json's default recursion budget
-/// of 128 on the former JSON boundary. Counts ingredient nodes, not the extra
-/// object/tuple/list wrappers in that former wire encoding.
-const MAX_INGREDIENT_DEPTH: u16 = 128;
-
-/// A flat ingredient form could not be reconstructed safely.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum IngredientFormError {
-    /// Empty, cyclic, shared, orphaned, invalid-index or out-of-order nodes.
-    Malformed,
-    /// More than 128 ingredient nodes on a root-to-leaf path.
-    TooDeep,
-}
-impl std::fmt::Display for IngredientFormError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Malformed => "invalid ingredient tree",
-            Self::TooDeep => "ingredient tree exceeds depth 128",
-        })
-    }
-}
-impl std::error::Error for IngredientFormError {}
-impl From<&Ingredient> for IngredientForm {
-    fn from(root: &Ingredient) -> Self {
-        let mut pending = vec![root];
-        let mut nodes = Vec::new();
-        let mut at = 0;
-        while at < pending.len() {
-            let ingredient = pending[at];
-            let children = ingredient.children.as_ref().map(|(shape, children)| {
-                let first = pending.len() as u64;
-                pending.extend(children);
-                (shape.clone(), (first..pending.len() as u64).collect())
-            });
-            nodes.push(IngredientNode {
-                items: ingredient.items.clone(),
-                order: ingredient.order.clone(),
-                custom: ingredient.custom.clone(),
-                children,
-            });
-            at += 1;
-        }
-        Self { nodes }
-    }
-}
-impl TryFrom<IngredientForm> for Ingredient {
-    type Error = IngredientFormError;
-    fn try_from(form: IngredientForm) -> Result<Self, Self::Error> {
-        // Validate the entire flat graph before constructing any recursive
-        // value, so refusing malformed or deep input cannot recursively drop
-        // a partially built tree either.
-        if form.nodes.is_empty() {
-            return Err(IngredientFormError::Malformed);
-        }
-        let mut depths = vec![0u16; form.nodes.len()];
-        depths[0] = 1;
-        for (index, node) in form.nodes.iter().enumerate() {
-            if depths[index] == 0 {
-                return Err(IngredientFormError::Malformed);
-            }
-            if let Some((_, children)) = &node.children {
-                for &child in children {
-                    let child =
-                        usize::try_from(child).map_err(|_| IngredientFormError::Malformed)?;
-                    if child <= index || child >= depths.len() || depths[child] != 0 {
-                        return Err(IngredientFormError::Malformed);
-                    }
-                    let depth = depths[index] + 1;
-                    if depth > MAX_INGREDIENT_DEPTH {
-                        return Err(IngredientFormError::TooDeep);
-                    }
-                    depths[child] = depth;
-                }
-            }
-        }
-        let mut built: Vec<Option<Self>> = vec![None; form.nodes.len()];
-        for (index, node) in form.nodes.into_iter().enumerate().rev() {
-            let children = node.children.map(|(shape, indices)| {
-                let children = indices
-                    .into_iter()
-                    .map(|child| {
-                        built[child as usize]
-                            .take()
-                            .expect("validated unique child")
-                    })
-                    .collect();
-                (shape, children)
-            });
-            built[index] = Some(Self {
-                items: node.items,
-                order: node.order,
-                custom: node.custom,
-                children,
-            });
-        }
-        let root = built[0].take().expect("validated root");
-        Ok(root)
-    }
-}
-
 /// How a shape's children combine at match time.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 // exhaustive: a closed set the game matches without a wildcard
@@ -571,7 +449,3 @@ impl CraftResult {
         Self { output, remainders }
     }
 }
-
-#[cfg(test)]
-#[path = "crafting/ingredient_form_tests.rs"]
-mod ingredient_form_tests;

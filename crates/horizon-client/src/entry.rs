@@ -53,41 +53,13 @@ pub fn main_with(
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    // Load wasm code from the same selection as content, then resolve one native/wasm
-    // dispatch order before anything below (logging, the crash
-    // handler) that a trait injection may call into.
-    let mut wasm_listening = Vec::new();
-    let mut wasm_manifests = Vec::new();
-    if let Ok(exe) = &exe {
-        let switch = |name: &str| {
-            launch
-                .rest
-                .iter()
-                .any(|arg| matches!(arg, Argument::Switch(s) if s == name))
-        };
-        let mut budgets = mod_api::__private::wasm_host::Budgets::default();
-        if switch("--wasm-fuel") {
-            budgets.fuel = Some(Default::default());
-        }
-        let config = horizon_mod_wasm::RuntimeConfig {
-            pulley: switch("--wasm-interpreter"),
-            cache: Some(launch.context.home.join("wasm-cache")),
-            budgets,
-        };
-        let game_dir = &launch.context.game_dir;
-        horizon_mod_wasm::set_internals(&crate::__internals::TABLE);
-        let loaded =
-            horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
-        mods.extend(loaded.mods);
-        wasm_listening = loaded.listening;
-        wasm_manifests = loaded.manifests;
-    }
+    // Wasm mods are refused until the shared-memory boundary exists; the Mods page says why.
+    horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
     // One installed dispatch order for both targets; ties retain bundle order.
     let manifests: Vec<_> = native
         .packages()
         .iter()
         .map(|p| &p.manifest)
-        .chain(wasm_manifests.iter())
         .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
         .collect();
     assert_eq!(
@@ -122,22 +94,12 @@ pub fn main_with(
         .collect();
     let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
     mod_api::__private::install(mods.into());
-    let mut wasm: std::collections::BTreeMap<_, _> = wasm_listening
-        .into_iter()
-        .map(|listeners| (listeners.id(), listeners))
-        .collect();
     for id in ids {
         for slot in slots.iter().filter(|slot| slot.id() == id) {
             if let Err(error) = mod_points::register(slot) {
                 eprintln!("Horizon: {id}: {error}");
                 std::process::exit(game::exit_code::ERROR);
             }
-        }
-        if let Some(listeners) = wasm.remove(id)
-            && let Err(error) = listeners.register()
-        {
-            eprintln!("Horizon: {id}: {error}");
-            std::process::exit(game::exit_code::ERROR);
         }
     }
     mod_points::__private::seal();

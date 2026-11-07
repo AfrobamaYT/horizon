@@ -16,10 +16,9 @@ It supports function points, listed call sites, and source-spliced helpers:
   [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) before it is compiled. The game is
   rebuilt from source.
 
-A `mod.wasm` listens at points too: its `horizon-mod.toml` lists the same point injections, with no
-`[native]` pins, and the game fills those places from the `mod.wasm` at load, with no game rebuild and no
-compiler ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Helper injections are
-native-only: a mod that needs one cannot be a wasm mod until the hook exists.
+A `mod.wasm` will listen at points too, once the game's shared-memory wasm boundary lands; until
+then a game refuses every `mod.wasm` ([Building a mod to `mod.wasm`](how-to/wasm-mods.md)). Helper
+injections are native-only.
 
 ## Function-slot declarations
 

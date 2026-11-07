@@ -24,29 +24,16 @@ log = "0.4"
 bytemuck = { version = "1.24", features = ["derive"] }
 glam = "0.30"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wit-bindgen = { version = "0.46", default-features = false, features = ["macros"] }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasmtime = { version = "50", optional = true, default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std"] }
-
 [build-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [dev-dependencies]
-wit-component = { version = "0.261", features = ["dummy-module"] }
-wit-parser = "0.261"
-wat = "1.261"
-wasm-encoder = { version = "0.261", features = ["wasmparser"] }
-wasmparser = "0.261"
 # `Items::for_tests` for the fluid ingredient unit tests.
 horizon-items = { path = "../horizon-items", features = ["test-support"] }
 
 [features]
 # Scoped mod installation for other crates' tests (`mod_api::testing`).
 testing = []
-# The game's side of WebAssembly mods: host forwarding and the mod proxies.
-wasm-host = ["dep:wasmtime"]
 
 [lints]
 workspace = true
