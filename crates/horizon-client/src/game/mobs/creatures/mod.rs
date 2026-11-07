@@ -26,6 +26,7 @@ use horizon_client::{
         Damage, DamageKind, Mob, MobEvent, MobWorld, PlayerView, Seen, SpawnSetup, Species, Who,
         ai::{eating_sound, eating_sound_is_bound, feed_animal, takes_food},
         farm::Climate,
+        finalize::Group,
         spawning::{self, BiomeFacts},
     },
     particles::{ParticleOptions, ParticleType},
@@ -1084,30 +1085,36 @@ impl Game<'_> {
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
     ) -> Finalized {
-        let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner);
+        let mut group = None;
+        let (outcome, difficulty) = self.finalize_spawn_event(mob, reason, spawner, &mut group);
         if outcome == Finalized::Done {
-            self.finalize_plain(mob, &difficulty, reason);
+            self.finalize_grouped(mob, &difficulty, reason, group);
         }
         outcome
     }
     /// `Mob.finalizeSpawn`'s event, the half listeners own: they hear the
-    /// spawn, cancel it, take it over, or set its difficulty. The decision
-    /// and the difficulty the spawn finalizes with come back together.
+    /// spawn, cancel it, take it over, set its difficulty, edit the mob
+    /// through its lend and change the pack's `group`, which finalization then
+    /// reads. The decision and the difficulty the spawn finalizes with come
+    /// back together.
     pub(super) fn finalize_spawn_event(
         &self,
-        mob: &Mob,
+        mob: &mut Mob,
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
+        group: &mut Option<Group>,
     ) -> (Finalized, spawning::LocalDifficulty) {
-        self.finalize_spawn_at(
-            &mob.kind.id,
-            [mob.position.x, mob.position.y, mob.position.z],
-            reason,
-            spawner,
-        )
+        let at = [mob.position.x, mob.position.y, mob.position.z];
+        let difficulty = self.local_difficulty(at);
+        if !mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
+            return (Finalized::Done, difficulty);
+        }
+        let kind = mob.kind.id.clone();
+        self.finalize_spawn_lent(&kind, at, reason, spawner, difficulty, Some(mob), group)
     }
-    /// The shared finalization decision for a mob type, including the separately
-    /// stored dragon, before the entity joins the level.
+    /// The shared finalization decision for a mob type the game keeps apart
+    /// from mobs (the dragon), before the entity joins the level: its lend has
+    /// a kind and a position and no mob.
     pub(super) fn finalize_spawn_at(
         &self,
         kind: &str,
@@ -1115,10 +1122,32 @@ impl Game<'_> {
         reason: SpawnReason,
         spawner: Option<mod_api::NativeSpawner>,
     ) -> (Finalized, spawning::LocalDifficulty) {
-        let mut difficulty = self.local_difficulty(at);
-        if mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
-            let mut heard = mod_api::NativeDifficulty::from(difficulty);
-            let (mut spawn_cancelled, mut skip) = (false, false);
+        let difficulty = self.local_difficulty(at);
+        if !mod_api::__private::listened(mod_api::HookId::FinalizeSpawn) {
+            return (Finalized::Done, difficulty);
+        }
+        self.finalize_spawn_lent(kind, at, reason, spawner, difficulty, None, &mut None)
+    }
+    /// Fires `finalize_spawn` with `mob` lent to it and the group data as the
+    /// API's; a group the listener changed comes back as the game's.
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_spawn_lent(
+        &self,
+        kind: &str,
+        at: [f64; 3],
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+        difficulty: spawning::LocalDifficulty,
+        mob: Option<&mut Mob>,
+        group: &mut Option<Group>,
+    ) -> (Finalized, spawning::LocalDifficulty) {
+        let mut heard = mod_api::NativeDifficulty::from(difficulty);
+        let (mut spawn_cancelled, mut skip) = (false, false);
+        let given = group
+            .as_ref()
+            .and_then(|g| super::native_unspawned_mob::native_spawn_group(g, self.lend_epoch()));
+        let mut native_group = given.clone();
+        self.lend_unspawned(kind, at, mob, |mob, edits| {
             self.native_finalize_spawn(mod_api::__private::FinalizeSpawnCall {
                 dimension: self.dim.id(),
                 kind,
@@ -1127,17 +1156,24 @@ impl Game<'_> {
                 spawner,
                 difficulty: &mut heard,
                 spawn_cancelled: &mut spawn_cancelled,
+                mob,
+                edits,
+                group: &mut native_group,
                 cancel: &mut skip,
             });
-            if spawn_cancelled {
-                return (Finalized::Cancelled, difficulty);
-            }
-            if skip {
-                return (Finalized::Skipped, difficulty);
-            }
-            difficulty = heard.into();
+        });
+        if native_group != given {
+            *group = native_group
+                .as_ref()
+                .and_then(super::native_unspawned_mob::spawn_group);
         }
-        (Finalized::Done, difficulty)
+        if spawn_cancelled {
+            return (Finalized::Cancelled, difficulty);
+        }
+        if skip {
+            return (Finalized::Skipped, difficulty);
+        }
+        (Finalized::Done, heard.into())
     }
     /// `ServerLevel.getCurrentDifficultyAt`.
     pub(super) fn local_difficulty(&self, at: [f64; 3]) -> spawning::LocalDifficulty {

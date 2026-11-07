@@ -1304,8 +1304,15 @@ fn frame_objects(types: &Types<'_>, ty: &Ty, e: &str, out: &mut String) {
                 && let super::ty::Kind::Record(fields) = &types.defs[*def].kind
             {
                 for field in fields {
-                    if let Ty::Dyn(..) = field.ty {
-                        frame_objects(types, &field.ty, &format!("&mut *{e}.{}", field.rust), out);
+                    // An event's shared trait object (a scoped editor) is reborrowed shared.
+                    if let Ty::Dyn(_, mutable) = field.ty {
+                        let borrow = if mutable { "&mut *" } else { "&*" };
+                        frame_objects(
+                            types,
+                            &field.ty,
+                            &format!("{borrow}{e}.{}", field.rust),
+                            out,
+                        );
                     }
                 }
             }
