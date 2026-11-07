@@ -52,6 +52,12 @@ mod horizon_world {
         }
     }
 }
+// Storage is not the subject of this physics fixture. Real numbered-list
+// identity and restoration have separate production tests.
+trait Lift: Default + Sized {
+    fn lift(&mut self) -> Self { std::mem::take(self) }
+}
+impl<T> Lift for Vec<T> {}
 struct ItemStack { item: String }
 struct Remote { entity_id: i32 }
 mod horizon_core {
