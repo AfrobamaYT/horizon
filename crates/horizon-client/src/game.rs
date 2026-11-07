@@ -3290,6 +3290,7 @@ struct Game<'a> {
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
@@ -21730,6 +21731,7 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,
             studio_replay: None,

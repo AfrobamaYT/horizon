@@ -560,6 +560,8 @@ impl Game<'_> {
         self.next_entity += 1;
         let yaw = self.world.random.next_float() * 360.0;
         let mut mob = Mob::new(self.next_entity, t, Vec3::new(at[0], at[1], at[2]), yaw);
+        // `EntityType.create`: the mob is constructed before `finalizeSpawn`.
+        self.initialize_entity(mod_api::Holder::Entity(mob.id), &kind);
         mob.persistent = persistent;
         match site {
             SpawnSite::Finalizing(reason) => match self.finalize_with(&mut mob, reason, None) {
