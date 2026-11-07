@@ -5739,3 +5739,16 @@ color = [0.0, 1.0, 0.0]
         host.clear_particles()
     }
 }
+
+impl Game<'_> {
+    pub(in crate::game) fn native_chat_suggestion_applied(
+        &self,
+        original: &str,
+        start: usize,
+        end: usize,
+        suggestion: &str,
+        input: &str,
+    ) {
+        mod_api::dispatch_chat_suggestion_applied(self, original, start, end, suggestion, input);
+    }
+}
