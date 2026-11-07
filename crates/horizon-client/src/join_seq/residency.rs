@@ -169,6 +169,56 @@ mod tests {
         assert_eq!(scratch, [new]);
     }
 
+    fn assert_idle_drain_does_not_wait_for_the_pending_mutex(journal: Journal) {
+        use std::{sync::mpsc, time::Duration};
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let holder = journal.clone();
+        let holder = std::thread::spawn(move || {
+            let _guard = holder.0.events.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        locked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        let drainer = std::thread::spawn(move || {
+            let mut scratch = Vec::new();
+            journal.drain_into(&mut scratch);
+            done_tx.send(scratch).unwrap();
+        });
+        let result = done_rx.recv_timeout(Duration::from_secs(2));
+        // Release and join before asserting, including on the timeout path.
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        drainer.join().unwrap();
+        assert!(result.is_ok(), "idle drain blocked on the pending mutex");
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn idle_drain_after_consuming_a_batch_does_not_lock() {
+        let journal = Journal::default();
+        journal.push(event(DimensionKey::OVERWORLD, Kind::Mob, Change::Lifted));
+        let mut scratch = Vec::new();
+        journal.drain_into(&mut scratch);
+        assert_eq!(scratch.len(), 1);
+        scratch.clear();
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(journal);
+    }
+
+    #[test]
+    fn idle_drain_after_clear_does_not_lock() {
+        let journal = Journal::default();
+        journal.push(event(DimensionKey::OVERWORLD, Kind::Mob, Change::Lifted));
+        journal.clear();
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(journal);
+    }
+
+    #[test]
+    fn fresh_idle_drain_does_not_lock() {
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(Journal::default());
+    }
+
     #[test]
     fn concurrent_producers_are_delivered_once_in_each_producers_order() {
         let journal = Journal::default();
