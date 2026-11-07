@@ -85,6 +85,9 @@ style overrides, ordered children, selector and NBT sources, inline objects, and
 and hover actions. Translation keys and argument components stay unresolved until the
 game displays them. `None` style fields inherit; `Some(false)` overrides an inherited
 decoration. Arbitrary profile and component-patch JSON remains data, never engine state.
+Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `None`
+keeps the engine-computed default; `Some` preserves a styled or translatable component
+rather than flattening it to a string.
 
 The recursive tree has one serde model. `TextForm` carries its serialized form for
 finite generated wasm bindings; decoding refuses malformed trees. Component and style

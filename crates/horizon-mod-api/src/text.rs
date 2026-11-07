@@ -85,8 +85,8 @@ pub enum TextObject {
         profile: serde_json::Value,
         /// Whether to draw the hat layer.
         hat: bool,
-        /// Text for consumers unable to display the object.
-        fallback: String,
+        /// Optional component for consumers unable to display the object; None uses the default.
+        fallback: Option<Box<Text>>,
     },
     /// A sprite in a named atlas.
     Atlas {
@@ -94,8 +94,8 @@ pub enum TextObject {
         atlas: String,
         /// Sprite identifier.
         sprite: String,
-        /// Text for consumers unable to display the object.
-        fallback: String,
+        /// Optional component for consumers unable to display the object; None uses the default.
+        fallback: Option<Box<Text>>,
     },
 }
 
@@ -267,6 +267,45 @@ mod tests {
             matches!(&decoded.content, TextContent::Translatable { key, .. } if key == "chat.type.text")
         );
         assert_eq!(decoded.children[0].style.bold, Some(false));
+    }
+    #[test]
+    fn object_fallback_form_distinguishes_omitted_styled_and_translatable() {
+        use serde_json::json;
+        let styled = json!({"content":{"Literal":"styled"}, "style":{"bold":false}, "children":[]});
+        let translated = json!({"content":{"Translatable":{"key":"test.head", "arguments":[]}}, "style":{}, "children":[]});
+        for object in [
+            json!({"Player":{"profile":{"name":"Test"}, "hat":true}}),
+            json!({"Atlas":{"atlas":"minecraft:blocks", "sprite":"test:icon"}}),
+        ] {
+            for fallback in [None, Some(styled.clone()), Some(translated.clone())] {
+                let mut object = object.clone();
+                if let Some(fallback) = &fallback {
+                    object.as_object_mut().unwrap().values_mut().next().unwrap()["fallback"] =
+                        fallback.clone();
+                }
+                let tree =
+                    json!({"content":{"Object":object}, "style":{}, "children":[]}).to_string();
+                let text = Text::try_from(TextForm { tree }).unwrap();
+                let TextContent::Object(object) = &text.content else {
+                    panic!("object contents")
+                };
+                let captured = match object {
+                    TextObject::Player { fallback, .. } | TextObject::Atlas { fallback, .. } => {
+                        fallback
+                    }
+                };
+                match &fallback {
+                    None => assert!(captured.is_none()),
+                    Some(value) if value == &styled => {
+                        assert_eq!(captured.as_ref().unwrap().style.bold, Some(false))
+                    }
+                    Some(_) => assert!(
+                        matches!(&captured.as_ref().unwrap().content, TextContent::Translatable { key, .. } if key == "test.head")
+                    ),
+                }
+                assert_eq!(Text::try_from(TextForm::from(&text)).unwrap(), text);
+            }
+        }
     }
     #[test]
     fn form_keeps_unknown_metadata_and_refuses_malformed_trees() {
