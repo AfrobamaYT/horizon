@@ -47,7 +47,7 @@ pub use isolate::LeftOut;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "private-source-points-v1";
+const STAGING: &str = "private-source-calls-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -2401,6 +2401,7 @@ fn pipeline(
             inject::POINTS,
             internals::INTERNALS,
             horizon_mod_api_gen::points::source::FILE,
+            horizon_mod_api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;

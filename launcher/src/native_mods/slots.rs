@@ -48,7 +48,8 @@ pub(super) fn sites<'a>(
                     .find(|site| {
                         super::internals::plain_path(&site.target)
                             == super::internals::plain_path(&entry.at)
-                            && Some(&site.selector) == entry.call.as_ref()
+                            && Some(&site.call) == entry.call.as_ref()
+                            && Some(&site.ctx) == entry.ctx.as_ref()
                             && Some(site.ordinal) == entry.nth
                     })
                     .expect("slot route checked"),
@@ -98,11 +99,11 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
                 calls: catalog
                     .sites
                     .iter()
-                    .filter(|site| plain(&site.target) == plain(&item.path))
+                    .filter(|site| !site.private && plain(&site.target) == plain(&item.path))
                     .map(|site| CallPlace {
-                        call: site.selector.clone(),
+                        call: site.call.clone(),
                         nth: site.ordinal,
-                        ctx: site.hash.clone(),
+                        ctx: site.ctx.clone(),
                         slots: vec![SlotKind::Site],
                     })
                     .collect(),
@@ -121,7 +122,12 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             &places,
         )?;
         let pending = match (route, inject.kind, inject.access) {
-            (Route::Source(_), Kind::Head | Kind::Return, Access::Internals) => None,
+            (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
+            (
+                Route::Source(_),
+                Kind::Head | Kind::Return | Kind::BeforeCall | Kind::AfterCall | Kind::ModifyValue,
+                Access::Internals,
+            ) => None,
             (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
             (_, Kind::Replace, _) => Some(NoSlotReason::ReplacePending),
             (Route::Slot(SlotKind::Site), _, Access::Api) => Some(NoSlotReason::ApiSitesPending),

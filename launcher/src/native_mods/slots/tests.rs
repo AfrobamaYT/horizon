@@ -14,7 +14,7 @@ fn fixture() -> (Manifest, Catalog) {
         }])).unwrap(),
         sites: serde_json::from_value(serde_json::json!([{
             "name":"Sone", "target":"game::run", "selector":"self.step", "ordinal":0,
-            "hash":"context", "listener":"game::__SoneListener", "record":"game::__SoneArgs", "output":"()"
+            "call":"game::step", "ctx":"context", "hash":"place", "listener":"game::__SoneListener", "record":"game::__SoneArgs", "output":"()"
         }])).unwrap(),
         discovery: false,
     };
@@ -58,11 +58,12 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 access,
                 priority: 7,
                 hash: "signature".into(),
-                call: call.then(|| "self.step".into()),
+                call: call.then(|| "game::step".into()),
                 nth: call.then_some(0),
                 ctx: call.then(|| "context".into()),
             });
             let pending = match (kind, access) {
+                (Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
                 (Kind::ModifyLocal, _) => Some(NoSlotReason::LocalSlotsPending),
                 (Kind::Field, _) => Some(NoSlotReason::ExtensionSlotsPending),
                 (Kind::Expression, _) => Some(NoSlotReason::SourcePending),
@@ -109,7 +110,7 @@ fn every_native_kind_and_access_registers_or_refuses_by_name() {
                 "{main}"
             );
             assert!(facade.source.contains(if call {
-                "pub const fn sone"
+                "pub const fn s"
             } else if kind == Kind::Return {
                 "pub const fn run_return"
             } else {
@@ -133,7 +134,7 @@ fn unified_route_checks_freshness_and_selects_native_function_source() {
         access: Access::Internals,
         priority: 0,
         hash: "signature".into(),
-        call: Some("self.step".into()),
+        call: Some("game::step".into()),
         nth: Some(0),
         ctx: Some("context".into()),
     });

@@ -148,10 +148,16 @@ impl Catalog {
                 record_name: Some(point.record_export),
             });
         }
+        let mut sites = listed.sites;
+        sites.extend(
+            horizon_mod_api_gen::sites::source::read(dir)?
+                .into_iter()
+                .map(sites::Site::from),
+        );
         Ok(Self {
             internals: internals::read(&path)?,
             points,
-            sites: listed.sites,
+            sites,
             discovery: false,
         })
     }
