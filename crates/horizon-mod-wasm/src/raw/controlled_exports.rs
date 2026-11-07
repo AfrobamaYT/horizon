@@ -64,6 +64,7 @@ fn component(names: &[(&str, &str)]) -> Exports {
         .unwrap()
         .encode()
         .unwrap();
+    // Canonical aliases in this fixture require component interface identities.
     let mut config = wasmtime::Config::new();
     config
         .consume_fuel(true)
