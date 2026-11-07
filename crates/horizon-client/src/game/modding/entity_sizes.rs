@@ -328,6 +328,25 @@ mod tests {
                         let path = finder.find(&[[2, 70, 0]], 8.0, 0, 32);
                         assert!(path.is_some(), "{answer:?}");
                     }
+                    let id = game
+                        .spawn_mob_spawned(
+                            "silverfish",
+                            [0.99, 70.0, 0.921591],
+                            crate::game::creatures::SpawnSite::Plain,
+                        )
+                        .unwrap();
+                    let i = game.mobs.iter().position(|m| m.id == id).unwrap();
+                    game.mobs[i].extra.model_scale = 0.0625;
+                    *size.lock().unwrap() = game.mobs[i].vanilla_dims();
+                    game.native_mob_sizes();
+                    let mut mob = game.mobs[i].path_mob();
+                    mob.on_ground = true;
+                    assert!((mob.width - 0.025).abs() < 1e-8);
+                    assert!((mob.height - 0.01875).abs() < 1e-8);
+                    let world = game.mob_world_base(&[]);
+                    let finder = Finder::new(&world, &mob, Evaluator::Walk);
+                    assert_eq!(finder.walk_path_type(0, 70, 0), PathType::Fence);
+                    assert!(finder.find(&[[-1, 70, 0]], 8.0, 0, 32).is_some());
                 });
             });
             done.send(()).unwrap();
