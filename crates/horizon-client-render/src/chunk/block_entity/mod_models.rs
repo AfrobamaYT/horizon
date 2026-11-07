@@ -1,5 +1,7 @@
 //! Engine-owned mod block entity storage and revision tracking.
-use horizon_core::nbt::{Compound, Tag};
+use horizon_core::nbt::Compound;
+#[cfg(test)]
+use horizon_core::nbt::Tag;
 use horizon_items::items::ItemStack;
 use std::sync::atomic::{AtomicU64, Ordering};
 /// A mod's block entity, read and changed through its fields

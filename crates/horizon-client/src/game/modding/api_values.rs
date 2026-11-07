@@ -935,6 +935,7 @@ mod enchantment_boundary_tests {
 #[cfg(test)]
 fn prepare_stack_boundary_tests() {
     install_stack_hooks();
+    mod_api::__private::install_parts(&[]).unwrap();
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
         "minecraft:diamond_sword",
@@ -1025,5 +1026,123 @@ impl TryIntoApi for crate::containers::ModBlockEntity {
             self.id().to_owned(),
             (**self).try_into_api()?,
         ))
+    }
+}
+
+impl super::Game<'_> {
+    pub(in crate::game) fn api_block_entity_tick(
+        &mut self,
+        pos: [i32; 3],
+        entity: &mut crate::containers::ModBlockEntity,
+    ) {
+        let Ok(mut api) = entity.try_into_api() else {
+            return;
+        };
+        let revision = api.revision();
+        self.native_block_entity_tick(pos, &mut api);
+        if let Ok(fields) = (*api).try_into_engine(self.items()) {
+            if api.revision() != revision {
+                **entity = fields;
+            }
+        }
+    }
+    pub(in crate::game) fn api_block_entity_update_tag(
+        pos: [i32; 3],
+        entity: &crate::containers::ModBlockEntity,
+        tag: &mut Option<horizon_core::nbt::Compound>,
+    ) {
+        if let Ok(api) = entity.try_into_api() {
+            Self::native_block_entity_update_tag(pos, &api, tag);
+        }
+    }
+    pub(in crate::game) fn api_block_entity_submit(
+        &self,
+        pos: [i32; 3],
+        block: &str,
+        state: horizon_world::registry::BlockStateId,
+        entity: &crate::containers::ModBlockEntity,
+        draw: &mut super::native_block_entity_draw::BlockEntityDraw,
+    ) {
+        if let Ok(api) = entity.try_into_api() {
+            self.native_block_entity_submit(pos, block, state, &api, draw);
+        }
+    }
+    pub(in crate::game) fn api_block_entity_render_bounding_box(
+        &self,
+        pos: [i32; 3],
+        block: &str,
+        state: horizon_world::registry::BlockStateId,
+        entity: &crate::containers::ModBlockEntity,
+        bounds: &mut [f32; 6],
+    ) {
+        if let Ok(api) = entity.try_into_api() {
+            self.native_block_entity_render_bounding_box(pos, block, state, &api, bounds);
+        }
+    }
+    pub(in crate::game) fn api_menu_button(
+        &mut self,
+        context: &mod_api::menu::MenuButtonContext,
+        entity: &mut crate::containers::ModBlockEntity,
+        carried: &mut Option<EngineStack>,
+    ) {
+        let (Ok(mut api), Ok(mut cursor)) = (entity.try_into_api(), carried.try_into_api()) else {
+            return;
+        };
+        let revision = api.revision();
+        self.native_menu_button(context, &mut api, &mut cursor);
+        if let (Ok(fields), Ok(cursor)) = (
+            (*api).try_into_engine(self.items()),
+            cursor.try_into_engine(self.items()),
+        ) {
+            if api.revision() != revision {
+                **entity = fields;
+            }
+            *carried = cursor;
+        }
+    }
+    pub(in crate::game) fn api_menu_quick_move(
+        &mut self,
+        pos: [i32; 3],
+        entity: &mut crate::containers::ModBlockEntity,
+        container_slots: usize,
+        slot: usize,
+        stack: &mut EngineStack,
+        handled: &mut bool,
+    ) {
+        let (Ok(mut api), Ok(mut held)) = (entity.try_into_api(), stack.try_into_api()) else {
+            return;
+        };
+        let revision = api.revision();
+        self.native_menu_quick_move(pos, &mut api, container_slots, slot, &mut held, handled);
+        match (
+            (*api).try_into_engine(self.items()),
+            held.try_into_engine(self.items()),
+        ) {
+            (Ok(fields), Ok(held)) => {
+                if api.revision() != revision {
+                    **entity = fields;
+                }
+                *stack = held;
+            }
+            _ => *handled = false,
+        }
+    }
+}
+impl super::GameLevel<'_> {
+    pub(in crate::game) fn api_pre_remove_side_effects(
+        &mut self,
+        pos: horizon_core::position::BlockPos,
+        state: horizon_world::registry::BlockStateId,
+        entity: &crate::containers::ModBlockEntity,
+        drops: &mut Vec<EngineStack>,
+    ) {
+        let Ok(api) = entity.try_into_api() else {
+            return;
+        };
+        let mut added = Vec::new();
+        self.native_pre_remove_side_effects(pos, state, &api, &mut added);
+        if let Ok(added) = added.try_into_engine(self.items) {
+            drops.extend(added);
+        }
     }
 }

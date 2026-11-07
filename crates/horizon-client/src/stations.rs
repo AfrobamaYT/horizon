@@ -832,7 +832,6 @@ fn apply_trim(
     let pattern = match pattern {
         crate::crafting::RecipeTrimPattern::Reference(id) => id.as_str(),
         crate::crafting::RecipeTrimPattern::Inline { asset_id, .. } => asset_id.as_str(),
-        _ => return None,
     };
     let material = e.props(&material.item)?.trim_material.clone()?;
     let trim = (Arc::from(material.as_str()), Arc::from(pattern));

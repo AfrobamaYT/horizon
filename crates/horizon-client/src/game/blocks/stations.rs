@@ -2697,8 +2697,11 @@ impl Game<'_> {
                 &details,
                 stack,
                 item_info,
-                self,
-                &context,
+                |appender, stack, out| {
+                    if let Ok(stack) = stack.try_into_api() {
+                        appender.append(self, &stack, &context, out);
+                    }
+                },
                 appenders
                     .iter()
                     .map(|p| (p.component(), p.placement(), p.enabled(), p.appender())),

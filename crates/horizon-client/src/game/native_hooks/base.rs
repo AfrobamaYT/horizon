@@ -1,4 +1,5 @@
 use super::*;
+use mod_api::ModBlockEntity;
 
 impl GameLevel<'_> {
     /// Initial saved data for a declared block entity (`EntityBlock.newBlockEntity`),
@@ -1591,7 +1592,7 @@ impl Game<'_> {
         &mut self,
         context: &mod_api::menu::MenuButtonContext,
         entity: &mut ModBlockEntity,
-        carried: &mut Option<ItemStack>,
+        carried: &mut Option<mod_api::ItemStack>,
     ) {
         self.fire_menu_button(context, entity, carried);
     }
@@ -1624,7 +1625,7 @@ impl Game<'_> {
         entity: &mut ModBlockEntity,
         container_slots: usize,
         slot: usize,
-        stack: &mut ItemStack,
+        stack: &mut mod_api::ItemStack,
         handled: &mut bool,
     ) {
         self.fire_menu_quick_move(pos, entity, container_slots, slot, stack, handled);
@@ -5162,6 +5163,7 @@ impl Game<'_> {
 #[cfg(test)]
 mod screen_open_tests {
     use super::*;
+    use mod_api::ModBlockEntity;
     use mod_api::{
         ClientHost, Flow, Hooks, InteractionKeyMappingTriggeredEvent, KeyMappingPreEvent, ModEntry,
         ScreenClosingEvent, ScreenOpeningEvent, testing::with_mods,
@@ -5792,6 +5794,7 @@ mod screen_open_tests {
 #[cfg(test)]
 mod text_tests {
     use super::*;
+    use mod_api::ModBlockEntity;
 
     /// `DrawContext::text` takes ARGB as vanilla's `GuiGraphics` does: the alpha reaches the
     /// vertices, and fully transparent text draws nothing.

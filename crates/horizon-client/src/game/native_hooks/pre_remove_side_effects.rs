@@ -1,4 +1,5 @@
 use super::*;
+use mod_api::ModBlockEntity;
 
 impl GameLevel<'_> {
     /// `BlockEntity.preRemoveSideEffects` of a mod's block entity: an
@@ -15,7 +16,7 @@ impl GameLevel<'_> {
         pos: BlockPos,
         state: BlockStateId,
         entity: &ModBlockEntity,
-        drops: &mut Vec<ItemStack>,
+        drops: &mut Vec<mod_api::ItemStack>,
     ) {
         self.fire_pre_remove_side_effects(pos, state, entity, drops);
     }

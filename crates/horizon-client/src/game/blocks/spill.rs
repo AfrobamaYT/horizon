@@ -591,7 +591,7 @@ impl GameLevel<'_> {
             )
             && let Some((lease, BlockEntity::Mod(entity))) = self.world.block_entities.take(&key)
         {
-            self.native_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
+            self.api_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
             self.world
                 .block_entities
                 .put(lease, BlockEntity::Mod(entity));

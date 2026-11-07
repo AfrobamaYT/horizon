@@ -13,7 +13,9 @@ use horizon_core::nbt::{JavaString, Tag};
 use horizon_world::native_load_context::LoopContext;
 use horizon_world::{component_patch::Patch, loot::PackOverlay};
 mod snapshots;
-pub use snapshots::*;
+pub use snapshots::{
+    FireworkShapeIngredient, RecipeRule, RecipeSnapshot, RecipeTemplate, RecipeTrimPattern,
+};
 mod ingredient;
 pub use ingredient::{Ingredient, Shape};
 use serde_json::Value;

@@ -29,8 +29,7 @@ use horizon_client::{
     block_entities::Pos,
     chat::ChatSource,
     containers::{
-        BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
-        ModEnergyBuffer, ModFluidTanks,
+        BlockEntity, MOD_MENUS, ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks,
     },
     crafting::{Ingredient, recipe_result},
     extras::Corner,
@@ -80,7 +79,7 @@ use mod_api::{
 use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey};
 use mod_api::{
     CameraType, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
-    Recipe, SoundPlay, SoundRef,
+    SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -109,3 +108,5 @@ use {
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 include!("shared.rs");
+
+use mod_api::ModBlockEntity;

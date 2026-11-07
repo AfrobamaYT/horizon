@@ -3243,7 +3243,7 @@ impl Game<'_> {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
             taken.nbt.insert("Items".into(), items);
         }
-        self.native_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
+        self.api_block_entity_tick([pos.0, pos.1, pos.2], &mut taken);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
     /// Puts back a mod block entity taken out for a call, unless the call
@@ -3297,7 +3297,7 @@ impl Game<'_> {
         }
         let mut taken = std::mem::take(&mut **m);
         let items = taken.items.clone();
-        self.native_menu_button(&context, &mut taken, carried);
+        self.api_menu_button(&context, &mut taken, carried);
         self.put_back_mod_block_entity(pos, taken, &items);
     }
     /// The cursor from the open mod screen's top left, with its block and
@@ -5079,6 +5079,7 @@ mod tests {
 #[cfg(test)]
 mod item_fall_on_tests {
     use super::*;
+    use horizon_client::containers::ModBlockEntity;
     use mod_api::{
         BlockPart, FallOnEvent, Hooks, LevelRandomHost, ModEntry, Registrar, testing::with_mods,
     };
