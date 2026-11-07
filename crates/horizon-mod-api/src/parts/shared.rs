@@ -1072,7 +1072,7 @@ pub mod tests {
         ]
         .into();
         crate::install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         crate::registry_keys::resolve_fluids(&[
             "minecraft:water",
             "minecraft:lava",

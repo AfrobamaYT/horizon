@@ -250,7 +250,7 @@ mod tests {
         let dimensions = installed_dimensions();
         let stem: serde_json::Value = serde_json::from_str(&dimensions[0].stem).unwrap();
         assert_eq!(stem["generator"]["type"], "later:void");
-        let generators = mod_api::__private::installed_chunk_generators();
+        let generators = crate::game::native_chunk_generator::installed_chunk_generators();
         assert!(generators.contains_key("later:void"));
     }
 
@@ -261,23 +261,33 @@ mod tests {
         // The engine's chunk: what the worker threads hand the generator.
         use horizon_world::registry::BlockStateId;
         use horizon_world::worldgen::mod_generators::ChunkAccess as EngineChunk;
-        struct Marker;
+        struct Marker(mod_api::BlockKey);
         impl mod_api::ChunkGenerator for Marker {
             fn build_terrain(&self, chunk: &mut dyn ChunkAccess) {
-                let state = chunk.state("stone");
-                chunk.set_block([1, chunk.min_y(), 2], state);
+                let state = chunk.state(self.0);
+                assert_eq!(chunk.metadata().name(state.block()), Ok("minecraft:stone"));
+                assert!(chunk.set_block([1, chunk.min_y(), 2], state));
+                let invalid =
+                    mod_api::BlockState::from(mod_api::BlockStateRecord::new(self.0, u16::MAX));
+                assert!(!chunk.set_block([2, chunk.min_y(), 2], invalid));
             }
         }
         struct Writes;
         #[mod_api::__subscriptions]
         impl Hooks for Writes {
             fn register(&self, r: &mut dyn Registrar, _: &mod_api::RegistrationContext) {
-                r.register_chunk_generator("test:marker", Marker);
+                let block = r.block_key("minecraft:stone");
+                r.register_chunk_generator("test:marker", Marker(block));
             }
         }
-        #[derive(Default)]
-        struct Written(Vec<([i32; 3], BlockStateId)>);
+        struct Written(
+            Vec<([i32; 3], BlockStateId)>,
+            &'static horizon_world::registry::BlockRegistry,
+        );
         impl EngineChunk for Written {
+            fn registry(&self) -> &'static horizon_world::registry::BlockRegistry {
+                self.1
+            }
             fn pos(&self) -> ChunkPos {
                 ChunkPos::new(0, 0)
             }
@@ -290,11 +300,11 @@ mod tests {
             fn height(&self) -> i32 {
                 384
             }
-            fn state(&self, _: &str) -> BlockStateId {
-                BlockStateId(9)
+            fn state(&self, name: &str) -> BlockStateId {
+                horizon_world::worldgen::structure::legacy::block_state(self.1, name, &[])
             }
-            fn state_with(&self, _: &str, _: &[(&str, &str)]) -> BlockStateId {
-                BlockStateId(9)
+            fn state_with(&self, name: &str, properties: &[(&str, &str)]) -> BlockStateId {
+                horizon_world::worldgen::structure::legacy::block_state(self.1, name, properties)
             }
             fn set_block(&mut self, pos: [i32; 3], state: BlockStateId) -> bool {
                 self.0.push((pos, state));
@@ -302,10 +312,21 @@ mod tests {
             }
         }
         install_parts(&[ModEntry::new("test", Box::new(Writes))]).unwrap();
-        let generators = mod_api::__private::installed_chunk_generators();
-        let mut chunk = Written::default();
-        generators["test:marker"].build_terrain(&mut chunk);
-        assert_eq!(chunk.0, [([1, -64, 2], BlockStateId(9))]);
+        let generators = crate::game::native_chunk_generator::installed_chunk_generators();
+        let facts = r#"{"defaults":{"minecraft:air":0,"minecraft:stone":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"","minecraft:stone"]]}"#;
+        let registry = Box::leak(Box::new(
+            horizon_world::registry::BlockRegistry::from_facts_json(facts.as_bytes()).unwrap(),
+        ));
+        crate::game::api_values::resolve_block_definitions(registry).unwrap();
+        let generator = generators["test:marker"].clone();
+        let writes = std::thread::spawn(move || {
+            let mut chunk = Written(Vec::new(), registry);
+            generator.build_terrain(&mut chunk);
+            chunk.0
+        })
+        .join()
+        .unwrap();
+        assert_eq!(writes, [([1, -64, 2], BlockStateId(1))]);
     }
 
     /// The vanilla levels are in the `minecraft` namespace, so only a mod with

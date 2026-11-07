@@ -6,9 +6,8 @@ use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
-pub(in crate::game) use block_state::{
-    install as install_block_states, prepare as prepare_block_states,
-};
+pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
+pub(in crate::game) use block_state::install as install_block_states;
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
 
@@ -19,7 +18,7 @@ pub(in crate::game) fn resolve_block_definitions(
 ) -> Result<(), String> {
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
-        return block_state::bind(registry);
+        return bind_worker_blocks(registry);
     }
     let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
     for index in 0..registry.len() {
@@ -54,7 +53,18 @@ pub(in crate::game) fn resolve_block_definitions(
             .map_err(|error| format!("block {name}: {error:?}"))
     })
     .map_err(|errors| errors.join("\n"))?;
-    block_state::bind(registry)
+    bind_worker_blocks(registry)
+}
+
+fn bind_worker_blocks(registry: &horizon_world::registry::BlockRegistry) -> Result<(), String> {
+    block_state::bind(registry)?;
+    let index = block_state::current().map_err(|error| format!("worker index: {error:?}"))?;
+    let retained = super::native_worldgen::retain(registry, index).map_err(|error| {
+        block_state::clear();
+        error
+    })?;
+    block_state::install(retained);
+    Ok(())
 }
 
 #[cfg(test)]

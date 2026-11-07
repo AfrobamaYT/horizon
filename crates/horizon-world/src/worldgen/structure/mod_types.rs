@@ -8,7 +8,7 @@
 //! state and its contexts carry no `Host`.
 use super::legacy::LegacyPiece;
 use super::start::StartContext;
-use horizon_core::nbt::Compound;
+use horizon_core::nbt::{Compound, Tag};
 use horizon_core::{
     position::ChunkPos,
     random::{LegacyRandom, WorldgenRandom},
@@ -21,6 +21,8 @@ use std::sync::{Arc, OnceLock};
 /// `Send + Sync` because neighbouring chunks build at once on worker threads;
 /// the same seed gives the same pieces.
 pub trait ModStructureType: Send + Sync {
+    /// Prepare a definition once at load. The game owns the JSON-to-NBT boundary.
+    fn prepare_config(&self, config: &serde_json::Value) -> Result<Arc<Tag>, String>;
     /// `Structure.findGenerationPoint` with `generatePieces`: the start
     /// position and at least one piece for `chunk`, or none for "no start
     /// here". The placement checks stay the game's own: the set's spacing, the
@@ -28,9 +30,10 @@ pub trait ModStructureType: Send + Sync {
     fn find_generation_point(
         &self,
         context: &mut dyn StartContext,
+        resources: &super::StructureResources,
         chunk: ChunkPos,
-        // The structure's own JSON config, as the data pack has it.
-        config: &Arc<serde_json::Value>,
+        // Converted once and retained by the loaded structure definition.
+        config: &Arc<Tag>,
         // Seeded as vanilla seeds it for the chunk (`setLargeFeatureSeed`).
         random: &mut WorldgenRandom<LegacyRandom>,
     ) -> Option<([i32; 3], Vec<Box<dyn LegacyPiece>>)>;
@@ -94,11 +97,15 @@ mod tests {
     struct Boxed(Vec<[i32; 3]>);
 
     impl ModStructureType for Boxed {
+        fn prepare_config(&self, _: &serde_json::Value) -> std::result::Result<Arc<Tag>, String> {
+            Ok(Arc::new(Tag::End))
+        }
         fn find_generation_point(
             &self,
             _context: &mut dyn StartContext,
+            _resources: &super::super::StructureResources,
             chunk: ChunkPos,
-            _config: &Arc<serde_json::Value>,
+            _config: &Arc<Tag>,
             _random: &mut WorldgenRandom<LegacyRandom>,
         ) -> Option<([i32; 3], Vec<Box<dyn LegacyPiece>>)> {
             let origin = [chunk.x * 16, 64, chunk.z * 16];

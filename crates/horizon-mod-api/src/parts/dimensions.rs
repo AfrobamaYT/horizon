@@ -70,8 +70,8 @@ pub trait DimensionsRegistrar {
     /// Register chunk generator `name` with `generator`; mods reach it through
     /// `register_chunk_generator`.
     ///
-    /// Not on wasm: a generator is code that runs on the game's worldgen worker threads, which a
-    /// wasm mod's cannot hand over; a wasm mod's dimension names the game's own generators.
+    /// Not on wasm: ChunkGenerator and ChunkAccess are not bound by the generated worker
+    /// interface. A wasm mod's dimension can name an already installed generator.
     fn add_chunk_generator(&mut self, name: &str, generator: Arc<dyn crate::ChunkGenerator>) {
         let _ = generator;
         panic!(
@@ -164,7 +164,7 @@ impl DimensionsRegistrar for PartRegistrar {
         self.chunk_generators
             .push(crate::chunk_generator::ChunkGeneratorInfo {
                 id: id.into(),
-                generator: Arc::new(crate::chunk_generator::Adapter(generator)),
+                generator,
             });
     }
 }
