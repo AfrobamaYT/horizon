@@ -15,6 +15,7 @@ pub struct GameRuleDecl {
 /// The vanilla rule metadata supplied once by the owning game at registration.
 /// This is a borrowed view like `KnownIds`, not a second registration lifecycle.
 // exhaustive: the game supplies the complete schema with a literal
+// hidden: only the game supplies the vanilla schema used to install declarations.
 #[doc(hidden)]
 pub struct RuleSchema<'a> {
     /// Whether a category already exists in the game.
