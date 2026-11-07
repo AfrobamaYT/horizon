@@ -129,9 +129,9 @@ a call site in the game
  ├─ at a point: its head listeners (priority, then dependency order); a cancel skips the body
  │    and its return listeners after the body
  │
- ├─ trait-mod hooks (dependency order; ties in bundle order)
- │    the first Cancel stops the rest; replacement hooks: the first Some wins
- │    collection hooks call every mod
+ ├─ trait-mod hooks (#[listener] priority descending, then dependency order)
+ │    a Cancel skips later mods except those receiving cancelled events, which may undo it;
+ │    replacement hooks: the first Some wins; collection hooks call every mod
  │
  └─ the game's own body
 ```

@@ -509,6 +509,8 @@ struct Running {
 pub struct WasmMod {
     module: Arc<Running>,
     subscribed: &'static [Option<HookId>],
+    /// Its `#[listener]` options, as its `listeners` export named them.
+    listeners: &'static [crate::Listener],
 }
 
 /// One of a wasm mod's registered parts or handlers, by the index the mod keeps it under.
@@ -916,6 +918,21 @@ fn hook_ids(names: Vec<String>) -> &'static [Option<HookId>] {
     )
 }
 
+/// The `#[listener]` options a listeners export named, for the hooks this game has.
+fn listeners_of(named: Vec<(String, i32, bool)>) -> &'static [crate::Listener] {
+    Box::leak(
+        named
+            .into_iter()
+            .map(|(name, priority, receive_cancelled)| crate::Listener {
+                hook: glue::hook_id(&name),
+                priority,
+                receive_cancelled,
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    )
+}
+
 /// The game's proxy of a handler the calling mod handed over (a part it registers), which calls
 /// back into it by the index it keeps the handler under.
 fn handler_of(handler: glue::horizon::mod_api::types::Handler) -> Result<WasmHandler, Refused> {
@@ -1011,9 +1028,13 @@ pub fn instantiate(
         let names = module.call_or(Frame::default(), Call::Load, Vec::new, |m, store| {
             m.horizon_mod_api_hooks().call_subscribed(store)
         });
+        let listeners = module.call_or(Frame::default(), Call::Load, Vec::new, |m, store| {
+            m.horizon_mod_api_hooks().call_listeners(store)
+        });
         let hooks = WasmMod {
             module: module.clone(),
             subscribed: hook_ids(names),
+            listeners: listeners_of(listeners),
         };
         entries.push(Instantiated {
             entry: crate::ModEntry::new(id, Box::new(hooks)),

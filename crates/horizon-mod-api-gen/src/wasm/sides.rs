@@ -266,7 +266,8 @@ pub(super) fn guest(
             };
             writeln!(code, "fn subscribed({param}) -> Vec<String> {{ {receiver}.{list}().iter().flatten().map(|id| hook_name(*id).to_string()).collect() }}").unwrap();
         }
-        if super::mod_receiver(owner).is_some() {
+        if let Some(receiver) = super::mod_receiver(owner) {
+            writeln!(code, "fn listeners() -> Vec<(String, i32, bool)> {{ {receiver}.listeners().iter().filter_map(|l| Some((hook_name(l.hook?).to_string(), l.priority, l.receive_cancelled))).collect() }}").unwrap();
             code.push_str(
                 "fn release_handlers(handlers: Vec<u32>) { super::release_handlers(handlers) }\n",
             );
@@ -631,6 +632,9 @@ pub(super) fn host(
             )
             .unwrap();
         }
+        if super::mod_receiver(owner).is_some() {
+            code.push_str("fn listeners(&self) -> &'static [crate::Listener] { self.listeners }\n");
+        }
         for method in methods.iter().filter(|m| m.owner == *owner) {
             let sig = signature(types, method)?;
             let mut prep = String::new();
@@ -723,6 +727,11 @@ pub(super) fn host(
             entries.push(("subscribed".into(), params, vec!["Vec<String>".into()]));
         }
         if super::mod_receiver(owner).is_some() {
+            entries.push((
+                "listeners".into(),
+                vec![],
+                vec!["Vec<(String, i32, bool)>".into()],
+            ));
             entries.push(("release-handlers".into(), vec!["Vec<u32>".into()], vec![]));
         }
         for (wit_name, params, results) in entries {

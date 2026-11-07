@@ -490,6 +490,8 @@ pub(super) fn package(
             writeln!(body, "  subscribed: func({handler}) -> list<string>;").unwrap();
         }
         if super::mod_receiver(owner).is_some() {
+            // Each `#[listener]`: the hook, its priority and whether it receives cancelled events.
+            body.push_str("  listeners: func() -> list<tuple<string, s32, bool>>;\n");
             body.push_str("  release-handlers: func(handlers: list<u32>);\n");
         }
         writeln!(text, "\ninterface {name} {{\n{body}}}").unwrap();

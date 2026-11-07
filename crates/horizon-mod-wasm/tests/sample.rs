@@ -245,6 +245,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
             raw_text: "keys",
             message: &mut message,
             replies: &mut replies,
+            cancelled: false,
         },
     );
     assert_eq!(message.plain(), "keys (via mod.wasm)");

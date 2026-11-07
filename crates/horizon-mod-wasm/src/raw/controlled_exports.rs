@@ -173,7 +173,7 @@ impl Reencode for Fixture {
             f.instruction(&Op::I32Const(self.subscribed));
         } else if name.contains("raw-listeners") && name.ends_with("declared") {
             f.instruction(&Op::I32Const(self.declared));
-        } else if name.ends_with("subscribed") {
+        } else if name.ends_with("subscribed") || name.ends_with("|listeners") {
             f.instruction(&Op::I32Const(0));
         } else if name.ends_with("trace") {
             f.instruction(&Op::I32Const(4096))

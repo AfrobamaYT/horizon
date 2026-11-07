@@ -75,6 +75,7 @@ fn chat(hooks: &dyn Hooks, work: &str) -> String {
         raw_text: work,
         message: &mut message,
         replies: &mut replies,
+        cancelled: false,
     };
     hooks.server_chat(&mut World, &mut event);
     message.plain()
