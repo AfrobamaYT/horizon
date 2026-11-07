@@ -3233,6 +3233,31 @@ pub fn block_jump_factor_at(
         |blocks, location| movement_support::block_jump_factor(blocks, location),
     )
 }
+/// `Entity.getOnPosLegacy` with the world's bound fence and wall tags.
+pub(crate) fn legacy_block_support_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> BlockPos {
+    movement_support::support_position(
+        &mut RegistryMovementWorld {
+            properties,
+            edits: &NoFactorEdits,
+            world: &mut WorldBlocks(world),
+        },
+        position,
+        supporting_block,
+        movement_support::LEGACY_SUPPORT_OFFSET,
+    )
+    .unwrap_or_else(|_| {
+        BlockPos::new(
+            position.x.floor() as i32,
+            (position.y - f64::from(movement_support::LEGACY_SUPPORT_OFFSET)).floor() as i32,
+            position.z.floor() as i32,
+        )
+    })
+}
 
 #[cfg(test)]
 mod tests {

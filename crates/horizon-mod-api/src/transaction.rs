@@ -18,19 +18,19 @@ pub struct Transaction(pub(crate) ());
 /// Transactions are available only on the logical server and preserve the receiver type.
 ///
 /// ```
-/// use mod_api::{BlockEntityRef, HostTransaction, ServerHost};
+/// use mod_api::{BlockEntityError, BlockEntityRef, HostTransaction, ServerHost};
 /// fn write(host: &mut dyn ServerHost, block: BlockEntityRef) {
-///     let _: Result<(), ()> = host.transaction(|host, _tx| {
-///         block.set_changed(host);
+///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }
 /// ```
 /// ```compile_fail
-/// use mod_api::{BlockEntityRef, Host, HostTransaction};
+/// use mod_api::{BlockEntityError, BlockEntityRef, Host, HostTransaction};
 /// fn write(host: &mut dyn Host, block: BlockEntityRef) {
-///     let _: Result<(), ()> = host.transaction(|host, _tx| {
-///         block.set_changed(host);
+///     let _: Result<(), BlockEntityError> = host.transaction(|host, _tx| {
+///         block.set_changed(host)?;
 ///         Ok(())
 ///     });
 /// }

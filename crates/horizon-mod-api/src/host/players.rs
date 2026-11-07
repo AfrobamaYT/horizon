@@ -272,10 +272,14 @@ pub trait PlayersBackendMut {
     fn player_hide(&mut self, player: PlayerRef, level: Option<u8>) -> bool;
     /// Side: server.
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
-    /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
-    /// open, or an unconnected player such as a fake player.
+    /// Returns Stale for an invalidated entity; Ok(false) for a wrong-level player,
+    /// non-provider, cancelled open, or an unconnected player such as a fake player.
     #[access(WorldOnly)]
-    fn player_open_menu(&mut self, player: PlayerRef, entity: BlockEntityRef) -> bool;
+    fn player_open_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Sends the player `uuid` the whole picture of map `map_id`: 128 x 128
     /// colours (`MapColor` ids times 4 plus the shade, row by row), scale 0,
@@ -296,8 +300,11 @@ pub trait PlayersBackendMut {
     /// stale or unavailable player, a displaced outer player, and a speed
     /// that is not finite.
     #[access(WorldOnly)]
-    fn player_set_abilities(&mut self, player: PlayerRef, abilities: NativePlayerAbilities)
-    -> bool;
+    fn player_set_abilities(
+        &mut self,
+        player: PlayerRef,
+        abilities: NativePlayerAbilities,
+    ) -> bool;
     /// Side: server.
     /// A fake player acts as a player does, through the game's own path for the action
     /// (`ServerGamePacketListenerImpl.handleUseItemOn` / `handleUseItem` / `handleInteract`'s
@@ -508,4 +515,12 @@ pub trait PlayersBackendMut {
         volume: f32,
         pitch: f32,
     ) -> bool;
+    /// Side: both.
+    /// Simulate one client movement tick for this server player without changing the player. Refuses stale, absent, dead, spectator or riding players and invalid input.
+    #[access(WorldOnly)]
+    fn player_simulate_move(
+        &mut self,
+        player: PlayerRef,
+        input: NativePlayerInput,
+    ) -> Option<NativeSimulatedMove>;
 }

@@ -234,7 +234,7 @@ pub mod tests {
             let mut data = Compound::new();
             data.insert("chemical".into(), Tag::String(chemical.0.as_str().into()));
             data.insert("amount".into(), Tag::Int(amount as i32));
-            entity.merge_data(host, data);
+            let _ = entity.merge_data(host, data);
         }
     }
     impl ResourceHandler<Chemical> for ChemTank {
@@ -535,7 +535,7 @@ pub mod tests {
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesHost for Ordered {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
+            Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
     }
     #[cfg(test)]

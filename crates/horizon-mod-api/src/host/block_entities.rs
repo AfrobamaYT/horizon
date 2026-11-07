@@ -75,6 +75,7 @@ pub trait BlockEntitiesBackend {
     fn block_entity_data_slots(&self, entity: BlockEntityRef) -> Option<Vec<i32>>;
     /// Side: both.
     /// Read a configured mod holder's declared internal item slot, without automation policy.
+    /// Removed, replaced or reloaded holders return BlockEntityItemError::Stale.
     #[access(WorldOnly)]
     fn block_entity_item_slot(
         &self,
@@ -90,46 +91,70 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Change the lock through the same storage used by container opening and saving.
     #[access(WorldOnly)]
-    fn block_entity_set_lock(&mut self, entity: BlockEntityRef, lock: Option<Compound>) -> bool;
+    fn block_entity_set_lock(
+        &mut self,
+        entity: BlockEntityRef,
+        lock: Option<Compound>,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Merges `data` into the block entity's saved data and loads it, as `/data merge block`
     /// does (`BlockDataAccessor.setData`: `loadWithComponents`, `setChanged`, then
     /// `sendBlockUpdated`, so comparators re-read it and clients get the update). `id`, `x`,
-    /// `y` and `z` in `data` are ignored. True when the data changed; false for a stale
-    /// handle, a client, another level than the one in place, data nested too deep or that
-    /// changes nothing, or a result the block entity can't load. Inside a transaction an
+    /// `y` and `z` in `data` are ignored. Ok(true) when data changed; Ok(false) for data
+    /// nested too deep, no change, or data the entity cannot load. Stale or unwritable
+    /// handles return BlockEntityError::Stale. Inside a transaction an
     /// abort puts the block entity, its name, `lock`, loot table roll and attachments back.
     #[access(WorldOnly)]
-    fn block_entity_merge_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool;
+    fn block_entity_merge_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Replaces the saved payload, retaining identity and position metadata.
     /// Uses the same transactional load and client update path as `merge_data`.
-    /// False for a missing or stale block entity, unsupported data, or no change.
+    /// Ok(false) for unsupported data or no change; Stale for an invalidated handle.
     #[access(WorldOnly)]
-    fn block_entity_replace_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool;
+    fn block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// `BlockEntity.setChanged`: the chunk is saved again and comparators re-read the
     /// container (`updateNeighbourForOutputSignal`). Inside a transaction it runs once at the
-    /// root commit. False for a stale handle, a client or another level than the one in place.
+    /// root commit. Returns Stale for an invalidated handle or a level not writable here.
     #[access(WorldOnly)]
-    fn block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool;
+    fn block_entity_set_changed(
+        &mut self,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
-    /// False for a block entity that isn't nameable, a stale handle, a client or another
-    /// level than the one in place. Inside a transaction an abort puts the name back.
+    /// Ok(false) for an entity that is not nameable; Stale for an invalidated or
+    /// unwritable handle. Inside a transaction an abort puts the name back.
     #[access(WorldOnly)]
-    fn block_entity_set_name(&mut self, entity: BlockEntityRef, name: Option<&str>) -> bool;
+    fn block_entity_set_name(
+        &mut self,
+        entity: BlockEntityRef,
+        name: Option<&str>,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Set a mod block entity's menu data slot in place, joining the current transaction
-    /// and its setChanged notice. False for a stale/client/parked/vanilla entity, an
-    /// invalid slot or no change. Does not resize the mod's declared data slots.
+    /// and its setChanged notice. Ok(false) for a vanilla entity, an invalid slot or
+    /// no change; Stale for an invalidated or unwritable handle. Does not resize slots.
     #[access(WorldOnly)]
-    fn block_entity_set_data_slot(&mut self, entity: BlockEntityRef, slot: u32, value: i32)
-    -> bool;
+    fn block_entity_set_data_slot(
+        &mut self,
+        entity: BlockEntityRef,
+        slot: u32,
+        value: i32,
+    ) -> Result<bool, BlockEntityError>;
     /// Side: server.
     /// Sizes a mod block entity's menu data explicitly, using the same write
     /// target, journal and Changed notice as scalar data-slot writes.
+    /// Removed, replaced or reloaded holders return BlockEntityDataError::Stale.
     #[access(WorldOnly)]
     fn block_entity_set_data_slots(
         &mut self,
@@ -138,6 +163,7 @@ pub trait BlockEntitiesBackendMut {
     ) -> Result<bool, BlockEntityDataError>;
     /// Side: server.
     /// Replace internal storage under the existing transaction; external ITEMS routing is separate.
+    /// Removed, replaced or reloaded holders return BlockEntityItemError::Stale.
     #[access(WorldOnly)]
     fn block_entity_set_item_slot(
         &mut self,

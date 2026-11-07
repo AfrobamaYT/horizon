@@ -343,6 +343,10 @@ pub trait LevelsBackend {
     /// a stale handle or on a client. Loads nothing.
     #[access(WorldOnly)]
     fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>>;
+    /// Side: both.
+    /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
+    #[access(WorldOnly)]
+    fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait

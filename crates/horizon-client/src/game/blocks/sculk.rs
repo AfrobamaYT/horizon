@@ -656,6 +656,12 @@ impl Game<'_> {
 
     /// `Level.gameEvent`: tell the listeners within reach.
     pub(super) fn post_game_event(&mut self, event: &'static str, pos: [f64; 3], ctx: Context) {
+        #[cfg(test)]
+        super::item_use::interact_vibration_tests::record_event(
+            event,
+            pos,
+            ctx.source.and_then(|source| source.actor()),
+        );
         self.post_game_event_with(event, pos, |_| ctx);
     }
     /// [`Self::post_game_event`] with the context worked out only when some

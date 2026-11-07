@@ -392,7 +392,7 @@ pub mod tests {
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesHost for PipeWorld {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
+            Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
     }
     #[cfg(test)]
@@ -1114,7 +1114,7 @@ pub mod tests {
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesHost for Shelf {
         fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(BlockEntityRef { level, position })
+            Some(crate::__private::game::block_entity_ref(level, position, 1))
         }
     }
     #[cfg(test)]

@@ -150,6 +150,21 @@ impl<T> JoinList<T> {
     pub fn swap(&mut self, a: usize, b: usize) {
         self.0.swap(a, b);
     }
+    /// Run an audited state edit without returning a mutable entity reference.
+    /// Whole-entity replacement belongs to the owning residency boundary.
+    ///
+    /// ```compile_fail
+    /// use horizon_client_lib::join_seq::JoinList;
+    /// let mut list = JoinList::<u32>::default();
+    /// let escaped = list.update(0, |entity| entity);
+    /// ```
+    pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
+        edit(&mut self.0[index])
+    }
+    /// Edit each entity in list order without lending out mutable iteration.
+    pub fn for_each_mut(&mut self, edit: impl FnMut(&mut T)) {
+        self.0.iter_mut().for_each(edit);
+    }
     pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut(self.0.iter_mut())
     }
@@ -290,6 +305,32 @@ mod tests {
 
     fn snapshot(list: &JoinList<Entity>) -> Vec<(u32, JoinSeq)> {
         list.iter().map(|e| (e.value, e.join)).collect()
+    }
+
+    #[test]
+    fn scoped_edits_preserve_order_and_keep_results_local_to_each_entity() {
+        let mut list: JoinList<_> = (1..=3).map(entity).collect();
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        assert_eq!(
+            list.update(1, |e| {
+                e.value += 10;
+                e.value
+            }),
+            12
+        );
+        let mut visited = Vec::new();
+        list.for_each_mut(|e| {
+            if e.value == 12 {
+                return;
+            }
+            visited.push(e.value);
+            e.value *= 2;
+        });
+        assert_eq!(visited, [1, 3]);
+        assert_eq!(
+            snapshot(&list),
+            [(2, joins[0]), (12, joins[1]), (6, joins[2])]
+        );
     }
 
     #[test]
