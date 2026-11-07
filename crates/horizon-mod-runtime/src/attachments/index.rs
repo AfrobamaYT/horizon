@@ -94,6 +94,10 @@ impl<H: Copy> AttachmentRow<H> {
     }
 }
 
+fn next_generation(next: u64) -> Option<u64> {
+    next.checked_add(1)
+}
+
 struct Owner {
     generation: u64,
     slots: HashMap<Arc<AttachmentKey>, usize>,
@@ -159,9 +163,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         // Process-wide identity also refuses tokens against another dimension's index.
         static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
         let generation = NEXT_GENERATION
-            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
-                next.checked_add(1)
-            })
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, next_generation)
             .expect("attachment residency generation exhausted");
         let token = AttachmentOwner { holder, generation };
         self.owners.insert(
@@ -344,6 +346,11 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn residency_generation_refuses_to_wrap() {
+        assert_eq!(super::next_generation(u64::MAX - 1), Some(u64::MAX));
+        assert_eq!(super::next_generation(u64::MAX), None);
+    }
     use super::*;
     use crate::attachments::{
         AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
