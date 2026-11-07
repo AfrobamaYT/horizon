@@ -77,8 +77,9 @@ impl DrawContext for GameDrawContext<'_, '_> {
             .native_gui_draw_item_with(&mut *self.surface, &stack, at, text)
     }
     fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+        let label = label.try_into_engine(&()).unwrap();
         self.game
-            .native_widget_button(&mut *self.surface, rect, label, active, highlighted)
+            .native_widget_button(&mut *self.surface, rect, &label, active, highlighted)
     }
     fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
         self.game

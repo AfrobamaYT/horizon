@@ -1391,6 +1391,7 @@ impl Game<'_> {
             menu: ClientMenu::default(),
             craft_result: None,
             menu_title: None,
+            menu_title_snapshot: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
