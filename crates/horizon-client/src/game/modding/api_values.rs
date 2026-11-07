@@ -285,11 +285,9 @@ impl<A: TryIntoApi, B: TryIntoApi<Error = A::Error>> TryIntoApi for (A, B) {
         Ok((self.0.try_into_api()?, self.1.try_into_api()?))
     }
 }
-impl<C: ?Sized, A: TryIntoEngine<C>, B: TryIntoEngine<C, Error = A::Error>> TryIntoEngine<C>
-    for (A, B)
-{
-    type Engine = (A::Engine, B::Engine);
-    type Error = A::Error;
+impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, mod_api::Text) {
+    type Engine = (horizon_client::text::Text, horizon_client::text::Text);
+    type Error = std::convert::Infallible;
     fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         Ok((
             self.0.try_into_engine(context)?,
