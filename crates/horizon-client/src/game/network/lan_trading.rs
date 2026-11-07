@@ -37,6 +37,37 @@ fn uuid_words(uuid: u128) -> [i32; 4] {
 }
 
 impl Game<'_> {
+    /// Development oracle: observe the actual open guest merchant, never a synthetic menu.
+    pub(super) fn harness_merchant(
+        &self,
+        host: &LanHost,
+        conn: u32,
+    ) -> Option<(i32, i32, serde_json::Value)> {
+        use serde_json::json;
+        let gm = host.play.get(&conn)?.merchant.as_ref()?;
+        let guest = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.conn == conn && g.placed)?;
+        let id = gm.merchant.mob?;
+        self.mobs
+            .iter()
+            .find(|m| m.id == id && m.alive() && !m.removed)?;
+        let stack = |s: &Option<ItemStack>| s.as_ref().map(|s| json!([s.item.as_ref(), s.count]));
+        let session = &gm.merchant.session;
+        Some((
+            gm.window,
+            gm.state,
+            json!({"window":gm.window,"merchant":self.persist.uuids.get(&id)?,
+            "player":uuid_words(guest.uuid),"slots":gm.slots.iter().map(stack).collect::<Vec<_>>(),
+            "carried":stack(&guest.carried),"xp":session.xp,
+            "offers":session.offers.iter().map(|o|json!({"uses":o.uses,
+                "special":o.special_price_diff,"cost":o.cost_a_count(self.items())})).collect::<Vec<_>>()}),
+        ))
+    }
+
+
     /// A trading screen the guest's interaction opened (it opened as a
     /// station while the guest acted): handed to the guest.
     pub(super) fn lan_open_merchant(&mut self, conn: u32, mut state: MerchantState) {
@@ -296,6 +327,7 @@ impl Game<'_> {
         let made = maps.made.take();
         let session = menu.merchant.take().expect("attached");
         let dropped = std::mem::take(&mut menu.dropped);
+        let crafted_counts = std::mem::take(&mut menu.crafted_counts);
         gm.slots = [
             menu.slot(0).cloned(),
             menu.slot(1).cloned(),
@@ -311,6 +343,13 @@ impl Game<'_> {
             });
         }
         self.register_exploration_maps(made);
+        if !crafted_counts.is_empty() {
+            self.as_guest(host, conn, |g| {
+                for (item, count) in crafted_counts {
+                    g.award_stat("crafted", &item, count);
+                }
+            });
+        }
         let opaque = gm
             .merchant
             .mob
