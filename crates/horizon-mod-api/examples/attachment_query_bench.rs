@@ -122,11 +122,10 @@ fn contribution(holder: AttachmentHolder, value: &u32) -> u64 {
     };
     u64::from(entity.id()) + u64::from(*value)
 }
-fn api(host: &dyn Host, limit: usize) -> u64 {
+fn api(host: &dyn Host) -> u64 {
     host.query(&VALUE)
         .unwrap()
         .iter()
-        .take(limit)
         .map(|row| {
             let row = row.unwrap();
             contribution(row.holder, row.value)
@@ -152,9 +151,9 @@ fn timed(rounds: u32, mut f: impl FnMut() -> u64) -> f64 {
 fn warm(host: &BenchHost) -> f64 {
     let rows = host.raw();
     let batch = host.query(&VALUE).unwrap();
-    assert_eq!(api(host, usize::MAX), 99_990_000);
+    assert_eq!(api(host), 99_990_000);
     assert_eq!(raw(&rows), 99_990_000);
-    let (_, counts) = measured(|| black_box(api(host, usize::MAX)));
+    let (_, counts) = measured(|| black_box(api(host)));
     assert_eq!(counts.allocations, 0);
     println!("warm acquisition + traversal allocations: {counts:?}");
     let mut baseline = Vec::new();
@@ -167,7 +166,7 @@ fn warm(host: &BenchHost) -> f64 {
             pair[path] = if path == 0 {
                 timed(ROUNDS, || raw(&black_box(host).raw()))
             } else {
-                timed(ROUNDS, || api(black_box(host as &dyn Host), usize::MAX))
+                timed(ROUNDS, || api(black_box(host as &dyn Host)))
             };
         }
         let r = timed(ROUNDS, || raw(black_box(&rows)));
@@ -193,12 +192,13 @@ fn warm(host: &BenchHost) -> f64 {
     println!(
         "warm acquisition + traversal, us/10,000: raw={baseline:.3}, host.query={query:.3}, overhead={overhead:.2}%"
     );
+    let raw_only = median(raw_only);
+    let typed_only = median(typed_only);
+    let traversal_overhead = (typed_only / raw_only - 1.0) * 100.0;
     println!(
-        "warm traversal only, us/10,000: raw={:.3}, typed={:.3}",
-        median(raw_only),
-        median(typed_only)
+        "warm traversal only, us/10,000: raw={raw_only:.3}, typed={typed_only:.3}, overhead={traversal_overhead:.2}%"
     );
-    overhead
+    overhead.max(traversal_overhead)
 }
 fn cold() {
     for limit in [1000, HOLDERS as usize] {
@@ -207,7 +207,17 @@ fn cold() {
         for _ in 0..9 {
             let host = BenchHost::new(true, true);
             let start = Instant::now();
-            let (sum, counts) = measured(|| api(&host, limit));
+            let (sum, counts) = measured(|| {
+                host.query(&VALUE)
+                    .unwrap()
+                    .iter()
+                    .take(limit)
+                    .map(|row| {
+                        let row = row.unwrap();
+                        contribution(row.holder, row.value)
+                    })
+                    .sum::<u64>()
+            });
             lazy.push(start.elapsed().as_secs_f64() * 1e6);
             assert_eq!(sum, (limit * (limit - 1)) as u64);
             let host = BenchHost::new(true, true);
@@ -252,7 +262,10 @@ fn cow(host: &mut BenchHost) {
         }
         drop(batch);
         let start = Instant::now();
-        VALUE.set(host, Holder::Entity(0), 123).unwrap();
+        let (_, ordinary_counts) = measured(|| VALUE.set(host, Holder::Entity(0), 123).unwrap());
+        if unpinned.is_empty() {
+            println!("unpinned ordinary set allocations: {ordinary_counts:?}");
+        }
         unpinned.push(start.elapsed().as_secs_f64() * 1e6);
     }
     println!(
