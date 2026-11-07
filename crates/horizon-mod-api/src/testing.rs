@@ -23,10 +23,15 @@
 //! let into = host.level.block_entity_at([1, 64, 0]).unwrap().items.as_ref().unwrap();
 //! assert_eq!(into.count("minecraft:stone"), 3);
 //! ```
+#[path = "testing/journal.rs"]
 mod journal;
+#[path = "testing/level.rs"]
 mod level;
+#[path = "testing/players.rs"]
 mod players;
+#[path = "testing/registries.rs"]
 mod registries;
+#[path = "testing/services.rs"]
 mod services;
 
 pub use journal::FakeJournal;
@@ -59,7 +64,7 @@ pub fn with_mods<R>(mods: Mods, f: impl FnOnce() -> R) -> R {
         }
     }
     let controllers: &'static [_] =
-        Box::leak(crate::part_table::registered_controllers(&mods).into_boxed_slice());
+        Box::leak(crate::parts::registered_controllers(&mods).into_boxed_slice());
     let installed = Box::leak(Box::new(Installed::new(mods)));
     let _restore = Restore(TEST_MODS.replace(Some(installed)));
     let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
@@ -117,44 +122,60 @@ impl FakeHost {
         self.registries.max_stack_size(&stack.item)
     }
 }
-
 impl Host for FakeHost {
     fn backend(&self) -> Option<BackendRef<'_>> {
         Some(BackendRef::of(self))
     }
+}
+impl crate::prelude::BlockEntitiesHost for FakeHost {
     fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         self.level.standing(level, pos)?;
         Some(BlockEntityRef {
             level,
             position: pos,
+            generation: 0,
         })
     }
+}
+impl crate::prelude::EntitiesHost for FakeHost {
     fn level(&self, dimension: &str) -> Option<LevelRef> {
         let level = self.level.level();
-        (level.dimension() == dimension).then_some(level)
+        (crate::registry_keys::dimension_id(level.dimension()) == Some(dimension)).then_some(level)
     }
     fn entity(&self, id: u32) -> Option<EntityRef> {
         let known = self.players.by_entity(id).is_some() || self.level.entity_at(id).is_some();
         known.then(|| EntityRef::new(NativeWorldEpoch::new(FAKE_EPOCH), id))
     }
+}
+impl crate::prelude::PlayersHost for FakeHost {
     fn player(&self, uuid: u128) -> Option<PlayerRef> {
         self.players.handle(uuid)
     }
+}
+impl crate::prelude::ItemsHost for FakeHost {
     fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
         self.registries.default_component(item, component)
     }
     fn max_stack_size(&self, item: &str) -> Option<u32> {
         Some(self.registries.max_stack_size(item))
     }
+}
+impl crate::prelude::LevelsHost for FakeHost {
     fn is_loaded(&self, id: &str) -> bool {
         self.registries.is_loaded(id)
     }
 }
+crate::impl_host_areas!(
+    FakeHost,
+    except(block_entities, entities, items, levels, players)
+);
 
 impl ServerHost for FakeHost {
     fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
         Some(BackendMutRef::of(self))
     }
+}
+impl crate::prelude::ModStateServerHost for FakeHost {
     fn transaction_open(&mut self, _: TransactionSeal) {
         self.journal
             .open((self.players.clone(), self.level.clone()));
@@ -164,6 +185,8 @@ impl ServerHost for FakeHost {
             (self.players, self.level) = (players, level);
         }
     }
+}
+impl crate::prelude::ServicesServerHost for FakeHost {
     fn commands(&mut self) -> &mut dyn Commands {
         &mut self.commands
     }
@@ -174,20 +197,26 @@ impl ServerHost for FakeHost {
         &self.players
     }
 }
-
+crate::impl_server_host_areas!(FakeHost, except(mod_state, services));
 impl ClientHost for FakeHost {}
+crate::impl_client_host_areas!(FakeHost);
 
-impl Backend for FakeHost {
+impl Backend for FakeHost {}
+impl crate::prelude::LevelsBackend for FakeHost {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == self.level.level()
     }
     fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         self.level.block_at(level, pos).map(str::to_owned)
     }
+}
+impl crate::prelude::BlockEntitiesBackend for FakeHost {
     fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         let standing = self.level.standing(entity.level, entity.position)?;
         standing.kind().cloned()
     }
+}
+impl crate::prelude::ItemsBackend for FakeHost {
     fn container_size(&self, at: BlockSide) -> Option<usize> {
         let items = self.level.standing(at.level, at.pos)?.items.as_ref()?;
         Some(items.slots.len())
@@ -203,6 +232,17 @@ impl Backend for FakeHost {
             .and_then(|standing| standing.items.as_ref());
         items.map_or(0, |items| items.capacity(slot, self.max_stack(stack)))
     }
+    fn entity_container_size(&self, _: u32) -> Option<usize> {
+        None
+    }
+    fn entity_automation_size(&self, _: u32) -> Option<usize> {
+        None
+    }
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        self.registries.container_slots(stack)
+    }
+}
+impl crate::prelude::FluidsEnergyBackend for FakeHost {
     fn fluid_tank_count(&self, at: BlockSide) -> Option<usize> {
         Some(self.level.standing(at.level, at.pos)?.tanks.len())
     }
@@ -226,6 +266,8 @@ impl Backend for FakeHost {
             .and_then(|standing| standing.energy.as_ref())
             .map_or(0, |energy| energy.capacity)
     }
+}
+impl crate::prelude::EntitiesBackend for FakeHost {
     fn entity_kind(&self, entity: EntityRef) -> Option<String> {
         if self.players.by_entity(entity.id()).is_some() {
             return Some("minecraft:player".to_owned());
@@ -238,24 +280,29 @@ impl Backend for FakeHost {
         }
         Some(self.level.entity_at(entity.id())?.level)
     }
-    fn entity_container_size(&self, _: u32) -> Option<usize> {
-        None
-    }
-    fn entity_automation_size(&self, _: u32) -> Option<usize> {
-        None
-    }
+}
+impl crate::prelude::PlayersBackend for FakeHost {
     fn player_selected_slot(&self, player: PlayerRef) -> Option<usize> {
         Some(self.players.get(player.uuid())?.selected_slot)
     }
     fn player_name(&self, player: PlayerRef) -> Option<String> {
         Some(self.players.get(player.uuid())?.name.clone())
     }
-    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
-        self.registries.container_slots(stack)
-    }
 }
+crate::impl_backend_areas!(
+    FakeHost,
+    except(
+        block_entities,
+        entities,
+        fluids_energy,
+        items,
+        levels,
+        players
+    )
+);
 
-impl BackendMut for FakeHost {
+impl BackendMut for FakeHost {}
+impl crate::prelude::ItemsBackendMut for FakeHost {
     fn container_insert(
         &mut self,
         at: BlockSide,
@@ -280,6 +327,24 @@ impl BackendMut for FakeHost {
         let standing = self.level.standing_mut(at.level, at.pos)?;
         standing.items.as_mut()?.extract(slot, max)
     }
+    fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
+        let (player, slot) = self.players.place(place)?;
+        player.slots.get(&slot).cloned()
+    }
+    fn game_insert(&mut self, place: &ItemPlace, stack: ItemStack, _: &Transaction) -> u32 {
+        let max_stack = self.max_stack(&stack);
+        match self.players.place(place) {
+            Some((player, slot)) if stack.count > 0 => player.insert(slot, stack, max_stack),
+            _ => 0,
+        }
+    }
+    fn game_extract(&mut self, place: &ItemPlace, stack: ItemStack, _: &Transaction) -> u32 {
+        self.players
+            .place(place)
+            .map_or(0, |(player, slot)| player.extract(slot, &stack))
+    }
+}
+impl crate::prelude::FluidsEnergyBackendMut for FakeHost {
     fn fluid_tank_insert(
         &mut self,
         at: BlockSide,
@@ -315,28 +380,16 @@ impl BackendMut for FakeHost {
             .and_then(|standing| standing.energy.as_mut())
             .map_or(0, |energy| energy.extract(amount))
     }
+}
+impl crate::prelude::EntitiesBackendMut for FakeHost {
     fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
         if let Some((uuid, _)) = self.players.by_entity(entity.id()) {
             return Some(uuid);
         }
         Some(self.level.entity_at(entity.id())?.uuid)
     }
-    fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
-        let (player, slot) = self.players.place(place)?;
-        player.slots.get(&slot).cloned()
-    }
-    fn game_insert(&mut self, place: &ItemPlace, stack: ItemStack, _: &Transaction) -> u32 {
-        let max_stack = self.max_stack(&stack);
-        match self.players.place(place) {
-            Some((player, slot)) if stack.count > 0 => player.insert(slot, stack, max_stack),
-            _ => 0,
-        }
-    }
-    fn game_extract(&mut self, place: &ItemPlace, stack: ItemStack, _: &Transaction) -> u32 {
-        self.players
-            .place(place)
-            .map_or(0, |(player, slot)| player.extract(slot, &stack))
-    }
+}
+impl crate::prelude::PlayersBackendMut for FakeHost {
     fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
         let Some(player) = self.players.get_mut(player.uuid()) else {
             return false;
@@ -345,6 +398,7 @@ impl BackendMut for FakeHost {
         true
     }
 }
+crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, players));
 
 #[cfg(test)]
 mod tests {
@@ -352,11 +406,15 @@ mod tests {
     use crate::{FLUIDS, FluidResource, Hand, HostTransaction, ItemResource, move_resources};
 
     fn water(amount: u32) -> FluidStack {
-        FluidStack::new("minecraft:water", amount)
+        FluidStack::new(
+            crate::registry_keys::fluid_key("minecraft:water").unwrap(),
+            amount,
+        )
     }
 
     #[test]
     fn a_fluid_moves_between_tanks_of_the_same_fluid_and_an_abort_puts_both_back() {
+        crate::parts::tests::game_thread();
         let mut host = FakeHost::new();
         let level = host.level.level();
         host.level.block_entity([0, 64, 0]).tanks = vec![FakeTank {
@@ -368,7 +426,10 @@ mod tests {
             capacity: 1000,
         }];
         host.level.block_entity([2, 64, 0]).tanks = vec![FakeTank {
-            held: Some(FluidStack::new("minecraft:lava", 100)),
+            held: Some(FluidStack::new(
+                crate::registry_keys::fluid_key("minecraft:lava").unwrap(),
+                100,
+            )),
             capacity: 1000,
         }];
         let server: &mut dyn ServerHost = &mut host;
@@ -423,3 +484,5 @@ mod tests {
         assert_eq!(given, [4]);
     }
 }
+
+impl crate::prelude::PlayersClientBackend for FakeHost {}

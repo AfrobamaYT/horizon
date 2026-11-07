@@ -26,7 +26,10 @@ impl FakeLevel {
     /// An empty level of `dimension` (`minecraft:the_nether`).
     pub fn new(dimension: &'static str) -> Self {
         Self {
-            level: LevelRef::new(NativeWorldEpoch::new(FAKE_EPOCH), dimension),
+            level: LevelRef::new(
+                NativeWorldEpoch::new(FAKE_EPOCH),
+                crate::registry_keys::dimension_key(dimension),
+            ),
             blocks: HashMap::new(),
             block_entities: BTreeMap::new(),
             entities: BTreeMap::new(),
@@ -102,7 +105,12 @@ pub struct FakeBlockEntity {
 impl FakeBlockEntity {
     /// Makes it a block entity of the mod type `id` (`mymod:pipe`).
     pub fn of_type(&mut self, id: &str) -> &mut Self {
-        self.kind = Some(BlockEntityTypeKey(id.into()));
+        self.kind = crate::parts::requested_keys()
+            .block_entity_types
+            .slots
+            .get(id)
+            .copied()
+            .map(BlockEntityTypeKey);
         self
     }
     /// Gives it `slots` empty item slots, of the vanilla limit of 64.

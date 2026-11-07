@@ -3535,9 +3535,6 @@ fn installed() -> Option<&'static Installed> {
     MODS.get()
 }
 
-#[cfg(any(test, feature = "testing"))]
-pub mod testing;
-
 /// Install the process-wide ordered list of mods.
 pub(crate) fn install(mods: Mods) -> &'static Installed {
     let installed = Installed::new(mods);
@@ -5200,7 +5197,10 @@ mod tests {
         /// A mod's own double, with only the services the hook reaches.
         struct Silent;
         impl Host for Silent {}
-        impl ServerHost for Silent {
+        crate::impl_host_areas!(Silent);
+        impl ServerHost for Silent {}
+        crate::impl_server_host_areas!(Silent, except(services));
+        impl crate::prelude::ServicesServerHost for Silent {
             fn commands(&mut self) -> &mut dyn Commands {
                 self
             }
