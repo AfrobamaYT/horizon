@@ -139,8 +139,6 @@ pub struct Type {
 pub struct Place {
     pub place: usize,
     pub target: &'static str,
-    /// The pinned function signature, distinct from the wire record shape.
-    pub signature_hash: &'static str,
     pub hash: &'static str,
     pub receiver: Option<u32>,
     pub receiver_writable: bool,
