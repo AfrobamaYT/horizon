@@ -102,14 +102,16 @@ fn publish_games_before_older_launcher_fallback() {
                 assert_eq!(events.borrow().first(), Some(&"releases"));
                 events.borrow_mut().push("fallback");
                 if url.contains("matching-refs") {
-                    Ok(serde_json::json!([{"ref": "refs/tags/launcher@99.0.0"}]))
+                    Ok(Some(
+                        serde_json::json!([{"ref": "refs/tags/launcher@99.0.0"}]),
+                    ))
                 } else {
-                    Ok(
+                    Ok(Some(
                         serde_json::json!({"tag_name": "launcher@99.0.0", "assets": [{
                             "name": LAUNCHER_ASSET.unwrap_or("unsupported"),
                             "browser_download_url": "u", "size": 1
                         }]}),
-                    )
+                    ))
                 }
             })
         },
@@ -142,6 +144,94 @@ fn failed_launcher_fallback_keeps_game_result_and_checks_stay_fresh() {
         assert!(updates.launcher.is_none());
     }
     assert_eq!(requests.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn empty_or_prebuilt_only_fork_has_no_game_or_launcher_update() {
+    for list in [
+        serde_json::json!([]),
+        serde_json::json!([{
+            "tag_name": "prebuilt-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "prerelease": true,
+            "assets": [{"name": "horizon-prebuilt-v3-x86_64-unknown-linux-gnu.tar.gz",
+                        "browser_download_url": "https://example.test/sdk", "size": 9}]
+        }]),
+    ] {
+        for missing in [None, Some(serde_json::json!([]))] {
+            let mut games = None;
+            let updates = releases_and_updates_with(
+                || Ok(list.clone()),
+                Vec::new,
+                |list| {
+                    launcher_releases_in_with(list, |url| {
+                        assert!(url.starts_with("https://api.github.com/repos/arismoko/horizon/"));
+                        Ok(missing.clone())
+                    })
+                },
+                |result| games = Some(result.unwrap()),
+            )
+            .unwrap();
+            assert!(games.unwrap().is_empty());
+            assert!(updates.horizon.is_none());
+            assert!(updates.launcher.is_none());
+        }
+    }
+}
+
+#[test]
+fn each_platform_download_is_bound_to_the_fork_not_the_provider_url() {
+    let platforms = [
+        (
+            "linux",
+            "x86_64",
+            "horizon-linux-x86_64.tar.gz",
+            "horizon-launcher-linux-x86_64.tar.gz",
+        ),
+        (
+            "windows",
+            "x86_64",
+            "horizon-windows-x64.zip",
+            "horizon-launcher-windows-x64.zip",
+        ),
+        (
+            "macos",
+            "aarch64",
+            "horizon-macos-arm64.zip",
+            "horizon-launcher-macos-arm64.zip",
+        ),
+    ];
+    let assets: Vec<_> = platforms.iter().flat_map(|(_, _, game, launcher)| [game, launcher])
+        .map(|name| serde_json::json!({"name": name, "size": 9,
+            "browser_download_url": "https://github.com/horizon-rust/horizon/releases/download/wrong/file"}))
+        .collect();
+    let list = serde_json::json!([
+        {"tag_name": "v0.9.9", "assets": assets},
+        {"tag_name": "launcher@0.9.9", "assets": assets}
+    ]);
+    for (os, arch, game, launcher) in platforms {
+        let (game_asset, launcher_asset) = platform_assets(os, arch).unwrap();
+        for (asset, keep, expected, tag) in [
+            (game_asset, is_game_tag as fn(&str) -> bool, game, "v0.9.9"),
+            (
+                launcher_asset,
+                is_launcher_tag as fn(&str) -> bool,
+                launcher,
+                "launcher@0.9.9",
+            ),
+        ] {
+            let parsed = parse_releases(&list, Some(asset), keep);
+            assert_eq!(parsed.len(), 1);
+            assert_eq!(
+                parsed[0].asset,
+                Some((
+                    format!(
+                        "https://github.com/arismoko/horizon/releases/download/{tag}/{expected}"
+                    ),
+                    9
+                ))
+            );
+        }
+    }
 }
 
 #[test]
