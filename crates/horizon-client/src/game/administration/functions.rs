@@ -792,7 +792,9 @@ impl Game<'_> {
             .find(|p| p.id == id)
             .map_or_else(|| "Default data pack".to_owned(), |p| p.description());
         let style = text::Style {
-            hover: Some(Box::new(Text::literal(format!("{id}\n{description}")))),
+            hover: Some(std::sync::Arc::new(Text::literal(format!(
+                "{id}\n{description}"
+            )))),
             ..style
         };
         let source = if id == "vanilla" {
@@ -1256,7 +1258,7 @@ mod tests {
                 let default = registry.default_state(id)?;
                 Some(mod_api::__private::ResolvedBlock {
                     default,
-                    states: mod_api::BlockStateRange::new(default, 1),
+                    states: horizon_world::registry::BlockStateRange::new(default, 1),
                     block: game.res.behaviours().block(default),
                 })
             })

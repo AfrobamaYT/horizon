@@ -9,6 +9,7 @@ import subprocess
 root = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output", type=Path, required=True)
+parser.add_argument("--group", choices=["state", "range"], default="state")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 facade = root / "crates/horizon-mod-api/src/block_state.rs"
@@ -26,6 +27,17 @@ cases = [
     ("source_without_metadata_commits", renderer, "let sources = has_custom_sources(by_block);", "let sources = false; let _ = has_custom_sources(by_block);", tint),
     ("region_returns_air_for_every_state", renderer, "*states\n            .get(self.state_id(pos) as usize)\n            .unwrap_or(&states[0])", "{ let _ = pos; states[0] }", tint),
 ]
+if args.group == "range":
+    span = root / "crates/horizon-mod-api/src/block_state_range.rs"
+    definitions = root / "crates/horizon-mod-runtime/src/block_definitions.rs"
+    focused = ["cargo", "test", "-p", "horizon-mod-api", "--lib", "local_range_validates_transport_and_never_wraps_ordinals"]
+    cases = [
+        ("span_accepts_overflow", span, "if count > u16::MAX as u32 + 1 - first.ordinal() as u32 {", "if false {", focused),
+        ("membership_ignores_key", span, "state.block().0 == self.first.block().0", "true", focused),
+        ("iteration_ignores_start", span, "(self.first.ordinal() as u32 + offset) as u16", "offset as u16", focused),
+        ("transport_skips_span_check", span, "Self::new(value.first, value.count)", "Ok(Self { first: value.first, count: value.count })", focused),
+        ("metadata_drops_last_state", definitions, "self.states.len() as u32", "self.states.len().saturating_sub(1) as u32", service),
+    ]
 results = []
 for name, path, old, new, command in cases:
     original = path.read_text()

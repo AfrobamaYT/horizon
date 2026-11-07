@@ -226,9 +226,8 @@ pub struct LootStack {
     pub stew_effects: Vec<(String, i32)>,
     /// Set by set_name: (`custom_name` or `item_name`, the text component).
     pub names: Vec<(String, Value)>,
-    /// Set by set_components: (component id, its JSON value; null removes
-    /// it), a later patch of the same id replacing an earlier one.
-    pub components: Vec<(String, Value)>,
+    /// Ordered component patches. None removes a component; repeated IDs apply in order.
+    pub components: Vec<(String, Option<Tag>)>,
 }
 /// `ExplorationMapFunction`'s settings.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1651,7 +1650,7 @@ impl<R: RandomSource> Context<'_, R> {
                         .retain(|(k, _)| k != "minecraft:instrument");
                     stack.components.push((
                         "minecraft:instrument".to_owned(),
-                        Value::String(options[pick].clone()),
+                        Some(Tag::String(options[pick].as_str().into())),
                     ));
                 }
             }
@@ -1721,8 +1720,15 @@ impl<R: RandomSource> Context<'_, R> {
             // stack becomes an item (trim on worn armour, see `mobs::finalize`).
             "minecraft:set_components" => {
                 for (id, value) in f["components"].as_object().into_iter().flatten() {
-                    stack.components.retain(|(k, _)| k != id);
-                    stack.components.push((id.clone(), value.clone()));
+                    let tag = if value.is_null() {
+                        None
+                    } else {
+                        let Ok(tag) = horizon_core::json_nbt::json_to_tag(value) else {
+                            continue;
+                        };
+                        Some(tag)
+                    };
+                    stack.components.push((id.clone(), tag));
                 }
             }
             // A mod's own kind: the hook changes the stack.
@@ -2199,7 +2205,10 @@ mod namespace_tests {
                 .filter(|(k, _)| k == "minecraft:instrument")
                 .collect();
             assert_eq!(instrument.len(), 1, "{:?}", horn.components);
-            seen.insert(instrument[0].1.as_str().unwrap().to_owned());
+            seen.insert(match &instrument[0].1 {
+                Some(Tag::String(id)) => id.to_string_lossy(),
+                _ => panic!("instrument"),
+            });
         }
         assert_eq!(
             seen.into_iter().collect::<Vec<_>>(),

@@ -131,8 +131,10 @@ impl mod_api::ServerHost for Server {}
 mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
-    fn broadcast(&self, line: Text) {
+    fn broadcast(&self, line: Text) -> Result<(), mod_api::text::TextFormError> {
+        line.validate_depth()?;
         self.0.lock().unwrap().push(line);
+        Ok(())
     }
 }
 
@@ -207,7 +209,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         assert_eq!(id, "minecraft:stone");
         Some(mod_api::__private::ResolvedBlock {
             default: mod_api::BlockStateId(17),
-            states: mod_api::BlockStateRange::new(mod_api::BlockStateId(17), 1),
+            states: horizon_world::registry::BlockStateRange::new(mod_api::BlockStateId(17), 1),
             block: horizon_world::level::states::BlockId(1),
         })
     })

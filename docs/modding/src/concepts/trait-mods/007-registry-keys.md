@@ -41,6 +41,12 @@ only copy those values and invoke metadata reads. When world numeric state IDs a
 the game resolves each state's property combination against the published definition, so
 local ordinals retain their meaning across reloads.
 
+`host.block_states().states_of(key)` returns a `BlockStateRange` in that same immutable
+local ordinal order. Its iterator yields owned `BlockState`s; it is not a span of world
+numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the span would
+exceed the u16 ordinal domain, and decoded transport spans obey the same check. Membership
+checks both the block key and the ordinal. A zero-count span is empty.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.
@@ -85,7 +91,7 @@ and remain strings, as do labels and tags.
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
 | Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
-| Renderer GUI commands | `mod_api::GuiDraw` | Mods pass API command records to `DrawContext::gui_paint` and HUD hooks. The renderer keeps its own command buffer and engine text; conversion happens at the game boundary. |
+| Renderer GUI commands | `mod_api::GuiDraw` | `DrawContext::gui_paint` returns a typed text-conversion result; handle refusal before drawing. HUD hooks reject invalid writeback as a whole. |
 | File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Part of [per-node origin tracking #1738](https://github.com/arismoko/horizon/issues/1738). |
 
 `mod_api::GameRuleValue` owns the `Bool(bool)` and `Int(i32)` cases, in that order.
@@ -123,14 +129,25 @@ rather than flattening it to a string.
 
 `TextForm` crosses the generated wasm boundary as a flat node table. Conversion
 is iterative, refuses component depth above 512 and rejects malformed tables. Each
-node's JSON metadata is still limited to 100 nested containers; a separate Value
-boundary is planned. Component and style metadata remain intact.
+node's JSON metadata is still limited to 100 nested containers pending the typed-node
+replacement. Component and style metadata remain intact. The game boundary also uses
+this flat form and validates component depth before cloning payloads or applying writes.
+Host methods accepting or returning Text return `Result<_, TextFormError>`; mixed
+item/Text writes preserve the refusal in `StackWriteError::Text`, and unspawned-mob
+reads use `UnspawnedMobError::Text`. `TooDeep` means a component exceeds 512 nodes
+along a recursive path. Unavailable backends are distinct from over-depth text.
+A refused hook capture does not dispatch; a refused writeback leaves every field unchanged.
+No subscriber means no conversion or snapshot allocation.
+
+Recursive `Clone`, `Eq` and `Drop` of a tree a mod itself built are ordinary Rust ownership,
+not part of the boundary guarantee. A wasm guest overflowing its own stack on a received
+512-deep tree traps within its dependency group.
 `Text::new(content)` constructs any content kind without exposing an engine value.
 The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
 new cases change the link contract, just as enum-case order does. Mod matches should
 name every case rather than silently treating a new protocol case as an old one.
 Typed content and style fields are authoritative; metadata retains unrecognized
-properties, not overrides of those typed fields. Game-side encoding is infallible
+properties, not overrides of those typed fields. Game-side encoding is fallible
 and reuses the engine's translation-argument and fallback construction rules.
 Capture keeps dynamic contents and metadata rather than flattening the rendered spans.
 It shares the engine's SNBT flag, shadow-colour, click-policy and inline-object parsers.

@@ -77,6 +77,11 @@ impl BlockDefinition {
         })
     }
 
+    /// Number of immutable state combinations, including every local ordinal.
+    pub fn state_count(&self) -> u32 {
+        self.states.len() as u32
+    }
+
     /// Read a borrowed property value without allocation, locks or mutable state.
     pub fn property(&self, state: u16, name: &str) -> Result<Option<&str>, StateError> {
         let values = self

@@ -1,7 +1,6 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
 use crate::{
-    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, DimensionKey, EffectKey, FluidKey,
-    ItemKey,
+    BlockEntityTypeKey, BlockKey, BlockStateId, DimensionKey, EffectKey, FluidKey, ItemKey,
 };
 
 impl BlockKey {
@@ -310,6 +309,8 @@ pub(crate) fn block_entity_type_display_name(key: BlockEntityTypeKey) -> String 
             .to_owned()
     })
 }
+
+use horizon_world::registry::BlockStateRange;
 
 /// A block slot's mappings in one game's current tables.
 #[derive(Clone, Copy, Debug)]

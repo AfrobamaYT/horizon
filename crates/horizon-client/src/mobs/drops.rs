@@ -264,7 +264,19 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
             stack.enchantments.push((e.to_string(), *l as i32));
         }
         if let Some((material, pattern)) = &g.trims[index] {
-            let trim = serde_json::json!({ "material": &**material, "pattern": &**pattern });
+            let trim = Some(horizon_core::nbt::Tag::Compound(
+                [
+                    (
+                        "material".into(),
+                        horizon_core::nbt::Tag::String((**material).into()),
+                    ),
+                    (
+                        "pattern".into(),
+                        horizon_core::nbt::Tag::String((**pattern).into()),
+                    ),
+                ]
+                .into(),
+            ));
             stack.components.push(("minecraft:trim".to_owned(), trim));
         }
     }

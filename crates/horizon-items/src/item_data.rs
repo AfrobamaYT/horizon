@@ -273,21 +273,26 @@ impl StackData {
         let tag = horizon_client_core::scoreboard::json_to_tag(text);
         self.set_other(id, Some(tag));
     }
-    /// `SetComponentsFunction`: one component of a loot patch, in its JSON
-    /// form. Trim is modelled; the rest keep their saved components.
-    /// A null value removes the component.
-    pub fn set_loot_component(&mut self, id: &str, value: &serde_json::Value) {
-        let tag = (!value.is_null()).then(|| horizon_client_core::scoreboard::json_to_tag(value));
+    /// Apply an ordered loot component patch without changing its NBT type.
+    /// None removes the component. Trim retains its modelled representation.
+    pub fn set_loot_component(&mut self, id: &str, value: &Option<Tag>) {
         match id {
             "minecraft:trim" => {
-                self.trim = match (value["material"].as_str(), value["pattern"].as_str()) {
-                    (Some(material), Some(pattern)) => {
-                        Some((Arc::from(material), Arc::from(pattern)))
-                    }
+                self.trim = match value {
+                    Some(Tag::Compound(map)) => match (
+                        map.get(&JavaString::from("material")),
+                        map.get(&JavaString::from("pattern")),
+                    ) {
+                        (Some(Tag::String(material)), Some(Tag::String(pattern))) => Some((
+                            Arc::from(material.to_string_lossy()),
+                            Arc::from(pattern.to_string_lossy()),
+                        )),
+                        _ => None,
+                    },
                     _ => None,
                 };
             }
-            _ => self.set_other(id, tag),
+            _ => self.set_other(id, value.clone()),
         }
     }
     /// Set (or with None remove) a preserved component.
@@ -2177,9 +2182,10 @@ mod tests {
     fn loot_component_keeps_a_styled_custom_name() {
         let name = serde_json::json!({"text":"Prize","color":"#ff8800"});
         let mut stack = ItemStack::new("minecraft:stick", 1);
-        stack
-            .data_mut()
-            .set_loot_component("minecraft:custom_name", &name);
+        stack.data_mut().set_loot_component(
+            "minecraft:custom_name",
+            &Some(horizon_core::json_nbt::json_to_tag(&name).unwrap()),
+        );
         assert_eq!(stack.custom_name().as_deref(), Some("Prize"));
         let expected = horizon_client_core::scoreboard::json_to_tag(&name);
         assert_eq!(
@@ -2190,7 +2196,7 @@ mod tests {
         );
         stack
             .data_mut()
-            .set_loot_component("minecraft:custom_name", &serde_json::Value::Null);
+            .set_loot_component("minecraft:custom_name", &None);
         assert!(stack.custom_name().is_none());
     }
 
@@ -2415,7 +2421,7 @@ mod carried_component_tests {
         );
         stack
             .data_mut()
-            .set_loot_component("minecraft:repair_cost", &serde_json::json!(5));
+            .set_loot_component("minecraft:repair_cost", &Some(Tag::Int(5)));
         assert!(stack.carries_component(None, "minecraft:repair_cost"));
     }
 

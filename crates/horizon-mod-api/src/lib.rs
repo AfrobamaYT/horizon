@@ -3765,41 +3765,6 @@ pub struct BlockSoundType {
     pub fall: std::sync::Arc<str>,
 }
 
-/// The states of one block (`StateDefinition.getPossibleStates`): consecutive ids, as the
-/// registry numbers a block's states.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it with `new`; mods read it
-pub struct BlockStateRange {
-    first: BlockStateId,
-    count: u32,
-}
-impl BlockStateRange {
-    /// `count` states from `first`.
-    pub const fn new(first: BlockStateId, count: u32) -> Self {
-        Self { first, count }
-    }
-    /// The first state's id.
-    pub const fn first(self) -> BlockStateId {
-        self.first
-    }
-    /// How many states the block has.
-    pub const fn len(self) -> u32 {
-        self.count
-    }
-    /// Never true: a block has at least one state.
-    pub const fn is_empty(self) -> bool {
-        self.count == 0
-    }
-    /// Whether `state` is one of them.
-    pub const fn contains(self, state: BlockStateId) -> bool {
-        state.0 >= self.first.0 && state.0 - self.first.0 < self.count
-    }
-    /// Each state, in id order.
-    pub fn iter(self) -> impl Iterator<Item = BlockStateId> {
-        (self.first.0..self.first.0 + self.count).map(BlockStateId)
-    }
-}
-
 /// What a fake player does in `PlayerRef::perform_action`: a player's own action, run through
 /// the game's path for it, as a client's packet is. Its answer is an [`ActionOutcome`], or an
 /// [`ActionRefused`] when none of it ran.
@@ -3910,7 +3875,7 @@ impl ScopedActionResult {
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
 /// action ran.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActionRefused {
     /// The handle is a real player's.
@@ -4852,8 +4817,10 @@ mod tests {
         let host: &mut dyn ServerHost = &mut server;
         assert!(host.commands().run_command("list"));
         assert!(!host.commands().run_command("missing"));
-        host.commands().feedback(Text::literal("answer"));
-        host.messages().broadcast(Text::literal("everyone"));
+        host.commands().feedback(Text::literal("answer")).unwrap();
+        host.messages()
+            .broadcast(Text::literal("everyone"))
+            .unwrap();
         assert_eq!(host.messages().text_allowed("blocked"), Some(false));
         let player = host.players().acting_player().unwrap();
         assert_eq!(host.players().server_players(), [player]);
@@ -4958,7 +4925,9 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
-            player.action_bar(host, Text::literal(block.clone()));
+            player
+                .action_bar(host, Text::literal(block.clone()))
+                .unwrap();
             if block == "minecraft:stone" {
                 Flow::Cancel
             } else {
