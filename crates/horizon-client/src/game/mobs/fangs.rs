@@ -135,6 +135,8 @@ impl Game<'_> {
     /// `EvokerFangs.tick`.
     pub(super) fn tick_fangs(&mut self) {
         let mut list = self.fangs.list.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         list.retain_mut(|f| {
             f.warmup = f.warmup.wrapping_sub(1);
             if f.warmup >= 0 {
@@ -355,6 +357,35 @@ fn p_zrot(p: &mut Poses, part: &str, v: f32) {
 mod tests {
     use super::{Party, fang_attack_pitch, fang_crit, fangs_allied};
     use horizon_core::random::LegacyRandom;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_fangs_tick_keeps_survivors_before_both_spawns() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.fangs.list.clear();
+            game.add_fangs([0.0, 80.0, 0.0], 0.0, 30, 0);
+            game.add_fangs([1.0, 80.0, 0.0], 0.0, 30, 0);
+            let first = game.fangs.list[0].id;
+            let second = game.fangs.list[1].id;
+            let next = game.next_entity;
+            super::super::entity::taken_pass_tests::with_spawn(
+                |game| {
+                    assert!(game.fangs.list.is_empty());
+                    game.add_fangs([2.0, 80.0, 0.0], 0.0, 40, 0);
+                    game.add_fangs([3.0, 80.0, 0.0], 0.0, 50, 0);
+                },
+                || game.tick_fangs(),
+            );
+            assert_eq!(
+                game.fangs
+                    .list
+                    .iter()
+                    .map(|f| (f.id, f.warmup))
+                    .collect::<Vec<_>>(),
+                [(first, 29), (second, 29), (next + 1, 40), (next + 2, 50)]
+            );
+        });
+    }
 
     #[test]
     fn fang_attack_pitch_matches_the_vanilla_span() {
