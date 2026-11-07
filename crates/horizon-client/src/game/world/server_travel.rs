@@ -147,7 +147,12 @@ fn drop_hook(host: &mut LanHost, conn: u32) {
     }
 }
 
-fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined, const DIRECT: bool>(
+fn take_vehicle<
+    T: Rideable
+        + horizon_client::join_seq::Joined
+        + horizon_mod_runtime::attachments::HasAttachmentLifetime,
+    const DIRECT: bool,
+>(
     list: &mut horizon_client::join_seq::JoinList<T, DIRECT>,
     id: u32,
     at: Vec3,
@@ -155,7 +160,7 @@ fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined, const DIRECT: bo
     motion: Vec3,
 ) -> Option<T> {
     let i = list.iter().position(|v| v.id() == id)?;
-    let mut v = list.remove(i);
+    let mut v = list.remove_for_transfer(i);
     v.arrive(at, yaw, motion);
     v.set_join_seq(horizon_client::join_seq::JoinSeq::UNJOINED);
     Some(v)
@@ -1014,11 +1019,14 @@ impl Game<'_> {
         let Some(parked) = self.levels.parked_mut(source) else {
             return;
         };
-        if let Some(b) = take_vehicle(&mut parked.boats, id, at, yaw, motion) {
+        if let Some(mut b) = take_vehicle(&mut parked.boats, id, at, yaw, motion) {
+            self.rebind_transferred_entity(source, id, &mut b);
             self.boats.push(b);
-        } else if let Some(c) = take_vehicle(&mut parked.carts, id, at, yaw, motion) {
+        } else if let Some(mut c) = take_vehicle(&mut parked.carts, id, at, yaw, motion) {
+            self.rebind_transferred_entity(source, id, &mut c);
             self.carts.push(c);
-        } else if let Some(m) = take_vehicle(&mut parked.mobs, id, at, yaw, motion) {
+        } else if let Some(mut m) = take_vehicle(&mut parked.mobs, id, at, yaw, motion) {
+            self.rebind_transferred_entity(source, id, &mut m);
             self.mobs.push(m);
         } else {
             return;
