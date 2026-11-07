@@ -30,12 +30,16 @@ identical tokens, then compares the aggregate line multiset with only the
 listed wrapper/import/heading exclusions. Documentation link repairs outside
 Parts are enumerated in `move.py`; the guide describes the unchanged mod call shape.
 
-The gate extension is isolated in commit `0540ebf54a`: Registrar import methods and
-its result-error enum cases are name-resolved sets, with exact membership checks.
-Other enum internals, hook ordering, hook IDs and dispatch stay byte-ordered. The
-actual move puts `declare-entity-attributes` after `provide-entity-capability` rather
-than last, relocating the `entity-attribute-error` type block too; no enum cases move.
-Those errors are registration refusals, not saved discriminants or serialized IDs.
-The new gate tests refuse changed/duplicated methods, changed/duplicated cases,
-hook reordering and reordering of unrelated enums. No ordering attribute or list is added. New-kind coverage must compile an
-added kind and exercise it through the union without changing existing shared files.
+The gate compares Registrar import methods, whole type blocks and use-list items as
+name-resolved sets with exact membership checks. All type internals, including every
+enum's case order, stay byte-ordered. Wasmtime 48.0.7's `typecheck_enum`
+(`func/typed.rs:2287–2308`) requires matching case order, even for result errors;
+case reordering would change the component link contract.
+
+The actual move puts `declare-entity-attributes` after `provide-entity-capability`
+rather than last, relocating the `entity-attribute-error` type block too; no enum
+cases move. Hook ordering, hook IDs and dispatch remain byte-identical. The gate
+tests refuse changed/duplicated methods, changed/duplicated cases and any enum-case
+or hook reordering. No ordering attribute or list is added. New-kind coverage must
+compile an added kind and exercise it through the union without changing existing
+shared files.
