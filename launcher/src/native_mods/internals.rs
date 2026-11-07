@@ -149,11 +149,12 @@ impl Catalog {
             });
         }
         let mut sites = listed.sites;
-        sites.extend(
-            horizon_mod_api_gen::sites::source::read(dir)?
-                .into_iter()
-                .map(sites::Site::from),
-        );
+        for site in horizon_mod_api_gen::sites::source::read(dir)? {
+            if sites.iter().any(|public| public.name == site.name) {
+                return Err(format!("E_SOURCE_COLLISION: {}", site.name));
+            }
+            sites.push(site.into());
+        }
         Ok(Self {
             internals: internals::read(&path)?,
             points,

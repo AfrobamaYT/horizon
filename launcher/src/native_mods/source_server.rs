@@ -58,22 +58,22 @@ fn run(functions: bool, private: bool, calls: bool) {
             .map(|line| format!("{line}\n"))
             .collect::<String>();
         fs::write(slots, text).unwrap();
-        if !calls {
-            let game = source.join("crates/horizon-client/src/game.rs");
-            let text = fs::read_to_string(&game).unwrap();
-            fs::write(
-                &game,
-                text.replace(
-                    "    fn next_autosave_interval",
-                    "    #[inline(always)]\n    fn next_autosave_interval",
-                )
-                .replace(
-                    "    pub(super) fn on_tick_rate_changed",
-                    "    #[inline(always)]\n    pub(super) fn on_tick_rate_changed",
-                ),
+    }
+    if private && !calls {
+        let game = source.join("crates/horizon-client/src/game.rs");
+        let text = fs::read_to_string(&game).unwrap();
+        fs::write(
+            &game,
+            text.replace(
+                "    fn next_autosave_interval",
+                "    #[inline(always)]\n    fn next_autosave_interval",
             )
-            .unwrap();
-        }
+            .replace(
+                "    pub(super) fn on_tick_rate_changed",
+                "    #[inline(always)]\n    pub(super) fn on_tick_rate_changed",
+            ),
+        )
+        .unwrap();
     }
     let catalog_dir = scratch.join("catalog");
     fs::create_dir(&catalog_dir).unwrap();

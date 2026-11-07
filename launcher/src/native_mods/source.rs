@@ -95,7 +95,10 @@ pub(super) fn stage(
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
 ) -> Result<(), String> {
-    use horizon_mod_api_gen::points::source::{self, Point};
+    use horizon_mod_api_gen::{
+        points::source::{self, Point},
+        sites::{source as call_source, Declaration},
+    };
     use syn::parse::Parser;
     let catalog = super::internals::Catalog::read(catalog_dir)?;
     let mut points = std::collections::BTreeMap::new();
@@ -119,7 +122,7 @@ pub(super) fn stage(
                 let ctx = inject.ctx.clone().expect("validated statement identity");
                 calls
                     .entry((target.clone(), selector.clone(), ordinal, ctx.clone()))
-                    .or_insert(horizon_mod_api_gen::sites::Declaration {
+                    .or_insert(Declaration {
                         target,
                         selector,
                         ordinal: Some(ordinal),
@@ -194,10 +197,10 @@ pub(super) fn stage(
                 .map_err(|error| error.to_string())?,
         )?
     };
-    horizon_mod_api_gen::sites::source::stage(root, &entries, &calls)?;
+    call_source::stage(root, &entries, &calls)?;
     std::fs::copy(
-        root.join(horizon_mod_api_gen::sites::source::FILE),
-        catalog_dir.join(horizon_mod_api_gen::sites::source::FILE),
+        root.join(call_source::FILE),
+        catalog_dir.join(call_source::FILE),
     )
     .map_err(|error| error.to_string())?;
     let mut points = points.into_values().collect::<Vec<_>>();
@@ -463,6 +466,17 @@ fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
             .contains("E_INJECT_LOST"));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
     }
+    let mut public = serde_json::to_value(&discovered).unwrap();
+    public["call"] = "different::callee".into();
+    std::fs::write(
+        dir.join("points.json"),
+        serde_json::json!({"points":[], "sites":[public]}).to_string(),
+    )
+    .unwrap();
+    assert!(Catalog::read(&dir)
+        .err()
+        .unwrap()
+        .contains("E_SOURCE_COLLISION"));
     std::fs::remove_dir_all(root).unwrap();
 }
 
