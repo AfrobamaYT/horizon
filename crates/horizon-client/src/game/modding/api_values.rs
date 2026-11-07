@@ -309,7 +309,7 @@ impl TryIntoApi for horizon_assets::item_model::StackView {
         }));
         let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
         EngineStack {
-            item: self.item.clone().into(),
+            item: self.item.as_str().into(),
             count,
             damage,
             extra,
