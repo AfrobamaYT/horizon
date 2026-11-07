@@ -12107,7 +12107,6 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mods_replace_and_cancel_received_chat() {
         use super::super::{execution_role::ExecutionRole, native_entity_refs::tests::with_game};
-        use horizon_client::text::Text;
         use horizon_core::nbt::Tag;
         use horizon_protocol::{
             connection::Pipe,

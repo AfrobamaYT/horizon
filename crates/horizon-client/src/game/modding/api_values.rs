@@ -152,22 +152,7 @@ macro_rules! scalar_values {
         }
     )* };
 }
-scalar_values!(i32, bool, ());
-
-impl TryIntoApi for u32 {
-    type Api = Self;
-    type Error = std::convert::Infallible;
-    fn try_into_api(&self) -> Result<Self, Self::Error> {
-        Ok(*self)
-    }
-}
-impl<C: ?Sized> TryIntoEngine<C> for u32 {
-    type Engine = Self;
-    type Error = std::convert::Infallible;
-    fn try_into_engine(&self, _: &C) -> Result<Self, Self::Error> {
-        Ok(*self)
-    }
-}
+scalar_values!(u32, i32, bool, ());
 
 impl TryIntoApi for String {
     type Api = Self;
@@ -278,6 +263,21 @@ impl<C: ?Sized, T: TryIntoEngine<C>> TryIntoEngine<C> for [T] {
             .collect()
     }
 }
+impl TryIntoApi for (horizon_client::text::Text, u32) {
+    type Api = (mod_api::Text, u32);
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok((self.0.try_into_api()?, self.1))
+    }
+}
+impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, u32) {
+    type Engine = (horizon_client::text::Text, u32);
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
+        Ok((self.0.try_into_engine(context)?, self.1))
+    }
+}
+
 impl<A: TryIntoApi, B: TryIntoApi<Error = A::Error>> TryIntoApi for (A, B) {
     type Api = (A::Api, B::Api);
     type Error = A::Error;

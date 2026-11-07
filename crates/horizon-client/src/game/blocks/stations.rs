@@ -3424,7 +3424,6 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn tooltip_part_lines_come_after_the_name_and_never_for_a_hidden_tooltip() {
-        use horizon_client::text::Text;
         use mod_api::{
             self, ClientHost, Hooks, ItemPart, ItemTooltipEvent, ModEntry, Mods, Registrar,
             TooltipEvent,
