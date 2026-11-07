@@ -67,7 +67,6 @@ impl Game<'_> {
         ))
     }
 
-
     /// A trading screen the guest's interaction opened (it opened as a
     /// station while the guest acted): handed to the guest.
     pub(super) fn lan_open_merchant(&mut self, conn: u32, mut state: MerchantState) {
