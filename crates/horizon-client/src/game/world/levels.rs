@@ -225,7 +225,7 @@ impl Levels {
 
     /// The mobs of a parked level.
     pub(super) fn parked_mobs(&self, dim: Dim) -> Option<&[Mob]> {
-        self.parked.get(&dim).map(|level| level.mobs.as_slice())
+        self.parked.get(&dim).map(|level| &*level.mobs)
     }
 
     /// A parked level's loose entities, for `horizon-report`: items, experience orbs,
@@ -233,11 +233,11 @@ impl Levels {
     pub(super) fn parked_entity_counts(&self, dim: Dim) -> Option<[usize; 5]> {
         self.parked.get(&dim).map(|l| {
             [
-                l.dropped.as_slice().len(),
-                l.orbs.as_slice().len(),
-                l.projectiles.as_slice().len(),
-                l.carts.as_slice().len(),
-                l.boats.as_slice().len(),
+                l.dropped.len(),
+                l.orbs.len(),
+                l.projectiles.len(),
+                l.carts.len(),
+                l.boats.len(),
             ]
         })
     }
