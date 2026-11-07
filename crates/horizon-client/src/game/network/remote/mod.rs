@@ -1452,6 +1452,7 @@ impl Game<'_> {
         let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
+        e.show_icon = p.flags & 4 != 0;
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
@@ -3050,19 +3051,21 @@ impl Game<'_> {
             // flies them on (`tick_remote_projectiles`). Eased towards it
             // instead, they only moved when an update came, every 10 to 20
             // ticks.
-            if let Some(p) = self
+            if let Some(i) = self
                 .creatures
                 .projectiles
-                .iter_mut()
-                .find(|p| p.id == id as u32)
+                .iter()
+                .position(|p| p.id == id as u32)
             {
-                if path.is_some() {
-                    p.position = Vec3::new(position[0], position[1], position[2]);
-                }
-                if let Some((yaw, pitch)) = rotation {
-                    p.yaw = yaw;
-                    p.pitch = pitch;
-                }
+                self.creatures.projectiles.update(i, |p| {
+                    if path.is_some() {
+                        p.position = Vec3::new(position[0], position[1], position[2]);
+                    }
+                    if let Some((yaw, pitch)) = rotation {
+                        p.yaw = yaw;
+                        p.pitch = pitch;
+                    }
+                });
                 return;
             }
             if path.is_some()
@@ -3124,8 +3127,8 @@ impl Game<'_> {
                 d.on_ground = on_ground;
                 return;
             }
-            if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-                f.position = at;
+            if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+                self.falling.update(i, |f| f.position = at);
                 return;
             }
             if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
@@ -6007,21 +6010,21 @@ impl Game<'_> {
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
             d.velocity = v;
-        } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-            f.velocity = v;
+        } else if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+            self.falling.update(i, |f| f.velocity = v);
         } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
         } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
             self.carts.update(i, |c| c.velocity = v);
-        } else if let Some(p) = self
+        } else if let Some(i) = self
             .creatures
             .projectiles
-            .iter_mut()
-            .find(|p| p.id == id as u32)
+            .iter()
+            .position(|p| p.id == id as u32)
         {
-            p.velocity = v;
+            self.creatures.projectiles.update(i, |p| p.velocity = v);
         } else if let Some(b) = self.dragon_fireballs.iter_mut().find(|b| b.id == id as u32) {
             b.velocity = v;
         } else if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id as u32) {

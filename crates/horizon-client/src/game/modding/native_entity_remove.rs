@@ -155,7 +155,7 @@ impl Game<'_> {
                 Target::Crystal(id) => self.crystals.retain(|c| c.id != id),
                 Target::Dragon(id) => {
                     if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-                        self.dragon = None;
+                        self.dragon.discard();
                     }
                 }
                 Target::Player | Target::Guest(_) | Target::Mob(_) => {}

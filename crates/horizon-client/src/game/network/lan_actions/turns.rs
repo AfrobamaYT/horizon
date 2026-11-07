@@ -590,10 +590,12 @@ impl Game<'_> {
         self.guest_combat.insert(conn, guest_combat);
         play.modifiers = std::mem::replace(&mut self.applied_modifiers, modifiers);
         // What the guest shot is theirs (Projectile.setOwner).
-        for p in self.creatures.projectiles.iter_mut().skip(projectiles) {
-            if p.owner == Some(horizon_client::mobs::Who::Player) && p.guest.is_none() {
-                p.guest = Some(conn);
-            }
+        for i in projectiles..self.creatures.projectiles.len() {
+            self.creatures.projectiles.update(i, |p| {
+                if p.owner == Some(horizon_client::mobs::Who::Player) && p.guest.is_none() {
+                    p.guest = Some(conn);
+                }
+            });
         }
         let listening = mod_api::__private::listened(mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {

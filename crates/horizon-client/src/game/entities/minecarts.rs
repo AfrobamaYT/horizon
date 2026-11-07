@@ -4,6 +4,10 @@
 //! `MinecartItem` placement, `VehicleEntity` breaking, the chest, hopper,
 //! furnace and TNT variants, saving, and `AbstractMinecartRenderer`'s old
 //! rail-following render with the display block.
+#[cfg(test)]
+#[path = "minecarts/lifetime_tests.rs"]
+mod lifetime_tests;
+
 use super::{Game, Hit, InteractTarget, Keys, entity::Entity};
 use horizon_client::actions::Action;
 use horizon_client::entity_rules::EntityRules;
@@ -95,6 +99,7 @@ impl CartKind {
 }
 #[derive(Clone, Debug)]
 pub(super) struct Minecart {
+    pub(super) attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
     pub(super) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
@@ -385,6 +390,7 @@ impl Minecart {
     pub fn new(id: u32, kind: CartKind, position: Vec3) -> Self {
         Self {
             join: Default::default(),
+            attachment_lifetime: Default::default(),
             id,
             kind,
             position,
@@ -1304,7 +1310,9 @@ impl Game<'_> {
         let Some(i) = self.carts.iter().position(|x| x.id == c.id) else {
             return;
         };
-        self.carts[i] = c.clone();
+        if !self.store_cart_back(i, c.clone()) {
+            return;
+        }
         self.push_from_cart(i);
         if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
             *c = self.carts[i].clone();
@@ -1830,6 +1838,18 @@ impl Game<'_> {
             self.mobs[j].previous = at;
         }
     }
+    /// Refuse a removed target before carrying its owning slot into a tick clone.
+    pub(super) fn store_cart_back(&mut self, index: usize, cart: Minecart) -> bool {
+        if self
+            .persist
+            .removals
+            .contains(&super::commands::Target::Cart(cart.id))
+        {
+            return false;
+        }
+        self.carts.store_back(index, cart)
+    }
+
     /// Every cart but the ridden one (which ticks with its rider).
     pub(super) fn tick_carts(&mut self) {
         self.vehicles_ticking(true);
@@ -1882,7 +1902,7 @@ impl Game<'_> {
                 };
                 if alive {
                     let due = std::mem::take(&mut c.command_due);
-                    game.carts[i] = c;
+                    game.store_cart_back(i, c);
                     due
                 } else {
                     game.eject_cart_mobs(i);
@@ -2013,7 +2033,7 @@ impl Game<'_> {
                 return None;
             };
             if alive {
-                game.carts[i] = c;
+                game.store_cart_back(i, c);
             } else {
                 game.eject_cart_mobs(i);
                 game.release_vehicle_container(c.id);
@@ -2262,7 +2282,7 @@ impl Game<'_> {
                 }
                 let mut c = self.carts[i].clone();
                 self.prime_cart(&mut c);
-                self.carts[i] = c;
+                self.store_cart_back(i, c);
             }
             // MinecartCommandBlock.interact: a game master gets SUCCESS (the
             // client opens the editor, `open_cart_command_block`), anyone else
@@ -3008,6 +3028,10 @@ impl PreparedModelFace {
         }
     }
 
+    pub(super) fn positions(&self) -> [[f32; 3]; 4] {
+        self.positions
+    }
+
     pub(super) fn gpu_vertex(&self, corner: usize) -> horizon_client::gfx::PreparedModelVertex {
         let normal = horizon_client::item_render::direction_vector(self.facing);
         horizon_client::gfx::PreparedModelVertex {
@@ -3083,6 +3107,24 @@ pub(super) fn emit_model_faces(
                 light,
                 glint_uv: [0.0, 0.0],
             });
+        }
+    }
+}
+
+/// Vanilla multiplies tint, alpha included, only when `tintIndex != -1`.
+pub(super) fn scale_tint_alpha(vertices: &mut [Vertex], faces: &[PreparedModelFace], tint: u32) {
+    let alpha = tint >> 24;
+    if alpha == 255 {
+        return;
+    }
+    let (quads, _) = vertices.as_chunks_mut::<4>();
+    for (face, quad) in faces.iter().zip(quads) {
+        if face.tint_index < 0 {
+            continue;
+        }
+        for vertex in quad {
+            let scaled = (vertex.color >> 24) * alpha / 255;
+            vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
         }
     }
 }
@@ -3576,3 +3618,4 @@ mod tests {
     }
 }
 horizon_client::impl_joined!(Minecart);
+horizon_mod_runtime::impl_attachment_lifetime!(Minecart);

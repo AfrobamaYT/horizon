@@ -609,21 +609,16 @@ impl Game<'_> {
             assign_entity_id(next, id);
         };
         self.tnts.iter_mut().for_each(|t| give(&mut t.id));
-        self.falling.iter_mut().for_each(|f| give(&mut f.id));
-        self.creatures
-            .projectiles
-            .iter_mut()
-            .for_each(|p| give(&mut p.id));
+        self.falling.for_each_mut(|f| give(&mut f.id));
+        self.creatures.projectiles.for_each_mut(|p| give(&mut p.id));
         self.tridents.iter_mut().for_each(|t| give(&mut t.id));
         self.rockets.iter_mut().for_each(|r| give(&mut r.id));
         self.crystals.iter_mut().for_each(|c| give(&mut c.id));
         self.bolts.iter_mut().for_each(|b| give(&mut b.id));
-        self.ominous_spawners
-            .iter_mut()
-            .for_each(|o| give(&mut o.id));
+        self.ominous_spawners.for_each_mut(|o| give(&mut o.id));
         self.potions.thrown_ids().for_each(&mut give);
         self.end.eye_ids().for_each(&mut give);
-        self.breath_clouds.iter_mut().for_each(|b| give(&mut b.id));
+        self.breath_clouds.for_each_mut(|b| give(&mut b.id));
         self.dragon_fireballs
             .iter_mut()
             .for_each(|b| give(&mut b.id));

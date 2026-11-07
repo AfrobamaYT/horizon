@@ -202,7 +202,10 @@ pub use prepared_model::{
     PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
 #[cfg(feature = "test-support")]
-pub use prepared_model::{cap_prepared_instance_slots, capped_prepared_room};
+pub use prepared_model::{
+    cap_prepared_instance_slots, capped_prepared_room, set_test_prepared_generation,
+    test_prepared_generation,
+};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -330,6 +333,7 @@ mod hdr_icc;
 mod hdr_stats;
 pub use hdr::Calibration as HdrCalibration;
 pub mod block_light;
+mod custom_sky;
 mod displace;
 pub mod lightning;
 mod lod;
@@ -1370,6 +1374,9 @@ pub struct Renderer {
     celestial_buffer: wgpu::Buffer,
     end_sky: end_sky::EndSky,
     stars: stars::Stars,
+    /// OptiFine custom sky layers (`crate::custom_sky`), and the frame's from the game.
+    custom_sky: custom_sky::CustomSky,
+    custom_sky_draws: Vec<crate::custom_sky::Draw>,
     /// The glowing entities' outline (`LevelRenderer.entityOutlineTarget`).
     entity_outline: entity_outline::EntityOutline,
     panorama: panorama::Panorama,
@@ -2185,24 +2192,26 @@ fn draws_frame(format: wgpu::TextureFormatFeatures) -> bool {
     )
 }
 
-/// The frame of a renderer made with a shader API 0.2 pack picked under
-/// `HORIZON_HDR_FRAME=float` (docs/design/hdr-linear-light.md): float, so values over 1
-/// survive from the world to the tonemap.
+/// The frame of a renderer made under `HORIZON_HDR_FRAME=float` (docs/design/hdr-linear-light.md)
+/// with a shader API 0.2 pack picked, or with HDR on and no pack: float, so values over 1
+/// survive from the world to the tonemap and the HDR pass.
 const LINEAR_FRAME: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
-/// What a renderer's frame is drawn in: `LINEAR_FRAME` for a 0.2 pack under the switch
-/// (`linear`: `(picked, the device draws it)`); else `WIDE_FRAME` when it is made with HDR on
-/// and Smooth Gradients (`wide_frame`, `Graphics::wide_frame`), the surface offering HDR output
-/// (`hdr_offered`) and the device drawing it (`draws_wide_frame`): an 8-bit frame's steps band
-/// in dark gradients, and HDR shows them. Else the swapchain's 8-bit format, as without HDR.
+/// What a renderer's frame is drawn in: `LINEAR_FRAME` under the switch where the device draws
+/// it, for a 0.2 pack, or for HDR on without a pack where the surface offers HDR output
+/// (`linear`: `(a 0.2 pack picked, HDR on without a pack, the device draws it)`); else
+/// `WIDE_FRAME` when it is made with HDR on and Smooth Gradients (`wide_frame`,
+/// `Graphics::wide_frame`), the surface offering HDR output (`hdr_offered`) and the device
+/// drawing it (`draws_wide_frame`): an 8-bit frame's steps band in dark gradients, and HDR
+/// shows them. Else the swapchain's 8-bit format, as without HDR.
 fn frame_format(
     wide_frame: bool,
     hdr_offered: bool,
     device_draws_it: bool,
     swapchain: wgpu::TextureFormat,
-    linear: (bool, bool),
+    linear: (bool, bool, bool),
 ) -> wgpu::TextureFormat {
-    if linear.0 && linear.1 {
+    if linear.2 && (linear.0 || linear.1 && hdr_offered) {
         LINEAR_FRAME
     } else if wide_frame && hdr_offered && device_draws_it {
         WIDE_FRAME
@@ -2732,6 +2741,7 @@ impl Renderer {
         wide_frame: bool,
         shader_pack: bool,
         linear_pack: bool,
+        hdr_float: bool,
     ) -> Result<Self> {
         let Opened {
             instance,
@@ -2867,9 +2877,10 @@ impl Renderer {
         crate::graphics::offer_smooth_gradients(wide_ok);
         let linear = (
             linear_pack,
+            hdr_float,
             draws_frame(adapter.get_texture_format_features(LINEAR_FRAME)),
         );
-        if linear == (true, false) {
+        if linear.0 && !linear.2 {
             log::warn!(
                 "Horizon renderer: the device can't draw a float frame; the shader API 0.2 pack runs on the 8-bit one"
             );
@@ -4012,12 +4023,8 @@ impl Renderer {
             alpha_blend,
             false,
         );
-        let world_text_pipeline = world_text::pipeline(
-            &device,
-            Some(&entity_layout),
-            &entity_shader,
-            config.format.remove_srgb_suffix(),
-        );
+        let world_text_pipeline =
+            world_text::pipeline(&device, Some(&entity_layout), &entity_shader, frame_format);
         // RenderPipelines.ENTITY_SOLID: a surface of an entity that is coplanar with
         // terrain wins the tie in vanilla (the boat's floor over the trapdoor on the
         // ground it is stopped by, #5950). Terrain and entities are separate draw
@@ -4722,6 +4729,7 @@ impl Renderer {
         let uploads = upload::Uploads::new(&device);
         let section_uploads = upload::Uploads::with_chunk(&device, SECTION_UPLOAD_CHUNK);
         let stars = stars::Stars::new(&device, frame_format);
+        let custom_sky = custom_sky::CustomSky::new(&device, frame_format);
         let entity_outline = entity_outline::EntityOutline::new(
             &device,
             (&entity_shader, &entity_layout, &entity_vertex),
@@ -4850,6 +4858,8 @@ impl Renderer {
             celestial_buffer,
             end_sky: end_sky::EndSky::default(),
             stars,
+            custom_sky,
+            custom_sky_draws: Vec::new(),
             entity_outline,
             panorama,
             border_pipeline,
@@ -5072,6 +5082,15 @@ impl Renderer {
             }
         }
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+    }
+    /// The pack's OptiFine custom sky layer textures (`crate::custom_sky::CustomSky::load`).
+    pub fn set_custom_sky(&mut self, pack: &crate::custom_sky::CustomSky) {
+        self.custom_sky.set_pack(&self.device, &self.queue, pack);
+    }
+    /// The custom sky layers the next frame draws (`CustomSky::draws`): the game refills it each
+    /// frame, empty when the world's sky has none.
+    pub fn custom_sky_draws(&mut self) -> &mut Vec<crate::custom_sky::Draw> {
+        &mut self.custom_sky_draws
     }
     /// The resource packs' `core/rendertype_lines` (`HudAtlas::lines_shader`) for the block
     /// outline, or the built-in one.
@@ -6926,7 +6945,7 @@ impl Renderer {
             && !std::mem::replace(&mut self.frame_kept_logged, true)
         {
             log::info!(
-                "Horizon renderer: the {:?} frame stays until the renderer is made again; a shader API 0.2 pack picked or dropped since runs on it",
+                "Horizon renderer: the {:?} frame stays until the renderer is made again; a shader pack picked or dropped since runs on it",
                 self.frame_format
             );
         }
@@ -9150,6 +9169,12 @@ impl Renderer {
                 brightness,
             );
         }
+        self.custom_sky.prepare(
+            &mut self.uploads,
+            &mut encoder,
+            jittered,
+            &self.custom_sky_draws,
+        );
         let celestial_vertices = frame.celestial.len().min(2048 * 4);
         if frame.end_sky && !frame.title {
             self.end_sky.prepare(&self.device, frame.end_sky_sprite);
@@ -9893,6 +9918,12 @@ impl Renderer {
                                 pass.set_vertex_buffer(0, self.sunrise_buffer.slice(..));
                                 pass.draw(0..sunrise_fan::VERTICES as u32, 0..1);
                             }
+                            // OptiFine custom sky layers, over the disc and sunrise and under the
+                            // sun, moon and stars.
+                            if self.custom_sky.is_drawing() {
+                                self.custom_sky.draw(&mut pass);
+                                pass.set_bind_group(0, &self.group, &[]);
+                            }
                         }
                     }
                 }
@@ -9905,6 +9936,13 @@ impl Renderer {
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     if frame.end_sky {
                         self.end_sky.draw(&mut pass);
+                        // The End's custom sky layers go over its sky box.
+                        if self.custom_sky.is_drawing() && !pack_draws_sky && self.native.is_none()
+                        {
+                            self.custom_sky.draw(&mut pass);
+                            pass.set_pipeline(&self.celestial_pipeline);
+                            pass.set_bind_group(0, &self.entity_group, &[]);
+                        }
                     }
                     if celestial_vertices > 0 && !pack_draws_celestial {
                         // The Overworld's bodies start with the sun's quad
@@ -11991,6 +12029,12 @@ fn shadow_box(view: &pack_post::ShadowView) -> Frustum {
 pub struct Frustum {
     planes: [Vec4; 6],
 }
+
+/// A frustum with the given clip planes, for tests that drive the public draw call.
+#[cfg(feature = "test-support")]
+pub fn test_frustum(planes: [Vec4; 6]) -> Frustum {
+    Frustum { planes }
+}
 impl Frustum {
     /// Whether the camera-relative box `min..max` is at least partly inside.
     pub fn intersects(&self, min: Vec3, max: Vec3) -> bool {
@@ -12619,8 +12663,14 @@ mod tests {
     fn the_frame_is_16_bit_only_with_hdr_and_a_device_that_draws_it() {
         use super::frame_format;
         use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb, Rgba8Unorm, Rgba16Unorm};
-        // No 0.2 pack (or a device without the float frame) leaves it as before.
-        for linear in [(false, false), (false, true), (true, false)] {
+        // No float frame asked for (or a device without it) leaves it as before.
+        for linear in [
+            (false, false, false),
+            (false, false, true),
+            (true, false, false),
+            (false, true, false),
+            (true, true, false),
+        ] {
             assert_eq!(
                 frame_format(true, true, true, Bgra8Unorm, linear),
                 Rgba16Unorm
@@ -12650,8 +12700,38 @@ mod tests {
         use wgpu::TextureFormat::Bgra8UnormSrgb;
         for (wide_frame, hdr_offered, draws) in [(true, true, true), (false, false, false)] {
             assert_eq!(
-                frame_format(wide_frame, hdr_offered, draws, Bgra8UnormSrgb, (true, true)),
+                frame_format(
+                    wide_frame,
+                    hdr_offered,
+                    draws,
+                    Bgra8UnormSrgb,
+                    (true, false, true)
+                ),
                 LINEAR_FRAME
+            );
+        }
+    }
+    /// HDR on without a pack under `HORIZON_HDR_FRAME=float` gets the float frame where the
+    /// surface offers HDR output, Smooth Gradients or not; where it doesn't, the frame is as
+    /// without the switch.
+    #[test]
+    fn hdr_without_a_pack_gets_the_float_frame_where_hdr_output_is_offered() {
+        use super::{LINEAR_FRAME, frame_format};
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb};
+        for (wide_frame, draws) in [(true, true), (false, false)] {
+            assert_eq!(
+                frame_format(wide_frame, true, draws, Bgra8UnormSrgb, (false, true, true)),
+                LINEAR_FRAME
+            );
+            assert_eq!(
+                frame_format(
+                    wide_frame,
+                    false,
+                    draws,
+                    Bgra8UnormSrgb,
+                    (false, true, true)
+                ),
+                Bgra8Unorm
             );
         }
     }

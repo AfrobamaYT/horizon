@@ -2641,7 +2641,7 @@ impl Game<'_> {
         self.place_dragon_parts();
         self.dragon_contacts();
         // The chunks the dragon passes through re-save their entity lists.
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             for p in [d.previous, d.position] {
                 self.world
                     .modified
@@ -2933,7 +2933,7 @@ impl Game<'_> {
                 self.spawn_orbs([p.x, p.y, p.z], (xp as f32 * 0.2) as u32);
             }
             let (id, at) = self.dragon.as_ref().map_or((0, p), |d| (d.id, d.position));
-            self.dragon = None;
+            self.dragon.discard();
             if fight {
                 self.dragon_killed();
             }
@@ -3157,7 +3157,9 @@ impl Game<'_> {
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
-        let mut clouds = std::mem::take(&mut self.breath_clouds);
+        let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
             if c.potion.is_some() {
@@ -4134,7 +4136,7 @@ impl Game<'_> {
         if self.dragon.as_ref().is_some_and(|d| d.id == id) {
             // Only the fight's own dragon (`dragonFight`) ends it.
             let fight = self.is_fight_dragon();
-            if let Some(d) = self.dragon.take() {
+            if let Some(d) = self.dragon.extract() {
                 // remove, then gameEvent(ENTITY_DIE), before the fight hears of it.
                 self.dragon_died_event(d.id, d.position, d.alive());
             }
@@ -4450,7 +4452,7 @@ impl Game<'_> {
         };
         self.next_entity += 9;
         let id = dragon.id;
-        self.dragon = Some(dragon);
+        assert!(self.dragon.install(dragon).is_ok());
         self.fight.dragon_uuid = Some(self.uuid_for(id));
         self.fight.dirty = true;
     }
@@ -4482,7 +4484,7 @@ impl Game<'_> {
                 self.fight.dragon_uuid = Some(self.uuid_for(id));
                 self.fight.killed = false;
                 if !active {
-                    self.dragon = None;
+                    self.dragon.discard();
                     self.fight.dragon_uuid = None;
                 }
             }
@@ -4663,7 +4665,9 @@ impl Game<'_> {
         dragon.id = self.next_entity + 1;
         self.next_entity += 9;
         let id = dragon.id;
-        self.dragon = Some(dragon);
+        // Finalization listeners can install another dragon after the initial
+        // refusal check. Keep the constructor's existing replacement order.
+        self.dragon.replace(dragon);
         self.place_dragon_parts();
         self.native_joins_flush(false, id).then_some(id)
     }
@@ -4677,7 +4681,7 @@ impl Game<'_> {
         d.id = id as u32;
         d.phase = Phase::from_id(10);
         d.join = horizon_client::join_seq::JoinSeq::next();
-        self.dragon = Some(d);
+        self.dragon.replace(d);
         self.place_dragon_parts();
         if let Some(d) = self.dragon.as_mut() {
             for part in &mut d.parts {
@@ -4728,7 +4732,7 @@ impl Game<'_> {
     /// keeps pointing at the same crystal.
     pub(super) fn remove_remote_dragon(&mut self, id: i32) {
         if self.dragon.as_ref().is_some_and(|d| d.id as i32 == id) {
-            self.dragon = None;
+            self.dragon.discard();
             return;
         }
         let Some(index) = self.crystals.iter().position(|c| c.id as i32 == id) else {
@@ -5095,7 +5099,7 @@ mod tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                game.dragon = None;
+                game.dragon.discard();
                 game.native_joins_skip();
                 let at = [4.5, 200.0, 4.5];
                 let id = game
@@ -5116,7 +5120,7 @@ mod tests {
                 assert!(game.spawn_dragon_spawned(at, dispenser).is_none());
                 assert_eq!(joins.lock().unwrap().len(), 1, "no second dragon joins");
 
-                game.dragon = None;
+                game.dragon.discard();
                 cancel.store(true, Ordering::Relaxed);
                 // The dispenser calls the shared constructor directly.
                 assert!(game.spawn_dragon_spawned(at, dispenser).is_none());
@@ -5168,7 +5172,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             for reason in [Reason::SpawnItemUse, Reason::Dispenser] {
                 for answer in [Answer::Keep, Answer::Skip, Answer::Refuse] {
-                    game.dragon = None;
+                    game.dragon.discard();
                     game.world.random = LegacyRandom::new(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let mods: mod_api::Mods = vec![ModEntry::new(
@@ -5190,7 +5194,7 @@ mod tests {
                     // draws the follow-range triangle and handedness roll.
                     let mut expected = LegacyRandom::new(42);
                     let yaw = horizon_client::camera::wrap_degrees(expected.next_float() * 360.0);
-                    if let Some(dragon) = &game.dragon {
+                    if let Some(dragon) = game.dragon.as_ref() {
                         assert_eq!(dragon.yaw, yaw);
                         assert_eq!(dragon.previous_yaw, yaw);
                     }
@@ -5269,7 +5273,7 @@ mod tests {
                     Answer::Refuse,
                     Answer::RefuseJoin,
                 ] {
-                    game.dragon = None;
+                    game.dragon.discard();
                     game.world.random = LegacyRandom::new(42);
                     let calls = Arc::new(AtomicUsize::new(0));
                     let joins = Arc::new(AtomicUsize::new(0));
@@ -6196,7 +6200,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let state = game.lan_dragon_state().unwrap();
             assert_eq!(
                 state.defaults,
@@ -6209,3 +6213,7 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "dragon/residency_tests.rs"]
+mod residency_tests;
