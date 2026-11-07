@@ -704,9 +704,21 @@ pub(super) mod tests {
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             assert_eq!(items.size(host), 7);
-            let chestplate = ItemResource::of(&ItemStack::new("minecraft:diamond_chestplate", 1));
-            let boots = ItemResource::of(&ItemStack::new("minecraft:diamond_boots", 1));
-            let sword = ItemResource::of(&ItemStack::new("minecraft:iron_sword", 1));
+            let chestplate = ItemResource::of(
+                &ItemStack::new("minecraft:diamond_chestplate", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let boots = ItemResource::of(
+                &ItemStack::new("minecraft:diamond_boots", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let sword = ItemResource::of(
+                &ItemStack::new("minecraft:iron_sword", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
             // The armour slots take what names them for a zombie, one of it; the
             // chestplate is not for the feet, and a sword is not armour at all.
             assert_eq!(items.capacity(host, 4, &chestplate), 1);
@@ -777,7 +789,13 @@ pub(super) mod tests {
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
             let _ = host.transaction(|host, tx| {
-                Ok::<_, ()>(handler.insert(host, tx, 4, &ItemResource::of(&chest), 1))
+                Ok::<_, ()>(handler.insert(
+                    host,
+                    tx,
+                    4,
+                    &ItemResource::of(&chest.clone().try_into_api().unwrap()),
+                    1,
+                ))
             });
             // Through `set_equipment`.
             let through_setter = game.living(game.entity(31).unwrap()).unwrap();
@@ -2025,8 +2043,16 @@ pub(super) mod tests {
             game.armor_stands.push(ArmorStand::new(41, Vec3::ZERO, 0.0));
             let stand_slot =
                 |game: &super::Game<'_>, id: usize| game.armor_stands[id].equipment.get(4).cloned();
-            let chestplate = ItemResource::of(&ItemStack::new("minecraft:diamond_chestplate", 1));
-            let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1));
+            let chestplate = ItemResource::of(
+                &ItemStack::new("minecraft:diamond_chestplate", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            let helmet = ItemResource::of(
+                &ItemStack::new("minecraft:iron_helmet", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
 
             // Seven slots; the stand wears what its `equippable` names for
             // it, one of it; a sword is not armour.
@@ -2044,7 +2070,11 @@ pub(super) mod tests {
                     items.capacity(
                         host,
                         4,
-                        &ItemResource::of(&ItemStack::new("minecraft:iron_sword", 1))
+                        &ItemResource::of(
+                            &ItemStack::new("minecraft:iron_sword", 1)
+                                .try_into_api()
+                                .unwrap()
+                        )
                     ),
                     0
                 );
