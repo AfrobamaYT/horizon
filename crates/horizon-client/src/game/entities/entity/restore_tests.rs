@@ -14,13 +14,16 @@ macro_rules! restore_cases {
         fn $name() {
             with_game(|game| {
                 game.summon_with_nbt($kind, [0.5, 70.0, 0.5], $nbt).unwrap();
+                game.lan_assign_ids();
                 let prefix: Vec<_> = game$(.$field)+.iter().map(|e| (e.id, e.join_seq())).collect();
                 assert_eq!(prefix.len(), 1);
                 let taken = game.take_entities();
                 game.summon_with_nbt($kind, [4.5, 70.0, 0.5], $nbt).unwrap();
+                game.lan_assign_ids();
                 let suffix: Vec<_> = game$(.$field)+.iter().map(|e| (e.id, e.join_seq())).collect();
                 assert_eq!(suffix.len(), 1);
                 assert!(prefix[0].1 < suffix[0].1);
+                assert_ne!(prefix[0].0, suffix[0].0);
                 game.restore_entities(taken);
                 let restored: Vec<_> = game$(.$field)+.iter().map(|e| (e.id, e.join_seq())).collect();
                 assert_eq!(restored, [prefix, suffix].concat());
@@ -77,9 +80,13 @@ fn restoring_keeps_both_owners_bound_and_old_batches_immutable() {
             .unwrap();
         let spawned = game.boats[0].id;
         let holder = game.entity(spawned).unwrap();
-        VALUE.set(&mut values, Holder::Entity(spawned), 20).unwrap();
+        let mut spawned_values = Attachments::default();
+        VALUE
+            .set(&mut spawned_values, Holder::Entity(spawned), 20)
+            .unwrap();
         let spawn_registration = game.boats.update(0, |boat| {
-            boat.attachment_lifetime().bind(&mut values, &index, holder);
+            boat.attachment_lifetime()
+                .bind(&mut spawned_values, &index, holder);
             boat.attachment_lifetime().registration().unwrap()
         });
         game.restore_entities(taken);
@@ -95,7 +102,10 @@ fn restoring_keeps_both_owners_bound_and_old_batches_immutable() {
             assert!(expected.same_registration(&actual));
         }
         assert_eq!(VALUE.get(&mut values, Holder::Entity(original)), Ok(10));
-        assert_eq!(VALUE.get(&mut values, Holder::Entity(spawned)), Ok(20));
+        assert_eq!(
+            VALUE.get(&mut spawned_values, Holder::Entity(spawned)),
+            Ok(20)
+        );
         VALUE
             .set(&mut values, Holder::Entity(original), 30)
             .unwrap();
@@ -108,6 +118,9 @@ fn restoring_keeps_both_owners_bound_and_old_batches_immutable() {
         assert_eq!(before.len(), 1);
         assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
         assert_eq!(after.len(), 2);
-        assert_eq!(VALUE.get(&mut values, Holder::Entity(spawned)), Ok(20));
+        assert_eq!(
+            VALUE.get(&mut spawned_values, Holder::Entity(spawned)),
+            Ok(20)
+        );
     });
 }
