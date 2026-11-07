@@ -5,6 +5,26 @@ use horizon_core::nbt::{JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
+/// Registry access for generated stack write-back in full and narrowed hook hosts.
+pub(in crate::game) trait ItemBoundary {
+    fn boundary_items(&self) -> Option<&Items>;
+}
+impl ItemBoundary for super::Game<'_> {
+    fn boundary_items(&self) -> Option<&Items> {
+        Some(self.items())
+    }
+}
+impl ItemBoundary for super::GameLevel<'_> {
+    fn boundary_items(&self) -> Option<&Items> {
+        Some(self.items)
+    }
+}
+impl ItemBoundary for super::native_hooks::HitLevel<'_> {
+    fn boundary_items(&self) -> Option<&Items> {
+        self.0.tags()
+    }
+}
+
 /// Normalize an existing game write's answer without changing its implementation.
 /// Generated API forwarders add the checked-input refusal around successful native answers.
 pub(in crate::game) trait IntoWriteResult {

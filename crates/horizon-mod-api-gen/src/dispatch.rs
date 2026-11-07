@@ -419,7 +419,47 @@ pub(super) fn emit(
             let target_path: syn::Path = syn::parse_str(target)
                 .map_err(|error| format!("invalid target for {name}: {error}"))?;
             let receiver = &target_path.segments[target_path.segments.len() - 2].ident;
-            fire.push_str(&format!("impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ mod_api::{call}({passed}); }} }}\n", signature = signature.to_token_stream()));
+            let crossing = if declared.is_empty() {
+                stack_crossing(
+                    &args,
+                    output.as_ref(),
+                    hook_id,
+                    scoped.is_some(),
+                    &surface_calls,
+                )
+            } else {
+                None
+            };
+            let body = if let Some(crossing) = crossing {
+                let passed = host
+                    .as_ref()
+                    .map(|(_, param)| {
+                        if param.call == "&*self" && receiver_mut == Some(false) {
+                            "self".to_owned()
+                        } else {
+                            param.call.to_owned()
+                        }
+                    })
+                    .into_iter()
+                    .chain(crossing.arguments.into_iter().map(|argument| {
+                        surface_calls
+                            .get(argument.as_str())
+                            .cloned()
+                            .unwrap_or(argument)
+                    }))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "{} mod_api::{call}({passed}); {}",
+                    crossing.before, crossing.after
+                )
+            } else {
+                format!("mod_api::{call}({passed});")
+            };
+            fire.push_str(&format!(
+                "impl {receiver}<'_> {{ #[inline] pub(super) {signature} {{ {body} }} }}\n",
+                signature = signature.to_token_stream()
+            ));
             if fill {
                 let passed = sig
                     .inputs
@@ -590,6 +630,148 @@ pub(super) fn emit(
 }
 
 /// A carrier's fields, each type with its elided lifetimes named `'a`, and its generics.
+struct StackCrossing {
+    before: String,
+    arguments: Vec<String>,
+    after: String,
+}
+
+/// Only stack-bearing declared argument types select this seam. Event records
+/// are built explicitly at their game call sites, not inferred from game bodies.
+fn stack_crossing(
+    args: &[(String, &Type)],
+    output: Option<&(String, &Type)>,
+    hook_id: &str,
+    scoped: bool,
+    surfaces: &std::collections::HashMap<&str, String>,
+) -> Option<StackCrossing> {
+    fn contains_stack(ty: &Type) -> bool {
+        use syn::visit::Visit;
+        struct Stack(bool);
+        impl<'ast> Visit<'ast> for Stack {
+            fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
+                self.0 |= path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|s| s.ident == "ItemStack");
+                syn::visit::visit_type_path(self, path);
+            }
+        }
+        let mut stack = Stack(false);
+        stack.visit_type(ty);
+        stack.0
+    }
+    let parameters = args.iter().chain(output).collect::<Vec<_>>();
+    if !parameters.iter().any(|(_, ty)| contains_stack(ty)) {
+        return None;
+    }
+    let guard = if scoped { "has_part_hook" } else { "listened" };
+    let mut before = format!(
+        "if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} use crate::game::api_values::TryIntoApi; "
+    );
+    if parameters.iter().any(|(_, ty)| {
+        contains_stack(ty) && matches!(ty, Type::Reference(r) if r.mutability.is_some())
+    }) {
+        before.push_str("use crate::game::api_values::{TryIntoEngine, ItemBoundary}; ");
+    }
+    let mut arguments = Vec::new();
+    let mut validations = String::new();
+    let mut writes = String::new();
+    for (name, ty) in parameters {
+        let stack = contains_stack(ty);
+        let mutable = matches!(ty, Type::Reference(r) if r.mutability.is_some());
+        if surfaces.contains_key(name.as_str()) || (!stack && !mutable) {
+            arguments.push(name.clone());
+            continue;
+        }
+        let local = format!("__api_{name}");
+        let value = if stack {
+            format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
+        } else {
+            format!("(*{name}).to_owned()")
+        };
+        before.push_str(&format!(
+            "let {mutability}{local} = {value}; ",
+            mutability = if mutable { "mut " } else { "" }
+        ));
+        arguments.push(match ty {
+            Type::Reference(_) => format!("&{}{local}", if mutable { "mut " } else { "" }),
+            Type::Path(_)
+                if generic_of(ty, "Option").is_some_and(|ty| matches!(ty, Type::Reference(_))) =>
+            {
+                format!("{local}.as_ref()")
+            }
+            _ => local.clone(),
+        });
+        if mutable {
+            let converted = format!("__engine_{name}");
+            let value = if stack {
+                let result = format!("__checked_{name}");
+                validations.push_str(&format!("let {result}: Result<_, mod_api::StackWriteError> = self.boundary_items().ok_or(mod_api::StackWriteError::Unavailable).and_then(|items| {local}.try_into_engine(items)); "));
+                format!("match {result} {{ Ok(value) => value, Err(_) => return }}")
+            } else {
+                local
+            };
+            validations.push_str(&format!("let {converted} = {value}; "));
+            writes.push_str(&format!("*{name} = {converted}; "));
+        }
+    }
+    Some(StackCrossing {
+        before,
+        arguments,
+        after: format!("{validations}{writes}"),
+    })
+}
+
+#[cfg(test)]
+mod stack_crossing_tests {
+    use super::*;
+    #[test]
+    fn stack_hook_gates_before_conversion_and_stages_every_write() {
+        let stack: Type = syn::parse_quote!(&mut ItemStack);
+        let power: Type = syn::parse_quote!(&mut u32);
+        let args = [("stack".to_owned(), &stack), ("power".to_owned(), &power)];
+        let crossing =
+            stack_crossing(&args, None, "ItemDamage", true, &Default::default()).unwrap();
+        assert!(
+            crossing
+                .before
+                .starts_with("if !mod_api::__private::has_part_hook")
+        );
+        assert!(crossing.before.contains("stack.try_into_api()"));
+        assert_eq!(crossing.arguments, ["&mut __api_stack", "&mut __api_power"]);
+        assert!(
+            crossing
+                .after
+                .contains("Result<_, mod_api::StackWriteError>")
+        );
+        let validation = crossing.after.find("try_into_engine").unwrap();
+        let first_write = crossing.after.find("*stack =").unwrap();
+        assert!(validation < first_write);
+        assert!(crossing.after.find("let __engine_power").unwrap() < first_write);
+        let body = format!(
+            "{{ {} {}; {} }}",
+            crossing.before, "dispatch(&mut __api_stack, &mut __api_power)", crossing.after
+        );
+        syn::parse_str::<syn::Block>(&body).unwrap();
+    }
+    #[test]
+    fn plain_hook_has_no_stack_seam() {
+        let scalar: Type = syn::parse_quote!(&mut u32);
+        assert!(
+            stack_crossing(
+                &[("power".to_owned(), &scalar)],
+                None,
+                "Plain",
+                false,
+                &Default::default()
+            )
+            .is_none()
+        );
+    }
+}
+
 fn carrier_fields(args: &[(String, &Type)]) -> (String, &'static str) {
     let mut lifetimes = CarrierLifetimes::default();
     let fields = args
