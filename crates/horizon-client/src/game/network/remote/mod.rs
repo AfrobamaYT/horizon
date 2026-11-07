@@ -2686,6 +2686,9 @@ impl Game<'_> {
         // handleLogin / handleRespawn: LocalPlayer.setPortalCooldown, so a
         // player who arrives standing in a portal gets no overlay from it.
         self.portals.player.cooldown = spawn.portal_cooldown;
+        if let Some(profile) = self.remote.as_ref().map(|remote| remote.profile) {
+            self.initialize_entity(Holder::Player(profile), "minecraft:player");
+        }
         self.apply_settings();
     }
 
@@ -3098,6 +3101,16 @@ impl Game<'_> {
     }
     /// `recreateFromPacket`: yRot and xRot from the packet, the body and head
     /// both at its head yaw (LivingEntity).
+    pub(super) fn client_attachment_entity_exists(&self, holder: Holder) -> bool {
+        self.remote.as_ref().is_some_and(|remote| match holder {
+            Holder::Entity(id) => remote.entities.contains_key(&(id as i32)),
+            Holder::Player(uuid) => {
+                remote.profile == uuid || remote.level_players.values().any(|p| *p == uuid)
+            }
+            _ => false,
+        })
+    }
+
     fn spawn_entity(&mut self, id: i32, kind: &str, position: [f64; 3], rotation: [f32; 3]) {
         let [yaw, pitch, head] = rotation;
         let at = Vec3::new(position[0], position[1], position[2]);
@@ -3758,6 +3771,11 @@ impl Game<'_> {
                 // The new LocalPlayer copies reduced debug info through its setter.
                 self.debug_entries.invalidate();
                 let old_player = self.remote.as_ref().map(|r| (r.entity_id, r.profile));
+                if let Some((_, uuid)) = old_player {
+                    self.forget_entity_initialization(horizon_client::lan::playerdata::uuid_ints(
+                        uuid,
+                    ));
+                }
                 if let Some(r) = self.remote.as_ref() {
                     self.audio.remove_sound_entity(r.entity_id as u32);
                 }
@@ -3991,6 +4009,12 @@ impl Game<'_> {
                     p.id as u32,
                     horizon_client::lan::playerdata::uuid_ints(p.uuid),
                 );
+                let holder = if kind == "minecraft:player" {
+                    Holder::Player(p.uuid)
+                } else {
+                    Holder::Entity(p.id as u32)
+                };
+                self.initialize_entity(holder, &kind);
                 self.spawn_entity(p.id, &kind, p.position, rotation);
                 if let Some(r) = self.remote.as_mut() {
                     r.cart_lerps.remove(&p.id);
@@ -4025,6 +4049,9 @@ impl Game<'_> {
             }
             C::RemoveEntities(p) => {
                 for id in p.ids {
+                    if let Some(uuid) = self.persist.uuids.get(&(id as u32)).copied() {
+                        self.forget_entity_initialization(uuid);
+                    }
                     if let Some(r) = self.remote.as_mut() {
                         if let Some(uuid) = r.level_players.remove(&id) {
                             r.attachments.remove(&Holder::Player(uuid));
@@ -12074,7 +12101,7 @@ mod tests {
             Box::new(Mod(calls.clone())),
         )]
         .into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_client_game(|game| {
                 let (client, _server) = horizon_protocol::connection::Pipe::pair();
