@@ -1511,12 +1511,12 @@ impl Game<'_> {
         if event != TNT_PRIME_EVENT {
             return;
         }
-        if let Some(c) = self
+        if let Some(i) = self
             .carts
-            .iter_mut()
-            .find(|c| c.id == id as u32 && c.kind == CartKind::Tnt)
+            .iter()
+            .position(|c| c.id == id as u32 && c.kind == CartKind::Tnt)
         {
-            c.fuse = 80;
+            self.carts.update(i, |c| c.fuse = 80);
         }
     }
     fn explode_cart(&mut self, c: &Minecart, speed_sqr: f64) {
@@ -1584,21 +1584,22 @@ impl Game<'_> {
             }
             for &k in &near {
                 let k = k as usize;
-                let c = &mut self.carts[k];
-                if !bb.intersects(c.bounds()) {
-                    continue;
-                }
-                let (mut xa, mut za) = (feet.x - c.position.x, feet.z - c.position.z);
-                let dd = xa * xa + za * za;
-                if dd < f64::from(1.0e-4f32) {
-                    continue;
-                }
-                let d = dd.sqrt();
-                let pow = (1.0 / d).min(1.0);
-                xa = xa / d * pow * f64::from(0.1f32) * 0.5;
-                za = za / d * pow * f64::from(0.1f32) * 0.5;
-                c.velocity.x -= xa;
-                c.velocity.z -= za;
+                self.carts.update(k, |c| {
+                    if !bb.intersects(c.bounds()) {
+                        return;
+                    }
+                    let (mut xa, mut za) = (feet.x - c.position.x, feet.z - c.position.z);
+                    let dd = xa * xa + za * za;
+                    if dd < f64::from(1.0e-4f32) {
+                        return;
+                    }
+                    let d = dd.sqrt();
+                    let pow = (1.0 / d).min(1.0);
+                    xa = xa / d * pow * f64::from(0.1f32) * 0.5;
+                    za = za / d * pow * f64::from(0.1f32) * 0.5;
+                    c.velocity.x -= xa;
+                    c.velocity.z -= za;
+                });
             }
         }
         self.push_carts_from_mobs(&cells);
@@ -1630,22 +1631,23 @@ impl Game<'_> {
             }
             for &k in &near {
                 let k = k as usize;
-                let c = &mut self.carts[k];
-                // hasPassenger(mob): a mob in this cart never pushes it.
-                if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
-                    continue;
-                }
-                let Some((xa, za)) = cart_push_from(feet, c.position) else {
-                    continue;
-                };
-                c.velocity.x -= xa;
-                c.velocity.z -= za;
-                let m = &mut self.mobs[j];
-                if m.pushable() && m.rider.is_none() && m.extra.rider.is_none() {
-                    m.velocity.x += xa / 4.0;
-                    m.velocity.z += za / 4.0;
-                    m.needs_sync = true;
-                }
+                self.carts.update(k, |c| {
+                    // hasPassenger(mob): a mob in this cart never pushes it.
+                    if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
+                        return;
+                    }
+                    let Some((xa, za)) = cart_push_from(feet, c.position) else {
+                        return;
+                    };
+                    c.velocity.x -= xa;
+                    c.velocity.z -= za;
+                    let m = &mut self.mobs[j];
+                    if m.pushable() && m.rider.is_none() && m.extra.rider.is_none() {
+                        m.velocity.x += xa / 4.0;
+                        m.velocity.z += za / 4.0;
+                        m.needs_sync = true;
+                    }
+                });
             }
         }
     }
@@ -1710,8 +1712,8 @@ impl Game<'_> {
                     Vec3::new(mo.x * 0.2 + (xdd + xa), mo.y, mo.z * 0.2 + (zdd + za)),
                 )
             };
-            self.carts[j].velocity = nt;
-            self.carts[i].velocity = no;
+            self.carts.update(j, |c| c.velocity = nt);
+            self.carts.update(i, |c| c.velocity = no);
         }
         self.pickup_from_cart(i);
     }
@@ -1775,7 +1777,8 @@ impl Game<'_> {
                 continue;
             };
             if !occupied {
-                self.carts[i].velocity = self.carts[i].velocity.subtract(v);
+                self.carts
+                    .update(i, |c| c.velocity = c.velocity.subtract(v));
             }
             let m = &mut self.mobs[j];
             if m.pushable() {
@@ -1867,7 +1870,7 @@ impl Game<'_> {
             // a mineshaft's chest cart carries its whole roll as NBT. The
             // stored cart keeps its slots for whatever reads them meanwhile.
             let due = self.with_entity_held_out(id, |game| {
-                let loot = game.carts[i].loot.take();
+                let loot = game.carts.update(i, |c| c.loot.take());
                 let mut c = game.carts[i].clone();
                 c.loot = loot;
                 let alive = game.tick_cart(&mut c, [0.0; 2]);
@@ -2166,23 +2169,27 @@ impl Game<'_> {
     /// `setChestVehicleItem` first unpack its loot table with no player, so
     /// no `player_generates_container_loot` fires later. While its menu is
     /// open the live slots are the placeholder copy (`open_cart_container`).
-    pub(super) fn cart_slots(&mut self, id: u32) -> Option<&mut Vec<Option<ItemStack>>> {
-        let c = self.carts.iter_mut().find(|c| c.id == id)?;
-        c.loot = None;
+    pub(super) fn edit_cart_slots<R>(
+        &mut self,
+        id: u32,
+        edit: impl FnOnce(&mut Vec<Option<ItemStack>>) -> R,
+    ) -> Option<R> {
+        let i = self.carts.iter().position(|c| c.id == id)?;
+        self.carts.update(i, |c| c.loot = None);
         match self
             .world
             .block_entities
             .get_mut(&(i32::MAX - 15, CART_KEY_Y, id as i32))
         {
-            Some(BlockEntity::Chest(open)) => Some(open),
-            _ => Some(&mut c.items),
+            Some(BlockEntity::Chest(open)) => Some(edit(open)),
+            _ => Some(self.carts.update(i, |c| edit(&mut c.items))),
         }
     }
     /// `ContainerEntity.unpackChestVehicleLootTable` for a player who opens a
     /// chest minecart: a roll it still holds fires `player_generates_container_loot`
     /// for its table, and the cart keeps its items from then on.
     fn unpack_cart_loot(&mut self, i: usize) {
-        let Some(loot) = self.carts[i].loot.take() else {
+        let Some(loot) = self.carts.update(i, |c| c.loot.take()) else {
             return;
         };
         if loot.items == horizon_client::save::encode_items(&self.carts[i].items) {
@@ -2224,17 +2231,23 @@ impl Game<'_> {
                 let fuel = held
                     .as_ref()
                     .is_some_and(|s| matches!(&*s.item, "minecraft:coal" | "minecraft:charcoal"));
-                let c = &mut self.carts[i];
                 // Java int arithmetic: a mod can set any fuel.
-                if fuel && let Some(next) = furnace_fuel_after(c.fuel) {
+                let fueled = self.carts.update(i, |c| {
+                    if !fuel {
+                        return false;
+                    }
+                    let Some(next) = furnace_fuel_after(c.fuel) else {
+                        return false;
+                    };
                     c.fuel = next;
                     if c.fuel > 0 {
                         let p = self.player.as_ref().map_or(c.position, |p| p.position);
                         c.push = Vec3::new(c.position.x - p.x, 0.0, c.position.z - p.z);
                     }
-                    if !self.creative {
-                        self.consume_held();
-                    }
+                    true
+                });
+                if fueled && !self.creative {
+                    self.consume_held();
                 }
             }
             CartKind::Tnt => {
@@ -2329,8 +2342,8 @@ impl Game<'_> {
             return;
         };
         let items = items.clone();
-        if let Some(c) = self.carts.iter_mut().find(|c| c.id as i32 == key.2) {
-            c.items = items;
+        if let Some(i) = self.carts.iter().position(|c| c.id as i32 == key.2) {
+            self.carts.update(i, |c| c.items = items);
         } else if let Some(i) = self.boats.iter().position(|b| b.id as i32 == key.2) {
             self.boats.update(i, |b| {
                 b.items = items;
@@ -2420,15 +2433,14 @@ impl Game<'_> {
         if cancel {
             return false;
         }
-        let destroyed = {
-            let c = &mut self.carts[i];
+        let destroyed = self.carts.update(i, |c| {
             c.hurt_dir = -c.hurt_dir;
             c.hurt_time = 10;
             c.damage += damage * 10.0;
             // MinecartTNT.shouldSourceDestroy: fire and explosions destroy
             // (so ignite) a TNT cart whatever damage it has taken.
             cart_is_destroyed(creative, c.damage, fire && c.kind == CartKind::Tnt)
-        };
+        });
         if destroyed {
             let speed = self.carts[i].velocity.x * self.carts[i].velocity.x
                 + self.carts[i].velocity.z * self.carts[i].velocity.z;

@@ -161,7 +161,7 @@ impl Game<'_> {
     /// mobs on mobs.
     pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
-        // The server's players in their boats and minecarts.
+        // Players arrive in boarding order; the first rider drives.
         for &(vehicle, guest) in guests {
             riding.add(vehicle as i32, guest);
         }
@@ -236,7 +236,10 @@ impl Game<'_> {
             out.push(e);
         }
         let improvements = self.minecart_improvements();
-        for c in self.carts.iter_mut().filter(|c| c.id > after) {
+        self.carts.for_each_mut(|c| {
+            if c.id <= after {
+                return;
+            }
             let p = c.position;
             let mut e = state(c.id, c.kind.id(), [p.x, p.y, p.z], c.yaw, c.on_ground());
             e.pitch = c.pitch;
@@ -291,7 +294,7 @@ impl Game<'_> {
                 _ => {}
             }
             out.push(e);
-        }
+        });
         for a in self.armor_stands.iter().filter(|a| a.id > after) {
             let p = a.position;
             let mut e = state(

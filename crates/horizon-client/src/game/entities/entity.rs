@@ -754,8 +754,13 @@ macro_rules! define_entity_handles {
                     $($field: std::mem::take(&mut self$(.$list)+),)*
                 }
             }
-            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
-                $(self$(.$list)+ = taken.$field;)*
+            pub(super) fn restore_entities(&mut self, mut taken: TakenEntities) {
+                $({
+                    let expected = self$(.$list)+.len() + taken.$field.len();
+                    std::mem::swap(&mut self$(.$list)+, &mut taken.$field);
+                    self$(.$list)+.append(&mut taken.$field);
+                    debug_assert_eq!(self$(.$list)+.len(), expected);
+                })*
             }
             /// Every entity's handle: lengths read now, nothing allocated, and
             /// no borrow of `Game` held, so the caller can change it mid-walk.
@@ -2081,6 +2086,10 @@ mod trident_selector_tests {
         assert_eq!(t.selector_target(), Some(Target::Trident(9)));
     }
 }
+
+#[cfg(test)]
+#[path = "entity/restore_tests.rs"]
+mod restore_tests;
 
 #[cfg(test)]
 mod join_order_tests {

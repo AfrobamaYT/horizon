@@ -1726,12 +1726,14 @@ impl Game<'_> {
                 }
             }
             Target::Cart(id) => {
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                    c.position = v;
-                    c.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(c, r);
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                    self.carts.update(i, |c| {
+                        c.position = v;
+                        c.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(c, r);
+                        }
+                    });
                 }
             }
             Target::Fangs(id) => {
