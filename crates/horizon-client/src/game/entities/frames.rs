@@ -766,11 +766,12 @@ mod source_tests {
 #[cfg(test)]
 mod map_limit_tests {
     use super::super::maps::{Decoration, Key, MapData};
-    use super::super::native_machines::tests::server_game;
     use super::*;
 
     fn frame(id: u32) -> ItemFrame {
         ItemFrame {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
             id,
             pos: [0, 64, id as i32],
             facing: 3,
@@ -814,24 +815,25 @@ mod map_limit_tests {
     #[test]
     #[ignore = "needs prepared resources (HORIZON_TEST_RESOURCES)"]
     fn a_map_tracking_more_than_256_markers_stays_in_the_hand() {
-        let mut game = server_game();
-        game.item_frames = vec![frame(1), frame(2)];
-        game.maps.data.insert(7, map_tracking(257));
-        game.maps.data.insert(8, map_tracking(256));
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.item_frames.extend([frame(1), frame(2)]);
+            game.maps.data.insert(7, map_tracking(257));
+            game.maps.data.insert(8, map_tracking(256));
 
-        // ItemFrame.interact: FAIL, the frame stays empty and the map is kept.
-        *game.held_mut() = Some(filled_map(7));
-        assert!(
-            game.interact_frame(at(1)),
-            "the refusal ends the interaction"
-        );
-        assert!(game.item_frames[0].item.is_none());
-        assert_eq!(game.held().and_then(|s| s.data()?.map_id), Some(7));
+            // ItemFrame.interact: FAIL, the frame stays empty and the map is kept.
+            *game.held_mut() = Some(filled_map(7));
+            assert!(
+                game.interact_frame(at(1)),
+                "the refusal ends the interaction"
+            );
+            assert!(game.item_frames[0].item.is_none());
+            assert_eq!(game.held().and_then(|s| s.data()?.map_id), Some(7));
 
-        // At the limit (not over it) the map goes in.
-        *game.held_mut() = Some(filled_map(8));
-        assert!(game.interact_frame(at(2)));
-        let framed = game.item_frames[1].item.as_ref();
-        assert_eq!(framed.and_then(|s| s.data()?.map_id), Some(8));
+            // At the limit (not over it) the map goes in.
+            *game.held_mut() = Some(filled_map(8));
+            assert!(game.interact_frame(at(2)));
+            let framed = game.item_frames[1].item.as_ref();
+            assert_eq!(framed.and_then(|s| s.data()?.map_id), Some(8));
+        });
     }
 }

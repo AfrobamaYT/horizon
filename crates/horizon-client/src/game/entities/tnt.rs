@@ -1473,7 +1473,6 @@ horizon_client::impl_joined!(PrimedTnt);
 
 #[cfg(test)]
 mod entity_collision_tests {
-    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
     use horizon_client::chunk::Chunk;
     use horizon_core::position::ChunkPos;
     use std::sync::Arc;
@@ -1484,97 +1483,69 @@ mod entity_collision_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn tnt_sand_and_orbs_land_on_boats_and_shulkers() {
-        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
-        let settings = Settings::default();
-        let loaded = load_resources(
-            root.clone(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            true,
-            &Progress::new(),
-            &mut |_, _| unreachable!(),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.game_dir = Some(
-            std::env::temp_dir().join(format!("horizon-tnt-boat-unit-{}", std::process::id())),
-        );
-        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&root),
-            None,
-        )
-        .unwrap();
-        game.build_registries();
-        game.set_allow_commands(true);
-        game.ui.difficulty = 2;
-        let registry = &game.pack.assets.registry;
-        let stone = registry.default_state("minecraft:stone").unwrap();
-        let sand = registry.default_state("minecraft:sand").unwrap();
-        let mut chunk = Chunk::empty(0, 0);
-        for x in 0..16 {
-            for z in 0..16 {
-                chunk.set(x, 199, z, stone.0);
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.ui.difficulty = 2;
+            let registry = &game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let sand = registry.default_state("minecraft:sand").unwrap();
+            let mut chunk = Chunk::empty(0, 0);
+            for x in 0..16 {
+                for z in 0..16 {
+                    chunk.set(x, 199, z, stone.0);
+                }
             }
-        }
-        game.world.chunks.insert((0, 0), Arc::new(chunk));
-        game.block_ticks
-            .add_empty_chunk(ChunkPos::new(0, 0))
-            .unwrap();
-        assert!(game.run_command("forceload add 0 0"));
-        assert!(game.run_command("summon oak_boat 4.5 200 4.5"));
-        assert!(game.run_command("summon oak_boat 12.5 200 12.5"));
-        assert!(game.run_command("summon shulker 8.5 200 8.5 {NoAI:1b}"));
-        assert!(game.run_command("summon tnt 4.5 202 4.5 {fuse:80}"));
-        assert!(game.run_command("summon tnt 4.5 202 12.5 {fuse:80}"));
-        assert!(game.run_command(
-            "summon falling_block 8.5 203 8.5 {BlockState:{Name:\"minecraft:sand\"},Time:1}"
-        ));
-        assert!(game.run_command("summon experience_orb 12.5 202 12.5 {Value:1}"));
-        for _ in 0..40 {
-            game.tick_world(true).unwrap();
-        }
-        let boat_top = game.boats[0].bounds().max_position().y;
-        let tnt_at = |z: f64| {
-            game.tnts
-                .iter()
-                .find(|t| (t.position.z - z).abs() < 0.5)
-                .map(|t| t.position.y)
-                .unwrap()
-        };
-        assert_eq!(tnt_at(4.5), boat_top, "the TNT rests on the boat");
-        assert_eq!(tnt_at(12.5), 200.0, "the other TNT lands on the stone");
-        assert_eq!(
-            game.orbs[0].position.y, boat_top,
-            "the orb rests on the boat"
-        );
-        // FallingBlockEntity.tick: it stops on the shulker, but the air
-        // under it would let it fall on (`wouldContinueFalling`), so it breaks
-        // into an item there instead of passing through to the stone.
-        assert_ne!(
-            game.world.block(8, 200, 8),
-            sand,
-            "the sand does not fall through"
-        );
-        assert_ne!(
-            game.world.block(8, 201, 8),
-            sand,
-            "nor is it placed over air"
-        );
-        assert!(
-            game.dropped
-                .iter()
-                .any(|i| &*i.stack.item == "minecraft:sand"),
-            "the sand breaks into an item"
-        );
+            game.world.chunks.insert((0, 0), Arc::new(chunk));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            assert!(game.run_command("forceload add 0 0"));
+            assert!(game.run_command("summon oak_boat 4.5 200 4.5"));
+            assert!(game.run_command("summon oak_boat 12.5 200 12.5"));
+            assert!(game.run_command("summon shulker 8.5 200 8.5 {NoAI:1b}"));
+            assert!(game.run_command("summon tnt 4.5 202 4.5 {fuse:80}"));
+            assert!(game.run_command("summon tnt 4.5 202 12.5 {fuse:80}"));
+            assert!(game.run_command(
+                "summon falling_block 8.5 203 8.5 {BlockState:{Name:\"minecraft:sand\"},Time:1}"
+            ));
+            assert!(game.run_command("summon experience_orb 12.5 202 12.5 {Value:1}"));
+            for _ in 0..40 {
+                game.tick_world(true).unwrap();
+            }
+            let boat_top = game.boats[0].bounds().max_position().y;
+            let tnt_at = |z: f64| {
+                game.tnts
+                    .iter()
+                    .find(|t| (t.position.z - z).abs() < 0.5)
+                    .map(|t| t.position.y)
+                    .unwrap()
+            };
+            assert_eq!(tnt_at(4.5), boat_top, "the TNT rests on the boat");
+            assert_eq!(tnt_at(12.5), 200.0, "the other TNT lands on the stone");
+            assert_eq!(
+                game.orbs[0].position.y, boat_top,
+                "the orb rests on the boat"
+            );
+            // FallingBlockEntity.tick: it stops on the shulker, but the air
+            // under it would let it fall on (`wouldContinueFalling`), so it breaks
+            // into an item there instead of passing through to the stone.
+            assert_ne!(
+                game.world.block(8, 200, 8),
+                sand,
+                "the sand does not fall through"
+            );
+            assert_ne!(
+                game.world.block(8, 201, 8),
+                sand,
+                "nor is it placed over air"
+            );
+            assert!(
+                game.dropped
+                    .iter()
+                    .any(|i| &*i.stack.item == "minecraft:sand"),
+                "the sand breaks into an item"
+            );
+        });
     }
 }
