@@ -25,6 +25,7 @@ fn tooltip_position(
     (x, y)
 }
 
+use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Game, Screen};
 use horizon_client::{
     block_entity_item, brewing,
@@ -720,7 +721,7 @@ impl Game<'_> {
                 s.anvil = answer.clone();
             }
             _ => {
-                let mut update = mod_api::menu::AnvilUpdate::new(
+                let mut update = crate::menu::AnvilUpdate::new(
                     left,
                     s.inputs[1].clone(),
                     Some(name.clone()),
@@ -728,7 +729,7 @@ impl Game<'_> {
                 );
                 let mut cancel = false;
                 let (player, entity_id) = (self.own_uuid(), self.own_entity_id());
-                self.native_anvil_update(player, entity_id, s.pos, &mut update, &mut cancel);
+                self.api_anvil_update(player, entity_id, s.pos, &mut update, &mut cancel);
                 update.answer(cancel, &mut s.anvil);
                 s.anvil_answer = Some((s.inputs.clone(), name, s.anvil.clone()));
             }
@@ -2715,19 +2716,22 @@ impl Game<'_> {
                 &details,
                 stack,
                 item_info,
-                self,
-                &context,
+                |appender, stack, out| {
+                    if let Ok(stack) = stack.try_into_api() {
+                        appender.append(self, &stack, &context, out);
+                    }
+                },
                 appenders
                     .iter()
                     .map(|p| (p.component(), p.placement(), p.enabled(), p.appender())),
             );
         }
         // ItemTooltipEvent, once the tooltip vanilla shows is complete.
-        if shown {
+        if shown && let Ok(stack) = stack.try_into_api() {
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
-                stack,
+                stack: &stack,
                 display: &display,
                 advanced,
                 creative,
@@ -2796,6 +2800,7 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::RenderTooltipPre) {
             return Some(at);
         }
+        let stack = stack.try_into_api().ok()?;
         let elements: Vec<TooltipElement> = lines
             .iter()
             .cloned()
@@ -2814,7 +2819,7 @@ impl Game<'_> {
         };
         self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
             draw: &mut draw,
-            stack,
+            stack: stack.as_ref(),
             screen_width: screen.0 as i32,
             screen_height: screen.1 as i32,
             elements: &elements,
@@ -2972,9 +2977,11 @@ impl Game<'_> {
         let mut component = None;
         self.native_tooltip_component(stack, &mut component);
         let images: Vec<TooltipImage> = tooltip_component_size(component)
-            .map(|size| TooltipImage {
-                stack: stack.clone(),
-                size,
+            .and_then(|size| {
+                Some(TooltipImage {
+                    stack: stack.try_into_api().ok()?,
+                    size,
+                })
             })
             .into_iter()
             .collect();
@@ -3015,7 +3022,9 @@ impl Game<'_> {
         }
         let mut at = y + text_h + bundle_extra + 2.0;
         for image in &images {
-            self.native_tooltip_component_draw(&image.stack, batch, [x, at], image.size);
+            if let Ok(stack) = image.stack.try_into_engine(self.items()) {
+                self.native_tooltip_component_draw(&stack, batch, [x, at], image.size);
+            }
             at += image.size[1] + 2.0;
         }
     }
@@ -3590,7 +3599,10 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut RenderTooltipGatherComponentsEvent<'_>,
             ) -> mod_api::Flow {
-                assert_eq!(event.stack.item.as_ref(), "minecraft:stick");
+                assert_eq!(
+                    mod_api::__private::item_key_id(event.stack.item()).unwrap(),
+                    "minecraft:stick"
+                );
                 assert_eq!((event.screen_width, event.screen_height), (320, 240));
                 assert_eq!(event.max_width, -1);
                 match MODE.load(Ordering::Relaxed) {
@@ -3836,7 +3848,11 @@ mod cycling_tests {
                     }
                     2 => {
                         event.draw.gui_draw_item_with(
-                            &ItemStack::new("minecraft:diamond", 5),
+                            &mod_api::ItemStack::new(
+                                mod_api::__private::item_key("minecraft:diamond").unwrap(),
+                                5,
+                            )
+                            .unwrap(),
                             [16.0, 32.0],
                             Some("7"),
                         );
