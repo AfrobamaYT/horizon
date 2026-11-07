@@ -1364,6 +1364,8 @@ pub struct Renderer {
     /// when the draw is not kept, spinning, or claimed by a shader pack.
     prepared_models: Option<PreparedModels>,
     prepared_draws: Vec<PreparedModelDraw>,
+    /// Ordinary-stream cuts for `prepared_draws`, filled once per frame.
+    prepared_cuts: Vec<u32>,
     prepared_ranges: Vec<(u32, u32, Option<usize>)>,
     prepared_uploaded: Vec<PreparedModelInstance>,
     prepared_instance_buffer: wgpu::Buffer,
@@ -2656,6 +2658,7 @@ impl Renderer {
 
     fn finish_prepared_frame(&mut self) {
         prepared_model::finish_staged(&mut self.prepared_draws);
+        self.prepared_cuts.clear();
         self.prepared_ranges.clear();
     }
 
@@ -4763,6 +4766,7 @@ impl Renderer {
             entity_bindings,
             prepared_models: None,
             prepared_draws: Vec::new(),
+            prepared_cuts: Vec::new(),
             prepared_ranges: Vec::new(),
             prepared_uploaded: Vec::new(),
             prepared_instance_buffer,
@@ -8704,12 +8708,17 @@ impl Renderer {
         }
         self.prepared_ranges.clear();
         if prepared_count > 0 {
+            entity_batch::ordinary_vertices_at_cuts(
+                entities,
+                self.prepared_draws.iter().map(|draw| draw.cpu_vertices),
+                oit_on,
+                &mut self.prepared_cuts,
+            );
             prepared_model::fill_ordered_ranges(
                 entity_quads * 4,
-                self.prepared_draws.iter().map(|draw| {
-                    entity_batch::ordinary_vertices_before(entities, draw.cpu_vertices, oit_on)
-                        .saturating_add(posed)
-                }),
+                self.prepared_cuts
+                    .iter()
+                    .map(|cut| cut.saturating_add(posed)),
                 &mut self.prepared_ranges,
             );
         }
