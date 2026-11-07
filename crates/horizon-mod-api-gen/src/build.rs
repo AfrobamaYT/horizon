@@ -175,6 +175,12 @@ fn render_records_need_no_game_sources() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn listed_render_slots_have_eligible_points() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    super::points::game_points(&root).unwrap();
+}
+
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
