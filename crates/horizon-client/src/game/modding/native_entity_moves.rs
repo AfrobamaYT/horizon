@@ -13,7 +13,7 @@ use mod_api::EntityRef;
 
 /// `Level.isInSpawnableBounds` and `/tp`'s limits: 30,000,000 blocks out,
 /// 20,000,000 up or down.
-fn in_bounds([x, y, z]: [f64; 3]) -> bool {
+pub(super) fn in_bounds([x, y, z]: [f64; 3]) -> bool {
     (-30_000_000.0..30_000_000.0).contains(&x)
         && (-30_000_000.0..30_000_000.0).contains(&z)
         && (-20_000_000.0..20_000_000.0).contains(&y)

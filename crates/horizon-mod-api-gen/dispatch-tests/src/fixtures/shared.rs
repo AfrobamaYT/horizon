@@ -547,8 +547,7 @@ mod stubs {
     pub(super) struct ChannelRef;
     #[derive(Clone, Copy)]
     pub(super) struct NativePlayerFood;
-    #[derive(Clone, Copy)]
-    pub(super) struct LivingRef;
+    pub(super) use super::generated::mod_api::LivingRef;
     #[derive(Clone, Copy)]
     pub(super) struct EntityRef;
     #[derive(Clone, Copy)]
@@ -563,6 +562,8 @@ mod stubs {
 }
 
 mod api {
+    #[derive(Clone, Copy)]
+    pub struct LivingRef;
     pub mod camera {
         pub struct CameraEntity;
         pub struct FovPlayer;
