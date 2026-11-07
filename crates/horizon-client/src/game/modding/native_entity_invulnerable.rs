@@ -64,7 +64,8 @@ impl Game<'_> {
     /// hit already broadcasts — by kind: the player's and mobs' for the
     /// living, the item, dragon and crystal branches for the damageable
     /// rest. True when the damage was taken. None for a stale handle, false
-    /// for a kind that cannot be hurt.
+    /// for a kind that cannot be hurt or an unregistered damage type. Stale
+    /// direct/causing handles are treated as absent sources.
     pub(super) fn entity_hurt(
         &mut self,
         entity: EntityRef,
@@ -187,6 +188,21 @@ mod tests {
     use horizon_client::mobs::Mob;
     use horizon_core::geometry::Vec3;
     use mod_api::{EntityRef, NativeWorldEpoch};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_unknown_damage_type_is_refused() {
+        with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(300001, pig, Vec3::ZERO, 0.0));
+            let victim = game.entity(300001).unwrap();
+            assert_eq!(
+                victim.hurt(game, "missing:unknown", 5.0, None, None),
+                Some(false)
+            );
+            assert_eq!(game.mobs[0].health, 10.0);
+        });
+    }
 
     struct SourceProbe(std::sync::Arc<std::sync::Mutex<Vec<(i32, i32)>>>);
     #[mod_api::__subscriptions]

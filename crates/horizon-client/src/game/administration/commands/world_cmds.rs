@@ -228,6 +228,11 @@ impl Game<'_> {
         cause: Option<Target>,
         from: Option<[f64; 3]>,
     ) -> bool {
+        // Resolve the damage registry at the shared command/API boundary before
+        // any target-specific path can mutate state or map it to a DamageKind.
+        if self.motion.health.damage.id(ty).is_none() {
+            return false;
+        }
         let attacker = cause.or(by).and_then(|t| self.network_entity_id(t));
         let mut attack = self.attack_of(attacker.unwrap_or(0));
         attack.direct = Some(by.and_then(|t| self.network_entity_id(t)).unwrap_or(0));
