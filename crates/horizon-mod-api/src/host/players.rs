@@ -481,9 +481,13 @@ pub trait PlayersBackendMut {
     }
     /// Side: server.
     /// Opens a block entity's menu for a connected player (`ServerPlayer.openMenu`).
-    /// Returns false for a stale or wrong-level handle, a non-provider, a cancelled
-    /// open, or an unconnected player such as a fake player.
-    fn player_open_menu(&mut self, player: PlayerRef, entity: BlockEntityRef) -> bool {
+    /// Returns Stale for an invalidated entity; Ok(false) for a wrong-level player,
+    /// non-provider, cancelled open, or an unconnected player such as a fake player.
+    fn player_open_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::player_open_menu",
             "player_open_menu",
@@ -857,6 +861,19 @@ pub trait PlayersBackendMut {
         crate::phase::unprovided(
             "BackendMut::player_play_sound",
             "player_play_sound",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// Simulate one client movement tick for this server player without changing the player. Refuses stale, absent, dead, spectator or riding players and invalid input.
+    fn player_simulate_move(
+        &mut self,
+        player: PlayerRef,
+        input: NativePlayerInput,
+    ) -> Option<NativeSimulatedMove> {
+        crate::phase::unprovided(
+            "BackendMut::player_simulate_move",
+            "player_simulate_move",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

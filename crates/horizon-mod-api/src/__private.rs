@@ -132,8 +132,16 @@ pub mod game {
     }
 
     /// A block entity handle the game names.
-    pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
-        BlockEntityRef { level, position }
+    pub fn block_entity_ref(
+        level: LevelRef,
+        position: [i32; 3],
+        generation: u64,
+    ) -> BlockEntityRef {
+        BlockEntityRef {
+            level,
+            position,
+            generation,
+        }
     }
     /// A client mod's sound handle the game names.
     pub fn sound_ref(id: u64) -> SoundRef {
@@ -206,6 +214,7 @@ pub mod game {
     pub struct BlockEntityRefFields {
         pub level: LevelRef,
         pub position: [i32; 3],
+        pub generation: u64,
     }
     impl Fields for BlockEntityRef {
         type Fields<'a> = BlockEntityRefFields;
@@ -213,6 +222,7 @@ pub mod game {
             BlockEntityRefFields {
                 level: self.level,
                 position: self.position,
+                generation: self.generation,
             }
         }
     }

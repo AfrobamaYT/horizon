@@ -62,6 +62,7 @@ struct KeptAttachments {
 
 struct Kept {
     entity: Option<BlockEntity>,
+    generation: Option<u64>,
     /// None where it had no map: an abort removes one a write made.
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
@@ -79,6 +80,7 @@ impl Kept {
     ) -> Self {
         Self {
             entity: world.block_entities.get(&pos).cloned(),
+            generation: world.block_entities.generation(&pos),
             attachments: world.block_entities.attachments(pos).cloned(),
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
@@ -466,6 +468,9 @@ impl Game<'_> {
                 (kept.entity, self.world.block_entities.get_mut(&pos))
             {
                 *now = entity;
+                self.world
+                    .block_entities
+                    .restore_generation(pos, kept.generation.unwrap());
             }
             self.world
                 .block_entities

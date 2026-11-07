@@ -100,6 +100,7 @@ impl BlockPart for Observed {
             host.block_entity(event.level, pos)
                 .unwrap()
                 .set_changed(host)
+                .unwrap()
         );
     }
 }
@@ -193,7 +194,7 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
                     }),
                     Ok(3)
                 );
-                assert!(entity.set_changed(host));
+                assert!(entity.set_changed(host).unwrap());
                 assert!(changes.0.lock().unwrap().is_empty());
                 Ok::<_, ()>(())
             });
@@ -211,7 +212,7 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
             assert!(
                 game.transaction(|host, tx| {
                     assert_eq!(items.insert(host, tx, 0, &sticks, 4), 4);
-                    assert!(entity.set_changed(host));
+                    assert!(entity.set_changed(host).unwrap());
                     Err::<(), ()>(())
                 })
                 .is_err()
@@ -221,7 +222,7 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
                 changes.0.lock().unwrap().as_slice(),
                 std::slice::from_ref(&expected)
             );
-            assert!(entity.set_changed(game));
+            assert!(entity.set_changed(game).unwrap());
             assert_eq!(*changes.0.lock().unwrap(), [expected.clone(), expected]);
             // A storage with no attached observer is not broadcast to this Part.
             place(game, level, [2, 64, 0], "minecraft:furnace");
@@ -229,6 +230,7 @@ fn a_contents_notice_reads_the_root_commit_and_not_aborted_writes() {
                 game.block_entity(level, [2, 64, 0])
                     .unwrap()
                     .set_changed(game)
+                    .unwrap()
             );
             assert_eq!(changes.0.lock().unwrap().len(), 2);
         },
@@ -251,7 +253,7 @@ fn a_self_write_does_not_reenter_but_another_backing_block_notifies() {
             let entity = game.block_entity(level, source).unwrap();
             // No outer transaction: set_changed dispatches immediately. The listener writes
             // into itself and another block, and explicitly invalidates itself on every call.
-            assert!(entity.set_changed(game));
+            assert!(entity.set_changed(game).unwrap());
             assert_eq!(
                 *changes.0.lock().unwrap(),
                 [
@@ -277,7 +279,7 @@ fn a_self_write_does_not_reenter_but_another_backing_block_notifies() {
                 2
             );
             // The first dispatch is finished: the same block must notify again, not stay guarded.
-            assert!(entity.set_changed(game));
+            assert!(entity.set_changed(game).unwrap());
             assert_eq!(
                 *changes.0.lock().unwrap(),
                 [
@@ -339,7 +341,7 @@ fn a_panicking_part_does_not_leave_its_contents_notice_guarded() {
             for _ in 0..2 {
                 assert!(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        entity.set_changed(game)
+                        entity.set_changed(game).unwrap()
                     }))
                     .is_err()
                 );
@@ -402,6 +404,7 @@ fn a_double_container_notifies_each_backing_block_once() {
                 game.block_entity(level, [0, 64, 0])
                     .unwrap()
                     .set_changed(game)
+                    .unwrap()
             );
             assert_eq!(
                 *changes.0.lock().unwrap(),
@@ -430,10 +433,14 @@ fn a_native_types_inherited_block_part_reads_the_committed_payload() {
             assert_eq!(
                 game.transaction(|host, _| {
                     for version in [11, 12] {
-                        assert!(entity.merge_data(
-                            host,
-                            Compound::from([("Version".into(), Tag::Int(version))])
-                        ));
+                        assert!(
+                            entity
+                                .merge_data(
+                                    host,
+                                    Compound::from([("Version".into(), Tag::Int(version))])
+                                )
+                                .unwrap()
+                        );
                     }
                     assert!(changes.0.lock().unwrap().is_empty());
                     Ok::<_, ()>(())
