@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 struct Home(PathBuf);
 impl Home {
@@ -127,32 +128,33 @@ fn root_replacement_cannot_redirect_sweep() {
 
 #[test]
 fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
-    for cache in [
-        BuildCache::Stage,
-        BuildCache::PendingStage,
-        BuildCache::NewStage,
-        BuildCache::Patched,
-        BuildCache::Source,
-        BuildCache::Tools,
-        BuildCache::PrebuiltOutput,
-        BuildCache::InternalsSync,
-        BuildCache::Prebuilt,
-        BuildCache::ServerBuilds,
-        BuildCache::Rust,
-        BuildCache::Cargo,
-        BuildCache::Scratch,
+    for (cache, expected) in [
+        (BuildCache::Stage, "native/stage"),
+        (BuildCache::PendingStage, "native/stage.pending"),
+        (BuildCache::NewStage, "native/stage.new"),
+        (BuildCache::Patched, "native/patched"),
+        (BuildCache::Source, "native/source"),
+        (BuildCache::Tools, "native/tools"),
+        (BuildCache::PrebuiltOutput, "native/prebuilt-build"),
+        (BuildCache::InternalsSync, "native/internals-sync"),
+        (BuildCache::Prebuilt, "native/prebuilt"),
+        (BuildCache::ServerBuilds, "native/server-builds"),
+        (BuildCache::Rust, "rust"),
+        (BuildCache::Cargo, "cargo"),
+        (BuildCache::Scratch, "tmp"),
     ] {
         for depth in ["", "target", "rev/target/debug"] {
-            let directory = format!("{}/{depth}", cache.relative());
+            let directory = format!("{expected}/{depth}");
             let home = Home::new();
-            let lock_path = home.seed(&format!("{directory}/target/debug/.cargo-lock"));
-            let output = home.seed(&format!("{directory}/target/debug/output"));
+            let lock_path = home.seed(&format!("{directory}/.cargo-lock"));
+            let output = home.seed(&format!("{directory}/output"));
             let held = fs::OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&lock_path)
                 .unwrap();
             held.lock().unwrap();
+            let world = home.seed("worlds/precious/level.dat");
             let storage = Storage::at(&home.0).unwrap();
             assert!(matches!(storage.clear(cache), Err(Error::Busy)));
             assert!(output.exists());
@@ -160,6 +162,37 @@ fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
             storage.clear(cache).unwrap();
             assert!(!output.exists());
             assert!(lock_path.exists());
+            assert!(world.exists());
         }
     }
+}
+
+#[test]
+fn same_path_with_different_root_identity_is_refused() {
+    let home = Home::new();
+    let storage = Storage::at(&home.0).unwrap();
+    let moved = home.0.with_extension("held");
+    fs::rename(&home.0, &moved).unwrap();
+    let precious = home.seed("native/source/world");
+    home.seed(".trash-precious/world");
+    assert!(storage.clear(BuildCache::Source).is_err());
+    assert!(storage.sweep().is_err());
+    assert!(precious.exists());
+    assert!(home.0.join(".trash-precious/world").exists());
+    fs::remove_dir_all(&home.0).unwrap();
+    fs::rename(moved, &home.0).unwrap();
+}
+
+#[test]
+fn freed_bytes_exclude_the_retained_lock_skeleton() {
+    let home = Home::new();
+    home.seed("native/source/rev/output");
+    home.seed("native/source/rev/.cargo-lock");
+    let storage = Storage::at(&home.0).unwrap();
+    let before = storage.bytes(BuildCache::Source).unwrap();
+    let freed = storage.clear(BuildCache::Source).unwrap();
+    let after = storage.bytes(BuildCache::Source).unwrap();
+    assert!(after > 0);
+    assert_eq!(freed, before.saturating_sub(after));
+    assert!(freed < before);
 }

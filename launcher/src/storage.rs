@@ -7,7 +7,6 @@ use cap_std::fs::Dir;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The five rows on the Storage page.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
