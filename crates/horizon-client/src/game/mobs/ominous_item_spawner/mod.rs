@@ -21,6 +21,7 @@ const TICKS_SCALING: f32 = 50.0;
 const ROTATION_SPEED: f32 = 40.0;
 
 pub(super) struct OminousItemSpawner {
+    pub(in crate::game) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id: from the entity counter on the server, the server's on
     /// a client.
     pub(super) id: u32,
@@ -34,6 +35,8 @@ pub(super) struct OminousItemSpawner {
     pub(super) uuid: [i32; 4],
     pub(super) raw: Option<Box<horizon_core::nbt::Tag>>,
 }
+
+horizon_client::impl_joined!(OminousItemSpawner);
 
 /// `ProjectileItem.DispenseConfig` of the items fired down: power,
 /// uncertainty and `overrideDispenseEvent`; None for items that just fall.
@@ -70,6 +73,7 @@ impl Game<'_> {
     ) {
         self.next_entity += 1;
         self.ominous_spawners.push(OminousItemSpawner {
+            join: Default::default(),
             id: self.next_entity,
             item,
             position,
@@ -94,6 +98,7 @@ impl Game<'_> {
         self.remember_uuid(id, saved, &tag);
         let uuid = self.uuid_for(id);
         self.ominous_spawners.push(OminousItemSpawner {
+            join: Default::default(),
             id,
             item,
             position: [at.x, at.y, at.z],
@@ -138,6 +143,7 @@ impl Game<'_> {
     /// entity data (`ItemStack.EMPTY` until then, which draws nothing).
     pub(super) fn add_remote_ominous_item_spawner(&mut self, id: u32, position: [f64; 3]) {
         self.ominous_spawners.push(OminousItemSpawner {
+            join: Default::default(),
             id,
             item: ItemStack::new("minecraft:air", 1),
             position,

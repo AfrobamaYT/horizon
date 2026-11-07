@@ -94,6 +94,20 @@ pub(super) fn fluid_in_tag(items: &Items, fluid: &str, tag: &str) -> bool {
     )
 }
 
+/// `FluidState.getShape`'s one box for `fluid` with `above` over it: up to a full block under
+/// the same fluid (`FluidState.getHeight`), else to the fluid's own height. None for no fluid.
+fn fluid_shape(fluid: EngineFluidState, above: Option<EngineFluidState>) -> Option<[f64; 6]> {
+    if fluid.kind() == FluidKind::Empty {
+        return None;
+    }
+    let height = if above.is_some_and(|above| above.kind().same_family(fluid.kind())) {
+        1.0
+    } else {
+        f64::from(fluid.own_height())
+    };
+    Some([0.0, 0.0, 0.0, 1.0, height, 1.0])
+}
+
 /// The fluid a registry id names, with or without `minecraft:`.
 fn fluid_kind(fluid: &str) -> Option<FluidKind> {
     FluidKind::from_name(&horizon_client::command::args::normalized(fluid))
@@ -149,6 +163,23 @@ impl Game<'_> {
     pub(super) fn level_fluid_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<FluidState> {
         let state = self.level_block_state(level, pos)?;
         self.state_fluid_state(state)
+    }
+
+    /// The fluid's shape at `pos` (`FluidState.getShape`), block-local: none for no fluid, else
+    /// the floor to `FluidState.getHeight`, a full block under the same fluid and the fluid's
+    /// own height otherwise. None as for `level_block_state`; an unloaded block above is no
+    /// fluid.
+    pub(super) fn level_fluid_shape(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<Vec<[f64; 6]>> {
+        let behaviours = self.res.behaviours();
+        let fluid = behaviours.fluid(self.level_block_state(level, pos)?);
+        let above = self
+            .level_block_state(level, [pos[0], pos[1] + 1, pos[2]])
+            .map(|state| behaviours.fluid(state));
+        Some(fluid_shape(fluid, above).into_iter().collect())
     }
 
     /// Whether `fluid` and `other` are the same fluid (`Fluid.isSame`): a source and its
@@ -235,9 +266,37 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn a_fluid_shape_is_full_under_the_same_fluid_and_its_own_height_otherwise() {
+        let source = EngineFluidState::WATER;
+        let shallow = EngineFluidState::new(FluidKind::FlowingWater, 3, false);
+        let lava = EngineFluidState::new(FluidKind::Lava, 8, false);
+        assert_eq!(fluid_shape(EngineFluidState::EMPTY, Some(source)), None);
+        // FlowingFluid.getOwnHeight: amount / 9, so a source is 8/9 high under air.
+        let top = |shape: Option<[f64; 6]>| shape.map(|b| b[4]);
+        assert_eq!(
+            top(fluid_shape(source, None)),
+            Some(f64::from(8.0f32 / 9.0))
+        );
+        assert_eq!(
+            top(fluid_shape(shallow, None)),
+            Some(f64::from(3.0f32 / 9.0))
+        );
+        // Flowing water under a source is the same fluid: a full block.
+        assert_eq!(top(fluid_shape(shallow, Some(source))), Some(1.0));
+        assert_eq!(
+            top(fluid_shape(source, Some(lava))),
+            Some(f64::from(8.0f32 / 9.0))
+        );
+        assert_eq!(
+            fluid_shape(source, Some(source)),
+            Some([0.0, 0.0, 0.0, 1.0, 1.0, 1.0])
+        );
+    }
+
+    #[test]
     fn fluid_state_conversion_preserves_source_and_empty_invariants() {
         mod_api::__private::install(Default::default());
-        mod_api::__private::part_tests::register_game_keys([]);
+        crate::game::api_values::register_game_keys([]);
         for kind in FluidKind::ALL {
             let engine =
                 EngineFluidState::new(kind, if kind == FluidKind::Empty { 0 } else { 8 }, true);
@@ -259,7 +318,10 @@ mod tests {
         use horizon_world::level::states::BlockId;
         use mod_api::__private::{ResolvedBlock, part_tests, resolve_blocks};
         mod_api::__private::install(Default::default());
-        part_tests::register_game_keys(["minecraft:stone".into(), "test:machine".into()]);
+        crate::game::api_values::register_game_keys([
+            "minecraft:stone".into(),
+            "test:machine".into(),
+        ]);
         let stone = part_tests::block_key("stone");
         let machine = part_tests::block_key("test:machine");
         let mut items = Items::for_tests(Default::default());

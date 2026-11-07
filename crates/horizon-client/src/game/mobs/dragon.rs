@@ -2400,6 +2400,7 @@ impl Game<'_> {
                     }
                     let id = self.take_entity_id();
                     self.breath_clouds.push(Breath {
+                        join: Default::default(),
                         id,
                         at: [x, y.floor() + 1.0, z],
                         radius: 5.0,
@@ -3088,6 +3089,7 @@ impl Game<'_> {
                 let feet = [next.x, next.y - 0.5, next.z];
                 let at = fireball_cloud_origin(feet, &snap_targets);
                 self.breath_clouds.push(Breath {
+                    join: Default::default(),
                     id,
                     at,
                     radius: 3.0,
@@ -3434,6 +3436,7 @@ fn breath_puffs(
     }
 }
 pub(super) struct Breath {
+    pub(in crate::game) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id once a server's players track it (0 until then).
     pub(super) id: u32,
     pub(super) at: [f64; 3],
@@ -3446,6 +3449,9 @@ pub(super) struct Breath {
     /// A lingering potion's cloud (`ThrownLingeringPotion`): what it applies.
     pub(super) potion: Option<super::potions::PotionCloud>,
 }
+
+horizon_client::impl_joined!(Breath, Dragon);
+
 impl Breath {
     /// `AreaEffectCloud.isWaiting`: before its wait time (20 ticks, 10 for a
     /// lingering potion's).

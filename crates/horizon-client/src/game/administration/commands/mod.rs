@@ -101,6 +101,7 @@ fn teleport_velocity(velocity: Vec3, relative: [bool; 3], fall_flying: bool) -> 
 /// entity memory (`persist.raw`), its position and rotation here.
 #[derive(Clone, Debug)]
 pub(in crate::game) struct OtherEntity {
+    pub(in crate::game) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     pub kind: String,
     pub position: Vec3,
@@ -108,6 +109,9 @@ pub(in crate::game) struct OtherEntity {
     pub pitch: f32,
     pub item_transformation: Option<super::persist::ItemDisplayTransformation>,
 }
+
+horizon_client::impl_joined!(OtherEntity);
+
 pub(super) fn err(key: &str, args: &[&dyn std::fmt::Display]) -> CommandError {
     CommandError::tr(key, args)
 }
