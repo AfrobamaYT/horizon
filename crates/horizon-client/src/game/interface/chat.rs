@@ -218,7 +218,7 @@ pub struct UiState {
 
 impl UiState {
     pub fn hud_mode(&self) -> mod_api::HudMode {
-        use crate::mod_api::HudMode;
+        use mod_api::HudMode;
         match (self.hide_gui, self.show_hand_when_hidden) {
             (false, _) => HudMode::AllVisible,
             (true, true) => HudMode::NoHud,
@@ -227,7 +227,7 @@ impl UiState {
     }
 
     pub fn set_hud_mode(&mut self, mode: mod_api::HudMode) {
-        use crate::mod_api::HudMode;
+        use mod_api::HudMode;
         self.hide_gui = mode != HudMode::AllVisible;
         self.show_hand_when_hidden = mode == HudMode::NoHud;
     }
@@ -249,7 +249,7 @@ impl UiState {
     }
 
     fn toggle_hide_gui(&mut self) {
-        use crate::mod_api::HudMode;
+        use mod_api::HudMode;
         self.set_hud_mode(if self.hide_gui {
             HudMode::AllVisible
         } else {
@@ -271,7 +271,7 @@ impl UiState {
 #[cfg(test)]
 mod hud_mode_tests {
     use super::UiState;
-    use crate::mod_api::HudMode;
+    use mod_api::HudMode;
 
     #[test]
     fn hud_modes_drive_the_effective_hud_and_hand_gate() {

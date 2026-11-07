@@ -22,7 +22,7 @@ mod tests {
     struct ThreeState;
     #[mod_api::__subscriptions]
     impl Hooks for ThreeState {
-        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent<'_>) {
+        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent) {
             host.set_hud_mode(match host.hud_mode() {
                 HudMode::AllVisible => HudMode::NoHud,
                 HudMode::NoHud => HudMode::AllHidden,
