@@ -159,7 +159,7 @@ mod tests {
             let (id, _) = game.raiding.raids.create_or_extend([0, 64, 0], 2, None, 3);
             assert!(!game.raiding.raids.get(id).unwrap().started);
 
-            assert_eq!(run_dev(&mut game, "raid check"), 1);
+            assert_eq!(run_dev(game, "raid check"), 1);
             let lines: Vec<String> = game
                 .chat_capture
                 .take()
@@ -175,9 +175,9 @@ mod tests {
                 ]
             );
 
-            run_dev(&mut game, "raid sound global");
+            run_dev(game, "raid sound global");
             assert!(game.audio.capture.as_ref().unwrap().is_empty());
-            run_dev(&mut game, "raid sound local");
+            run_dev(game, "raid sound local");
             let played: Vec<_> = game
                 .audio
                 .capture
