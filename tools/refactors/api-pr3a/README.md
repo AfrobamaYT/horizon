@@ -55,3 +55,43 @@ python3 -m unittest discover -s tools/refactors/api-pr3a -p 'test_*.py'
 The final gate consumes manifests generated at the base and the new head.
 Signature changes, WIT record changes and hook dispatch equivalence require
 separate review/proofs; the manifest comparison does not claim those are equal.
+
+Generate each checkout's API outputs with its own generator (the same
+`horizon_mod_api_gen::generate(root, out, Target::Api)` entry point used by the
+API build script). The baseline is this PR's merge base, `8fcd440a3e675499b83277490376dfa92001d14e`.
+Run `host-manifest` on the generated `mod_api_generated_host.rs`, generated
+`mod_api_host_areas.rs`, and that checkout's `src/host/*.rs` files. Then run:
+
+```sh
+python3 tools/refactors/api-pr3a/manifest_gate.py before.txt after.txt \
+  tools/refactors/api-pr3a/host-manifest-exceptions.json
+python3 tools/refactors/api-pr3a/report_wit.py "$BASE_OUT/mod-api.wit" "$HEAD_OUT/mod-api.wit"
+python3 tools/ci/wit_report.py "$BASE_OUT/mod-api.wit" "$HEAD_OUT/mod-api.wit"
+```
+
+The ten exact manifest exceptions are intentional: the old tag helpers leave
+for `Host::tags`; `item_key` now covers every item; `max_damage` is added;
+container transfer docs distinguish resource identity from transferred amount;
+and merchant setter docs describe typed refusal. Other names, owners, docs and
+hidden flags must remain unchanged. Existing enum/variant case positions are
+checked, not merely the relative order of surviving cases.
+
+## Actual native benchmark
+
+`bench_native.py` compiles the selected checkout's real generated `fire_use_item`
+shim, one subscribed ItemPart, and (for the owned case) the checked-in game
+converter with source hashes. Timings use the system allocator; allocation
+counts use a separate instrumentation build. Nine batches of 200,000 calls
+follow warmup. The baseline checkout must be main, not a modeled stack.
+
+```sh
+python3 tools/refactors/api-pr3a/bench_native.py --repo . --mode owned --output target/stack-bench-head
+python3 tools/refactors/api-pr3a/bench_native.py --repo "$MAIN_CHECKOUT" --mode engine --output target/stack-bench-main
+```
+
+Reports include timings, allocations, bytes and sizes. Damage presence is read
+through the engine's existing component-presence helper, while the single
+engine component encoder omits that separately carried scalar. Numeric-only
+snapshots, including explicit zero, allocate nothing. Other component patches
+remain eagerly owned, not lazy; the PR body lists hot callers and the named
+follow-up for lazy/cached patches. No whole-game tick or wasm speedup is claimed.
