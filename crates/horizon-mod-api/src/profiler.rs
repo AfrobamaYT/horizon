@@ -1,0 +1,344 @@
+//! Host-only Level 1 timings. Totals are inclusive: nested calls also contribute to their parent.
+//! No arguments or game data are retained. Start/stop must run outside mod calls; stop drains
+//! in-flight guards. Repeated start is a no-op; repeated stop returns an empty report.
+use super::NativeModCall;
+use std::cell::{Cell, UnsafeCell};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
+const THREADS: usize = 64;
+const CALLS: usize = 4096;
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static EPOCH: AtomicUsize = AtomicUsize::new(0);
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+static POOL: AtomicPtr<Pool> = AtomicPtr::new(std::ptr::null_mut());
+static CONTROL: Mutex<()> = Mutex::new(());
+thread_local! { static SLOT: Cell<(usize, usize)> = const { Cell::new((0, 0)) }; }
+
+/// One call, shared by native and wasm timing producers. Names are resolved at load time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Record {
+    pub mod_id: &'static str,
+    pub hook: &'static str,
+    pub part: Option<&'static str>,
+    pub nanoseconds: u64,
+}
+/// Inclusive nanoseconds; bucket 0 contains 0 and 1, bucket n contains [2^n, 2^(n+1)).
+#[derive(Debug)]
+pub struct Aggregate {
+    pub count: u64,
+    pub total: u128,
+    pub min: u64,
+    pub max: u64,
+    pub histogram: [u64; 64],
+}
+impl Default for Aggregate {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            total: 0,
+            min: 0,
+            max: 0,
+            histogram: [0; 64],
+        }
+    }
+}
+type Key = (&'static str, &'static str, Option<&'static str>);
+#[derive(Default, Debug)]
+pub struct Report {
+    pub calls: BTreeMap<Key, Aggregate>,
+    /// Capacity exhaustion is explicit, never silently presented as a complete profile.
+    pub dropped: usize,
+}
+impl Report {
+    fn record(&mut self, record: Record) {
+        let a = self
+            .calls
+            .entry((record.mod_id, record.hook, record.part))
+            .or_default();
+        a.min = if a.count == 0 {
+            record.nanoseconds
+        } else {
+            a.min.min(record.nanoseconds)
+        };
+        a.count += 1;
+        a.total += u128::from(record.nanoseconds);
+        a.max = a.max.max(record.nanoseconds);
+        a.histogram[(63 - record.nanoseconds.max(1).leading_zeros()) as usize] += 1;
+    }
+    /// Mods sorted by total time, then hooks/parts by total within each mod.
+    pub fn summary(&self) -> String {
+        use std::fmt::Write;
+        let mut mods = BTreeMap::<_, u128>::new();
+        for ((id, _, _), a) in &self.calls {
+            *mods.entry(*id).or_default() += a.total;
+        }
+        let mut mods: Vec<_> = mods.into_iter().collect();
+        mods.sort_by_key(|(id, total)| (std::cmp::Reverse(*total), *id));
+        let mut text = format!(
+            "Inclusive native/wasm call timings (ns); dropped: {}\n",
+            self.dropped
+        );
+        for (id, total) in mods {
+            writeln!(text, "{id}: {total}").unwrap();
+            let mut calls: Vec<_> = self
+                .calls
+                .iter()
+                .filter(|((m, _, _), _)| *m == id)
+                .collect();
+            calls.sort_by_key(|(key, a)| (std::cmp::Reverse(a.total), **key));
+            for ((_, hook, part), a) in calls {
+                writeln!(
+                    text,
+                    "  {hook} [{}]: count={} total={} min={} max={}",
+                    part.unwrap_or("-"),
+                    a.count,
+                    a.total,
+                    a.min,
+                    a.max
+                )
+                .unwrap();
+            }
+        }
+        text
+    }
+}
+struct Buffer {
+    next: AtomicUsize,
+    records: Vec<UnsafeCell<Option<Record>>>,
+}
+// Each index is reserved once with fetch_add. Only its reserving guard writes it; stop
+// reads only after all guards have left. Buffers are never reused within an epoch.
+unsafe impl Sync for Buffer {}
+struct Pool {
+    next_thread: AtomicUsize,
+    buffers: Vec<Buffer>,
+    dropped: AtomicUsize,
+    clock: fn() -> u64,
+}
+fn clock() -> u64 {
+    #[cfg(test)]
+    tests::CLOCK_READS.fetch_add(1, SeqCst);
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    ORIGIN
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_nanos()
+        .min(u128::from(u64::MAX)) as u64
+}
+pub fn is_enabled() -> bool {
+    ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Allocate all thread buffers before enabling. Returns false if already running.
+pub fn start() -> bool {
+    start_with_clock(clock)
+}
+fn start_with_clock(clock: fn() -> u64) -> bool {
+    let _control = CONTROL.lock().unwrap_or_else(|e| e.into_inner());
+    if is_enabled() {
+        return false;
+    }
+    let pool = Box::new(Pool {
+        next_thread: AtomicUsize::new(0),
+        dropped: AtomicUsize::new(0),
+        clock,
+        buffers: (0..THREADS)
+            .map(|_| Buffer {
+                next: AtomicUsize::new(0),
+                records: (0..CALLS).map(|_| UnsafeCell::new(None)).collect(),
+            })
+            .collect(),
+    });
+    POOL.store(Box::into_raw(pool), SeqCst);
+    EPOCH.fetch_add(1, SeqCst);
+    ENABLED.store(true, SeqCst);
+    true
+}
+/// Disable, drain active calls, and merge every thread. Call outside any profiled guard.
+pub fn stop() -> Report {
+    let _control = CONTROL.lock().unwrap_or_else(|e| e.into_inner());
+    if !ENABLED.swap(false, SeqCst) {
+        return Report::default();
+    }
+    EPOCH.fetch_add(1, SeqCst);
+    while ACTIVE.load(SeqCst) != 0 {
+        std::thread::yield_now();
+    }
+    // No validated entrant can access the old pool after disable/epoch change and drain.
+    let pool = unsafe { Box::from_raw(POOL.swap(std::ptr::null_mut(), SeqCst)) };
+    let mut report = Report {
+        dropped: pool.dropped.load(SeqCst),
+        ..Report::default()
+    };
+    for buffer in &pool.buffers {
+        for record in buffer
+            .records
+            .iter()
+            .take(buffer.next.load(SeqCst).min(CALLS))
+        {
+            // All writers have finished, including guards unwound by panics.
+            if let Some(record) = unsafe { *record.get() } {
+                report.record(record);
+            }
+        }
+    }
+    report
+}
+pub(super) struct Guard {
+    pool: *const Pool,
+    slot: usize,
+    call: NativeModCall,
+    began: u64,
+}
+pub(super) fn enter(call: NativeModCall) -> Option<Guard> {
+    if !is_enabled() {
+        return None;
+    }
+    let epoch = EPOCH.load(SeqCst);
+    ACTIVE.fetch_add(1, SeqCst);
+    if !ENABLED.load(SeqCst) || EPOCH.load(SeqCst) != epoch {
+        ACTIVE.fetch_sub(1, SeqCst);
+        return None;
+    }
+    // ACTIVE pins this pool until the returned guard drops.
+    let pool = unsafe { &*POOL.load(SeqCst) };
+    let slot = SLOT.with(|s| {
+        let (old_epoch, old_slot) = s.get();
+        if old_epoch == epoch {
+            old_slot
+        } else {
+            let slot = pool.next_thread.fetch_add(1, SeqCst);
+            s.set((epoch, slot));
+            slot
+        }
+    });
+    Some(Guard {
+        pool,
+        slot,
+        call,
+        began: (pool.clock)(),
+    })
+}
+impl Drop for Guard {
+    fn drop(&mut self) {
+        // This guard holds one ACTIVE reference, so stop cannot free the pool yet.
+        let pool = unsafe { &*self.pool };
+        let ns = (pool.clock)().saturating_sub(self.began);
+        let index = pool
+            .buffers
+            .get(self.slot)
+            .map(|b| (b, b.next.fetch_add(1, SeqCst)));
+        if let Some((buffer, index)) = index.filter(|(_, i)| *i < CALLS) {
+            // Unique reserved index, and stop waits for our ACTIVE decrement before reading.
+            unsafe {
+                *buffer.records[index].get() = Some(Record {
+                    mod_id: self.call.id,
+                    hook: self.call.hook,
+                    part: self.call.part,
+                    nanoseconds: ns,
+                });
+            }
+        } else {
+            pool.dropped.fetch_add(1, SeqCst);
+        }
+        ACTIVE.fetch_sub(1, SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crash::enter_native_mod;
+    static SERIAL: Mutex<()> = Mutex::new(());
+    static TIME: AtomicUsize = AtomicUsize::new(0);
+    pub(super) static CLOCK_READS: AtomicUsize = AtomicUsize::new(0);
+    fn tick() -> u64 {
+        TIME.fetch_add(1, SeqCst) as u64
+    }
+    fn call(id: &'static str, hook: &'static str, part: Option<&'static str>) -> NativeModCall {
+        NativeModCall { id, hook, part }
+    }
+    #[test]
+    fn profiler_guards_and_threads() {
+        let _serial = SERIAL.lock().unwrap();
+        stop();
+        TIME.store(0, SeqCst);
+        CLOCK_READS.store(0, SeqCst);
+        drop(enter_native_mod(call("off", "off", None)));
+        assert_eq!(TIME.load(SeqCst), 0);
+        assert_eq!(CLOCK_READS.load(SeqCst), 0);
+        assert!(start_with_clock(tick));
+        assert!(!start());
+        let outer = enter_native_mod(call("a", "outer", None));
+        drop(enter_native_mod(call("b", "inner", Some("Part"))));
+        drop(outer);
+        let panic = std::panic::catch_unwind(|| {
+            let _guard = enter_native_mod(call("c", "panic", None));
+            panic!("mod panic");
+        });
+        assert!(panic.is_err());
+        for _ in 0..2 {
+            std::thread::spawn(|| {
+                drop(enter_native_mod(call("d", "thread", None)));
+            })
+            .join()
+            .unwrap();
+        }
+        let report = stop();
+        assert_eq!(report.calls.len(), 4);
+        for (key, count, total) in [
+            (("a", "outer", None), 1, 3),
+            (("b", "inner", Some("Part")), 1, 1),
+            (("c", "panic", None), 1, 1),
+            (("d", "thread", None), 2, 2),
+        ] {
+            let a = &report.calls[&key];
+            assert_eq!((a.count, a.total), (count, total));
+        }
+        assert_eq!(TIME.load(SeqCst), 10);
+        assert_eq!(report.dropped, 0);
+        assert!(stop().calls.is_empty());
+        assert!(start_with_clock(tick));
+        drop(enter_native_mod(call("fresh", "epoch", None)));
+        assert_eq!(stop().calls.len(), 1);
+    }
+    #[test]
+    fn profiler_histogram_and_summary() {
+        let mut report = Report::default();
+        for nanoseconds in [0, 1, 2, 3, 4, 7, 8, u64::MAX] {
+            report.record(Record {
+                mod_id: "m",
+                hook: "h",
+                part: None,
+                nanoseconds,
+            });
+        }
+        let a = &report.calls[&("m", "h", None)];
+        assert_eq!((a.count, a.min, a.max), (8, 0, u64::MAX));
+        assert_eq!(a.total, u128::from(u64::MAX) + 25);
+        let mut expected = [0; 64];
+        expected[0] = 2;
+        expected[1] = 2;
+        expected[2] = 2;
+        expected[3] = 1;
+        expected[63] = 1;
+        assert_eq!(a.histogram, expected);
+        report.record(Record {
+            mod_id: "z",
+            hook: "first",
+            part: Some("P"),
+            nanoseconds: u64::MAX,
+        });
+        report.record(Record {
+            mod_id: "z",
+            hook: "second",
+            part: None,
+            nanoseconds: 100,
+        });
+        let text = report.summary();
+        assert!(text.find("z:").unwrap() < text.find("m:").unwrap());
+        assert!(text.find("first [P]").unwrap() < text.find("second [-]").unwrap());
+    }
+}
