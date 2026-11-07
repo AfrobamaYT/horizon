@@ -94,34 +94,45 @@ impl Game<'_> {
         self.native_owner_entity(target)
     }
 
-    /// The owner fields for `Projectile.setOwner(owner)`. `Who` names the
-    /// owners used for hit credit and collision exclusion, including vehicles
-    /// represented as `Who::Mob` in projectile targets. Any other entity is
-    /// kept by its UUID alone (`Projectile.getOwner` resolves that). None
-    /// for a stale owner, or a fishing hook, which no UUID finds again.
-    fn native_projectile_owner_fields(&mut self, owner: Option<EntityRef>) -> Option<OwnerFields> {
+    /// Resolves hit credit, persistent identity, and a separate non-living
+    /// vehicle identity for collision exclusion. None for a stale owner or hook.
+    fn native_projectile_owner_fields(
+        &mut self,
+        owner: Option<EntityRef>,
+    ) -> Option<(OwnerFields, Option<u32>)> {
         let Some(owner) = owner else {
-            return Some((None, None, None));
+            return Some(((None, None, None), None));
         };
-        let (who, guest) = match self.native_entity_target(owner)? {
+        let target = self.native_entity_target(owner)?;
+        let vehicle = match target {
+            Target::Boat(id) | Target::Cart(id) => Some(id),
+            _ => None,
+        };
+        let (who, guest) = match target {
             Target::Player => (Some(Who::Player), self.lan_acting),
             Target::Guest(conn) => (Some(Who::Player), Some(conn)),
-            Target::Mob(id) | Target::Boat(id) | Target::Cart(id) => (Some(Who::Mob(id)), None),
+            Target::Mob(id) => (Some(Who::Mob(id)), None),
             Target::Hook(_) => return None,
             _ => (None, None),
         };
         let uuid = uuid_ints(self.entity_uuid(owner)?);
-        Some((who, Some(uuid), guest))
+        Some(((who, Some(uuid), guest), vehicle))
     }
 
     /// `Projectile.setOwner` on the thing a handle names. False when the
     /// owner does not fit: a trident a player threw always has a player owner.
-    fn native_projectile_apply_owner(&mut self, backing: Backing, fields: OwnerFields) -> bool {
+    fn native_projectile_apply_owner(
+        &mut self,
+        backing: Backing,
+        owner: (OwnerFields, Option<u32>),
+    ) -> bool {
+        let (fields, vehicle) = owner;
         let (who, uuid, guest) = fields;
         match backing {
             Backing::List(i) => {
                 self.creatures.projectiles.update(i, |p| {
                     (p.owner, p.owner_uuid, p.guest) = fields;
+                    p.owner_vehicle = vehicle;
                     // `AbstractArrow.setOwner(Entity)`: a player's arrow may be picked up.
                     if let Some(a) = &mut p.arrow {
                         a.set_owner(who);
@@ -181,7 +192,7 @@ impl Game<'_> {
         let Some(backing) = self.native_projectile_backing(projectile) else {
             return false;
         };
-        let Some(owner) = self.native_projectile_owner_fields(new_owner) else {
+        let Some((owner, vehicle)) = self.native_projectile_owner_fields(new_owner) else {
             return false;
         };
         if !power.iter().all(|v| v.is_finite()) {
@@ -207,10 +218,13 @@ impl Game<'_> {
         match backing {
             // `deflect` takes the `EntityReference` overload of `setOwner`: an
             // arrow's pickup does not change, unlike `set_owner`.
-            Backing::List(i) => self
-                .creatures
-                .projectiles
-                .update(i, |p| p.deflect(turn, power, owner, by_attack)),
+            Backing::List(i) => self.creatures.projectiles.update(i, |p| {
+                let applied = p.deflect(turn, power, owner, by_attack);
+                if applied {
+                    p.owner_vehicle = vehicle;
+                }
+                applied
+            }),
             Backing::Trident(i) => {
                 if owner.0 != Some(Who::Player) {
                     return false;
@@ -413,6 +427,8 @@ mod tests {
             let scene = Air(game.vehicle_targets());
             let mut p = game.creatures.projectiles[0].clone();
             assert!(!p.left_owner);
+            assert_eq!(p.owner, None, "a vehicle must not credit a living attacker");
+            assert_eq!(p.owner_uuid, Some(game.uuid_for(boat_id)));
             let mut control = p.clone();
             control.owner = Some(Who::Mob(boat_id));
             assert_eq!(control.tick(&scene).1, Hit::None);
@@ -422,6 +438,44 @@ mod tests {
                 matches!(returned.tick(&scene).1, Hit::Entity { who: Who::Mob(id), .. } if id == boat_id)
             );
             assert_eq!(p.tick(&scene).1, Hit::None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn a_vehicle_owned_trident_does_not_scale_damage_as_a_living_attacker() {
+        use horizon_client::projectiles::Hit;
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.world.health_rules.difficulty = horizon_world::food::Difficulty::Easy;
+            let boat_id = game.take_entity_id();
+            game.boats.push(super::super::boats::Boat::new(
+                boat_id,
+                "oak".into(),
+                Vec3::ZERO,
+                0.0,
+            ));
+            let boat = game.entity(boat_id).unwrap();
+            game.add_projectile(Projectile::new(
+                ProjectileKind::Trident,
+                Vec3::new(3.0, 0.0, 0.0),
+                None,
+            ));
+            let id = game.creatures.projectiles[0].id;
+            let projectile = game.projectile(game.entity(id).unwrap()).unwrap();
+            assert!(game.projectile_set_owner(projectile, Some(boat)));
+            let p = game.creatures.projectiles[0].clone();
+            game.projectile_hit(
+                &p,
+                Hit::Entity {
+                    who: Who::Player,
+                    at: Vec3::ZERO,
+                },
+            )
+            .unwrap();
+            // Vanilla's 8 damage is not Easy's living-attacker reduction to 5.
+            assert_eq!(game.player.as_ref().unwrap().health.health(), 12.0);
         });
     }
 
@@ -463,7 +517,7 @@ mod tests {
             assert!(handle.set_owner(game, Some(mob)));
             assert_eq!(handle.owner(game), Some(mob));
             assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(99)));
-            // Any entity may own it; vehicles also need a collision identity.
+            // A non-living owner has collision identity but no living hit credit.
             let boat_id = game.take_entity_id();
             game.boats.push(super::super::boats::Boat::new(
                 boat_id,
@@ -474,7 +528,8 @@ mod tests {
             let boat = game.entity(boat_id).unwrap();
             assert!(handle.set_owner(game, Some(boat)));
             assert_eq!(handle.owner(game), Some(boat));
-            assert_eq!(game.creatures.projectiles[0].owner, Some(Who::Mob(boat_id)));
+            assert_eq!(game.creatures.projectiles[0].owner, None);
+            assert_eq!(game.creatures.projectiles[0].owner_vehicle, Some(boat_id));
             let saved = game.uuid_for(boat_id);
             assert_eq!(game.creatures.projectiles[0].owner_uuid, Some(saved));
             assert!(handle.set_owner(game, Some(mob)));
@@ -694,7 +749,7 @@ mod tests {
             assert!(!trident.set_owner(game, Some(boat)));
             assert!(rocket.set_owner(game, Some(boat)));
             assert_eq!(rocket.owner(game), Some(boat));
-            assert_eq!(game.rockets[0].owner, Some(Who::Mob(boat_id)));
+            assert_eq!(game.rockets[0].owner, None);
             let saved = game.uuid_for(boat_id);
             let tag = game.rockets[0].to_nbt([9; 4], None, None);
             let back = Rocket::from_nbt(
