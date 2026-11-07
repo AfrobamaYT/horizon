@@ -62,6 +62,7 @@ struct KeptAttachments {
 
 struct Kept {
     entity: Option<BlockEntity>,
+    generation: Option<u64>,
     /// None where it had no map: an abort removes one a write made.
     attachments: Option<Attachments>,
     hopper: Option<HopperState>,
@@ -79,6 +80,7 @@ impl Kept {
     ) -> Self {
         Self {
             entity: world.block_entities.get(&pos).cloned(),
+            generation: world.block_entities.generation(&pos),
             attachments: world.block_entities.attachments(pos).cloned(),
             hopper: hoppers.get(&pos).copied(),
             name: world.block_names.get(&pos).cloned(),
@@ -305,10 +307,9 @@ impl Game<'_> {
         if self.transactions.is_empty() {
             return;
         }
-        let Some((slots, _)) = self.entity_slots(id) else {
+        let Some(slots) = self.edit_entity_slots(id, |slots, _| slots.to_vec()) else {
             return;
         };
-        let slots = slots.to_vec();
         if let Some(level) = self.transactions.last_mut() {
             level.entities.entry(id).or_insert(slots);
         }
@@ -467,6 +468,9 @@ impl Game<'_> {
                 (kept.entity, self.world.block_entities.get_mut(&pos))
             {
                 *now = entity;
+                self.world
+                    .block_entities
+                    .restore_generation(pos, kept.generation.unwrap());
             }
             self.world
                 .block_entities
@@ -485,11 +489,11 @@ impl Game<'_> {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
         for (id, kept) in level.entities {
-            if let Some((slots, _)) = self.entity_slots(id) {
+            self.edit_entity_slots(id, |slots, _| {
                 for (slot, kept) in slots.iter_mut().zip(kept) {
                     *slot = kept;
                 }
-            }
+            });
         }
         for (id, len) in level.mob_lengths {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {

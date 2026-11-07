@@ -337,6 +337,17 @@ pub struct ArrowScene<'a, 'r> {
     pub tnt_explodes: bool,
     /// The mod hooks a mob-owned arrow asks (`MobWorld::mob_hooks`).
     pub mob_hooks: Option<&'a dyn crate::mobs::MobHooks>,
+    pub owners: &'a dyn OwnerLookup,
+}
+/// `EntityReference.getEntity` for an owner the arrow only knows by UUID.
+pub trait OwnerLookup {
+    /// A loaded entity other than a player has this UUID.
+    fn non_player_entity(&self, uuid: [i32; 4]) -> bool;
+}
+impl OwnerLookup for () {
+    fn non_player_entity(&self, _: [i32; 4]) -> bool {
+        false
+    }
 }
 impl ArrowScene<'_, '_> {
     fn block(&self, p: BlockPos) -> BlockStateId {
@@ -1089,7 +1100,14 @@ impl Ticker<'_, '_, '_, '_> {
                 Some(hooks) => hooks.can_grief(owner, self.scene.mob_griefing),
                 None => self.scene.mob_griefing,
             },
-            _ => true,
+            None => {
+                !self
+                    .p
+                    .owner_uuid
+                    .is_some_and(|u| self.scene.owners.non_player_entity(u))
+                    || self.scene.mob_griefing
+            }
+            Some(Who::Player) => true,
         }
     }
     /// `onProjectileHit` of the blocks a burning projectile lights.

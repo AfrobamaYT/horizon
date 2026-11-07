@@ -121,5 +121,5 @@ fn controllers() -> &'static [ControllerInfo] {
     if let Some(table) = TEST_CONTROLLERS.get() {
         return table;
     }
-    super::part_table::installed_controllers()
+    super::parts::installed_controllers()
 }

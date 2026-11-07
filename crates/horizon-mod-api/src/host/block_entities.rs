@@ -122,6 +122,7 @@ pub trait BlockEntitiesBackend {
     }
     /// Side: both.
     /// Read a configured mod holder's declared internal item slot, without automation policy.
+    /// Removed, replaced or reloaded holders return BlockEntityItemError::Stale.
     fn block_entity_item_slot(
         &self,
         entity: BlockEntityRef,
@@ -140,7 +141,11 @@ pub trait BlockEntitiesBackend {
 pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Change the lock through the same storage used by container opening and saving.
-    fn block_entity_set_lock(&mut self, entity: BlockEntityRef, lock: Option<Compound>) -> bool {
+    fn block_entity_set_lock(
+        &mut self,
+        entity: BlockEntityRef,
+        lock: Option<Compound>,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_lock",
             "block_entity_set_lock",
@@ -151,11 +156,15 @@ pub trait BlockEntitiesBackendMut {
     /// Merges `data` into the block entity's saved data and loads it, as `/data merge block`
     /// does (`BlockDataAccessor.setData`: `loadWithComponents`, `setChanged`, then
     /// `sendBlockUpdated`, so comparators re-read it and clients get the update). `id`, `x`,
-    /// `y` and `z` in `data` are ignored. True when the data changed; false for a stale
-    /// handle, a client, another level than the one in place, data nested too deep or that
-    /// changes nothing, or a result the block entity can't load. Inside a transaction an
+    /// `y` and `z` in `data` are ignored. Ok(true) when data changed; Ok(false) for data
+    /// nested too deep, no change, or data the entity cannot load. Stale or unwritable
+    /// handles return BlockEntityError::Stale. Inside a transaction an
     /// abort puts the block entity, its name, `lock`, loot table roll and attachments back.
-    fn block_entity_merge_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
+    fn block_entity_merge_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_merge_data",
             "block_entity_merge_data",
@@ -165,8 +174,12 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Replaces the saved payload, retaining identity and position metadata.
     /// Uses the same transactional load and client update path as `merge_data`.
-    /// False for a missing or stale block entity, unsupported data, or no change.
-    fn block_entity_replace_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
+    /// Ok(false) for unsupported data or no change; Stale for an invalidated handle.
+    fn block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_replace_data",
             "block_entity_replace_data",
@@ -176,8 +189,11 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// `BlockEntity.setChanged`: the chunk is saved again and comparators re-read the
     /// container (`updateNeighbourForOutputSignal`). Inside a transaction it runs once at the
-    /// root commit. False for a stale handle, a client or another level than the one in place.
-    fn block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool {
+    /// root commit. Returns Stale for an invalidated handle or a level not writable here.
+    fn block_entity_set_changed(
+        &mut self,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_changed",
             "block_entity_set_changed",
@@ -187,9 +203,13 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Sets the custom name, or clears it with None, as an anvil-renamed item placed with
     /// `components` sets `CustomName`. Plain text only. Clients get a block entity update.
-    /// False for a block entity that isn't nameable, a stale handle, a client or another
-    /// level than the one in place. Inside a transaction an abort puts the name back.
-    fn block_entity_set_name(&mut self, entity: BlockEntityRef, name: Option<&str>) -> bool {
+    /// Ok(false) for an entity that is not nameable; Stale for an invalidated or
+    /// unwritable handle. Inside a transaction an abort puts the name back.
+    fn block_entity_set_name(
+        &mut self,
+        entity: BlockEntityRef,
+        name: Option<&str>,
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_name",
             "block_entity_set_name",
@@ -198,14 +218,14 @@ pub trait BlockEntitiesBackendMut {
     }
     /// Side: server.
     /// Set a mod block entity's menu data slot in place, joining the current transaction
-    /// and its setChanged notice. False for a stale/client/parked/vanilla entity, an
-    /// invalid slot or no change. Does not resize the mod's declared data slots.
+    /// and its setChanged notice. Ok(false) for a vanilla entity, an invalid slot or
+    /// no change; Stale for an invalidated or unwritable handle. Does not resize slots.
     fn block_entity_set_data_slot(
         &mut self,
         entity: BlockEntityRef,
         slot: u32,
         value: i32,
-    ) -> bool {
+    ) -> Result<bool, BlockEntityError> {
         crate::phase::unprovided(
             "BackendMut::block_entity_set_data_slot",
             "block_entity_set_data_slot",
@@ -215,6 +235,7 @@ pub trait BlockEntitiesBackendMut {
     /// Side: server.
     /// Sizes a mod block entity's menu data explicitly, using the same write
     /// target, journal and Changed notice as scalar data-slot writes.
+    /// Removed, replaced or reloaded holders return BlockEntityDataError::Stale.
     fn block_entity_set_data_slots(
         &mut self,
         entity: BlockEntityRef,
@@ -228,6 +249,7 @@ pub trait BlockEntitiesBackendMut {
     }
     /// Side: server.
     /// Replace internal storage under the existing transaction; external ITEMS routing is separate.
+    /// Removed, replaced or reloaded holders return BlockEntityItemError::Stale.
     fn block_entity_set_item_slot(
         &mut self,
         entity: BlockEntityRef,

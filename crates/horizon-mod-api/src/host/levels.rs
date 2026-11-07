@@ -581,6 +581,15 @@ pub trait LevelsBackend {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
+    fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>> {
+        crate::phase::unprovided(
+            "Backend::level_collision_boxes",
+            "level_collision_boxes",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -946,6 +955,29 @@ pub trait LevelsBackendMut {
         crate::phase::unprovided(
             "BackendMut::level_set_random",
             "level_set_random",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
+    /// `growWaterPlant`), with no player and no item: the mods' `bonemeal` hook first, level event
+    /// 1505 when something grew. True when something grew; false for a refused write, a stale or
+    /// parked handle, a client, and a block that did not grow.
+    fn level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        crate::phase::unprovided(
+            "BackendMut::level_bone_meal",
+            "level_bone_meal",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
+    /// Set the biome of the 4x4x4 cell holding `pos` to `biome` (`minecraft:plains`), as
+    /// `/fillbiome` does for one cell. False for a refused write, a stale or parked handle, a
+    /// client, an unknown biome and an unchanged cell.
+    fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool {
+        crate::phase::unprovided(
+            "BackendMut::level_set_biome",
+            "level_set_biome",
             crate::phase::LoadAccess::WorldOnly,
         )
     }

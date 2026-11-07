@@ -190,7 +190,7 @@ impl Game<'_> {
             return false;
         }
         let id = m.id;
-        if !self.may_board() || !self.native_may_board(id) {
+        if !self.native_may_board(id) {
             return true;
         }
         self.start_riding(id);
@@ -345,7 +345,7 @@ impl Game<'_> {
         }
         // doPlayerRide
         let id = self.mobs[index].id;
-        if !self.may_board() || !self.native_may_board(id) {
+        if !self.native_may_board(id) {
             return true;
         }
         let m = &mut self.mobs[index];

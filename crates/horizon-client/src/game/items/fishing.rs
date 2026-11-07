@@ -424,6 +424,11 @@ impl Game<'_> {
                 1.0,
                 pitch,
             );
+            // A rod that broke during retrieval is now an empty ItemStack,
+            // whose use-effects component is absent.
+            if let Some(rod) = self.held().cloned() {
+                self.use_vibration(&rod, "minecraft:item_interact_finish");
+            }
         } else {
             let pitch = 0.4 / (self.world.random.next_float() * 0.4 + 0.8);
             self.audio.play(
@@ -471,6 +476,7 @@ impl Game<'_> {
             });
             // FishingRodItem.use counts a cast, not a reel-in.
             self.award_stat("used", "minecraft:fishing_rod", 1);
+            self.use_vibration(stack, "minecraft:item_interact_start");
         }
         self.swing_arm();
         true
@@ -516,8 +522,10 @@ impl Game<'_> {
                 t.velocity = pulled(t.velocity);
             } else if let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) {
                 a.velocity = pulled(a.velocity);
-            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                b.velocity = pulled(b.velocity);
+            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                self.boats.update(i, |b| {
+                    b.velocity = pulled(b.velocity);
+                });
             } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
                 // `AbstractMinecart` is pickable, so `pullEntity` moves it too.
                 c.velocity = pulled(c.velocity);

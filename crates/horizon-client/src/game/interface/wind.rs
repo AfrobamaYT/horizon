@@ -338,13 +338,13 @@ impl Game<'_> {
         let mut entities = self.take_entities();
         for_each_entity_mut!(entities, entity => {
             if entity.ignores_explosion(&burst) || !entity.pushed_by_wind() {
-                continue;
+                return;
             }
             let feet = entity.position();
             let feet = [feet.x, feet.y, feet.z];
             let dist = distance(feet) / diameter;
             if dist > 1.0 {
-                continue;
+                return;
             }
             let b = entity.explosion_box();
             let (lo, hi) = (b.min_position(), b.max_position());

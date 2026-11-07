@@ -391,13 +391,12 @@ impl crate::entity_rules::EntityRules for ArmorStand {
 #[derive(Clone, Copy)]
 pub struct ItemStep {
     old_velocity: Vec3,
-    moved: bool,
     landed: Option<(BlockPos, f64)>,
+    movement: Option<Vec3>,
+    clipped_vertical: bool,
 }
 impl ItemStep {
-    /// `Entity.checkFallDamage`'s landing: the block the item came down on
-    /// (`getOnPosLegacy`) and how far it fell, for its `Block.fallOn`. None when the move
-    /// didn't end a fall.
+    /// The landing position and accumulated fall distance, before block contact.
     pub fn landed(&self) -> Option<(BlockPos, f64)> {
         self.landed
     }
@@ -619,11 +618,36 @@ impl ItemEntity {
         facts: &BlockFacts,
         collision: &BlockCollisionRegistry<'_>,
         no_physics: bool,
-        (water_height, lava_height): (f64, f64),
+        heights: (f64, f64),
         entity_boxes: &[Aabb],
         border: Option<&BorderGeometry>,
         blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
         context: &horizon_world::native_load_context::LoopContext,
+    ) -> ItemStep {
+        let step = self.tick_move_before_block_effects(
+            world,
+            facts,
+            collision,
+            no_physics,
+            heights,
+            entity_boxes,
+            border,
+        );
+        self.finish_move_block_effects(world, facts, no_physics, blocks, step, context);
+        step
+    }
+
+    /// Resolve the item's move before the owner handles block contact and
+    /// resumes the normal block effects.
+    pub fn tick_move_before_block_effects(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        no_physics: bool,
+        (water_height, lava_height): (f64, f64),
+        entity_boxes: &[Aabb],
+        border: Option<&BorderGeometry>,
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
@@ -739,9 +763,74 @@ impl ItemEntity {
                     slime,
                 );
             }
-            // Entity.move's last step: soul sand and honey slow the item's
-            // horizontal speed. A move through blocks (noPhysics) returns
-            // before it. `blocks` is None only for the isolated unit tests.
+            return ItemStep {
+                old_velocity,
+                movement: Some(moved),
+                clipped_vertical: !no_physics && moved.y != wanted.y,
+                landed,
+            };
+        }
+        // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
+        if !no_physics {
+            self.slime_step_on(world, facts);
+        }
+        ItemStep {
+            old_velocity,
+            landed: None,
+            movement: None,
+            clipped_vertical: false,
+        }
+    }
+
+    /// The block at `Entity.getOnPosLegacy` for this tick's clipped move.
+    /// Idle ticks retain the entity's collision flags but have no contact.
+    pub fn vertical_contact(
+        &self,
+        world: &World,
+        collision: &BlockCollisionRegistry<'_>,
+        blocks: &horizon_world::movement_properties::BoundMovementProperties,
+        step: ItemStep,
+    ) -> Option<BlockPos> {
+        if !step.clipped_vertical {
+            return None;
+        }
+        let mut scene = SceneCollisions {
+            world,
+            binding: collision,
+            subject: None,
+        };
+        let mut ground = horizon_world::ground_support::GroundState::default();
+        ground
+            .check_support(self.on_ground, self.bounds(), step.movement, |bounds| {
+                horizon_world::ground_support::find_supporting_block(
+                    &mut scene,
+                    horizon_world::collision_context::CollisionContext::empty(false),
+                    self.position,
+                    bounds,
+                    1_000_000,
+                )
+            })
+            .ok()?;
+        Some(crate::motion::legacy_block_support_at(
+            world,
+            blocks,
+            self.position,
+            ground.supporting_block,
+        ))
+    }
+
+    /// Resume the normal block effects after the collision response.
+    pub fn finish_move_block_effects(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        no_physics: bool,
+        blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
+        step: ItemStep,
+        context: &horizon_world::native_load_context::LoopContext,
+    ) {
+        if step.movement.is_some() {
+            // Entity.move applies the block's speed factor before block effects.
             if !no_physics && let Some(blocks) = blocks {
                 let factor = crate::motion::block_speed_factor_at(
                     world,
@@ -753,24 +842,8 @@ impl ItemEntity {
                 self.velocity =
                     horizon_world::entity_move::scale_by_block_speed(self.velocity, factor);
             }
-            // Entity.move -> applyEffectsFromBlocks: honey then bubble columns
-            // (before air drag), matching ItemEntity.tick.
             self.apply_honey_slide(world, facts);
             self.stuck = self.stuck_multiplier(world, facts).unwrap_or(Vec3::ZERO);
-            return ItemStep {
-                old_velocity,
-                moved: true,
-                landed,
-            };
-        }
-        // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
-        if !no_physics {
-            self.slime_step_on(world, facts);
-        }
-        ItemStep {
-            old_velocity,
-            moved: false,
-            landed: None,
         }
     }
     /// The rest of `ItemEntity.tick`, after the bubble column's push: slime,
@@ -784,7 +857,7 @@ impl ItemEntity {
         no_physics: bool,
         step: ItemStep,
     ) -> bool {
-        if step.moved {
+        if step.movement.is_some() {
             // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn, with the
             // vertical speed the bounce just left (before the air drag).
             if !no_physics {

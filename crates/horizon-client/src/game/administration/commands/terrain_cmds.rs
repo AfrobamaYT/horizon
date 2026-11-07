@@ -235,22 +235,11 @@ impl Game<'_> {
         if changed == 0 {
             return Err(err("commands.fillbiome.no_changes", &[]));
         }
-        for key in &touched {
-            self.world.modified.insert(*key);
-            for sy in 0..self.world.layout().sections() as i32 {
-                self.world.dirty_sections.insert((key.0, sy, key.1));
-            }
-        }
-        // ChunkMap.resendBiomesForChunks: the players who see the changed
-        // columns are sent their new biomes, in the order the columns were
-        // gathered (z, then x).
-        if let Some(host) = self.lan.as_mut() {
-            let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
-                .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
-                .filter(|key| touched.contains(key))
-                .collect();
-            host.hub.resend_biomes(&self.world, &columns);
-        }
+        let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
+            .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
+            .filter(|key| touched.contains(key))
+            .collect();
+        self.commit_biome_columns(&touched, &columns);
         self.feedback(Text::translate(
             "commands.fillbiome.success.count",
             &[
@@ -266,6 +255,56 @@ impl Game<'_> {
         Ok(changed)
     }
 
+    /// The tail of a biome change: the columns in `touched` are saved and re-meshed, and the
+    /// players who see `columns` are sent their new biomes (`ChunkMap.resendBiomesForChunks`), in
+    /// the order the columns were gathered (z, then x). Shared by `/fillbiome` and
+    /// `native_level_set_biome`.
+    pub(in crate::game) fn commit_biome_columns(
+        &mut self,
+        touched: &std::collections::HashSet<(i32, i32)>,
+        columns: &[(i32, i32)],
+    ) {
+        for key in touched {
+            self.world.modified.insert(*key);
+            for sy in 0..self.world.layout().sections() as i32 {
+                self.world.dirty_sections.insert((key.0, sy, key.1));
+            }
+        }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.resend_biomes(&self.world, columns);
+        }
+    }
+    /// Set the biome cell holding `pos` (a 4x4x4 cell, `QuartPos`) to the biome named `biome`
+    /// (`minecraft:plains`), as `/fillbiome` does for one cell: the chunk is saved, re-meshed and
+    /// resent. False for an unknown biome, an unloaded or out-of-height position, or a cell that
+    /// already has it.
+    pub(in crate::game) fn set_biome_at(&mut self, pos: [i32; 3], biome: &str) -> bool {
+        let Some(target) = world_biomes!(self)
+            .list
+            .iter()
+            .position(|b| b.name == biome)
+        else {
+            return false;
+        };
+        let key = (pos[0] >> 4, pos[2] >> 4);
+        let Some(chunk) = self.world.chunks.get(&key) else {
+            return false;
+        };
+        if !self.world.shape.contains_y(pos[1])
+            || usize::from(chunk.biome(pos[0], pos[1], pos[2])) == target
+        {
+            return false;
+        }
+        let qy =
+            ((pos[1] - self.world.bottom_y()) >> 2).clamp(0, self.world.layout().height() / 4 - 1);
+        if let Some(chunk) = self.world.chunks.get_mut(&key) {
+            let chunk = std::sync::Arc::make_mut(chunk);
+            chunk.set_biome_cell((pos[0] & 15) >> 2, qy, (pos[2] & 15) >> 2, target as u16);
+        }
+        self.commit_biome_columns(&std::collections::HashSet::from([key]), &[key]);
+        true
+    }
+
     // ---- /worldborder -----------------------------------------------------------------------
 
     /// Every tick: the size change, the wall the player cannot pass and
@@ -279,7 +318,8 @@ impl Game<'_> {
         let now = horizon_client::lan::border::Sent::of(&self.border);
         if let Some(sent) = host.border_sent.replace(now) {
             for packet in sent.changes(&self.border) {
-                host.hub.broadcast(&packet);
+                // PlayerList$1: only the players of the border's own level.
+                host.hub.broadcast_level(&packet);
             }
         }
     }
