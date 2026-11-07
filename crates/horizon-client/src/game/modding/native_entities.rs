@@ -93,20 +93,25 @@ impl Game<'_> {
         let target = self.spawn_entity_from_nbt(tag);
         // These roots take their id as they load, and a rocket has no command
         // Target variant. Select the newly appended root, never an older waiting entity.
-        let root = match kind {
-            "minecraft:tnt" => self.tnts.get_mut(deferred.0).map(|e| &mut e.id),
-            "minecraft:falling_block" => None,
-            "minecraft:firework_rocket" => self.rockets.get_mut(deferred.2).map(|e| &mut e.id),
-            _ => None,
-        };
-        let root = root.map(|id| super::lan_entities::assign_entity_id(&mut self.next_entity, id));
-        let root = if kind == "minecraft:falling_block" && deferred.1 < self.falling.len() {
-            Some(self.falling.update(deferred.1, |f| {
-                super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id)
-            }))
-        } else {
-            root
-        };
+        let root =
+            match kind {
+                "minecraft:tnt" => self.tnts.get_mut(deferred.0).map(|e| {
+                    super::entity::assign_stored_id(&mut self.next_entity, &mut e.id, None)
+                }),
+                "minecraft:falling_block" if deferred.1 < self.falling.len() => {
+                    Some(self.falling.update(deferred.1, |f| {
+                        super::entity::assign_stored_id(
+                            &mut self.next_entity,
+                            &mut f.id,
+                            Some(&f.attachment_lifetime),
+                        )
+                    }))
+                }
+                "minecraft:firework_rocket" => self.rockets.get_mut(deferred.2).map(|e| {
+                    super::entity::assign_stored_id(&mut self.next_entity, &mut e.id, None)
+                }),
+                _ => None,
+            };
         self.native_mobs_joined(from, false);
         // Otherwise the root is the first entity spawned, also for kinds no
         // command target stands for (experience orbs, end crystals, cushions). An id handed out to an
@@ -195,19 +200,27 @@ impl Game<'_> {
     fn assign_pending_join_ids(&mut self) {
         self.assign_dragon_and_crystal_ids();
         for t in &mut self.tnts {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+            super::entity::assign_stored_id(&mut self.next_entity, &mut t.id, None);
         }
         self.falling.for_each_mut(|f| {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id);
+            super::entity::assign_stored_id(
+                &mut self.next_entity,
+                &mut f.id,
+                Some(&f.attachment_lifetime),
+            );
         });
         for p in &mut self.creatures.projectiles {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut p.id);
+            super::entity::assign_stored_id(
+                &mut self.next_entity,
+                &mut p.id,
+                Some(&p.attachment_lifetime),
+            );
         }
         for t in &mut self.tridents {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+            super::entity::assign_stored_id(&mut self.next_entity, &mut t.id, None);
         }
         for r in &mut self.rockets {
-            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
+            super::entity::assign_stored_id(&mut self.next_entity, &mut r.id, None);
         }
     }
     /// The entity inserted earliest after the last one announced.
@@ -375,6 +388,51 @@ impl Game<'_> {
 mod tests {
     use super::*;
     use mod_api::ServerHost;
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn pending_ids_keep_counter_order_and_assign_zero_only_once() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            for (kind, nbt) in [
+                ("minecraft:tnt", "{fuse:80s}"),
+                (
+                    "minecraft:falling_block",
+                    "{BlockState:{Name:\"minecraft:sand\"},Time:1}",
+                ),
+                ("minecraft:arrow", "{}"),
+                ("minecraft:trident", "{}"),
+                ("minecraft:firework_rocket", "{LifeTime:20}"),
+            ] {
+                game.summon_with_nbt(kind, [1.0, 70.0, 1.0], nbt).unwrap();
+            }
+            let base = game.next_entity;
+            let joined = game.persist.joined_seq;
+            let announced = game.persist.live.clone();
+            game.assign_pending_join_ids();
+            let ids = [
+                game.tnts[0].id,
+                game.falling[0].id,
+                game.creatures.projectiles[0].id,
+                game.tridents[0].id,
+                game.rockets[0].id,
+            ];
+            assert_eq!(ids, [base + 1, base + 2, base + 3, base + 4, base + 5]);
+            game.assign_pending_join_ids();
+            assert_eq!(game.next_entity, base + 5);
+            assert_eq!(game.persist.joined_seq, joined);
+            assert_eq!(game.persist.live, announced);
+            assert_eq!(
+                [
+                    game.tnts[0].id,
+                    game.falling[0].id,
+                    game.creatures.projectiles[0].id,
+                    game.tridents[0].id,
+                    game.rockets[0].id
+                ],
+                ids
+            );
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources and an isolated process for native mods"]
