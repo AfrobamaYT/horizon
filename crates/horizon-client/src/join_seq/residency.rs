@@ -277,6 +277,28 @@ mod tests {
     }
 
     #[test]
+    fn retirement_is_rechecked_after_a_blocked_push_takes_the_mutex() {
+        use std::{sync::mpsc, time::Duration};
+        let stale = Journal::default();
+        let guard = stale.0.events.lock().unwrap();
+        let pusher = stale.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let pusher = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            pusher.push(event(DimensionKey::NETHER, Kind::Mob, Change::Lifted));
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Give an incorrect pre-lock load time to observe retired=false.
+        // Correct code cannot read retirement until this guard is released.
+        std::thread::sleep(Duration::from_millis(100));
+        stale.0.retired.store(true, Ordering::Relaxed);
+        drop(guard);
+        pusher.join().unwrap();
+        assert!(stale.0.events.lock().unwrap().is_empty());
+        assert!(!stale.0.ready.load(Ordering::Acquire));
+    }
+
+    #[test]
     fn repeated_epoch_resets_never_reactivate_an_older_producer() {
         let mut journal = Journal::default();
         let first = journal.clone();
