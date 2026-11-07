@@ -4,6 +4,9 @@
 //! Mods page.
 pub mod link;
 mod runtime;
+pub mod boundary {
+    include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
+}
 pub use runtime::{CallClass, WasmHandler, WasmMod};
 
 pub(crate) trait NoAnswer {
@@ -14,12 +17,7 @@ impl<T: Default> NoAnswer for T {
         T::default()
     }
 }
-impl NoAnswer for mod_api::Flow {
-    fn no_answer() -> Self {
-        Self::Continue
-    }
-}
-pub(crate) fn refused<E: From<(mod_api::Identifier, String)>>() -> E {
+pub(crate) fn call_refused<E: From<(mod_api::Identifier, String)>>() -> E {
     E::from((
         mod_api::Identifier::parse("horizon:wasm_mod").expect("valid constant identifier"),
         "the mod's call didn't run".into(),
@@ -363,7 +361,6 @@ pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
                 match m.side {
                     horizon_mod_package::manifest::Side::Both => mod_api::Side::Both,
                     horizon_mod_package::manifest::Side::Client => mod_api::Side::Client,
-                    horizon_mod_package::manifest::Side::Server => mod_api::Side::Server,
                 },
                 m.owned_namespaces().map(str::to_owned).collect(),
                 m.dependencies.keys().cloned().collect(),

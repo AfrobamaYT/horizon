@@ -86,7 +86,7 @@ impl fmt::Display for LinkError {
 impl std::error::Error for LinkError {}
 
 /// A linked group: its store, and each member's instance.
-pub struct Group<T = ()> {
+pub struct Group<T: 'static = ()> {
     pub(crate) store: Store<T>,
     pub(crate) members: Vec<(String, Instance)>,
     pub(crate) memory: Memory,
@@ -256,7 +256,7 @@ impl<T: 'static> Group<T> {
                             _ => return Err(unresolved()),
                         },
                         _ => return Err(unresolved()),
-                    };
+                    }
                 };
                 imports.push(extern_);
             }
@@ -272,6 +272,7 @@ impl<T: 'static> Group<T> {
                 .collect();
             for (name, extern_) in exports {
                 if name.starts_with("__wasm_")
+                    || name.starts_with("horizon_")
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {

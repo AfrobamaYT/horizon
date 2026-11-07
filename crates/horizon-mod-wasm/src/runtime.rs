@@ -1,4 +1,7 @@
 //! Sandboxed core-wasm transport. One lock, memory and poison flag per dependency group.
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod runtime_tests;
 use crate::{
     Refusal,
     boundary::{Cx, Frame, serve},
@@ -33,6 +36,9 @@ pub(crate) struct State {
     cx: Box<Cx>,
     memory: Option<Memory>,
     replies: Vec<Writer>,
+    inputs: Vec<Writer>,
+    outputs: Vec<Vec<u8>>,
+    imports: Vec<Vec<u8>>,
     depth: usize,
     group: usize,
 }
@@ -40,12 +46,16 @@ impl Default for State {
     fn default() -> Self {
         Self {
             limits: wasmtime::StoreLimitsBuilder::new()
+                .trap_on_grow_failure(true)
                 .memory_size(256 << 20)
                 .table_elements(1 << 20)
                 .build(),
             cx: Box::default(),
             memory: None,
             replies: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            imports: Vec::new(),
             depth: 0,
             group: 0,
         }
@@ -80,13 +90,51 @@ pub struct WasmMod {
     hook: TypedFunc<(u32, u32, u32), u64>,
     pub subscribed: &'static [Option<HookId>],
     released: Arc<Mutex<Vec<Id>>>,
+    subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
 }
 pub struct WasmHandler {
     pub index: Id,
     pub module: WasmMod,
 }
+impl WasmHandler {
+    pub fn subscriptions(&self, owner: &'static str, export_id: u32) -> &'static [Option<HookId>] {
+        if let Some(value) = self
+            .module
+            .subscriptions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(self.index, export_id))
+            .copied()
+        {
+            return value;
+        }
+        let names = self
+            .module
+            .call(
+                CallClass::Callback,
+                Frame::default(),
+                export_id,
+                Some(self.index),
+                |_| {},
+                |r| r.take(),
+            )
+            .unwrap_or_default();
+        let value = crate::boundary::subscriptions_of(owner, names);
+        self.module
+            .subscriptions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((self.index, export_id), value);
+        value
+    }
+}
 impl Drop for WasmHandler {
     fn drop(&mut self) {
+        self.module
+            .subscriptions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(id, _), _| *id != self.index);
         self.module
             .released
             .lock()
@@ -152,12 +200,15 @@ fn host(
     let end = (ptr as usize)
         .checked_add(len as usize)
         .ok_or_else(|| wasmtime::Error::msg("input range overflow"))?;
-    let input = memory
-        .data(&caller)
-        .get(ptr as usize..end)
-        .ok_or_else(|| wasmtime::Error::msg("input outside memory"))?
-        .to_vec();
     let depth = caller.data().depth;
+    let mut input = std::mem::take(&mut caller.data_mut().imports[depth]);
+    input.clear();
+    input.extend_from_slice(
+        memory
+            .data(&caller)
+            .get(ptr as usize..end)
+            .ok_or_else(|| wasmtime::Error::msg("input outside memory"))?,
+    );
     let mut reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     reply.clear();
     let cx = &mut *caller.data_mut().cx as *mut Cx;
@@ -183,6 +234,7 @@ fn host(
             .map_err(|e| wasmtime::Error::msg(e.to_string()))
     };
     drop(loan);
+    caller.data_mut().imports[depth] = input;
     result?;
     let size = u32::try_from(reply.bytes().len())?;
     if size <= cap {
@@ -196,8 +248,11 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
     let memory = state
         .memory
         .ok_or_else(|| wasmtime::Error::msg("no group memory"))?;
-    let bytes = state.replies[state.depth].bytes().to_vec();
-    memory.write(&mut caller, ptr as usize, &bytes)?;
+    let depth = state.depth;
+    let reply = std::mem::take(&mut caller.data_mut().replies[depth]);
+    let result = memory.write(&mut caller, ptr as usize, reply.bytes());
+    caller.data_mut().replies[depth] = reply;
+    result?;
     Ok(())
 }
 
@@ -269,6 +324,7 @@ impl WasmMod {
                 hook,
                 subscribed: &[],
                 released: Arc::default(),
+                subscriptions: Arc::default(),
             })
             .collect())
     }
@@ -337,29 +393,36 @@ impl WasmMod {
         store.data_mut().depth = depth;
         if store.data().replies.len() <= depth {
             store.data_mut().replies.resize_with(depth + 1, Writer::new);
+            store.data_mut().inputs.resize_with(depth + 1, Writer::new);
+            store.data_mut().outputs.resize_with(depth + 1, Vec::new);
+            store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
+        let mut w = std::mem::take(&mut store.data_mut().inputs[depth]);
+        let mut output = std::mem::take(&mut store.data_mut().outputs[depth]);
         let result = (|| -> wasmtime::Result<R> {
             let released =
                 std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
             if !released.is_empty() {
-                let mut w = Writer::new();
+                w.clear();
                 w.put(&released);
-                self.invoke(&mut store, mod_api::wire::RELEASE, &w)?;
+                self.invoke(&mut store, mod_api::wire::RELEASE, &w, &mut output)?;
             }
-            let mut w = Writer::new();
+            w.clear();
             if let Some(handler) = handler {
                 w.put(&handler);
             }
             args(&mut w);
-            let bytes = self.invoke(&mut store, id, &w)?;
-            let mut r = Reader::new(&bytes);
+            self.invoke(&mut store, id, &w, &mut output)?;
+            let mut r = Reader::new(&output);
             let value = reply(&mut r)?;
             if !r.rest().is_empty() {
                 return Err(WireError::Trailing.into());
             }
             Ok(value)
         })();
+        store.data_mut().inputs[depth] = w;
+        store.data_mut().outputs[depth] = output;
         store.data_mut().cx.frames.pop();
         store.data_mut().depth -= 1;
         match result {
@@ -376,7 +439,8 @@ impl WasmMod {
         store: &mut StoreContextMut<'_, State>,
         id: u32,
         input: &Writer,
-    ) -> wasmtime::Result<Vec<u8>> {
+        output: &mut Vec<u8>,
+    ) -> wasmtime::Result<()> {
         let len = u32::try_from(input.bytes().len())?;
         let ptr = self.input.call(&mut *store, len)?;
         let memory = store
@@ -388,15 +452,23 @@ impl WasmMod {
         let ptr = (result >> 32) as usize;
         let len = result as u32;
         if len == u32::MAX {
-            return Err(wasmtime::Error::msg("guest refused call"));
+            let bytes = memory
+                .data(&*store)
+                .get(ptr..)
+                .ok_or_else(|| wasmtime::Error::msg("error reply outside memory"))?;
+            let message: String = Reader::new(bytes).take()?;
+            return Err(wasmtime::Error::msg(message));
         }
         let end = ptr
             .checked_add(len as usize)
             .ok_or_else(|| wasmtime::Error::msg("reply overflow"))?;
-        Ok(memory
-            .data(&*store)
-            .get(ptr..end)
-            .ok_or_else(|| wasmtime::Error::msg("reply outside memory"))?
-            .to_vec())
+        output.clear();
+        output.extend_from_slice(
+            memory
+                .data(&*store)
+                .get(ptr..end)
+                .ok_or_else(|| wasmtime::Error::msg("reply outside memory"))?,
+        );
+        Ok(())
     }
 }
