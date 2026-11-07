@@ -63,6 +63,7 @@ impl InstanceGroups for Game<'_> {
         if capacity > 16_384 || reserved + (capacity as usize).max(1) > MOD_CAPACITY {
             return Err(GroupError::CapacityExceeded);
         }
+        self.prepared_model_draws.borrow_mut().reserve(16_384);
         storage.next = storage
             .next
             .checked_add(1)

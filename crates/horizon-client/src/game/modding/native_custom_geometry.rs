@@ -85,6 +85,9 @@ impl Game<'_> {
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
         horizon_client::world_geometry::validate_instances(instances)?;
+        self.prepared_model_draws
+            .borrow_mut()
+            .reserve(instances.len().min(16_384));
         self.draw_validated_model_instances(draw, model, instances)
     }
     pub(super) fn draw_validated_model_instances(
@@ -119,6 +122,7 @@ impl Game<'_> {
         let mut gpu_left = if gpu {
             self.prepared_copy_room(start as u64, instances.len())
                 .unwrap_or(0)
+                .min(staged.capacity() - start)
         } else {
             0
         };
@@ -319,6 +323,47 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources; measure on a real GPU host"]
+    fn persistent_groups_submission_cost() {
+        use mod_api::InstanceGroups;
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = grass(game);
+            let mut draw = WorldGeometry::default();
+            for n in [1, 16, 128] {
+                let groups: Vec<_> = (0..n)
+                    .map(|_| {
+                        let group = game.create_group(model, 128).unwrap();
+                        group.set_len(game, 128).unwrap();
+                        group
+                    })
+                    .collect();
+                let start = std::time::Instant::now();
+                for _ in 0..1000 {
+                    draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+                    game.prepared_model_draws.borrow_mut().clear();
+                    for group in &groups {
+                        context(game, &mut draw)
+                            .draw_instance_group(*group)
+                            .unwrap();
+                    }
+                    std::hint::black_box(&draw);
+                }
+                eprintln!(
+                    "{n} groups, {} copies, CPU submission ms/frame: {:.6}",
+                    n * 128,
+                    start.elapsed().as_secs_f64()
+                );
+                for group in groups {
+                    group.destroy(game).unwrap();
+                }
+            }
+        });
+    }
+
+    #[test]
     #[ignore = "needs software Vulkan"]
     fn persistent_groups_match_batch() {
         use mod_api::{GroupError, InstanceGroups};
@@ -363,7 +408,7 @@ mod tests {
                         per_copy: false,
                         hdr: false,
                         atlas_size: [game.gui.atlas.width, game.gui.atlas.height],
-                        atlas: game.gui.atlas.pixels(),
+                        atlas: &game.gui.atlas.pixels(),
                         view_proj: Mat4::IDENTITY,
                     },
                 )
@@ -382,12 +427,26 @@ mod tests {
             context(game, &mut draw).draw_instance_group(group).unwrap();
             assert_eq!(draw.usage().instances_used, 1);
             assert_eq!(expected, render(game));
+            let sibling = game.create_group(model, 16_384).unwrap();
+            let third = game.create_group(model, 16_384).unwrap();
+            let fourth = game.create_group(model, 16_384).unwrap();
+            assert_eq!(
+                game.create_group(model, 16_384),
+                Err(GroupError::CapacityExceeded)
+            );
+            for handle in [sibling, third, fourth] {
+                handle.destroy(game).unwrap();
+            }
             group.destroy(game).unwrap();
             assert_eq!(group.set_len(game, 1), Err(GroupError::Stale));
             assert_eq!(
                 context(game, &mut draw).draw_instance_group(group),
                 Err(GroupError::Stale)
             );
+            let fresh = game.create_group(model, 8).unwrap();
+            assert_ne!(fresh, group);
+            game.instance_groups.borrow_mut().clear();
+            assert_eq!(fresh.set_len(game, 1), Err(GroupError::Stale));
         });
     }
 
