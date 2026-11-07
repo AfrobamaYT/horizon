@@ -12187,7 +12187,7 @@ mod tests {
             fn client_mining_predict(
                 &self,
                 _: &dyn ClientHost,
-                event: &mut ClientMiningPredictEvent<'_>,
+                event: &mut ClientMiningPredictEvent,
             ) -> Flow {
                 assert!(!event.prediction.starting);
                 assert_eq!(event.prediction.pos, [0, 64, 0]);
