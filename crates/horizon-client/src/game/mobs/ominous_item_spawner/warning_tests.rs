@@ -245,3 +245,19 @@ fn lifecycle_spawner_commands_unload_park_and_remote_metadata() {
     }
     .run();
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn residency_command_positions_and_client_spawner_clock() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.set_allow_commands(true);
+        game.add_remote_ominous_item_spawner(701, [1.0, 80.0, 1.0]);
+        game.spawn_creeper_cloud([2.0, 80.0, 2.0], Vec::new(), Vec::new(), Vec::new(), 0);
+        assert!(game.run_command("tp @e[type=minecraft:ominous_item_spawner] 64.0 80.0 64.0"));
+        assert_eq!(game.ominous_spawners[0].position, [64.0, 80.0, 64.0]);
+        assert!(game.run_command("tp @e[type=minecraft:area_effect_cloud] -32.0 90.0 -48.0"));
+        assert_eq!(game.breath_clouds[0].at, [-32.0, 90.0, -48.0]);
+        game.tick_remote_ominous_item_spawners();
+        assert_eq!(game.ominous_spawners[0].tick_count, 1);
+    });
+}
