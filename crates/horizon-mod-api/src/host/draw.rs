@@ -296,6 +296,31 @@ pub trait BlockEntityDrawContext {
         unimplemented!("BlockEntityDrawContext::draw_model_part")
     }
 }
+/// What `block_screen_effect_draw` draws with, one per hook call: quads in camera space, in
+/// blocks, with `+x` right, `+y` up and the camera at the origin looking down `-z`. It is the
+/// space of `ScreenEffectRenderer`'s own quads, whose whole-view quad has corners at `(±1, ±1, -0.5)`,
+/// under the first-person hand's projection. Quads draw in the order given, after the level and
+/// the hand and before the GUI, alpha-blended with no depth test; give corners in order round the quad.
+pub trait CameraDrawContext {
+    /// A quad of corners `corners` in solid `argb`. False, with nothing drawn, for a coordinate
+    /// that is not finite.
+    fn quad(&mut self, corners: [[f32; 3]; 4], argb: u32) -> bool {
+        unimplemented!("CameraDrawContext::quad")
+    }
+    /// A quad of corners `corners` showing sprite `name` of the game's 2D atlas (`block/fire_1`,
+    /// `misc/underwater`), with `uv` the texture coordinates of each corner in sprite units (0 to
+    /// 1 is the sprite once; beyond that it repeats), every texel multiplied by `argb`. False,
+    /// with nothing drawn, when there is no such sprite or a coordinate is not finite.
+    fn sprite(
+        &mut self,
+        name: &str,
+        corners: [[f32; 3]; 4],
+        uv: [[f32; 2]; 4],
+        argb: u32,
+    ) -> bool {
+        unimplemented!("CameraDrawContext::sprite")
+    }
+}
 /// Per-view untextured geometry, cleared even without listeners; `usage` reports fixed setup-time limits shared across listeners and depth modes.
 pub trait WorldDrawContext {
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,

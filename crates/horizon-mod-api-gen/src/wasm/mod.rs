@@ -23,6 +23,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "DrawContext",
     "BlockEntityDrawContext",
     "WorldDrawContext",
+    "CameraDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
