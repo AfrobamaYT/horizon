@@ -1,20 +1,20 @@
 use super::*;
-use crate::mod_api::{
+use horizon_client::{chunk::Chunk, join_seq::Joined as _};
+use mod_api::{
     self, BlockPart, Flow, Hooks, HostSide, ItemAfterVerticalCollisionEvent, Registrar,
     RegistrationContext,
 };
-use horizon_client::{chunk::Chunk, join_seq::Joined as _};
 use std::sync::Mutex;
 
 type Contact = (bool, u32, [i32; 3], [f64; 3], u32);
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Probe {
-    contacts: Mutex<Vec<Contact>>,
+    contacts: Arc<Mutex<Vec<Contact>>>,
 }
 
 #[mod_api::horizon_part]
-impl BlockPart for Arc<Probe> {
+impl BlockPart for Probe {
     fn item_after_vertical_collision(
         &self,
         _: HostSide,
@@ -36,7 +36,7 @@ impl BlockPart for Arc<Probe> {
 }
 
 #[mod_api::__subscriptions]
-impl Hooks for Arc<Probe> {
+impl Hooks for Probe {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         let key = r.block_key("minecraft:stone");
         r.block_part(key, self.clone());
@@ -49,13 +49,14 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -69,7 +70,9 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -112,7 +115,7 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
     assert_eq!(vanilla.stack, input);
     assert_eq!(vanilla.age, 1);
 
-    let probe = Arc::new(Probe::default());
+    let probe = Probe::default();
     let mods: mod_api::Mods =
         vec![mod_api::ModEntry::new("contact", Box::new(probe.clone()))].into();
     mod_api::testing::with_mods(mods.clone(), || {

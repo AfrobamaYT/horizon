@@ -9,13 +9,14 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -29,7 +30,9 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -77,9 +80,18 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     let before_save = saved.values().any(|tags| !tags.is_empty());
     let health = game.mobs[0].health;
     let world_time = game.world.game_time;
-    assert!(!game.native_remove_mob("minecraft:the_nether", 42));
-    assert!(game.native_remove_mob("minecraft:overworld", 42));
-    assert!(!game.native_remove_mob("minecraft:overworld", 42));
+    assert!(!game.native_entity_discard(mod_api::EntityRef::new(
+        mod_api::NativeWorldEpoch::new(u64::MAX),
+        42
+    )));
+    assert!(game.native_entity_discard(mod_api::EntityRef::new(
+        game.native_lifecycle.epoch().unwrap(),
+        42
+    )));
+    assert!(!game.native_entity_discard(mod_api::EntityRef::new(
+        game.native_lifecycle.epoch().unwrap(),
+        42
+    )));
     assert_eq!(game.world.game_time, world_time);
     assert_eq!(game.mobs[0].health, health, "discard is not lethal damage");
     assert_eq!(game.mobs[0].death_time, 0);
@@ -125,7 +137,10 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     }
     // Removing another mob during its death animation also hides UUID lookup
     // immediately. No dead/alive predicate was added to general lookup.
-    assert!(game.native_remove_mob("minecraft:overworld", 43));
+    assert!(game.native_entity_discard(mod_api::EntityRef::new(
+        game.native_lifecycle.epoch().unwrap(),
+        43
+    )));
     assert_eq!(game.target_with_uuid(dying_uuid), None);
     // The old UUID entry can remain in EntityMemory until its normal sweep.
     // It must not shadow a newly joined entity with the same UUID.
@@ -147,7 +162,10 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
     game.save_every_entity(&keys, &mut saved);
     let root = &saved[&(0, 0)][0];
     assert!(matches!(root.get("Passengers"), Some(Tag::List(list)) if list.len() == 1));
-    assert!(game.native_remove_mob("minecraft:overworld", 45));
+    assert!(game.native_entity_discard(mod_api::EntityRef::new(
+        game.native_lifecycle.epoch().unwrap(),
+        45
+    )));
     saved.clear();
     game.save_every_entity(&keys, &mut saved);
     assert_eq!(saved[&(0, 0)].len(), 1);

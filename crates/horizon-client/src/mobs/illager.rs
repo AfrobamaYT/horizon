@@ -944,10 +944,10 @@ mod tests {
                 let mut mob = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
                 let mut goals = std::mem::take(&mut mob.ai.targets);
                 let mut events = Vec::new();
-                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut test_level = crate::health::TestLevel::new(0);
                 let mut cx = Cx {
                     w: &w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                 };
                 for _ in 0..100 {

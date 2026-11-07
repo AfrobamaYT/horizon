@@ -1307,8 +1307,7 @@ impl Game<'_> {
                 Some(world_items!(self)),
                 Some(&self.pack.block_registries),
                 &self.damage_hooks,
-            )
-            .in_loop(&self.loop_context);
+            );
             let path_changes = horizon_client::mobs::collision_changes(&base, &path_writes);
             // Each mob keeps its snapshot slot all tick; the first slot of an
             // id answers, as a scan would.
@@ -2996,11 +2995,11 @@ impl Game<'_> {
                             Who::Player => self.player.as_mut().map_or(0.0, |p| {
                                 p.attribute("minecraft:knockback_resistance").unwrap_or(0.0)
                             }),
-                            Who::Mob(id) => self
-                                .mobs
-                                .iter()
-                                .find(|m| m.id == id)
-                                .map_or(0.0, |m| self.mob_knockback_resistance(m)),
+                            Who::Mob(id) => {
+                                self.mobs.iter().find(|m| m.id == id).map_or(0.0, |m| {
+                                    super::lan_attributes::mob_knockback_resistance(m)
+                                })
+                            }
                         };
                         let up = f64::from(0.4f32) * (1.0 - resistance).max(0.0);
                         match target {

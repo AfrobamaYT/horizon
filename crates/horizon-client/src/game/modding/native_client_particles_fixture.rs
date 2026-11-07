@@ -3,11 +3,11 @@ use super::{Game, execution_role::ExecutionRole};
 use horizon_client::{
     Result,
     hud::Rect,
-    mod_api::ClientHost,
     motion::PlayerMotion,
     particles::{ParticleEngine, ParticleLevel, ParticleOptions, ParticleType},
 };
 use horizon_core::geometry::Vec3;
+use mod_api::ClientHost;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -101,7 +101,7 @@ impl Game<'_> {
             h: 16,
         };
         self.particles = ParticleEngine::new(
-            &pack,
+            &horizon_assets::resource_source::ResourceSource::directory(pack.clone()),
             &HashMap::from([
                 ("particle/fixture_smoke".into(), rect),
                 ("fixture:particle/spark".into(), rect),

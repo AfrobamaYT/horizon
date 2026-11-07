@@ -2235,7 +2235,7 @@ pub(super) mod initial_history_tests {
     /// A scripted clock's values reach the pack as they are, before STILL's ticks.
     #[test]
     fn a_scripted_clock_comes_before_the_still_ticks() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         for still_ticks in [None, Some(47_811)] {
             let mut u = FrameUniforms::default();
@@ -2269,7 +2269,7 @@ pub(super) mod initial_history_tests {
     /// otherwise put them at their targets.
     #[test]
     fn a_scripted_clock_moves_smoothed_values_by_its_delta() {
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut input = PackInputs {
@@ -2312,7 +2312,7 @@ pub(super) mod initial_history_tests {
             &horizon_shaders::Macros::standard(),
         );
         let mut custom = horizon_shaders::Custom::parse(&properties);
-        let hud = HudBatch::new([800, 450]);
+        let hud = HudBatch::scratch([800, 450]);
         let f = frame(&hud);
         let mut u = FrameUniforms::default();
         let mut run = |u: &mut FrameUniforms| -> Vec<[u32; 2]> {

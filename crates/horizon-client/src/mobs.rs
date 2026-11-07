@@ -4556,9 +4556,9 @@ impl Mob {
                                     );
                                 } else {
                                     let amount = (4i32 << amp) as f32;
-                                    if let Some(context) = level.loop_context() {
-                                        self.heal(context, amount);
-                                    } else if self.health > 0.0 {
+                                    // No owning loop is lent to a DamageLevel yet. Keep this
+                                    // component's instant healing vanilla-only, not deferred.
+                                    if self.health > 0.0 {
                                         self.health = (self.health + amount)
                                             .clamp(0.0, self.attrs.max_health);
                                     }
@@ -6237,6 +6237,41 @@ mod totem_tests {
         t.species = Species::Fox;
         t.max_health = 10.0;
         Mob::new(1, Arc::new(t), Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn death_component_instant_healing_obeys_inversion_cap_and_dead_state() {
+        let mut level = crate::health::TestLevel::new(0);
+        for (undead, id) in [
+            (false, "minecraft:instant_health"),
+            (true, "minecraft:instant_damage"),
+        ] {
+            let mut mob = fox();
+            let mut kind = (*mob.kind).clone();
+            kind.flags.undead = undead;
+            mob.kind = Arc::new(kind);
+            mob.health = 1.0;
+            let effect = crate::items::ConsumeEffect::ApplyEffects {
+                probability: 1.0,
+                effects: vec![crate::items::ConsumeEffectSpec {
+                    id: id.into(),
+                    duration: 1,
+                    amplifier: 1,
+                    ambient: false,
+                    show_particles: true,
+                }],
+            };
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(mob.health, 9.0);
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(mob.health, 10.0);
+            mob.health = 0.0;
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(
+                mob.health, 0.0,
+                "instant healing does not revive a dead mob"
+            );
+        }
     }
 
     /// `LivingEntity.checkTotemDeathProtection`: a totem in the mouth takes

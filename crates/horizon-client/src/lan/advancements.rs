@@ -1051,12 +1051,11 @@ mod tests {
         let dir = root.join("data/recipe_pilot/recipe");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("press.json"), recipe).unwrap();
-        for marker in [
-            horizon_items::content_namespaces::MARKER,
-            horizon_items::content_namespaces::MOD_IDS_MARKER,
-        ] {
-            std::fs::write(root.join(marker), br#"["recipe_pilot"]"#).unwrap();
-        }
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["recipe_pilot"]"#,
+        )
+        .unwrap();
         let (sync, e) = entry(&root, "recipe_pilot:press");
         assert_eq!(
             e.id,

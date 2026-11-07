@@ -481,7 +481,7 @@ mod tests {
             ..Default::default()
         };
         let cache = CachedQuads::new(&atlas, &d, 0);
-        let mut fresh = horizon_client::hud::HudBatch::new([1, 1]);
+        let mut fresh = horizon_client::hud::HudBatch::scratch([1, 1]);
         text_display::draw(&mut fresh, &atlas, &d, &cache.lines, 0);
         let vertices = |b: &horizon_client::hud::HudBatch| {
             b.vertices

@@ -2373,13 +2373,14 @@ mod enchantment_snapshot_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2393,7 +2394,9 @@ mod enchantment_snapshot_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -2412,7 +2415,12 @@ mod enchantment_snapshot_tests {
         )
         .unwrap();
         game.world_root = dir;
-        game.world_tables = game.build_world_tables(false, &[]).unwrap().0;
+        let stack = game.reload_datapacks(false, &[]).unwrap();
+        let root = game.options.resources.clone();
+        game.world_tables = game
+            .build_world_tables(&stack, false, &root, game.mods.data_switched)
+            .unwrap()
+            .0;
         assert!(
             game.world_tables.is_some(),
             "the real active table container must be available"
@@ -2440,7 +2448,7 @@ mod enchantment_snapshot_tests {
             .tags = tags.clone();
         let item_ids = game.ui.registries.ids("minecraft:item").to_vec();
         let effects = game.ui.registries.effects.clone();
-        game.sync_function_registries();
+        game.sync_function_registries(&stack);
         for phase in [0, 1] {
             if phase == 1 {
                 game.build_registries();
@@ -2470,7 +2478,7 @@ mod enchantment_snapshot_tests {
         game.world_tables.as_mut().unwrap().stations.enchantments = base.clone();
         game.world_tables.as_mut().unwrap().items.enchantments = base;
         assert!(game.enchantments().get("h024:audit").is_none());
-        game.sync_function_registries();
+        game.sync_function_registries(&stack);
         assert!(
             !game
                 .ui

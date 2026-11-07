@@ -295,18 +295,21 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
             }),
         )
         .unwrap();
-    build(
+    build_fixture(
         &base,
+        Path::new(""),
         &[ContentMod {
             id: "ruby".into(),
             content,
+            jars: Vec::new(),
         }],
         &scratch,
     )
     .unwrap();
     let registry = horizon_world::level::data::load_registry(&scratch).unwrap();
     let facts = BlockFacts::load(&scratch, &registry).unwrap();
-    let items = Items::load(&scratch, &registry, &facts, &PackOverlay::NONE).unwrap();
+    let defaults = horizon_world::item_defaults::read(&scratch).unwrap();
+    let items = Items::load(&scratch, &registry, &facts, &PackOverlay::NONE, &defaults).unwrap();
     let b = Behaviours::load(&registry, &scratch).unwrap();
     let target = registry.default_state("ruby:frame").unwrap();
     struct Level {
@@ -370,7 +373,7 @@ fn block_aliases_keep_the_original_item_in_placement_context() {
                 can_use_game_master_blocks: false,
             };
             assert!(
-                matches!(b.block(&mut level,&mut Ticks::default(),&ctx),PlaceOutcome::Placed{state,..} if state==target)
+                matches!(b.place_block(&mut level,&mut Ticks::default(),&ctx),PlaceOutcome::Placed{state,..} if state==target)
             );
             assert_eq!(level.asked.borrow().last().map(String::as_str), Some(*name));
         }
@@ -1282,13 +1285,13 @@ fn content_root_loads_with_every_table() {
             item: "ruby:ruby_sword".into(),
             can_use_game_master_blocks: false,
         };
-        let denied = independent_behaviours.block(&mut level, &mut Ticks::new(1), &ctx);
+        let denied = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
         assert!(matches!(denied, PlaceOutcome::Failed));
         assert!(level.events.is_empty());
         level
             .blocks
             .insert(floor, new.default_state("minecraft:farmland").unwrap());
-        let placed = independent_behaviours.block(&mut level, &mut Ticks::new(1), &ctx);
+        let placed = independent_behaviours.place_block(&mut level, &mut Ticks::new(1), &ctx);
         assert!(matches!(placed, PlaceOutcome::Placed { state, .. } if state == wheat));
         assert!(level.events.iter().any(|e| matches!(e, LevelEvent::Sound { sound, .. } if &**sound == "minecraft:item.crop.plant")));
 

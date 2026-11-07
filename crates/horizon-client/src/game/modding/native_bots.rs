@@ -4,12 +4,12 @@
 //! a box. Nothing runs unless a mod calls it, and neither changes the player or the level.
 use super::Game;
 use horizon_client::collisions::SceneCollisions;
-use horizon_client::mod_api::{NativePlayerInput, NativeSimulatedMove};
 use horizon_client::motion::{MotionWorld, PlayerMotion};
 use horizon_client::sprint::Keys;
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_world::block_collision_scan::BlockCollisionScan;
 use horizon_world::collision_context::CollisionContext;
+use mod_api::{NativePlayerInput, NativeSimulatedMove};
 
 /// The most block cells `native_collision_boxes` looks at: a box of about 100 blocks a side.
 const COLLISION_CELLS: usize = 1_000_000;
@@ -100,6 +100,10 @@ impl Game<'_> {
             collision_binding: self.collision,
             resources: self.motion,
             health: &self.health_resources,
+            tag_items: Some(world_items!(self)),
+            loop_context: &self.loop_context,
+            damage_hooks: &self.damage_hooks,
+            block_registries: Some(&self.pack.block_registries),
         }
         .replayed_tick(keys, sprints(&input))
         .ok()?;
@@ -140,8 +144,8 @@ impl Game<'_> {
         body.pitch = g.pitch;
         body.sprinting = g.sprinting;
         body.may_fly = g.creative();
-        body.flying = g.flying;
-        body.flying_speed = g.flying_speed;
+        body.flying = g.abilities.flying;
+        body.flying_speed = g.abilities.flying_speed;
         body.fall_flying = g.fall_flying;
         Some(body)
     }

@@ -1340,7 +1340,7 @@ mod tests {
         let Some((device, _)) = device() else {
             return;
         };
-        let hud = crate::hud::HudBatch::new([4, 4]);
+        let hud = crate::hud::HudBatch::scratch([4, 4]);
         let mut frame = crate::gfx::pack_uniforms::initial_history_tests::frame(&hud);
         let mut native = NativeFrame::new(&device, None, Vec::new(), Default::default(), None);
         frame.pack.still_ticks = Some(47_811);

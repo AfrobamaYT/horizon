@@ -1088,9 +1088,13 @@ pub(super) mod interact_vibration_tests {
             let root =
                 std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
             let terrain = horizon_client::vanillagen::VanillaTerrain::new(
-                &root.join("worldgen"),
-                game.pack.assets.registry,
-                &game.res.core.biomes,
+                horizon_client::vanillagen::TerrainResources {
+                    dir: &root.join("worldgen"),
+                    data: Some(&game.pack.data_changes),
+                    registry: game.pack.assets.registry,
+                    biomes: &game.res.core.biomes,
+                    item_data: &game.res.core.item_data,
+                },
                 1234,
             )
             .unwrap();

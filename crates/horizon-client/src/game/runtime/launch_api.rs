@@ -136,8 +136,8 @@ fn content() -> serde_json::Value {
     use horizon_mod_package::manifest;
     serde_json::json!({
         // 0.1 was the WebAssembly code line: no build runs it any more.
-        "mod": { "api": manifest::APIS.iter().filter(|a| **a != manifest::API).collect::<Vec<_>>() },
-        "native_mod": { "hooks": super::native_hooks::NATIVE_HOOKS_API, "rebuild": true },
+        "mod": { "api": [manifest::API] },
+        "native_mod": { "exact_build": true, "rebuild": true },
         // The lines it draws: a newer one is read and checked, not drawn yet.
         "shader": { "schema": horizon_shader_api::SCHEMA, "api": [horizon_shader_api::API] },
         "resourcepack": { "format": horizon_core::version::RESOURCE_PACK_FORMAT },
@@ -168,12 +168,10 @@ fn reply_value(horizon: &str) -> serde_json::Value {
     })
 }
 
-/// The reply as the reference shows it: the native hooks level rises with every hook added, so
-/// it shows as a placeholder and the page doesn't go stale with each one.
+/// The reply with a placeholder for the game build version.
 #[cfg(test)]
 fn reference_reply() -> String {
-    let mut reply = reply_value("<version>");
-    reply["content"]["native_mod"]["hooks"] = "<hooks level>".into();
+    let reply = reply_value("<version>");
     serde_json::to_string_pretty(&reply).expect("a JSON value")
 }
 
@@ -218,8 +216,8 @@ pub fn markdown() -> String {
         w,
         "`content` is what this build loads ([content.md](content.md)), so a launcher offers only \
          what works on it: content \
-         mods of the manifest `api` lines in `mod.api`; native mods built for hooks up to \
-         `native_mod.hooks`, which need the game rebuilt (`rebuild`); shader packs of \
+         mods of the manifest `api` lines in `mod.api`; native mods built for this exact game build \
+         (`native_mod.exact_build`), which need the game rebuilt (`rebuild`); shader packs of \
          `shader.schema` and the lines in `shader.api` (a newer line is read, not drawn); resource \
          and data packs of `format` (`[major, minor]`; others still load, marked too old or too \
          new as vanilla marks them); modpacks of `modpack.format`; the mod index of \

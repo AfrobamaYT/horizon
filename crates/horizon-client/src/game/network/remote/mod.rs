@@ -8805,7 +8805,7 @@ impl Game<'_> {
         };
         self.with_level(|b, level, _| {
             let mut level = DryLevel::new(level);
-            match b.block(
+            match b.place_block(
                 &mut level,
                 &mut horizon_world::level::Ticks::default(),
                 &ctx,
@@ -13828,24 +13828,26 @@ mod tests {
                 }),
             )
             .unwrap();
-        build(
-            &base,
-            &[ContentMod {
-                id: "ruby".into(),
-                content,
-            }],
-            &root,
-        )
-        .unwrap();
+        let mods = [ContentMod {
+            id: "ruby".into(),
+            content,
+            jars: Vec::new(),
+        }];
+        let inventory = horizon_mod_package::enabled::EnabledMods::new([(
+            "ruby".to_owned(),
+            horizon_mod_package::Side::Both,
+        )]);
+        build(&base, std::path::Path::new(""), &mods, &root, &inventory).unwrap();
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -13859,7 +13861,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -13886,6 +13890,7 @@ mod tests {
             let hit = crate::game::Hit {
                 pos,
                 face: [0, 1, 0],
+                inside: false,
                 point: [f64::from(pos[0]) + 0.5, 70.0, 0.5],
             };
             let stack = ItemStack::new(name, 2);
@@ -13908,6 +13913,7 @@ mod tests {
         let blocked = crate::game::Hit {
             pos: [0, 70, 0],
             face: [0, 1, 0],
+            inside: false,
             point: [0.5, 71.0, 0.5],
         };
         game.set_mode_id(2);
@@ -14802,7 +14808,7 @@ mod tests {
                 base.ceiling = ceiling;
                 let valid = !obstructed && loaded && ceiling > 1;
                 let mut preview = DryLevel::new(&base);
-                let outcome = behaviours.block(&mut preview, &mut Ticks::default(), &ctx);
+                let outcome = behaviours.place_block(&mut preview, &mut Ticks::default(), &ctx);
                 assert_eq!(
                     matches!(outcome, PlaceOutcome::Placed { .. }),
                     valid,

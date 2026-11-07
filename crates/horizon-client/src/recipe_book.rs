@@ -1269,12 +1269,11 @@ mod tests {
         let content = root.join("data/recipe_pilot/recipe");
         std::fs::create_dir_all(&vanilla).unwrap();
         std::fs::create_dir_all(&content).unwrap();
-        for marker in [
-            horizon_items::content_namespaces::MARKER,
-            horizon_items::content_namespaces::MOD_IDS_MARKER,
-        ] {
-            std::fs::write(root.join(marker), br#"["recipe_pilot"]"#).unwrap();
-        }
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["recipe_pilot"]"#,
+        )
+        .unwrap();
         std::fs::write(
             vanilla.join("control.json"),
             br#"{"type":"minecraft:crafting_shapeless","result":{"id":"minecraft:stick"}}"#,

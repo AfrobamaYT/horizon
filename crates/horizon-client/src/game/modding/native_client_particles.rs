@@ -1,7 +1,7 @@
 //! Local particle requests from native client hooks.
 use super::Game;
 use horizon_client::particles::ParticleOptions;
-use mod_api::PositionSource;
+use mod_api::particles::PositionSource;
 
 fn finite_options(options: &ParticleOptions) -> bool {
     options.color.into_iter().all(f32::is_finite)
@@ -19,6 +19,7 @@ fn finite_options(options: &ParticleOptions) -> bool {
                 && match source {
                     PositionSource::Block(_) => true,
                     PositionSource::Entity { y_offset, .. } => y_offset.is_finite(),
+                    _ => false,
                 }
         })
 }
@@ -36,7 +37,7 @@ impl Game<'_> {
         at: [f64; 3],
         velocity: [f64; 3],
     ) -> bool {
-        if !self.options.execution_role.is_client()
+        if !self.native_window()
             || self.player.is_none()
             || !at.into_iter().all(f64::is_finite)
             || !velocity.into_iter().all(f64::is_finite)

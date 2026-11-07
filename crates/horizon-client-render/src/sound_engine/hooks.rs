@@ -353,4 +353,42 @@ mod tests {
             crate::sound_engine::PlayResult::Started
         );
     }
+    #[test]
+    fn live_play_sound_edits_reach_the_channel_without_changing_the_instance() {
+        struct Live(std::sync::atomic::AtomicUsize);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Live {
+            fn play_sound(
+                &self,
+                _: &dyn mod_api::LoopContext,
+                event: &mut mod_api::PlaySoundEvent<'_>,
+            ) {
+                let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(event.starting, n == 0);
+                if n == 1 {
+                    let sound = event.sound.as_mut().unwrap();
+                    sound.volume = 0.25;
+                    sound.pitch = 2.0;
+                } else if n == 2 {
+                    *event.sound = None;
+                }
+            }
+        }
+        let mods = vec![mod_api::ModEntry::new("live", Box::new(Live(0.into())))];
+        mod_api::testing::with_mods(mods.into(), || {
+            let (mut engine, mut backend) = (engine(), Null::default());
+            let instance =
+                SoundInstance::for_ui("minecraft:block.plain", 1.0, 1.0, LegacyRandom::new(1));
+            let (id, result) = engine.play_new(instance, true, &mut backend);
+            assert_eq!(result, crate::sound_engine::PlayResult::Started);
+            let channel = engine.channel(id).unwrap();
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert_eq!(backend.volume[&channel], 0.25);
+            assert_eq!(backend.pitch[&channel], 2.0);
+            assert_eq!(engine.instance(id).unwrap().volume, 1.0);
+            assert_eq!(engine.instance(id).unwrap().pitch, 1.0);
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert!(engine.instance(id).unwrap().stopped);
+        });
+    }
 }

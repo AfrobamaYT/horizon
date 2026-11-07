@@ -1,28 +1,28 @@
 //! Run alone with private prepared resources: installs process-wide trait mods.
 use super::*;
-use crate::mod_api::{
-    self, EntityInteractEvent, Flow, Hooks, ItemInteractMobEvent, ItemPart, Registrar,
-    RegistrationContext, ServerHost,
-};
 use horizon_client::{
     chunk::Chunk,
     merchant::{ItemCost, MerchantOffer, Trader},
     mobs::Mob,
+};
+use mod_api::{
+    self, EntityInteractEvent, Flow, Hooks, ItemInteractMobEvent, ItemPart, Registrar,
+    RegistrationContext, ServerHost,
 };
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Probe {
-    calls: Mutex<Vec<(i32, String, String)>>,
-    answer: AtomicU8,
-    claim_entity: AtomicBool,
-    discard: AtomicBool,
+    calls: Arc<Mutex<Vec<(i32, String, String)>>>,
+    answer: Arc<AtomicU8>,
+    claim_entity: Arc<AtomicBool>,
+    discard: Arc<AtomicBool>,
 }
 #[mod_api::__subscriptions]
-impl Hooks for Arc<Probe> {
+impl Hooks for Probe {
     fn register(&self, r: &mut dyn Registrar, _: &RegistrationContext) {
         for item in ["minecraft:stick", "minecraft:paper"] {
             let key = r.item_key(item);
@@ -38,7 +38,7 @@ impl Hooks for Arc<Probe> {
     }
 }
 #[mod_api::horizon_part]
-impl ItemPart for Arc<Probe> {
+impl ItemPart for Probe {
     fn item_interact_mob(
         &self,
         host: &mut dyn ServerHost,
@@ -94,13 +94,14 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
     let root = PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -108,7 +109,7 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
     let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
     options.resources = root.clone();
     options.execution_role = execution_role::ExecutionRole::IntegratedServer;
-    let probe = Arc::new(Probe::default());
+    let probe = Probe::default();
     let mods: mod_api::Mods = vec![mod_api::ModEntry::new("item", Box::new(probe.clone()))].into();
     mod_api::testing::with_mods(mods.clone(), || {
         mod_api::__private::install_parts(&mods).unwrap();
@@ -119,7 +120,9 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

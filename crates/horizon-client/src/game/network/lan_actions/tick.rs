@@ -282,8 +282,8 @@ impl Game<'_> {
 
     /// `handlePlayerPositionChange` jumps from the pre-move position and yaw.
     /// A later attack packet reads the resulting velocity even before travel.
-    pub(super) fn guest_jump(&mut self, conn: u32, from: [f64; 3], yaw: f32) {
-        let identity = if horizon_client::mod_api::mods().is_empty() {
+    pub(in crate::game) fn guest_jump(&mut self, conn: u32, from: [f64; 3], yaw: f32) {
+        let identity = if !mod_api::__private::listened(mod_api::HookId::PlayerJump) {
             None
         } else {
             self.lan
@@ -308,6 +308,10 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 health: &game.health_resources,
+                tag_items: Some(world_items!(game)),
+                loop_context: &game.loop_context,
+                damage_hooks: &game.damage_hooks,
+                block_registries: Some(&game.pack.block_registries),
             };
             let _ = w.jump_from_ground();
             (w.player.position, w.player.yaw, w.player.ground.on_ground) =
@@ -392,9 +396,9 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 health: &game.health_resources,
+                tag_items: Some(world_items!(game)),
                 loop_context: &game.loop_context,
                 damage_hooks: &game.damage_hooks,
-                tag_items: Some(world_items!(game)),
                 block_registries: Some(&game.pack.block_registries),
             };
             w.player.health.advance_clock();
@@ -533,9 +537,9 @@ impl Game<'_> {
                 collision_binding: game.collision,
                 resources: game.motion,
                 health: &game.health_resources,
+                tag_items: Some(world_items!(game)),
                 loop_context: &game.loop_context,
                 damage_hooks: &game.damage_hooks,
-                tag_items: Some(world_items!(game)),
                 block_registries: Some(&game.pack.block_registries),
             }
             .server_travel();

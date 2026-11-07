@@ -85,7 +85,6 @@ impl DamageHooks {
 /// Built from the level's world, or, in the mob tick, which reads the world while mobs
 /// draw, from a [`LentLevel`] taken out of it for the tick.
 pub struct DamageLevel<'a> {
-    context: Option<&'a horizon_world::native_load_context::LoopContext>,
     shape: crate::chunk::LevelShape,
     chunks: &'a crate::chunk_map::ChunkMap,
     air: horizon_world::registry::BlockStateId,
@@ -119,7 +118,6 @@ impl<'a> DamageLevel<'a> {
             ..
         } = world;
         Self {
-            context: None,
             shape: *shape,
             chunks,
             air: *air,
@@ -143,7 +141,6 @@ impl<'a> DamageLevel<'a> {
         hooks: &'a DamageHooks,
     ) -> Self {
         Self {
-            context: None,
             shape: world.shape,
             chunks: &world.chunks,
             air: world.air,
@@ -167,7 +164,6 @@ impl<'a> DamageLevel<'a> {
     /// The same level, for a shorter borrow.
     pub fn reborrow(&mut self) -> DamageLevel<'_> {
         DamageLevel {
-            context: self.context,
             shape: self.shape,
             chunks: self.chunks,
             air: self.air,
@@ -192,17 +188,6 @@ impl<'a> DamageLevel<'a> {
     /// The authoritative world's merged tag tables, if available.
     pub fn tags(&self) -> Option<&crate::items::Items> {
         self.tags
-    }
-    /// Associate the owning loop once where the game builds a hit's level.
-    pub fn in_loop(self, context: &'a horizon_world::native_load_context::LoopContext) -> Self {
-        Self {
-            context: Some(context),
-            ..self
-        }
-    }
-    /// The owning loop; vanilla-only isolated levels deliberately have none.
-    pub fn loop_context(&self) -> Option<&'a horizon_world::native_load_context::LoopContext> {
-        self.context
     }
     /// The cached block parser context, if available.
     pub fn block_registries(&self) -> Option<&crate::command::args::Registries> {

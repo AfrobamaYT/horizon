@@ -438,13 +438,8 @@ impl Game<'_> {
             if let Some(states) = states {
                 std::mem::swap(states, &mut p.lan_states);
             }
-            match host.as_deref_mut() {
-                Some(h) => std::mem::swap(&mut h.border_sent, &mut p.border_sent),
-                None => {
-                    if let Some(h) = self.lan.as_mut() {
-                        std::mem::swap(&mut h.border_sent, &mut p.border_sent);
-                    }
-                }
+            if let Some(h) = self.lan.as_mut() {
+                std::mem::swap(&mut h.border_sent, &mut p.border_sent);
             }
             p.idle = 0;
             let left = std::mem::replace(&mut self.dim, target);
@@ -894,13 +889,14 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -914,7 +910,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();

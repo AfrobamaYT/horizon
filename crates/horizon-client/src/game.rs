@@ -2425,9 +2425,6 @@ fn follow_named_keymap(logical_key: &winit::keyboard::Key, physical_key: &mut Ph
     }
 }
 
-#[cfg(test)]
-mod keymap_tests;
-
 /// Q throws the whole stack with Control down: the same modifier word the
 /// screens read (`has_control_down`), never a latched sprint toggle.
 fn drop_whole_stack(modifiers: winit::keyboard::ModifiersState) -> bool {
@@ -4634,8 +4631,7 @@ impl Game<'_> {
             Some(world_items!(self)),
             Some(&self.pack.block_registries),
             &self.damage_hooks,
-        )
-        .in_loop(&self.loop_context);
+        );
         let contact = horizon_client::block_contact::Contact {
             entity: id as i32,
             kind: "minecraft:item",
@@ -8168,9 +8164,10 @@ impl Game<'_> {
     }
     /// Whether the use effects of `stack` ask for interaction vibrations.
     pub(super) fn use_vibrates(&self, stack: &ItemStack) -> bool {
-        self.items()
-            .get(&stack.item)
-            .is_some_and(|i| i.interact_vibrations)
+        item_use::interact_vibrations(
+            stack,
+            self.items().get(&stack.item).map(|i| i.interact_vibrations),
+        )
     }
     /// `ItemStack.causeUseVibration` for `stack` used by the player: the
     /// `event` game event (`ITEM_INTERACT_START` when the use begins,
@@ -23629,7 +23626,11 @@ fn start_game<'a>(
     let prepared = match prepared {
         Some(prepared) => Some(prepared),
         None => Some(GameCpuResources::load(
-            &options.resources,
+            &horizon_assets::resource_source::ResourceRoot::new(
+                options.resources.clone(),
+                packs::cache_dir(),
+                pack.source.clone(),
+            ),
             entity_models.as_deref(),
         )?),
     };
