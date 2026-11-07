@@ -313,9 +313,24 @@ pub fn apply_consumption(
 /// (`Entity.playSound` at its feet) while the fox is defending. Only the
 /// server broadcasts that sound.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+    if let Some(decision) = ai_step_until_consumption(m, w, events) {
+        apply_consumption(&decision, w, m, events);
+        finish_ai_step(m, w, events);
+    }
+}
+
+/// Run `Fox.aiStep` until its mouth item must be consumed. `Some` pauses before
+/// effect RNG draws and remainder replacement; the owner applies consumption and
+/// resumes `finish_ai_step`. `None` means the complete step already ran.
+#[inline]
+pub fn ai_step_until_consumption(
+    m: &mut Mob,
+    w: &MobWorld,
+    events: &mut Vec<MobEvent>,
+) -> Option<Consumption> {
     client_tick(m);
     if !m.alive() {
-        return;
+        return None;
     }
     m.extra.ints[TICKS_SINCE_EATEN] += 1;
     if let Some(item) = super::finalize::item(m, super::finalize::MAINHAND)
@@ -329,7 +344,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             // ItemStack.finishUsingItem: the consumable's on-consumed effects
             // run (a chorus fruit teleports it), then a use remainder stays.
             if let Some(decision) = decide_consumption(m, w) {
-                apply_consumption(&decision, w, m, events);
+                return Some(decision);
             }
         } else if eaten > 560 && m.random.next_float() < 0.1 {
             let at = [m.position.x, m.position.y, m.position.z];
@@ -343,6 +358,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         }
     }
     finish_ai_step(m, w, events);
+    None
 }
 
 /// The part of `Fox.aiStep` after mouth-item consumption: flags, growl and snow.
