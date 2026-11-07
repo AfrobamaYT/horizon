@@ -1802,7 +1802,7 @@ impl Entity for Projectile {
                 game.load_arrow(tag, uuid, player_uuid)
             }
             "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
-                game.load_spit_or_bullet(tag, player_uuid)
+                game.load_spit_or_bullet(tag, uuid, player_uuid)
             }
             "minecraft:fireball"
             | "minecraft:small_fireball"
