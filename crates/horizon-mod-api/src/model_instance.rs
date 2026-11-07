@@ -115,7 +115,7 @@ pub enum InstanceError {
     Translucent,
 }
 
-/// Persistent copies of one resolved model, retired on reload, world close or destroy.
+/// Persistent copies of one resolved model, retired on reload, world close, mod disable or destroy.
 /// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
 /// Retired handles never become valid again, even when their storage slot is reused.
 /// Native and wasm mods use the same storage, ownership and drawing rules.
@@ -178,7 +178,8 @@ impl InstanceGroupRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GroupError {
-    /// The group belongs to another mod, was destroyed, or its world/resources retired.
+    /// The group belongs to another mod, was destroyed, its owner was disabled,
+    /// or its world/resources retired. Re-enabling or slot reuse cannot revive it.
     Stale,
     /// The model could not be resolved.
     Model(crate::ModelError),
