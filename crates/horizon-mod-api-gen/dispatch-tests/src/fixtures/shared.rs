@@ -1,5 +1,6 @@
 //! Shared exception: dispatch infrastructure and cross-area fixture types/tests; no new hooks.
 use horizon_core::game_mode::GameMode;
+use mod_api::mod_api::hud_layout::GuiDraw;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -625,7 +626,6 @@ mod api {
         #[derive(Clone, Copy)]
         pub struct Hand;
     }
-    pub use hud_layout::GuiDraw;
     pub mod hud_layout {
         pub struct HealthInputs;
         pub struct GuiDraw;
