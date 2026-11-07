@@ -516,6 +516,28 @@ pub fn installed() -> Option<Toolchain> {
     (toolchain.dir.join(COMPLETE).is_file() && toolchain.compiler_available()).then_some(toolchain)
 }
 
+fn download_archive(
+    url: &str,
+    bytes: u64,
+    sha256: &str,
+    to: &Path,
+    progress: &impl Fn(f32),
+) -> Result<(), String> {
+    backend::download(url, bytes, sha256, to, progress)?;
+    let actual = fs::metadata(to).map_err(|error| error.to_string())?.len();
+    if actual != bytes {
+        let _ = fs::remove_file(to);
+        return Err(crate::i18n::trf(
+            "Rust toolchain archive has {actual} bytes; expected {expected}.",
+            &[
+                ("actual", &actual.to_string()),
+                ("expected", &bytes.to_string()),
+            ],
+        ));
+    }
+    Ok(())
+}
+
 /// Downloads, checks and unpacks the pinned toolchain (once); `progress` gets the fraction done.
 pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
     if let Some(done) = installed() {
@@ -544,7 +566,7 @@ pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
         let file = format!("{name}-{VERSION}-{}.tar.gz", host.target);
         let archive = root().join(format!(".{file}"));
         let step = |f: f32| progress((i as f32 + f) / count);
-        backend::download(
+        download_archive(
             &format!("{DIST}/{file}"),
             component.bytes,
             sha256,
@@ -560,7 +582,7 @@ pub fn install(progress: impl Fn(f32)) -> Result<Toolchain, String> {
         let archive = root().join(format!(".{}.zip", compiler.directory));
         let done = host.components.len() as f32;
         let step = |f: f32| progress((done + f) / count);
-        backend::download(
+        download_archive(
             compiler.url,
             compiler.bytes,
             compiler.sha256,
@@ -902,6 +924,40 @@ pub fn remove() -> Result<(), String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn archive_download_checks_pinned_length_as_well_as_hash() {
+        use std::{io::Read, net::TcpListener};
+        let directory =
+            std::env::temp_dir().join(format!("horizon-rust-length-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let archive = directory.join("archive");
+        for (bytes, accepted) in [(4, true), (5, false)] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/archive", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 2048];
+                stream.read(&mut request).unwrap();
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nrust",
+                    )
+                    .unwrap();
+            });
+            let result = download_archive(
+                &url,
+                bytes,
+                "521fe5c9ece1aa1f8b66228171598263574aefc6fa4ba06a61747ec81ee9f5a3",
+                &archive,
+                &|_| {},
+            );
+            server.join().unwrap();
+            assert_eq!(result.is_ok(), accepted);
+            assert_eq!(archive.exists(), accepted);
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn every_host_pins_each_component_once_with_a_sha256() {

@@ -604,7 +604,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// You read the mod's source (the link printed) and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
     },
@@ -619,7 +619,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// You read the new source and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
     },
@@ -815,7 +815,7 @@ enum Cmd {
         /// plays (a full rebuild)
         #[arg(long, conflicts_with = "version")]
         update: bool,
-        /// You read the mods' source and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
         /// The build mode: optimized (the default: the prebuilt game when the mods allow it, else
