@@ -419,7 +419,8 @@ fn saved_proto_chunks_restore_exactly() {
         "example:data".into(),
         horizon_core::nbt::Tag::Int(9),
     )]);
-    extras.attachments = horizon_world::attachments::Attachments::from_nbt(attachment.clone());
+    extras.attachments =
+        horizon_mod_runtime::attachments::Attachments::from_nbt(attachment.clone());
     save.save_protos(&[seeded], assets.registry, &generator.biomes)
         .unwrap();
     save.flush().unwrap();

@@ -47,30 +47,31 @@ pub(super) struct Parked {
     level_events: Vec<LevelEvent>,
     /// Entity portal processes and cooldowns belong to this level's entities.
     portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
-    falling: horizon_client::join_seq::JoinList<FallingBlock>,
+    falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
     item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
     armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
     cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
-    others: Vec<commands::OtherEntity>,
+    others: horizon_client::join_seq::ResidentList<commands::OtherEntity>,
     fangs: super::fangs::FangState,
-    pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat>,
-    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
+    pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat, false>,
+    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart, false>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
-    dragon: Option<dragon::Dragon>,
+    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
-    breath_clouds: Vec<dragon::Breath>,
+    breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
     rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
-    ominous_spawners: Vec<ominous_item_spawner::OminousItemSpawner>,
+    ominous_spawners:
+        horizon_client::join_seq::ResidentList<ominous_item_spawner::OminousItemSpawner>,
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
     knot_ids: HashMap<[i32; 3], u32>,
-    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile>,
+    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile, false>,
     dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     persist: persist::EntityMemory,
@@ -92,6 +93,10 @@ pub(super) struct Parked {
     spawn_scratch: super::natural_spawning::SpawnScratch,
     /// Server ticks since a player was last in the level.
     idle: u32,
+    /// The level's own world border (`ServerLevel.getWorldBorder`), and what its players were
+    /// last told of it (`LanHost::border_sent`).
+    border: horizon_client::worldborder::WorldBorder,
+    border_sent: Option<horizon_client::lan::border::Sent>,
 }
 
 /// Which passes of the server tick the level in place runs: the first
@@ -166,6 +171,11 @@ impl Levels {
             .map(|(_, level)| &level.streaming)
     }
 
+    /// A parked level's existing generator query worker, without switching levels.
+    pub(super) fn parked_locator_of(&self, dimension: &str) -> Option<Arc<VanillaTerrain>> {
+        self.parked_of(dimension)?.locator.clone()
+    }
+
     /// The streaming of the level not in place whose dimension is `dimension`, to change.
     pub(super) fn parked_streaming_of_mut(&mut self, dimension: &str) -> Option<&mut Streaming> {
         self.parked
@@ -174,11 +184,36 @@ impl Levels {
             .map(|(_, level)| &mut level.streaming)
     }
 
+    /// `ServerLevel.setChunkForced`: force a column in an already open level without changing the acting
+    /// player's level; the same queue and load barrier serve the active level.
+    pub(super) fn force_parked_chunk(
+        &mut self,
+        dimension: &str,
+        x: i32,
+        z: i32,
+        forced: bool,
+    ) -> Option<bool> {
+        let level = self.parked_mut_of(dimension)?;
+        Some(
+            level
+                .streaming
+                .set_forced_loaded(&mut level.world, x, z, forced),
+        )
+    }
+
     pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
         self.parked.get(&dim).map(|level| &level.anims)
     }
 
     /// The worlds of the levels not in place.
+    /// A parked level's world border.
+    pub(super) fn parked_border(
+        &self,
+        dim: Dim,
+    ) -> Option<&horizon_client::worldborder::WorldBorder> {
+        self.parked.get(&dim).map(|level| &level.border)
+    }
+
     pub(super) fn parked_worlds(&self) -> impl Iterator<Item = &World> {
         self.parked.values().map(|level| &level.world)
     }
@@ -225,7 +260,7 @@ impl Levels {
 
     /// The mobs of a parked level.
     pub(super) fn parked_mobs(&self, dim: Dim) -> Option<&[Mob]> {
-        self.parked.get(&dim).map(|level| level.mobs.as_slice())
+        self.parked.get(&dim).map(|level| &*level.mobs)
     }
 
     /// A parked level's loose entities, for `horizon-report`: items, experience orbs,
@@ -233,11 +268,11 @@ impl Levels {
     pub(super) fn parked_entity_counts(&self, dim: Dim) -> Option<[usize; 5]> {
         self.parked.get(&dim).map(|l| {
             [
-                l.dropped.as_slice().len(),
-                l.orbs.as_slice().len(),
-                l.projectiles.as_slice().len(),
-                l.carts.as_slice().len(),
-                l.boats.as_slice().len(),
+                l.dropped.len(),
+                l.orbs.len(),
+                l.projectiles.len(),
+                l.carts.len(),
+                l.boats.len(),
             ]
         })
     }
@@ -290,19 +325,19 @@ impl Game<'_> {
             item_frames: Default::default(),
             armor_stands: Default::default(),
             cushions: Default::default(),
-            others: Vec::new(),
+            others: Default::default(),
             fangs: Default::default(),
             boats: Default::default(),
             carts: Default::default(),
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
             crystals: Default::default(),
-            dragon: None,
+            dragon: Default::default(),
             dragon_fireballs: Vec::new(),
-            breath_clouds: Vec::new(),
+            breath_clouds: Default::default(),
             tridents: Default::default(),
             rockets: Default::default(),
-            ominous_spawners: Vec::new(),
+            ominous_spawners: Default::default(),
             tnts: Default::default(),
             hoppers: HashMap::new(),
             mobs: Default::default(),
@@ -324,6 +359,8 @@ impl Game<'_> {
             creaking: Default::default(),
             spawn_scratch: Default::default(),
             idle: 0,
+            border: self.load_border(dim),
+            border_sent: None,
         })
     }
 
@@ -390,6 +427,7 @@ impl Game<'_> {
         self.sculk.swap_level(&mut p.sculk);
         self.creaking.swap_level(&mut p.creaking);
         swap(&mut self.spawn_scratch, &mut p.spawn_scratch);
+        swap(&mut self.border, &mut p.border);
         // What only the client draws starts over.
         self.clear_client_particles();
     }
@@ -422,6 +460,9 @@ impl Game<'_> {
             let states = self.lan.as_mut().map(|h| &mut h.states);
             if let Some(states) = states {
                 std::mem::swap(states, &mut p.lan_states);
+            }
+            if let Some(h) = self.lan.as_mut() {
+                std::mem::swap(&mut h.border_sent, &mut p.border_sent);
             }
             p.idle = 0;
             let left = std::mem::replace(&mut self.dim, target);
@@ -523,6 +564,7 @@ impl Game<'_> {
                 Dim::Overworld => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
+                Dim::Extra(_) => "level_extra",
             });
             if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
@@ -694,7 +736,7 @@ impl Game<'_> {
             .lan
             .as_ref()
             .map_or(&[][..], |h| h.hub.guests.as_slice());
-        let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
+        let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native mod's tickets.
@@ -815,7 +857,7 @@ impl Game<'_> {
     /// (`MinecraftServer.stopServer`'s `level.close()` loop), in vanilla's
     /// order of its levels: the Overworld, the Nether, the End.
     pub(super) fn native_levels_closing(&mut self) {
-        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+        for dim in Dim::all() {
             self.native_level_closed(dim);
         }
     }
@@ -861,5 +903,50 @@ mod tests {
         levels.clear();
         assert!(levels.heard_open.is_empty());
         assert!(levels.parked.is_empty());
+    }
+
+    /// `ServerLevel.getWorldBorder`: `/worldborder` in one level leaves the others' alone.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn each_level_keeps_its_own_world_border() {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        assert!(game.run_command("worldborder set 1000"));
+        assert!(game.run_command("execute in minecraft:the_nether run worldborder set 100"));
+        assert_eq!(game.dim, Dim::Overworld);
+        assert_eq!(game.border.size(), 1000.0);
+        let nether = game.levels.parked_border(Dim::Nether).unwrap();
+        assert_eq!(nether.size(), 100.0);
     }
 }

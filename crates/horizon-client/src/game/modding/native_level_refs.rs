@@ -40,16 +40,138 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
     })
 }
 
+/// Bound the synchronous generator work before constructing its spiral or height vector.
+fn biome_search_within_budget(parameters: mod_api::BiomeSearch, height: i32) -> bool {
+    if parameters.radius < 0
+        || parameters.horizontal_step <= 0
+        || parameters.vertical_step <= 0
+        || height <= 0
+    {
+        return false;
+    }
+    let rings = parameters.radius as u64 / parameters.horizontal_step as u64;
+    let width = 2 * rings + 1;
+    // Clamping the origin into the build interval cannot increase this height count.
+    let heights = (height as u64 - 1) / parameters.vertical_step as u64 + 1;
+    width
+        .checked_mul(width)
+        .and_then(|columns| columns.checked_mul(heights))
+        .is_some_and(|samples| samples <= mod_api::BiomeSearch::MAX_SAMPLES)
+}
+
 impl Game<'_> {
+    /// `ServerLevel.findClosestBiome3d`, using the same generator query as `/locate biome`.
+    pub(super) fn level_find_closest_biome(
+        &self,
+        level: LevelRef,
+        biome: &str,
+        parameters: mod_api::BiomeSearch,
+    ) -> Option<mod_api::BiomeSearchResult> {
+        let world = self.native_level_world(level)?;
+        if !biome_search_within_budget(parameters, world.shape.max_y() - world.shape.min_y) {
+            return None;
+        }
+        let terrain = if level.dimension() == self.dim.key() {
+            self.end.locator()
+        } else {
+            self.levels.parked_locator_of(level.dimension_id())
+        }?;
+        let selector = match biome.strip_prefix('#') {
+            Some(tag) => format!("#{}", horizon_client::command::args::normalized(tag)),
+            None => horizon_client::command::args::normalized(biome).into_owned(),
+        };
+        let allowed = |name: &str| self.biome_matches(&selector, name);
+        let query = horizon_world::worldgen::generator::BiomeSearch {
+            allowed: &allowed,
+            origin: parameters.origin,
+            radius: parameters.radius,
+            horizontal: parameters.horizontal_step,
+            vertical: parameters.vertical_step,
+            // Resident columns are padded to the Overworld's storage span.
+            // BiomeSource searches use the dimension's build range instead.
+            min_y: world.shape.min_y,
+            max_y: world.shape.max_y() - 1,
+        };
+        terrain
+            .find_closest_biome(&query)
+            .map(|(biome, position)| mod_api::BiomeSearchResult::new(biome, position))
+    }
+
+    /// `LevelReader.getBiome`: the noise cell selected by this level's BiomeManager zoom.
+    /// Unlike a generating server query, an absent selected column returns None.
+    fn native_read_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let world = self.native_level_read_world(level)?;
+        let streaming = if level.dimension() == self.native_level_key() {
+            &self.streaming
+        } else {
+            self.levels.parked_streaming_of(level.dimension_id())?
+        };
+        let [qx, qy, qz] = streaming.biome_zoom.quart_at_block(block_pos(pos));
+        let chunk = world.chunks.get(&(qx >> 2, qz >> 2))?;
+        // ChunkAccess clamps to the dimension's height, not our padded storage.
+        // Clamp before conversion to preserve signed block-coordinate extremes.
+        let min_qy = world.shape.min_y >> 2;
+        let max_qy = (world.shape.max_y() - 1) >> 2;
+        let y = qy.clamp(min_qy, max_qy) << 2;
+        let biome = chunk.biome(qx << 2, y, qz << 2);
+        Some(world_biomes!(self).get(biome).name.clone())
+    }
+
+    /// The authoritative server's `LevelReader.getBiome`, including parked levels.
+    pub(super) fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        if !self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// The client's current copy of `LevelReader.getBiome`, never an authoritative server read.
+    pub(super) fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        if self.is_logical_server() {
+            return None;
+        }
+        self.native_read_biome(level, pos)
+    }
+
+    /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
+    pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
+        Some(self.native_level_read_world(level)?.shape.logical_height)
+    }
+
+    /// `BlockGetter.getBlockFloorHeight` with an empty collision context.
+    /// Uses the normal dynamic shapes, querying below only when this shape is empty.
+    pub(super) fn level_block_floor_height(
+        &self,
+        level: LevelRef,
+        [x, y, z]: [i32; 3],
+    ) -> Option<f64> {
+        let world = self.native_level_read_world(level)?;
+        if !world.loaded(x, z) || !world.shape.contains_y(y) {
+            return None;
+        }
+        let here = self.block_collision_shape_in(world, [x, y, z]);
+        let below = if here.is_empty() {
+            self.block_collision_shape_in(world, [x, y.checked_sub(1)?, z])
+        } else {
+            horizon_core::geometry::VoxelShape::empty()
+        };
+        Some(horizon_core::geometry::block_floor_height(&here, || &below))
+    }
+
+    /// The border of a resident server level, through the handle's lifetime check.
+    pub(super) fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
+        self.native_level_world(level)?;
+        Some(self.border.bounds())
+    }
     /// The world a handle names now, or None for a stale or foreign one.
     pub(super) fn native_level_world(&self, level: LevelRef) -> Option<&World> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
             return None;
         }
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             return Some(&self.world);
         }
-        self.levels.parked_world_of(level.dimension())
+        self.levels.parked_world_of(level.dimension_id())
     }
     /// The world a handle names for a read that works on both sides: the
     /// server's level, or on a client the one it shows (`Minecraft.level`, its
@@ -60,33 +182,46 @@ impl Game<'_> {
         }
         (self.remote.as_ref().is_some_and(|r| r.logged_in)
             && self.native_lifecycle.epoch() == Some(level.epoch())
-            && level.dimension() == self.dim.id())
+            && level.dimension() == self.native_level_key())
         .then_some(&self.world)
     }
     /// Find a loaded chunk in an open server level.
-    pub(super) fn native_chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
+    pub(super) fn chunk(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
         self.native_level_world(level)?
             .chunks
             .contains_key(&(pos[0], pos[1]))
             .then_some(mod_api::__private::game::chunk_ref(level, pos))
     }
+    /// Every loaded chunk of an open server level as handles, ordered by chunk x then z. None
+    /// for a stale handle or on a client. Loads nothing.
+    pub(super) fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>> {
+        let mut positions: Vec<(i32, i32)> = self
+            .native_level_world(level)?
+            .chunks
+            .keys()
+            .copied()
+            .collect();
+        positions.sort_unstable();
+        Some(
+            positions
+                .into_iter()
+                .map(|(x, z)| mod_api::__private::game::chunk_ref(level, [x, z]))
+                .collect(),
+        )
+    }
     /// Whether this chunk is loaded; false on a client or for a stale handle.
-    pub(super) fn native_chunk_ref_loaded(&self, chunk: ChunkRef) -> bool {
-        self.native_chunk(chunk.level(), chunk.pos()).is_some()
+    pub(super) fn chunk_loaded(&self, chunk: ChunkRef) -> bool {
+        self.chunk(chunk.level(), chunk.pos()).is_some()
     }
     /// The status of a loaded chunk. Proto chunks are not exposed here.
-    pub(super) fn native_chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus> {
-        self.native_chunk(chunk.level(), chunk.pos())
+    pub(super) fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus> {
+        self.chunk(chunk.level(), chunk.pos())
             .map(|_| ChunkStatus::Full)
     }
     /// A handle for chunk `pos` of an open level, loaded or not, so a mod can
     /// force an unloaded chunk. None for a stale handle, on a client, and for
     /// a chunk outside the world (`ChunkPos` past 30 million blocks).
-    pub(super) fn native_level_chunk_ref(
-        &self,
-        level: LevelRef,
-        pos: [i32; 2],
-    ) -> Option<ChunkRef> {
+    pub(super) fn level_chunk_ref(&self, level: LevelRef, pos: [i32; 2]) -> Option<ChunkRef> {
         self.native_level_world(level)?;
         chunk_in_world(pos).then_some(ChunkRef::new(level, pos))
     }
@@ -94,14 +229,14 @@ impl Game<'_> {
     /// foreign one.
     fn native_level_streaming(&self, level: LevelRef) -> Option<&Streaming> {
         self.native_level_world(level)?;
-        if level.dimension() == self.dim.id() {
+        if level.dimension() == self.dim.key() {
             return Some(&self.streaming);
         }
-        self.levels.parked_streaming_of(level.dimension())
+        self.levels.parked_streaming_of(level.dimension_id())
     }
     /// Whether `/forceload` holds the chunk (`ServerLevel.getForcedChunks`),
     /// loaded or not; a mod's own ticket on it does not count. None for a stale handle or on a client.
-    pub(super) fn native_chunk_forced(&self, chunk: ChunkRef) -> Option<bool> {
+    pub(super) fn chunk_forced(&self, chunk: ChunkRef) -> Option<bool> {
         let [x, z] = chunk.pos();
         Some(
             self.native_level_streaming(chunk.level())?
@@ -115,26 +250,23 @@ impl Game<'_> {
     /// without a player. This is the world's own `/forceload` state, not a
     /// ticket the mod owns: the chunk stays forced across restarts, and after
     /// the mod is unloaded or removed, until `set_forced(false)` or
-    /// `/forceload remove` clears it. Unlike vanilla, the chunk is not loaded before
-    /// this returns: it loads over the next ticks, as after `/forceload`.
+    /// `/forceload remove` clears it. Adding a newly forced chunk loads it
+    /// before returning, as vanilla does.
     /// False for a stale handle, on a client, and for a level the server
     /// has not opened.
-    pub(super) fn native_chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {
+    pub(super) fn chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {
         if self.native_level_streaming(chunk.level()).is_none() {
             return false;
         }
         let [x, z] = chunk.pos();
-        let streaming = if chunk.level().dimension() == self.dim.id() {
-            &mut self.streaming
-        } else if let Some(streaming) = self
-            .levels
-            .parked_streaming_of_mut(chunk.level().dimension())
-        {
-            streaming
+        if chunk.level().dimension() == self.dim.key() {
+            self.streaming
+                .set_forced_loaded(&mut self.world, x, z, forced)
         } else {
-            return false;
-        };
-        streaming.set_forced(x, z, forced)
+            self.levels
+                .force_parked_chunk(chunk.level().dimension_id(), x, z, forced)
+                .unwrap_or(false)
+        }
     }
     /// The mods validate the chunk tickets `dim`'s level loaded from its save,
     /// controller by controller (`LoadingValidationCallback.validateTickets`),
@@ -186,7 +318,7 @@ impl Game<'_> {
     /// discarded. False outside a mod's hook, for another mod's controller, on
     /// a client, for a chunk outside the world and for a level the server has
     /// not opened.
-    pub(super) fn native_chunk_set_mod_forced(
+    pub(super) fn chunk_set_mod_forced(
         &mut self,
         chunk: ChunkRef,
         controller: TicketController,
@@ -207,7 +339,7 @@ impl Game<'_> {
             chunk: (x, z),
             natural_spawning,
         };
-        let dimension = chunk.level().dimension();
+        let dimension = chunk.level().dimension_id();
         let streaming = if dimension == self.dim.id() {
             &mut self.streaming
         } else if let Some(streaming) = self.levels.parked_streaming_of_mut(dimension) {
@@ -220,7 +352,7 @@ impl Game<'_> {
     /// The chunk tickets `controller` holds in the level, as (owner, chunk
     /// position, natural_spawning), in order. None for a stale handle, on a
     /// client, outside a mod's hook and for another mod's controller.
-    pub(super) fn native_level_mod_forced_chunks(
+    pub(super) fn level_mod_forced_chunks(
         &self,
         level: LevelRef,
         controller: TicketController,
@@ -238,7 +370,7 @@ impl Game<'_> {
     }
     /// The level's force-loaded chunks (`/forceload query`), sorted as
     /// the command lists them. None for a stale handle or on a client.
-    pub(super) fn native_level_forced_chunks(&self, level: LevelRef) -> Option<Vec<[i32; 2]>> {
+    pub(super) fn level_forced_chunks(&self, level: LevelRef) -> Option<Vec<[i32; 2]>> {
         let mut forced: Vec<(i32, i32)> = self
             .native_level_streaming(level)?
             .commanded()
@@ -251,11 +383,7 @@ impl Game<'_> {
     /// The block state ID at `pos` (`Level.getBlockState`), without formatting a string.
     /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
     /// state is the one the server sent for a chunk the client holds.
-    pub(super) fn native_level_state(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<BlockStateId> {
+    pub(super) fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId> {
         let world = self.native_level_read_world(level)?;
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| world.block(x, y, z))
@@ -265,7 +393,7 @@ impl Game<'_> {
     /// simulation. The player must be live in the level in place, and the block must be loaded;
     /// parked levels cannot provide the hook's level context. A stale handle, invalid face,
     /// unavailable player or level, or no transformation returns None.
-    pub(super) fn native_level_block_transform(
+    pub(super) fn level_block_transform(
         &self,
         level: LevelRef,
         player: PlayerRef,
@@ -276,7 +404,7 @@ impl Game<'_> {
     ) -> Option<BlockTransformPreview> {
         use super::native_server::PlayerRead;
         let world = self.native_level_read_world(level)?;
-        if level.dimension() != self.dim.id()
+        if level.dimension() != self.dim.key()
             || !world.is_loaded_at(pos[0], pos[1], pos[2])
             || !matches!(
                 hit.face,
@@ -286,10 +414,10 @@ impl Game<'_> {
             return None;
         }
         let (offhand, sneaking) = match self.player_handle_read(player)? {
-            PlayerRead::Acting { .. } if self.dim.id() == level.dimension() => {
+            PlayerRead::Acting { .. } if self.dim.key() == level.dimension() => {
                 (self.offhand.as_ref(), self.keys.held(super::Mapping::Sneak))
             }
-            PlayerRead::Guest(guest) if guest.dimension == level.dimension() => {
+            PlayerRead::Guest(guest) if guest.dimension == level.dimension_id() => {
                 (guest.offhand.as_ref(), guest.sneaking)
             }
             _ => return None,
@@ -319,7 +447,7 @@ impl Game<'_> {
     /// `FluidState.getFlow` at `pos`: the current that pushes an entity there, after the
     /// `fluid_flow` hook, as entities feel it. Zero where no fluid flows. None as for
     /// `block_state`.
-    pub(super) fn native_level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3> {
+    pub(super) fn level_fluid_flow(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec3> {
         let world = self.native_level_read_world(level)?;
         let [x, y, z] = pos;
         world.is_loaded_at(x, y, z).then(|| {
@@ -334,20 +462,20 @@ impl Game<'_> {
     }
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
-    pub(super) fn native_level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
-        self.native_level_state(level, pos)
+    pub(super) fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        self.level_block_state(level, pos)
             .map(|state| self.res.facts().get(state).name.to_string())
     }
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
     /// `block_state`. API 381.
-    pub(super) fn native_level_block_property(
+    pub(super) fn level_block_property(
         &self,
         level: LevelRef,
         pos: [i32; 3],
         key: &str,
     ) -> Option<String> {
-        let state = self.native_level_state(level, pos)?;
+        let state = self.level_block_state(level, pos)?;
         self.pack
             .assets
             .registry
@@ -361,10 +489,10 @@ impl Game<'_> {
     /// `LevelRef::capability` looks up. False for a level parked while the server ticks
     /// another (its blocks can still be read), for a handle of an earlier open, and on a
     /// client.
-    pub(super) fn native_level_in_place(&self, level: LevelRef) -> bool {
+    pub(super) fn level_in_place(&self, level: LevelRef) -> bool {
         self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
-            && self.dim.id() == level.dimension()
+            && self.dim.key() == level.dimension()
     }
     /// `f` over the game's own `SignalGetter` for the level in place, as the level's blocks
     /// and mods' parts answer it; `None` for another level, a stale handle or a client.
@@ -377,7 +505,7 @@ impl Game<'_> {
             &horizon_world::level::Signals<'_, super::native_level_signals::ReadLevel<'_, '_>>,
         ) -> R,
     ) -> Option<R> {
-        if !self.native_level_in_place(level) {
+        if !self.level_in_place(level) {
             return None;
         }
         let view = super::native_level_signals::ReadLevel { game: self, level };
@@ -387,7 +515,7 @@ impl Game<'_> {
     /// conducts included (`SignalGetter.getSignal(pos, direction)`, as a block reads its
     /// neighbour `pos` that lies `direction` from it), 0 to 15. None for another level, a stale
     /// handle or a client. Takes a shared host and opens no transaction.
-    pub(super) fn native_level_signal(
+    pub(super) fn level_signal(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -397,7 +525,7 @@ impl Game<'_> {
     }
     /// The strong power alone that the block at `pos` gives that way
     /// (`SignalGetter.getDirectSignal(pos, direction)`), 0 to 15. None as for `signal`.
-    pub(super) fn native_level_direct_signal(
+    pub(super) fn level_direct_signal(
         &self,
         level: LevelRef,
         pos: [i32; 3],
@@ -407,26 +535,18 @@ impl Game<'_> {
     }
     /// The strongest strong power reaching the block at `pos` from its six neighbours
     /// (`SignalGetter.getDirectSignalTo`), 0 to 15. None as for `signal`.
-    pub(super) fn native_level_direct_signal_to(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<i32> {
+    pub(super) fn level_direct_signal_to(&self, level: LevelRef, pos: [i32; 3]) -> Option<i32> {
         self.native_level_signals(level, |s| s.direct_signal_to(block_pos(pos)))
     }
     /// The strongest power reaching the block at `pos` from its six neighbours
     /// (`SignalGetter.getBestNeighborSignal`, what a dispenser or a piston reads), 0 to 15.
     /// None as for `signal`.
-    pub(super) fn native_level_best_neighbor_signal(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<i32> {
+    pub(super) fn level_best_neighbor_signal(&self, level: LevelRef, pos: [i32; 3]) -> Option<i32> {
         self.native_level_signals(level, |s| s.best_neighbor_signal(block_pos(pos)))
     }
     /// Whether any neighbour powers the block at `pos` (`SignalGetter.hasNeighborSignal`),
     /// asking no side past the first that does. False where `signal` is None.
-    pub(super) fn native_level_has_neighbor_signal(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+    pub(super) fn level_has_neighbor_signal(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_signals(level, |s| s.has_neighbor_signal(block_pos(pos)))
             .unwrap_or(false)
     }
@@ -435,13 +555,13 @@ impl Game<'_> {
     /// read or write there finds the world. False on a client or for a stale
     /// handle: the position is not loaded here. On a client, a chunk it holds is loaded
     /// (`ClientLevel.hasChunkAt`). API 381.
-    pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+    pub(super) fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.native_level_read_world(level)
             .is_some_and(|w| w.is_loaded_at(pos[0], pos[1], pos[2]))
     }
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
     /// None as for `block_state`: a position that isn't loaded has no light to read.
-    pub(super) fn native_level_brightness(
+    pub(super) fn level_brightness(
         &self,
         level: LevelRef,
         layer: LightLayer,
@@ -456,13 +576,33 @@ impl Game<'_> {
     /// (`LevelHeightAccessor.getMinY`, `getHeight`). Reads any loaded server level
     /// or the client's current level. None for a stale handle, before client login,
     /// or for a dimension unavailable on this side. Does not load chunks. API 381.
-    pub(super) fn native_level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+    pub(super) fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
         self.native_level_read_world(level)
             .map(|w| (w.shape.min_y, w.shape.height))
     }
+    /// `Level.isInWorldBounds`: `pos` within 30,000,000 blocks on x and z and inside the level's
+    /// build height. None as for `level_height`. Does not load chunks.
+    pub(in crate::game) fn level_in_world_bounds(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        let (min_y, height) = self.level_height(level)?;
+        Some(horizontal_in_bounds(pos) && pos[1] >= min_y && pos[1] < min_y.saturating_add(height))
+    }
+    /// `Level.isInSpawnableBounds`: 30,000,000 blocks on x and z, 20,000,000 on y. None as for
+    /// `level_height`. Does not load chunks.
+    pub(in crate::game) fn level_in_spawnable_bounds(
+        &self,
+        level: LevelRef,
+        pos: [i32; 3],
+    ) -> Option<bool> {
+        self.native_level_read_world(level)?;
+        Some(horizontal_in_bounds(pos) && (-20_000_000..20_000_000).contains(&pos[1]))
+    }
     /// The ticks the server has run (`Level.getGameTime`), shared by every
     /// level as in vanilla. API 381.
-    pub(super) fn native_level_game_time(&self, level: LevelRef) -> Option<i64> {
+    pub(super) fn level_game_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.world.game_time)
     }
@@ -470,7 +610,7 @@ impl Game<'_> {
     /// every level; it keeps counting past 24000. On a client, the synchronized
     /// Overworld clock, advanced at its server-supplied rate, even when the
     /// displayed dimension has a different default clock. API 381.
-    pub(super) fn native_level_day_time(&self, level: LevelRef) -> Option<i64> {
+    pub(super) fn level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_read_world(level)?;
         if self.is_logical_server() {
             Some(self.world.day_time)
@@ -480,11 +620,56 @@ impl Game<'_> {
     }
 }
 
+/// `Level.isInWorldBoundsHorizontal`: x and z inside the 30,000,000-block limit.
+fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
+    (-30_000_000..30_000_000).contains(&pos[0]) && (-30_000_000..30_000_000).contains(&pos[2])
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
+
+    #[test]
+    fn biome_search_budget_bounds_columns_and_heights_before_sampling() {
+        use mod_api::BiomeSearch;
+        let allowed = |radius, horizontal, vertical, height| {
+            super::biome_search_within_budget(
+                BiomeSearch::new([i32::MIN, i32::MAX, i32::MAX], radius, horizontal, vertical),
+                height,
+            )
+        };
+        assert!(allowed(0, 1, i32::MAX, 384));
+        assert!(allowed(i32::MAX, i32::MAX, i32::MAX, 384));
+        assert!(allowed(127, 1, i32::MAX, 256));
+        assert!(!allowed(128, 1, i32::MAX, 256));
+        assert!(allowed(15, 1, 4, 256));
+        assert!(!allowed(16, 1, 4, 256));
+        assert!(!allowed(i32::MAX, 1, 1, i32::MAX));
+        for (radius, horizontal, vertical, height) in [
+            (-1, 1, 1, 384),
+            (0, 0, 1, 384),
+            (0, -1, 1, 384),
+            (0, 1, 0, 384),
+            (0, 1, -1, 384),
+            (0, 1, 1, 0),
+        ] {
+            assert!(!allowed(radius, horizontal, vertical, height));
+        }
+    }
+
+    /// A logical server with its worker queue running rather than the
+    /// title-screen streamer's paused placeholder.
+    fn with_chunk_streaming(test: impl FnOnce(&mut super::Game<'_>)) {
+        with_game(|game| {
+            game.options.headless = true;
+            game.streaming.paused = false;
+            game.streaming.mesh = false;
+            game.streaming.radius = 0;
+            test(game);
+        });
+    }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -535,8 +720,8 @@ mod tests {
                         .guests
                         .update(0, |g| g.inventory[0] = value);
                 }
-                let player = game.native_player_ref(12).unwrap();
-                let level = game.native_level(game.dim.id()).unwrap();
+                let player = game.player(12).unwrap();
+                let level = game.level(game.dim.id()).unwrap();
                 let hit = BlockHit::new([0.5, 65.0, 0.5], [0, 1, 0], false);
                 let preview = level
                     .block_transform(game, player, Hand::Main, &tool, pos, hit)
@@ -603,7 +788,7 @@ mod tests {
                 .default_state("minecraft:glass")
                 .unwrap();
             game.world.set(1, y, 1, glass).unwrap();
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let host: &dyn Host = game;
             assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
             assert_eq!(
@@ -642,7 +827,7 @@ mod tests {
             game.block_ticks
                 .comparator_outputs
                 .insert(BlockPos::new(4, y, 4), 9);
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let host: &dyn Host = game;
             assert_eq!(level.signal(host, [1, y, 1], Direction::East), Some(15));
             assert_eq!(level.best_neighbor_signal(host, [2, y, 1]), Some(15));
@@ -652,11 +837,87 @@ mod tests {
                 NativeWorldEpoch::new(level.epoch().get() + 1),
                 level.dimension(),
             );
-            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let other = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             for unavailable in [stale, other] {
                 assert_eq!(unavailable.signal(host, [1, y, 1], Direction::East), None);
                 assert!(!unavailable.has_neighbor_signal(host, [2, y, 1]));
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn loaded_chunks_lists_the_level_in_order_without_loading() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            let before = level.loaded_chunks(game).unwrap().len();
+            for pos in [(2, -1), (0, 5), (0, -3)] {
+                game.world
+                    .chunks
+                    .insert(pos, Arc::new(Chunk::empty(pos.0, pos.1)));
+            }
+            let chunks = level.loaded_chunks(game).unwrap();
+            assert_eq!(chunks.len(), before + 3);
+            let positions: Vec<[i32; 2]> = chunks.iter().map(|chunk| chunk.pos()).collect();
+            assert!(
+                positions.windows(2).all(|pair| pair[0] <= pair[1]),
+                "ordered"
+            );
+            assert!(positions.contains(&[0, -3]) && positions.contains(&[2, -1]));
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(nether.loaded_chunks(game), None, "not opened yet");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn bounds_reads_follow_the_level_without_loading_chunks() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            let nether = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(level.in_world_bounds(game, [0, 64, 0]), Some(true));
+            assert_eq!(level.in_world_bounds(game, [0, -65, 0]), Some(false));
+            assert_eq!(level.in_world_bounds(game, [0, 320, 0]), Some(false));
+            assert_eq!(
+                level.in_world_bounds(game, [30_000_000, 64, 0]),
+                Some(false)
+            );
+            assert_eq!(level.in_world_bounds(game, [0, i32::MAX, 0]), Some(false));
+            assert_eq!(level.in_spawnable_bounds(game, [0, 320, 0]), Some(true));
+            assert_eq!(
+                level.in_spawnable_bounds(game, [29_999_999, 19_999_999, -30_000_000]),
+                Some(true)
+            );
+            assert_eq!(
+                level.in_spawnable_bounds(game, [0, 20_000_000, 0]),
+                Some(false)
+            );
+            assert_eq!(
+                nether.in_world_bounds(game, [0, 64, 0]),
+                None,
+                "not opened yet"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn world_border_reads_refuse_stale_and_unopened_levels() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            game.border.set_center([12.0, -8.0]);
+            game.border.set_size(40.0);
+            assert_eq!(level.world_border(game), Some([-8.0, -28.0, 32.0, 12.0]));
+            let stale_epoch = NativeWorldEpoch::new(level.epoch().get() + 1);
+            let stale = LevelRef::new(stale_epoch, level.dimension());
+            assert_eq!(stale.world_border(game), None);
+            let unopened = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(unopened.world_border(game), None);
+            game.border.set_center([0.0, 0.0]);
+            assert_eq!(level.world_border(game), Some([-20.0, -20.0, 20.0, 20.0]));
         });
     }
 
@@ -670,7 +931,7 @@ mod tests {
 
         with_game(|game| {
             let overworld = game.level("minecraft:overworld").unwrap();
-            let nether = LevelRef::new(overworld.epoch(), "minecraft:the_nether");
+            let nether = LevelRef::new(overworld.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(overworld.height(game), Some((-64, 384)));
             assert_eq!(nether.height(game), None, "not opened yet");
             game.enter_level(Dim::Nether).unwrap();
@@ -715,7 +976,7 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let bottom = game.world.bottom_y();
             let top = game.world.top_y();
             let registry = &game.pack.assets.registry;
@@ -747,7 +1008,7 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let registry = &game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
             let water = registry.default_state("minecraft:water").unwrap();
@@ -775,47 +1036,61 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunks_set_clear_and_query_like_forceload() {
-        with_game(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let far = game.native_level_chunk_ref(level, [40, -7]).unwrap();
-            let near = game.native_level_chunk_ref(level, [-3, 2]).unwrap();
-            assert_eq!(game.native_chunk_forced(far), Some(false));
-            assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
-            assert!(game.native_chunk_set_forced(far, true));
-            assert!(!game.native_chunk_set_forced(far, true), "already forced");
-            assert!(game.native_chunk_set_forced(near, true));
-            assert_eq!(game.native_chunk_forced(far), Some(true));
+        with_chunk_streaming(|game| {
+            let level = game.level(game.dim.id()).unwrap();
+            let far = game.level_chunk_ref(level, [40, -7]).unwrap();
+            let near = game.level_chunk_ref(level, [-3, 2]).unwrap();
+            assert_eq!(game.chunk_forced(far), Some(false));
+            assert_eq!(game.level_forced_chunks(level), Some(vec![]));
+            // A synchronous load leaves existing columns for the normal owner
+            // update to save and unload, including their entity data.
+            let old = std::sync::Arc::new(horizon_client::chunk::Chunk::empty(-40, 40));
+            game.world.chunks.insert((-40, 40), old.clone());
+            game.world.modified.insert((-40, 40));
+            assert!(!game.chunk_loaded(far));
+            assert!(game.chunk_set_forced(far, true));
+            assert!(game.chunk_loaded(far), "loaded before returning");
+            assert!(std::sync::Arc::ptr_eq(&old, &game.world.chunks[&(-40, 40)]));
+            assert!(game.world.modified.contains(&(-40, 40)));
+            assert!(!game.chunk_set_forced(far, true), "already forced");
+            assert!(game.chunk_set_forced(near, true));
+            assert_eq!(game.chunk_forced(far), Some(true));
             // The command's own set and order.
             assert!(game.streaming.forced.contains(&(40, -7)));
-            let listed = game.native_level_forced_chunks(level).unwrap();
+            let listed = game.level_forced_chunks(level).unwrap();
             // Signed packed positions: z first, then x.
             assert_eq!(listed, vec![[40, -7], [-3, 2]]);
-            assert!(game.native_chunk_set_forced(far, false));
-            assert!(!game.native_chunk_set_forced(far, false), "already clear");
-            assert_eq!(game.native_level_forced_chunks(level), Some(vec![[-3, 2]]));
+            assert!(game.chunk_set_forced(far, false));
+            assert!(!game.chunk_set_forced(far, false), "already clear");
+            assert_eq!(game.level_forced_chunks(level), Some(vec![[-3, 2]]));
             assert!(!game.streaming.forced.contains(&(40, -7)));
             // Outside the world.
-            assert!(game.native_level_chunk_ref(level, [1_875_000, 0]).is_none());
-            assert!(
-                game.native_level_chunk_ref(level, [0, -1_875_001])
-                    .is_none()
-            );
+            // Unchanged adds and removals do not load a missing column.
+            let pending = game.level_chunk_ref(level, [200, 200]).unwrap();
+            assert!(game.streaming.set_forced(200, 200, true));
+            assert!(!game.chunk_loaded(pending));
+            assert!(!game.chunk_set_forced(pending, true));
+            assert!(!game.chunk_loaded(pending));
+            assert!(game.chunk_set_forced(pending, false));
+            assert!(!game.chunk_loaded(pending));
+            assert!(game.level_chunk_ref(level, [1_875_000, 0]).is_none());
+            assert!(game.level_chunk_ref(level, [0, -1_875_001]).is_none());
         });
     }
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunk_changes_the_ticket_sources_and_the_saved_set() {
-        with_game(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let chunk = game.native_level_chunk_ref(level, [5, 6]).unwrap();
-            assert!(game.native_chunk_set_forced(chunk, true));
+        with_chunk_streaming(|game| {
+            let level = game.level(game.dim.id()).unwrap();
+            let chunk = game.level_chunk_ref(level, [5, 6]).unwrap();
+            assert!(game.chunk_set_forced(chunk, true));
             assert!(game.levels_to_tick().contains(&game.dim));
             game.save
                 .save_forced_chunks(&game.streaming.forced)
                 .unwrap();
             assert!(game.save.load_forced_chunks().contains(&(5, 6)));
-            assert!(game.native_chunk_set_forced(chunk, false));
+            assert!(game.chunk_set_forced(chunk, false));
             game.save
                 .save_forced_chunks(&game.streaming.forced)
                 .unwrap();
@@ -826,36 +1101,42 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forced_chunks_of_a_parked_level_and_stale_handles() {
-        with_game(|game| {
+        with_chunk_streaming(|game| {
             let stale_epoch =
                 NativeWorldEpoch::new(game.native_lifecycle.epoch().unwrap().get() + 1);
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let stale_level = mod_api::LevelRef::new(stale_epoch, level.dimension());
             let stale = ChunkRef::new(stale_level, [0, 0]);
-            assert_eq!(game.native_chunk_forced(stale), None);
-            assert!(!game.native_chunk_set_forced(stale, true));
-            assert_eq!(game.native_level_forced_chunks(stale_level), None);
-            assert!(game.native_level_chunk_ref(stale_level, [0, 0]).is_none());
+            assert_eq!(game.chunk_forced(stale), None);
+            assert!(!game.chunk_set_forced(stale, true));
+            assert_eq!(game.level_forced_chunks(stale_level), None);
+            assert!(game.level_chunk_ref(stale_level, [0, 0]).is_none());
             // A level the server has not opened.
             let other = if game.dim == Dim::Nether {
                 Dim::End
             } else {
                 Dim::Nether
             };
-            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.key());
             let chunk = ChunkRef::new(parked, [1, 1]);
-            assert_eq!(game.native_chunk_forced(chunk), None);
-            assert!(!game.native_chunk_set_forced(chunk, true));
+            assert_eq!(game.chunk_forced(chunk), None);
+            assert!(!game.chunk_set_forced(chunk, true));
             // Opened, then parked.
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
-            assert_eq!(game.native_chunk_forced(chunk), Some(false));
-            assert!(game.native_chunk_set_forced(chunk, true));
-            assert_eq!(game.native_level_forced_chunks(parked), Some(vec![[1, 1]]));
-            assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
+            assert_eq!(game.chunk_forced(chunk), Some(false));
+            assert!(!game.chunk_loaded(chunk));
+            assert!(game.chunk_set_forced(chunk, true));
+            assert!(
+                game.chunk_loaded(chunk),
+                "parked level loaded before returning"
+            );
+            assert_eq!(game.dim, back, "forcing must not switch the acting level");
+            assert_eq!(game.level_forced_chunks(parked), Some(vec![[1, 1]]));
+            assert_eq!(game.level_forced_chunks(level), Some(vec![]));
             assert!(game.levels_to_tick().contains(&other));
-            assert!(game.native_chunk_set_forced(chunk, false));
+            assert!(game.chunk_set_forced(chunk, false));
             assert!(!game.levels_to_tick().contains(&other));
         });
     }
@@ -867,7 +1148,7 @@ mod tests {
         use mod_api::{LevelRef, ServerHost};
 
         with_game(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             // The level in place: the draws advance `World.random` itself.
             let mut expected = game.world.random.clone();
             let host: &mut dyn ServerHost = game;
@@ -884,7 +1165,7 @@ mod tests {
             } else {
                 Dim::Nether
             };
-            let parked = LevelRef::new(level.epoch(), other.id());
+            let parked = LevelRef::new(level.epoch(), other.key());
             let host: &mut dyn ServerHost = game;
             assert!(parked.random(&*host).is_none(), "not open yet");
             let back = game.dim;
@@ -913,7 +1194,7 @@ mod tests {
             // A handle of an earlier open names nothing.
             let stale = LevelRef::new(
                 NativeWorldEpoch::new(level.epoch().get() + 1),
-                game.dim.id(),
+                game.dim.key(),
             );
             let host: &mut dyn ServerHost = game;
             assert!(stale.with_random(&mut *host, |r| r.next_int()).is_none());
@@ -1006,7 +1287,7 @@ mod tests {
     }
     /// A game whose mods are `Machines` and `Other`, with their controllers registered.
     fn with_machines(test: impl FnOnce(&mut super::super::Game<'_>)) {
-        testing::with_mods(mods(), || with_game(test));
+        testing::with_mods(mods(), || with_chunk_streaming(test));
     }
 
     #[test]
@@ -1014,71 +1295,61 @@ mod tests {
     fn mod_tickets_are_scoped_by_owner_and_share_the_forceload_store() {
         use mod_api::NativeTicketOwner::{Block, Entity};
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let chunk = game.native_level_chunk_ref(level, [5, 6]).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            let chunk = game.level_chunk_ref(level, [5, 6]).unwrap();
             let (a, b) = (Block([80, 64, 96]), Entity(7));
             // Outside a mod's hook there is no caller to own a ticket.
-            assert!(!game.native_chunk_set_mod_forced(chunk, quarry(), a, true, false));
+            assert!(!game.chunk_set_mod_forced(chunk, quarry(), a, true, false));
             let guard = in_mod("machines");
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), a, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), a, true, false));
             assert!(
-                !game.native_chunk_set_mod_forced(chunk, quarry(), a, true, false),
+                !game.chunk_set_mod_forced(chunk, quarry(), a, true, false),
                 "held"
             );
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), b, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), b, true, false));
             assert!(game.streaming.forced.contains(&(5, 6)));
-            assert_eq!(
-                game.native_chunk_forced(chunk),
-                Some(false),
-                "not /forceload's"
-            );
-            assert_eq!(game.native_level_forced_chunks(level), Some(vec![]));
+            assert_eq!(game.chunk_forced(chunk), Some(false), "not /forceload's");
+            assert_eq!(game.level_forced_chunks(level), Some(vec![]));
             // Two owners in one chunk release separately.
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), a, false, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), a, false, false));
             assert!(game.streaming.forced.contains(&(5, 6)));
             assert_eq!(
-                game.native_level_mod_forced_chunks(level, quarry()),
+                game.level_mod_forced_chunks(level, quarry()),
                 Some(vec![(b, [5, 6], false)])
             );
             // Another mod cannot use our controller, however it asks; its own is empty.
             drop(guard);
             let guard = in_mod("other");
-            assert_eq!(game.native_level_mod_forced_chunks(level, quarry()), None);
-            assert!(!game.native_chunk_set_mod_forced(chunk, quarry(), b, false, false));
-            assert!(!game.native_chunk_set_mod_forced(chunk, quarry(), b, true, false));
+            assert_eq!(game.level_mod_forced_chunks(level, quarry()), None);
+            assert!(!game.chunk_set_mod_forced(chunk, quarry(), b, false, false));
+            assert!(!game.chunk_set_mod_forced(chunk, quarry(), b, true, false));
             let vault = controller("other:vault");
-            assert_eq!(
-                game.native_level_mod_forced_chunks(level, vault),
-                Some(vec![])
-            );
-            assert!(game.native_chunk_set_mod_forced(chunk, vault, b, true, false));
-            assert!(game.native_chunk_set_mod_forced(chunk, vault, b, false, false));
+            assert_eq!(game.level_mod_forced_chunks(level, vault), Some(vec![]));
+            assert!(game.chunk_set_mod_forced(chunk, vault, b, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, vault, b, false, false));
             drop(guard);
             // Our other controller is apart from the first: it neither lists nor releases its tickets.
             let guard = in_mod("machines");
             let drill = controller("machines:drill");
+            assert_eq!(game.level_mod_forced_chunks(level, drill), Some(vec![]));
+            assert!(!game.chunk_set_mod_forced(chunk, drill, b, false, false));
+            assert!(game.chunk_set_mod_forced(chunk, drill, b, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, drill, b, false, false));
             assert_eq!(
-                game.native_level_mod_forced_chunks(level, drill),
-                Some(vec![])
-            );
-            assert!(!game.native_chunk_set_mod_forced(chunk, drill, b, false, false));
-            assert!(game.native_chunk_set_mod_forced(chunk, drill, b, true, false));
-            assert!(game.native_chunk_set_mod_forced(chunk, drill, b, false, false));
-            assert_eq!(
-                game.native_level_mod_forced_chunks(level, quarry()),
+                game.level_mod_forced_chunks(level, quarry()),
                 Some(vec![(b, [5, 6], false)])
             );
             drop(guard);
             // /forceload and a ticket on one chunk: the chunk stays until both go.
-            assert!(game.native_chunk_set_forced(chunk, true));
-            assert!(game.native_chunk_set_forced(chunk, false));
+            assert!(game.chunk_set_forced(chunk, true));
+            assert!(game.chunk_set_forced(chunk, false));
             assert!(
                 game.streaming.forced.contains(&(5, 6)),
                 "the ticket holds it"
             );
-            assert!(game.native_chunk_set_forced(chunk, true));
+            assert!(game.chunk_set_forced(chunk, true));
             let _guard = in_mod("machines");
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), b, false, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), b, false, false));
             assert!(
                 game.streaming.forced.contains(&(5, 6)),
                 "/forceload holds it"
@@ -1087,7 +1358,7 @@ mod tests {
             assert!(game.streaming.forced.is_empty());
             // The world's bounds, as /forceload checks them.
             let outside = mod_api::ChunkRef::new(level, [1_875_000, 0]);
-            assert!(!game.native_chunk_set_mod_forced(outside, quarry(), a, true, false));
+            assert!(!game.chunk_set_mod_forced(outside, quarry(), a, true, false));
         });
     }
 
@@ -1096,14 +1367,14 @@ mod tests {
     fn mod_tickets_save_apart_from_vanillas_tickets_and_release_with_the_world() {
         use mod_api::NativeTicketOwner::{Block, Entity};
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let chunk = game.native_level_chunk_ref(level, [-9, 4]).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            let chunk = game.level_chunk_ref(level, [-9, 4]).unwrap();
             let _guard = in_mod("machines");
             let drill = controller("machines:drill");
             let (block, entity) = (Block([-140, 70, 70]), Entity(u128::MAX - 3));
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), block, true, false));
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), entity, true, false));
-            assert!(game.native_chunk_set_mod_forced(chunk, drill, block, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), block, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), entity, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, drill, block, true, false));
             game.save_chunk_tickets().unwrap();
             let vanilla = game.save.load_forced_chunks();
             assert!(vanilla.is_empty(), "vanilla's file has no mod ticket");
@@ -1117,9 +1388,8 @@ mod tests {
             };
             reopen(game, known_slot);
             // Each ticket comes back under the controller that held it.
-            let listed = |game: &super::super::Game<'_>, c| {
-                game.native_level_mod_forced_chunks(level, c).unwrap()
-            };
+            let listed =
+                |game: &super::super::Game<'_>, c| game.level_mod_forced_chunks(level, c).unwrap();
             assert_eq!(listed(game, quarry()).len(), 2);
             assert_eq!(listed(game, drill), vec![(block, [-9, 4], false)]);
             assert!(game.streaming.forced.contains(&(-9, 4)));
@@ -1132,14 +1402,8 @@ mod tests {
             assert!(game.streaming.forced.is_empty());
             assert!(game.save.load_mod_tickets(known_slot).is_empty());
             // Released tickets leave the file.
-            assert!(game.native_chunk_set_mod_forced(
-                chunk,
-                quarry(),
-                Block([-140, 70, 70]),
-                true,
-                false
-            ));
-            assert!(game.native_chunk_set_mod_forced(
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), Block([-140, 70, 70]), true, false));
+            assert!(game.chunk_set_mod_forced(
                 chunk,
                 quarry(),
                 Block([-140, 70, 70]),
@@ -1155,7 +1419,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_ticket_keeps_a_parked_level_active() {
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let other = if game.dim == Dim::Nether {
                 Dim::End
             } else {
@@ -1164,14 +1428,14 @@ mod tests {
             let back = game.dim;
             game.enter_level(other).unwrap();
             game.enter_level(back).unwrap();
-            let parked = mod_api::LevelRef::new(level.epoch(), other.id());
+            let parked = mod_api::LevelRef::new(level.epoch(), other.key());
             let chunk = ChunkRef::new(parked, [2, 2]);
             let _guard = in_mod("machines");
             let owner = mod_api::NativeTicketOwner::Block([32, 64, 32]);
             assert!(!game.levels_to_tick().contains(&other));
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), owner, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.levels_to_tick().contains(&other));
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), owner, false, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), owner, false, false));
             assert!(!game.levels_to_tick().contains(&other));
         });
     }
@@ -1187,14 +1451,37 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn forceload_add_returns_with_each_new_column_loaded() {
+        with_chunk_streaming(|game| {
+            game.ui.registries.permission = 4;
+            assert!(!game.world.chunks.contains_key(&(8, -4)));
+            assert!(!game.world.chunks.contains_key(&(9, -4)));
+            assert_eq!(query_result(game, "forceload add 128 -64 144 -64"), Some(2));
+            for key in [(8, -4), (9, -4)] {
+                assert!(
+                    game.world.chunks.contains_key(&key),
+                    "loaded {key:?} before command return"
+                );
+                assert!(game.streaming.commanded().contains(&key));
+            }
+            assert_eq!(query_result(game, "forceload add 128 -64 144 -64"), None);
+            assert_eq!(
+                query_result(game, "forceload remove 128 -64 144 -64"),
+                Some(2)
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn forceload_query_lists_only_command_tickets() {
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let chunk = game.native_level_chunk_ref(level, [3, 3]).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            let chunk = game.level_chunk_ref(level, [3, 3]).unwrap();
             game.ui.registries.permission = 4;
             let _guard = in_mod("machines");
             let owner = mod_api::NativeTicketOwner::Block([48, 64, 48]);
-            assert!(game.native_chunk_set_mod_forced(chunk, quarry(), owner, true, false));
+            assert!(game.chunk_set_mod_forced(chunk, quarry(), owner, true, false));
             assert!(game.streaming.forced.contains(&(3, 3)));
             assert_eq!(query_result(game, "forceload query"), Some(0), "list form");
             assert_eq!(
@@ -1202,7 +1489,7 @@ mod tests {
                 None,
                 "position form"
             );
-            assert!(game.native_chunk_set_forced(chunk, true));
+            assert!(game.chunk_set_forced(chunk, true));
             assert_eq!(query_result(game, "forceload query"), Some(1));
             assert_eq!(query_result(game, "forceload query 48 48"), Some(1));
         });
@@ -1213,13 +1500,13 @@ mod tests {
     fn natural_spawning_tickets_and_plain_ones_save_and_load_apart() {
         use mod_api::NativeTicketOwner::Block;
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let plain = game.native_level_chunk_ref(level, [11, 12]).unwrap();
-            let spawning = game.native_level_chunk_ref(level, [13, 12]).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            let plain = game.level_chunk_ref(level, [11, 12]).unwrap();
+            let spawning = game.level_chunk_ref(level, [13, 12]).unwrap();
             let _guard = in_mod("machines");
             let owner = Block([176, 64, 192]);
-            assert!(game.native_chunk_set_mod_forced(plain, quarry(), owner, true, false));
-            assert!(game.native_chunk_set_mod_forced(spawning, quarry(), owner, true, true));
+            assert!(game.chunk_set_mod_forced(plain, quarry(), owner, true, false));
+            assert!(game.chunk_set_mod_forced(spawning, quarry(), owner, true, true));
             let tickets = game.streaming.mod_tickets();
             assert!(!tickets.forces_natural_spawning((11, 12)));
             assert!(tickets.forces_natural_spawning((13, 12)));
@@ -1228,12 +1515,12 @@ mod tests {
             assert!(game.streaming.forced.contains(&(13, 12)));
             assert!(game.levels_to_tick().contains(&game.dim));
             assert_eq!(
-                game.native_level_mod_forced_chunks(level, quarry()),
+                game.level_mod_forced_chunks(level, quarry()),
                 Some(vec![(owner, [11, 12], false), (owner, [13, 12], true)])
             );
             // One owner holds both kinds on one chunk apart.
-            assert!(game.native_chunk_set_mod_forced(plain, quarry(), owner, true, true));
-            assert!(game.native_chunk_set_mod_forced(plain, quarry(), owner, false, true));
+            assert!(game.chunk_set_mod_forced(plain, quarry(), owner, true, true));
+            assert!(game.chunk_set_mod_forced(plain, quarry(), owner, false, true));
             assert!(game.streaming.forced.contains(&(11, 12)));
             assert!(
                 !game
@@ -1275,15 +1562,15 @@ mod tests {
                     game.world.chunks.insert((cx, cz), Arc::new(chunk));
                 }
             }
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             // Both chunks lie in the player's 8-chunk area and past 128 blocks of it.
-            let flagged = game.native_level_chunk_ref(level, [8, 8]).unwrap();
-            let plain = game.native_level_chunk_ref(level, [8, 7]).unwrap();
+            let flagged = game.level_chunk_ref(level, [8, 8]).unwrap();
+            let plain = game.level_chunk_ref(level, [8, 7]).unwrap();
             {
                 let _guard = in_mod("machines");
                 let owner = Block([128, 64, 128]);
-                assert!(game.native_chunk_set_mod_forced(flagged, quarry(), owner, true, true));
-                assert!(game.native_chunk_set_mod_forced(plain, quarry(), owner, true, false));
+                assert!(game.chunk_set_mod_forced(flagged, quarry(), owner, true, true));
+                assert!(game.chunk_set_mod_forced(plain, quarry(), owner, true, false));
             }
             game.spawn_natural();
             assert_eq!(game.world.inhabited.get(&(8, 8)), Some(&1));
@@ -1428,15 +1715,15 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn validation_sees_the_saved_tickets_not_ones_added_after_the_load() {
         with_machines(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let tickets = vec![saved("machines:quarry", [1, 64, 1], (7, 7))];
             game.streaming.load_forced(Default::default(), tickets);
             // `level_load` runs after the load: its hold is the same owner's.
-            let fresh = game.native_level_chunk_ref(level, [6, 6]).unwrap();
+            let fresh = game.level_chunk_ref(level, [6, 6]).unwrap();
             {
                 let _guard = in_mod("machines");
                 let owner = mod_api::NativeTicketOwner::Block([1, 64, 1]);
-                assert!(game.native_chunk_set_mod_forced(fresh, quarry(), owner, true, false));
+                assert!(game.chunk_set_mod_forced(fresh, quarry(), owner, true, false));
             }
             game.validate_mod_chunk_tickets(game.dim);
             assert!(!game.streaming.forced.contains(&(7, 7)), "saved one pruned");
@@ -1456,7 +1743,7 @@ mod tests {
             // Block light 5 and sky light 12 in the lowest section.
             Arc::make_mut(&mut chunk.sections[0]).light = Light::Uniform(0xC5);
             game.world.chunks.insert((0, 0), Arc::new(chunk));
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let lit = [3, -60, 5];
             let sky = game.world.light(3, -60, 5) >> 4;
             let block = game.world.light(3, -60, 5) & 15;
@@ -1480,27 +1767,502 @@ mod tests {
                 assert!(!host.is_loaded([16, -60, 0]));
             });
             assert_eq!(
-                game.native_level_brightness(level, LightLayer::Block, lit),
+                game.level_brightness(level, LightLayer::Block, lit),
                 Some(5)
             );
+            assert_eq!(game.level_brightness(level, LightLayer::Sky, lit), Some(12));
             assert_eq!(
-                game.native_level_brightness(level, LightLayer::Sky, lit),
-                Some(12)
-            );
-            assert_eq!(
-                game.native_level_brightness(level, LightLayer::Sky, [16, -60, 0]),
+                game.level_brightness(level, LightLayer::Sky, [16, -60, 0]),
                 None
             );
             assert_eq!(
-                game.native_level_brightness(level, LightLayer::Sky, [0, 320, 0]),
+                game.level_brightness(level, LightLayer::Sky, [0, 320, 0]),
                 None
             );
-            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.id());
-            assert_eq!(
-                game.native_level_brightness(stale, LightLayer::Sky, lit),
-                None
-            );
+            let stale = LevelRef::new(NativeWorldEpoch::new(u64::MAX), game.dim.key());
+            assert_eq!(game.level_brightness(stale, LightLayer::Sky, lit), None);
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
+        });
+    }
+}
+
+#[cfg(test)]
+mod environment_read_tests {
+    use crate::game::{Dim, native_entity_refs::tests::with_game};
+    use horizon_client::chunk::Chunk;
+    use mod_api::{BiomeSearch, LevelRef, NativeWorldEpoch};
+    use std::sync::Arc;
+
+    fn paint_biome(game: &mut crate::game::Game<'_>, name: &str) {
+        let biome = world_biomes!(game).id(name);
+        let mut chunk = Chunk::empty(0, 0);
+        for y in 0..chunk.sections.len() as i32 * 4 {
+            for x in 0..4 {
+                for z in 0..4 {
+                    chunk.set_biome_cell(x, y, z, biome);
+                }
+            }
+        }
+        game.world.chunks.insert((0, 0), Arc::new(chunk));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn biome_reads_follow_live_cells_parked_levels_and_client_login_without_loading() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            paint_biome(game, "minecraft:plains");
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:plains")
+            );
+            assert_eq!(overworld.biome_at(game, [31, 64, 31]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            paint_biome(game, "minecraft:desert");
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert")
+            );
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                overworld.biome_at(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:desert"),
+                "parked level's cells"
+            );
+            game.enter_level(Dim::Overworld).unwrap();
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.biome_at(game, [8, 64, 8]), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "BiomeReadTest").unwrap();
+            assert_eq!(
+                overworld.client_biome(game, [8, 64, 8]),
+                None,
+                "not logged in"
+            );
+            game.remote.as_mut().unwrap().logged_in = true;
+            paint_biome(game, "minecraft:snowy_plains");
+            let client_level = game.level("minecraft:overworld").unwrap();
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]).as_deref(),
+                Some("minecraft:snowy_plains")
+            );
+            assert_eq!(client_level.client_biome(game, [31, 64, 31]), None);
+            let foreign = LevelRef::new(client_level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(foreign.client_biome(game, [8, 64, 8]), None);
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.remote.as_mut().unwrap().logged_in = false;
+            assert_eq!(
+                client_level.client_biome(game, [8, 64, 8]),
+                None,
+                "logged out"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn floor_reads_real_collision_shapes_and_refuses_unloaded_positions() {
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let level = game.level("minecraft:overworld").unwrap();
+            let registry = game.pack.assets.registry;
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let slab = registry.default_state("minecraft:oak_slab").unwrap();
+            let fence = registry.default_state("minecraft:oak_fence").unwrap();
+            for (x, block, height, above) in [
+                (2, stone, 1.0, 0.0),
+                (5, slab, 0.5, f64::NEG_INFINITY),
+                (8, fence, 1.5, 0.5),
+            ] {
+                game.world.set(x, 100, 8, block).unwrap();
+                assert_eq!(level.block_floor_height(game, [x, 100, 8]), Some(height));
+                assert_eq!(level.block_floor_height(game, [x, 101, 8]), Some(above));
+            }
+            assert_eq!(
+                level.block_floor_height(game, [12, 100, 8]),
+                Some(f64::NEG_INFINITY)
+            );
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            assert_eq!(level.block_floor_height(game, [32, 100, 8]), None);
+            assert_eq!(
+                level.block_floor_height(game, [8, game.world.top_y(), 8]),
+                None
+            );
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Nether).unwrap();
+            assert_eq!(
+                level.block_floor_height(game, [5, 100, 8]),
+                Some(0.5),
+                "parked collision shapes"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(level.epoch().get() + 1),
+                level.dimension(),
+            );
+            assert_eq!(stale.block_floor_height(game, [5, 100, 8]), None);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn sky_and_logical_height_read_the_named_dimension_and_client_state() {
+        use crate::game::execution_role::ExecutionRole;
+        use horizon_client::chunk::LevelShape;
+        use horizon_protocol::connection::Pipe;
+
+        with_game(|game| {
+            let overworld = game.level("minecraft:overworld").unwrap();
+            assert_eq!(overworld.logical_height(game), Some(384));
+            for time in [0, 6000, 12000, 18000, 24000] {
+                game.world.day_time = time;
+                assert_eq!(overworld.get_sky_darken(game), Some(game.sky_darken()));
+            }
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.0, 0.0);
+            game.world.weather.thunder_level = (0.0, 0.0);
+            game.enter_level(Dim::Nether).unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.height(game),
+                Some((0, 256)),
+                "logical and build heights differ"
+            );
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            // The vanilla fixture records clear midnight as 11 and half-rain noon as 1.
+            // Change the shared state while the Overworld snapshot stays parked at noon.
+            game.world.day_time = 18000;
+            assert_eq!(overworld.day_time(game), Some(18000));
+            assert_eq!(overworld.get_sky_darken(game), Some(11));
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.5, 0.5);
+            assert_eq!(overworld.get_sky_darken(game), Some(1));
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            assert_eq!(game.dim, Dim::Nether, "a read does not swap levels");
+            let parked = game.levels.parked_world_of("minecraft:overworld").unwrap();
+            assert_eq!(
+                parked.day_time, 6000,
+                "the parked snapshot is not rewritten"
+            );
+            assert_eq!(parked.weather.levels(1.0), (0.0, 0.0));
+            game.enter_level(Dim::Overworld).unwrap();
+            game.world.day_time = 6000;
+            assert_eq!(nether.logical_height(game), Some(128));
+            assert_eq!(
+                nether.get_sky_darken(game),
+                Some(11),
+                "parked level keeps its dimension's sky"
+            );
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(overworld.epoch().get() + 1),
+                overworld.dimension(),
+            );
+            assert_eq!(stale.logical_height(game), None);
+            assert_eq!(stale.get_sky_darken(game), None);
+
+            game.options.execution_role = ExecutionRole::Client;
+            game.options.dedicated = None;
+            let (client, _server) = Pipe::pair();
+            game.connect_local(client, "SkyReadTest").unwrap();
+            assert_eq!(overworld.logical_height(game), None, "not logged in");
+            game.remote.as_mut().unwrap().logged_in = true;
+            game.world.shape = LevelShape::new(-128, 512, 256, true, false).unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
+            assert_eq!(
+                level.logical_height(game),
+                Some(256),
+                "client's own dimension shape"
+            );
+            assert_eq!(level.get_sky_darken(game), Some(game.sky_darken()));
+            assert_eq!(
+                nether.logical_height(game),
+                None,
+                "another dimension isn't visible to a client"
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn closest_biome_uses_the_named_generator_without_loading_resident_chunks() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+
+        with_game(|game| {
+            game.enter_level(Dim::Nether).unwrap();
+            let directory = game.options.resources.join("worldgen");
+            let terrain = VanillaTerrain::for_dimension(
+                TerrainResources {
+                    data: Some(&game.pack.data_changes),
+                    dir: &directory,
+                    registry: game.pack.assets.registry,
+                    biomes: world_biomes!(game),
+                    item_data: &game.res.core.item_data,
+                },
+                12345,
+                "minecraft:the_nether",
+            )
+            .unwrap();
+            game.end.set_locator(Some(Arc::new(terrain)));
+            let nether = game.level("minecraft:the_nether").unwrap();
+            let parameters = BiomeSearch::new([8, 64, 8], 0, 32, 64);
+            let before = (game.world.chunks.len(), game.streaming.pending());
+            let found = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .expect("all Nether source biomes match");
+            assert_eq!(
+                found.position,
+                [8, 64, 8],
+                "vanilla samples the origin first"
+            );
+            assert!(
+                [
+                    "minecraft:nether_wastes",
+                    "minecraft:soul_sand_valley",
+                    "minecraft:crimson_forest",
+                    "minecraft:warped_forest",
+                    "minecraft:basalt_deltas"
+                ]
+                .contains(&found.biome.as_str())
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:plains", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(game, "minecraft:no_such_biome", parameters),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], -1, 32, 64)
+                ),
+                None
+            );
+            assert_eq!(
+                nether.find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], 32, 0, 64)
+                ),
+                None
+            );
+            // The old public boundary accepted these calls and could panic or hang.
+            let huge_step = nether
+                .find_closest_biome(
+                    game,
+                    "#minecraft:is_nether",
+                    BiomeSearch::new([0, 64, 0], 0, 32, i32::MAX),
+                )
+                .expect("a step larger than the build height samples only the origin");
+            assert_eq!(huge_step.position, [0, 64, 0]);
+            for parameters in [
+                BiomeSearch::new([0, 64, 0], i32::MAX, 1, 1),
+                BiomeSearch::new([0, 64, 0], 128, 1, i32::MAX),
+                BiomeSearch::new([0, 64, 0], 16, 1, 1),
+                BiomeSearch::new([0, 64, 0], 0, 32, 0),
+                BiomeSearch::new([0, 64, 0], 0, 32, -1),
+            ] {
+                assert_eq!(
+                    nether.find_closest_biome(game, "#minecraft:is_nether", parameters),
+                    None,
+                    "invalid or over-budget input must be refused even if the origin matches"
+                );
+            }
+            assert_eq!(before, (game.world.chunks.len(), game.streaming.pending()));
+            game.enter_level(Dim::Overworld).unwrap();
+            let parked = nether
+                .find_closest_biome(game, "#minecraft:is_nether", parameters)
+                .unwrap();
+            assert_eq!(parked, found, "parked level retains its generator and seed");
+            let stale = LevelRef::new(
+                NativeWorldEpoch::new(nether.epoch().get() + 1),
+                nether.dimension(),
+            );
+            assert_eq!(
+                stale.find_closest_biome(game, "#minecraft:is_nether", parameters),
+                None
+            );
+        });
+    }
+
+    /// API results over original fixture worlds, compared with independently recorded vanilla calls.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_environment_reads_match_vanilla_vectors() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+        use serde_json::{Value, json};
+        use std::collections::HashMap;
+
+        let fixture = |name: &str, variable: &str| {
+            let path = std::env::var_os(variable)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../tests/fixtures")
+                        .join(name)
+                });
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let inputs = fixture("level_environment_reads.jsonl", "HORIZON_LEVEL_READ_CASES");
+        let expected = fixture(
+            "level_environment_reads_expected.jsonl",
+            "HORIZON_LEVEL_READ_EXPECTED",
+        );
+        assert!(inputs.len() >= 476);
+        assert_eq!(inputs.len(), expected.len());
+        let position =
+            |value: &Value| std::array::from_fn::<_, 3, _>(|i| value[i].as_i64().unwrap() as i32);
+        with_game(|game| {
+            let mut generators = HashMap::new();
+            for (input, expected) in inputs.iter().zip(&expected) {
+                assert_eq!(input["name"], expected["name"]);
+                let dimension = input["dimension"].as_str().unwrap_or("minecraft:overworld");
+                let dim = Dim::from_id(dimension);
+                if game.dim != dim {
+                    game.enter_level(dim).unwrap();
+                }
+                let kind = input["kind"].as_str().unwrap();
+                match kind {
+                    "biome" => {
+                        game.world.chunks.clear();
+                        let ids = ["minecraft:plains", "minecraft:desert", "minecraft:forest"]
+                            .map(|name| world_biomes!(game).id(name));
+                        for column in input["loaded"].as_array().unwrap() {
+                            let (cx, cz) = (
+                                column[0].as_i64().unwrap() as i32,
+                                column[1].as_i64().unwrap() as i32,
+                            );
+                            let mut chunk = Chunk::empty(cx, cz);
+                            for y in 0..chunk.sections.len() as i32 * 4 {
+                                for x in 0..4 {
+                                    for z in 0..4 {
+                                        let qy = (chunk.min_y() >> 2) + y;
+                                        let index =
+                                            ((cx * 4 + x) * 31 + qy * 7 + (cz * 4 + z) * 17)
+                                                .rem_euclid(3);
+                                        chunk.set_biome_cell(x, y, z, ids[index as usize]);
+                                    }
+                                }
+                            }
+                            game.world.chunks.insert((cx, cz), Arc::new(chunk));
+                        }
+                        game.streaming.biome_zoom = horizon_core::biome::BiomeZoom::new(
+                            input["zoom_seed"].as_i64().unwrap(),
+                        );
+                    }
+                    "floor" => {
+                        game.world.chunks.clear();
+                        game.world
+                            .chunks
+                            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                        for (field, y) in [("here", 100), ("below", 99)] {
+                            let state = game
+                                .pack
+                                .assets
+                                .registry
+                                .default_state(input[field].as_str().unwrap())
+                                .unwrap();
+                            game.world.set(8, y, 8, state).unwrap();
+                        }
+                    }
+                    "sky" => {
+                        game.world.day_time = input["time"].as_i64().unwrap();
+                        let rain = input["rain"].as_f64().unwrap() as f32;
+                        let thunder = input["thunder"].as_f64().unwrap() as f32;
+                        game.world.weather.rain_level = (rain, rain);
+                        game.world.weather.thunder_level = (thunder, thunder);
+                    }
+                    "search" => {
+                        let seed = input["seed"].as_i64().unwrap();
+                        let key = (dimension.to_owned(), seed);
+                        let generator = generators.entry(key).or_insert_with(|| {
+                            let directory = game.options.resources.join("worldgen");
+                            let terrain = VanillaTerrain::for_dimension(
+                                TerrainResources {
+                                    data: Some(&game.pack.data_changes),
+                                    dir: &directory,
+                                    registry: game.pack.assets.registry,
+                                    biomes: world_biomes!(game),
+                                    item_data: &game.res.core.item_data,
+                                },
+                                seed,
+                                dimension,
+                            )
+                            .unwrap();
+                            Arc::new(terrain)
+                        });
+                        game.end.set_locator(Some(generator.clone()));
+                    }
+                    "logical_height" => {}
+                    other => panic!("unknown fixture {other}"),
+                }
+                let level = game.level(dimension).unwrap();
+                let before = (game.world.chunks.len(), game.streaming.pending());
+                let value = match kind {
+                    "biome" => json!(level.biome_at(game, position(&input["position"]))),
+                    "floor" => json!(level.block_floor_height(game, [8, 100, 8]).map(|height| {
+                        if height == f64::NEG_INFINITY {
+                            json!("-Infinity")
+                        } else {
+                            json!(height)
+                        }
+                    })),
+                    "sky" => json!(level.get_sky_darken(game)),
+                    "logical_height" => json!(level.logical_height(game)),
+                    "search" => {
+                        let parameters = BiomeSearch::new(
+                            position(&input["position"]),
+                            input["radius"].as_i64().unwrap() as i32,
+                            input["horizontal"].as_i64().unwrap() as i32,
+                            input["vertical"].as_i64().unwrap() as i32,
+                        );
+                        json!(
+                            level
+                                .find_closest_biome(
+                                    game,
+                                    input["selector"].as_str().unwrap(),
+                                    parameters
+                                )
+                                .map(
+                                    |found| json!({"biome":found.biome,"position":found.position})
+                                )
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    json!({"name":input["name"],"value":value}),
+                    *expected,
+                    "{}",
+                    input["name"]
+                );
+                assert_eq!(
+                    before,
+                    (game.world.chunks.len(), game.streaming.pending()),
+                    "read queued or loaded a chunk: {}",
+                    input["name"]
+                );
+            }
         });
     }
 }

@@ -10,7 +10,7 @@ use horizon_client::{
     mod_list::ModList,
     mod_registry::{self, Done},
 };
-use horizon_mods::index::Index;
+use horizon_mod_package::index::Index;
 use std::path::PathBuf;
 use std::sync::{
     Arc,

@@ -454,6 +454,15 @@ impl<'t> Frame<'t> {
         refused
     }
 
+    /// Trusted signature arity, checked before guest argument payloads are copied.
+    pub(crate) fn argument_count(&self, function: u32) -> Result<usize, Refusal> {
+        self.table
+            .thunks
+            .get(function as usize)
+            .map(|thunk| thunk.args.len())
+            .ok_or_else(|| gone("no such function"))
+    }
+
     /// Calls the declared function `function` on `receiver` with `args`, after applying the
     /// call's writes. A reference it returns is a new root, valid until the next call. Answers
     /// what it returned, and the writes that couldn't apply.

@@ -25,7 +25,7 @@ impl Game<'_> {
             let water = ItemStack::new("minecraft:water_bucket", 1);
             if self.inventory[self.selected].is_none() {
                 self.inventory[self.selected] = Some(water);
-            } else if let Some(rest) = self.give(water) {
+            } else if let Some(rest) = self.add_stack_to_inventory(water) {
                 let at = self.eye_position().unwrap_or([0.0; 3]);
                 self.spawn_item(rest, at, [0.0; 3], 40);
             }
@@ -134,7 +134,7 @@ impl Game<'_> {
         if tame && !food {
             // doPlayerRide.
             let id = self.mobs[index].id;
-            if !self.may_board() || !self.native_may_board(id) {
+            if !self.native_may_board(id) {
                 return true;
             }
             self.break_leash(id, true, false);

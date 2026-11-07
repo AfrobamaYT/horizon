@@ -135,7 +135,7 @@ pub struct Sky {
     pub star_brightness: f32,
     pub sunrise_color: [f32; 4],
     pub cloud_color: [f32; 4],
-    /// `gameplay/sky_light_level`, the server-side sky darkening.
+    /// `gameplay/sky_light_level` in raw light levels, from 0 to 15.
     pub sky_light_level: f32,
     /// Environmental fog (`visual/fog_start_distance` / `fog_end_distance`).
     pub fog_start: f32,
@@ -299,7 +299,7 @@ impl Environment {
                     .copied()
                     .unwrap_or([0.0; 4]),
             ),
-            sky_light_level: scalar("minecraft:gameplay/sky_light_level") / 15.0,
+            sky_light_level: scalar("minecraft:gameplay/sky_light_level"),
             fog_start: self
                 .base
                 .get("minecraft:visual/fog_start_distance")
@@ -369,8 +369,8 @@ pub fn apply_weather(sky: &mut Sky, rain: f32, thunder: f32) {
             sky.cloud_color,
             [c[0], c[1], c[2], sky.cloud_color[3]],
         );
-        // sky_light_level is a fraction of 15 here; the layer blends towards level 4.
-        let target_level = lerp(alpha, sky.sky_light_level * 15.0, 4.0) / 15.0;
+        // Weather layers operate on the raw light attribute, towards level 4.
+        let target_level = lerp(alpha, sky.sky_light_level, 4.0);
         sky.sky_light_level = lerp(level, sky.sky_light_level, target_level);
         sky.sky_light_color = lerp3(
             level,
@@ -400,8 +400,8 @@ pub fn apply_weather(sky: &mut Sky, rain: f32, thunder: f32) {
 pub fn sky_darken(environment: &Environment, day_time: i64, rain: f32, thunder: f32) -> i32 {
     let mut sky = environment.sample(day_time, None, None);
     apply_weather(&mut sky, rain, thunder);
-    // Level.updateSkyBrightness: darkening from the sky light level.
-    (15.0 - 15.0 * sky.sky_light_level).round() as i32
+    // Level.updateSkyBrightness uses a truncating Java float-to-int conversion.
+    (15.0 - sky.sky_light_level) as i32
 }
 
 #[cfg(test)]
@@ -431,6 +431,22 @@ mod tests {
         assert!(constant.tracks.is_empty());
         assert_eq!(constant.base("example:base")[0], 3.0);
         assert!(Environment::load_dimension(&source, "missing", false).is_err());
+    }
+
+    #[test]
+    fn sky_darken_truncates_the_raw_attribute_without_normalizing_it() {
+        let source = |level| Environment {
+            period: 24000,
+            tracks: HashMap::new(),
+            base: HashMap::from([(
+                "minecraft:gameplay/sky_light_level".into(),
+                [level, 0.0, 0.0, 0.0],
+            )]),
+        };
+        // Level.updateSkyBrightness: 15 - 14.5 is truncated to zero, not rounded to one.
+        assert_eq!(sky_darken(&source(14.5), 0, 0.0, 0.0), 0);
+        assert_eq!(sky_darken(&source(13.5), 0, 0.0, 0.0), 1);
+        assert_eq!(sky_darken(&source(4.0), 0, 0.0, 0.0), 11);
     }
 
     #[test]

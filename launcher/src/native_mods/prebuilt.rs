@@ -4,10 +4,10 @@
 //! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
 //! release, builds from source, and the build log says why. A prebuilt build that fails is an
 //! error like any other build's, never retried from source.
-use super::{api, dependencies, inject, internals, Profile, Target};
+use super::{api, dependencies, internals, Profile, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
-use horizon_mods::index::native;
+use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -26,7 +26,7 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum SourceReason {
-    /// A mod has a helper `[[native.injection]]` or a module: they change the game's own code.
+    /// A mod has a checked private source point, legacy helper, or module changing game code.
     Injections { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
@@ -96,6 +96,32 @@ pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option
     projects.iter().find_map(project_refusal)
 }
 
+/// Checked private-source routes require an install-time game build, never a prebuilt retry.
+pub(super) fn source_refusal(
+    game: &Path,
+    projects: &[api::Project<'_>],
+) -> Result<Option<SourceReason>, String> {
+    let catalog = internals::Catalog::read(game)?;
+    for project in projects {
+        let manifest = &project.bundle.manifest;
+        if super::slots::routes(&catalog, manifest)
+            .map_err(|error| error.to_string())?
+            .iter()
+            .any(|route| {
+                matches!(
+                    route,
+                    horizon_mod_package::manifest::inject::Route::Source(_)
+                )
+            })
+        {
+            return Ok(Some(SourceReason::Injections {
+                mod_id: manifest.id.clone(),
+            }));
+        }
+    }
+    Ok(None)
+}
+
 /// Why `project` alone can't build against the prebuilt game, or `None` when it can.
 pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason> {
     {
@@ -145,20 +171,6 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
         }
         None
     }
-}
-
-/// Checks `injections` against the prebuilt `game`'s points. A target that isn't a point is an
-/// error on any route, as is a method that isn't its point's: the source route stages the same
-/// points.
-pub(super) fn serves_points(
-    game: &Path,
-    injections: &[inject::PointInjection],
-) -> Result<(), String> {
-    if injections.is_empty() {
-        return Ok(());
-    }
-    let points = inject::listed(&game.join(inject::POINTS))?;
-    inject::check(injections, &points).map_err(|error| error.to_string())
 }
 
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
@@ -516,9 +528,11 @@ pub(super) fn compile(
         .arg("--extern")
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
+        .arg(format!("mod_points={}", libraries["mod_points"].display()))
+        .arg("--extern")
         .arg(format!(
-            "horizon_mods={}",
-            library(&deps, "horizon_mods")?.display()
+            "horizon_mod_package={}",
+            library(&deps, "horizon_mod_package")?.display()
         ));
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();
@@ -570,6 +584,30 @@ mod tests {
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         refusal(&[api::Project::read(&bundle).unwrap()], Profile::Optimized)
+    }
+
+    #[test]
+    fn only_the_exact_build_of_the_prebuilt_game_is_accepted() {
+        let dir = super::super::tests::dir("prebuilt-exact-build");
+        let check = |commit: &str, rustc: &str, target: &str, side: &str| {
+            let identity = serde_json::json!({
+                "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
+            });
+            fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
+            check_identity(&dir, "abc123", "x86_64-pc-windows-gnu", Target::Client)
+        };
+        let rustc = format!("rustc x\nrelease: {}\nhost: y", rust_toolchain::VERSION);
+        let host = "x86_64-pc-windows-gnu";
+        assert_eq!(check("abc123", &rustc, host, "client"), Ok(()));
+        assert!(check("abc124", &rustc, host, "client").is_err());
+        assert!(check("abc123", &rustc, "x86_64-unknown-linux-gnu", "client").is_err());
+        assert!(check("abc123", &rustc, host, "server").is_err());
+        assert!(check("abc123", "rustc x\nrelease: 0.0.1", host, "client").is_err());
+        let longer = format!("release: {}.1", rust_toolchain::VERSION);
+        assert!(check("abc123", &longer, host, "client").is_err());
+        fs::remove_file(dir.join(IDENTITY)).unwrap();
+        assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

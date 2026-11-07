@@ -1,6 +1,6 @@
 //! Raw call-site routing and adapters; every kind uses the same typed wrap constructor.
 use super::internals::Error;
-use horizon_mods::{
+use horizon_mod_package::{
     manifest::{Injection, InjectionKind},
     Manifest,
 };
@@ -75,7 +75,7 @@ pub(super) fn check<'a>(
 }
 
 impl Site {
-    fn constructor(&self) -> String {
+    pub(super) fn constructor(&self) -> String {
         self.name.to_ascii_lowercase()
     }
 
@@ -101,7 +101,7 @@ impl Site {
         }
         exports.insert(format!("    pub use {};\n", self.record));
         let listener = self.listener.rsplit("::").next().expect("listener name");
-        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::RawListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::RawListener::site(id, mod_points::SiteId::{}, priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
+        constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}, priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
     }
 
     pub(super) fn registration(
@@ -111,14 +111,17 @@ impl Site {
         injection: &Injection,
     ) -> String {
         let f = format!("mod_{index}::{}", injection.raw.as_ref().expect("raw site"));
-        let adapter = match injection.kind {
-            InjectionKind::BeforeCall | InjectionKind::ModifyArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
-            InjectionKind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
-            InjectionKind::ModifyExpressionValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
-            InjectionKind::WrapOperation => f,
-            InjectionKind::WrapWithCondition => format!("|receiver, args, original| {{ if {f}(receiver, &*args) {{ original(receiver, args); }} }}"),
+        use horizon_mod_package::manifest::inject::Kind;
+        let kind = match injection.kind {
+            InjectionKind::BeforeCall => Kind::BeforeCall,
+            InjectionKind::ModifyArg => Kind::ModifyCallArg,
+            InjectionKind::AfterCall => Kind::AfterCall,
+            InjectionKind::ModifyExpressionValue => Kind::ModifyValue,
+            InjectionKind::WrapOperation => Kind::WrapCall,
+            InjectionKind::WrapWithCondition => Kind::WrapIf,
             _ => unreachable!("manifest checked a site kind"),
         };
+        let adapter = adapter(kind, &f);
         format!(
             "        mod_{index}_internals::raw::{}({:?}, {}, {:?}, {adapter}),\n",
             self.constructor(),
@@ -126,6 +129,18 @@ impl Site {
             injection.priority.unwrap_or(0),
             injection.id
         )
+    }
+}
+
+pub(super) fn adapter(kind: horizon_mod_package::manifest::inject::Kind, f: &str) -> String {
+    use horizon_mod_package::manifest::inject::Kind;
+    match kind {
+        Kind::BeforeCall | Kind::ModifyCallArg => format!("|receiver, args, original| {{ {f}(receiver, args); original(receiver, args) }}"),
+        Kind::AfterCall => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, &value); value }}"),
+        Kind::ModifyValue => format!("|receiver, args, original| {{ let value = original(receiver, args); {f}(receiver, value) }}"),
+        Kind::WrapCall => f.into(),
+        Kind::WrapIf => format!("|receiver, args, original| {{ if {f}(receiver, &*args) {{ original(receiver, args); }} }}"),
+        _ => unreachable!("a site kind"),
     }
 }
 

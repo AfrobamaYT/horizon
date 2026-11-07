@@ -92,8 +92,8 @@ pub struct DamageLevel<'a> {
     tags: Option<&'a crate::items::Items>,
     block_registries: Option<&'a crate::command::args::Registries>,
     random: &'a mut horizon_core::random::LegacyRandom,
-    attachments: &'a mut horizon_world::attachments::Attachments,
-    attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+    attachments: &'a mut horizon_mod_runtime::attachments::Attachments,
+    attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_mod_runtime::attachments::Holder>,
     /// The game's hooks; none on a client predicting its own mount: they are the server's.
     hooks: Option<&'a DamageHooks>,
     /// Who attacks in this hit and what they hold: the facts of the site that built the level.
@@ -217,13 +217,13 @@ impl<'a> DamageLevel<'a> {
     /// block entity or entity's are not reachable from a hit: `MissingHolder`.
     pub fn attachments(
         &mut self,
-        holder: horizon_world::attachments::Holder,
+        holder: horizon_mod_runtime::attachments::Holder,
     ) -> std::result::Result<
-        &mut horizon_world::attachments::Attachments,
-        horizon_world::attachments::AttachmentError,
+        &mut horizon_mod_runtime::attachments::Attachments,
+        horizon_mod_runtime::attachments::AttachmentError,
     > {
-        if holder != horizon_world::attachments::Holder::Level {
-            return Err(horizon_world::attachments::AttachmentError::MissingHolder);
+        if holder != horizon_mod_runtime::attachments::Holder::Level {
+            return Err(horizon_mod_runtime::attachments::AttachmentError::MissingHolder);
         }
         self.attachment_syncs.insert(holder);
         Ok(self.attachments)
@@ -256,8 +256,8 @@ impl<'a> DamageLevel<'a> {
 /// elsewhere (the mob tick), and put back after.
 pub struct LentLevel {
     random: horizon_core::random::LegacyRandom,
-    attachments: horizon_world::attachments::Attachments,
-    attachment_syncs: crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+    attachments: horizon_mod_runtime::attachments::Attachments,
+    attachment_syncs: crate::fast_hash::FxHashSet<horizon_mod_runtime::attachments::Holder>,
 }
 impl LentLevel {
     /// Take `world`'s random and attachments: until [`Self::give_back`] the world has a

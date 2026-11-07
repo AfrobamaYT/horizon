@@ -183,9 +183,9 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return Err(TurnRefused::Gone);
         };
-        std::mem::swap(
+        let attachments = std::mem::replace(
             &mut self.player_attachments,
-            self.guest_attachments.entry(conn).or_default(),
+            std::mem::take(host.hub.guests.attachments_mut(conn).unwrap()),
         );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
@@ -229,6 +229,7 @@ impl Game<'_> {
         host.hub.guests.update(i, |g| {
             std::mem::swap(&mut self.inventory, &mut g.inventory);
             std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.location_armor, &mut g.location_armor);
             std::mem::swap(&mut self.offhand, &mut g.offhand);
             std::mem::swap(&mut self.equipment, &mut g.equipment);
             std::mem::swap(&mut self.carried, &mut g.carried);
@@ -297,11 +298,6 @@ impl Game<'_> {
         self.right = play.using.is_some() || self.using.is_some();
         // The guest's vehicle (Entity.vehicle) for its turn.
         let riding = std::mem::replace(&mut self.riding, g.vehicle);
-        // The guest's boarding cooldown for its turn; `guest_server_tick`
-        // counts it down once per tick (Entity.baseTick), not per turn.
-        let host_boarding = (self.boarding_cooldown, self.riding_at_tick);
-        self.boarding_cooldown = g.boarding_cooldown;
-        self.riding_at_tick = g.vehicle;
         // `Entity.isPassenger()` for that turn, from the same vehicle: the
         // guest's body keeps no swim (`Entity.updateSwimming` needs it false).
         // Taken from `g.vehicle` each turn, so boarding and getting out land.
@@ -400,6 +396,7 @@ impl Game<'_> {
         self.block_reach = self.interaction_range("minecraft:block_interaction_range", 4.5, 5.0);
         let building_boxes = std::mem::replace(&mut self.lan_building_boxes, other_boxes);
         Ok(GuestSwap {
+            attachments,
             conn,
             i,
             play,
@@ -442,7 +439,6 @@ impl Game<'_> {
             left,
             right,
             riding,
-            host_boarding,
             host_station,
             sleeping,
             sleep_timer,
@@ -517,6 +513,7 @@ impl Game<'_> {
             }
         }
         let GuestSwap {
+            attachments,
             conn,
             i,
             mut play,
@@ -559,7 +556,6 @@ impl Game<'_> {
             left,
             right,
             riding,
-            host_boarding,
             host_station,
             sleeping,
             sleep_timer,
@@ -594,10 +590,12 @@ impl Game<'_> {
         self.guest_combat.insert(conn, guest_combat);
         play.modifiers = std::mem::replace(&mut self.applied_modifiers, modifiers);
         // What the guest shot is theirs (Projectile.setOwner).
-        for p in self.creatures.projectiles.iter_mut().skip(projectiles) {
-            if p.owner == Some(horizon_client::mobs::Who::Player) && p.guest.is_none() {
-                p.guest = Some(conn);
-            }
+        for i in projectiles..self.creatures.projectiles.len() {
+            self.creatures.projectiles.update(i, |p| {
+                if p.owner == Some(horizon_client::mobs::Who::Player) && p.guest.is_none() {
+                    p.guest = Some(conn);
+                }
+            });
         }
         let listening = mod_api::__private::listened(mod_api::HookId::PlayerLaunchProjectile);
         for projectile in projectiles..self.creatures.projectiles.len() {
@@ -747,20 +745,12 @@ impl Game<'_> {
         // inventory key while riding).
         let guest_mount = std::mem::replace(&mut self.mount_menu, host_mount_menu).opened_mob();
         self.keys = host_keys;
-        // `Entity.addPassenger`: a rider that gets in now sits behind the
-        // players already in the vehicle, which is what tells its
-        // `getControllingPassenger` apart from this one's.
         let new_mode = self.mode_id();
         let turn_previous = std::mem::replace(&mut self.previous_mode, outer_previous);
         let turn_abilities = std::mem::replace(&mut self.acting_abilities, outer_abilities);
         let Some(host) = self.lan.as_mut() else {
             unreachable!("LanHost dropped inside a guest turn; closes are deferred");
         };
-        let seat_order = (guest_vehicle.is_some() && host.hub.guests[i].vehicle != guest_vehicle)
-            .then(|| {
-                host.hub.seat_order += 1;
-                host.hub.seat_order
-            });
         enum TurnTeleport {
             Command([f64; 3], [bool; 3]),
             Position([f64; 3]),
@@ -768,26 +758,12 @@ impl Game<'_> {
         }
         let (stat_events, name, teleport) = host.hub.guests.update(i, |g| {
             let mut teleport = None;
-            std::mem::swap(
-                &mut self.player_attachments,
-                self.guest_attachments.entry(g.conn).or_default(),
-            );
+            g.attachments = std::mem::replace(&mut self.player_attachments, attachments);
             let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
-            // Entity.removePassenger: 60 ticks before it may board again.
-            let guest_boarding = crate::game::boarding::after_leaving(
-                self.boarding_cooldown,
-                g.vehicle,
-                guest_vehicle,
-            );
-            (self.boarding_cooldown, self.riding_at_tick) = host_boarding;
-            g.boarding_cooldown = guest_boarding;
             if guest_vehicle.is_none() {
                 g.vehicle_good = None;
             }
             g.vehicle = guest_vehicle;
-            if let Some(order) = seat_order {
-                g.vehicle_order = order;
-            }
             let fell_asleep = bed.is_some() && g.bed.is_none();
             (g.bed, g.sleep_timer, g.spawn) = (bed, guest_sleep_timer, guest_spawn);
             g.respawn_elsewhere = guest_respawn.map(|c| c.saved());
@@ -835,6 +811,7 @@ impl Game<'_> {
             g.selected = std::mem::replace(&mut self.selected, selected);
             std::mem::swap(&mut self.inventory, &mut g.inventory);
             std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.location_armor, &mut g.location_armor);
             std::mem::swap(&mut self.offhand, &mut g.offhand);
             std::mem::swap(&mut self.equipment, &mut g.equipment);
             std::mem::swap(&mut self.carried, &mut g.carried);

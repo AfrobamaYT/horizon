@@ -48,6 +48,8 @@ pub struct ConsumeEffectSpec {
     /// `MobEffectInstance`'s `ambient` (default false) and `show_particles` (default true).
     pub ambient: bool,
     pub show_particles: bool,
+    /// `show_icon`, which defaults to `show_particles`.
+    pub show_icon: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +69,28 @@ pub enum ConsumeEffect {
         kind: String,
         data: serde_json::Value,
     },
+}
+
+/// Typed consumable shared by item prototypes and stack component patches.
+pub type ItemConsumable = horizon_world::consumable::Consumable<String, ConsumeEffect>;
+
+/// Decode `Consumable.CODEC` defaults and ordered effects at the component boundary.
+pub(crate) fn parse_consumable(cons: &Value) -> ItemConsumable {
+    ItemConsumable {
+        seconds: cons["consume_seconds"].as_f64().map_or(1.6, |s| s as f32),
+        animation: crate::use_animation::consumable_animation(cons),
+        sound: cons["sound"]
+            .as_str()
+            .unwrap_or("minecraft:entity.generic.eat")
+            .to_owned(),
+        particles: cons["has_consume_particles"].as_bool().unwrap_or(true),
+        effects: cons["on_consume_effects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(parse_consume_effect)
+            .collect(),
+    }
 }
 
 /// One `on_consume_effects` entry. A bare type name is minecraft's own, as
@@ -143,6 +167,8 @@ pub struct ItemInfo {
     pub id: Arc<str>,
     pub max_stack: u32,
     pub max_damage: u32,
+    /// Prototype damage, cached when default components are loaded.
+    pub damage: i32,
     pub block: Option<BlockStateId>,
     pub tool: Vec<ToolRule>,
     pub tool_default_speed: f32,
@@ -429,8 +455,12 @@ pub struct Instrument {
 impl Instrument {
     /// `InstrumentItem.getUseDuration`: `Mth.floor(useDuration * 20)`.
     pub fn use_ticks(&self) -> i32 {
-        (self.use_duration * 20.0).floor() as i32
+        instrument_use_ticks(self.use_duration)
     }
+}
+/// `InstrumentItem.getUseDuration`: floor after the float multiplication.
+pub fn instrument_use_ticks(seconds: f32) -> i32 {
+    (seconds * 20.0).floor() as i32
 }
 /// The id of a goat horn's instrument (`InstrumentItem.getInstrument`): the
 /// stack's own `instrument` component, else the item's `ponder_goat_horn`.
@@ -546,7 +576,7 @@ pub(crate) fn load_tag_lists(
     kind: &str,
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let loaded =
         |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
@@ -776,6 +806,40 @@ impl Items {
                     .or_insert(BlockStateId(i as u32));
             }
         }
+        // Block.getItem is not an inverse of BlockItem.getBlock: several items
+        // may place the same block. Read their normal compiled bindings too.
+        #[derive(Default, serde::Deserialize)]
+        struct Bindings {
+            #[serde(default)]
+            items: HashMap<String, Binding>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Binding {
+            #[serde(default)]
+            class: Vec<String>,
+            #[serde(default)]
+            fields: Fields,
+        }
+        #[derive(Default, serde::Deserialize)]
+        struct Fields {
+            block: Option<String>,
+        }
+        let bindings = match fs::read(root.join("block-behaviours.json")) {
+            Ok(bytes) => serde_json::from_slice::<Bindings>(&bytes)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Bindings::default(),
+            Err(error) => return Err(error.into()),
+        };
+        for (item, binding) in &bindings.items {
+            if binding.class.iter().any(|name| name == "BlockItem")
+                && let Some(state) = binding
+                    .fields
+                    .block
+                    .as_deref()
+                    .and_then(|block| registry.default_state(block))
+            {
+                block_for_item.entry(item).or_insert(state);
+            }
+        }
         let mut items = Self::load_with(root, &block_for_item, overlay, defaults)?;
         let path = root.join(MOD_ITEM_BLOCKS);
         match fs::read(&path) {
@@ -871,18 +935,6 @@ impl Items {
                 .and_then(|f| f.get("can_always_eat"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let mut consume_effects = Vec::new();
-            if let Some(effects) = c
-                .get("minecraft:consumable")
-                .and_then(|cons| cons.get("on_consume_effects"))
-                .and_then(|e| e.as_array())
-            {
-                for effect in effects {
-                    if let Some(parsed) = parse_consume_effect(effect) {
-                        consume_effects.push(parsed);
-                    }
-                }
-            }
             items.insert(
                 id.clone(),
                 ItemInfo {
@@ -891,6 +943,7 @@ impl Items {
                     id: id.clone(),
                     max_stack: c["minecraft:max_stack_size"].as_u64().unwrap_or(64) as u32,
                     max_damage: c["minecraft:max_damage"].as_u64().unwrap_or(0) as u32,
+                    damage: c["minecraft:damage"].as_i64().unwrap_or(0).max(0) as i32,
                     block: block_for_item.get(name.as_str()).copied(),
                     tool,
                     tool_default_speed: c["minecraft:tool"]["default_mining_speed"]
@@ -909,18 +962,7 @@ impl Items {
                         .get("minecraft:kinetic_weapon")
                         .and_then(crate::kinetic_weapon::UseTiming::from_json),
                     // Consumable.CODEC's defaults.
-                    consumable: c.get("minecraft:consumable").map(|cons| {
-                        horizon_world::consumable::Consumable {
-                            seconds: cons["consume_seconds"].as_f64().map_or(1.6, |s| s as f32),
-                            animation: crate::use_animation::consumable_animation(cons),
-                            sound: cons["sound"]
-                                .as_str()
-                                .unwrap_or("minecraft:entity.generic.eat")
-                                .to_owned(),
-                            particles: cons["has_consume_particles"].as_bool().unwrap_or(true),
-                            effects: std::mem::take(&mut consume_effects),
-                        }
-                    }),
+                    consumable: c.get("minecraft:consumable").map(parse_consumable),
                     use_remainder: c["minecraft:use_remainder"]["id"]
                         .as_str()
                         .map(str::to_owned),
@@ -1171,6 +1213,13 @@ impl Items {
     }
     /// Whether an item belongs to a loaded item tag.
     pub fn item_in_tag(&self, tag: &str, item: &str) -> bool {
+        let normalized;
+        let tag = if !tag.contains(':') || tag.starts_with(':') {
+            normalized = format!("minecraft:{}", tag.strip_prefix(':').unwrap_or(tag));
+            normalized.as_str()
+        } else {
+            tag
+        };
         self.item_tags.get(tag).is_some_and(|s| s.contains(item))
     }
     fn block_matches(&self, spec: &str, block: &str) -> bool {
@@ -2376,6 +2425,62 @@ pub fn bucket_contents(
 }
 
 /// One `MobEffectInstance` of an `apply_effects` consume effect (its codec's defaults).
+/// `DeathProtection.CODEC`: the `death_effects` of a `minecraft:death_protection`
+/// component, in order (`applyEffects` runs each one). A missing or empty
+/// list, as in `death_protection={}`, has none.
+pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
+    component
+        .get("death_effects")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_consume_effect)
+        .collect()
+}
+
+#[cfg(test)]
+mod death_effects_tests {
+    use super::*;
+    #[test]
+    fn the_totems_component_reads_clear_then_three_effects() {
+        let totem = serde_json::json!({"death_effects": [
+            {"type": "minecraft:clear_all_effects"},
+            {"type": "minecraft:apply_effects", "effects": [
+                {"amplifier": 1, "duration": 900, "id": "minecraft:regeneration", "show_icon": true},
+                {"amplifier": 1, "duration": 100, "id": "minecraft:absorption", "show_icon": true},
+                {"duration": 800, "id": "minecraft:fire_resistance", "show_icon": true}
+            ]}
+        ]});
+        let effects = death_effects(&totem);
+        assert_eq!(effects.len(), 2);
+        assert_eq!(effects[0], ConsumeEffect::ClearAllEffects);
+        let ConsumeEffect::ApplyEffects {
+            effects,
+            probability,
+        } = &effects[1]
+        else {
+            panic!("second effect is apply_effects");
+        };
+        assert_eq!(*probability, 1.0);
+        let ids: Vec<_> = effects
+            .iter()
+            .map(|e| (e.id.as_str(), e.duration, e.amplifier))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("minecraft:regeneration", 900, 1),
+                ("minecraft:absorption", 100, 1),
+                ("minecraft:fire_resistance", 800, 0)
+            ]
+        );
+    }
+    #[test]
+    fn an_empty_component_has_no_effects() {
+        assert!(death_effects(&serde_json::json!({})).is_empty());
+    }
+}
+
 fn consume_effect_spec(e: &Value) -> Option<ConsumeEffectSpec> {
     let flag = |key: &str, default: bool| e.get(key).and_then(|v| v.as_bool()).unwrap_or(default);
     Some(ConsumeEffectSpec {
@@ -2384,6 +2489,7 @@ fn consume_effect_spec(e: &Value) -> Option<ConsumeEffectSpec> {
         amplifier: e.get("amplifier").and_then(|a| a.as_i64()).unwrap_or(0) as i32,
         ambient: flag("ambient", false),
         show_particles: flag("show_particles", true),
+        show_icon: flag("show_icon", flag("show_particles", true)),
     })
 }
 
@@ -2549,7 +2655,7 @@ mod tests {
 
     #[test]
     fn tag_conditions_use_enabled_server_ids_before_each_replace_and_reload() {
-        use horizon_mods::{Side, enabled::EnabledMods};
+        use horizon_mod_package::{Side, enabled::EnabledMods};
         let root = std::env::temp_dir().join(format!(
             "horizon-conditional-tags-{}-{}",
             std::process::id(),
@@ -2614,7 +2720,7 @@ mod tests {
         ] {
             let inventory = EnabledMods::new(side.map(|side| ("code_only".into(), side)));
             fs::write(
-                root.join(horizon_mods::enabled::MARKER),
+                root.join(horizon_mod_package::enabled::MARKER),
                 serde_json::to_vec(&inventory).unwrap(),
             )
             .unwrap();

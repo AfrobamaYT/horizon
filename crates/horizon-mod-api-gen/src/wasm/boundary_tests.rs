@@ -39,6 +39,7 @@ fn generated_host_constructors_refuse_nested_inputs_and_hook_outputs() {
     ]
     .into_iter()
     .map(|(name, ty)| Method {
+        via: None,
         owner: "BoundaryProbe",
         name: name.into(),
         receiver: Some(true),
@@ -47,6 +48,7 @@ fn generated_host_constructors_refuse_nested_inputs_and_hook_outputs() {
     })
     .collect();
     let event_method = Method {
+        via: None,
         owner: "BoundaryProbe",
         name: "event".into(),
         receiver: Some(true),

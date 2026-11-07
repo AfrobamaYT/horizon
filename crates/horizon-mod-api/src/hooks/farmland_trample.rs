@@ -14,3 +14,9 @@ pub trait Hooks {
     )]
     fn farmland_trample();
 }
+
+/// Original upstream notes; the existing fork event above owns this moment.
+pub trait UpstreamNotes {
+    #[notes = r###"farmland trampling: `native_trample(dimension, entity, kind, pos, fall_distance, cancel)` is heard when a player or mob that fell onto farmland is about to turn it to dirt, after vanilla's chance and checks (NeoForge's `FarmlandTrampleEvent`, Bukkit's physical `PlayerInteractEvent` and `EntityInteractEvent`). Cancel and the farmland and its crop stay. No `self`. Bundles that use it need `"hooks": @API:trample@`."###]
+    fn trample();
+}

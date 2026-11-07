@@ -7,7 +7,7 @@ use crate::{
 };
 use std::io;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum FluidKind {
     Empty,
@@ -54,7 +54,7 @@ impl FluidKind {
         1 << self as u8
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FluidState {
     kind: FluidKind,
     amount: u8,
@@ -103,15 +103,14 @@ impl FluidState {
                     _ => {}
                 }
             }
-            if flowing {
-                if let Some(value) = properties
+            if flowing
+                && let Some(value) = properties
                     .get("level")
                     .and_then(serde_json::Value::as_str)
                     .and_then(crate::registry::java_integer)
                     .filter(|v| (1..=8).contains(v))
-                {
-                    state.amount = value as u8;
-                }
+            {
+                state.amount = value as u8;
             }
         }
         Ok(state)

@@ -76,23 +76,27 @@ pub(crate) struct Resolved<'a> {
     pub output: proc_macro2::TokenStream,
 }
 
-/// Resolve a selected call and refuse shapes that cannot have a repeatable raw continuation.
-pub(crate) fn resolve<'a>(
+/// Identity facts, independent of whether the call can be lowered into a repeatable record.
+pub(crate) struct Callee<'a> {
+    pub callee: &'a Internal,
+    pub receiver: Option<&'a Expr>,
+    pub arguments: Vec<&'a Expr>,
+}
+
+/// Resolve all runtime calls for per-callee ordinals, including non-record-safe calls.
+pub(crate) fn callee<'a>(
     expr: &'a Expr,
     enclosing: &Internal,
     enclosing_sig: &syn::Signature,
     lexical: &super::analysis::Scope,
     entries: &'a [Internal],
     rule: &Rule,
-) -> Result<Resolved<'a>, Error> {
+) -> Result<Callee<'a>, Error> {
     lexical.check_target(expr)?;
     let (scope, this) = crate::internals_table::function_scope(rule, enclosing)
         .ok_or(Cause::Missing("unresolved enclosing receiver"))?;
     let (callee, recv, arguments) = match expr {
         Expr::MethodCall(call) => {
-            if call.turbofish.is_some() {
-                return Err(Cause::Signature("generic callee").into());
-            }
             let owner = receiver(&call.receiver, &scope, this.as_deref(), rule, enclosing_sig)?;
             let mut candidates = entries
                 .iter()
@@ -123,9 +127,6 @@ pub(crate) fn resolve<'a>(
             };
             if path.qself.is_some() {
                 return Err(Cause::Missing("qualified-self call is not supported").into());
-            }
-            if path.path.segments.iter().any(|s| !s.arguments.is_empty()) {
-                return Err(Cause::Signature("generic callee").into());
             }
             let mut written = path.path.clone();
             if written.segments.first().is_some_and(|s| s.ident == "Self") {
@@ -171,6 +172,38 @@ pub(crate) fn resolve<'a>(
         }
         _ => unreachable!(),
     };
+    Ok(Callee {
+        callee,
+        receiver: recv,
+        arguments,
+    })
+}
+
+/// Resolve a selected call and refuse shapes that cannot have a repeatable raw continuation.
+pub(crate) fn resolve<'a>(
+    expr: &'a Expr,
+    enclosing: &Internal,
+    enclosing_sig: &syn::Signature,
+    lexical: &super::analysis::Scope,
+    entries: &'a [Internal],
+    rule: &Rule,
+) -> Result<Resolved<'a>, Error> {
+    let Callee {
+        callee,
+        receiver: recv,
+        arguments,
+    } = callee(expr, enclosing, enclosing_sig, lexical, entries, rule)?;
+    let generic = match expr {
+        Expr::MethodCall(call) => call.turbofish.is_some(),
+        Expr::Call(call) => {
+            matches!(&*call.func, Expr::Path(path) if path.path.segments.iter().any(|s| !s.arguments.is_empty()))
+        }
+        _ => false,
+    };
+    if generic {
+        return Err(Cause::Signature("generic callee").into());
+    }
+
     let sig = crate::internals_table::signature(&callee.signature)
         .ok_or(Cause::Signature("generic or bounded callee"))?;
     if sig.generics.params.len() != sig.generics.lifetimes().count()

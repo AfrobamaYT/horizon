@@ -63,7 +63,7 @@ impl Game<'_> {
             &horizon_client::logging::game_home().join("jars"),
         )
         .map_err(ReloadStageError::OriginalJars)?;
-        let inventory = horizon_mods::enabled::EnabledMods::read(resources)
+        let inventory = horizon_mod_package::enabled::EnabledMods::read(resources)
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;
         let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
         // Nobody listens: no registration graph, only the vanilla function library.
@@ -127,7 +127,7 @@ impl Game<'_> {
         self.structure_templates.clear();
     }
     /// The retained server reload listeners of the last successful reload.
-    pub(super) fn native_reload_resources(&self) -> &dyn ServerReloadResources {
+    pub(super) fn reload_resources(&self) -> &dyn ServerReloadResources {
         &self.reload_resources
     }
 }
