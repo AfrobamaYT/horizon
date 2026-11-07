@@ -49,7 +49,7 @@ pub trait TagsHost {
     /// water and flowing water. None for `minecraft:empty`, whose bucket is air, and for a name
     /// no fluid has.
     #[access(Metadata)]
-    fn fluid_bucket(&self, fluid: &str) -> Option<&'static str>;
+    fn fluid_bucket(&self, fluid: &str) -> Option<ItemKey>;
     /// Side: both.
     /// The sound event a bucket plays as it picks `fluid` up (`Fluid.getPickupSound`),
     /// `minecraft:item.bucket.fill_lava` for lava and flowing lava. None for

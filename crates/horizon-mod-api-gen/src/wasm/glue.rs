@@ -793,8 +793,13 @@ pub(super) fn conversions(
                 format!("match v {{ {}, {EVERY_CASE} }}", arms.join(", "))
             }
             Kind::Via(form) => format!(
-                "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err(Refused::because)?; {} }}",
+                "{{ let f: {} = ::core::convert::TryFrom::try_from(v).map_err({})?; {} }}",
                 super::sides::rust_ty(types, form, false),
+                if rust == "crate::Text" {
+                    "Refused::Text"
+                } else {
+                    "Refused::because"
+                },
                 lower(types, form, "(&f)")
             ),
             Kind::Chain { frame, case, link } if case.is_empty() => format!(
@@ -942,10 +947,17 @@ pub(super) fn conversions(
                     format!("match w {{ {} }}", arms.join(", "))
                 }
                 Kind::Via(form) => format!(
-                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err(|_| Refused::because(\"a {} that doesn't convert\"))? }}",
+                    "{{ let f: {} = {}; ::core::convert::TryFrom::try_from(f).map_err({})? }}",
                     super::sides::rust_ty(types, form, false),
                     lift(types, form, "w"),
-                    path.trim_start_matches("crate::")
+                    if path == "crate::Text" {
+                        "Refused::Text".into()
+                    } else {
+                        format!(
+                            "|_| Refused::because(\"a {} that doesn't convert\")",
+                            path.trim_start_matches("crate::")
+                        )
+                    }
                 ),
                 Kind::Chain { frame, case, link } if case.is_empty() => format!(
                     "{{ let mut frames = w.into_iter().rev(); let mut v = {}; for frame in frames {{ let mut outer = {}; outer.{link} = Some(Box::new(v)); v = outer; }} v }}",

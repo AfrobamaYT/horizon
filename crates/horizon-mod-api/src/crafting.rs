@@ -96,6 +96,7 @@ fn is_custom(kind: &str) -> bool {
 }
 
 /// Takes the answer `resolve` left out of `data`.
+// hidden: the game-owned ingredient adapter reads the answer a mod's `resolve` left, not a mod-facing call.
 #[doc(hidden)]
 pub fn resolved_items(data: &mut horizon_core::nbt::Compound) -> Option<Vec<String>> {
     let answer = data.remove(&RESOLVED_ITEMS.into())?;
@@ -146,6 +147,7 @@ pub struct WalkedIngredient {
 #[doc(hidden)]
 pub type CustomIds<'a> = &'a dyn Fn(&mut horizon_core::nbt::Compound) -> Option<Vec<String>>;
 /// Game-owned JSON-to-NBT boundary for the hidden recipe parser.
+// hidden: supplied by the game's ingredient adapter to the parser, not a mod-facing type.
 #[doc(hidden)]
 pub type IngredientData<'a> =
     &'a dyn Fn(&serde_json::Map<String, Value>) -> Option<horizon_core::nbt::Compound>;
@@ -443,7 +445,33 @@ pub enum Shape {
     /// The first child must, and the second must not.
     Difference,
 }
+/// Why an ingredient cannot be retained as an exact, component-independent key set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IngredientKeysError {
+    /// A custom predicate may inspect components or context at match time.
+    NotEnumerable,
+    /// An ingredient name cannot be resolved in the completed item registry.
+    UnknownItem,
+}
+impl crate::NoBackend for IngredientKeysError {
+    fn no_backend() -> Self {
+        Self::UnknownItem
+    }
+}
 impl Ingredient {
+    /// Resolve exact membership once per load/reload for local matching in mod memory.
+    /// Plain item lists, expanded tags and standard shapes with no custom descendants
+    /// are component-independent. A custom/component predicate anywhere in the tree
+    /// returns `NotEnumerable`: the display item list is not an exact predicate (and
+    /// for differences containing custom predicates is not even necessarily a superset).
+    /// Such predicates remain mod-owned; this method never invokes a match-time hook.
+    /// One host call per ingredient at publication; never call this per tick or candidate.
+    pub fn item_keys(&self, host: &dyn Host) -> Result<Arc<[crate::ItemKey]>, IngredientKeysError> {
+        backend_of(host)
+            .ok_or(IngredientKeysError::UnknownItem)?
+            .recipe_ingredient_item_keys(self)
+    }
     /// The items of a list, in order.
     pub fn of(items: Vec<String>) -> Self {
         Self {
@@ -453,6 +481,7 @@ impl Ingredient {
             children: None,
         }
     }
+    // hidden: the game's recipe loader calls this with its own converter, not mod code.
     #[doc(hidden)]
     pub fn parse(v: &Value, items: &Items, convert: IngredientData<'_>) -> Option<Self> {
         // A mod's own kind: `resolve` asked the hook once at load and left
@@ -554,21 +583,67 @@ impl Recipe {
     }
 }
 
-/// What a crafting grid makes (`CraftingRecipe.assemble` and `getRemainingItems`), as
-/// [`LevelRef::craft`] answers it.
+/// Typed input to the engine's matched recipe lookup. Slot order is significant.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
-pub struct CraftResult {
-    /// The stack the recipe makes.
-    pub output: ItemStack,
-    /// What each slot of the grid keeps once the craft takes one item from it, row by row as
-    /// the grid was given: an empty bucket for a milk bucket, `None` for most.
-    pub remainders: Vec<Option<ItemStack>>,
+pub enum RecipeInput {
+    Crafting {
+        width: u32,
+        height: u32,
+        slots: Vec<Option<ItemStack>>,
+    },
+    Single(ItemStack),
+    Smithing {
+        template: Option<ItemStack>,
+        base: Option<ItemStack>,
+        addition: Option<ItemStack>,
+    },
 }
-impl CraftResult {
-    /// New.
-    pub fn new(output: ItemStack, remainders: Vec<Option<ItemStack>>) -> Self {
-        Self { output, remainders }
+/// A refusal distinct from a valid input with no matching recipe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RecipeLookupError {
+    InvalidInput,
+    InvalidItem,
+    InvalidRecipe,
+    UnavailableLevel,
+    /// The engine has no matcher for this type. Cache its recipes once per load/reload
+    /// through Host::recipes_of_type and match in mod memory, without per-tick crossings.
+    NotMatchable,
+}
+impl crate::NoBackend for RecipeLookupError {
+    fn no_backend() -> Self {
+        Self::UnavailableLevel
+    }
+}
+/// What the matched recipe assembles; lookup never consumes the input.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RecipeMatch {
+    pub recipe: crate::Identifier,
+    pub output: ItemStack,
+    /// Remaining items in input slot order after consuming one item per occupied slot.
+    pub remainders: Vec<Option<ItemStack>>,
+    pub experience: f32,
+    /// Recipe-file cooking time; station-specific speed adjustments are not applied here.
+    pub processing_time: u32,
+}
+impl RecipeMatch {
+    /// Build the result of an engine match.
+    pub fn new(
+        recipe: crate::Identifier,
+        output: ItemStack,
+        remainders: Vec<Option<ItemStack>>,
+        experience: f32,
+        processing_time: u32,
+    ) -> Self {
+        Self {
+            recipe,
+            output,
+            remainders,
+            experience,
+            processing_time,
+        }
     }
 }
 

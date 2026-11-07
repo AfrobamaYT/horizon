@@ -200,6 +200,37 @@ impl Text {
             metadata: Default::default(),
         }
     }
+    /// Check vanilla's component-depth bound before cloning any node payload.
+    /// Counts every recursive component relation, including hover names.
+    pub fn validate_depth(&self) -> Result<(), TextFormError> {
+        let mut pending = vec![(self, 1)];
+        while let Some((text, depth)) = pending.pop() {
+            if depth > MAX_TEXT_DEPTH {
+                return Err(TextFormError::TooDeep);
+            }
+            pending.extend(text.children.iter().map(|text| (text, depth + 1)));
+            match &text.content {
+                TextContent::Translatable { arguments, .. } => {
+                    pending.extend(arguments.iter().map(|text| (text, depth + 1)))
+                }
+                TextContent::Selector { separator, .. } | TextContent::Nbt { separator, .. } => {
+                    pending.extend(separator.iter().map(|text| (text.as_ref(), depth + 1)))
+                }
+                TextContent::Object(
+                    TextObject::Player { fallback, .. } | TextObject::Atlas { fallback, .. },
+                ) => pending.extend(fallback.iter().map(|text| (text.as_ref(), depth + 1))),
+                _ => {}
+            }
+            match &text.style.hover {
+                Some(TextHover::Text(text)) => pending.push((text, depth + 1)),
+                Some(TextHover::Entity { name, .. }) => {
+                    pending.extend(name.iter().map(|text| (text.as_ref(), depth + 1)))
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
     /// A literal component, with no inherited style overrides or children.
     pub fn literal(value: impl Into<String>) -> Self {
         Self::new(TextContent::Literal(value.into()))
@@ -266,26 +297,34 @@ pub const MAX_TEXT_DEPTH: usize = 512;
 pub const MAX_TEXT_FORM_DEPTH: usize = 100;
 
 /// A text form exceeds a boundary or is malformed.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TextFormError {
+    /// The host has no game backend for this operation.
+    Unavailable,
     /// The component or its metadata exceeds the permitted depth.
     TooDeep,
     /// A node is not valid serialized data.
-    Invalid(serde_json::Error),
+    Invalid(String),
     /// Parent indices or node relations are invalid.
     Malformed,
 }
 impl std::fmt::Display for TextFormError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Unavailable => write!(f, "text backend unavailable"),
             Self::TooDeep => write!(f, "text form exceeds maximum depth"),
-            Self::Invalid(error) => error.fmt(f),
+            Self::Invalid(error) => f.write_str(error),
             Self::Malformed => write!(f, "malformed text node table"),
         }
     }
 }
 impl std::error::Error for TextFormError {}
+impl crate::NoBackend for TextFormError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
+}
 
 // Bound the residual JSON metadata independently of component depth.
 #[derive(Default)]
@@ -333,12 +372,10 @@ impl std::io::Write for DepthWriter {
 impl TryFrom<&Text> for TextForm {
     type Error = TextFormError;
     fn try_from(value: &Text) -> Result<Self, Self::Error> {
+        value.validate_depth()?;
         let mut nodes = Vec::new();
         let mut pending = vec![(value, None, TextRelation::Child, 1)];
         while let Some((text, parent, relation, depth)) = pending.pop() {
-            if depth > MAX_TEXT_DEPTH {
-                return Err(TextFormError::TooDeep);
-            }
             let index = u32::try_from(nodes.len()).map_err(|_| TextFormError::Malformed)?;
             let mut children = Vec::new();
             for child in &text.children {
@@ -449,7 +486,7 @@ impl TryFrom<&Text> for TextForm {
                 return Err(if writer.too_deep {
                     TextFormError::TooDeep
                 } else {
-                    TextFormError::Invalid(e)
+                    TextFormError::Invalid(e.to_string())
                 });
             }
             nodes.push(TextNode {
@@ -487,9 +524,8 @@ impl TryFrom<TextForm> for Text {
     type Error = TextFormError;
     fn try_from(value: TextForm) -> Result<Self, Self::Error> {
         use std::io::Write;
-        let mut nodes = Vec::with_capacity(value.nodes.len());
         let mut depths = Vec::with_capacity(value.nodes.len());
-        for (index, node) in value.nodes.into_iter().enumerate() {
+        for (index, node) in value.nodes.iter().enumerate() {
             let depth = match node.parent {
                 None if index == 0 && node.relation == TextRelation::Child => 1,
                 Some(parent) if (parent as usize) < index => depths[parent as usize] + 1,
@@ -498,11 +534,16 @@ impl TryFrom<TextForm> for Text {
             if depth > MAX_TEXT_DEPTH {
                 return Err(TextFormError::TooDeep);
             }
+            depths.push(depth);
+        }
+        let mut nodes = Vec::with_capacity(value.nodes.len());
+        for node in value.nodes {
             let mut writer = DepthWriter::default();
             writer
                 .write_all(node.data.as_bytes())
                 .map_err(|_| TextFormError::TooDeep)?;
-            let text: Text = serde_json::from_str(&node.data).map_err(TextFormError::Invalid)?;
+            let text: Text = serde_json::from_str(&node.data)
+                .map_err(|e: serde_json::Error| TextFormError::Invalid(e.to_string()))?;
             // Nodes must themselves be shallow; reject hidden recursive data.
             if !text.children.is_empty()
                 || matches!(&text.content, TextContent::Translatable { arguments, .. } if !arguments.is_empty())
@@ -531,7 +572,6 @@ impl TryFrom<TextForm> for Text {
             {
                 return Err(TextFormError::Malformed);
             }
-            depths.push(depth);
             nodes.push((node.parent, node.relation, Some(text)));
         }
         if nodes.is_empty() {

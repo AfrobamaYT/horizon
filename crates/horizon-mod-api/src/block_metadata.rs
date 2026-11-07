@@ -3,6 +3,7 @@ use crate::{BlockKey, StateConstraint};
 
 /// Transport form for a process-local state. Mods use the BlockState facade, not this record.
 /// Receiving metadata and write boundaries validate the ordinal against the block definition.
+// hidden: generated native/wasm transport for the private-field BlockState facade.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -59,8 +60,11 @@ impl From<horizon_mod_runtime::block_definitions::StateError> for BlockStateErro
 /// Read-only metadata, lent by a host's block-states service or a tint worker.
 /// This is the low-level resource contract; mods call the BlockState facade instead.
 /// Native and generated WebAssembly forwards invoke the same immutable table implementation.
+// hidden: low-level shared resource contract; BlockState methods are the mod-facing operations.
 #[doc(hidden)]
 pub trait BlockMetadata {
+    /// Borrow the canonical block name from this context's retained registry.
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError>;
     /// Borrow a property's serialized value; a missing property returns None.
     fn property(
         &self,
@@ -89,6 +93,9 @@ mod tests {
     impl Backend for MetadataHost {}
     crate::impl_backend_areas!(MetadataHost, except(block_states));
     impl crate::prelude::BlockStatesBackend for MetadataHost {
+        fn block_metadata_name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+            self.0.name(block)
+        }
         fn block_metadata_property(
             &self,
             state: BlockStateRecord,
@@ -140,6 +147,15 @@ mod tests {
         let host = MetadataHost(crate::__private::block_definitions().unwrap());
         let metadata = host.block_states();
         let block = crate::__private::block_key("probe:lamp").unwrap();
+        assert_eq!(metadata.name(block), Ok("probe:lamp"));
+        assert_eq!(
+            metadata.name(BlockKey(999)),
+            Err(BlockStateError::UnknownBlock)
+        );
+        assert_eq!(
+            Empty.block_states().name(block),
+            Err(BlockStateError::Unavailable)
+        );
         let off = metadata.of(block, &[]).unwrap();
         assert_eq!(off.state, 0);
         let on = metadata.with(off, "lit", "true").unwrap();
@@ -157,6 +173,18 @@ mod tests {
         assert_eq!(value.property(&metadata, "lit"), Ok(Some("false")));
         assert_eq!(changed.property(&metadata, "lit"), Ok(Some("true")));
         assert_eq!(changed.ordinal(), 1);
+        let states = crate::__private::block_state_range(block).unwrap();
+        assert_eq!(
+            states
+                .iter()
+                .map(|state| state.property(&metadata, "lit").unwrap().unwrap())
+                .collect::<Vec<_>>(),
+            ["false", "true"]
+        );
+        assert_eq!(
+            crate::__private::block_state_range(BlockKey(999)),
+            Err(BlockStateError::UnknownBlock)
+        );
         assert_eq!(
             changed.with(&metadata, "lit", "invalid"),
             Err(BlockStateError::InvalidValue(0))
@@ -186,6 +214,13 @@ mod tests {
 }
 
 impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+        self.names
+            .entries
+            .get(block.0 as usize)
+            .map(|entry| entry.id.as_str())
+            .ok_or(BlockStateError::UnknownBlock)
+    }
     fn property(
         &self,
         state: BlockStateRecord,

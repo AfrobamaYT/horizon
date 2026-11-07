@@ -62,6 +62,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
     crate::install_parts(
         &[ModEntry::new("boundary", Box::new(Requests))],
         &crate::parts::tests::rule_schema(),
+        |_| false,
     )
     .unwrap();
     crate::registry_keys::resolve_effects(

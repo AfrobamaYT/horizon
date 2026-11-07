@@ -11822,7 +11822,7 @@ impl ClientMenu {
 
 impl Remote {
     pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
-        self.menu_title_snapshot = title.try_into_api().unwrap().map(Arc::new);
+        self.menu_title_snapshot = title.try_into_api().ok().flatten().map(Arc::new);
         self.menu_title = title;
     }
 
@@ -13618,7 +13618,12 @@ mod tests {
             assert!(!level.is_loaded(game, [160, 64, 0]));
             game.handle_packet(C::BlockUpdate(play::BlockUpdate { pos: at, state: 1 }))
                 .unwrap();
-            assert_eq!(level.block(game, at).as_deref(), Some("minecraft:stone"));
+            assert_eq!(
+                level
+                    .block(game, at)
+                    .and_then(mod_api::__private::block_key_id),
+                Some("minecraft:stone")
+            );
             assert!(level.block_state(game, at).is_some());
             assert_eq!(level.block(game, [160, 64, 0]), None);
             assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);

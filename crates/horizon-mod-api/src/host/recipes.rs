@@ -12,7 +12,9 @@ pub trait RecipesHost {
     /// one typed (`Recipe`: its ingredients, results, group, cooking time and
     /// experience, or its stonecutting, smithing or special crafting rule),
     /// with its file as JSON for a mod's own type. Dynamic rules are not fixed
-    /// outputs; use `LevelRef::craft` to assemble a crafting grid. These are the
+    /// outputs; use `LevelRef::recipe_for` for engine-matchable recipe types.
+    /// Cache mod-owned types once per load/reload and match those in mod memory;
+    /// the host returns RecipeLookupError::NotMatchable for such types. These are the
     /// recipes in force (`RecipeManager.getAllRecipesFor`): data packs merged and
     /// load conditions held, so a pack's override or removal shows. A data pack
     /// changes them on `/reload`, so look them up again when you need them. Empty
@@ -85,6 +87,13 @@ pub trait RecipesClientHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait RecipesBackend {
+    /// Side: both. Exact load-time membership for component-independent ingredients.
+    /// Custom/component predicates anywhere in the tree are NotEnumerable.
+    #[access(PublishedResources)]
+    fn recipe_ingredient_item_keys(
+        &self,
+        ingredient: &Ingredient,
+    ) -> Result<Arc<[ItemKey]>, IngredientKeysError>;
     /// Side: both.
     /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
     /// game's loop context.

@@ -913,6 +913,10 @@ pub(super) mod tests {
             })
             .collect();
         crate::game::api_values::register_game_keys(ids);
+        // Re-registering fixture keys installs a fresh Parts registry after resource loading.
+        // Publish its complete immutable definitions before preparing the numeric owner index.
+        crate::game::api_values::resolve_block_definitions(registry)
+            .expect("fixture block definitions resolve against its loaded state registry");
         mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
             .expect("fixture item keys resolve against its loaded catalog");
 
@@ -1577,7 +1581,8 @@ pub(super) mod tests {
             assert!(game.level_is_loaded(level, [0, 127, 0]));
             assert_eq!(game.level_block_state(level, [0, 127, 0]), Some(stone));
             assert_eq!(
-                game.level_block(level, [0, 127, 0]).as_deref(),
+                game.level_block(level, [0, 127, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:stone")
             );
             assert!(game.native_level_write_allowed(level, [0, 127, 0]));

@@ -74,6 +74,11 @@ impl<H: Host + ?Sized> HostBlockStates for H {
 }
 
 impl BlockMetadata for BlockStates<'_> {
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+        self.backend
+            .ok_or(BlockStateError::Unavailable)?
+            .block_metadata_name(block)
+    }
     fn property(
         &self,
         state: BlockStateRecord,
@@ -142,7 +147,8 @@ impl BlockStates<'_> {
     }
 
     /// The states of `block` (`minecraft:oak_stairs`), `StateDefinition.getPossibleStates`.
-    /// None before the mapping is loaded, or for a host without a game.
+    /// Local ordinals retain their meaning if world numeric IDs reorder on reload.
+    /// None before metadata is published, for an unknown block or for a host without a game.
     pub fn states_of(&self, block: crate::BlockKey) -> Option<BlockStateRange> {
         self.backend?.block_states_of(block)
     }
