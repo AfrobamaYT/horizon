@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Kill owned-state facade/transport/reload mutants using the production focused tests."""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+
+root = Path(__file__).resolve().parents[3]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, required=True)
+args = parser.parse_args()
+args.output.mkdir(parents=True, exist_ok=True)
+facade = root / "crates/horizon-mod-api/src/block_state.rs"
+values = root / "crates/horizon-client/src/game/modding/api_values.rs"
+renderer = root / "crates/horizon-client-render/src/mesher/mod_tint.rs"
+service = ["cargo", "test", "-p", "horizon-mod-api", "--lib", "metadata_service_reads_edits_and_refuses_invalid_transport"]
+worker = ["cargo", "test", "-p", "horizon-mod-api", "--test", "block_metadata", "metadata_resource_worker_reads_allocate_nothing"]
+tint = ["cargo", "test", "-p", "horizon-client-render", "--lib", "mesher::mod_tint_tests::"]
+cases = [
+    ("property_loses_name", facade, "metadata.property((&self).into(), name)", 'metadata.property((&self).into(), "absent")', service),
+    ("with_returns_original", facade, "metadata.with((&self).into(), name, value).map(Into::into)", "{ let _ = (metadata, name, value); Ok(self) }", service),
+    ("transport_loses_ordinal", facade, "state: value.state,", "state: 0,", service),
+    ("property_allocates", facade, "metadata.property((&self).into(), name)", "{ std::hint::black_box(name.to_owned()); metadata.property((&self).into(), name) }", worker),
+    ("reload_uses_default_not_properties", values, "mod_api::BlockState::of(block_metadata_table()?, block, &properties)", "mod_api::BlockState::of(block_metadata_table()?, block, { let _ = &properties; &[] })", ["python3", "tools/refactors/api-pr3b/test_block_key_load_boundary.py"]),
+    ("source_without_metadata_commits", renderer, "let sources = has_custom_sources(by_block);", "let sources = false; let _ = has_custom_sources(by_block);", tint),
+    ("region_returns_air_for_every_state", renderer, "*states\n            .get(self.state_id(pos) as usize)\n            .unwrap_or(&states[0])", "{ let _ = pos; states[0] }", tint),
+]
+results = []
+for name, path, old, new, command in cases:
+    original = path.read_text()
+    if original.count(old) != 1:
+        raise RuntimeError(f"{name}: mutation target is not unique")
+    try:
+        path.write_text(original.replace(old, new))
+        run = subprocess.run(command, cwd=root, env=dict(os.environ, CARGO_TARGET_DIR=str(root / "target"), CARGO_BUILD_JOBS="4", HORIZON_TEST_RESOURCES="/box/cache/horizon-local/horizon-client/26.3"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=600)
+        (args.output / f"{name}.log").write_text(run.stdout)
+        killed = run.returncode != 0 and "panicked at" in run.stdout and ("assertion" in run.stdout or "no face tinted" in run.stdout) and "test result: FAILED." in run.stdout
+        results.append({"name": name, "killed_by_assertion": killed, "exit_code": run.returncode})
+        print(json.dumps(results[-1]), flush=True)
+        if not killed:
+            raise RuntimeError(f"{name}: survived or failed without an executed assertion; see log")
+    finally:
+        path.write_text(original)
+(args.output / "results.json").write_text(json.dumps(results, indent=2) + "\n")
