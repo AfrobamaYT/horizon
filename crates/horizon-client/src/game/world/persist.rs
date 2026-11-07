@@ -205,6 +205,17 @@ pub(super) struct ItemDisplayTransformation {
     right_rotation: [f32; 4],
 }
 
+impl From<mod_api::NativeTransformation> for ItemDisplayTransformation {
+    fn from(value: mod_api::NativeTransformation) -> Self {
+        Self {
+            translation: value.translation,
+            left_rotation: value.left_rotation,
+            scale: value.scale,
+            right_rotation: value.right_rotation,
+        }
+    }
+}
+
 impl ItemDisplayTransformation {
     pub(super) fn from_tag(tag: Option<&Tag>) -> Option<Self> {
         match tag {
@@ -3261,6 +3272,7 @@ mod item_display_saved_transform_tests {
                 "transformation".into(),
                 expected([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
             );
+            assert!(game.display_set_shadow_radius(display, 1.25));
             let want = expected([9.0, 8.0, 7.0], [0.0, 0.0, 0.0, 1.0], [2.0; 3]);
             assert_eq!(
                 game.command_target_nbt(Target::Other(id))

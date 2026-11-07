@@ -130,14 +130,6 @@ impl Game<'_> {
             return false;
         };
         edit(c);
-        if kind == NativeDisplayKind::Item {
-            let projection = super::persist::ItemDisplayTransformation::from_tag(
-                c.get(&"transformation".into()),
-            );
-            let index = self.others.iter().position(|o| o.id == id).unwrap();
-            self.others
-                .update(index, |o| o.item_transformation = projection);
-        }
         true
     }
 
@@ -209,7 +201,20 @@ impl Game<'_> {
             ("scale", floats(&t.scale)),
             ("right_rotation", floats(&t.right_rotation)),
         ]);
-        self.display_put(display, None, "transformation", tag)
+        if !self.display_put(display, None, "transformation", tag) {
+            return false;
+        }
+        let index = self
+            .others
+            .iter()
+            .position(|o| o.id == display.entity().id())
+            .unwrap();
+        self.others.update(index, |o| {
+            if o.kind == "minecraft:item_display" {
+                o.item_transformation = Some(t.into());
+            }
+        });
+        true
     }
 
     /// `Display.getBillboardConstraints`.
