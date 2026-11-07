@@ -103,7 +103,7 @@ fn frame(surface: &mut super::Surface<'_>) -> Result<String, String> {
         }
     }
     Ok(format!(
-        "#[derive(Default)] pub struct Frame {{ {fields} }} impl Frame {{ {methods} }}"
+        "#[derive(Default)] pub struct Frame {{ {fields} }}\n// SAFETY: pointers are used only by unsafe serve during the synchronous call that lent them.\nunsafe impl Send for Frame {{}}\nimpl Frame {{ {methods} }}"
     ))
 }
 
@@ -188,7 +188,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                     } else {
                         format!("self.subscriptions({owner:?}, {id})")
                     };
-                    writeln!(code, "{sig} {{ {body} }}").unwrap();
+                    writeln!(
+                        code,
+                        "fn {}(&self) -> &'static [Option<mod_api::HookId>] {{ {body} }}",
+                        m.name
+                    )
+                    .unwrap();
                     continue;
                 }
                 if !dispatchable(types, m) {
@@ -261,7 +266,7 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                 }
                 let class =
                     super::call_class(types, m).replace("super::Call::", "crate::CallClass::");
-                writeln!(code,"{sig} {{ let mut frame = Frame::default(); {setup} self.call({class}, frame, {id}, {}, |w| {{ {put} }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} {apply} Ok(answer) }}).unwrap_or_else(|| {}) }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),fallback(types,m)).unwrap();
+                writeln!(code,"{sig} {{ let mut frame = Frame::default(); {setup} let mut sent = Writer::new(); {{ let w = &mut sent; {put} }} self{module}.call({class}, frame, {id}, {}, |w| {{ w.put_bytes(sent.bytes()); }}, |r| {{ let answer: {} = r.take()?; {take} if !r.rest().is_empty() {{ return Err(WireError::Tag(u32::MAX)); }} {apply} Ok(answer) }}).unwrap_or_else(|| {}) }}",if receiver=="WasmMod" {"None"} else {"Some(self.index)"},rust_ty(types,&m.ret,true),fallback(types,m),module=if receiver=="WasmMod" {""} else {".module"}).unwrap();
             }
             code.push_str("}\n");
         }
@@ -301,7 +306,24 @@ pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
     let mut code = generate(&mut surface)?;
     writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
+    let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;
+    let ids = ast
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Enum(e) if e.ident == "HookId" => Some(
+                e.variants
+                    .iter()
+                    .map(|v| v.ident.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .ok_or("HookId absent")?;
     for hook in crate::Catalog::load(root)?.hooks {
+        if !ids.contains(&crate::hook_id(&hook.name)) {
+            continue;
+        }
         writeln!(
             code,
             "{:?} => Some(mod_api::HookId::{}),",
