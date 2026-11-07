@@ -473,7 +473,7 @@ impl Launcher {
         match memo.as_ref() {
             Some((k, routes)) if *k == key => routes.clone(),
             _ => {
-                let routes = native_mods::routes(&home, profile);
+                let routes = native_mods::routes(&home);
                 *memo = Some((key, routes.clone()));
                 routes
             }
@@ -489,7 +489,11 @@ impl Launcher {
         let busy = self.native_step.is_some();
         let building = busy && self.native_for.as_deref() == Some(instance.id.as_str());
         let routes = self.native_routes();
-        let route = routes.iter().find(|(id, _)| id == mod_id).map(|(_, r)| r)?;
+        let route = routes
+            .mods
+            .iter()
+            .find(|(id, _)| id == mod_id)
+            .map(|(_, r)| r)?;
         let profile = Profile::chosen(&self.settings);
         let last = self
             .version_of(instance)
@@ -524,6 +528,7 @@ impl Launcher {
             )
         } else {
             match route {
+                Route::Invalid { reason } => ("alert-circle", pal.warn, tr("Needs attention"), reason.clone()),
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,

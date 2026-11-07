@@ -4,7 +4,7 @@
 //! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
 //! release, builds from source, and the build log says why. A prebuilt build that fails is an
 //! error like any other build's, never retried from source.
-use super::{api, dependencies, internals, Profile, Target};
+use super::{api, dependencies, internals, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
 use horizon_mod_package::index::native;
@@ -24,8 +24,8 @@ const OPT_LEVEL: &str = "opt-level=3";
 const UNPACKED_LIMIT: u64 = 8 << 30;
 
 /// Why a build compiles the game from source instead of using the prebuilt game.
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum SourceReason {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceReason {
     /// A mod has a helper `[[native.injection]]` or a module: they change the game's own code.
     Injections { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
@@ -34,8 +34,6 @@ pub(super) enum SourceReason {
     Features { mod_id: String },
     /// A mod depends on a crate other than the mod API and other mods.
     Crate { mod_id: String, krate: String },
-    /// The player chose a profile other than Optimized, the one the prebuilt game is built with.
-    Profile { profile: &'static str },
     /// No prebuilt game for this computer.
     Host,
     /// The prebuilt game's release couldn't be downloaded.
@@ -63,15 +61,11 @@ impl std::fmt::Display for SourceReason {
                 "{mod} depends on the crate {crate}, so the game builds from source",
                 &[("mod", mod_id), ("crate", krate)],
             ),
-            Self::Profile { profile } => trf(
-                "{profile} builds the game on this computer; only Optimized uses the prebuilt game",
-                &[("profile", profile)],
-            ),
             Self::Host => {
                 tr("no prebuilt game for this computer, so the game builds from source").into()
             }
             Self::Download { why } => trf(
-                "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
+                "The prebuilt game couldn't be downloaded ({why}). Try again.",
                 &[("why", why)],
             ),
             Self::NoRelease { revision } => trf(
@@ -83,16 +77,14 @@ impl std::fmt::Display for SourceReason {
     }
 }
 
-/// The first reason `projects` can't build against the prebuilt game with `profile`, or `None`
-/// when they can: the profile is `optimized`, the one the game is prebuilt with, and each mod is
-/// a crate that depends on the mod API (with its default features) and on other mods, with no
-/// injections, build script or features of its own.
-pub(super) fn refusal(projects: &[api::Project<'_>], profile: Profile) -> Option<SourceReason> {
-    if profile != Profile::Optimized {
-        return Some(SourceReason::Profile {
-            profile: profile.name(),
-        });
+impl SourceReason {
+    pub(super) fn forces_source(&self) -> bool {
+        !matches!(self, Self::Download { .. })
     }
+}
+
+/// The first structural reason these projects cannot use the prebuilt game.
+pub(super) fn refusal(projects: &[api::Project<'_>]) -> Option<SourceReason> {
     projects.iter().find_map(project_refusal)
 }
 
@@ -167,30 +159,11 @@ pub(super) fn fetch(
     if dir.join(IDENTITY).is_file() {
         return Ok(Ok(dir));
     }
-    let release = format!(
-        "https://github.com/{}/releases/download/{}{revision}",
-        native::PREBUILT_REPO,
-        native::PREBUILT_TAG
-    );
-    // A download that fails builds from source, saying why; a file that arrives wrong is refused.
+    let release = release_url(revision);
     let download = |why: String| Ok(Err(SourceReason::Download { why }));
-    let sums = match crate::backend::get_unless_missing(&format!("{release}/{SUMS}")) {
-        Ok(Some(sums)) => sums,
-        Ok(None) => {
-            return Ok(Err(SourceReason::NoRelease {
-                revision: revision.to_owned(),
-            }))
-        }
-        Err(why) => return download(why),
-    };
-    let mut text = String::new();
-    if let Err(e) = sums.into_reader().read_to_string(&mut text) {
-        return download(e.to_string());
-    }
-    let Some(expected) = expected_sum(&text, &name) else {
-        return Ok(Err(SourceReason::NoRelease {
-            revision: revision.to_owned(),
-        }));
+    let expected = match release_sum(revision, &name) {
+        Ok(sum) => sum,
+        Err(reason) => return Ok(Err(reason)),
     };
     let parent = dir.parent().expect("under prebuilt/");
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -249,6 +222,57 @@ pub(super) fn fetch(
     fs::rename(&unpacked, &dir).map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
     Ok(Ok(dir))
+}
+
+/// Keep retryable failures distinct from structural reasons to compile the game locally.
+pub(super) fn or_source(game: Result<PathBuf, SourceReason>) -> Result<Option<PathBuf>, String> {
+    match game {
+        Ok(game) => Ok(Some(game)),
+        Err(reason) if reason.forces_source() => {
+            super::log_warning(&reason.to_string());
+            Ok(None)
+        }
+        Err(reason) => Err(reason.to_string()),
+    }
+}
+
+fn release_url(revision: &str) -> String {
+    format!(
+        "https://github.com/{}/releases/download/{}{revision}",
+        native::PREBUILT_REPO,
+        native::PREBUILT_TAG
+    )
+}
+
+fn release_sum(revision: &str, name: &str) -> Result<String, SourceReason> {
+    let missing = || SourceReason::NoRelease {
+        revision: revision.to_owned(),
+    };
+    let download = |why: String| SourceReason::Download { why };
+    let sums = crate::backend::get_unless_missing(&format!("{}/{SUMS}", release_url(revision)))
+        .map_err(download)?
+        .ok_or_else(missing)?;
+    let mut text = String::new();
+    sums.into_reader()
+        .read_to_string(&mut text)
+        .map_err(|error| download(error.to_string()))?;
+    expected_sum(&text, name).ok_or_else(missing)
+}
+
+/// Checks release metadata without downloading the prebuilt game. Run only on a worker.
+/// Download failures are retryable, never permission to rebuild the game from source.
+pub fn prebuilt_availability(revision: &str, target: Target) -> Option<SourceReason> {
+    let Some(host) = rust_toolchain::host() else {
+        return Some(SourceReason::Host);
+    };
+    let name = native::prebuilt_archive(host.target, matches!(target, Target::Server));
+    let cached = super::root()
+        .join("prebuilt")
+        .join(format!("{revision}-{}", name.trim_end_matches(".tar.gz")));
+    if cached.join(IDENTITY).is_file() {
+        return None;
+    }
+    release_sum(revision, &name).err()
 }
 
 /// `name`'s sum in a `sha256sum` listing.
@@ -557,7 +581,7 @@ mod tests {
         )
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
-        refusal(&[api::Project::read(&bundle).unwrap()], Profile::Optimized)
+        refusal(&[api::Project::read(&bundle).unwrap()])
     }
 
     #[test]
@@ -605,16 +629,15 @@ mod tests {
     }
 
     #[test]
-    fn only_the_optimized_profile_takes_the_prebuilt_game() {
-        for profile in [Profile::Developer, Profile::Balanced] {
-            assert_eq!(
-                refusal(&[], profile),
-                Some(SourceReason::Profile {
-                    profile: profile.name()
-                })
-            );
-        }
-        assert_eq!(refusal(&[], Profile::Optimized), None);
+    fn failed_download_never_selects_a_source_build() {
+        assert!(or_source(Err(SourceReason::Download {
+            why: "offline".into()
+        }))
+        .is_err());
+        assert_eq!(
+            or_source(Ok(PathBuf::from("cached-game"))).unwrap(),
+            Some(PathBuf::from("cached-game"))
+        );
     }
 
     #[test]

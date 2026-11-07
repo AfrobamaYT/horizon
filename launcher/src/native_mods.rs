@@ -35,6 +35,7 @@ mod internals;
 mod internals_sync;
 mod isolate;
 mod package;
+mod picker;
 mod prebuilt;
 mod sites;
 mod slots;
@@ -45,6 +46,8 @@ mod source_server;
 mod wasm_internals;
 
 pub use isolate::LeftOut;
+pub use picker::{needs_picker, Route, Routes};
+pub use prebuilt::{prebuilt_availability, SourceReason};
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
@@ -627,53 +630,32 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
     Ok(out)
 }
 
-/// How one native mod reaches the game under a build mode.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Route {
-    /// It compiles on its own against the prebuilt game.
-    Prebuilt,
-    /// The whole game builds from source on this computer, for this reason.
-    Game { reason: String },
-}
-
-/// Each mod id with its route.
-pub type Routes = Vec<(String, Route)>;
-
-/// Each turned-on native mod's route under `profile`, by mod id. Read from the files in
-/// `home`; empty when they can't be read (the build says why).
-pub fn routes(home: &Path, profile: Profile) -> Routes {
+/// Structural routes independent of the saved build mode. Invalid input is reported per mod.
+/// Prebuilt release availability is probed separately on a worker, never while drawing the UI.
+pub fn routes(home: &Path) -> Routes {
     let Ok(folder) = stage_installed(home, root().join("installed.routes")) else {
-        return Vec::new();
+        return Routes::default();
     };
     let Ok(found) = bundles(&folder) else {
-        return Vec::new();
+        return Routes::default();
     };
-    found
+    let mods = found
         .iter()
         .map(|bundle| {
-            let refusal = if profile != Profile::Optimized {
-                Some(prebuilt::SourceReason::Profile {
-                    profile: profile.name(),
-                })
-            } else {
-                match api::Project::read(bundle) {
-                    Ok(project) => prebuilt::project_refusal(&project),
-                    Err(e) => {
-                        return (
-                            bundle.manifest.id.clone(),
-                            Route::Game {
-                                reason: e.to_string(),
-                            },
-                        )
-                    }
-                }
+            let route = match api::Project::read(bundle) {
+                Ok(project) => prebuilt::project_refusal(&project)
+                    .map_or(Route::Prebuilt, |reason| Route::Game { reason }),
+                Err(error) => Route::Invalid {
+                    reason: error.to_string(),
+                },
             };
-            let route = refusal.map_or(Route::Prebuilt, |reason| Route::Game {
-                reason: reason.to_string(),
-            });
             (bundle.manifest.id.clone(), route)
         })
-        .collect()
+        .collect();
+    Routes {
+        mods,
+        unavailable: None,
+    }
 }
 
 /// A validated flat mod project. The package manifest owns identity and build pins.
@@ -2191,10 +2173,10 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists || !wasm_internals.is_empty() {
+    let prebuilt = if exists || !wasm_internals.is_empty() || profile != Profile::Optimized {
         None
     } else {
-        let game = match prebuilt::refusal(&projects, profile) {
+        let game = match prebuilt::refusal(&projects) {
             Some(reason) => Err(reason),
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
@@ -2203,7 +2185,7 @@ fn pipeline(
                 Err(reason) => Err(reason),
             },
         };
-        game.map_err(|reason| log_warning(&reason.to_string())).ok()
+        prebuilt::or_source(game)?
     };
     check_cancelled()?;
     let plan = match prebuilt {
