@@ -19,6 +19,7 @@ pub mod geometry;
 pub mod identifier;
 pub mod java_hash_map;
 pub mod jmath;
+pub mod level_key;
 pub mod nbt;
 pub mod neighbour_update;
 pub mod no_ai;
@@ -34,4 +35,5 @@ pub mod ticks;
 pub mod use_animation;
 pub mod version;
 
+pub use level_key::LevelKey;
 pub use version::VANILLA_VERSION;

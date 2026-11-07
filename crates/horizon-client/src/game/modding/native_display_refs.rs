@@ -201,7 +201,20 @@ impl Game<'_> {
             ("scale", floats(&t.scale)),
             ("right_rotation", floats(&t.right_rotation)),
         ]);
-        self.display_put(display, None, "transformation", tag)
+        if !self.display_put(display, None, "transformation", tag) {
+            return false;
+        }
+        let index = self
+            .others
+            .iter()
+            .position(|o| o.id == display.entity().id())
+            .unwrap();
+        self.others.update(index, |o| {
+            if o.kind == "minecraft:item_display" {
+                o.item_transformation = Some(t.into());
+            }
+        });
+        true
     }
 
     /// `Display.getBillboardConstraints`.
@@ -568,6 +581,7 @@ mod tests {
     fn push(game: &mut Game<'_>, id: u32, kind: &str) -> DisplayRef {
         game.options.dedicated = Some(Vec::new());
         game.others.push(OtherEntity {
+            item_transformation: None,
             id,
             kind: kind.into(),
             position: Vec3::new(1.0, 70.0, 1.0),
@@ -590,6 +604,7 @@ mod tests {
             assert_eq!(item.kind(game), Some(NativeDisplayKind::Item));
             assert_eq!(text.entity(), game.entity(21).unwrap());
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 24,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,

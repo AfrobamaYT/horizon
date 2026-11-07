@@ -429,7 +429,7 @@ impl Game<'_> {
             point: hit.point,
             inside: hit.inside,
         };
-        let (state, sound, loot, durability, particle) = self.block_transform_in(
+        let (state, sound, loot, durability, particle, _) = self.block_transform_in(
             stack,
             &hit,
             super::TransformContext {
