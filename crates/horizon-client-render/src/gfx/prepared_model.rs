@@ -28,15 +28,14 @@ impl PreparedModelInstance {
     /// `local` is the block-corner pose. The camera translation is subtracted in f64.
     pub fn new(local: Mat4, origin: DVec3, camera: DVec3, tint: [f32; 4], light: u32) -> Self {
         let model = camera_matrix(local, origin, camera);
-        let normal = Mat3::from_mat4(model).inverse().transpose();
-        let cols = normal.to_cols_array_2d();
-        let mut rows = [[0.0; 4]; 3];
-        for column in 0..3 {
-            rows[column][..3].copy_from_slice(&cols[column]);
-        }
+        Self::from_model(model.to_cols_array_2d(), normal_matrix(model), tint, light)
+    }
+
+    #[inline]
+    fn from_model(model: [[f32; 4]; 4], normal: [[f32; 4]; 3], tint: [f32; 4], light: u32) -> Self {
         Self {
-            model: model.to_cols_array_2d(),
-            normal: rows,
+            model,
+            normal,
             tint,
             light,
             _pad: [0; 3],
@@ -46,6 +45,56 @@ impl PreparedModelInstance {
     /// The camera-relative pose stored for this copy.
     pub fn matrix(&self) -> Mat4 {
         Mat4::from_cols_array_2d(&self.model)
+    }
+}
+
+#[inline]
+fn normal_matrix(model: Mat4) -> [[f32; 4]; 3] {
+    let normal = Mat3::from_mat4(model).inverse().transpose();
+    let cols = normal.to_cols_array_2d();
+    let mut rows = [[0.0; 4]; 3];
+    for column in 0..3 {
+        rows[column][..3].copy_from_slice(&cols[column]);
+    }
+    rows
+}
+
+/// Reuse the inverse transpose for consecutive copies with the same linear pose.
+/// This is a batch-local cache, not retained across views or resource generations.
+#[derive(Default)]
+pub struct PreparedInstanceBuilder {
+    previous: Option<PreparedNormal>,
+}
+
+struct PreparedNormal {
+    basis: [[f32; 4]; 3],
+    normal: [[f32; 4]; 3],
+}
+
+impl PreparedInstanceBuilder {
+    /// Construct the same instance as `PreparedModelInstance::new`, including singular poses.
+    #[inline]
+    pub fn instance(
+        &mut self,
+        local: Mat4,
+        origin: DVec3,
+        camera: DVec3,
+        tint: [f32; 4],
+        light: u32,
+    ) -> PreparedModelInstance {
+        let model = camera_matrix(local, origin, camera);
+        let columns = model.to_cols_array_2d();
+        let basis = [columns[0], columns[1], columns[2]];
+        let previous = self.previous.get_or_insert_with(|| PreparedNormal {
+            basis,
+            normal: normal_matrix(model),
+        });
+        // Byte equality preserves signed zero and NaN payloads as well as finite poses.
+        if bytemuck::bytes_of(&previous.basis) != bytemuck::bytes_of(&basis) {
+            previous.basis = basis;
+            previous.normal = normal_matrix(model);
+        }
+        PreparedModelInstance::from_model(columns, previous.normal, tint, light)
     }
 }
 
@@ -433,6 +482,27 @@ pub fn cap_prepared_instance_slots(slots: u64) {
     SLOT_CAP.store(slots, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// `u64::MAX` means the test has not named an uploaded generation.
+#[cfg(feature = "test-support")]
+static UPLOADED_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Pretend prepared geometry for `generation` is resident. `None` clears it.
+#[cfg(feature = "test-support")]
+pub fn set_test_prepared_generation(generation: Option<u64>) {
+    UPLOADED_GENERATION.store(
+        generation.unwrap_or(u64::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The generation `set_test_prepared_generation` published, if any.
+#[cfg(feature = "test-support")]
+pub fn test_prepared_generation() -> Option<u64> {
+    let generation = UPLOADED_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+    (generation != u64::MAX).then_some(generation)
+}
+
 pub fn prepared_instance_room_for(already: u64, incoming: usize, max_buffer: u64) -> usize {
     let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
     let device = max_instance_slots(stride, max_buffer);
@@ -512,21 +582,52 @@ fn map_bytes(buffer: &wgpu::Buffer, contents: &[u8]) -> Result<()> {
 }
 
 fn take_forced_failure() -> bool {
-    FAIL_UPLOAD.swap(false, std::sync::atomic::Ordering::Relaxed)
+    #[cfg(feature = "test-support")]
+    {
+        FAIL_UPLOAD.with(|flag| flag.replace(false))
+    }
+    #[cfg(not(feature = "test-support"))]
+    {
+        false
+    }
 }
 
-static FAIL_UPLOAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// The next [`PreparedModels::create`] returns an error and uploads nothing.
+/// The next [`PreparedModels::create`] on this thread returns an error and uploads nothing.
+/// Another thread's upload is left alone, so parallel pixel tests cannot consume each other's failure.
 #[cfg(feature = "test-support")]
 pub fn fail_next_prepared_upload() {
-    FAIL_UPLOAD.store(true, std::sync::atomic::Ordering::Relaxed);
+    FAIL_UPLOAD.with(|flag| flag.set(true));
+}
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    static FAIL_UPLOAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use bytemuck::Zeroable;
+
+    #[test]
+    fn batch_normal_reuse_matches_independent_instances() {
+        let mut builder = PreparedInstanceBuilder::default();
+        let camera = DVec3::new(30_000_000.25, 72.5, -30_000_000.75);
+        for local in [
+            Mat4::IDENTITY,
+            Mat4::from_rotation_y(0.6),
+            Mat4::from_scale(Vec3::new(-0.5, 1.25, 2.0)),
+            Mat4::from_scale(Vec3::ZERO),
+        ] {
+            for offset in [0.0, 1.5, 100.25, f64::MAX] {
+                let origin = camera + DVec3::splat(offset);
+                let tint = [0.5, 0.25, 1.0, 0.125];
+                let expected = PreparedModelInstance::new(local, origin, camera, tint, 0xF030);
+                let cached = builder.instance(local, origin, camera, tint, 0xF030);
+                assert_eq!(bytemuck::bytes_of(&cached), bytemuck::bytes_of(&expected));
+            }
+        }
+    }
 
     #[test]
     fn camera_translation_keeps_a_fraction_past_f32_precision() {
@@ -717,5 +818,15 @@ mod tests {
         })
         .unwrap();
         assert!(mapped);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn forced_upload_failure_stays_on_the_thread_that_set_it() {
+        fail_next_prepared_upload();
+        let stolen = std::thread::scope(|scope| scope.spawn(take_forced_failure).join().unwrap());
+        assert!(!stolen, "another thread consumed the forced upload failure");
+        assert!(take_forced_failure());
+        assert!(!take_forced_failure());
     }
 }

@@ -395,7 +395,7 @@ impl MapData {
     }
     /// `MapItemSavedData.isTrackedCountOverLimit`: more than `limit`
     /// decorations count (`MapDecorationType.trackCount`).
-    fn tracked_over_limit(&self, limit: usize) -> bool {
+    pub(super) fn tracked_over_limit(&self, limit: usize) -> bool {
         self.decorations
             .iter()
             .filter(|d| tracks_count(d.sprite))
@@ -813,11 +813,7 @@ fn decoration_rotation(nether: bool, game_time: i64, y_rot: f64) -> u8 {
 }
 impl Game<'_> {
     fn dimension_id(&self) -> &'static str {
-        match self.dim {
-            super::Dim::Nether => "minecraft:the_nether",
-            super::Dim::End => "minecraft:the_end",
-            _ => "minecraft:overworld",
-        }
+        self.dim.id()
     }
     fn map_path(&self, name: &str) -> std::path::PathBuf {
         self.world_root.join("data/minecraft/maps").join(name)

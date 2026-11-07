@@ -294,7 +294,10 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         };
         let plain = format_ident!("__p{i}");
         *typed.pat = syn::parse_quote!(mut #plain);
-        match original.and_then(|name| shape.args.iter().find(|arg| arg.name == name)) {
+        match original
+            .filter(|_| !shape.raw_only)
+            .and_then(|name| shape.args.iter().find(|arg| arg.name == name))
+        {
             Some(arg) => {
                 let name = &arg.name;
                 passed.push(plain);
@@ -366,7 +369,12 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     let record = shape.record();
     let outcome = shape.raw_outcome(&function.sig);
     // A raw `result` is the API record's when the API carries the value, else a slot of its own.
-    let api_result = matches!(shape.returns, point_shape::Returns::Value(_));
+    let api_result = !shape.raw_only && matches!(shape.returns, point_shape::Returns::Value(_));
+    let cancel = if shape.raw_only {
+        quote!(__cancel)
+    } else {
+        quote!(__args.cancel)
+    };
     // A native-width value crosses the record as 64 bits.
     let (widen, narrow) = match &shape.returns {
         point_shape::Returns::Value(ty) => match point_shape::wide(ty) {
@@ -398,7 +406,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
                 quote!(#name: &mut #place)
             });
         let outcome = match outcome {
-            point_shape::RawOutcome::Cancel => quote!(cancel: &mut __args.cancel,),
+            point_shape::RawOutcome::Cancel => quote!(cancel: &mut #cancel,),
             point_shape::RawOutcome::Result(_) => quote!(result: &mut #result_place,),
             point_shape::RawOutcome::None => quote!(),
         };
@@ -450,7 +458,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         syn::Ident::new(&shape.name, proc_macro2::Span::call_site()),
     );
     let head_listened = listened(&head_variant);
-    let head_fire = fire(&head_variant, &head_method, true);
+    let head_fire = fire(&head_variant, &head_method, !shape.raw_only);
     let result_slot = match &outcome {
         point_shape::RawOutcome::Result(_) if shape.raw && !api_result => {
             quote!(let mut __result_slot = None;)
@@ -458,13 +466,13 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         _ => quote!(),
     };
     let stop = match (&shape.returns, &outcome) {
-        (point_shape::Returns::Unit, _) => quote!(if __args.cancel {
+        (point_shape::Returns::Unit, _) => quote!(if #cancel {
             return;
         }),
-        (point_shape::Returns::UnitResult, _) => quote!(if __args.cancel {
+        (point_shape::Returns::UnitResult, _) => quote!(if #cancel {
             return Ok(());
         }),
-        (point_shape::Returns::Value(_), _) => {
+        (point_shape::Returns::Value(_), _) if api_result => {
             quote!(if let Some(__result) = __args.result.take() {
                 return __result #narrow;
             })
@@ -483,7 +491,7 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
         );
         let return_listened = listened(&variant);
         let name = method.to_string();
-        let api = match (&shape.returns, shape.has_return()) {
+        let api = match (&shape.returns, shape.has_return() && !shape.raw_only) {
             (_, false) => quote!(),
             (point_shape::Returns::Value(_), true) => quote! {
                 __args.result = Some(__result #widen);
@@ -544,9 +552,14 @@ pub fn point(attribute: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote!()
     };
+    let arguments = if shape.raw_only {
+        quote!(let mut __cancel = false;)
+    } else {
+        quote!(let mut __args = mod_points::#record::__new(#(#passed),*);)
+    };
     outer.block = syn::parse_quote!({
         #[allow(unused_mut)]
-        let mut __args = mod_points::#record::__new(#(#passed),*);
+        #arguments
         #result_slot
         if #head_listened {
             #head_fire

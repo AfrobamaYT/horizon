@@ -97,6 +97,9 @@ impl WorldRenderView {
 }
 
 /// Queued primitive counts and fixed capacities, shared across both depth modes.
+///
+/// `instances_capacity` is the per-view budget of 16,384 model copies. It is reserved
+/// when the view's storage is created and is never grown during submission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct WorldDrawUsage {
@@ -108,15 +111,30 @@ pub struct WorldDrawUsage {
     pub quads: u32,
     /// Maximum quads per view.
     pub quad_capacity: u32,
+    /// Model copies accepted for this view. Culled copies are not included.
+    /// A call may pass at most [`instances_capacity`](Self::instances_capacity)
+    /// copies; that bound is applied before culling.
+    pub instances_used: u32,
+    /// Maximum model copies per view, and the most copies one call may pass.
+    pub instances_capacity: u32,
 }
 impl WorldDrawUsage {
     /// Describe the current usage and setup-time limits.
-    pub fn new(lines: u32, line_capacity: u32, quads: u32, quad_capacity: u32) -> Self {
+    pub fn new(
+        lines: u32,
+        line_capacity: u32,
+        quads: u32,
+        quad_capacity: u32,
+        instances_used: u32,
+        instances_capacity: u32,
+    ) -> Self {
         Self {
             lines,
             line_capacity,
             quads,
             quad_capacity,
+            instances_used,
+            instances_capacity,
         }
     }
 }

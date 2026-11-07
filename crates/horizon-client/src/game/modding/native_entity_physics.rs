@@ -80,11 +80,9 @@ mod tests {
             game.creatures.projectiles.push(arrow);
             let arrow = game.entity(arrow_id).unwrap();
             assert_eq!(arrow.no_physics(game), Some(false));
-            game.creatures.projectiles[0]
-                .arrow
-                .as_mut()
-                .unwrap()
-                .no_physics = true;
+            game.creatures
+                .projectiles
+                .update(0, |p| p.arrow.as_mut().unwrap().no_physics = true);
             assert_eq!(arrow.no_physics(game), Some(true));
 
             let trident_id = game.take_entity_id();
@@ -122,7 +120,7 @@ mod tests {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = game.take_entity_id();
             let dragon_id = dragon.id;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.entity(dragon_id).unwrap();
             assert_eq!(dragon.no_physics(game), Some(true));
 

@@ -40,6 +40,7 @@ members = [
     "crates/horizon-mod-wasm",
     "crates/horizon-mod-api-gen",
     "crates/horizon-mod-api",
+    "crates/horizon-mod-dimension-game",
     "crates/horizon-mod-api-macros",
     "crates/horizon-mod-point-shape",
     "crates/horizon-mod-api-gen/dispatch-tests",
@@ -47,6 +48,7 @@ members = [
     "crates/horizon-port-pack",
     "crates/horizon-shaders",
     "crates/horizon-optifine",
+    "crates/horizon-polytone",
     "crates/horizon-shader-api",
     "crates/horizon-release-sign",
     "crates/horizon-mod-deps",
@@ -57,7 +59,7 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.95"
 
 # Ports mirror vanilla's Java signatures, index loops and nested generic types
 # one to one so they can be checked against the decompiled sources.
