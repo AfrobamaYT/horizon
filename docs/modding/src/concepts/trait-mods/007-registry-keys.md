@@ -79,6 +79,8 @@ and remain strings, as do labels and tags.
 
 | Previous engine value | API-owned value | Mod changes |
 | --- | --- | --- |
+| Engine damage containers | `mod_api::{DamageContainer, DamageValues, Reduction}` | Hooks receive an owned scalar snapshot. Read reductions with `reduction`; edit damage and cooldown through the container setters. Sequencing methods remain game-only. |
+| Engine item property values | `mod_api::{ItemBar, ItemRarity}` | Resource methods retain their signatures; damageability, glint and repair checks use game-owned metadata reads. |
 | Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
@@ -202,3 +204,17 @@ skips the parts: a mod reacting to its own blocks uses a part, one reacting to e
 thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
 the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
+
+### Damage and item metadata snapshots
+
+The three damage hooks convert only after their subscription guard. `DamageValues`
+retains the entire sequence, including reductions and the pre-hook input, so changing
+`new_damage` still reaches the engine's original NaN and negative normalization point.
+`DamageValues::set_reduction` edits snapshot data; it does not run a damage calculation.
+The fixed reduction storage is private; use its accessors rather than an array index.
+`Reduction` case order is append-only. Engine `record_*`, `enter_pre`, `capture_inflicted`
+and `pre_change` are not mod API methods.
+
+`ItemResource::damageable`, `foil` and `repairable` delegate to the game's existing
+property readers through metadata access. Defaults, explicit overrides, component
+removals, compass glint and repair tags follow gameplay's single property path.

@@ -877,7 +877,8 @@ pub trait Hooks {
     /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
-    /// `container` holds the damage before any reduction: change its `new_damage`, or the
+    /// `container` is an API-owned scalar snapshot before any reduction; engine sequencing
+    /// remains game-owned. Change its `new_damage`, or the
     /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
     /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
     /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
