@@ -344,9 +344,15 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     syn::ReturnType::Type(_, ty) => boundary_value(ty),
                     syn::ReturnType::Default => false,
                 };
+                let infallible_output = match &entry.sig.output {
+                    syn::ReturnType::Type(_, ty) => infallible_value(ty),
+                    syn::ReturnType::Default => false,
+                };
                 let call = if checked_write {
                     if crosses_output {
                         format!("call_stack_write(|| {call})")
+                    } else if infallible_output {
+                        format!("call_write(|| {call}).try_into_api().unwrap()")
                     } else {
                         format!("call_write(|| {call})")
                     }
@@ -360,6 +366,8 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                         ),
                         None => format!("{call}.try_into_api().unwrap_or_default()"),
                     }
+                } else if infallible_output {
+                    format!("{call}.try_into_api().unwrap()")
                 } else {
                     call
                 };
@@ -376,35 +384,47 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 
 /// API records whose game representation is owned by another crate. Conversions are
 /// implemented once by the game; this rule only selects the boundary, never its behaviour.
+fn infallible_value(ty: &Type) -> bool {
+    contains_value(ty, &["Text"])
+}
+
 fn boundary_value(ty: &Type) -> bool {
-    struct Values(bool);
-    impl<'ast> Visit<'ast> for Values {
+    contains_value(
+        ty,
+        &[
+            "ItemStack",
+            "GameRuleValue",
+            "ItemResource",
+            "ItemCost",
+            "MerchantOffer",
+            "Ingredient",
+            "Recipe",
+            "RecipeRule",
+            "RecipeTemplate",
+            "RecipeTrimPattern",
+            "FireworkShapeIngredient",
+            "AnvilResult",
+            "AnvilCraft",
+            "AnvilUpdate",
+            "GrindstonePlace",
+            "GrindstoneTake",
+        ],
+    )
+}
+
+fn contains_value(ty: &Type, names: &[&str]) -> bool {
+    struct Values<'a>(bool, &'a [&'a str]);
+    impl<'ast> Visit<'ast> for Values<'_> {
         fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-            self.0 |= path.path.segments.last().is_some_and(|segment| {
-                matches!(
-                    segment.ident.to_string().as_str(),
-                    "ItemStack"
-                        | "GameRuleValue"
-                        | "ItemResource"
-                        | "ItemCost"
-                        | "MerchantOffer"
-                        | "Ingredient"
-                        | "Recipe"
-                        | "RecipeRule"
-                        | "RecipeTemplate"
-                        | "RecipeTrimPattern"
-                        | "FireworkShapeIngredient"
-                        | "AnvilResult"
-                        | "AnvilCraft"
-                        | "AnvilUpdate"
-                        | "GrindstonePlace"
-                        | "GrindstoneTake"
-                )
-            });
+            self.0 |= path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| self.1.contains(&segment.ident.to_string().as_str()));
             syn::visit::visit_type_path(self, path);
         }
     }
-    let mut values = Values(false);
+    let mut values = Values(false, names);
     values.visit_type(ty);
     values.0
 }
@@ -454,12 +474,19 @@ fn boundary_arguments(
             return Err(format!("{method}: unsupported argument"));
         };
         let name = pat.ident.to_string();
-        if !boundary_value(&arg.ty) {
+        let infallible = infallible_value(&arg.ty);
+        if !boundary_value(&arg.ty) && !infallible {
             args.push(name);
             continue;
         }
-        let conversion = format!("{name}.try_into_engine(self.items())");
-        let value = if checked_write {
+        let conversion = if infallible {
+            format!("{name}.try_into_engine(&())")
+        } else {
+            format!("{name}.try_into_engine(self.items())")
+        };
+        let value = if infallible {
+            format!("{conversion}.unwrap()")
+        } else if checked_write {
             format!("{conversion}?")
         } else {
             format!(

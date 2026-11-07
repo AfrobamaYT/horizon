@@ -654,7 +654,7 @@ fn stack_crossing(
         "GameRuleValue",
         "PlacementContext",
     ];
-    const INFALLIBLE_VALUES: &[&str] = &["GuiDraw"];
+    const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
     fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
         struct Boundary<'a> {

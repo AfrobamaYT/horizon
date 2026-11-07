@@ -2017,7 +2017,7 @@ mod declaration_snapshot_tests {
 }
 
 macro_rules! gui_draw_value {
-    ($draw:expr, $from:ident, $to:ident) => {
+    ($draw:expr, $from:ident, $to:ident, $convert:ident($($args:expr),*)) => {
         match $draw {
             $from::Sprite {
                 sprite,
@@ -2096,7 +2096,7 @@ macro_rules! gui_draw_value {
                 color,
                 shadow,
             } => $to::Text {
-                text: text.clone(),
+                text: text.$convert($($args),*).unwrap(),
                 x: *x,
                 y: *y,
                 color: *color,
@@ -2129,7 +2129,7 @@ impl TryIntoApi for horizon_client::hud_layout::GuiDraw {
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
         use mod_api::hud_layout::GuiDraw as Api;
-        Ok(gui_draw_value!(self, Engine, Api))
+        Ok(gui_draw_value!(self, Engine, Api, try_into_api()))
     }
 }
 impl<C: ?Sized> TryIntoEngine<C> for mod_api::hud_layout::GuiDraw {
@@ -2138,7 +2138,7 @@ impl<C: ?Sized> TryIntoEngine<C> for mod_api::hud_layout::GuiDraw {
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
         use mod_api::hud_layout::GuiDraw as Api;
-        Ok(gui_draw_value!(self, Api, Engine))
+        Ok(gui_draw_value!(self, Api, Engine, try_into_engine(&())))
     }
 }
 
