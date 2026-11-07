@@ -677,13 +677,10 @@ impl Game<'_> {
             host.hub.send_inventory(gi);
             placed
         } else {
-            let Some((window, state, mut menu, pos)) = host
+            let (window, state, mut menu, pos) = host
                 .play
                 .get_mut(&conn)
-                .and_then(|play| play.crafting.table.take_if(|(w, ..)| *w == container))
-            else {
-                return None;
-            };
+                .and_then(|play| play.crafting.table.take_if(|(w, ..)| *w == container))?;
             let placed = self.guest_menu_op(gi, &mut menu, apply)?;
             let host = self.lan.as_mut()?;
             host.play.entry(conn).or_default().crafting.table = Some((window, state, menu, pos));
