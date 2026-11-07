@@ -3,6 +3,8 @@ use super::*;
 impl Game<'_> {
     /// Per tick, for every guest: dig, use items, pick up drops, die.
     pub(in crate::game) fn tick_guests(&mut self) {
+        // `EntityEvent.Size` for the poses the guests' moves set since the last tick.
+        self.native_guest_sizes();
         self.tick_guest_cameras();
         self.lan_merchant_tick();
         self.lan_stations_tick();
