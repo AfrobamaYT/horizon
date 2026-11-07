@@ -994,3 +994,36 @@ mod brewed_boundary_tests {
         );
     }
 }
+
+impl TryIntoApi for crate::containers::ModBlockEntityFields {
+    type Api = mod_api::containers::ModBlockEntityFields;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::containers::ModBlockEntityFields {
+            nbt: self.nbt.clone(),
+            items: self.items.try_into_api()?,
+            data: self.data.clone(),
+        })
+    }
+}
+impl TryIntoEngine for mod_api::containers::ModBlockEntityFields {
+    type Engine = crate::containers::ModBlockEntityFields;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(crate::containers::ModBlockEntityFields {
+            nbt: self.nbt.clone(),
+            items: self.items.try_into_engine(items)?,
+            data: self.data.clone(),
+        })
+    }
+}
+impl TryIntoApi for crate::containers::ModBlockEntity {
+    type Api = mod_api::ModBlockEntity;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::ModBlockEntity::new(
+            self.id().to_owned(),
+            (**self).try_into_api()?,
+        ))
+    }
+}
