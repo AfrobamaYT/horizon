@@ -1381,7 +1381,7 @@ mod transfer_lifetime_tests {
                     game.enter_level(Dim::Nether).unwrap();
                     let destination_ref =
                         mod_api::EntityRef::new(game.level(game.dim.id()).unwrap().epoch(), id);
-                    assert_ne!(source_ref, destination_ref);
+                    assert_eq!(source_ref, destination_ref);
                     game.arrive_vehicle(source, id, Vec3::ZERO, 0.0);
                     assert!(source_index.lock().unwrap().snapshot(&key).is_empty());
                     let destination_index =
@@ -1414,6 +1414,14 @@ mod transfer_lifetime_tests {
                             Ok(&17)
                         );
                         assert_eq!(retained[0].entry.read(&VALUE), Ok(&17));
+                        for index in [&source_index, &destination_index] {
+                            assert_eq!(index.lock().unwrap().validate_row(&retained[0]),
+                                Err(horizon_mod_runtime::attachments::AttachmentRowError::StaleHolder));
+                        }
+                        assert_eq!(
+                            destination_index.lock().unwrap().validate_row(&rows[0]),
+                            Ok(())
+                        );
                     }
                     assert_eq!(game.persist.uuids.get(&id), Some(&uuid));
                 });
