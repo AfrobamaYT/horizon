@@ -382,7 +382,10 @@ impl Game<'_> {
         // `LivingEntity.canUsePortal` (#943): not a passenger — its vehicle
         // goes through and carries it (`carry_riders_through_portals`) — and
         // not asleep.
-        if !riding && !sleeping && let Some(pos) = self.nether_portal_inside(at) {
+        if !riding
+            && !sleeping
+            && let Some(pos) = self.nether_portal_inside(at)
+        {
             self.portals.player.set_inside(pos, PLAYER_DELAY);
         }
         // `ServerPlayer.showEndCredits`: the player stays out of the world while the
