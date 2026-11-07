@@ -43,14 +43,14 @@ folders are unsupported.
 
 The shared [manifest fields](../how-to/content-mods.md#the-manifest) include `id`, `name`, `version`, `api = "0.2"`
 and `capabilities = ["registries"]`. The content API is checked for exact equality. Unknown fields
-refuse the manifest. Code adds `[native]`:
+refuse the manifest. Both code targets may declare top-level `internals`, an array of tables with
+`path`, `hash`, and optional `kind` when a path names several member kinds. Native code adds `[native]`:
 
 | Field | Type | Rule |
 | --- | --- | --- |
 | `game` | string | not empty, the Minecraft version (`"26.3"`) |
 | `horizon` | string | the exact Horizon commit, 40 lowercase hex characters |
 | `mixins` | string | the exact horizon-mixins commit, 40 lowercase hex characters |
-| `internals` | array of tables | optional declared game internals: `path`, `hash`, and `kind` when a path names several member kinds |
 | `injection` | array of tables | optional injections, written as `[[native.injection]]` |
 | `module` | array of tables | optional support modules, written as `[[native.module]]` |
 
@@ -82,7 +82,7 @@ A wasm mod adds `[wasm]` instead, written by `cargo horizon-mod build --wasm`
 At load `mod.wasm` must start with `\0asm`, be at most 64 MiB and match `sha512`; each failure refuses the
 package with its reason.
 
-Beside `[wasm]`, `[native]` may contain only `internals`, not injections or native build pins.
+Both code targets declare top-level `internals`; a `[wasm]` mod has no `[native]` table.
 Wasm internals listeners use top-level `[[inject]]` with `access = "internals"`, `kind = "head"`
 or `"return"`, a pinned function `hash`, and a crate-root `with` function. They require at least
 one declared internal. The generated `mod_internals::raw_listeners!()` entry exports those
