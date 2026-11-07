@@ -172,6 +172,7 @@ pub enum Event {
     Traded(usize, Box<MerchantOffer>),
 }
 /// What the world lends a trading session for offers made while it is open.
+#[derive(Clone, Copy)]
 pub struct TradeEnv<'a> {
     pub trades: &'a Trades,
     pub enchantments: &'a Enchantments,
@@ -535,6 +536,8 @@ pub struct TradeContext<'a> {
 /// `ExplorationMapFunction`: `ServerLevel.findNearestMapStructure` and the
 /// map it makes, for the world the merchant is in.
 pub trait MapMaker {
+    /// Stage maps and id reservations with a menu edit.
+    fn with_staged(&self, edit: &mut dyn FnMut(&dyn MapMaker) -> bool) -> bool;
     /// The map for the nearest structure in `destination` (a structure tag)
     /// within `radius` chunks of `origin`, or the stack unchanged when none is
     /// found.

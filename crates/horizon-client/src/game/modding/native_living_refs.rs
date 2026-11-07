@@ -1451,7 +1451,7 @@ mod tests {
             game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
@@ -1479,7 +1479,7 @@ mod tests {
             game.lan_acting_entity = None;
             game.mobs[0].removed = true;
             game.armor_stands.clear();
-            game.dragon = None;
+            game.dragon.discard();
             for id in [20u32, 12, 13, 14] {
                 let handle = game.entity(id).and_then(|er| game.living(er));
                 assert!(handle.is_none(), "handle of {id} after it is gone");
@@ -1879,7 +1879,7 @@ mod tests {
             game.armor_stands.push(stand);
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 17;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let stand = game.living(game.entity(16).unwrap()).unwrap();
             let dragon = game.living(game.entity(17).unwrap()).unwrap();
             game.audio.capture = Some(Vec::new());
@@ -2021,7 +2021,7 @@ mod tests {
             assert_eq!(game.living_equipment(horse, EquipmentSlot::Body), None);
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.living(game.entity(15).unwrap()).unwrap();
             // The dragon and an armor stand store all eight slots, full
             // stacks included, and save them through the real codecs.

@@ -1599,6 +1599,7 @@ mod tests {
     }
 
     /// Shared types are resolved per state; undeclared and stale entities stay off the wire.
+
     #[test]
     fn shared_block_entity_types_supply_chunks_updates_and_detached_encoders() {
         use crate::block_entity_types::BlockEntityTypes;

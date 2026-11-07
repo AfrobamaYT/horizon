@@ -14,6 +14,7 @@ use std::{
 use syn::{ImplItem, Item, Type};
 
 mod guest;
+pub mod source;
 pub use guest::{GuestInject, guest_exports};
 
 /// One point, as `points.json` lists it.
@@ -90,7 +91,7 @@ type Pending = (String, PathBuf, PathBuf, Vec<String>);
 /// declarations (and `#[path]`s, and inline modules that declare files). With `every_build`, a
 /// module behind a `cfg` is left out with everything under it (the points: functions every build
 /// compiles); without, it is kept with its conditions (the internals, listed with the builds they
-/// exist in). Test-only modules are always left out.
+/// exist in). Test-only modules are always left out, including files gated by inner attributes.
 pub(crate) fn module_files(
     module: String,
     path: PathBuf,
@@ -102,6 +103,13 @@ pub(crate) fn module_files(
     while let Some((module, path, dir, cfg)) = pending.pop() {
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = crate::game_modules::parse(&path, &source)?;
+        if test_only(&file.attrs) || (every_build && gated(&file.attrs)) {
+            continue;
+        }
+        let cfg = cfg
+            .into_iter()
+            .chain(conditions(&file.attrs))
+            .collect::<Vec<_>>();
         let here = path
             .parent()
             .expect("a source file has a folder")
@@ -449,16 +457,31 @@ pub(crate) fn file_points<'a>(
     keep: &dyn Fn(&Found<'_>) -> bool,
     out: &mut Vec<Found<'a>>,
 ) {
+    file_functions(module, items, keep, &point_shape::eligible, out);
+}
+
+fn file_functions<'a>(
+    module: &str,
+    items: &'a [Item],
+    keep: &dyn Fn(&Found<'_>) -> bool,
+    eligible: &dyn Fn(&[syn::Attribute], &syn::Signature) -> bool,
+    out: &mut Vec<Found<'a>>,
+) {
     for item in items {
         match item {
             Item::Mod(inline) if !gated(&inline.attrs) => {
                 if let Some((_, inner)) = &inline.content {
-                    file_points(&format!("{module}::{}", inline.ident), inner, keep, out);
+                    file_functions(
+                        &format!("{module}::{}", inline.ident),
+                        inner,
+                        keep,
+                        eligible,
+                        out,
+                    );
                 }
             }
             Item::Fn(function)
-                if !gated(&function.attrs)
-                    && point_shape::eligible(&function.attrs, &function.sig) =>
+                if !gated(&function.attrs) && eligible(&function.attrs, &function.sig) =>
             {
                 let found = Found {
                     module: module.to_owned(),
@@ -482,7 +505,7 @@ pub(crate) fn file_points<'a>(
                 }
                 for member in &block.items {
                     if let ImplItem::Fn(method) = member
-                        && point_shape::eligible(&method.attrs, &method.sig)
+                        && eligible(&method.attrs, &method.sig)
                     {
                         let found = Found {
                             module: module.to_owned(),
@@ -614,12 +637,19 @@ fn all_points<'a>(
 }
 
 /// The game's points, by name: every point function of the game module, and the listed ones of
-/// the crates below it.
+/// the crates below it. Staged private source targets are never part of this public list.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
+    let private = source::read(root)?
+        .into_iter()
+        .map(|point| plain_path(&point.target))
+        .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
     let mut points = Vec::new();
     for (_, found) in all_points(&scanned, &list)? {
         let target = found.target();
+        if private.contains(&plain_path(&target)) {
+            continue;
+        }
         let shape = found.shape()?;
         let api = shape.api_items(&target);
         points.push(GamePoint {
@@ -874,7 +904,7 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 }
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
-pub(crate) fn records(points: &[GamePoint]) -> String {
+pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
     let parse = |code: &str| {
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
@@ -902,6 +932,16 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
             std::iter::once(head).chain((point.at_return || point.raw).then_some(back))
         })
         .collect();
+    let mut places = places;
+    for point in sources {
+        places.push((point.name.clone(), &point.target, ""));
+        places.push((format!("{}_return", point.name), &point.target, ""));
+    }
+    let private_variants = sources.iter().map(|point| {
+        let head = quote::format_ident!("{}", point_shape::camel(&point.name));
+        let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
+        quote!(#head, #back,)
+    });
     let names = places.iter().map(|place| &place.0);
     let targets = places.iter().map(|place| place.1);
     let shapes = places.iter().map(|place| place.2);
@@ -918,7 +958,7 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         #[repr(usize)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         #[non_exhaustive]
-        pub enum PointId { #(#variants)* __Count }
+        pub enum PointId { #(#variants)* #(#private_variants)* __Count }
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
@@ -1248,7 +1288,7 @@ mod tests {
                 ("tick", "horizon_client::game::Game<'_>::tick", "both", true),
             ]
         );
-        let api = records(&points);
+        let api = records(&points, &[]);
         assert!(
             api.contains("fn tick_return")
                 && !api.contains("fn slot_return")
