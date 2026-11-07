@@ -143,7 +143,7 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                     ""
                 };
                 let attribute = format!(
-                    "#[horizon_mod_api_macros::point(raw, name = {:?}{free})] ",
+                    "#[horizon_mod_api_macros::point(raw_only, name = {:?}{free})] ",
                     point.name
                 );
                 let mut out = text.clone();
@@ -270,7 +270,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
         GAME,
         &staged.replace(
             "#[inline(always)]",
-            "#[horizon_mod_api_macros::point(raw)] #[inline(always)]",
+            "#[horizon_mod_api_macros::point(raw_only)] #[inline(always)]",
         ),
     );
     assert!(
@@ -310,6 +310,19 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     );
     assert_eq!(found.len(), 1);
     assert!(point_shape::eligible(found[0].attrs, found[0].sig));
+    let marker = found[0]
+        .attrs
+        .iter()
+        .find(|attr| attr.path().segments.last().unwrap().ident == "point")
+        .unwrap();
+    let syn::Meta::List(marker) = &marker.meta else {
+        panic!("point arguments")
+    };
+    assert!(
+        point_shape::shape(marker.tokens.clone(), found[0].sig)
+            .unwrap()
+            .raw_only
+    );
     assert!(
         found[0]
             .attrs
