@@ -268,6 +268,16 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
+/// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
+/// start.
+pub(super) fn register_gui_layers(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut layers = Vec::new();
+    Game::native_register_gui_layers(&RegistrationContext::new(), &mut layers);
+    horizon_client::gui_layers::register(layers);
+}
 /// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
 /// refresh of the list (`Game::refresh_debug_renderers`).
 pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
