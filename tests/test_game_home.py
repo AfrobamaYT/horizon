@@ -34,7 +34,6 @@ EXEMPT = {
     "test_item_use_order_parity.py": "starts servers through test_server_knockback_parity.run_side; its Server uses game_environment",
     "test_bed_explosion_parity.py": "starts servers through test_server_knockback_parity.run_side; its Server uses game_environment",
     "port_harness.py": "ports Java code, starts no game",
-    "test_ignored_tests.py": "asserts the runner environment with subprocess.run mocked; starts no game",
 }
 
 
