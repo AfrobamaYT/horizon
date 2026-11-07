@@ -1577,11 +1577,8 @@ impl Game<'_> {
         // The mobs added during the tick (into the emptied `self.mobs`) come
         // first, as `append` put them; with none, the ticked list goes back
         // as it is instead of being copied into a new one, every mob a tick.
-        if self.mobs.is_empty() {
-            self.mobs = mobs;
-        } else {
-            self.mobs.append(&mut mobs);
-        }
+        self.mobs
+            .restore(mobs, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
         self.died = died;
         snapshot.clear();
         self.creatures.seen_buf = snapshot;

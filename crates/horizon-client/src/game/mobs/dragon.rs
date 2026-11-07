@@ -3212,7 +3212,8 @@ impl Game<'_> {
             }
             true
         });
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
         for (who, amount) in harmed {
             self.as_fight_player(who, |g| {
                 g.dragon_hurts_player("minecraft:indirect_magic", amount);

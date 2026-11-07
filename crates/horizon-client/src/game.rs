@@ -5003,8 +5003,10 @@ impl Game<'_> {
     /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
     /// They keep their join numbers; the spawned ones got theirs on joining.
     fn put_back_dropped(&mut self, items: horizon_client::join_seq::JoinList<ItemEntity>) {
-        let spawned = std::mem::replace(&mut self.dropped, items);
-        self.dropped.extend(spawned);
+        self.dropped.restore(
+            items,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
     /// becomes an item entity where that item lay (`new ItemEntity(level, x,

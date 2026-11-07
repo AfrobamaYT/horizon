@@ -771,11 +771,10 @@ macro_rules! define_entity_handles {
                     $($field: self$(.$list)+.lift(),)*
                 }
             }
-            pub(super) fn restore_entities(&mut self, mut taken: TakenEntities) {
+            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
                 $({
                     let expected = self$(.$list)+.len() + taken.$field.len();
-                    std::mem::swap(&mut self$(.$list)+, &mut taken.$field);
-                    self$(.$list)+.append(&mut taken.$field);
+                    self$(.$list)+.restore(taken.$field, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
                     debug_assert_eq!(self$(.$list)+.len(), expected);
                 })*
             }

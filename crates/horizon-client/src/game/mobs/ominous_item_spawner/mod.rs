@@ -137,7 +137,10 @@ impl Game<'_> {
             }
             true
         });
-        self.ominous_spawners.restore(spawners);
+        self.ominous_spawners.restore(
+            spawners,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
     }
     /// `handleAddEntity` for a spawner a server sent: its item comes with the
     /// entity data (`ItemStack.EMPTY` until then, which draws nothing).

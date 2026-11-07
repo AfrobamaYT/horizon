@@ -164,7 +164,9 @@ impl Game<'_> {
             f.life -= 1;
             f.life >= 0
         });
-        self.fangs.list.restore(list);
+        self.fangs
+            .list
+            .restore(list, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
     }
     /// `dealDamageTo` everything alive in the fangs' box (0.5 x 0.8,
     /// inflated 0.2 sideways) but the evoker's allies.
