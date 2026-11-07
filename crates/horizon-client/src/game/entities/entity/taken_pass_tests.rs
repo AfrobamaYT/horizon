@@ -145,6 +145,7 @@ impl LifecycleFixture {
                         for (index, entity) in $list.iter().enumerate() {
                             let join = entity.join_seq();
                             assert!(join.is_joined());
+                            assert!(join < horizon_client::join_seq::JoinSeq::upcoming());
                             assert!(unique.insert(join), "duplicate owner join");
                             assert_eq!($list.locate(join), Some(index));
                         }
@@ -156,6 +157,7 @@ impl LifecycleFixture {
                 lookup!(game.breath_clouds);
                 if let Some(dragon) = game.dragon.as_ref() {
                     assert!(dragon.join.is_joined());
+                    assert!(dragon.join < horizon_client::join_seq::JoinSeq::upcoming());
                     assert!(unique.insert(dragon.join));
                     assert_eq!(game.dragon.locate(dragon.join), Some(0));
                 }
