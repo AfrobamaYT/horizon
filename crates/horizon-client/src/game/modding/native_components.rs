@@ -153,10 +153,7 @@ impl Game<'_> {
         power: i32,
         pool: &mod_api::Identifier,
     ) -> Result<Option<ItemStack>, mod_api::StackWriteError> {
-        if power <= 0
-            || level.dimension() != self.dim.key()
-            || self.native_level_world(level).is_none()
-        {
+        if level.dimension() != self.dim.key() || self.native_level_world(level).is_none() {
             return Ok(None);
         }
         let items = world_items!(self);
@@ -329,17 +326,19 @@ mod enchantment_conflict_tests {
                 expected_random.clone().next_long()
             );
 
+            // Vanilla still rolls enchantments and advances the RNG at zero power.
+            let power = 0;
             let definitions = &game.stations().enchantments;
             let expected = definitions.select(
                 game.items(),
                 &mut expected_random,
                 &stack.item,
-                30,
+                power,
                 definitions.tag("minecraft:in_enchanting_table"),
             );
             assert!(!expected.is_empty());
             let result = resource
-                .enchant_randomly(game, level, 30, &pool)
+                .enchant_randomly(game, level, power, &pool)
                 .unwrap()
                 .unwrap();
             let result = stack_value(result.as_stack()).unwrap();
