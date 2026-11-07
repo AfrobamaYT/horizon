@@ -241,6 +241,74 @@ fn fully_crouched(m: &Mob) -> bool {
     m.anim.v[CROUCH_AMOUNT] == MAX_CROUCH_AMOUNT
 }
 
+/// The mouth-item snapshot at `Fox.aiStep`'s consumption boundary.
+/// It owns the full stack so a listener never observes a later hand value.
+#[derive(Clone, Debug)]
+pub struct Consumption {
+    pub mob: u32,
+    pub stack: horizon_items::items::ItemStack,
+    pub from: Vec3,
+    ticks_since_eaten: i32,
+}
+impl Consumption {
+    /// Refuse an old decision after the actor, mouth, position or eating state changed.
+    pub fn still_valid(&self, m: &Mob) -> bool {
+        m.id == self.mob
+            && m.alive()
+            && !m.removed
+            && m.position == self.from
+            && m.extra.main_hand_stack() == Some(&self.stack)
+            && m.extra.ints[TICKS_SINCE_EATEN] == self.ticks_since_eaten
+            && m.ai.target.is_none()
+            && m.on_ground
+            && !flag(m, SLEEPING)
+    }
+}
+
+/// Decide consumption after incrementing the fox's eat counter, before drawing
+/// teleport candidates or replacing the mouth stack. No random values are drawn.
+pub fn decide_consumption(m: &Mob, w: &MobWorld) -> Option<Consumption> {
+    let stack = m.extra.main_hand_stack()?;
+    if !m.alive()
+        || m.removed
+        || m.extra.ints[TICKS_SINCE_EATEN] <= 600
+        || !eats(w, &stack.item)
+        || m.ai.target.is_some()
+        || !m.on_ground
+        || flag(m, SLEEPING)
+    {
+        return None;
+    }
+    Some(Consumption {
+        mob: m.id,
+        stack: stack.clone(),
+        from: m.position,
+        ticks_since_eaten: m.extra.ints[TICKS_SINCE_EATEN],
+    })
+}
+
+/// Apply a still-current consumption decision using the existing effects and remainder.
+/// The game can resume at the same boundary after giving its full host to a listener.
+pub fn apply_consumption(
+    decision: &Consumption,
+    w: &MobWorld,
+    m: &mut Mob,
+    events: &mut Vec<MobEvent>,
+) -> bool {
+    if !decision.still_valid(m) {
+        return false;
+    }
+    consume(w, m, events, &decision.stack.item);
+    m.extra.set_main_hand(
+        w.items
+            .and_then(|i| i.items.get(&decision.stack.item))
+            .and_then(|i| i.use_remainder.as_deref())
+            .map(Into::into),
+    );
+    m.extra.ints[TICKS_SINCE_EATEN] = 0;
+    true
+}
+
 /// `Fox.tick` and `Fox.aiStep`: eating, and `SoundEvents.FOX_AGGRO`
 /// (`Entity.playSound` at its feet) while the fox is defending. Only the
 /// server broadcasts that sound.
@@ -260,14 +328,9 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if eaten > 600 {
             // ItemStack.finishUsingItem: the consumable's on-consumed effects
             // run (a chorus fruit teleports it), then a use remainder stays.
-            consume(w, m, events, &item);
-            m.extra.set_main_hand(
-                w.items
-                    .and_then(|i| i.items.get(&item))
-                    .and_then(|i| i.use_remainder.as_deref())
-                    .map(Into::into),
-            );
-            m.extra.ints[TICKS_SINCE_EATEN] = 0;
+            if let Some(decision) = decide_consumption(m, w) {
+                apply_consumption(&decision, w, m, events);
+            }
         } else if eaten > 560 && m.random.next_float() < 0.1 {
             let at = [m.position.x, m.position.y, m.position.z];
             events.push(MobEvent::Sound("entity.fox.eat", at, 1.0, 1.0));
