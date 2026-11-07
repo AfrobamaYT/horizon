@@ -94,7 +94,7 @@ mod entity_inside_tests {
                 "only drop=true creates dirt resources"
             );
             let dropped = &game.dropped[drops_before];
-            assert_eq!(dropped.stack.id, "minecraft:dirt");
+            assert_eq!(dropped.stack.item.as_ref(), "minecraft:dirt");
             assert_eq!(
                 dropped.position.x.floor() as i32,
                 4,
