@@ -38,7 +38,7 @@ pub enum ItemPose {
     /// A spear being charged (`ItemUseAnimation.SPEAR`): the time held and
     /// the ticks since its last hit's feedback.
     Spear {
-        kinetic: crate::spear::Kinetic,
+        timing: crate::spear::UseTiming,
         time_held: f32,
         ticks_since_hit: f32,
     },
@@ -90,13 +90,13 @@ pub fn item_pose(left: bool, inverse_height: f32, attack: f32, pose: ItemPose) -
     }
     // The spear's own place in the hand, without the equip height.
     if let ItemPose::Spear {
-        kinetic,
+        timing,
         time_held,
         ticks_since_hit,
     } = pose
     {
         return Mat4::from_translation(Vec3::new(invert * 0.56, -0.52, -0.72))
-            * crate::spear::first_person_use(&kinetic, ticks_since_hit, time_held, !left);
+            * crate::spear::first_person_use(&timing, ticks_since_hit, time_held, !left);
     }
     if matches!(pose, ItemPose::Stab) {
         return m * crate::spear::first_person_attack(attack, !left);
@@ -733,30 +733,6 @@ impl UseResult {
 }
 pub use horizon_items::use_animation::consumable_animation;
 
-/// `Item.getUseAnimation` of an item: the `consumable`'s, else `blocks_attacks`
-/// blocks and a kinetic weapon spears, then what the item's own class answers
-/// (`BowItem`, `CrossbowItem`, `TridentItem`, `SpyglassItem`, `InstrumentItem`,
-/// `BrushItem`, `BundleItem`).
-pub fn item_use_animation(
-    info: &crate::items::ItemInfo,
-) -> horizon_world::consumable::UseAnimation {
-    use horizon_world::consumable::UseAnimation;
-    if let Some(consumable) = &info.consumable {
-        return consumable.animation;
-    }
-    match &*info.id {
-        "minecraft:bow" => UseAnimation::Bow,
-        "minecraft:crossbow" => UseAnimation::Crossbow,
-        "minecraft:trident" => UseAnimation::Trident,
-        "minecraft:spyglass" => UseAnimation::Spyglass,
-        "minecraft:goat_horn" => UseAnimation::TootHorn,
-        "minecraft:brush" => UseAnimation::Brush,
-        _ if info.bundle => UseAnimation::Bundle,
-        _ if info.blocks_attacks.is_some() => UseAnimation::Block,
-        id if crate::spear::Kinetic::of(id).is_some() => UseAnimation::Spear,
-        _ => UseAnimation::None,
-    }
-}
 /// What the click handling reads and does in the world.
 pub trait HandWorld {
     fn hit(&mut self) -> Hit;
@@ -1604,7 +1580,7 @@ mod action_result_tests {
     }
     #[test]
     fn a_consumable_names_its_use_animation() {
-        use horizon_world::consumable::UseAnimation::*;
+        use horizon_core::use_animation::UseAnimation::*;
         assert_eq!(consumable_animation(&serde_json::json!({})), Eat);
         for (name, expected) in [
             ("drink", Drink),
@@ -1624,35 +1600,6 @@ mod action_result_tests {
                 expected,
                 "{name}"
             );
-        }
-    }
-
-    #[test]
-    #[ignore = "requires prepared items in HORIZON_TEST_RESOURCES"]
-    fn an_item_answers_its_use_animation() {
-        use horizon_world::consumable::UseAnimation::*;
-        let root = std::path::PathBuf::from(
-            std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
-        );
-        let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let items =
-            crate::items::Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults)
-                .unwrap();
-        for (id, expected) in [
-            ("minecraft:bread", Eat),
-            ("minecraft:milk_bucket", Drink),
-            ("minecraft:shield", Block),
-            ("minecraft:bow", Bow),
-            ("minecraft:crossbow", Crossbow),
-            ("minecraft:trident", Trident),
-            ("minecraft:spyglass", Spyglass),
-            ("minecraft:goat_horn", TootHorn),
-            ("minecraft:brush", Brush),
-            ("minecraft:bundle", Bundle),
-            ("minecraft:iron_spear", Spear),
-            ("minecraft:stick", None),
-        ] {
-            assert_eq!(item_use_animation(items.get(id).unwrap()), expected, "{id}");
         }
     }
 

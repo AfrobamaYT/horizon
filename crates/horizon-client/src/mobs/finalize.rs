@@ -506,7 +506,7 @@ fn effect_modifiers(m: &Mob, a: Attr) -> impl Iterator<Item = (f64, Op)> + '_ {
     m.extra
         .effects
         .iter()
-        .filter_map(move |&(effect, _, amplifier)| effect_modifier(effect, amplifier, a))
+        .filter_map(move |effect| effect_modifier(effect.id, effect.amplifier, a))
 }
 /// `AttributeInstance.getValue`: the base, then the modifiers by operation.
 pub fn value(m: &Mob, a: Attr) -> f64 {
@@ -1027,6 +1027,19 @@ pub fn set_item_stack(m: &mut Mob, slot: usize, stack: crate::items::ItemStack) 
     if slot <= HEAD {
         m.extra.set_slot_stack(slot, Some(stack));
     }
+}
+/// `ItemStack.setDamageValue` on what `m` has in `slot` (one of the hands or
+/// the armour): its enchantments and trim stay.
+pub fn set_slot_damage(m: &mut Mob, slot: usize, damage: u32) {
+    let Some(id) = item(m, slot).filter(|_| slot <= HEAD) else {
+        return;
+    };
+    let kept = m.extra.slot_stack(slot).cloned();
+    let mut stack = kept
+        .filter(|s| s.item == id)
+        .unwrap_or_else(|| crate::items::ItemStack::new(&id, 1));
+    stack.damage = damage;
+    m.extra.set_slot_stack(slot, Some(stack));
 }
 /// `setItemSlot` with a fresh stack (enchantments cleared).
 pub fn set_item(m: &mut Mob, slot: usize, id: &str) {
@@ -1971,7 +1984,7 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
             S::Villager | S::WanderingTrader => {
                 if s == S::Villager {
                     if reason == Reason::Breeding {
-                        m.extra.variant2 = 0;
+                        m.extra.profession = Default::default();
                     }
                     self.villager_type(m);
                 }
@@ -2064,7 +2077,11 @@ impl<L: FinalizeLevel + ?Sized, R: RandomSource> Ctx<'_, L, R> {
                 let mut fresh = LegacyRandom::new(
                     (m.random.state() as i64).wrapping_mul(0x5851_F42D_4C95_7F2D) ^ i64::from(m.id),
                 );
-                m.extra.variant2 = fresh.next_int_bound(15).unwrap_or(0) as u8;
+                if m.extra.profession.index().is_some() {
+                    m.extra.profession = super::villager::ProfessionState::from_index(
+                        fresh.next_int_bound(15).unwrap_or(0) as u8,
+                    );
+                }
                 self.zombie(m, g, reason)
             }
             S::Husk => self.husk(m, g, reason),
@@ -2646,6 +2663,23 @@ mod tests {
         assert_eq!(villager_type("minecraft:badlands"), 1);
         assert_eq!(villager_type("minecraft:grove"), 4);
         assert_eq!(villager_type("minecraft:plains"), 0);
+    }
+    /// A worn piece that wears (Thorns' `ChangeItemDamage`) keeps its
+    /// enchantments and trim, and the next wear adds to the last.
+    #[test]
+    fn a_worn_piece_keeps_its_enchantments_and_trim_as_it_wears() {
+        let kind = crate::mobs::sensor_scan_tests::kind();
+        let mut m = crate::mobs::Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+        set_item(&mut m, CHEST, "minecraft:iron_chestplate");
+        set_slot_enchantments(&mut m, CHEST, vec![(Arc::from("minecraft:thorns"), 3)]);
+        let trim: gear::Trim = (Arc::from("minecraft:gold"), Arc::from("minecraft:coast"));
+        gear::set_trim(&mut m, gear::CHEST, Some(trim.clone()));
+        set_slot_damage(&mut m, CHEST, 2);
+        set_slot_damage(&mut m, CHEST, 5);
+        let worn = item_stack(&m, CHEST).unwrap();
+        assert_eq!(worn.damage, 5);
+        assert_eq!(worn.enchantment_level("minecraft:thorns"), 3);
+        assert_eq!(worn.data().and_then(|d| d.trim.clone()), Some(trim));
     }
     #[test]
     fn october_31_is_halloween() {

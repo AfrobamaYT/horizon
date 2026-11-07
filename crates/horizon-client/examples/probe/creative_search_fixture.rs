@@ -16,7 +16,9 @@ pub fn main() -> horizon_client::Result<()> {
     let args: Vec<String> = crate::args().collect();
     let usage =
         "usage: creative_search_fixture RESOURCES CREATIVE_JSON VANILLA_JSON OUTPUT [permissions]";
-    let names = Names::load(Path::new(args.get(1).ok_or(usage)?));
+    let names = Names::load(&horizon_assets::resource_source::ResourceSource::directory(
+        Path::new(args.get(1).ok_or(usage)?).to_path_buf(),
+    ));
     let mut creative = Creative::from_json(&serde_json::from_slice(&fs::read(
         args.get(2).ok_or(usage)?,
     )?)?)?;

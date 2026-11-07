@@ -21,6 +21,8 @@ pub struct TargetInfo {
     pub position: Vec3,
     pub eye_y: f64,
     pub bounds: Aabb,
+    /// `LivingEntity.getHitbox`: `bounds` cut below the seat of a rider.
+    pub hitbox: Aabb,
     pub alive: bool,
     pub can_be_seen_as_enemy: bool,
     pub is_player: bool,
@@ -299,6 +301,15 @@ impl MobWorld<'_> {
                 position: p.position,
                 eye_y: p.eye[1],
                 bounds: p.bounds,
+                // A riding player's seat is `Avatar.DEFAULT_VEHICLE_ATTACHMENT`
+                // (0.6) above its feet.
+                hitbox: if p.passenger {
+                    let (lo, hi) = (p.bounds.min_position(), p.bounds.max_position());
+                    let y = (p.position.y + f64::from(0.6_f32)).max(lo.y);
+                    Aabb::new(Vec3::new(lo.x, y, lo.z), hi)
+                } else {
+                    p.bounds
+                },
                 alive: p.alive,
                 can_be_seen_as_enemy: true,
                 is_player: true,
@@ -309,6 +320,7 @@ impl MobWorld<'_> {
                 position: s.position,
                 eye_y: s.eye_y,
                 bounds: s.bounds,
+                hitbox: s.hitbox,
                 alive: s.alive,
                 can_be_seen_as_enemy: !s.playing_dead,
                 is_player: false,
@@ -464,9 +476,15 @@ pub(crate) fn with_resource_test_world(
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry).unwrap();
     let motion = crate::motion::MotionResources::load(root, &assets).unwrap();
-    let data = super::MobData::load(root, &facts);
+    let data = super::MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let types = super::MobTypes::load(root).unwrap();
-    let biomes = crate::biome::Biomes::load(root).unwrap();
+    let biomes = crate::biome::Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )
+    .unwrap();
     let defaults = horizon_world::item_defaults::read(root).unwrap();
     let items = crate::items::Items::load(
         root,
@@ -484,17 +502,20 @@ pub(crate) fn with_resource_test_world(
     build(&mut world, registry);
     let lid_openers = std::collections::HashMap::new();
     let w = MobWorld {
+        goal_host: None,
         teams: Default::default(),
         loop_context: crate::test_resources::server_loop_context(),
         world: &world,
         registry,
         facts: &facts,
         fluid_tables: &motion.fluids,
+        attributes: &motion.attributes,
         movement: &motion.blocks,
         collision: &collision,
         suffocation: &suffocation,
         data: &data,
         player: None,
+        player_identity: None,
         controlling_player_movement: None,
         nearest_player: None,
         others,
@@ -544,6 +565,7 @@ pub(crate) fn test_player(position: Vec3) -> super::PlayerView {
         ),
         eye: [position.x, position.y + 1.62, position.z],
         alive: true,
+        invulnerable: false,
         creative: false,
         sneaking: false,
         swimming: false,

@@ -27,7 +27,7 @@ use super::{
     playerdata,
 };
 use crate::save::Level;
-use horizon_world::nbt::{Limits, Tag, read_named};
+use horizon_core::nbt::{Limits, Tag, read_named};
 use serde_json::Value;
 
 /// The parts of a record, in the order the replies list them.
@@ -53,9 +53,6 @@ pub struct Imported {
     /// asked for: they need the game's tree and its counters.
     pub advancements: Option<Value>,
     pub stats: Option<Value>,
-    /// Whether the mods' attachments came (a whole import): the game's own copy of them is then
-    /// the record's.
-    pub attachments: bool,
     /// Whether the other players are told the player has arrived (when it is placed).
     pub announce: bool,
     /// Whether the request asks the player to be let into the world now. The import never places
@@ -323,7 +320,7 @@ fn check_values(level: &Level) -> Result<(), String> {
     if level
         .active_effects
         .iter()
-        .any(|(_, _, amplifier, _, _)| !(0..=255).contains(amplifier))
+        .any(|(_, _, amplifier, ..)| !(0..=255).contains(amplifier))
     {
         return Err("the record holds an effect no player can have".into());
     }
@@ -361,7 +358,7 @@ struct Kept {
         Option<(String, [i32; 3])>,
         bool,
         Vec<String>,
-        horizon_world::attachments::Attachments,
+        horizon_mod_runtime::attachments::Attachments,
     )>,
     dimension: String,
 }
@@ -417,7 +414,7 @@ impl Kept {
                     g.last_death.clone(),
                     g.seen_credits,
                     g.post_effects.clone(),
-                    g.attachments.clone(),
+                    horizon_mod_runtime::attachments::Attachments::clone(&g.attachments),
                 )
             }),
             dimension: g.dimension.clone(),
@@ -484,13 +481,8 @@ impl Kept {
             (None, _) => {}
         }
         if let Some((saved, death, credits, post, attachments)) = self.other {
-            (
-                g.saved,
-                g.last_death,
-                g.seen_credits,
-                g.post_effects,
-                g.attachments,
-            ) = (saved, death, credits, post, attachments);
+            (g.saved, g.last_death, g.seen_credits, g.post_effects) = (saved, death, credits, post);
+            g.attachments.replace_contents(attachments);
         }
         // The client is in one dimension, and only a login can change it.
         g.dimension = self.dimension;
@@ -499,11 +491,15 @@ impl Kept {
 
 /// Applies the request to the held player `uuid` and tells its client, leaving it held
 /// (`Hub::confirm_arrival` places it). The caller gives the player its advancements and
-/// statistics (`Imported::advancements`, `Imported::stats`) and its attachments.
+/// statistics (`Imported::advancements`, `Imported::stats`).
 ///
 /// Nothing changes when it refuses: the record is read and checked first, and the
-/// guest is touched only once everything is known to be well.
+/// guest is touched only once everything is known to be well. It refuses everything once
+/// the server has begun to stop.
 pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Imported, String> {
+    if hub.transfers.as_ref().is_some_and(|t| t.stopping) {
+        return Err(super::arrivals::STOPPING.into());
+    }
     let request = read_request(request)?;
     let (tag, handover) = read_compound(request.record, uuid)?;
     let Some(i) = hub
@@ -555,8 +551,7 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     // for a player loaded into an empty guest and wrong here: the held player holds what its
     // own file gave it on this server, and an imported inventory REPLACES that, a slot the
     // record leaves empty being empty afterwards.
-    {
-        let g = &mut hub.guests[i];
+    hub.guests.update(i, |g| {
         if request.parts.contains(&"inventory") {
             g.inventory.iter_mut().for_each(|slot| *slot = None);
             g.armor = Default::default();
@@ -566,12 +561,9 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
         if request.parts.contains(&"ender_chest") {
             g.ender_items.iter_mut().for_each(|slot| *slot = None);
         }
-    }
-    playerdata::apply(&mut hub.guests[i], &level);
-    kept.restore(&mut hub.guests[i], &request.parts);
-    // What the request says of where the player stands wins over the record.
-    {
-        let g = &mut hub.guests[i];
+        playerdata::apply(g, &level);
+        kept.restore(g, &request.parts);
+        // What the request says of where the player stands wins over the record.
         let a = &request.arrival;
         if let Some(p) = a.position {
             g.position = p;
@@ -590,18 +582,21 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
         {
             body.velocity = velocity;
         }
-    }
+    });
     // Everything the import changed reaches the client now, so that a proxy sees the
     // player as it will be; the player stays held until it is placed or dropped.
     let recentered = hub.send_arrival_state(i);
-    let g = &mut hub.guests[i];
-    // A retry of this hand-over's import finds the view already moved: it still answers that
-    // the chunks around the new place are on their way, as the first reply did.
-    let recentered = recentered || (g.arrival_handover == Some(handover) && g.arrival_recentered);
-    g.arrival_recentered = recentered;
-    g.imported = true;
-    g.arrival_announce = request.announce;
-    g.arrival_handover = Some(handover);
+    let recentered = hub.guests.update(i, |g| {
+        // A retry of this hand-over's import finds the view already moved: it still answers that
+        // the chunks around the new place are on their way, as the first reply did.
+        let recentered =
+            recentered || (g.arrival_handover == Some(handover) && g.arrival_recentered);
+        g.arrival_recentered = recentered;
+        g.imported = true;
+        g.arrival_announce = request.announce;
+        g.arrival_handover = Some(handover);
+        recentered
+    });
     let records = |key: &str| {
         request
             .parts
@@ -613,7 +608,6 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     Ok(Imported {
         advancements: records("advancements"),
         stats: records("stats"),
-        attachments: request.parts.len() == PARTS.len(),
         parts: request.parts,
         announce: request.announce,
         place: request.place,

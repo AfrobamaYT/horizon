@@ -7,11 +7,12 @@ use syn::{Item, UseTree};
 const CRATES: &[(&str, &str)] = &[
     ("mod_api", "crates/horizon-mod-api/src"),
     ("horizon_core", "crates/horizon-core/src"),
+    ("horizon_mod_runtime", "crates/horizon-mod-runtime/src"),
     ("horizon_world", "crates/horizon-world/src"),
     ("horizon_items", "crates/horizon-items/src"),
     ("horizon_client_core", "crates/horizon-client-core/src"),
     ("horizon_assets", "crates/horizon-assets/src"),
-    ("horizon_mods", "crates/horizon-mods/src"),
+    ("horizon_mod_package", "crates/horizon-mod-package/src"),
 ];
 
 /// One module: its crate, its path below the crate root, and its items.
@@ -110,6 +111,7 @@ impl<'a> Index<'a> {
         let path = self.root.join(dir).join(file);
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         self.read.borrow_mut().push(path.clone());
+        let source = super::super::exports::expand(self.root, &source)?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
         self.expand_includes(file.items)
     }

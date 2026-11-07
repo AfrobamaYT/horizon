@@ -8,21 +8,27 @@ description = "The one runtime for wasm mods: groups packages by their dependenc
 
 [dependencies]
 horizon-mod-api = { path = "../horizon-mod-api", features = ["wasm-host"] }
-horizon-mods = { path = "../horizon-mods", default-features = false }
+horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 horizon-mod-points = { path = "../horizon-mod-points", features = ["wasm-host"] }
 wasmtime = { version = "50", default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std", "parallel-compilation", "pulley"] }
 wit-component = "0.261"
-semver = "1"
 log = "0.4"
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+heck = "0.5"
+wit-parser = "0.261"
 
 [dev-dependencies]
 # `FakeHost`, the host the tests run mods against.
 horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
+wit-component = { version = "0.261", features = ["dummy-module"] }
 # A component built in the test, importing a function this game doesn't have.
 wasm-encoder = "0.261"
 wit-parser = "0.261"
 # The worldgen side of a mod's structure type, driven from worker threads in the bench test.
 horizon-core = { path = "../horizon-core" }
+horizon-client-core = { path = "../horizon-client-core" }
 horizon-world = { path = "../horizon-world" }
 serde_json = "1"
 

@@ -12,6 +12,7 @@ use horizon_client::{
     collisions,
     containers::{BlockEntity, CreakingHeart},
     items::{ItemStack, Items},
+    join_seq::JoinList,
     light::{LightTables, apply_lighting, light_chunk},
     mobs::{
         Damage, MobType, creaking,
@@ -220,6 +221,7 @@ fn goal_name(m: &Mob, name: &str) -> String {
         "RandomSwimming" => "RandomSwimmingGoal",
         "LookAtPlayer" => "LookAtPlayerGoal",
         "RandomLookAround" => "RandomLookAroundGoal",
+        "SpearUse" => "SpearUseGoal",
         "HurtByTarget" => "HurtByTargetGoal",
         "NearestTarget" => "NearestAttackableTargetGoal",
         "Panic" => "PanicGoal",
@@ -282,11 +284,8 @@ fn villager_flag(m: &mut Mob, flag: &str) {
         .unwrap_or_else(|| panic!("unknown mob flag {flag}"));
     match k {
         "profession" => {
-            let p = horizon_client::mobs::render::PROFESSIONS
-                .iter()
-                .position(|p| *p == v)
-                .expect("profession");
-            villager::set_profession(m, p as u8);
+            let p = villager::profession_index(v).expect("profession");
+            villager::set_profession(m, p);
         }
         "level" => m.extra.villager_level = v.parse().unwrap(),
         "xp" => {
@@ -331,7 +330,7 @@ fn spawn_seed(index: usize) -> i64 {
 /// draws from the level's random and joins the scenario's mobs next tick,
 /// seeded as the oracle seeds what a tick spawned.
 fn summon_golem(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     a: usize,
     needed: usize,
     w: &MobWorld,
@@ -371,7 +370,7 @@ fn summon_golem(
 /// Villager events that act at once in vanilla (`TradeWithVillager` and
 /// `VillagerMakeLove` write the other villager directly).
 fn villager_events(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     events: &mut Vec<MobEvent>,
     from: usize,
     w: &MobWorld,
@@ -431,7 +430,7 @@ fn villager_events(
                 child.persistent = true;
                 // The flat world is all plains (type 0).
                 child.extra.variant = variant.unwrap_or(0);
-                child.extra.variant2 = villager::NONE;
+                child.extra.profession = Default::default();
                 child.extra.age = -24000;
                 child.extra.bed = Some(bed);
                 let seed = spawn_seed(index);
@@ -454,7 +453,7 @@ fn seen(m: &Mob) -> Seen {
 /// The probe's mobs as a creaking heart sees them: creakings it creates take
 /// the n-th seed from 1000, as the oracle's do.
 struct Host<'a> {
-    mobs: &'a mut Vec<Mob>,
+    mobs: &'a mut JoinList<Mob>,
     added: Vec<Mob>,
     types: &'a MobTypes,
     created: &'a mut i64,
@@ -527,7 +526,7 @@ impl HiveHost for ProbeHive<'_, '_> {
     fn set_honey_level(&mut self, at: [i32; 3], level: i32) {
         self.honey.push((at, level));
     }
-    fn load(&mut self, tag: &horizon_world::nbt::Tag) -> Option<Mob> {
+    fn load(&mut self, tag: &horizon_core::nbt::Tag) -> Option<Mob> {
         let index = self.first + self.added.len();
         let mut m = horizon_client::entity_nbt::mob_from_nbt(
             tag,
@@ -606,7 +605,12 @@ fn player_damage(e: &MobEvent) -> f32 {
         | MobEvent::CubeHurtPlayer { amount, .. }
         | MobEvent::StingPlayer { amount, .. }
         | MobEvent::AttackPlayerWithEffect { amount, .. }
-        | MobEvent::DamagePlayer { amount, .. } => *amount,
+        | MobEvent::DamagePlayer { amount, .. }
+        | MobEvent::IronGolemHit {
+            target: Who::Player,
+            amount,
+            ..
+        } => *amount,
         MobEvent::SonicBoom {
             target: Who::Player,
             ..
@@ -625,7 +629,12 @@ fn player_hurt(player: Option<&PlayerView>, e: &MobEvent) -> bool {
         | MobEvent::CubeHurtPlayer { amount, .. }
         | MobEvent::StingPlayer { amount, .. }
         | MobEvent::AttackPlayerWithEffect { amount, .. }
-        | MobEvent::DamagePlayer { amount, .. } => *amount > 0.0,
+        | MobEvent::DamagePlayer { amount, .. }
+        | MobEvent::IronGolemHit {
+            target: Who::Player,
+            amount,
+            ..
+        } => *amount > 0.0,
         MobEvent::SonicBoom {
             target: Who::Player,
             ..
@@ -840,7 +849,7 @@ fn villager(m: &Mob) -> String {
     };
     let mut s = format!(
         "prof {} lvl {} xp {} food {} age {} inv {} gossip {} rep {} sleep {}",
-        horizon_client::mobs::render::PROFESSIONS[m.extra.variant2 as usize % 15],
+        villager::profession(m.extra.profession.index().unwrap_or(0)).id,
         m.extra.villager_level.max(1),
         villager::xp(m),
         e.map_or(0, |e| e.food_level),
@@ -887,7 +896,10 @@ pub fn main() -> horizon_client::Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let motion = horizon_client::motion::MotionResources::load(root, &assets)?;
-    let data = MobData::load(root, &facts);
+    let data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let types = MobTypes::load(root)?;
     // The types a bee leaving its hive is loaded with (EntityType.loadEntityRecursive).
     let arc_types: HashMap<String, Arc<MobType>> = types
@@ -895,7 +907,9 @@ pub fn main() -> horizon_client::Result<()> {
         .iter()
         .map(|(k, v)| (k.clone(), Arc::new(v.clone())))
         .collect();
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::load(root, registry, &facts, &PackOverlay::NONE, &defaults)?;
     let tables = LightTables::load(root, registry, &facts)?;
@@ -1005,7 +1019,7 @@ pub fn main() -> horizon_client::Result<()> {
         }
         world.day_time = s.time;
         world.game_time = 1000;
-        let mut mobs: Vec<Mob> = Vec::new();
+        let mut mobs = JoinList::<Mob>::default();
         for (i, spec) in s.mobs.iter().enumerate() {
             let kind = types
                 .types
@@ -1124,6 +1138,7 @@ pub fn main() -> horizon_client::Result<()> {
                 ),
                 eye: [p[0], p[1] + f64::from(1.62_f32), p[2]],
                 alive: true,
+                invulnerable: false,
                 creative: s.creative,
                 sneaking: false,
                 swimming: false,
@@ -1173,17 +1188,21 @@ pub fn main() -> horizon_client::Result<()> {
             };
             ($snapshot:expr, $grid:expr) => {
                 MobWorld {
+                    goal_host: None,
                     teams: Default::default(),
                     loop_context: crate::test_resources::server_loop_context(),
                     world: &world,
                     registry,
                     facts: &facts,
                     fluid_tables: &motion.fluids,
+                    attributes: &motion.attributes,
                     movement: &motion.blocks,
                     collision: &collision,
                     suffocation: &suffocation,
                     data: &data,
                     player: player.clone(),
+                    // The probe lends no goal view: no identity to capture.
+                    player_identity: None,
                     controlling_player_movement: None,
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
@@ -1402,14 +1421,28 @@ pub fn main() -> horizon_client::Result<()> {
                 // (LivingEntity.hurtServer), with the sounds they raise.
                 let mut k = from;
                 while k < events.len() {
-                    if let MobEvent::AttackMob {
-                        target,
-                        amount,
-                        source,
-                    } = events[k]
+                    let (hit, toss) = match events[k] {
+                        MobEvent::AttackMob {
+                            target,
+                            amount,
+                            source,
+                        } => (Some((target, amount, source)), false),
+                        // IronGolem.doHurtTarget: thrown up only if the hit landed.
+                        MobEvent::IronGolemHit {
+                            target: Who::Mob(target),
+                            amount,
+                            source,
+                        } => (Some((target, amount, source)), true),
+                        _ => (None, false),
+                    };
+                    if let Some((target, amount, source)) = hit
                         && let Some(t) = mobs.iter_mut().find(|m| m.id == target)
                         && t.damage(&mut test_level.level(), amount, source)
                     {
+                        if toss {
+                            t.velocity.y +=
+                                f64::from(0.4f32) * (1.0 - t.knockback_resistance()).max(0.0);
+                        }
                         let raised = std::mem::take(&mut t.outbox);
                         let n = raised.len();
                         events.splice(k + 1..k + 1, raised);
@@ -1461,7 +1494,13 @@ pub fn main() -> horizon_client::Result<()> {
                     else {
                         continue;
                     };
-                    let tag = horizon_client::entity_nbt::mob_to_nbt(&mobs[i], [0; 4], None, None);
+                    let tag = horizon_client::entity_nbt::mob_to_nbt(
+                        &mobs[i],
+                        [0; 4],
+                        None,
+                        None,
+                        |_| None,
+                    );
                     let flower = horizon_client::mobs::bee::get(&mobs[i]).and_then(|b| b.flower);
                     let mut honey = Vec::new();
                     let stored = {
@@ -1602,8 +1641,8 @@ pub fn main() -> horizon_client::Result<()> {
                     }
                 }
             }
-            mobs.append(&mut born);
-            mobs.append(&mut added);
+            mobs.extend(born);
+            mobs.extend(added);
             for e in &heart_events {
                 match e {
                     HeartEvent::SetBlock(at, st) => world.set(at[0], at[1], at[2], *st)?,

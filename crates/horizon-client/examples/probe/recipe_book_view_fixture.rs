@@ -33,7 +33,9 @@ pub fn main() -> horizon_client::Result<()> {
     let mut book = Book::build(&recipes, &items);
     book.set_display_ids(&index);
     let max = |s: &horizon_client::items::ItemStack| items.get(&s.item).map_or(64, |i| i.max_stack);
-    let names = horizon_client::creative::Names::load(root);
+    let names = horizon_client::creative::Names::load(
+        &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+    );
     let translate = |k: &str| names.get(k).map(str::to_owned);
     let tooltip = |s: &horizon_client::items::ItemStack| {
         horizon_client::item_tooltip::lines(s, items.get(&s.item), &translate)

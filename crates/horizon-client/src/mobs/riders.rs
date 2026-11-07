@@ -2,13 +2,14 @@
 //! vehicle (`EntityAttachments`), the rider steering the vehicle toward its
 //! target (`Mob.getControllingPassenger`, whose navigation and move control
 //! the rider's goals use), and the saved jockey fields. The game links the
-//! two (`game/passengers.rs`) and spawns the jockeys.
+//! two (`game/entities/passengers.rs`) and spawns the jockeys.
 use super::{
     Mob, MobWorld, Seen, Species,
     goals::{JUMP, LOOK, MOVE, TARGET},
 };
+use crate::join_seq::JoinList;
 use horizon_core::geometry::{Aabb, Vec3};
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 /// The goal flags a controlling passenger takes from its vehicle.
 const CONTROLLED: u8 = MOVE | JUMP | LOOK;
@@ -60,6 +61,7 @@ pub fn happy_ghast_attachment(index: usize) -> [f64; 3] {
     let [x, y, z] = SEATS[index.min(SEATS.len() - 1)];
     pt(x, y, z)
 }
+/// `Pig.getDefaultDimensions` and other species' age-specific passenger attachments.
 fn base_attachment(v: &Mob) -> [f64; 3] {
     let baby = v.is_baby();
     // Players and mannequins have no `passengerAttachments`: their box top.
@@ -74,6 +76,7 @@ fn base_attachment(v: &Mob) -> [f64; 3] {
         Species::Donkey => up(1.1125),
         Species::Mule => up(1.2125),
         Species::SkeletonHorse | Species::ZombieHorse => up(1.31875),
+        Species::Pig if baby => up(0.5),
         Species::Pig => up(0.86875),
         // `Hoglin.BABY_DIMENSIONS` and `EntityType.HOGLIN`.
         Species::Hoglin if baby => up(0.875),
@@ -184,7 +187,7 @@ pub fn seat(attachment: [f64; 3], rider_offset: f64, at: Vec3, yaw: f32) -> Vec3
 
 /// `Entity.startRiding`: the link it makes, `rider` on `vehicle` as its first
 /// passenger (`addPassenger`).
-pub fn link(mobs: &mut [Mob], rider: u32, vehicle: u32) {
+pub fn link(mobs: &mut JoinList<Mob>, rider: u32, vehicle: u32) {
     if rider == vehicle {
         return;
     }
@@ -226,7 +229,7 @@ fn top_passenger(mobs: &[Mob], vehicle: u32, counter: i32) -> u32 {
 /// Not the vehicle it is on already, nor one it carries itself, and only
 /// after its boarding cooldown, onto a vehicle with no passenger
 /// (`canRide`, `canAddPassenger`). Returns whether it boarded.
-pub fn start_riding(mobs: &mut [Mob], rider: u32, vehicle: u32) -> bool {
+pub fn start_riding(mobs: &mut JoinList<Mob>, rider: u32, vehicle: u32) -> bool {
     // `Shulker.startRiding` puts its attach face back before the ride is
     // decided, so a shulker that is refused still ends up lid up.
     if let Some(m) = mobs.iter_mut().find(|m| m.id == rider) {
@@ -418,7 +421,7 @@ pub fn mob_controlled(m: &Mob, w: &MobWorld) -> bool {
 /// Navigation is lent, not copied: goal start/stop/path progress all address
 /// the same object the vehicle ticks. The pathfinder sees the vehicle body.
 pub fn tick(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     index: usize,
     w: &MobWorld,
     level: &mut super::DamageLevel<'_>,
@@ -445,13 +448,7 @@ pub fn tick(
     if owner == index {
         return mobs[index].tick(w, level, events);
     }
-    let (rider, vehicle) = if index < owner {
-        let (left, right) = mobs.split_at_mut(owner);
-        (&mut left[index], &mut right[0])
-    } else {
-        let (left, right) = mobs.split_at_mut(index);
-        (&mut right[0], &mut left[owner])
-    };
+    let [rider, vehicle] = mobs.get_disjoint_mut([index, owner]).unwrap();
     let body = vehicle.path_mob();
     std::mem::swap(&mut rider.ai.nav, &mut vehicle.ai.nav);
     rider.ai.navigation_redirect = Some(Box::new(super::nav::Redirect {
@@ -572,6 +569,35 @@ mod tests {
             1.312_500_059_604_645
         ));
     }
+    /// `Pig.getDefaultDimensions`: BABY_DIMENSIONS overrides PASSENGER.
+    #[test]
+    fn a_baby_pig_uses_its_own_passenger_attachment() {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:pig".into();
+        kind.species = Species::Pig;
+        let kind = std::sync::Arc::new(kind);
+        let mut vehicle = Mob::new(1, kind.clone(), Vec3::new(4.5, 200.0, 4.5), 0.0);
+        let rider = Mob::new(2, kind, Vec3::ZERO, 0.0);
+        for (scale, baby_y, adult_y) in [
+            (0.0, 0.5, 0.868_749_976_158_142_1),
+            (1.0, 0.5, 0.868_749_976_158_142_1),
+            (2.0, 1.0, 1.737_499_952_316_284_2),
+        ] {
+            vehicle.extra.model_scale = scale;
+            for (age, expected) in [(-24000, baby_y), (-1, baby_y), (0, adult_y), (42, adult_y)] {
+                vehicle.extra.age = age;
+                let attachment = passenger_attachment(&vehicle);
+                assert_eq!(attachment, [0.0, expected, 0.0], "age={age}, scale={scale}");
+                let offset = vehicle_attachment(&rider, vehicle.width());
+                assert_eq!(offset, 0.0);
+                assert_eq!(
+                    seat(attachment, offset, vehicle.position, vehicle.yaw),
+                    Vec3::new(4.5, 200.0 + expected, 4.5)
+                );
+            }
+        }
+    }
+
     #[test]
     fn archers_keep_their_distance_and_brawlers_close_in() {
         assert!(ranged(Species::Skeleton) && ranged(Species::Pillager));
@@ -626,43 +652,51 @@ mod tests {
             m
         };
         // Attached to the block to its east (face 5) and saddled by nobody.
-        let mut mobs = [
+        let mut mobs: JoinList<_> = [
             mob(1, "minecraft:shulker", Species::Shulker, 5),
             mob(2, "minecraft:pig", Species::Pig, 0),
-        ];
+        ]
+        .into_iter()
+        .collect();
         assert!(start_riding(&mut mobs, 1, 2), "the shulker boards");
         assert_eq!(mobs[0].extra.variant3, 0, "riding lid up");
         assert_eq!(mobs[1].extra.rider, Some(1));
 
         // A vehicle that already carries someone refuses the board, but the
         // face has already gone back to `DOWN`.
-        let mut refused = [
+        let mut refused: JoinList<_> = [
             mob(1, "minecraft:shulker", Species::Shulker, 3),
             mob(2, "minecraft:pig", Species::Pig, 0),
             mob(9, "minecraft:zombie", Species::Zombie, 0),
-        ];
+        ]
+        .into_iter()
+        .collect();
         refused[1].extra.rider = Some(9);
         assert!(!start_riding(&mut refused, 1, 2));
         assert_eq!(refused[0].extra.variant3, 0);
         assert_eq!(refused[0].extra.mount, None);
 
         // `Entity.startRiding` for anything else leaves the data alone.
-        let mut others = [
+        let mut others: JoinList<_> = [
             mob(1, "minecraft:cow", Species::Cow, 4),
             mob(2, "minecraft:pig", Species::Pig, 0),
-        ];
+        ]
+        .into_iter()
+        .collect();
         assert!(start_riding(&mut others, 1, 2));
         assert_eq!(others[0].extra.variant3, 4);
 
         // A camel takes riders while it carries at most two: the first stays
         // extra.rider, and a fourth is refused.
-        let mut camel_ride = [
+        let mut camel_ride: JoinList<_> = [
             mob(1, "minecraft:husk", Species::Husk, 0),
             mob(2, "minecraft:parched", Species::Parched, 0),
             mob(3, "minecraft:zombie", Species::Zombie, 0),
             mob(4, "minecraft:husk", Species::Husk, 0),
             mob(10, "minecraft:camel_husk", Species::CamelHusk, 0),
-        ];
+        ]
+        .into_iter()
+        .collect();
         assert!(start_riding(&mut camel_ride, 1, 10), "first rider boards");
         assert_eq!(camel_ride[4].extra.rider, Some(1), "first rider is driver");
         assert!(start_riding(&mut camel_ride, 2, 10), "second rider boards");
@@ -673,11 +707,13 @@ mod tests {
         assert_eq!(camel_ride[3].extra.mount, None);
 
         // Any other mob carries one.
-        let mut single = [
+        let mut single: JoinList<_> = [
             mob(1, "minecraft:zombie", Species::Zombie, 0),
             mob(2, "minecraft:husk", Species::Husk, 0),
             mob(10, "minecraft:chicken", Species::Chicken, 0),
-        ];
+        ]
+        .into_iter()
+        .collect();
         assert!(start_riding(&mut single, 1, 10));
         assert!(!start_riding(&mut single, 2, 10));
     }

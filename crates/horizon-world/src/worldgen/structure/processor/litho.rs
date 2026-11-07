@@ -348,21 +348,23 @@ impl SetBlock {
 #[cfg(test)]
 mod tests {
     use super::super::{BlockInfo, PlaceSettings, ProcessorList, process_list};
-    use crate::{
-        heightmap::HeightmapType,
-        nbt::{JavaString, Tag},
-        registry::{BlockRegistry, BlockStateId},
-        worldgen::{
-            anchor::WorldGenerationContext,
-            block_feature::FeatureBlockBindings,
-            placement::{PlacementContext, PlacementQueryError},
-            structure::{
-                Rotation, StateTransforms, StructureResources, template::parse_state_string,
-            },
-        },
-    };
     use serde_json::{Value, json};
     use std::collections::{BTreeMap, BTreeSet};
+    use {
+        crate::{
+            heightmap::HeightmapType,
+            registry::{BlockRegistry, BlockStateId},
+            worldgen::{
+                anchor::WorldGenerationContext,
+                block_feature::FeatureBlockBindings,
+                placement::{PlacementContext, PlacementQueryError},
+                structure::{
+                    Rotation, StateTransforms, StructureResources, template::parse_state_string,
+                },
+            },
+        },
+        horizon_core::nbt::{JavaString, Tag},
+    };
 
     /// Every combination of `properties`' values, the first one the default.
     fn states(name: &str, properties: &[(&str, &[&str])]) -> Vec<Value> {

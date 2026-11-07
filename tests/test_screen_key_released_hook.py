@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from native_hook_sources import native_hook_sources
+
 from test_world_input_capture import method
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +16,7 @@ class ScreenKeyReleasedHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_cancelled_release_still_releases_every_binding(self):
         source = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        hooks = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
+        hooks = native_hook_sources()
         gate = method(hooks.replace("pub(super) fn", "fn"), "screen_key_released")
         mapping = method(source, "mapped_key_event")
         button = method(source.replace("fn keyboard_button(", "    fn keyboard_button("), "keyboard_button")
@@ -47,7 +49,7 @@ struct Settings { keys: Bindings }
 struct Game { keys: HashSet<i32>, settings: Settings, screen: bool, title: Option<()>, modifiers: u32,
     open: bool, cancel: bool, calls: Cell<usize>, handled: usize, released: Vec<(bool, i32)> }
 impl Game {
-    fn dialog_open(&self) -> bool { false }
+    fn screen_over_playing(&self) -> bool { false }
     fn screen_view_now(&self) -> Option<&'static str> { self.open.then_some("options") }
     fn native_screen_key_released_pre(&self, screen: &&str, name: &str, modifiers: u32, canceled: &mut bool) {
         assert_eq!((*screen, name, modifiers), ("options", "key.keyboard.a", 5));

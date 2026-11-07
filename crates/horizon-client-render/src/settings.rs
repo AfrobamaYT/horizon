@@ -18,7 +18,7 @@ pub fn set_source_volumes(volumes: [f32; 11]) {
 pub fn sound_source(event: &str) -> usize {
     let e = event.trim_start_matches("minecraft:");
     let index = |name: &str| SOUND_SOURCES.iter().position(|n| *n == name).unwrap_or(0);
-    const HOSTILE: [&str; 25] = [
+    const HOSTILE: [&str; 34] = [
         "zombie",
         "skeleton",
         "creeper",
@@ -44,6 +44,16 @@ pub fn sound_source(event: &str) -> usize {
         "silverfish",
         "zombified_piglin",
         "wither_skeleton",
+        "bogged",
+        "breeze",
+        "endermite",
+        "parched",
+        "warden",
+        "zombie_villager",
+        "vex",
+        "wither",
+        // Monster's common hurt/death (e.g. Giant) and other shared sounds.
+        "hostile",
     ];
     if e == "block.potent_sulfur.noxious_gas" {
         // PotentSulfurBlock.animateTick, its only caller, plays it as AMBIENT.
@@ -328,11 +338,21 @@ impl Settings {
             .map_or(-1, |i| i as i32)
     }
     pub fn load(path: &Path) -> Self {
-        let horizon = path
+        let mut horizon = path
             .parent()
             .map(crate::graphics::Graphics::load)
             .unwrap_or_default();
         crate::mipmap::set_dither_cutouts(horizon.dither_cutout_mips);
+        if let Some(dir) = path.parent() {
+            let (key, _) = crate::shader_pack_list::resolve(
+                &crate::logging::shared_dir(dir).join(crate::shader_pack_list::DIR),
+                &horizon.shader_pack,
+            );
+            if key != horizon.shader_pack {
+                horizon.shader_pack = key;
+                horizon.save(dir);
+            }
+        }
         let controller = path
             .parent()
             .map(crate::gamepad::PadSettings::load)
@@ -840,6 +860,16 @@ pub enum Opt {
     MaxAnisotropy,
 }
 
+impl Settings {
+    /// GUI scaling inputs for this settings owner.
+    pub fn gui_scale_inputs(&self) -> crate::hud::GuiScale {
+        crate::hud::GuiScale {
+            requested: self.gui_scale,
+            unicode: self.force_unicode,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,6 +886,61 @@ mod tests {
             horizon_narrator::Status::Off
         );
     }
+    /// `Monster.getSoundSource`: the verified families and inherited common sounds.
+    #[test]
+    fn hostile_families_keep_their_sound_category() {
+        for (event, source) in [
+            ("entity.zombie.hurt", 5),
+            ("entity.cow.hurt", 6),
+            ("block.stone.break", 4),
+            ("entity.player.hurt", 7),
+            ("entity.arrow.hit", 7),
+            ("music_disc.13", 2),
+            ("item.goat_horn.sound.0", 2),
+            ("weather.rain", 3),
+            ("ambient.cave", 8),
+        ] {
+            assert_eq!(sound_source(event), source, "{event}");
+        }
+        // Explicit sources still take precedence, including H331's arrow route.
+        let mut audio = crate::audio::Audio::silent(
+            &horizon_assets::resource_source::ResourceSource::directory(
+                Path::new("/nonexistent/h068-audio").to_path_buf(),
+            ),
+        );
+        audio.capture = Some(Vec::new());
+        audio.play_on(6, "minecraft:entity.arrow.hit", Some([1.0; 3]), 1.0, 1.0);
+        audio.play_on(4, "minecraft:entity.warden.hurt", Some([1.0; 3]), 1.0, 1.0);
+        assert_eq!(
+            audio
+                .capture
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|s| s.source)
+                .collect::<Vec<_>>(),
+            [6, 4]
+        );
+        for family in [
+            "bogged",
+            "breeze",
+            "endermite",
+            "parched",
+            "warden",
+            "zombie_villager",
+            "vex",
+            "wither",
+            "hostile",
+        ] {
+            for suffix in ["hurt", "death"] {
+                for prefix in ["", "minecraft:"] {
+                    let event = format!("{prefix}entity.{family}.{suffix}");
+                    assert_eq!(sound_source(&event), 5, "{event}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn three_d_skin_layers_move_from_options_txt_to_the_extras_file() {
         // #8091 wrote the switch into options.txt; a player who had it on keeps

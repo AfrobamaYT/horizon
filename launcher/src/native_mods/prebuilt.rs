@@ -4,10 +4,10 @@
 //! anything runs: a mod set the prebuilt game can't serve, or a revision with no prebuilt
 //! release, builds from source, and the build log says why. A prebuilt build that fails is an
 //! error like any other build's, never retried from source.
-use super::{api, dependencies, inject, internals, Profile, Target};
+use super::{api, dependencies, internals, Profile, Target};
 use crate::i18n::{tr, trf};
 use crate::rust_toolchain::{self, Toolchain};
-use horizon_mods::index::native;
+use horizon_mod_package::index::native;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
@@ -145,20 +145,6 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
         }
         None
     }
-}
-
-/// Checks `injections` against the prebuilt `game`'s points. A target that isn't a point is an
-/// error on any route, as is a method that isn't its point's: the source route stages the same
-/// points.
-pub(super) fn serves_points(
-    game: &Path,
-    injections: &[inject::PointInjection],
-) -> Result<(), String> {
-    if injections.is_empty() {
-        return Ok(());
-    }
-    let points = inject::listed(&game.join(inject::POINTS))?;
-    inject::check(injections, &points).map_err(|error| error.to_string())
 }
 
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
@@ -503,8 +489,11 @@ pub(super) fn compile(
         .map(|&i| &projects[i].bundle.manifest)
         .collect();
     let main = out.join("main.rs");
-    fs::write(&main, api::main_rs(&template, &manifests, &catalog.points))
-        .map_err(|e| e.to_string())?;
+    fs::write(
+        &main,
+        api::main_rs(&template, &manifests, &catalog.points, &catalog.sites),
+    )
+    .map_err(|e| e.to_string())?;
     let binary = out.join(crate::backend::CLIENT);
     let mut cmd = rustc(rust, game, out, "2024");
     cmd.args(["--crate-type", "bin", "--crate-name", "horizon_native_game"])
@@ -513,9 +502,11 @@ pub(super) fn compile(
         .arg("--extern")
         .arg(format!("mod_api={}", api_library.display()))
         .arg("--extern")
+        .arg(format!("mod_points={}", libraries["mod_points"].display()))
+        .arg("--extern")
         .arg(format!(
-            "horizon_mods={}",
-            library(&deps, "horizon_mods")?.display()
+            "horizon_mod_package={}",
+            library(&deps, "horizon_mod_package")?.display()
         ));
     for (position, &index) in resolution.order.iter().enumerate() {
         let id = projects[index].bundle.manifest.id.as_str();
@@ -567,6 +558,30 @@ mod tests {
         .unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         refusal(&[api::Project::read(&bundle).unwrap()], Profile::Optimized)
+    }
+
+    #[test]
+    fn only_the_exact_build_of_the_prebuilt_game_is_accepted() {
+        let dir = super::super::tests::dir("prebuilt-exact-build");
+        let check = |commit: &str, rustc: &str, target: &str, side: &str| {
+            let identity = serde_json::json!({
+                "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
+            });
+            fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
+            check_identity(&dir, "abc123", "x86_64-pc-windows-gnu", Target::Client)
+        };
+        let rustc = format!("rustc x\nrelease: {}\nhost: y", rust_toolchain::VERSION);
+        let host = "x86_64-pc-windows-gnu";
+        assert_eq!(check("abc123", &rustc, host, "client"), Ok(()));
+        assert!(check("abc124", &rustc, host, "client").is_err());
+        assert!(check("abc123", &rustc, "x86_64-unknown-linux-gnu", "client").is_err());
+        assert!(check("abc123", &rustc, host, "server").is_err());
+        assert!(check("abc123", "rustc x\nrelease: 0.0.1", host, "client").is_err());
+        let longer = format!("release: {}.1", rust_toolchain::VERSION);
+        assert!(check("abc123", &longer, host, "client").is_err());
+        fs::remove_file(dir.join(IDENTITY)).unwrap();
+        assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

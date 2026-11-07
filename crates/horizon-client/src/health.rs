@@ -92,8 +92,8 @@ pub struct DamageLevel<'a> {
     tags: Option<&'a crate::items::Items>,
     block_registries: Option<&'a crate::command::args::Registries>,
     random: &'a mut horizon_core::random::LegacyRandom,
-    attachments: &'a mut horizon_world::attachments::Attachments,
-    attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+    attachments: &'a mut horizon_mod_runtime::attachments::Attachments,
+    attachment_syncs: &'a mut crate::fast_hash::FxHashSet<horizon_mod_runtime::attachments::Holder>,
     /// The game's hooks; none on a client predicting its own mount: they are the server's.
     hooks: Option<&'a DamageHooks>,
     /// Who attacks in this hit and what they hold: the facts of the site that built the level.
@@ -217,13 +217,13 @@ impl<'a> DamageLevel<'a> {
     /// block entity or entity's are not reachable from a hit: `MissingHolder`.
     pub fn attachments(
         &mut self,
-        holder: horizon_world::attachments::Holder,
+        holder: horizon_mod_runtime::attachments::Holder,
     ) -> std::result::Result<
-        &mut horizon_world::attachments::Attachments,
-        horizon_world::attachments::AttachmentError,
+        &mut horizon_mod_runtime::attachments::Attachments,
+        horizon_mod_runtime::attachments::AttachmentError,
     > {
-        if holder != horizon_world::attachments::Holder::Level {
-            return Err(horizon_world::attachments::AttachmentError::MissingHolder);
+        if holder != horizon_mod_runtime::attachments::Holder::Level {
+            return Err(horizon_mod_runtime::attachments::AttachmentError::MissingHolder);
         }
         self.attachment_syncs.insert(holder);
         Ok(self.attachments)
@@ -256,8 +256,8 @@ impl<'a> DamageLevel<'a> {
 /// elsewhere (the mob tick), and put back after.
 pub struct LentLevel {
     random: horizon_core::random::LegacyRandom,
-    attachments: horizon_world::attachments::Attachments,
-    attachment_syncs: crate::fast_hash::FxHashSet<horizon_world::attachments::Holder>,
+    attachments: horizon_mod_runtime::attachments::Attachments,
+    attachment_syncs: crate::fast_hash::FxHashSet<horizon_mod_runtime::attachments::Holder>,
 }
 impl LentLevel {
     /// Take `world`'s random and attachments: until [`Self::give_back`] the world has a
@@ -458,6 +458,14 @@ pub struct HealthResources {
 }
 impl HealthResources {
     pub fn load(root: &Path) -> Result<Self> {
+        Self::load_with_conditions(root, &horizon_world::conditions::LoadConditions::vanilla())
+    }
+    /// Startup damage resources use the same engine-owned server inventory
+    /// as the other tables, before any world pack stack exists.
+    pub fn load_with_conditions(
+        root: &Path,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Result<Self> {
         let read = |name: &str| -> Result<serde_json::Value> {
             Ok(serde_json::from_slice(&fs::read(root.join(name))?)?)
         };
@@ -467,7 +475,13 @@ impl HealthResources {
                 ids[name].as_u64().ok_or("missing player float ID")?,
             )?)
         };
-        let damage = Catalog::load(root, &horizon_world::loot::PackOverlay::NONE)?;
+        let damage = Catalog::load(
+            root,
+            &horizon_world::loot::PackOverlay {
+                conditions,
+                ..horizon_world::loot::PackOverlay::NONE
+            },
+        )?;
         for name in ["minecraft:fall", "minecraft:stalagmite", "minecraft:starve"] {
             if damage.id(name).is_none() {
                 return Err(format!("missing damage type {name}").into());

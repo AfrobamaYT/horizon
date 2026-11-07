@@ -128,7 +128,11 @@ pub fn main() -> Result<()> {
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
     let defaults = horizon_world::item_defaults::read(root)?;
-    let renderer = BlockEntityRenderer::load(root, registry, &defaults)?;
+    let renderer = BlockEntityRenderer::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        registry,
+        &defaults,
+    )?;
     let tags = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     let frames = tags
         .block_tags

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
 class RemoteMotionTests(unittest.TestCase):
     def test_mob_velocity_reaches_squid_animation(self):
-        source = (ROOT / "crates/horizon-client/src/game/remote.rs").read_text()
+        source = (next(ROOT.glob('crates/horizon-client/src/game/*/remote/mod.rs'))).read_text()
         start = source.index("    fn remote_motion(")
         end = source.index("    fn apply_remote_health(", start)
         fixture = r'''
@@ -22,6 +22,15 @@ struct Vec3(f64, f64, f64);
 impl Vec3 { fn new(x: f64, y: f64, z: f64) -> Self { Self(x,y,z) } }
 #[derive(Default)]
 struct Entity { id: u32, velocity: Vec3 }
+// The standalone probe needs the scoped list operation used by cart motion.
+trait EditEntity {
+    fn update<R>(&mut self, i: usize, edit: impl FnOnce(&mut Entity) -> R) -> R;
+}
+impl EditEntity for Vec<Entity> {
+    fn update<R>(&mut self, i: usize, edit: impl FnOnce(&mut Entity) -> R) -> R {
+        edit(&mut self[i])
+    }
+}
 #[derive(Default)]
 struct Remote { pending_items: HashMap<i32, ((), Vec3)> }
 #[derive(Default)]
@@ -32,7 +41,7 @@ impl Potions { fn remote_thrown_motion(&mut self, _id: u32, _v: Vec3) -> bool { 
 #[derive(Default)]
 struct End;
 impl End { fn remote_eye_motion(&mut self, _id: u32, _v: [f64; 3]) {} }
-// game/mob_index.rs: the same answers as a linear search.
+// game/mobs/mob_index.rs: the same answers as a linear search.
 #[derive(Default)]
 struct MobIndex;
 impl MobIndex {
@@ -64,6 +73,9 @@ fn main() {
     }
     game.remote_motion(43, [0.1, 0.2, 0.3]);
     assert_eq!(game.dropped[0].velocity, Vec3::new(0.1, 0.2, 0.3));
+    game.carts.push(Entity { id: 44, ..Entity::default() });
+    game.remote_motion(44, [-0.7, 0.25, 1.5]);
+    assert_eq!(game.carts[0].velocity, Vec3::new(-0.7, 0.25, 1.5));
     game.remote_motion(999, [1.0; 3]); // Untracked entity is harmless.
 }
 '''.replace("METHOD", source[start:end])

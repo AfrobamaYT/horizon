@@ -1,7 +1,7 @@
 //! Declared internals and typed raw listeners, shared by both native build routes.
-use super::{api, inject};
+use super::{api, inject, sites};
 use crate::i18n::trf;
-use horizon_mods::internals::{self, ListedInternal};
+use horizon_mod_package::internals::{self, ListedInternal};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -14,6 +14,7 @@ pub(super) const INTERNALS: &str = "internals.json";
 pub(super) struct Catalog {
     pub(super) internals: Vec<ListedInternal>,
     pub(super) points: Vec<inject::ListedPoint>,
+    pub(super) sites: Vec<sites::Site>,
     pub(super) discovery: bool,
 }
 
@@ -24,6 +25,7 @@ pub(super) struct Facade {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Error {
+    Inject(horizon_mod_package::manifest::inject::InjectError),
     Missing {
         mod_id: String,
         path: String,
@@ -49,11 +51,20 @@ pub(super) enum Error {
     Path {
         path: String,
     },
+    NotSite {
+        mod_id: String,
+        line: String,
+    },
+    SiteKind {
+        mod_id: String,
+        injection: String,
+    },
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
+            Self::Inject(error) => return error.fmt(f),
             Self::Missing { mod_id, path } => trf(
                 "E_INTERNAL_MISSING: {mod} uses {path}, which this game doesn't have; run cargo horizon-mod internals sync to discover this pin's used internals.",
                 &[("mod", mod_id), ("path", path)],
@@ -73,6 +84,14 @@ impl std::fmt::Display for Error {
             Self::NotRaw { mod_id, target } => trf(
                 "E_NOT_RAW: {mod}: {target} has no raw form: it is generic or takes impl Trait.",
                 &[("mod", mod_id), ("target", target)],
+            ),
+            Self::NotSite { mod_id, line } => trf(
+                "E_NOT_SITE: {mod}: add `{line}` to crates/horizon-mod-api-gen/slots/{mod}.txt and rebuild the game; this call is not a compiled-in site.",
+                &[("mod", mod_id), ("line", line)],
+            ),
+            Self::SiteKind { mod_id, injection } => trf(
+                "E_SITE_KIND: {mod}: injection {injection}: WRAP_WITH_CONDITION requires a unit-returning call.",
+                &[("mod", mod_id), ("injection", injection)],
             ),
             Self::Path { path } => trf(
                 "E_INTERNAL_PATH: {path} cannot be re-exported as a declared internal; declare its types or free functions instead.",
@@ -114,23 +133,29 @@ impl From<internals::Error> for Error {
 impl Catalog {
     pub(super) fn read(dir: &Path) -> Result<Self, String> {
         let path = dir.join(INTERNALS);
+        let listed = inject::catalog(&dir.join(inject::POINTS))?;
         Ok(Self {
             internals: internals::read(&path)?,
-            points: inject::listed(&dir.join(inject::POINTS))?,
+            points: listed.points,
+            sites: listed.sites,
             discovery: false,
         })
     }
 
-    pub(super) fn check(&self, manifest: &horizon_mods::Manifest) -> Result<(), Error> {
+    pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
+        super::slots::check(self, manifest).map_err(Error::Inject)?;
         let Some(native) = &manifest.native else {
             return Ok(());
         };
         for declared in &native.internals {
             internals::check(&self.internals, &manifest.id, declared)?;
         }
+        for injection in sites::of(manifest) {
+            sites::check(&self.sites, manifest, injection)?;
+        }
         for injection in inject::raw_of(manifest) {
             if !self.points.iter().any(|point| {
-                point.target == injection.target
+                plain_path(&point.target) == plain_path(&injection.target)
                     && point.raw
                     && point.listener.is_some()
                     && point.return_listener.is_some()
@@ -146,7 +171,7 @@ impl Catalog {
 
     pub(super) fn prepare<'a>(
         &self,
-        manifests: impl IntoIterator<Item = &'a horizon_mods::Manifest>,
+        manifests: impl IntoIterator<Item = &'a horizon_mod_package::Manifest>,
     ) -> Result<BTreeMap<&'a str, Facade>, Error> {
         manifests
             .into_iter()
@@ -161,12 +186,15 @@ impl Catalog {
             .collect()
     }
 
-    pub(super) fn log_raw(&self, manifest: &horizon_mods::Manifest) -> Result<(), String> {
+    pub(super) fn log_raw(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), String> {
+        for decision in super::slots::report(manifest) {
+            super::append_log(&decision)?;
+        }
         for injection in inject::raw_of(manifest) {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let place = point.place(injection.at_return);
             super::append_log(&trf(
@@ -174,12 +202,19 @@ impl Catalog {
                 &[("mod", &manifest.id), ("point", &place)],
             ))?;
         }
+        for injection in sites::of(manifest) {
+            let site = sites::find(&self.sites, injection).expect("site checked");
+            super::append_log(&trf(
+                "{mod} listens raw at {point}",
+                &[("mod", &manifest.id), ("point", &site.name)],
+            ))?;
+        }
         Ok(())
     }
 
     /// Discovery opens the staged view, not the production declaration boundary. Keep the
     /// exact raw constructors from the normal facade; they are not internal-use declarations.
-    fn discovery_facade(&self, manifest: &horizon_mods::Manifest) -> Result<Facade, Error> {
+    fn discovery_facade(&self, manifest: &horizon_mod_package::Manifest) -> Result<Facade, Error> {
         let mut manifest = manifest.clone();
         manifest
             .native
@@ -205,7 +240,7 @@ impl Catalog {
     }
 
     /// Re-exports are the compiler's boundary: no module wildcard can widen the declaration.
-    pub(super) fn facade(&self, manifest: &horizon_mods::Manifest) -> Result<Facade, Error> {
+    pub(super) fn facade(&self, manifest: &horizon_mod_package::Manifest) -> Result<Facade, Error> {
         self.check(manifest)?;
         let mut tree = Module::default();
         let mut crates = BTreeSet::from(["horizon_client".into()]);
@@ -232,7 +267,7 @@ impl Catalog {
             let point = self
                 .points
                 .iter()
-                .find(|point| point.target == injection.target)
+                .find(|point| plain_path(&point.target) == plain_path(&injection.target))
                 .expect("raw target checked");
             let listener = if injection.at_return {
                 &point.return_listener
@@ -263,8 +298,16 @@ impl Catalog {
                 .and_then(|name| name.strip_suffix("Listener"))
                 .expect("generated listener name");
             constructors.insert(format!(
-                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::RawListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::RawListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
+                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::SlotListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::SlotListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
             ));
+        }
+        for injection in sites::of(manifest) {
+            sites::find(&self.sites, injection)
+                .expect("site checked")
+                .facade(&mut exports, &mut constructors, &mut crates);
+        }
+        for (_, site) in super::slots::sites(&self.sites, manifest) {
+            site.facade(&mut exports, &mut constructors, &mut crates);
         }
         for export in exports {
             text.push_str(&export);
@@ -293,22 +336,7 @@ impl Catalog {
         } else {
             &entry.path
         };
-        // Generic arguments belong to a fingerprint, not to a `use` path.
-        let mut depth = 0;
-        let path: String = path
-            .chars()
-            .filter(|&c| match c {
-                '<' => {
-                    depth += 1;
-                    false
-                }
-                '>' => {
-                    depth -= 1;
-                    false
-                }
-                _ => depth == 0,
-            })
-            .collect();
+        let path = plain_path(path);
         syn::parse_str::<syn::Path>(&path).map_err(|_| invalid())?;
         if !member {
             return Ok(path);
@@ -341,6 +369,24 @@ impl Catalog {
         }
         Err(invalid())
     }
+}
+
+/// Generic arguments belong to a fingerprint, not to a use path or a site target's identity.
+pub(super) fn plain_path(path: &str) -> String {
+    let mut depth = 0;
+    path.chars()
+        .filter(|&c| match c {
+            '<' => {
+                depth += 1;
+                false
+            }
+            '>' => {
+                depth -= 1;
+                false
+            }
+            _ => depth == 0 && !c.is_whitespace(),
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -378,14 +424,15 @@ impl Module {
     }
 }
 
-pub(super) fn needed(manifest: &horizon_mods::Manifest) -> bool {
-    manifest.native.as_ref().is_some_and(|native| {
-        !native.internals.is_empty()
-            || native
-                .injection
-                .iter()
-                .any(|injection| injection.raw.is_some())
-    })
+pub(super) fn needed(manifest: &horizon_mod_package::Manifest) -> bool {
+    !manifest.inject.is_empty()
+        || manifest.native.as_ref().is_some_and(|native| {
+            !native.internals.is_empty()
+                || native
+                    .injection
+                    .iter()
+                    .any(|injection| injection.raw.is_some())
+        })
 }
 
 pub(super) fn package(id: &str) -> String {
@@ -424,20 +471,21 @@ mod tests {
         let dir = super::super::tests::dir(&format!("internals-{name}"));
         super::super::tests::write_bundle(&dir, "example", "");
         fs::write(dir.join("Cargo.toml"), "[package]\nname='example'\nversion='1.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api={version='0.1'}\n").unwrap();
-        let path = dir.join(horizon_mods::manifest::MANIFEST);
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap().replace("[native]", "[native]\ninternals = [{ path = 'horizon_client::game::Game', hash = '1234' }, { path = 'horizon_client::game::maps::dimension_id', hash = '5678' }]")
             + "[[native.injection]]\nid = 'count'\ntarget = \"horizon_client::game::Game<'_>::tick\"\nkind = 'HEAD'\nraw = 'count'\n";
         fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let catalog = Catalog {
             discovery: false,
+            sites: Vec::new(),
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
                 { "path": "horizon_client::game::maps::Game<'_>::dimension_id", "kind": "method", "signature": "impl Game<'_> { fn dimension_id(&self) -> u8 }", "hash": "abcd" }
             ])).unwrap(),
             points: serde_json::from_value(serde_json::json!([
-                { "name": "tick", "target": "horizon_client::game::Game<'_>::tick", "raw": true,
+                { "name": "tick", "target": "horizon_client::game::Game<'_>::tick", "raw": true, "at_return": true,
                     "listener": "horizon_client::game::__TickListener", "return_listener": "horizon_client::game::__TickReturnListener" }
             ])).unwrap(),
         };
@@ -461,7 +509,7 @@ mod tests {
         assert!(!source.contains("pub use lower;"));
         assert!(!source.contains("pub use lower::Shape;"));
         assert!(source.contains("pub use horizon_client::game::__TickListener;"));
-        assert!(source.contains("mod_points::__private::RawListener::new"));
+        assert!(source.contains("mod_points::__private::SlotListener::new"));
         assert!(!normal.contains("pub use horizon_client::*;"));
         assert_eq!(catalog.facade(&bundle.manifest).unwrap().source, normal);
         fs::remove_dir_all(dir).unwrap();
@@ -484,9 +532,9 @@ pub mod raw {
     pub use horizon_client::game::__TickListener;
     pub use horizon_client::game::__TickRaw;
     /// Registers a function of this place's exact listener type.
-    pub const fn tick(id: &'static str, f: __TickListener) -> mod_points::__private::RawListener {
+    pub const fn tick(id: &'static str, f: __TickListener) -> mod_points::__private::SlotListener {
         // SAFETY: `f` has this place's listener type, checked by the signature.
-        unsafe { mod_points::__private::RawListener::new(id, mod_points::PointId::Tick, f as *const ()) }
+        unsafe { mod_points::__private::SlotListener::new(id, mod_points::PointId::Tick, f as *const ()) }
     }
 }
 "#
@@ -499,12 +547,13 @@ pub mod raw {
             include_str!("../../../crates/horizon-client/src/native_main.rs.template"),
             &[&bundle.manifest],
             &catalog.points,
+            &catalog.sites,
         );
         assert!(main.contains("#![forbid(unsafe_code)]"));
         assert!(main.contains(
             "mod_0_internals::raw::tick(\"example\", mod_0::count), // injection \"count\""
         ));
-        assert!(!main.contains("/* MOD_RAW */"));
+        assert!(!main.contains("/* MOD_SLOTS */"));
         assert!(!main.contains("mod_0::__horizon_points"));
         assert!(!main.contains("unsafe {"));
         fs::remove_dir_all(dir).unwrap();
@@ -587,12 +636,12 @@ pub mod raw {
     fn method_entries_export_the_owner_and_return_listeners_use_the_return_place() {
         let (dir, mut bundle, catalog) = fixture("owner-return");
         let native = bundle.manifest.native.as_mut().unwrap();
-        native.internals[1] = horizon_mods::manifest::Internal {
+        native.internals[1] = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::maps::Game<'_>::dimension_id".into(),
             kind: None,
             hash: "abcd".into(),
         };
-        native.injection[0].kind = horizon_mods::manifest::InjectionKind::Return;
+        native.injection[0].kind = horizon_mod_package::manifest::InjectionKind::Return;
         let text = catalog.facade(&bundle.manifest).unwrap().source;
         assert_eq!(
             text.matches("pub use horizon_client::game::Game;").count(),
@@ -604,7 +653,12 @@ pub mod raw {
             text.contains("pub const fn tick_return(id: &'static str, f: __TickReturnListener)")
         );
         assert!(text.contains("PointId::TickReturn"));
-        let main = api::main_rs("/* MOD_RAW */", &[&bundle.manifest], &catalog.points);
+        let main = api::main_rs(
+            "/* MOD_SLOTS */",
+            &[&bundle.manifest],
+            &catalog.points,
+            &catalog.sites,
+        );
         assert!(main.contains("mod_0_internals::raw::tick_return(\"example\", mod_0::count)"));
         fs::remove_dir_all(dir).unwrap();
     }
@@ -618,11 +672,12 @@ pub mod raw {
         field.hash = "field".into();
         field.signature = "u8".into();
         catalog.internals.insert(2, field);
-        bundle.manifest.native.as_mut().unwrap().internals[1] = horizon_mods::manifest::Internal {
-            path: method.path.clone(),
-            kind: Some("method".into()),
-            hash: method.hash,
-        };
+        bundle.manifest.native.as_mut().unwrap().internals[1] =
+            horizon_mod_package::manifest::Internal {
+                path: method.path.clone(),
+                kind: Some("method".into()),
+                hash: method.hash,
+            };
         let facade = catalog.facade(&bundle.manifest).unwrap();
         assert!(facade
             .source
@@ -643,7 +698,7 @@ pub mod raw {
 
     #[test]
     fn source_staging_uses_a_per_mod_facade_and_preserves_the_library_name() {
-        let (dir, bundle, catalog) = fixture("stage");
+        let (dir, bundle, mut catalog) = fixture("stage");
         let path = dir.join("Cargo.toml");
         let text = fs::read_to_string(&path).unwrap()
             + "horizon-internals = { git = 'https://example.invalid/horizon', rev = 'pin' }\n";
@@ -690,6 +745,36 @@ pub mod raw {
         assert!(super::super::crates::wanted(&stage, &BTreeMap::new())
             .unwrap()
             .is_empty());
+        super::super::tests::write_bundle(&dir, "example", "pub fn count<T>(_: &mut T) {}\n");
+        let path = dir.join(horizon_mod_package::manifest::MANIFEST);
+        fs::write(&path, fs::read_to_string(&path).unwrap() + "[[inject]]\nid='/* MOD_ENTRIES *//* MOD_SLOTS */'\nat='horizon_client::net::receive_brand'\nkind='head'\naccess='internals'\nwith='count'\nhash='5678'\n").unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname='example'\nversion='1.0.0'\n[dependencies]\nhorizon-mod-api='0.1'\n",
+        )
+        .unwrap();
+        let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
+        catalog.internals[1].path = "horizon_client::net::receive_brand".into();
+        catalog.internals[1].signature = "fn receive_brand()".into();
+        catalog.points[0].target = catalog.internals[1].path.clone();
+        catalog.points[0].name = "receive_brand".into();
+        catalog.points[0].listener = Some("horizon_client::net::__ReceiveBrandListener".into());
+        let project = api::Project::read(&bundle).unwrap();
+        assert_eq!(super::super::prebuilt::project_refusal(&project), None);
+        api::stage(
+            &stage,
+            &[project],
+            &[vec![]],
+            &super::super::dependencies::Resolution { order: vec![0] },
+            &catalog,
+        )
+        .unwrap();
+        let game = api::read(&stage.join("crates/native-game/Cargo.toml")).unwrap();
+        assert!(game["dependencies"].get("mod_0_internals").is_some());
+        let facade = fs::read_to_string(stage.join("native-internals/example/src/lib.rs")).unwrap();
+        assert!(facade.contains("fn receive_brand("));
+        let main = fs::read_to_string(stage.join("crates/native-game/src/main.rs")).unwrap();
+        assert!(main.contains(".ordered(0, \"/* MOD_ENTRIES *//* MOD_SLOTS */\")"));
         fs::remove_dir_all(stage).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }

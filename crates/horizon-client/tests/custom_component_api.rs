@@ -4,11 +4,11 @@ use horizon_client::{
     content_identity,
     mod_content::{ContentMod, accept_mod, build, known_components},
 };
+use horizon_core::nbt::Tag;
 use horizon_protocol::{
     buf::NBT_QUOTA,
     item::custom::{self, InstallError},
 };
-use horizon_world::nbt::Tag;
 use std::fs;
 use std::path::Path;
 
@@ -79,10 +79,10 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
             format!(r#"{{"template":"minecraft:stone","components":{patch}}}"#),
         )
         .unwrap();
-        let package = horizon_mods::Package::read(&dir).unwrap();
+        let package = horizon_mod_package::Package::read(&dir).unwrap();
         ContentMod {
             id: id.into(),
-            content: horizon_mods::Content::read(&dir, &package.manifest).unwrap(),
+            content: horizon_mod_package::Content::read(&dir, &package.manifest).unwrap(),
             jars: Vec::new(),
         }
     };
@@ -134,7 +134,18 @@ fn registration_limits_and_defaults_are_bound_to_the_connection() {
     fs::create_dir_all(&blockstates).unwrap();
     fs::write(blockstates.join("stone.json"), "{}").unwrap();
     let out = scratch.join("out");
-    build(&base, Path::new(""), &accepted, &out).unwrap();
+    build(
+        &base,
+        Path::new(""),
+        &accepted,
+        &out,
+        &horizon_mod_package::enabled::EnabledMods::new(
+            accepted
+                .iter()
+                .map(|package| (package.id.clone(), horizon_mod_package::Side::Both)),
+        ),
+    )
+    .unwrap();
     let items: serde_json::Value =
         serde_json::from_slice(&fs::read(out.join("items.json")).unwrap()).unwrap();
     assert_eq!(

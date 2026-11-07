@@ -20,7 +20,7 @@ fn a_trident_joining_after_tracking_is_paired_before_its_throw_sound() {
     );
     let (mut hub, rx) = hub_with_sync(sync);
     hub.sync_attachments = true;
-    hub.guests[0].sent_chunks.insert((0, 0));
+    hub.guests.update(0, |g| g.sent_chunks.insert((0, 0)));
     let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
     let border = crate::worldborder::WorldBorder::default();
     let mut next_entity = 38;
@@ -105,7 +105,7 @@ fn a_captured_sound_reaches_the_client_before_its_emitter_is_removed() {
         horizon_protocol::registry::Ids::from_names(vec!["minecraft:mooshroom".into()]),
     );
     let (mut hub, rx) = hub_with_sync(sync);
-    hub.guests[0].sent_chunks.insert((0, 0));
+    hub.guests.update(0, |g| g.sent_chunks.insert((0, 0)));
     let mooshroom = EntityState {
         id: 37,
         uuid: 37,
@@ -183,7 +183,7 @@ fn a_new_pair_does_not_reorder_sounds_or_remove_an_old_emitter_early() {
                 ]),
             );
             let (mut hub, rx) = hub_with_sync(sync);
-            hub.guests[0].sent_chunks.insert((0, 0));
+            hub.guests.update(0, |g| g.sent_chunks.insert((0, 0)));
             let old = EntityState {
                 id: 37,
                 uuid: 37,
@@ -400,7 +400,7 @@ fn captured_entity_sound_routes_by_player_dimension_range_and_exclusion() {
         entity: Some(37),
         except_entity: None,
     };
-    hub.guests[0].position = [0.0; 3];
+    hub.guests.update(0, |g| g.position = [0.0; 3]);
     // The server broadcasts by distance even if this player does not track
     // the emitter; the receiving client decides whether it knows that id.
     hub.captured_sound(&sound, None);
@@ -423,11 +423,17 @@ fn captured_entity_sound_routes_by_player_dimension_range_and_exclusion() {
     random.next_long();
     assert!(rx.try_recv().is_err());
 
-    hub.guests[0].position = [16.0, 0.0, 0.0];
+    {
+        let value = [16.0, 0.0, 0.0];
+        hub.guests.update(0, |g| g.position = value);
+    }
     hub.captured_sound(&sound, None);
     random.next_long();
     assert!(rx.try_recv().is_err(), "the radius itself is excluded");
-    hub.guests[0].position = [15.99, 0.0, 0.0];
+    {
+        let value = [15.99, 0.0, 0.0];
+        hub.guests.update(0, |g| g.position = value);
+    }
     hub.captured_sound(&sound, None);
     let C::SoundEntity(packet) = next_sent_packet(&rx) else {
         panic!("expected entity sound")
@@ -438,12 +444,21 @@ fn captured_entity_sound_routes_by_player_dimension_range_and_exclusion() {
         "rejected broadcasts still draw their seeds"
     );
 
-    hub.guests[0].dimension = "minecraft:the_nether".into();
+    {
+        let value = "minecraft:the_nether".into();
+        hub.guests.update(0, |g| g.dimension = value);
+    }
     hub.captured_sound(&sound, None);
     random.next_long();
     assert!(rx.try_recv().is_err());
-    hub.guests[0].dimension = "minecraft:overworld".into();
-    hub.guests[0].placed = false;
+    {
+        let value = "minecraft:overworld".into();
+        hub.guests.update(0, |g| g.dimension = value);
+    }
+    {
+        let value = false;
+        hub.guests.update(0, |g| g.placed = value);
+    }
     hub.captured_sound(&sound, None);
     random.next_long();
     assert!(rx.try_recv().is_err());

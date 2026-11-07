@@ -247,14 +247,14 @@ data component in `components`; a block's item takes `components` too).
 
 How the game loads them, without touching vanilla's path:
 
-- Horizon reads everything from one resource root. Resource packs already work as an
-  **overlay root** (`packs::startup_root`) with vanilla's files linked and the overridden ones
-  rewritten. Content mods add one more layer: the enabled mods' `assets/` and `data/`, and the
-  prepared per-state tables (`facts.json`, `gameplay-facts.json`, `block-behaviours.json`, the
-  collision, occlusion and movement tables, `model-states.json`, `render-definitions.json`,
-  `items.json`, ...). Each table gets the mod blocks' rows appended, copied from the template's
-  rows with the declared overrides. The loaders then read one tree and need no mod-specific
-  code.
+- `packs::startup_root` keeps prepared tables, disposable caches and resolved resource reads separate.
+  Enabled mods' `assets/` and `data/` are lazy layers over vanilla; folders and open jars use the same
+  interface. Selected resource packs override the asset view without changing the server's data layers.
+  Jar code is never executed, and raw jar entries are not copied into a generated resource tree.
+  Content mods still generate per-state tables (`facts.json`, `gameplay-facts.json`,
+  `block-behaviours.json`, collision, occlusion and movement tables, `model-states.json`,
+  `render-definitions.json`, `items.json`, ...). Mod blocks' rows are appended from their templates,
+  with declared overrides. Derived tag merges and rewritten worldgen bundles are generated output.
 - **Vanilla state ids do not move.** Mod states are appended after vanilla's, mods in id order,
   so the same mod set gives the same ids. Saves store block names, so ids never reach the disk.
 - Loaders that read only `data/minecraft/` (recipes, loot, tags) read every namespace, as
@@ -267,13 +267,13 @@ How the game loads them, without touching vanilla's path:
   structure mods all ship files under `yungsapi`, the namespace of YUNG's API, whose own jar isn't
   carried) is left to none of them, and its files stay outside. The launcher applies the game's
   rule before it starts a pack (`pipeline::loadable`) and lists what it left off.
-- The overlay is built on the first start with a set of mods and kept for later starts. A stamp
+- Generated tables are built on the first start with a set of mods and kept for later starts. A stamp
   (`horizon-mod-content.stamp`) hashes the game executable, the base tables and every mod file's
   size and mtime. Adding, removing or editing a mod, or a new build of Horizon, rebuilds it. For
   ATM10's 40 data-tier mods the build takes about a minute of the first start on a busy machine.
 - **Worldgen.** Mods' structures, structure sets, template pools, processor lists, configured and
-  placed features join the `worldgen/*.json` bundles. Their structure templates go under
-  `worldgen/structure/<ns>/`. Their biome tags are merged into `worldgen/biome_tags.json`, minus
+  placed features join the `worldgen/*.json` bundles. Structure templates are loaded lazily from
+  their original `data/<ns>/structure/` entries. Their biome tags are merged into `worldgen/biome_tags.json`, minus
   the biomes and tags Horizon does not have. Mod biomes, noise and density functions are not
   carried yet.
 - **Limits.** Chunk sections size their global palette to the registry: 16 bits for vanilla's
@@ -327,6 +327,7 @@ cargo run -p horizon-port-pack -- fetch ~/.horizon/ports/pack         # the port
 cargo run -p horizon-port-pack -- carry ~/.horizon/ports/pack         # content mods with a jar, or name them
 #   --resources <prepared root>: only templates Horizon's tables have
 cargo run -p horizon-port-pack -- report ~/.horizon/ports/pack        # coverage.json and coverage.md
+cargo run -p horizon-port-pack -- events ~/.horizon/ports/pack/jars   # NeoForge events the mods listen to, and their hooks
 cargo run -p horizon-port-pack -- port ~/Downloads/pack.zip ~/.horizon/ports/pack [--from <folder>] [--resources <root>]
 ```
 
@@ -368,6 +369,32 @@ Fences, Windows and Furniture, Ecologics, Compressed Blocks, More Decorative Blo
 Nether Structures are Partly; Sodium and GeckoLib don't run (Mixins, renderers, nothing to port);
 Fabric API doesn't run (its id has a dash, which content mods can't use). A check takes 0.2 s to
 3 s, and 24 s for Compressed Blocks (18 MB, 9,360 recipes, writing the carry dominates).
+
+`events <jar or folder> [--hooks <hook-counterparts.json>]` reads the same class files for the NeoForge
+events a mod listens to and the capabilities it uses. A listener is an `@SubscribeEvent` method's
+parameter, or a method reference or lambda that takes one event
+(`NeoForge.EVENT_BUS.addListener(this::onTick)`). It looks each name up in the hook catalog's
+`neoforge` names, generated at build time from the Rust hook declarations (see the
+[hook notes](https://arismoko.github.io/horizon/reference/hook-notes.html)). An optional JSON
+file with `hooks` entries containing `name` and `neoforge` can replace those labels for a report.
+Over a folder of jars it ranks the names by how many mods use them. Each name gets one of four answers:
+
+- a hook;
+- another phase's hook (`player_tick_post` for `PlayerTickEvent.Pre` when only Post is listed);
+- a hook whose label says why it isn't quite the counterpart;
+- none.
+
+Names NeoForge changed after 1.21.1 (`Capabilities.ItemHandler`, `Capabilities.EnergyStorage`,
+`AddReloadListenerEvent`) are looked up under their new ones. The report reads names only, never
+code: it says where a port starts, for a human to check.
+
+On ATM10's 498 jars (2026-11-05, 8 s), 416 of 497 mods listen to events or use capabilities: 6,616
+uses of 326 names. Upstream's catalog at that date had a hook for 23% of those uses, and 43% once
+horizon-rust/horizon#9924 labelled 32 core hooks. The most used names with no hook are mod setup and registration
+(`FMLClientSetupEvent` 208 mods, `RegisterPayloadHandlersEvent` 180,
+`RegisterCapabilitiesEvent` 162, `RegisterMenuScreensEvent` 143), which a Horizon mod does its own
+way. After those come `ClientTickEvent.Post` and `.Pre` (95, 46), `RenderLevelStageEvent` (81) and
+`ClientPlayerNetworkEvent.LoggingOut` and `.LoggingIn` (53, 35).
 
 `fetch` gets each jar the player's way, never from us: copied from a folder they have (matched
 by SHA-1, or through a CurseForge app instance's `minecraftinstance.json`), else downloaded from
@@ -876,7 +903,11 @@ left out (blocks with a class of their own are counted and named, since facts ca
 their extra code); **partial** with the failing checks, the blocks left out and what the
 templates miss; **not yet** with the API tier it waits for, or the dependency; **not needed**
 for libraries, performance mods, pack tooling and what Horizon has built in. Unclassified mods
-(the 20 CurseForge-only rows the reviewed table only guesses) count as not yet.
+(the 20 CurseForge-only rows the reviewed table only guesses) count as not yet. A mod made for
+1.20 or older (its `recipes/` and `loot_tables/` folders named as before 1.21, which 26.3 does
+not read) is not carried, as `check` doesn't carry it either: not yet, and not one Port can
+carry over. Prominence II (Fabric 1.20.1, 445 jars) had 149 such mods counted as come over,
+with 28,948 recipes and 8,784 loot tables that would not load.
 
 Both files open with a plain headline for players, counted from the rows' own status, class and
 tier: how many of the mods that need porting came over (ported or partial, as content: blocks,

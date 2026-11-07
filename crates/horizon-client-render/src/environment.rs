@@ -2,8 +2,9 @@
 //! (`KeyframeTrackSampler`, `EasingType`): sky/fog colours, sky light factor,
 //! celestial angles and star brightness for the overworld day cycle.
 use crate::Result;
+use horizon_assets::resource_source::ResourceSource;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 enum Easing {
@@ -134,7 +135,7 @@ pub struct Sky {
     pub star_brightness: f32,
     pub sunrise_color: [f32; 4],
     pub cloud_color: [f32; 4],
-    /// `gameplay/sky_light_level`, the server-side sky darkening.
+    /// `gameplay/sky_light_level` in raw light levels, from 0 to 15.
     pub sky_light_level: f32,
     /// Environmental fog (`visual/fog_start_distance` / `fog_end_distance`).
     pub fog_start: f32,
@@ -145,19 +146,19 @@ pub struct Sky {
     pub cloud_height: f32,
 }
 impl Environment {
-    pub fn load(root: &Path) -> Result<Self> {
+    pub fn load(root: &ResourceSource) -> Result<Self> {
         Self::load_dimension(root, "overworld", true)
     }
     /// A dimension's base attributes, optionally driven by the day timeline.
-    pub fn load_dimension(root: &Path, dimension: &str, day_cycle: bool) -> Result<Self> {
+    pub fn load_dimension(root: &ResourceSource, dimension: &str, day_cycle: bool) -> Result<Self> {
         let timeline: Value = if day_cycle {
-            serde_json::from_slice(&fs::read(root.join("data/minecraft/timeline/day.json"))?)?
+            serde_json::from_slice(&root.read("data/minecraft/timeline/day.json")?)?
         } else {
             serde_json::json!({"period_ticks": 24000, "tracks": {}})
         };
-        let dimension: Value = serde_json::from_slice(&fs::read(
-            root.join(format!("data/minecraft/dimension_type/{dimension}.json")),
-        )?)?;
+        let dimension: Value = serde_json::from_slice(
+            &root.read(&format!("data/minecraft/dimension_type/{dimension}.json"))?,
+        )?;
         let mut tracks = HashMap::new();
         for (name, track) in timeline["tracks"].as_object().ok_or("invalid timeline")? {
             let easing = match &track["ease"] {
@@ -298,7 +299,7 @@ impl Environment {
                     .copied()
                     .unwrap_or([0.0; 4]),
             ),
-            sky_light_level: scalar("minecraft:gameplay/sky_light_level") / 15.0,
+            sky_light_level: scalar("minecraft:gameplay/sky_light_level"),
             fog_start: self
                 .base
                 .get("minecraft:visual/fog_start_distance")
@@ -368,8 +369,8 @@ pub fn apply_weather(sky: &mut Sky, rain: f32, thunder: f32) {
             sky.cloud_color,
             [c[0], c[1], c[2], sky.cloud_color[3]],
         );
-        // sky_light_level is a fraction of 15 here; the layer blends towards level 4.
-        let target_level = lerp(alpha, sky.sky_light_level * 15.0, 4.0) / 15.0;
+        // Weather layers operate on the raw light attribute, towards level 4.
+        let target_level = lerp(alpha, sky.sky_light_level, 4.0);
         sky.sky_light_level = lerp(level, sky.sky_light_level, target_level);
         sky.sky_light_color = lerp3(
             level,
@@ -399,8 +400,8 @@ pub fn apply_weather(sky: &mut Sky, rain: f32, thunder: f32) {
 pub fn sky_darken(environment: &Environment, day_time: i64, rain: f32, thunder: f32) -> i32 {
     let mut sky = environment.sample(day_time, None, None);
     apply_weather(&mut sky, rain, thunder);
-    // Level.updateSkyBrightness: darkening from the sky light level.
-    (15.0 - 15.0 * sky.sky_light_level).round() as i32
+    // Level.updateSkyBrightness uses a truncating Java float-to-int conversion.
+    (15.0 - sky.sky_light_level) as i32
 }
 
 #[cfg(test)]
@@ -412,7 +413,40 @@ mod tests {
             .join("../../.local/horizon-client/26.3");
         root.join("data/minecraft/timeline/day.json")
             .exists()
-            .then(|| Environment::load(&root).unwrap())
+            .then(|| Environment::load(&ResourceSource::directory(root)).unwrap())
+    }
+
+    #[test]
+    fn resolved_dimension_and_timeline_data_need_no_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("data/minecraft/timeline/day.json".into(), Resource::bytes(br#"{"period_ticks":100,"tracks":{"example:value":{"keyframes":[{"ticks":0,"value":2},{"ticks":50,"value":4}]}}}"#.to_vec())),
+            ("data/minecraft/dimension_type/overworld.json".into(), Resource::bytes(br#"{"attributes":{"example:base":3}}"#.to_vec())),
+        ]));
+        let environment = Environment::load(&source).unwrap();
+        assert_eq!(environment.period, 100);
+        assert_eq!(environment.base("example:base")[0], 3.0);
+        assert_eq!(environment.value("example:value", [0.0; 4], 25)[0], 3.0);
+        let constant = Environment::load_dimension(&source, "overworld", false).unwrap();
+        assert!(constant.tracks.is_empty());
+        assert_eq!(constant.base("example:base")[0], 3.0);
+        assert!(Environment::load_dimension(&source, "missing", false).is_err());
+    }
+
+    #[test]
+    fn sky_darken_truncates_the_raw_attribute_without_normalizing_it() {
+        let source = |level| Environment {
+            period: 24000,
+            tracks: HashMap::new(),
+            base: HashMap::from([(
+                "minecraft:gameplay/sky_light_level".into(),
+                [level, 0.0, 0.0, 0.0],
+            )]),
+        };
+        // Level.updateSkyBrightness: 15 - 14.5 is truncated to zero, not rounded to one.
+        assert_eq!(sky_darken(&source(14.5), 0, 0.0, 0.0), 0);
+        assert_eq!(sky_darken(&source(13.5), 0, 0.0, 0.0), 1);
+        assert_eq!(sky_darken(&source(4.0), 0, 0.0, 0.0), 11);
     }
 
     #[test]

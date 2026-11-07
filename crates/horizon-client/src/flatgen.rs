@@ -3,10 +3,12 @@ use crate::{
     chunk::{Chunk, LevelShape},
     streaming::ChunkGenerator,
 };
-use horizon_world::{
-    nbt::Tag,
-    registry::{BlockRegistry, BlockStateId},
-    worldgen::feature::{BasicFeature, FeatureBlocks, FeatureWorld},
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        registry::{BlockRegistry, BlockStateId},
+        worldgen::feature::{BasicFeature, FeatureBlocks, FeatureWorld},
+    },
 };
 
 /// The layers of a flat generator, bottom up from the world's minimum Y.
@@ -420,7 +422,10 @@ mod tests {
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
         let registry = assets.registry;
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let terrain = |biome, features, layers: &[(&str, i32)]| {
             FlatTerrain::from_settings(
                 &flat_world(biome, features, layers),

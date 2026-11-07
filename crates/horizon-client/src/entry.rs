@@ -1,46 +1,33 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Vec::new(), &[], &[], &[]);
+    main_with(Vec::new(), &[], &[]);
 }
 
-/// Whether a mod's `__HORIZON_POINTS` names a method, at compile time: the launcher's generated
-/// `main` checks each point injection with it.
-#[doc(hidden)]
-pub use mod_points::__private::lists as point_listed;
-
-/// A native mod that listens at injection points: its id, and the generated export that sees its
-/// installed `Hooks` as its `impl Points` (#589).
-pub type NativePoints = (
-    &'static str,
-    fn(&'static dyn mod_api::Hooks) -> &'static dyn mod_points::Points,
-);
-
-/// A native mod's raw listener (#589), which the generated `main` makes after its typed `let`
-/// checked the function against the place's listener type.
-pub use mod_points::__private::RawListener as NativeRaw;
+/// A native function slot, checked against its place's exact type before erasure.
+pub use mod_points::__private::SlotListener as NativeSlot;
 
 /// The places raw listeners register at, named by the generated `main`.
 #[doc(hidden)]
 pub use mod_points::PointId;
 
-/// Start the game with named trait mods in dispatch order, their `impl Points` and their raw
-/// listeners.
+/// Start with named mods and their function slots in installed dependency order.
 pub fn main_with(
     mut mods: Vec<mod_api::ModEntry>,
-    points: &[NativePoints],
-    raw: &[NativeRaw],
-    built: &'static [horizon_mods::runtime::BuiltMod],
+    slots: &[NativeSlot],
+    built: &'static [horizon_mod_package::runtime::BuiltMod],
 ) {
     let exe = std::env::current_exe();
     let native: crate::Result<_> = exe
         .as_ref()
         .map_err(|e| e.to_string().into())
-        .and_then(|exe| horizon_mods::runtime::Runtime::load(exe, built).map_err(Into::into));
+        .and_then(|exe| {
+            horizon_mod_package::runtime::Runtime::load(exe, built).map_err(Into::into)
+        });
     let native = match native {
         Ok(native) => native,
         Err(error) => {
@@ -51,6 +38,7 @@ pub fn main_with(
     crate::gfx::native_render::set_mods_built_in(!native.built().is_empty());
     horizon_threads::configure_allocator();
     horizon_client::spans::startup::init(std::time::Instant::now());
+    horizon_client::spans::trace::start_from_env();
     let launch: crate::Result<_> = std::env::current_dir().map_err(Into::into).and_then(|cwd| {
         Ok(LaunchArguments::parse(
             std::env::args().skip(1),
@@ -66,10 +54,11 @@ pub fn main_with(
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    // Wasm mods join the native ones after them, in dependency order, from the same selection
-    // as content mods. Then the mods are installed, before anything below (logging, the crash
+    // Load wasm code from the same selection as content, then resolve one native/wasm
+    // dispatch order before anything below (logging, the crash
     // handler) that a trait injection may call into.
     let mut wasm_listening = Vec::new();
+    let mut wasm_manifests = Vec::new();
     if let Ok(exe) = &exe {
         let switch = |name: &str| {
             launch
@@ -87,30 +76,68 @@ pub fn main_with(
             budgets,
         };
         let game_dir = &launch.context.game_dir;
-        let (wasm, listening) =
+        horizon_mod_wasm::set_internals(&crate::__internals::TABLE);
+        let loaded =
             horizon_mod_wasm::load_installed(exe, game_dir, &launch.context.dev_mods, &config);
-        mods.extend(wasm);
-        wasm_listening = listening;
+        mods.extend(loaded.mods);
+        wasm_listening = loaded.listening;
+        wasm_manifests = loaded.manifests;
     }
+    // One installed dispatch order for both targets; ties retain bundle order.
+    let manifests: Vec<_> = native
+        .packages()
+        .iter()
+        .map(|p| &p.manifest)
+        .chain(wasm_manifests.iter())
+        .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
+        .collect();
+    assert_eq!(
+        manifests.len(),
+        mods.len(),
+        "loaded code has checked manifests"
+    );
+    let declared: Vec<_> = manifests
+        .iter()
+        .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies))
+        .collect();
+    let inputs: Vec<_> = manifests
+        .iter()
+        .zip(&declared)
+        .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
+            id: &m.id,
+            version: &m.version,
+            has_api: true,
+            dependencies,
+        })
+        .collect();
+    let order = horizon_mod_package::dependencies::resolve(&inputs)
+        .unwrap_or_else(|error| panic!("mod load refused: {error}"));
+    let mut entries: std::collections::BTreeMap<_, _> = mods
+        .into_iter()
+        .map(|entry| (entry.fields().id, entry))
+        .collect();
+    let mods: Vec<_> = order
+        .order
+        .into_iter()
+        .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
+        .collect();
+    let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
     mod_api::__private::install(mods.into());
-    for (id, listeners) in points {
-        let hooks = mod_api::__private::hooks_of(id)
-            .expect("a native mod listening at points is installed");
-        if let Err(error) = mod_points::register(id, listeners(hooks)) {
+    let mut wasm: std::collections::BTreeMap<_, _> = wasm_listening
+        .into_iter()
+        .map(|listeners| (listeners.id(), listeners))
+        .collect();
+    for id in ids {
+        for slot in slots.iter().filter(|slot| slot.id() == id) {
+            if let Err(error) = mod_points::register(slot) {
+                eprintln!("Horizon: {id}: {error}");
+                std::process::exit(game::exit_code::ERROR);
+            }
+        }
+        if let Some(listeners) = wasm.remove(id)
+            && let Err(error) = listeners.register()
+        {
             eprintln!("Horizon: {id}: {error}");
-            std::process::exit(game::exit_code::ERROR);
-        }
-    }
-    for listener in raw {
-        if let Err(error) = mod_points::__private::register_raw(listener) {
-            eprintln!("Horizon: {}: {error}", listener.id());
-            std::process::exit(game::exit_code::ERROR);
-        }
-    }
-    // Wasm mods' listeners after the native ones', as their hooks are.
-    for listening in wasm_listening {
-        if let Err(error) = listening.register() {
-            eprintln!("Horizon: {error}");
             std::process::exit(game::exit_code::ERROR);
         }
     }
@@ -185,6 +212,34 @@ pub fn main_with(
     {
         log::warn!("The enchantment level hook is already installed; keeping the first");
     }
+    install_client_hooks();
+    raise_open_file_limit();
+    if let Err(error) = game::run_with(launch, native) {
+        // A bad command line is the caller's mistake, not a crash: no report.
+        let usage = error.is::<game::UsageError>();
+        log::error!("Horizon: {error}");
+        logging::flush();
+        // The report's path is the last line on stderr (crash::SAVED_LINE).
+        if !help && !usage {
+            crash::report_error(&home, side, &*error);
+        }
+        // Started from Explorer, the console window closes with the game:
+        // keep the message on screen until it is read.
+        #[cfg(windows)]
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            eprintln!("Press Enter to close.");
+            let _ = std::io::stdin().read_line(&mut String::new());
+        }
+        std::process::exit(if usage {
+            game::exit_code::USAGE
+        } else {
+            game::exit_code::ERROR
+        });
+    }
+    logging::flush();
+}
+
+pub(crate) fn install_client_hooks() {
     if !crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
         menu_slot_rules: |context, menu, slot, stack, may_place, max_stack| {
             let context = mod_api::OwningLoop::new(context);
@@ -270,30 +325,6 @@ pub fn main_with(
     }) {
         log::warn!("Native client hooks already installed; keeping the first callbacks");
     }
-    raise_open_file_limit();
-    if let Err(error) = game::run_with(launch, native) {
-        // A bad command line is the caller's mistake, not a crash: no report.
-        let usage = error.is::<game::UsageError>();
-        log::error!("Horizon: {error}");
-        logging::flush();
-        // The report's path is the last line on stderr (crash::SAVED_LINE).
-        if !help && !usage {
-            crash::report_error(&home, side, &*error);
-        }
-        // Started from Explorer, the console window closes with the game:
-        // keep the message on screen until it is read.
-        #[cfg(windows)]
-        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprintln!("Press Enter to close.");
-            let _ = std::io::stdin().read_line(&mut String::new());
-        }
-        std::process::exit(if usage {
-            game::exit_code::USAGE
-        } else {
-            game::exit_code::ERROR
-        });
-    }
-    logging::flush();
 }
 
 /// The JVM raises its open-file limit to the hard limit as it starts

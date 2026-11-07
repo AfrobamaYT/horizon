@@ -20,6 +20,7 @@ use crate::{
     world::World,
 };
 use glam::{DVec3, Mat4, Quat, Vec3};
+use horizon_assets::resource_source::{ResourceRoot, ResourceSource};
 use horizon_core::geometry::{
     Direction,
     trig::{self, Mth},
@@ -32,7 +33,6 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     f32::consts::PI,
-    path::Path,
     sync::{
         Arc, Mutex, PoisonError, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -1366,22 +1366,23 @@ const VIEW_DISTANCE: f64 = 64.0;
 
 impl BlockEntityRenderer {
     pub fn load(
-        root: &Path,
+        root: &ResourceRoot,
         registry: &BlockRegistry,
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Result<Self> {
-        let visibility = load_visibility(root, registry)?;
+        let visibility = load_visibility(root.prepared(), registry)?;
         Self::load_with_visibility(root, registry, visibility, defaults)
     }
     /// [`BlockEntityRenderer::load`] over the face visibility the meshes use
     /// (`MeshTables::visibility`): a clone shares its shapes and their faces.
     pub fn load_with_visibility(
-        root: &Path,
+        root: &ResourceRoot,
         registry: &BlockRegistry,
         visibility: FaceVisibility,
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Result<Self> {
-        let all: Value = serde_json::from_slice(&std::fs::read(root.join("entity-models.json"))?)?;
+        let all: Value =
+            serde_json::from_slice(&std::fs::read(root.prepared().join("entity-models.json"))?)?;
         let models = MODELS
             .iter()
             .filter_map(|(key, layer)| all.get(*layer).map(|v| (*key, ModelPart::parse(v))))
@@ -1389,15 +1390,15 @@ impl BlockEntityRenderer {
         let mut renderer = Self::new(models, registry);
         renderer.visibility = Some(Mutex::new(visibility));
         // The packs' custom entity models (`.jem` files), before anything draws.
-        renderer.set_shapes(renderer.shapes_for(root));
+        renderer.set_shapes(renderer.shapes_for(root.source()));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
         for (item, components) in defaults.entries() {
             let Some(pattern) = components["minecraft:provides_pottery_pattern"].as_str() else {
                 continue;
             };
             let name = pattern.strip_prefix("minecraft:").unwrap_or(pattern);
-            let file = root.join(format!("data/minecraft/decorated_pot_pattern/{name}.json"));
-            let Ok(def) = std::fs::read(file) else {
+            let file = format!("data/minecraft/decorated_pot_pattern/{name}.json");
+            let Ok(def) = root.source().read(&file) else {
                 continue;
             };
             let def: Value = serde_json::from_slice(&def)?;
@@ -1436,7 +1437,7 @@ impl BlockEntityRenderer {
     }
     /// The models the packs under `root` give, their `.jem` files over vanilla's, for
     /// [`Self::set_shapes`] (a pack reload): vanilla's own, shared, without any.
-    pub fn shapes_for(&self, root: &Path) -> Arc<BlockEntityShapes> {
+    pub fn shapes_for(&self, root: &ResourceSource) -> Arc<BlockEntityShapes> {
         match crate::block_entity_cem::reshape(root, &self.vanilla.models) {
             Some((models, textures)) => Arc::new(BlockEntityShapes::new(models, textures)),
             None => self.vanilla.clone(),
@@ -3439,7 +3440,9 @@ impl BeamPart {
                 (at(b, self.end), [s.u0, v1]),
             ] {
                 out.push(Vertex {
-                    normal: [0; 4],
+                    // The beacon beam render types keep the default back-face culling: seen
+                    // from inside a beam, its walls must not show.
+                    normal: CULL_BACK,
                     pos: p.to_array(),
                     uv,
                     layer: 6,
@@ -3529,12 +3532,15 @@ fn portal_cube(m: Mat4, faces: &[Direction], layer: u32, out: &mut Vec<Vertex>) 
 mod tests {
     use super::*;
     use crate::assets::Assets;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     #[test]
     #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
     fn entity_block_particles_and_breaking_use_exported_models() -> Result<()> {
         use crate::{models::catalog::StateModels, sprites::Sprites};
-        use horizon_world::{DATA_VERSION, chunk::BlockState, nbt::Tag};
+        use {
+            horizon_core::nbt::Tag,
+            horizon_world::{DATA_VERSION, chunk::BlockState},
+        };
         let root = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
         );
@@ -3568,14 +3574,20 @@ mod tests {
                 "defaults",
                 Tag::compound(names.iter().enumerate().map(|(id, name)| {
                     (
-                        horizon_world::nbt::JavaString::from(format!("minecraft:{name}").as_str()),
+                        horizon_core::nbt::JavaString::from(format!("minecraft:{name}").as_str()),
                         Tag::Int(id as i32),
                     )
                 })),
             ),
         ]))?;
         let mut sprites = Sprites::default();
-        let catalog = StateModels::from_facts(&root, &registry, &names, &mut sprites, &facts)?;
+        let catalog = StateModels::from_facts(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+            &registry,
+            &names,
+            &mut sprites,
+            &facts,
+        )?;
         for (id, name) in names.iter().enumerate() {
             let models = catalog.collect(
                 BlockStateId(id as u32),
@@ -4309,6 +4321,23 @@ mod tests {
     /// submits the unit cube's two Y faces. Both are wound outward, so of each
     /// face only the side looking at the camera draws: the portal shows one
     /// surface from above and one from below, never both at once.
+    /// `RenderPipelines.BEACON_BEAM_OPAQUE` / `_TRANSLUCENT` keep the default
+    /// back-face culling, so a camera inside a beam sees no wall of it.
+    #[test]
+    fn beacon_beam_faces_cull_their_backs() {
+        let rect = Rect {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+            w: 16,
+            h: 16,
+        };
+        let mut out = Vec::new();
+        beacon_beam(Vec3::ZERO, &[(0xFFFFFF, 4)], 0.0, 1.0, rect, &mut out);
+        assert_eq!(out.len(), 32, "solid and glow, four quads each");
+        assert!(out.iter().all(|v| v.normal == CULL_BACK));
+    }
     #[test]
     fn the_end_portal_cube_is_one_sided() {
         let mut out = Vec::new();
@@ -4349,7 +4378,12 @@ mod tests {
         let assets = Assets::load(&root).unwrap();
         let registry = assets.registry;
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let renderer = BlockEntityRenderer::load(&root, registry, &defaults).unwrap();
+        let renderer = BlockEntityRenderer::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            registry,
+            &defaults,
+        )
+        .unwrap();
         let state = registry.default_state("minecraft:decorated_pot").unwrap();
         let sprites: HashMap<String, Rect> = [
             "entity/decorated_pot/decorated_pot_base",
@@ -4426,7 +4460,12 @@ mod tests {
         };
         // No block entity's `.jem` (a mob's only): vanilla's shapes, not a copy.
         let empty = pack("render-none", &[("optifine/cem/zombie.jem", "{}".into())]);
-        assert!(Arc::ptr_eq(&renderer.shapes_for(&empty), &renderer.vanilla));
+        assert!(Arc::ptr_eq(
+            &renderer.shapes_for(&horizon_assets::resource_source::ResourceSource::directory(
+                empty.to_path_buf()
+            )),
+            &renderer.vanilla
+        ));
         let root = pack(
             "render-chest",
             &[(
@@ -4437,7 +4476,9 @@ mod tests {
                 ),
             )],
         );
-        renderer.set_shapes(renderer.shapes_for(&root));
+        renderer.set_shapes(renderer.shapes_for(
+            &horizon_assets::resource_source::ResourceSource::directory(root.to_path_buf()),
+        ));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty);
         let rect = |u0: f32| Rect {

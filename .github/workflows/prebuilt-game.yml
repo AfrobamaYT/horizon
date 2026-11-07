@@ -53,7 +53,7 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-gnu
           - name: macos
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -62,7 +62,7 @@ jobs:
         shell: bash
     env:
       # v<layout>: the launcher asks only for the archive layout it reads (prebuilt_archive in
-      # crates/horizon-mods/src/index/native.rs); bump both when the folder's layout changes.
+      # crates/horizon-mod-package/src/index/native.rs); bump both when the folder's layout changes.
       ARCHIVE: horizon-prebuilt-v3-${{ matrix.target }}${{ matrix.server && '-server' || '' }}.tar.gz
     steps:
       - uses: actions/checkout@v4

@@ -30,7 +30,9 @@
 //! The float arithmetic follows vanilla and JOML's default (non-FMA,
 //! non-fast-math) code paths operation by operation.
 use horizon_core::geometry::trig;
-pub use mod_api::camera::{CameraEntity, FovPlayer, LivingCamera, UseItem, lerp, wrap_degrees};
+pub use mod_api::camera::{
+    CameraEntity, CameraType, FovPlayer, LivingCamera, UseItem, lerp, wrap_degrees,
+};
 
 /// `(float) Math.PI`.
 const PI: f32 = std::f32::consts::PI;
@@ -478,31 +480,6 @@ pub fn view_matrix(yaw: f32, pitch: f32) -> glam::Mat4 {
     // Vanilla uses the conjugate of Camera.rotation, not a world-up look-at.
     let q = Quat::rotation_yxz(PI - yaw * DEG_TO_RAD, -pitch * DEG_TO_RAD, 0.0);
     glam::Mat4::from_quat(glam::Quat::from_xyzw(-q.x, -q.y, -q.z, q.w))
-}
-
-/// `CameraType`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CameraType {
-    #[default]
-    FirstPerson,
-    ThirdPersonBack,
-    ThirdPersonFront,
-}
-impl CameraType {
-    pub fn is_first_person(self) -> bool {
-        self == Self::FirstPerson
-    }
-    pub fn is_mirrored(self) -> bool {
-        self == Self::ThirdPersonFront
-    }
-    /// `CameraType.cycle` (F5).
-    pub fn cycle(self) -> Self {
-        match self {
-            Self::FirstPerson => Self::ThirdPersonBack,
-            Self::ThirdPersonBack => Self::ThirdPersonFront,
-            Self::ThirdPersonFront => Self::FirstPerson,
-        }
-    }
 }
 
 /// `AbstractClientPlayer.getFieldOfViewModifier(firstPerson, effectScale)`.

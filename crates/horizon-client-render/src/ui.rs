@@ -5,12 +5,8 @@ use crate::{
     hud::{HudAtlas, HudBatch, Rect, rgba},
     text::Text,
 };
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::RwLock,
-    time::Instant,
-};
+use horizon_assets::resource_source::ResourceSource;
+use std::{collections::HashMap, sync::RwLock, time::Instant};
 
 /// `GuiSpriteScaling.NineSlice`: the sprite's size in GUI pixels, whatever
 /// its texture's resolution, its borders (left, top, right, bottom) in the
@@ -54,7 +50,7 @@ fn parse_nine_slice(v: &serde_json::Value) -> Option<NineSlice> {
     })
 }
 /// Read `gui.scaling` metadata for every GUI sprite under `root`.
-pub fn load_metadata(root: &Path) {
+pub fn load_metadata(root: &ResourceSource) {
     set_metadata(read_metadata(root));
 }
 /// The GUI sprites' nine-slice metadata of a resource root, read off the
@@ -65,57 +61,33 @@ pub struct UiMetadata(HashMap<String, NineSlice>);
 pub fn set_metadata(metadata: UiMetadata) {
     *NINE_SLICE.write().unwrap_or_else(|e| e.into_inner()) = Some(metadata.0);
 }
-/// Reads the metadata [`load_metadata`] puts in use, without putting it in use.
-pub fn read_metadata(root: &Path) -> UiMetadata {
+/// Reads the metadata [`load_metadata`] puts in use, without putting it in use. Another
+/// namespace's sprites are named with it (`lobby:gui/sprites/...`), as the GUI atlas packs them.
+pub fn read_metadata(root: &ResourceSource) -> UiMetadata {
     let mut map = HashMap::new();
-    let base = root.join("assets/minecraft/textures");
-    let sprites = base.join("gui/sprites");
-    // A prepared root's: from its data file, without listing the disk.
-    let files: Vec<PathBuf> = match horizon_core::prepared_files::files_under(&sprites) {
-        Some(files) => files
-            .iter()
-            .filter(|file| file.ends_with(".png.mcmeta"))
-            .map(|file| sprites.join(file))
-            .collect(),
-        None => {
-            let mut files = Vec::new();
-            let mut stack = vec![sprites];
-            while let Some(dir) = stack.pop() {
-                let Ok(entries) = std::fs::read_dir(&dir) else {
-                    continue;
-                };
-                for e in entries.flatten() {
-                    let p = e.path();
-                    if p.is_dir() {
-                        stack.push(p);
-                    } else if p.to_string_lossy().ends_with(".png.mcmeta") {
-                        files.push(p);
-                    }
-                }
-            }
-            files
+    for namespace in root.namespaces("assets") {
+        let base = format!("assets/{namespace}/textures/");
+        let prefix = match namespace.as_str() {
+            "minecraft" => String::new(),
+            namespace => format!("{namespace}:"),
+        };
+        for name in root.list(&format!("{base}gui/sprites/")) {
+            let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
+                continue;
+            };
+            let Ok(text) = root.read_to_string(&name) else {
+                continue;
+            };
+            let Some(nine_slice) = serde_json::from_str(&text)
+                .ok()
+                .as_ref()
+                .and_then(parse_nine_slice)
+            else {
+                continue;
+            };
+            let key = stripped.strip_prefix(base.as_str()).unwrap_or_default();
+            map.insert(format!("{prefix}{key}"), nine_slice);
         }
-    };
-    for p in files {
-        let name = p.to_string_lossy().into_owned();
-        let Some(stripped) = name.strip_suffix(".png.mcmeta") else {
-            continue;
-        };
-        let Ok(text) = horizon_core::prepared_files::read_to_string(&p) else {
-            continue;
-        };
-        let Some(nine_slice) = serde_json::from_str(&text)
-            .ok()
-            .as_ref()
-            .and_then(parse_nine_slice)
-        else {
-            continue;
-        };
-        let key = Path::new(stripped)
-            .strip_prefix(&base)
-            .map(|r| r.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        map.insert(key, nine_slice);
     }
     UiMetadata(map)
 }
@@ -1092,6 +1064,46 @@ fn tooltip_size(atlas: &HudAtlas, lines: &[Text]) -> (f32, f32) {
     };
     (w, h)
 }
+/// `TooltipRenderUtil.getBackgroundSprite` and `getFrameSprite` of a tooltip style
+/// (`<namespace>:<path>`): `tooltip/<path>_background` and `tooltip/<path>_frame` in the style's
+/// namespace, named as the GUI atlas packs them.
+pub fn tooltip_style_sprites(namespace: &str, path: &str) -> [String; 2] {
+    let prefix = match namespace {
+        "minecraft" => String::new(),
+        namespace => format!("{namespace}:"),
+    };
+    ["background", "frame"].map(|part| format!("{prefix}gui/sprites/tooltip/{path}_{part}"))
+}
+/// `TooltipRenderUtil.renderTooltipBackground`: the background sprite, then the frame sprite,
+/// each drawn by `blitSprite` (nine-sliced as its `gui.scaling` says, stretched without it)
+/// 12 pixels out from the tooltip's contents `[x, y, w, h]` (`PADDING` 3 and `MARGIN` 9 on
+/// every side). Whether the atlas has both sprites; one that lacks either draws nothing.
+pub fn tooltip_sprites(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    [background, frame]: [&str; 2],
+    [x, y, w, h]: [f32; 4],
+) -> bool {
+    if ![background, frame]
+        .iter()
+        .all(|sprite| atlas.sprites.contains_key(*sprite))
+    {
+        return false;
+    }
+    for sprite in [background, frame] {
+        blit_sprite(
+            batch,
+            atlas,
+            sprite,
+            x - 12.0,
+            y - 12.0,
+            w + 24.0,
+            h + 24.0,
+            u32::MAX,
+        );
+    }
+    true
+}
 fn tooltip_box(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
@@ -1102,25 +1114,14 @@ fn tooltip_box(
     h: f32,
 ) {
     crate::widgets::frame_tooltip(lines);
-    nine_slice(
+    tooltip_sprites(
         batch,
         atlas,
-        "gui/sprites/tooltip/background",
-        x - 12.0,
-        y - 12.0,
-        w + 24.0,
-        h + 24.0,
-        u32::MAX,
-    );
-    nine_slice(
-        batch,
-        atlas,
-        "gui/sprites/tooltip/frame",
-        x - 12.0,
-        y - 12.0,
-        w + 24.0,
-        h + 24.0,
-        u32::MAX,
+        [
+            "gui/sprites/tooltip/background",
+            "gui/sprites/tooltip/frame",
+        ],
+        [x, y, w, h],
     );
     let mut ly = y;
     for (i, line) in lines.iter().enumerate() {
@@ -1769,6 +1770,7 @@ impl EditBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     /// The quads' destination rectangles and their UVs.
     fn quads(batch: &HudBatch) -> Vec<([f32; 4], [f32; 4])> {
@@ -1834,7 +1836,10 @@ mod tests {
     }
 
     fn atlas() -> HudAtlas {
-        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+        HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (std::path::Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap()
     }
 
     /// `defaultScrollingHelper` draws an overflowing label from `left` less the
@@ -1855,7 +1860,7 @@ mod tests {
     #[test]
     fn an_active_icon_button_is_a_focus_target_and_a_disabled_one_is_not() {
         let atlas = atlas();
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         // Whatever this thread drew before is the last frame's, then gone.
         crate::widgets::end_frame(u64::MAX - 1);
         button(
@@ -1893,11 +1898,11 @@ mod tests {
         let atlas = atlas();
         crate::widgets::set_action_glyphs(true);
         let label = Text::literal("Done");
-        let mut plain = HudBatch::new([640, 480]);
+        let mut plain = HudBatch::scratch([640, 480]);
         button(
             &mut plain, &atlas, 10.0, 20.0, 150.0, 20.0, &label, true, false,
         );
-        let mut declared = HudBatch::new([640, 480]);
+        let mut declared = HudBatch::scratch([640, 480]);
         action_button(
             &mut declared,
             &atlas,
@@ -1918,7 +1923,7 @@ mod tests {
         let atlas = atlas();
         let label = Text::literal("Graphics API: Prefer Vulkan (Experimental)");
         assert!(atlas.font.width_text(&label.resolved()) > 96.0);
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         scrolling_text_at(
             &mut batch,
             &atlas,
@@ -1940,7 +1945,7 @@ mod tests {
             );
         }
         // A label that fits is centred and not cut: every glyph is drawn.
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         let short = Text::literal("Done");
         scrolling_text_at(
             &mut batch,
@@ -1993,7 +1998,7 @@ mod tests {
             (false, true, 10.0, u32::MAX),
             (false, false, 10.0, 0xFFA0_A0A0),
         ] {
-            let mut tab = HudBatch::new([640, 480]);
+            let mut tab = HudBatch::scratch([640, 480]);
             menu_tab_label(
                 &mut tab,
                 &atlas,
@@ -2003,7 +2008,7 @@ mod tests {
                 active,
                 0,
             );
-            let mut want = HudBatch::new([640, 480]);
+            let mut want = HudBatch::scratch([640, 480]);
             want.text_styled(&atlas, &label.resolved(), left, y, color, true);
             let glyphs = |b: &HudBatch| -> Vec<([u32; 2], u32)> {
                 b.vertices
@@ -2035,7 +2040,7 @@ mod tests {
     }
     #[test]
     fn separator_tiles_sample_both_rows_and_clip_the_last_column() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         tile(
             &mut batch,
             sprite(32, 2),
@@ -2067,7 +2072,7 @@ mod tests {
             r#"{"gui":{"scaling":{"type":"nine_slice","width":200,"height":20,
                 "border":{"left":20,"top":4,"right":20,"bottom":4}}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(400, 40),
@@ -2089,7 +2094,7 @@ mod tests {
         let n = faithful(
             r#"{"gui":{"scaling":{"type":"nine_slice","width":100,"height":100,"border":12,"stretch_inner":true}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(200, 200),
@@ -2114,7 +2119,7 @@ mod tests {
             border: [10; 4],
             stretch_inner: false,
         };
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_nine_slice(
             &mut batch,
             sprite(100, 100),
@@ -2132,7 +2137,7 @@ mod tests {
         let n = faithful(
             r#"{"gui":{"scaling":{"type":"nine_slice","width":100,"height":100,"border":10,"stretch_inner":true}}}"#,
         );
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_sprite(
             &mut batch,
             sprite(100, 100),
@@ -2148,7 +2153,7 @@ mod tests {
     }
     #[test]
     fn blit_sprite_stretches_a_sprite_without_metadata() {
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         draw_sprite(
             &mut batch,
             sprite(9, 9),
@@ -2168,7 +2173,7 @@ mod tests {
             border: [8; 4],
             stretch_inner: true,
         };
-        let mut batch = HudBatch::new([640, 480]);
+        let mut batch = HudBatch::scratch([640, 480]);
         // 9 wide: borders of floor(9 / 2) = 4, as vanilla's integer division.
         draw_nine_slice(
             &mut batch,
@@ -2184,7 +2189,10 @@ mod tests {
     #[test]
     fn append_fields_highlight_the_whole_value_and_blink_their_cursor() {
         use crate::hud::Blend;
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let end = 10.0 + HudBatch::text_width(&atlas, "abc") + 1.0;
         let span = |b: &HudBatch, r: &std::ops::Range<u32>| {
             let v = &b.vertices[r.start as usize..r.end as usize];
@@ -2199,7 +2207,7 @@ mod tests {
         };
         // Select All in the creative search: inverted white, then blue added,
         // from one pixel before the text to the cursor, 11 high.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
@@ -2217,7 +2225,7 @@ mod tests {
             assert_eq!(span(&b, r), (9.0, end, 19.0, 30.0));
         }
         // The anvil keeps its text colour; 300 ms later the cursor is hidden.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
@@ -2232,7 +2240,7 @@ mod tests {
         let blends: Vec<_> = b.blends.iter().map(|(_, blend)| *blend).collect();
         assert_eq!(blends, vec![Blend::Additive]);
         let quads = |ms| {
-            let mut b = HudBatch::new([854, 480]);
+            let mut b = HudBatch::scratch([854, 480]);
             append_field(
                 &mut b,
                 &atlas,
@@ -2248,7 +2256,7 @@ mod tests {
         };
         assert!(quads(300) < quads(600));
         // A full field shows a bar on its last pixel instead of an underscore.
-        let mut b = HudBatch::new([854, 480]);
+        let mut b = HudBatch::scratch([854, 480]);
         append_field(
             &mut b,
             &atlas,
@@ -2287,7 +2295,10 @@ mod tests {
     }
     #[test]
     fn edit_box_clicks_place_the_cursor_and_select() {
-        let atlas = HudAtlas::build(Path::new("/nonexistent/horizon-test-assets")).unwrap();
+        let atlas = HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_owned(),
+        ))
+        .unwrap();
         let mut e = EditBox::new(10.0, 0.0, 200.0, 20.0);
         e.set_value("hello world");
         let at = |e: &EditBox, s: &str| e.text_x() + atlas.font.width(s);
@@ -2414,6 +2425,96 @@ mod tests {
         assert_eq!(
             menu_tooltip_position(screen, (100, 200), [100, 200, 150, 20], size),
             (112, 170)
+        );
+    }
+    #[test]
+    fn nine_slice_metadata_reads_resolved_resource_names_without_files() {
+        use horizon_assets::resource_source::Resource;
+        let source = ResourceSource::indexed(std::collections::BTreeMap::from([
+            ("assets/minecraft/textures/gui/sprites/widget/button.png.mcmeta".to_owned(),
+             Resource::bytes(br#"{"gui":{"scaling":{"type":"nine_slice","width":20,"height":12,"border":3}}}"#.to_vec())),
+            ("assets/minecraft/textures/gui/sprites/broken.png.mcmeta".to_owned(), Resource::bytes(b"invalid".to_vec())),
+            ("assets/minecraft/textures/block/stone.png.mcmeta".to_owned(), Resource::bytes(b"{}".to_vec())),
+            ("assets/lobby/textures/gui/sprites/tooltip/gold_frame.png.mcmeta".to_owned(),
+             Resource::bytes(br#"{"gui":{"scaling":{"type":"nine_slice","width":40,"height":40,"border":6}}}"#.to_vec())),
+        ]));
+        let metadata = read_metadata(&source);
+        assert_eq!(metadata.0.len(), 2);
+        let button = metadata.0.get("gui/sprites/widget/button").unwrap();
+        assert_eq!(
+            (button.width, button.height, button.border),
+            (20, 12, [3; 4])
+        );
+        // Another namespace's sprite is named with it, as the GUI atlas packs it.
+        let frame = metadata
+            .0
+            .get("lobby:gui/sprites/tooltip/gold_frame")
+            .unwrap();
+        assert_eq!((frame.width, frame.border), (40, [6; 4]));
+    }
+    /// A tooltip style names its sprites as `TooltipRenderUtil` does, in the GUI atlas's names;
+    /// the box draws the background, then the frame, 12 pixels out from the contents, each
+    /// stretched when it has no `gui.scaling` (`GuiMetadataSection.DEFAULT`), and nothing
+    /// without either sprite.
+    #[test]
+    fn a_tooltip_style_draws_its_own_background_and_frame() {
+        assert_eq!(
+            tooltip_style_sprites("minecraft", "fancy"),
+            [
+                "gui/sprites/tooltip/fancy_background",
+                "gui/sprites/tooltip/fancy_frame"
+            ]
+        );
+        let [background, frame] = tooltip_style_sprites("lobby", "gold");
+        assert_eq!(
+            [background.as_str(), frame.as_str()],
+            [
+                "lobby:gui/sprites/tooltip/gold_background",
+                "lobby:gui/sprites/tooltip/gold_frame"
+            ]
+        );
+        let mut atlas = atlas();
+        let mut batch = HudBatch::scratch([640, 480]);
+        assert!(!tooltip_sprites(
+            &mut batch,
+            &atlas,
+            [&background, &frame],
+            [20.0, 20.0, 50.0, 8.0]
+        ));
+        assert!(batch.vertices.is_empty());
+        // Two 16 × 16 sprites without metadata, in different places on the atlas.
+        let region = |u0: f32| Rect {
+            u0,
+            v0: 0.0,
+            u1: u0 + 0.25,
+            v1: 0.25,
+            w: 16,
+            h: 16,
+        };
+        // A background without its frame would draw a box with no border.
+        atlas.sprites.insert(background.clone(), region(0.0));
+        assert!(!tooltip_sprites(
+            &mut batch,
+            &atlas,
+            [&background, &frame],
+            [20.0, 20.0, 50.0, 8.0]
+        ));
+        assert!(batch.vertices.is_empty());
+        atlas.sprites.insert(frame.clone(), region(0.5));
+        assert!(tooltip_sprites(
+            &mut batch,
+            &atlas,
+            [&background, &frame],
+            [20.0, 20.0, 50.0, 8.0]
+        ));
+        // Each is one stretched picture over the whole box, the background under the frame.
+        let box_ = [8.0, 8.0, 82.0, 40.0];
+        assert_eq!(
+            quads(&batch),
+            [
+                (box_, [0.0, 0.0, 0.25, 0.25]),
+                (box_, [0.5, 0.0, 0.75, 0.25])
+            ]
         );
     }
 }

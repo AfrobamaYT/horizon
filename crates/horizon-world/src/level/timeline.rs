@@ -1,10 +1,13 @@
 //! Blocks driven by the overworld day timeline's environment attributes
 //! (`gameplay/eyeblossom_open`, `gameplay/turtle_egg_hatch_chance`) and the
 //! dried ghast's hydration ticks.
-use super::{Dimension, LevelAccess, LevelEvent, Sim, update::below};
 use crate::registry::BlockStateId;
 use horizon_core::{position::BlockPos, random::RandomSource};
 use std::sync::Arc;
+use {
+    super::{LevelAccess, LevelEvent, Sim, update::below},
+    horizon_core::dimension::Dimension,
+};
 
 /// `BlockScanUtils.findBlocks` order: sections by x, z, y; blocks by y, z, x.
 pub(crate) fn box_scan_order(min: BlockPos, max: BlockPos) -> Vec<BlockPos> {

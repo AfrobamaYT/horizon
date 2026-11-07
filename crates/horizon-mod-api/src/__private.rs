@@ -18,14 +18,6 @@ pub fn mod_index_on(index: usize) -> bool {
     crate::mod_index_on(index)
 }
 
-/// The installed mod `id`'s hooks, for the game to hand its other faces (its `impl Points`) on.
-pub fn hooks_of(id: &str) -> Option<&'static dyn Hooks> {
-    crate::mods()
-        .iter()
-        .find(|entry| entry.id == id)
-        .map(|entry| &*entry.hooks)
-}
-
 /// Marks the thread as inside mod `id`'s `call` until the guard drops, as a hook's dispatch does,
 /// so a panic in it names both.
 pub fn enter(id: &'static str, call: &'static str) -> crate::crash::NativeModGuard {
@@ -42,33 +34,36 @@ pub fn listened(hook: HookId) -> bool {
     crate::listened(hook)
 }
 
-pub use crate::block_entity_type::validate_block_entity_type_keys;
-pub use crate::generated::calls::*;
-pub use crate::part_table::{
-    HookParts, KnownIds, PartsRef, block_entity_types, block_listens, has_part_hook,
-    has_scoped_hook, install_parts, mark_game_thread, parts, resolve_parts,
-};
-pub use crate::phase::install_packages;
+/// A read backend wrapper for a host the game builds narrowed: the mob tick's
+/// goal view hands itself out as its own backend (#1077).
+pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
+    crate::BackendRef::of(inner)
+}
+/// Call `read` on `host`'s real backend, or `None` where the host has none:
+/// the mob tick's goal view forwards the level's own reads — blocks, loaded
+/// chunks, time, height, weather, block entities — through it (#1077); the
+/// entity data its snapshot does not carry stays refused.
+pub fn backend_read<R>(host: &dyn crate::Host, read: impl FnOnce(&dyn Backend) -> R) -> Option<R> {
+    host.backend().map(|backend| read(backend.open()))
+}
 /// The game's side of wasm mods, for `horizon-mod-wasm`.
 #[cfg(all(feature = "wasm-host", not(target_arch = "wasm32")))]
 pub mod wasm_host {
-    pub use crate::wasm_host::{
-        Budgets, CallHost, CallRefused, EPOCH, Exports, Fuel, Instantiated, LoadError, Member,
-        State, instantiate, live_groups,
-    };
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/mod_api_exports_private_wasm_host.rs"
+    ));
 }
-/// The registered structure types, for the executable to hand to the engine's
-/// `StructureRegistry` before any world opens.
-pub use crate::structure_type::installed_structure_types;
-/// The mod's side of the exports other crates add to its world (the points crate's listeners).
-#[cfg(target_arch = "wasm32")]
-pub use crate::wasm::exported as wasm_guest;
-#[cfg(any(test, feature = "testing"))]
-pub use crate::{part_table::tests as part_tests, phase::with_test_packages};
 
 /// The trait mods installed, in dispatch order: the game's own list, not part of the mod surface.
 pub fn mods() -> &'static [ModEntry] {
     crate::mods()
+}
+
+/// Actual installed code identities, including mods with no hook subscriptions.
+/// The engine uses this dispatch inventory to apply its saved code switches.
+pub fn installed_code_ids() -> impl Iterator<Item = &'static str> {
+    crate::mods().iter().map(|entry| entry.id)
 }
 
 /// The startup package inventory at an owning engine load boundary.
@@ -78,28 +73,27 @@ pub fn loaded_mods() -> LoadedMods {
 
 /// The data-pack and resource reloads the game runs.
 pub mod reload {
-    pub use crate::reload::{
-        PreparedStep, RegisteredListener, ReloadFiles, ReloadStageError, apply_listeners,
-        prepare_listeners,
-    };
-    pub use crate::server_reload::{OrderedServerReload, RetainedEntry};
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/mod_api_exports_private_reload.rs"
+    ));
 }
 
 /// The structs the game fills for its hooks, each turned into the API's own with `From`.
 pub mod built {
-    pub use crate::built::{
-        ChannelRef, NativeActiveEffect, NativeBlockClick, NativeExplosionStart, NativeItemClick,
-        NativeItemFished, NativeLifecycleContext, NativeLootDrops, NativePlayerAbilities,
-        NativePlayerExperience, NativePlayerFood, NativePortalShape, NativeScreenView,
-        NativeServerPlayer, SoundPlay, ToolUse,
-    };
-    pub use crate::config_files::built::{ConfigEntry, ConfigStat};
-    pub use crate::game::built::NativeConfigFile;
-    pub use crate::render::built::{BlockSpriteArrays, HandDrawn, WorldDrawn};
+    include!(concat!(
+        env!("OUT_DIR"),
+        "/mod_api_exports_private_built.rs"
+    ));
+    /// Wrap a slot in the model store's published generation.
+    pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
+        crate::ModelRef(generation, slot)
+    }
 }
 
 /// What the game reads of handles and calls on the API's own types.
 pub mod game {
+    include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private_game.rs"));
     use crate::*;
     use std::fmt::Debug;
 
@@ -129,13 +123,21 @@ pub mod game {
         }
     }
 
-    /// A block entity type the game names.
-    pub fn block_entity_type_key(id: &str) -> BlockEntityTypeKey {
-        BlockEntityTypeKey(id.into())
-    }
     /// A block entity handle the game names.
-    pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
-        BlockEntityRef { level, position }
+    pub fn block_entity_ref(
+        level: LevelRef,
+        position: [i32; 3],
+        generation: u64,
+    ) -> BlockEntityRef {
+        BlockEntityRef {
+            level,
+            position,
+            generation,
+        }
+    }
+    /// A client mod's sound handle the game names.
+    pub fn sound_ref(id: u64) -> SoundRef {
+        SoundRef { id }
     }
     /// A boss bar handle the game names.
     pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
@@ -187,9 +189,24 @@ pub mod game {
         (enchantments.entries, enchantments.changed)
     }
 
+    pub struct ModelRefFields {
+        pub generation: u64,
+        pub slot: u32,
+    }
+    impl Fields for ModelRef {
+        type Fields<'a> = ModelRefFields;
+        fn fields(&self) -> ModelRefFields {
+            ModelRefFields {
+                generation: self.0,
+                slot: self.1,
+            }
+        }
+    }
+
     pub struct BlockEntityRefFields {
         pub level: LevelRef,
         pub position: [i32; 3],
+        pub generation: u64,
     }
     impl Fields for BlockEntityRef {
         type Fields<'a> = BlockEntityRefFields;
@@ -197,7 +214,18 @@ pub mod game {
             BlockEntityRefFields {
                 level: self.level,
                 position: self.position,
+                generation: self.generation,
             }
+        }
+    }
+
+    pub struct SoundRefFields {
+        pub id: u64,
+    }
+    impl Fields for SoundRef {
+        type Fields<'a> = SoundRefFields;
+        fn fields(&self) -> SoundRefFields {
+            SoundRefFields { id: self.id }
         }
     }
 
@@ -246,22 +274,24 @@ pub mod game {
     }
 
     pub struct ModEntryFields<'a> {
+        pub id: &'static str,
         pub hooks: &'a dyn Hooks,
     }
     impl Fields for ModEntry {
         type Fields<'a> = ModEntryFields<'a>;
         fn fields(&self) -> ModEntryFields<'_> {
             ModEntryFields {
+                id: self.id,
                 hooks: &*self.hooks,
             }
         }
     }
 
     pub trait PartsLookup {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts>;
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts>;
     }
     impl PartsLookup for Parts {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts> {
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts> {
             Parts::for_hook(self, hook)
         }
     }
@@ -285,15 +315,6 @@ pub mod game {
         }
         fn file_to_id(&self, file: &str) -> Option<Identifier> {
             FileToIdConverter::file_to_id(self, file)
-        }
-    }
-
-    pub trait BlockEntityTypeKeyRegistered: Sized {
-        fn registered(id: &str) -> Option<Self>;
-    }
-    impl BlockEntityTypeKeyRegistered for BlockEntityTypeKey {
-        fn registered(id: &str) -> Option<Self> {
-            BlockEntityTypeKey::registered(id)
         }
     }
 
@@ -393,7 +414,6 @@ pub mod game {
         }
     }
 
-    pub use self::modblockentityviewnew::ModBlockEntityViewNew;
     mod modblockentityviewnew {
         #[allow(unused_imports)]
         use crate::*;
@@ -413,7 +433,6 @@ pub mod game {
         }
     }
 
-    pub use self::reloadfilesnew::ReloadFilesNew;
     mod reloadfilesnew {
         #[allow(unused_imports)]
         use crate::reload::*;
@@ -436,3 +455,22 @@ pub mod game {
         }
     }
 }
+
+/// Construct a fluid state from an engine-owned state and its load-resolved key.
+pub fn engine_fluid_state(
+    fluid: crate::FluidKey,
+    state: horizon_world::fluid::FluidState,
+) -> crate::FluidState {
+    debug_assert_eq!(
+        state.amount() == 0,
+        state.kind() == horizon_world::fluid::FluidKind::Empty
+    );
+    crate::FluidState {
+        fluid,
+        amount: state.amount(),
+        falling: state.falling(),
+        source: state.is_source(),
+    }
+}
+
+include!(concat!(env!("OUT_DIR"), "/mod_api_exports_private.rs"));

@@ -200,13 +200,10 @@ pub fn apply_enchantment(
 
 /// `ItemStack.isDamageableItem`: durability, and not `minecraft:unbreakable`.
 pub fn is_damageable(items: &Items, stack: &ItemStack) -> bool {
-    items.get(&stack.item).is_some_and(|i| i.max_damage > 0)
-        && stack
-            .data()
-            .is_none_or(|d| d.other("minecraft:unbreakable").is_none())
+    horizon_items::properties::damageable(|id| stack.carries_component(items.get(&stack.item), id))
 }
 fn max_damage(items: &Items, stack: &ItemStack) -> i32 {
-    items.get(&stack.item).map_or(0, |i| i.max_damage as i32)
+    stack.max_damage(items.get(&stack.item))
 }
 /// `ItemStack.isValidRepairItem`.
 pub fn is_valid_repair_item(
@@ -215,6 +212,16 @@ pub fn is_valid_repair_item(
     stack: &ItemStack,
     material: &ItemStack,
 ) -> bool {
+    if let Some(data) = stack.data() {
+        if let Some(component) = data.other("minecraft:repairable") {
+            return horizon_items::properties::repairable(component, &material.item, |tag| {
+                items.item_in_tag(tag, &material.item)
+            });
+        }
+        if data.other("!minecraft:repairable").is_some() {
+            return false;
+        }
+    }
     e.props(&stack.item)
         .is_some_and(|p| Enchantments::item_in(items, &p.repairable, &material.item))
 }
@@ -334,7 +341,7 @@ pub fn anvil_result(
             if n != hover_name {
                 naming_cost = 1;
                 price += 1;
-                result.data_mut().custom_name = Some(horizon_world::nbt::Tag::String(n.into()));
+                result.data_mut().custom_name = Some(horizon_core::nbt::Tag::String(n.into()));
             }
         }
         _ => {
@@ -499,17 +506,17 @@ pub fn grindstone_experience(
 pub enum Smithing {
     Transform {
         id: String,
-        template: Ingredient,
+        template: Option<Ingredient>,
         base: Ingredient,
-        addition: Ingredient,
-        result: String,
+        addition: Option<Ingredient>,
+        result: crate::crafting::Template,
     },
     Trim {
         id: String,
         template: Ingredient,
         base: Ingredient,
         addition: Ingredient,
-        pattern: String,
+        pattern: mod_api::RecipeTrimPattern,
     },
 }
 #[derive(Clone, Debug)]
@@ -517,6 +524,79 @@ pub struct Stonecutting {
     pub id: String,
     pub input: Ingredient,
     pub result: ItemStack,
+}
+/// One canonical parse shared by the station tables and the mod recipe view.
+#[derive(Clone, Debug)]
+pub(crate) enum ParsedStationRecipe {
+    Smithing(Smithing),
+    Stonecutting(Stonecutting),
+}
+impl ParsedStationRecipe {
+    pub(crate) fn parse(id: String, v: &Value, items: &Items) -> Option<Self> {
+        match v["type"].as_str().unwrap_or("") {
+            "minecraft:smithing_transform" => Some(Self::Smithing(Smithing::Transform {
+                id,
+                template: v.get("template").map(|v| ingredient(v, items)),
+                base: ingredient(&v["base"], items),
+                addition: v.get("addition").map(|v| ingredient(v, items)),
+                result: crate::crafting::Template::parse(&v["result"])?,
+            })),
+            "minecraft:smithing_trim" => Some(Self::Smithing(Smithing::Trim {
+                id,
+                template: ingredient(&v["template"], items),
+                base: ingredient(&v["base"], items),
+                addition: ingredient(&v["addition"], items),
+                pattern: if let Some(id) = v["pattern"].as_str() {
+                    mod_api::RecipeTrimPattern::Reference(id.to_owned())
+                } else {
+                    mod_api::RecipeTrimPattern::Inline {
+                        asset_id: v["pattern"]["asset_id"].as_str()?.to_owned(),
+                        description: crate::crafting::json_tag(v["pattern"].get("description")?),
+                        decal: v["pattern"]["decal"].as_bool().unwrap_or(false),
+                    }
+                },
+            })),
+            "minecraft:stonecutting" => Some(Self::Stonecutting(Stonecutting {
+                id,
+                input: ingredient(&v["ingredient"], items),
+                result: crate::crafting::Template::parse(&v["result"])?.create(),
+            })),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn rule(&self) -> mod_api::RecipeRule {
+        match self {
+            Self::Stonecutting(recipe) => mod_api::RecipeRule::Stonecutting {
+                input: recipe.input.clone(),
+                result: recipe.result.clone(),
+            },
+            Self::Smithing(Smithing::Transform {
+                template,
+                base,
+                addition,
+                result,
+                ..
+            }) => mod_api::RecipeRule::SmithingTransform {
+                template: template.clone(),
+                base: base.clone(),
+                addition: addition.clone(),
+                result: result.view(),
+            },
+            Self::Smithing(Smithing::Trim {
+                template,
+                base,
+                addition,
+                pattern,
+                ..
+            }) => mod_api::RecipeRule::SmithingTrim {
+                template: template.clone(),
+                base: base.clone(),
+                addition: addition.clone(),
+                pattern: pattern.clone(),
+            },
+        }
+    }
 }
 #[derive(Default)]
 pub struct StationRecipes {
@@ -528,6 +608,7 @@ pub struct StationRecipes {
     /// What mods added to the smithing slots' property sets (template, base,
     /// addition).
     smithing_additions: [HashSet<String>; 3],
+    item_limits: std::collections::HashMap<Arc<str>, (u32, u32)>,
 }
 fn ingredient(v: &Value, items: &Items) -> Ingredient {
     Ingredient::parse(v, items).unwrap_or_else(|| Ingredient::of(Vec::new()))
@@ -550,41 +631,10 @@ impl StationRecipes {
     ) -> Self {
         let mut smithing = Vec::new();
         let mut stonecutting = Vec::new();
-        for recipe in &sources.recipes {
-            let id = crate::crafting::qualified(&recipe.name);
-            let v = &*recipe.resolved;
-            match v["type"].as_str().unwrap_or("") {
-                "minecraft:smithing_transform" => smithing.push(Smithing::Transform {
-                    id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
-                    result: horizon_world::loot::recipe_result_id(&v["result"])
-                        .unwrap_or("minecraft:air")
-                        .to_owned(),
-                }),
-                "minecraft:smithing_trim" => smithing.push(Smithing::Trim {
-                    id,
-                    template: ingredient(&v["template"], items),
-                    base: ingredient(&v["base"], items),
-                    addition: ingredient(&v["addition"], items),
-                    pattern: v["pattern"].as_str().unwrap_or("").to_owned(),
-                }),
-                "minecraft:stonecutting" => {
-                    // A result count outside 1..=99 fails vanilla's codec: no recipe.
-                    if let Some(count) = crate::crafting::template_count(&v["result"]) {
-                        stonecutting.push(Stonecutting {
-                            id,
-                            input: ingredient(&v["ingredient"], items),
-                            result: ItemStack::new(
-                                horizon_world::loot::recipe_result_id(&v["result"])
-                                    .unwrap_or("minecraft:air"),
-                                count,
-                            ),
-                        });
-                    }
-                }
-                _ => {}
+        for recipe in sources.station_recipes(items).iter().flatten() {
+            match recipe {
+                ParsedStationRecipe::Smithing(recipe) => smithing.push(recipe.clone()),
+                ParsedStationRecipe::Stonecutting(recipe) => stonecutting.push(recipe.clone()),
             }
         }
         let mut trim_materials = Vec::new();
@@ -623,6 +673,11 @@ impl StationRecipes {
             smithing,
             stonecutting,
             trim_materials,
+            item_limits: items
+                .items
+                .iter()
+                .map(|(id, info)| (id.clone(), (info.max_stack, info.max_damage)))
+                .collect(),
             smithing_additions: [
                 added("smithing_template"),
                 added("smithing_base"),
@@ -639,22 +694,20 @@ impl StationRecipes {
     }
     fn slot_ok(&self, context: &LoopContext, slot: usize, stack: &ItemStack) -> bool {
         self.smithing_additions[slot].contains(&*stack.item)
-            || self.smithing.iter().any(|r| {
-                let (t, b, a) = match r {
-                    Smithing::Transform {
-                        template,
-                        base,
-                        addition,
-                        ..
-                    }
-                    | Smithing::Trim {
-                        template,
-                        base,
-                        addition,
-                        ..
-                    } => (template, base, addition),
-                };
-                [t, b, a][slot].test_in(context, stack)
+            || self.smithing.iter().any(|r| match r {
+                Smithing::Transform {
+                    template,
+                    base,
+                    addition,
+                    ..
+                } => [template.as_ref(), Some(base), addition.as_ref()][slot]
+                    .is_some_and(|i| i.test_in(context, stack)),
+                Smithing::Trim {
+                    template,
+                    base,
+                    addition,
+                    ..
+                } => [template, base, addition][slot].test_in(context, stack),
             })
     }
     /// `RecipePropertySet` SMITHING_TEMPLATE / BASE / ADDITION.
@@ -682,7 +735,7 @@ impl StationRecipes {
         base: Option<&ItemStack>,
         addition: Option<&ItemStack>,
     ) -> Option<(&str, ItemStack)> {
-        let (template, base, addition) = (template?, base?, addition?);
+        let base = base?;
         for r in &self.smithing {
             match r {
                 Smithing::Transform {
@@ -692,12 +745,39 @@ impl StationRecipes {
                     addition: a,
                     result,
                 } => {
-                    if t.test_in(context, template)
-                        && b.test_in(context, base)
-                        && a.test_in(context, addition)
+                    if t.as_ref().map_or(template.is_none(), |i| {
+                        template.is_some_and(|s| i.test_in(context, s))
+                    }) && b.test_in(context, base)
+                        && a.as_ref().map_or(addition.is_none(), |i| {
+                            addition.is_some_and(|s| i.test_in(context, s))
+                        })
                     {
-                        // SmithingTransformRecipe: transmute the base keeping its components.
-                        return Some((id.as_str(), base.transmute(result, 1)));
+                        let output = result.over(base, 0);
+                        let (mut max_stack, mut max_damage) = self
+                            .item_limits
+                            .get(&output.item)
+                            .copied()
+                            .unwrap_or((64, 0));
+                        if let Some(data) = output.data() {
+                            for (key, value) in &data.other {
+                                match (key.as_str(), value) {
+                                    (
+                                        "minecraft:max_stack_size",
+                                        horizon_core::nbt::Tag::Int(n),
+                                    ) => max_stack = *n as u32,
+                                    ("!minecraft:max_stack_size", _) => max_stack = 1,
+                                    ("minecraft:max_damage", horizon_core::nbt::Tag::Int(n)) => {
+                                        max_damage = *n as u32
+                                    }
+                                    ("!minecraft:max_damage", _) => max_damage = 0,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        return (output.count > 0
+                            && output.count <= max_stack
+                            && !(max_damage > 0 && max_stack > 1))
+                            .then_some((id.as_str(), output));
                     }
                 }
                 Smithing::Trim {
@@ -708,11 +788,11 @@ impl StationRecipes {
                     pattern,
                     ..
                 } => {
-                    if t.test_in(context, template)
+                    if template.is_some_and(|s| t.test_in(context, s))
                         && b.test_in(context, base)
-                        && a.test_in(context, addition)
+                        && addition.is_some_and(|s| a.test_in(context, s))
                     {
-                        return apply_trim(e, base, addition, pattern).map(|r| (id.as_str(), r));
+                        return apply_trim(e, base, addition?, pattern).map(|r| (id.as_str(), r));
                     }
                 }
             }
@@ -754,8 +834,13 @@ fn apply_trim(
     e: &Enchantments,
     base: &ItemStack,
     material: &ItemStack,
-    pattern: &str,
+    pattern: &mod_api::RecipeTrimPattern,
 ) -> Option<ItemStack> {
+    let pattern = match pattern {
+        mod_api::RecipeTrimPattern::Reference(id) => id.as_str(),
+        mod_api::RecipeTrimPattern::Inline { asset_id, .. } => asset_id.as_str(),
+        _ => return None,
+    };
     let material = e.props(&material.item)?.trim_material.clone()?;
     let trim = (Arc::from(material.as_str()), Arc::from(pattern));
     if base.data().and_then(|d| d.trim.as_ref()) == Some(&trim) {
@@ -1066,7 +1151,11 @@ mod tests {
             origin: [0.0; 3],
             maps: None,
         };
-        for p in crate::merchant::PROFESSIONS {
+        for p in crate::mobs::villager::profession_table()
+            .entries()
+            .iter()
+            .filter_map(|p| p.trade_set)
+        {
             let set = crate::merchant::Trades::set_for(p, 1);
             let mut random = crate::merchant::sequence_random(
                 12345,
@@ -1104,6 +1193,113 @@ mod tests {
         assert!((12..24).contains(&xp));
     }
     #[test]
+    fn stonecutting_component_result_is_retained() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:stonecutting","ingredient":"minecraft:stone","result":{"id":"minecraft:diamond","count":2,"components":{"minecraft:damage":7}}});
+        let rule = ParsedStationRecipe::parse("test:cut".into(), &json, &items)
+            .unwrap()
+            .rule();
+        let mod_api::RecipeRule::Stonecutting { result, .. } = rule else {
+            panic!("wrong rule")
+        };
+        assert_eq!(result.item.as_ref(), "minecraft:diamond");
+        assert_eq!(result.count, 2);
+        assert_eq!(result.damage, 7);
+    }
+
+    #[test]
+    fn smithing_transform_omitted_slots_match_empty() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_transform","base":"minecraft:stone","result":"minecraft:diamond"});
+        let parsed = ParsedStationRecipe::parse("test:smith".into(), &json, &items).unwrap();
+        assert!(matches!(
+            parsed.rule(),
+            mod_api::RecipeRule::SmithingTransform {
+                template: None,
+                addition: None,
+                ..
+            }
+        ));
+        let ParsedStationRecipe::Smithing(recipe) = parsed else {
+            panic!("wrong rule")
+        };
+        let stations = StationRecipes {
+            smithing: vec![recipe],
+            ..Default::default()
+        };
+        let base = ItemStack::new("minecraft:stone", 1);
+        let ench = Enchantments::default();
+        let ctx = crate::test_resources::server_loop_context();
+        assert!(
+            stations
+                .smithing_result(ctx, &ench, None, Some(&base), None)
+                .is_some()
+        );
+        assert!(
+            stations
+                .smithing_result(ctx, &ench, Some(&base), Some(&base), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn smithing_rejects_invalid_assembled_stack() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_transform","base":"minecraft:diamond_sword","result":{"id":"minecraft:netherite_sword","count":2}});
+        let ParsedStationRecipe::Smithing(recipe) =
+            ParsedStationRecipe::parse("test:smith".into(), &json, &items).unwrap()
+        else {
+            panic!("wrong rule")
+        };
+        let stations = StationRecipes {
+            smithing: vec![recipe],
+            item_limits: [(Arc::from("minecraft:netherite_sword"), (1, 2031))]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let base = ItemStack::new("minecraft:diamond_sword", 1);
+        assert!(
+            stations
+                .smithing_result(
+                    crate::test_resources::server_loop_context(),
+                    &Enchantments::default(),
+                    None,
+                    Some(&base),
+                    None
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn smithing_inline_trim_pattern_is_retained() {
+        let items = Items::for_tests(Default::default());
+        let json = serde_json::json!({"type":"minecraft:smithing_trim","template":"minecraft:stick","base":"minecraft:stone","addition":"minecraft:iron_ingot","pattern":{"asset_id":"example:wave","description":{"translate":"trim.example.wave"},"decal":true}});
+        let rule = ParsedStationRecipe::parse("test:trim".into(), &json, &items)
+            .unwrap()
+            .rule();
+        let mod_api::RecipeRule::SmithingTrim {
+            pattern:
+                mod_api::RecipeTrimPattern::Inline {
+                    asset_id,
+                    description,
+                    decal,
+                },
+            ..
+        } = rule
+        else {
+            panic!("wrong rule")
+        };
+        assert_eq!(asset_id, "example:wave");
+        assert_eq!(
+            description.get("translate"),
+            Some(&horizon_core::nbt::Tag::String("trim.example.wave".into()))
+        );
+        assert!(decal);
+    }
+
+    #[test]
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
         let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
@@ -1139,7 +1335,7 @@ mod tests {
         let recipes = StationRecipes::load(
             &root,
             &sample_items(),
-            &PackOverlay { files: &packs },
+            &PackOverlay::new(&packs),
             &crate::test_resources::server_load(),
         );
         let _ = fs::remove_dir_all(&root);

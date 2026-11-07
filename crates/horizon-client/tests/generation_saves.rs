@@ -201,13 +201,24 @@ impl Session {
 
 fn worker_context(root: &Path) -> Arc<WorkerContext> {
     let assets = Arc::new(Assets::load(root).unwrap());
-    let render = Arc::new(assets.reload(root).unwrap());
+    let render = Arc::new(
+        assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+    );
     let facts = BlockFacts::load(root, assets.registry).unwrap();
     let visibility = models::load_visibility(root, assets.registry).unwrap();
     Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
         light: Arc::new(LightTables::load(root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(root).unwrap()),
+        biomes: Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+        ),
         assets,
         render: render.clone(),
         hidden_states: Arc::from([]),
@@ -304,13 +315,24 @@ fn proto_chunks_are_viewed_once_per_state() {
         return;
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let render = Arc::new(assets.reload(&root).unwrap());
+    let render = Arc::new(
+        assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+    );
     let facts = BlockFacts::load(&root, assets.registry).unwrap();
     let visibility = models::load_visibility(&root, assets.registry).unwrap();
     let context = Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility).unwrap()),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts).unwrap()),
-        biomes: Arc::new(Biomes::load(&root).unwrap()),
+        biomes: Arc::new(
+            Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap(),
+        ),
         assets,
         render: render.clone(),
         hidden_states: Arc::from([]),
@@ -349,10 +371,16 @@ fn saved_proto_chunks_restore_exactly() {
         return;
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let biomes = Arc::new(
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap(),
+    );
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -386,12 +414,13 @@ fn saved_proto_chunks_restore_exactly() {
     let extras = Arc::make_mut(extras);
     extras
         .root
-        .insert("example:unknown".into(), horizon_world::nbt::Tag::Int(42));
-    let attachment = horizon_world::nbt::Compound::from_iter([(
+        .insert("example:unknown".into(), horizon_core::nbt::Tag::Int(42));
+    let attachment = horizon_core::nbt::Compound::from_iter([(
         "example:data".into(),
-        horizon_world::nbt::Tag::Int(9),
+        horizon_core::nbt::Tag::Int(9),
     )]);
-    extras.attachments = horizon_world::attachments::Attachments::from_nbt(attachment.clone());
+    extras.attachments =
+        horizon_mod_runtime::attachments::Attachments::from_nbt(attachment.clone());
     save.save_protos(&[seeded], assets.registry, &generator.biomes)
         .unwrap();
     save.flush().unwrap();
@@ -415,7 +444,7 @@ fn saved_proto_chunks_restore_exactly() {
             .unwrap()
             .root
             .get(&"example:unknown".into()),
-        Some(&horizon_world::nbt::Tag::Int(42))
+        Some(&horizon_core::nbt::Tag::Int(42))
     );
     assert_eq!(
         proto.column.saved.as_ref().unwrap().attachments.to_nbt(),
@@ -432,7 +461,7 @@ fn saved_proto_chunks_restore_exactly() {
             let extras = loaded.saved.unwrap();
             assert_eq!(
                 extras.root.get(&"example:unknown".into()),
-                Some(&horizon_world::nbt::Tag::Int(42))
+                Some(&horizon_core::nbt::Tag::Int(42))
             );
             assert_eq!(extras.attachments.to_nbt(), attachment);
         }
@@ -475,18 +504,24 @@ fn saved_proto_block_entities_keep_their_id() {
         save::{Persistent, SaveDir},
         vanillagen::VanillaTerrain,
     };
-    use horizon_world::{
-        nbt::{Limits, Tag},
-        region::RegionFile,
+    use {
+        horizon_core::nbt::{Limits, Tag},
+        horizon_world::region::RegionFile,
     };
     let Some(root) = resources() else {
         return;
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let biomes = Arc::new(
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap(),
+    );
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
     let terrain = VanillaTerrain::for_dimension(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,
@@ -577,7 +612,12 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
         return;
     };
     let assets = Arc::new(Assets::load(&root).unwrap());
-    let biomes = Arc::new(Biomes::load(&root).unwrap());
+    let biomes = Arc::new(
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.to_path_buf(),
+        ))
+        .unwrap(),
+    );
     let dir = std::env::temp_dir().join(format!("horizon-final-be-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let generator = Persistent {
@@ -594,4 +634,46 @@ fn persistent_forwards_the_block_entities_decoration_made_in_a_final_chunk() {
     assert_eq!(made.len(), 1, "Persistent drops the block entities");
     assert_eq!(made[0].0, (1, 64, 2));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `NoiseGeneratorSettings.disableMobGeneration` reaches the client's
+/// `spawnOriginalMobs` gate from the shipped presets: the End asks for no
+/// creature packs at generation and the overworld and nether ask for them.
+#[test]
+fn the_end_asks_for_no_creature_packs_and_the_overworld_does() {
+    use horizon_client::{assets::Assets, biome::Biomes, vanillagen::VanillaTerrain};
+    let Some(root) = resources() else {
+        return;
+    };
+    let assets = Arc::new(Assets::load(&root).unwrap());
+    let biomes = Arc::new(
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            root.clone(),
+        ))
+        .unwrap(),
+    );
+    let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad).unwrap();
+    for (dimension, want) in [
+        ("minecraft:overworld", false),
+        ("minecraft:the_nether", false),
+        ("minecraft:the_end", true),
+    ] {
+        let terrain = VanillaTerrain::for_dimension(
+            horizon_client::vanillagen::TerrainResources {
+                data: None,
+                dir: &root.join("worldgen"),
+                registry: assets.registry,
+                biomes: &biomes,
+                item_data: &item_data,
+            },
+            12345,
+            dimension,
+        )
+        .unwrap();
+        assert_eq!(
+            terrain.disable_mob_generation(),
+            want,
+            "disable_mob_generation of {dimension}"
+        );
+    }
 }

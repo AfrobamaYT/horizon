@@ -32,23 +32,6 @@ pub fn max_xp(level: i32) -> i32 {
         0
     }
 }
-/// The professions with trades, as in `VillagerProfession`.
-pub const PROFESSIONS: &[&str] = &[
-    "armorer",
-    "butcher",
-    "cartographer",
-    "cleric",
-    "farmer",
-    "fisherman",
-    "fletcher",
-    "leatherworker",
-    "librarian",
-    "mason",
-    "shepherd",
-    "toolsmith",
-    "weaponsmith",
-];
-
 /// A villager's or wandering trader's trading state (`AbstractVillager.offers`
 /// and `Villager.villagerXp`); `None` on the mob until its offers are first asked for.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -482,10 +465,11 @@ impl Trades {
     }
     /// `VillagerProfession.getTrades(level)`.
     pub fn set_for(profession: &str, level: i32) -> String {
-        format!(
-            "minecraft:{}/level_{level}",
-            profession.trim_start_matches("minecraft:")
-        )
+        let name = profession.trim_start_matches("minecraft:");
+        let base = crate::mobs::villager::profession_index(name)
+            .and_then(|index| crate::mobs::villager::profession(index).trade_set)
+            .unwrap_or(name);
+        format!("minecraft:{base}/level_{level}")
     }
     fn trade_list(&self, spec: &Value) -> Vec<String> {
         match spec {

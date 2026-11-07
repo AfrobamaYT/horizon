@@ -75,14 +75,16 @@ fn main() -> Result<()> {
     let (base, work) = (Path::new(base), Path::new(work));
     let oracle: Value = serde_json::from_slice(&fs::read(work.join("oracle/facts.json"))?)?;
     let mut mods = Vec::new();
+    let mut inventory = Vec::new();
     for entry in fs::read_dir(work.join("mods"))?.flatten() {
         let id = entry.file_name().to_string_lossy().into_owned();
         let dir = entry.path().join("carry");
         if !(wanted.is_empty() || wanted.contains(&id)) || !dir.is_dir() {
             continue;
         }
-        let package = horizon_mods::Package::read(&dir)?;
-        let content = horizon_mods::Content::read(&dir, &package.manifest)?;
+        let package = horizon_mod_package::Package::read(&dir)?;
+        let content = horizon_mod_package::Content::read(&dir, &package.manifest)?;
+        inventory.push((package.manifest.id.clone(), package.manifest.side));
         mods.push(ContentMod {
             id: package.manifest.id.clone(),
             content,
@@ -101,6 +103,7 @@ fn main() -> Result<()> {
         &horizon_client::logging::game_home().join("jars"),
         &mods,
         &root,
+        &horizon_mod_package::enabled::EnabledMods::new(inventory),
     )
     .map_err(step("content root"))?;
     let built = began.elapsed().as_secs_f64();

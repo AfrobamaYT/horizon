@@ -278,10 +278,14 @@ fn main() -> Result<(), Error> {
     horizon_threads::jobs::configure(n);
 
     let assets = Arc::new(Assets::load(&root)?);
-    let render = Arc::new(assets.reload(&root)?);
+    let render = Arc::new(assets.reload(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )?);
     let facts = BlockFacts::load(&root, assets.registry)?;
     let visibility = models::load_visibility(&root, assets.registry)?;
-    let biomes = Arc::new(Biomes::load(&root)?);
+    let biomes = Arc::new(Biomes::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+    )?);
     let context = Arc::new(WorkerContext {
         tables: Arc::new(MeshTables::new(&assets, &render, &facts, visibility)?),
         light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -292,6 +296,7 @@ fn main() -> Result<(), Error> {
     });
     let item_data = test_resources::item_data(&root, DataLoadOrigin::ServerDataLoad)?;
     let terrain_resources = horizon_client::vanillagen::TerrainResources {
+        data: None,
         dir: &root.join("worldgen"),
         registry: assets.registry,
         biomes: &biomes,

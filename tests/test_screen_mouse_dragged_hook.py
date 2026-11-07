@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from native_hook_sources import native_hook_sources
+
 from test_world_input_capture import method
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +16,7 @@ class ScreenMouseDraggedHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_drag_lifecycle_delta_and_cancelled_cursor(self):
         source = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        hooks = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
+        hooks = native_hook_sources()
         hooks = hooks.replace("pub(super) fn", "fn").replace("super::glfw_", "glfw_")
         track = method(hooks, "track_drag_button")
         dispatch = method(hooks, "screen_mouse_dragged")
@@ -25,19 +27,29 @@ class ScreenMouseDraggedHookTests(unittest.TestCase):
         fixture = r"""
 use std::{cell::RefCell, collections::HashSet};
 type MouseButton = i32;
+mod winit {
+    pub mod keyboard {
+        #[derive(Clone, Copy)]
+        pub struct ModifiersState(pub u32);
+        impl ModifiersState {
+            pub fn empty() -> Self { Self(0) }
+        }
+    }
+}
+use winit::keyboard::ModifiersState;
 mod native_hooks {
     pub enum ScreenMousePost { Drag { button: i32, delta: [f32; 2] } }
     pub enum ScreenMousePre { NotFired, Canceled, Passed(ScreenMousePost) }
 }
 use native_hooks::{ScreenMousePost, ScreenMousePre};
 fn glfw_button(button: i32) -> i32 { button }
-fn glfw_modifiers(bits: u32) -> u32 { bits }
+fn glfw_modifiers(state: ModifiersState) -> u32 { state.0 }
 struct View { mouse: (f32, f32) }
 struct Point { x: f64, y: f64 }
 struct Batch { scale: f32 }
 enum WindowEvent { Focused(bool) }
 struct Game { drag_button: Option<i32>, physical_buttons: HashSet<i32>, physical_keys: HashSet<i32>,
-    cursor: (f32, f32), modifiers: u32, synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
+    cursor: (f32, f32), modifiers: ModifiersState, synthetic: bool, open: bool, cancel: bool, handled: usize, posts: usize,
     calls: RefCell<Vec<(i32, [f32; 2], (f32, f32))>> }
 impl Game {
     fn pad_synthetic_input(&self) -> bool { self.synthetic }
@@ -61,7 +73,7 @@ impl Game {
 fn lifecycle_and_cancellation() {
     for cancel in [false, true] {
         let mut game = Game { drag_button: None, physical_buttons: HashSet::from([0, 1]),
-            physical_keys: HashSet::from([10]), cursor: (10.0, 10.0), modifiers: 5, synthetic: false,
+            physical_keys: HashSet::from([10]), cursor: (10.0, 10.0), modifiers: ModifiersState(5), synthetic: false,
             open: true, cancel, handled: 0, posts: 0, calls: RefCell::new(vec![]) };
         game.track_drag_button(0, true);
         game.track_drag_button(1, true);
@@ -89,6 +101,7 @@ fn lifecycle_and_cancellation() {
         game.track_drag_button(0, true);
         game.physical_buttons.insert(0);
         game.focus(WindowEvent::Focused(false));
+        assert_eq!(game.modifiers.0, 0);
         assert_eq!(game.drag_button, None);
         assert!(game.physical_buttons.is_empty() && game.physical_keys.is_empty());
         game.pointer(Point { x: 62.0, y: 42.0 }).unwrap();

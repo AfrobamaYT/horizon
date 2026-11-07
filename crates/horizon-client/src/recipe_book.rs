@@ -7,8 +7,8 @@ use crate::{
     crafting::{Ingredient, Placement, Recipe, Recipes},
     items::{ItemStack, Items},
 };
+use horizon_core::nbt::Tag;
 use horizon_world::loot::PackOverlay;
-use horizon_world::nbt::Tag;
 pub use mod_api::recipe_book::RecipeBookCategory;
 use std::collections::{BTreeSet, HashMap};
 
@@ -599,7 +599,7 @@ pub struct GhostSlot {
 /// A `RecipeDisplayId` as a `HashMap` key: a record of one int hashes as it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct DisplayKey(i32);
-impl horizon_world::java_hash_map::JavaKey for DisplayKey {
+impl horizon_core::java_hash_map::JavaKey for DisplayKey {
     fn java_hash(&self) -> i32 {
         self.0
     }
@@ -617,7 +617,7 @@ impl horizon_world::java_hash_map::JavaKey for DisplayKey {
 /// order of the book's buttons.
 #[derive(Default)]
 pub struct ClientBook {
-    known: horizon_world::java_hash_map::JavaHashMap<DisplayKey, ()>,
+    known: horizon_core::java_hash_map::JavaHashMap<DisplayKey, ()>,
     pub highlight: std::collections::HashSet<i32>,
 }
 impl ClientBook {
@@ -987,7 +987,7 @@ mod tests {
     /// namespace in, so those recipes show in the book too.
     #[test]
     fn a_book_saved_with_bare_names_reads_qualified() {
-        use horizon_world::nbt::{Compound, Tag};
+        use horizon_core::nbt::{Compound, Tag};
         let list = || Tag::List(vec![Tag::String("folder_recipe".into())]);
         let mut compound = Compound::new();
         compound.insert("recipes".into(), list());
@@ -1091,7 +1091,7 @@ mod tests {
         let root = content_recipe_root("overlay", CONTENT_RECIPE);
         let replacement = br#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:flint"],"result":{"id":"minecraft:torch"}}"#;
         let files = [("recipe/example:test".to_owned(), vec![replacement.to_vec()])];
-        let overlay = PackOverlay { files: &files };
+        let overlay = PackOverlay::new(&files);
         let items = crate::items::Items::for_tests(HashMap::new());
         let recipes = Recipes::load(
             &root,
@@ -1255,6 +1255,53 @@ mod tests {
             (Some("minecraft:smithing_table"), None)
         );
     }
+    #[test]
+    fn content_namespace_recipes_have_display_ids() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-mod-recipe-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let vanilla = root.join("data/minecraft/recipe");
+        let content = root.join("data/recipe_pilot/recipe");
+        std::fs::create_dir_all(&vanilla).unwrap();
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["recipe_pilot"]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            vanilla.join("control.json"),
+            br#"{"type":"minecraft:crafting_shapeless","result":{"id":"minecraft:stick"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            content.join("flint_to_echo_shard.json"),
+            br#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:flint"],"result":{"id":"minecraft:echo_shard","count":2}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            content.join("gated.json"),
+            br#"{"type":"minecraft:crafting_shapeless","neoforge:conditions":[{"type":"neoforge:mod_loaded","modid":"absent"}],"result":{"id":"minecraft:diamond"}}"#,
+        )
+        .unwrap();
+        let index = RecipeIndex::load(&root, &PackOverlay::NONE);
+        std::fs::remove_dir_all(&root).unwrap();
+        let id = "recipe_pilot:flint_to_echo_shard";
+        let display = index
+            .first_display(id)
+            .expect("content recipe has a display ID");
+        assert!(display >= 0);
+        assert_eq!(index.recipe_of_display(display), Some(id));
+        assert_eq!(index.result(id), Some("minecraft:echo_shard"));
+        assert!(index.first_display("minecraft:control").is_some());
+        assert!(!index.contains("recipe_pilot:gated"));
+    }
+
     #[test]
     fn small_recipes_are_centred_in_the_grid() {
         // One ingredient in a 3x3 grid goes to the middle cell.
@@ -1437,7 +1484,7 @@ mod tests {
             "recipe/parity:a_pick".to_owned(),
             vec![recipe.as_bytes().to_vec()],
         )];
-        let index = RecipeIndex::load(&root, &PackOverlay { files: &packs });
+        let index = RecipeIndex::load(&root, &PackOverlay::new(&packs));
         std::fs::remove_dir_all(&root).unwrap();
         let ids = [
             "parity:a_pick",

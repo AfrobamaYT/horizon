@@ -268,7 +268,7 @@ impl Fixture {
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let hud = HudBatch::new(size);
+        let hud = HudBatch::scratch(size);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         post.run(
             &self.device,
@@ -451,6 +451,7 @@ fn fixture_frame(hud: &HudBatch) -> Frame<'_> {
         visible_static_block_entity_sections: &[],
         static_block_entity_stats: crate::block_entity_render::StaticCacheFrameStats::default(),
         entity_motion: &[],
+        entity_motion_posed: &[],
         colored_lights: &[],
         emissive_layers: &[],
         shadow_only: &[],

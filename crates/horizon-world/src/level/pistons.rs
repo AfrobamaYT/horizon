@@ -10,12 +10,12 @@ use super::{
     states::BlockId,
     update::{above, rel},
 };
-use crate::{
-    java_hash_map::{JavaHashMap, JavaKey},
-    registry::BlockStateId,
-};
 use horizon_core::{geometry::Direction, position::BlockPos, random::RandomSource};
 use std::cmp::Ordering;
+use {
+    crate::registry::BlockStateId,
+    horizon_core::java_hash_map::{JavaHashMap, JavaKey},
+};
 
 /// `PistonMovingBlockEntity` state, owned by [`Ticks::moving_pistons`].
 #[derive(Clone, Copy, Debug, PartialEq)]

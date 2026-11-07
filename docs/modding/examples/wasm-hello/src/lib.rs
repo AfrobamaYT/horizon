@@ -2,15 +2,20 @@
 //! native mod too.
 // ANCHOR: mod
 use mod_api::{
-    Flow, Hooks, HostSide, ItemPart, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
-    Text, UseItemEvent,
+    BlockKey, DataLoadContext, EffectKey, Flow, FluidDefinition, FluidIngredient, FluidKey,
+    FluidStack, FluidStateError, Hooks, HostFluidStates, HostSide, ItemPart, LootTableLoadEvent,
+    Registrar, RegistrationContext, ServerChatEvent, ServerHost, StateConstraint, Text,
+    UseItemEvent,
 };
-use mod_points::{Points, TickArgs};
+use mod_points::TickArgs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
 pub struct Mod {
-    ticks: AtomicU64,
+    stone: std::sync::OnceLock<BlockKey>,
+    speed: std::sync::OnceLock<EffectKey>,
+    water: std::sync::OnceLock<FluidKey>,
+    chocolate: std::sync::OnceLock<FluidKey>,
 }
 
 /// Sticks announce each use.
@@ -28,28 +33,98 @@ impl ItemPart for Stick {
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
     fn register(&self, registrar: &mut dyn Registrar, _cx: &RegistrationContext) {
-        registrar.item_part("minecraft:stick", Stick);
+        let item = registrar.item_key("minecraft:stick");
+        registrar.item_part(item, Stick);
+        let _ = self.stone.set(registrar.block_key("minecraft:stone"));
+        let _ = self.speed.set(registrar.effect_key("minecraft:speed"));
+        let _ = self.water.set(registrar.fluid_key("minecraft:water"));
+        let _ = self.chocolate.set(registrar.declare_fluid("chocolate"));
     }
 
-    fn server_chat(&self, _host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+    fn loot_table_load(&self, context: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
+        if event.id != "test:loot" {
+            return;
+        }
+        let water = context.fluid_key("minecraft:water").expect("water");
+        let ingredient =
+            FluidIngredient::from_json(&mod_api::serde_json::json!("minecraft:water"), context)
+                .expect("ingredient");
+        assert!(ingredient.test(&FluidStack::new(water, 1)));
+        *event.table = mod_api::serde_json::json!({"fluid_guest_ok": true});
+    }
+
+    fn server_chat(&self, host: &mut dyn ServerHost, event: &mut ServerChatEvent<'_>) -> Flow {
+        let stone = *self.stone.get().expect("registered block key");
+        let speed = *self.speed.get().expect("registered effect key");
+        assert_eq!(stone.id(host), "minecraft:stone");
+        assert_eq!(speed.id(host), "minecraft:speed");
+        let state = host.block_state_default(stone).expect("stone state");
+        let fluid = host.state_fluid_state(state).expect("fluid state");
+        assert_eq!(
+            (
+                fluid.amount,
+                fluid.falling,
+                fluid.is_source(),
+                fluid.is_empty()
+            ),
+            (0, false, false, true)
+        );
+        let service = host.fluid_states();
+        let water = *self.water.get().expect("registered water");
+        let chocolate = *self.chocolate.get().expect("declared chocolate");
+        let Some(FluidDefinition::World {
+            default,
+            properties,
+        }) = service.definition(water)
+        else {
+            panic!("water definition")
+        };
+        assert!(default.matches(&[StateConstraint::new("falling", "true")]));
+        assert!(
+            properties
+                .iter()
+                .any(|p| p.name == "falling" && p.values.contains(&"false".into()))
+        );
+        assert_eq!(service.validate(water, &[]), Ok(()));
+        assert_eq!(
+            service.validate(water, &[StateConstraint::new("level", "8")]),
+            Err(FluidStateError::UnknownProperty(0))
+        );
+        assert_eq!(
+            service.validate(
+                water,
+                &[
+                    StateConstraint::new("falling", "true"),
+                    StateConstraint::new("falling", "true")
+                ]
+            ),
+            Err(FluidStateError::Duplicate(1))
+        );
+        assert_eq!(
+            service.definition(chocolate),
+            Some(FluidDefinition::TankOnly)
+        );
+        assert_eq!(
+            service.validate(chocolate, &[]),
+            Err(FluidStateError::NoWorldState)
+        );
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
     }
 }
 
+static TICKS: AtomicU64 = AtomicU64::new(0);
+
 /// Listens at the game's tick, a point its `horizon-mod.toml` names: every 200 server ticks it
 /// says so in chat.
-#[mod_api::horizon_mod]
-impl Points for Mod {
-    fn tick(&self, host: HostSide<'_>, _args: &mut TickArgs) {
-        let HostSide::Server(host) = host else {
-            return;
-        };
-        let ticks = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
-        if ticks % 200 == 0 {
-            host.messages()
-                .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
-        }
+pub fn tick(host: HostSide<'_>, _args: &mut TickArgs) {
+    let HostSide::Server(host) = host else { return };
+    let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    if ticks % 200 == 0 {
+        host.messages()
+            .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
     }
 }
+#[cfg(target_arch = "wasm32")]
+include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 // ANCHOR_END: mod

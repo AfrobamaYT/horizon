@@ -461,7 +461,7 @@ mod tests {
     fn message_hit_testing_respects_sprite_advances_and_glyph_bounds() {
         use crate::{component, hud::Rect, text::ClickEvent};
         let font = Font::load(
-            std::path::Path::new("/nonexistent-horizon-dialog-test-resources"),
+            &horizon_assets::resource_source::ResourceSource::default(),
             &std::collections::HashMap::new(),
             &[],
             (1, 1),

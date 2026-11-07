@@ -96,4 +96,153 @@ fn client_packet_hands_a_mod_the_type_and_custom_payload() {
 
 // Fluid acceptance is scoped to a FLUIDS provider, not a global Hooks method.
 // Its default/refused/accepted writes are covered with a real Game backend in
-// game/machines/native_fluids.rs::tests::a_scoped_tank_can_refuse_a_fluid.
+// game/blocks/machines/native_fluids.rs::tests::a_scoped_tank_can_refuse_a_fluid.
+
+mod model_layers {
+    use mod_api::{
+        CubeListBuilder, Hooks, LayerDefinition, LayerDefinitionsEvent, MeshDefinition, ModEntry,
+        PartPose, RegistrationContext,
+    };
+
+    struct Golem(&'static str);
+    #[mod_api::__subscriptions]
+    impl Hooks for Golem {
+        // ANCHOR: layer_definitions
+        fn layer_definitions(
+            &self,
+            _context: &RegistrationContext,
+            event: &mut LayerDefinitionsEvent<'_>,
+        ) {
+            let mut mesh = MeshDefinition::new();
+            let root = mesh.root();
+            let head = CubeListBuilder::create()
+                .tex_offs(0, 0)
+                .add_box([-4.0, -8.0, -4.0], [8.0, 8.0, 8.0]);
+            mesh.add_or_replace_child(root, "head", head, PartPose::offset(0.0, 6.0, 0.0));
+            event
+                .layers
+                .push((self.0.into(), LayerDefinition::create(mesh, 64, 32)));
+        }
+        // ANCHOR_END: layer_definitions
+    }
+
+    #[test]
+    fn layer_definitions_collect_each_mods_layers_in_order() {
+        // The harness supplies the engine-owned context; the listener above uses only public API.
+        use mod_api::__private::game::RegistrationContextNew;
+        mod_api::testing::with_mods(
+            vec![
+                ModEntry::new("first", Box::new(Golem("first:golem#main"))),
+                ModEntry::new("second", Box::new(Golem("second:golem#main"))),
+            ]
+            .into(),
+            || {
+                let mut layers = Vec::new();
+                mod_api::dispatch_layer_definitions(&RegistrationContext::new(), &mut layers);
+                let ids: Vec<_> = layers.iter().map(|(id, _)| id.as_str()).collect();
+                assert_eq!(ids, ["first:golem#main", "second:golem#main"]);
+                let model = layers[0].1.bake_root();
+                let head = model.get_child("head").expect("the head part");
+                assert_eq!((head.y, head.polygons.len()), (6.0, 6));
+            },
+        );
+    }
+}
+
+/// Each mod changes the prior answer, vanilla's stays readable, and cancel
+/// stops later mods. The fork's existing typed event owns this moment.
+#[test]
+fn an_anvil_update_is_changed_in_turn_and_cancel_stops_later_mods() {
+    use mod_api::menu::AnvilUpdate;
+    use mod_api::stations::AnvilResult;
+    use mod_api::{AnvilUpdateEvent, Flow, Host, HostSide, ItemStack, ServerHost};
+    struct TestHost;
+    impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
+    mod_api::impl_server_host_areas!(TestHost);
+    impl ServerHost for TestHost {}
+    #[derive(Default)]
+    struct Recipe;
+    #[mod_api::__subscriptions]
+    impl Hooks for Recipe {
+        fn anvil_update(&self, _: HostSide<'_>, event: &mut AnvilUpdateEvent<'_>) -> Flow {
+            let update = &mut *event.update;
+            if update.name.as_deref() == Some("void") {
+                return Flow::Cancel;
+            }
+            if &*update.left.item == "minecraft:iron_ingot"
+                && update
+                    .right
+                    .as_ref()
+                    .is_some_and(|r| &*r.item == "minecraft:emerald")
+            {
+                update.output = Some(ItemStack::new("minecraft:diamond", 1));
+                update.xp_cost = 5;
+                update.material_cost = 1;
+            }
+            Flow::Continue
+        }
+    }
+    #[derive(Default)]
+    struct Discount;
+    #[mod_api::__subscriptions]
+    impl Hooks for Discount {
+        fn anvil_update(&self, _: HostSide<'_>, event: &mut AnvilUpdateEvent<'_>) -> Flow {
+            assert_eq!(
+                event.update.vanilla.xp_cost, 3,
+                "vanilla's cost stays readable"
+            );
+            event.update.xp_cost -= 1;
+            Flow::Continue
+        }
+    }
+    let mods: mod_api::Mods = vec![
+        ModEntry::new("recipe", Box::new(Recipe)),
+        ModEntry::new("discount", Box::new(Discount)),
+    ]
+    .into();
+    mod_api::testing::with_mods(mods, || {
+        let update = |left: &str, right: Option<&str>, name: Option<&str>| {
+            let vanilla = AnvilResult {
+                result: Some(ItemStack::new("minecraft:iron_sword", 1)),
+                cost: 3,
+                repair_item_count_cost: 0,
+                only_renaming: false,
+            };
+            let mut update = AnvilUpdate::new(
+                ItemStack::new(left, 1),
+                right.map(|r| ItemStack::new(r, 4)),
+                name.map(str::to_owned),
+                &vanilla,
+            );
+            let mut cancel = false;
+            mod_api::dispatch_anvil_update(
+                HostSide::Server(&mut TestHost),
+                7,
+                1,
+                [0, 64, 0],
+                &mut update,
+                &mut cancel,
+            );
+            (
+                update.output.map(|o| o.item.to_string()),
+                update.xp_cost,
+                update.material_cost,
+                cancel,
+            )
+        };
+        let sword = Some("minecraft:iron_sword".to_owned());
+        assert_eq!(
+            update("minecraft:iron_ingot", Some("minecraft:emerald"), None),
+            (Some("minecraft:diamond".to_owned()), 4, 1, false)
+        );
+        assert_eq!(
+            update("minecraft:iron_sword", None, Some("")),
+            (sword.clone(), 2, 0, false)
+        );
+        assert_eq!(
+            update("minecraft:iron_sword", None, Some("void")),
+            (sword, 3, 0, true)
+        );
+    });
+}

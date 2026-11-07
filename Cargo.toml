@@ -2,6 +2,7 @@
 exclude = ["launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-core",
+    "crates/horizon-mod-runtime",
     "docs/modding/examples",
     "crates/horizon-dualsense",
     "crates/horizon-narrator",
@@ -10,6 +11,7 @@ members = [
     "crates/horizon-world",
     "crates/horizon-client",
     "crates/horizon-mod-points",
+    "crates/horizon-mod-internals",
     "crates/horizon-internals",
     "crates/horizon-client-lib",
     "crates/horizon-client-core",
@@ -33,7 +35,7 @@ members = [
     "crates/horizon-bench",
     "crates/horizon-friends",
     "crates/horizon-relay",
-    "crates/horizon-mods",
+    "crates/horizon-mod-package",
     "crates/horizon-mod-wasm",
     "crates/horizon-mod-api-gen",
     "crates/horizon-mod-api",

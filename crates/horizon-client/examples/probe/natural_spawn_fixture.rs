@@ -52,10 +52,6 @@ use horizon_core::{
     geometry::Aabb,
     random::{LegacyRandom, RandomSource},
 };
-use horizon_world::{
-    block_collision::BlockCollisionRegistry, chunk::BlockState, loot::PackOverlay, nbt::Tag,
-    registry::BlockStateId,
-};
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
@@ -63,6 +59,13 @@ use std::{
     fmt::Write as _,
     fs,
     path::Path,
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        block_collision::BlockCollisionRegistry, chunk::BlockState, loot::PackOverlay,
+        registry::BlockStateId,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -525,7 +528,10 @@ pub fn main() -> horizon_client::Result<()> {
     let assets = Assets::load(root)?;
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
-    let data = MobData::load(root, &facts);
+    let data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     // Trial spawner rewards: the loot tables and the configs.
@@ -536,7 +542,9 @@ pub fn main() -> horizon_client::Result<()> {
         None
     };
     let types = MobTypes::load(root)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let structures = StructureSpawns::load(root);
     let collision = collisions::load(root, registry)?;
     let entity_types: HashSet<String> = fs::read(root.join("entity-types.json"))
@@ -921,7 +929,7 @@ fn spawner_case(
         .collect();
     let pos = [v[0], v[1], v[2]];
     let text = horizon_client::skins::base64_decode(&get("snbt", "")).ok_or("bad snbt")?;
-    let tag = horizon_world::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
+    let tag = horizon_core::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
     let mut spawner = Spawner::load(&tag);
     let ticks: i32 = get("ticks", "1").parse()?;
     for tick in 0..ticks {
@@ -1022,7 +1030,7 @@ fn trial_case(
         .borrow_mut()
         .push((pos, registry.resolve(&block_state(state, ominous))?));
     let text = horizon_client::skins::base64_decode(&get("snbt", "")).ok_or("bad snbt")?;
-    let tag = horizon_world::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
+    let tag = horizon_core::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
     let mut spawner = TrialSpawner::load(&tag);
     let ticks: i64 = get("ticks", "1").parse()?;
     let t0: i64 = get("t0", "0").parse()?;
@@ -1038,7 +1046,7 @@ fn trial_case(
         let mut spawn = |l: &World, r: &SpawnerSpawn, _: &mut LegacyRandom| {
             let t = l.s.types.types.get(r.id)?;
             // Slime.readAdditionalSaveData: size Size + 1, clamped to 1..=127.
-            let size = match r.entity.get(&horizon_world::nbt::JavaString::from("Size")) {
+            let size = match r.entity.get(&horizon_core::nbt::JavaString::from("Size")) {
                 Some(Tag::Byte(v)) => i32::from(*v),
                 Some(Tag::Short(v)) => i32::from(*v),
                 Some(Tag::Int(v)) => *v,
@@ -1058,10 +1066,7 @@ fn trial_case(
             l.trial_count.set(l.trial_count.get() + 1);
             // Zombie.readAdditionalSaveData: IsBaby halves the box
             // (getAgeScale); finalizeSpawn's fixed random never makes one.
-            let baby = match r
-                .entity
-                .get(&horizon_world::nbt::JavaString::from("IsBaby"))
-            {
+            let baby = match r.entity.get(&horizon_core::nbt::JavaString::from("IsBaby")) {
                 Some(Tag::Byte(v)) => *v != 0,
                 Some(Tag::Int(v)) => *v != 0,
                 _ => false,
@@ -1299,7 +1304,7 @@ fn vault_case(
     let mut state = VaultState::from_name(&get("state", "inactive")).ok_or("bad state")?;
     let ominous = get("ominous", "0") == "1";
     let text = horizon_client::skins::base64_decode(&get("snbt", "")).ok_or("bad snbt")?;
-    let tag = horizon_world::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
+    let tag = horizon_core::nbt::parse_snbt(&String::from_utf8(text)?)?.0;
     let mut vault = Vault::load(&tag);
     let schedule = |key: &str| -> Vec<Vec<String>> {
         get(key, "")

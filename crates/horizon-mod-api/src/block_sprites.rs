@@ -65,3 +65,37 @@ impl BlockFaceTexture {
         }
     }
 }
+
+/// An atlas the client stitches its sprites into (vanilla's `TextureAtlas`), as
+/// `texture_atlas_stitched` names it. Horizon packs vanilla's many atlases into these two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum TextureAtlas {
+    /// The block sprite arrays: every texture a block model uses, one layer each. Look a sprite up
+    /// with `texture_sprites`, which answers a [`SpriteRef`].
+    Blocks,
+    /// The GUI atlas: GUI sprites, particles and the item and block textures drawn flat. Look a
+    /// sprite up with `gui_sprite`, which answers an [`AtlasRegion`].
+    Gui,
+}
+
+/// Where a sprite lies in the GUI atlas, as `gui_sprite` answers it: plain data, a snapshot of the
+/// atlas built last. It stays right until the next `texture_atlas_stitched` for
+/// [`TextureAtlas::Gui`], when a mod reads it again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct AtlasRegion {
+    /// `[u0, v0, u1, v1]`: the sprite's corners, from 0 to 1 across the atlas.
+    pub uv: [f32; 4],
+    /// The sprite's size in its own pixels: the default resources' texture's size whatever the
+    /// resolution of a pack that replaced it (the units vanilla's GUI code draws it in), the
+    /// texture's own size for one the default resources lack.
+    pub size: [u32; 2],
+}
+
+impl AtlasRegion {
+    /// A region, from the game's atlas.
+    pub fn new(uv: [f32; 4], size: [u32; 2]) -> Self {
+        Self { uv, size }
+    }
+}

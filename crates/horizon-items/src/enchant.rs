@@ -66,7 +66,8 @@ pub struct ItemProps {
     pub enchantable: u32,
     /// `minecraft:repairable.items` (ids or a `#tag`).
     pub repairable: Vec<String>,
-    pub glint: bool,
+    /// The prototype override; absence differs from an explicit false.
+    pub glint: Option<bool>,
     pub rarity: String,
     /// `minecraft:provides_trim_material`.
     pub trim_material: Option<String>,
@@ -95,7 +96,10 @@ fn string_list(v: &Value) -> Vec<String> {
         _ => vec![],
     }
 }
-fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
+fn read_tag_dir(
+    dir: &Path,
+    conditions: &horizon_world::conditions::LoadConditions,
+) -> HashMap<String, Vec<String>> {
     let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return HashMap::new();
     };
@@ -104,6 +108,9 @@ fn read_tag_dir(dir: &Path) -> HashMap<String, Vec<String>> {
         .iter()
         .filter_map(|file| {
             let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
+            if !conditions.allows(&v) {
+                return None;
+            }
             let values = v["values"]
                 .as_array()
                 .into_iter()
@@ -205,13 +212,16 @@ impl Enchantments {
         defaults: &horizon_world::item_defaults::ItemDefaults,
     ) -> Self {
         let data = root.join("data/minecraft");
-        let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"));
+        let mut raw_tags = read_tag_dir(&data.join("tags/enchantment"), overlay.conditions);
         for (id, files) in overlay.tag_kind("enchantment") {
-            let slot = raw_tags.entry(id).or_default();
             for bytes in files {
                 let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
                     continue;
                 };
+                if !overlay.conditions.allows(&v) {
+                    continue;
+                }
+                let slot = raw_tags.entry(id.clone()).or_default();
                 if v["replace"].as_bool() == Some(true) {
                     slot.clear();
                 }
@@ -245,7 +255,10 @@ impl Enchantments {
                 })
                 .collect()
         };
-        let entity_tags = unordered(read_tag_dir(&data.join("tags/entity_type")));
+        let entity_tags = unordered(read_tag_dir(
+            &data.join("tags/entity_type"),
+            overlay.conditions,
+        ));
         let damage_tags = match horizon_world::damage_source::Catalog::load(root, overlay) {
             Ok(catalog) => catalog
                 .tags()
@@ -257,18 +270,15 @@ impl Enchantments {
                 })
                 .collect(),
             // Small tools/fixtures may not carry the prepared catalog.
-            Err(_) => unordered(read_tag_dir(&data.join("tags/damage_type"))),
+            Err(_) => unordered(read_tag_dir(
+                &data.join("tags/damage_type"),
+                overlay.conditions,
+            )),
         };
         // The registry lists entries sorted by id, like the data-pack loader.
-        let mut files: BTreeMap<String, Value> = BTreeMap::new();
-        // The folder's own files, not its subfolders'.
-        if let Ok(folder) = horizon_world::json_folder::read(&data.join("enchantment")) {
-            for file in folder.files.iter().filter(|f| !f.name.contains('/')) {
-                if let Ok(v) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
-                    files.insert(format!("minecraft:{}", file.name), v);
-                }
-            }
-        }
+        let files: BTreeMap<String, Value> = crate::items::data_files(root, "enchantment", overlay)
+            .into_iter()
+            .collect();
         let lang: HashMap<String, String> =
             horizon_core::prepared_files::read(&root.join("assets/minecraft/lang/en_us.json"))
                 .ok()
@@ -313,9 +323,7 @@ impl Enchantments {
                 ItemProps {
                     enchantable: c["minecraft:enchantable"]["value"].as_u64().unwrap_or(0) as u32,
                     repairable: string_list(&c["minecraft:repairable"]["items"]),
-                    glint: c["minecraft:enchantment_glint_override"]
-                        .as_bool()
-                        .unwrap_or(false),
+                    glint: c["minecraft:enchantment_glint_override"].as_bool(),
                     rarity: c["minecraft:rarity"]
                         .as_str()
                         .unwrap_or("common")
@@ -415,9 +423,8 @@ impl Enchantments {
     }
     /// Whether `item` matches an id / `#tag` list.
     pub fn item_in(items: &Items, specs: &[String], item: &str) -> bool {
-        specs.iter().any(|s| match s.strip_prefix('#') {
-            Some(tag) => items.item_tags.get(tag).is_some_and(|t| t.contains(item)),
-            None => s == item,
+        specs.iter().any(|spec| {
+            crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
         })
     }
     /// `Enchantment.canEnchant` / `isSupportedItem`.

@@ -43,8 +43,14 @@ const TAG_KINDS: [(&str, &str); 3] = [
     ("tags/fluid", "fluid_tags"),
     ("tags/worldgen/biome", "biome_tags"),
 ];
-/// The pack folders `add_file` looks at, in walk order.
-pub const PACK_KINDS: [&str; 4] = ["dimension", "dimension_type", "tags", "worldgen"];
+/// The pack folders the worldgen resolver reads, in walk order.
+pub const PACK_KINDS: [&str; 5] = [
+    "dimension",
+    "dimension_type",
+    "structure",
+    "tags",
+    "worldgen",
+];
 
 /// `ns:path` for a pack file `data/<ns>/<kind>/<path>.json`.
 fn resource_id(file: &str, kind: &str) -> Option<String> {
@@ -53,6 +59,13 @@ fn resource_id(file: &str, kind: &str) -> Option<String> {
         .strip_prefix(kind)?
         .strip_prefix('/')?
         .strip_suffix(".json")?;
+    Some(format!("{ns}:{path}"))
+}
+
+/// `ns:path` for a pack's structure template `data/<ns>/structure/<path>.nbt`.
+pub fn template_id(file: &str) -> Option<String> {
+    let (ns, rest) = file.strip_prefix("data/")?.split_once('/')?;
+    let path = rest.strip_prefix("structure/")?.strip_suffix(".nbt")?;
     Some(format!("{ns}:{path}"))
 }
 
@@ -139,14 +152,27 @@ impl LevelHeight {
 /// Replacement and added bundle entries, and tag files, from data packs.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct WorldgenOverrides {
+    templates: BTreeMap<String, horizon_assets::resource_source::Resource>,
     /// Bundle name → id → the highest pack's JSON text for it.
     entries: BTreeMap<String, BTreeMap<String, String>>,
     /// Tag bundle name → (tag id, pack id, tag file text), lowest pack first.
     tags: BTreeMap<String, Vec<(String, String, String)>>,
 }
 impl WorldgenOverrides {
+    /// Lazy gzip NBT entries, retaining their source generation for cache identity.
+    pub fn templates(&self) -> &BTreeMap<String, horizon_assets::resource_source::Resource> {
+        &self.templates
+    }
+    pub fn set_template(
+        &mut self,
+        id: String,
+        resource: horizon_assets::resource_source::Resource,
+    ) {
+        self.templates.insert(id, resource);
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.tags.is_empty()
+        self.entries.is_empty() && self.tags.is_empty() && self.templates.is_empty()
     }
     /// A pack's file for `id` in `bundle`: called for packs from the lowest
     /// to the highest, so the last call for an id wins.
@@ -319,6 +345,15 @@ impl WorldgenOverrides {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_template_id_comes_from_a_structure_nbt_file_only() {
+        assert_eq!(
+            template_id("data/p/structure/room/a.nbt").as_deref(),
+            Some("p:room/a")
+        );
+        assert_eq!(template_id("data/p/structure/a.json"), None);
+        assert_eq!(template_id("data/p/worldgen/structure/a.nbt"), None);
+    }
 
     #[test]
     fn the_highest_pack_wins_and_others_join() {

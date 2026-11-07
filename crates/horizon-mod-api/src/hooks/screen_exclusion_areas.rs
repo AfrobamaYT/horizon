@@ -11,12 +11,8 @@ pub trait Hooks {
         side = "client",
         contract = "collect",
         out = "areas",
-        cancellable = false
+        cancellable = false,
+        neoforge = "none (NeoForge has no counterpart in the game; recipe viewers define their own API)"
     )]
     fn screen_exclusion_areas();
-}
-
-pub trait Helpers {
-    #[helper(side = "client")]
-    fn screen_exclusion();
 }

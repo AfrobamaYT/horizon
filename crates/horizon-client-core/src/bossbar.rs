@@ -4,7 +4,7 @@ use crate::{
     scoreboard::{Comp, bracketed, comp_text, json_to_tag, literal, tag_to_json},
     text::{self, Style, Text},
 };
-use horizon_world::nbt::{Compound, Tag};
+use horizon_core::nbt::{Compound, Tag};
 
 pub const COLORS: [&str; 7] = ["pink", "blue", "red", "green", "yellow", "purple", "white"];
 pub const STYLES: [&str; 5] = [

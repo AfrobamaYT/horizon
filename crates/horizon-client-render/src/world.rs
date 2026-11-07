@@ -53,10 +53,10 @@ impl DirtySections {
 }
 pub struct World {
     /// Server-owned mod data attached to this dimension.
-    pub attachments: horizon_world::attachments::Attachments,
+    pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// The holders lent to mods since the last flush, whose synced changes
     /// `flush_attachment_sync` sends.
-    pub attachment_syncs: FxHashSet<horizon_world::attachments::Holder>,
+    pub attachment_syncs: FxHashSet<horizon_mod_runtime::attachments::Holder>,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -74,7 +74,7 @@ pub struct World {
     /// incrementally by streaming.
     pub light_edits: Vec<((i32, i32, i32), u32, u32)>,
     /// Saved entities of chunks that just loaded, spawned by the game.
-    pub loaded_entities: Vec<((i32, i32), Vec<horizon_world::nbt::Tag>)>,
+    pub loaded_entities: Vec<((i32, i32), Vec<horizon_core::nbt::Tag>)>,
     /// Chunks that just came into this level from a worker, and whether each
     /// was generated rather than read from the save: the game tells native mods.
     pub loaded_chunks: Vec<(i32, i32, bool)>,
@@ -106,7 +106,7 @@ pub struct World {
     pub block_log_held: Vec<(i32, i32, i32)>,
     /// Every write since the mobs last ticked (position, old and new state),
     /// for `ServerLevel.sendBlockUpdated`'s path recomputing; kept only while
-    /// the mobs of this world tick (`game/creatures.rs`).
+    /// the mobs of this world tick (`game/mobs/creatures/mod.rs`).
     pub path_writes: Option<Vec<((i32, i32, i32), u32, u32)>>,
     /// The chunks changed in bulk (`edit_runs`) since the log was last
     /// drained, kept while `block_log` is: sent to the players whole.
@@ -116,7 +116,7 @@ pub struct World {
     /// (`ChunkHolder.sectionLightChanged`).
     pub light_log: Option<crate::fast_hash::FxHashMap<(i32, i32), SectionMask>>,
     /// The villager POIs of each section (`PoiManager`'s sections).
-    pub pois: crate::poi_sections::PoiSections<crate::poi_sections::Poi>,
+    pub pois: crate::poi_sections::PoiSections<horizon_world::poi::PoiType>,
     /// Moving-piston states removed during the last tick; retained until the
     /// final block mesh is visible.
     pub moving_piston_fallback: Vec<([i32; 3], horizon_world::piston_shape::MovingPistonState)>,
@@ -193,6 +193,24 @@ impl Weather {
     }
 }
 impl World {
+    /// Install loaded instances, retiring an existing column's block entities even
+    /// when the new payload omits their positions. Initial loads need no world scan.
+    pub fn load_chunk_block_entities(
+        &mut self,
+        chunk: (i32, i32),
+        entities: Vec<(
+            crate::block_entities::Pos,
+            crate::chunk::block_entity::BlockEntity,
+        )>,
+    ) {
+        if self.chunks.contains_key(&chunk) {
+            let incoming: FxHashSet<_> = entities.iter().map(|(pos, _)| *pos).collect();
+            self.block_entities
+                .unload(|p| (p.0 >> 4, p.2 >> 4) == chunk && !incoming.contains(p));
+        }
+        self.block_entities.load_chunk(entities);
+    }
+
     pub fn new(air: BlockStateId, seed: i64) -> Self {
         Self {
             shape: LevelShape::OVERWORLD,
@@ -487,7 +505,7 @@ impl World {
     /// `LockCode`: the `lock` a container block entity refuses to open
     /// without, as the tag it was loaded or set with carries it (Horizon's
     /// model holds no field for it).
-    pub fn block_lock(&self, key: (i32, i32, i32)) -> Option<&horizon_world::nbt::Tag> {
+    pub fn block_lock(&self, key: (i32, i32, i32)) -> Option<&horizon_core::nbt::Tag> {
         self.chunks
             .get(&(key.0 >> 4, key.2 >> 4))?
             .saved
@@ -501,8 +519,8 @@ impl World {
     /// `LockCode.addToTag` for a tag a command gives a container (`setblock`,
     /// `data merge`): the tag it was set with keeps the lock, so `data get`
     /// shows it, a player's open checks it and the save writes it.
-    pub fn set_block_lock(&mut self, key: (i32, i32, i32), tag: &horizon_world::nbt::Tag) {
-        use horizon_world::nbt::Tag;
+    pub fn set_block_lock(&mut self, key: (i32, i32, i32), tag: &horizon_core::nbt::Tag) {
+        use horizon_core::nbt::Tag;
         let lock = tag.get("lock").and_then(|lock| match lock {
             Tag::Compound(_) => Some(lock.clone()),
             _ => None,
@@ -698,6 +716,6 @@ mod tests {
 /// A block entity's fields kept beside its model ([`World::block_entity_extras`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockEntityExtras {
-    source: Option<horizon_world::nbt::Tag>,
+    source: Option<horizon_core::nbt::Tag>,
     rolled_loot: Option<crate::chunk::RolledLoot>,
 }

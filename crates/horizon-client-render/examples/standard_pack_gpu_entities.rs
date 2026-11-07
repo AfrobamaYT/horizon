@@ -130,6 +130,8 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         false,
         false,
         true,
+        false,
+        false,
     ))?;
     renderer.resize(320, 180);
     assert!(
@@ -193,7 +195,7 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     let cpu = client::gfx::entity_skin::expand(&skin.new_model, &skin);
-    let hud = HudBatch::new([320, 180]);
+    let hud = HudBatch::scratch([320, 180]);
     let mut frame = fixture_frame(&hud);
     frame.title = false;
     frame.camera = glam::DVec3::ZERO;
@@ -382,6 +384,7 @@ fn fixture_frame(hud: &HudBatch) -> Frame<'_> {
         visible_static_block_entity_sections: &[],
         static_block_entity_stats: Default::default(),
         entity_motion: &[],
+        entity_motion_posed: &[],
         entity_spans: &[],
         skin: None,
         glowing: &[],

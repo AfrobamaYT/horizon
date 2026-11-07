@@ -179,7 +179,7 @@ impl LevelRef {
         super::answered(
             super::ask_providers(
                 host,
-                |index| table.block_entity_provider(key.name, kind.as_ref()?.id(), index),
+                |index| table.block_entity_provider(key.name, kind?, index),
                 super::BlockProviderOf::get::<T>,
                 |provider, host| provider.provide(host, at),
                 |host| {

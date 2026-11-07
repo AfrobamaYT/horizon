@@ -6,13 +6,13 @@ use crate::{
     save::{Level, put, read_dat, uuid_from_tag, write_dat},
 };
 use horizon_protocol::crypto::uuid_string;
-use horizon_world::{
-    attachments::{ATTACHMENTS_KEY, attachment_compound},
-    nbt::Tag,
-};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound},
 };
 
 /// `PlayerDataStorage`'s player directory (`players/data`), created on first use
@@ -130,6 +130,10 @@ pub fn apply(guest: &mut Guest, level: &Level) {
     guest.pitch = level.rotation[1];
     guest.head_yaw = guest.yaw;
     guest.on_ground = level.on_ground;
+    // LivingEntity.readAdditionalSaveData: a saved FallFlying sets shared
+    // flag 7, so a player saved mid-glide (#11193) lands gliding; its next
+    // `updateFallFlying` ends the glide if it can't go on.
+    guest.fall_flying = level.fall_flying;
     guest.health = level.health;
     guest.saved_absorption = Some(level.absorption);
     guest.food = level.food;
@@ -161,15 +165,16 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         .map(|s| [s[0] + 0.5, s[1], s[2] + 0.5]);
     guest.respawn_elsewhere = level.respawn_elsewhere.clone();
     guest.saved = level.player_extra.clone();
-    guest.attachments = match attachment_compound(
+    let attachments = match attachment_compound(
         guest
             .saved
             .as_ref()
             .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
     ) {
-        Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
+        Ok(Some(data)) => horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
         _ => Default::default(),
     };
+    guest.attachments.replace_contents(attachments);
     guest.seen_credits = level.seen_credits;
     guest.post_effects.clone_from(&level.post_effects);
     guest.last_death = level.last_death.clone();
@@ -437,6 +442,8 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     level.spawn = guest.spawn.map(|s| [s[0] - 0.5, s[1], s[2] - 0.5]);
     level.respawn_elsewhere = guest.respawn_elsewhere.clone();
     level.on_ground = guest.on_ground;
+    // LivingEntity.addAdditionalSaveData: FallFlying is isFallFlying().
+    level.fall_flying = guest.fall_flying;
     level.seen_credits = guest.seen_credits;
     level.post_effects.clone_from(&guest.post_effects);
     level.last_death = guest.last_death.clone();
@@ -481,9 +488,9 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
         level.food_tick_timer = body.food_tick_timer;
         let extra = level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
-            let short = |v: i32| horizon_world::nbt::Tag::Short(v.clamp(-32768, 32767) as i16);
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
+            let short = |v: i32| horizon_core::nbt::Tag::Short(v.clamp(-32768, 32767) as i16);
             map.insert("Fire".into(), short(body.fire_ticks));
             map.insert("Air".into(), short(body.air));
             // Entity.saveWithoutId writes TicksFrozen only above 0, so a
@@ -491,7 +498,7 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
             if body.ticks_frozen > 0 {
                 map.insert(
                     "TicksFrozen".into(),
-                    horizon_world::nbt::Tag::Int(body.ticks_frozen),
+                    horizon_core::nbt::Tag::Int(body.ticks_frozen),
                 );
             } else {
                 map.remove(&"TicksFrozen".into());
@@ -510,8 +517,8 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     if let Some(attributes) = attributes {
         let extra = level
             .player_extra
-            .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
-        if let horizon_world::nbt::Tag::Compound(map) = extra {
+            .get_or_insert_with(|| horizon_core::nbt::Tag::Compound(Default::default()));
+        if let horizon_core::nbt::Tag::Compound(map) = extra {
             map.insert("attributes".into(), attributes);
         }
     }
@@ -828,7 +835,7 @@ mod tests {
 
     #[test]
     fn player_attachments_survive_playerdata_and_respawn() {
-        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
         let keep = AttachmentType {
             namespace: "test",
             name: "keep",
@@ -847,22 +854,33 @@ mod tests {
         let mut original = guest();
         keep.set(
             &mut original.attachments,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             31,
         )
         .unwrap();
         save(&original, &dir);
         let mut loaded = guest();
         loaded.uuid = original.uuid;
+        let index = std::sync::Arc::new(std::sync::Mutex::new(
+            horizon_mod_runtime::attachments::index::AttachmentIndex::default(),
+        ));
+        let binding = loaded.attachments.bind_index(&index, loaded.uuid);
         assert!(load(&mut loaded, &dir));
-        loaded.attachments = loaded.attachments.copy_on_death().unwrap();
+        let copy = loaded.attachments.copy_on_death().unwrap();
+        loaded.attachments.replace_contents(copy);
         assert_eq!(
             keep.get(
                 &mut loaded.attachments,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(31)
         );
+        let rows = index
+            .lock()
+            .unwrap()
+            .snapshot(&("test".into(), "keep".into()));
+        assert_eq!(rows[0].entry.read(&keep), Ok(&31));
+        assert!(binding.unregister(), "load and respawn preserve authority");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -958,6 +976,34 @@ mod tests {
         let mut back = guest();
         apply(&mut back, &read);
         (tag, back)
+    }
+
+    /// #11193: a player who saved while gliding comes back gliding, as
+    /// LivingEntity.addAdditionalSaveData's FallFlying and the flag
+    /// readAdditionalSaveData sets from it have it.
+    #[test]
+    fn a_saved_glide_comes_back() {
+        let mut g = guest();
+        g.fall_flying = true;
+        let (tag, back) = round_trip(&g);
+        assert_eq!(tag.get("FallFlying"), Some(&Tag::Byte(1)));
+        assert!(back.fall_flying);
+        let (tag, back) = round_trip(&guest());
+        assert_eq!(tag.get("FallFlying"), Some(&Tag::Byte(0)));
+        assert!(!back.fall_flying);
+    }
+
+    /// `getBooleanOr` takes any numeric tag: an int `FallFlying` from
+    /// another writer still starts the glide.
+    #[test]
+    fn a_numeric_fall_flying_reads_as_a_glide() {
+        let mut level = Level::default();
+        store(&guest(), &mut level, None);
+        let mut tag = level.player_tag();
+        put(&mut tag, "FallFlying", Tag::Int(1));
+        let mut read = Level::default();
+        read.read_player(&tag);
+        assert!(read.fall_flying);
     }
 
     #[test]
@@ -1078,7 +1124,7 @@ mod tests {
         let tag = read.player_tag();
         assert!(matches!(
             tag.get("post_effects"),
-            Some(horizon_world::nbt::Tag::List(l)) if l.is_empty()
+            Some(horizon_core::nbt::Tag::List(l)) if l.is_empty()
         ));
     }
 

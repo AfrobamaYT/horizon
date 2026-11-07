@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use horizon_mods::dependencies;
+use horizon_mod_package::dependencies;
 
 mod api;
 mod crates;
@@ -36,6 +36,13 @@ mod internals_sync;
 mod isolate;
 mod package;
 mod prebuilt;
+mod sites;
+mod slots;
+#[cfg(test)]
+mod source;
+#[cfg(all(test, target_os = "linux"))]
+mod source_server;
+mod wasm_internals;
 
 pub use isolate::LeftOut;
 
@@ -44,7 +51,7 @@ const PREFIX: &str = "native-";
 const STAGING: &str = "embedded-inventory-packages-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
-pub const MIXINS_REV: &str = horizon_mods::index::native::MIXINS_REV;
+pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
 /// What a native build is compiled for, as the player picks it on the Mods page. `Optimized`, the
 /// default, is the release profile the daily prebuilt game is built with (thin LTO, one codegen
@@ -551,7 +558,7 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
 /// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
-) -> Result<Vec<horizon_mods::internals::ListedInternal>, String> {
+) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, String> {
     internals_sync::check(folder).map_err(|error| error.to_string())
 }
 
@@ -603,10 +610,10 @@ pub fn cache_info(clear: bool) -> Result<CacheInfo, String> {
 
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's `horizon-mod.toml` at the `.hmod` package root.
-const NATIVE_MANIFEST: &str = horizon_mods::manifest::MANIFEST;
+const NATIVE_MANIFEST: &str = horizon_mod_package::manifest::MANIFEST;
 /// Where an instance keeps the native mods installed from the registry, `<id>.hmod`, each on or
 /// off in `horizon-mods.txt` like any mod.
-pub const INSTALLED: &str = horizon_mods::mod_list::NATIVE_DIR;
+pub const INSTALLED: &str = horizon_mod_package::mod_list::NATIVE_DIR;
 
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
@@ -624,7 +631,7 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
     paths.sort();
     let mut count = 0;
     for path in paths {
-        let bundle = horizon_mods::index::native::Bundle::read(&path)
+        let bundle = horizon_mod_package::index::native::Bundle::read(&path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
         if !crate::browser::java::is_enabled(home, &bundle.manifest.id) {
             continue;
@@ -637,12 +644,13 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
         }
         count += 1;
     }
-    if count == 0 {
+    if count == 0 && wasm_internals::installed(Some(home))?.is_empty() {
         return Err(format!(
             "No native mod is turned on in {}: install one from the Mods page first.",
             home.join(INSTALLED).display()
         ));
     }
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -698,14 +706,14 @@ pub fn routes(home: &Path, profile: Profile) -> Routes {
 /// A validated flat mod project. The package manifest owns identity and build pins.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bundle {
-    pub manifest: horizon_mods::manifest::Manifest,
+    pub manifest: horizon_mod_package::manifest::Manifest,
     pub dir: PathBuf,
     /// The typed injection sites projected for conflict warnings.
     pub injections: Vec<Injection>,
 }
 
 impl Bundle {
-    fn native(&self) -> &horizon_mods::manifest::Native {
+    fn native(&self) -> &horizon_mod_package::manifest::Native {
         self.manifest
             .native
             .as_ref()
@@ -713,7 +721,7 @@ impl Bundle {
     }
 
     /// Whether horizon-mixins changes the game's source for it: a helper injection or a module.
-    /// A `trait_method` or `raw` injection listens at a point instead ([`inject`]).
+    /// A raw injection listens at a point instead ([`inject`]).
     fn needs_mixins(&self) -> bool {
         !self.native().module.is_empty()
             || self
@@ -796,6 +804,20 @@ impl Injection {
 
 /// The flat native project in `folder`, or the native projects directly inside it.
 pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    let found = scan_bundles(folder)?;
+    if found.is_empty() {
+        return Err(format!(
+            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
+            folder.display()
+        ));
+    }
+    Ok(found)
+}
+
+fn scan_bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
+    if !folder.exists() {
+        return Ok(Vec::new());
+    }
     if let Some(found) = bundle_in(folder)? {
         return Ok(vec![found]);
     }
@@ -809,12 +831,6 @@ pub fn bundles(folder: &Path) -> Result<Vec<Bundle>, String> {
     let mut found = Vec::new();
     for dir in dirs {
         found.extend(bundle_in(&dir)?);
-    }
-    if found.is_empty() {
-        return Err(format!(
-            "{} holds no native mod ({NATIVE_MANIFEST} and Cargo.toml).",
-            folder.display()
-        ));
     }
     Ok(found)
 }
@@ -1827,7 +1843,7 @@ fn source(revision: &str) -> Result<PathBuf, String> {
     }
     let archive = format!(
         "https://codeload.github.com/{}/tar.gz/{revision}",
-        horizon_mods::index::native::PREBUILT_REPO
+        horizon_mod_package::index::native::PREBUILT_REPO
     );
     let partial = root().join("source").join(format!(".{revision}.partial"));
     let top = unpack_archive(&archive, &partial, u64::MAX)?;
@@ -1866,7 +1882,10 @@ pub(crate) fn unpack_archive(url: &str, partial: &Path, limit: u64) -> Result<Pa
 }
 
 /// Makes `to` hold `from`'s files, writing only those that changed, so Cargo, which goes by file
-/// times, recompiles only what the mods changed.
+/// times, recompiles only what the mods changed. A file written gets the current time, not
+/// `from`'s: a copy keeps the original's time on Windows and macOS, and an unpacked source has
+/// its commit's, which can be older than the last build. Cargo would take that file for one it
+/// already compiled and link the older crate (#10421).
 fn sync(from: &Path, to: &Path) -> Result<(), String> {
     let new = files(from)?;
     let old = if to.is_dir() { files(to)? } else { Vec::new() };
@@ -1874,7 +1893,10 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         let target = to.join(name);
         if fs::read(&target).ok() != fs::read(path).ok() {
             fs::create_dir_all(target.parent().unwrap_or(to)).map_err(|e| e.to_string())?;
-            fs::copy(path, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+            fs::copy(path, &target)
+                .and_then(|_| fs::File::options().write(true).open(&target))
+                .and_then(|file| file.set_modified(std::time::SystemTime::now()))
+                .map_err(|e| format!("{}: {e}", target.display()))?;
         }
     }
     for (name, path) in old {
@@ -1883,6 +1905,24 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Marks a `stage/` whose files all got the time they were written ([`sync`]).
+const STAGE_STAMPED: &str = "stage.stamped";
+
+/// The stage the compiler reads, in `root`. One written before #10421 can hold files with their
+/// commit's time over crates compiled from another commit: it is written again, once, so each of
+/// its files is newer than what `target/` holds.
+fn stage_dir(root: &Path) -> Result<PathBuf, String> {
+    let stage = root.join("stage");
+    let stamped = root.join(STAGE_STAMPED);
+    if !stamped.exists() {
+        if stage.exists() {
+            fs::remove_dir_all(&stage).map_err(|e| format!("{}: {e}", stage.display()))?;
+        }
+        fs::write(&stamped, "").map_err(|e| format!("{}: {e}", stamped.display()))?;
+    }
+    Ok(stage)
 }
 
 /// Copy a bundle without its API package's Cargo build output.
@@ -1959,6 +1999,27 @@ struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
     isolate: bool,
+    /// The instance whose installed wasm mods choose the game's internals table; none leaves the
+    /// committed empty table.
+    home: Option<&'a Path>,
+}
+
+/// Whether an instance needs a source table even without any native code mods.
+pub fn has_wasm_internals(home: &Path) -> bool {
+    wasm_internals::installed(Some(home)).is_ok_and(|declared| !declared.is_empty())
+}
+
+/// Resolve the two inputs to the source pipeline before preparing or building the game.
+fn build_inputs(
+    folder: &Path,
+    home: Option<&Path>,
+) -> Result<(Vec<Bundle>, wasm_internals::Declarations), Failed> {
+    let mods = scan_bundles(folder)?;
+    let declared = wasm_internals::installed(home)?;
+    if mods.is_empty() && declared.is_empty() {
+        return Err(Failed::Nothing);
+    }
+    Ok((mods, declared))
 }
 
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
@@ -1996,7 +2057,7 @@ fn pipeline(
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
     let _ = fs::remove_dir_all(&incoming);
-    let found = bundles(folder)?;
+    let (found, wasm_internals) = build_inputs(folder, options.home)?;
     // #6490: said before anything runs, so a build that fails later still
     // shows them.
     for warning in warn_conflicts(&found) {
@@ -2040,7 +2101,7 @@ fn pipeline(
         .zip(declared)
         .filter(|(b, _)| !left_out.iter().any(|l| l.id == b.manifest.id))
         .unzip();
-    if mods.is_empty() {
+    if mods.is_empty() && wasm_internals.is_empty() {
         return Err(Failed::Nothing);
     }
     let inputs: Vec<_> = mods
@@ -2079,10 +2140,6 @@ fn pipeline(
             ))?;
         }
     }
-    let point_injections: Vec<_> = ordered
-        .iter()
-        .flat_map(|bundle| inject::of(&bundle.manifest))
-        .collect();
     let revision = match &built_on {
         Some(about) => about.horizon.clone(),
         None => revision_of(base)?,
@@ -2092,7 +2149,7 @@ fn pipeline(
         return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
     }
     if target == Target::Server {
-        let jars = horizon_mods::manifest::collect_jar_requirements(
+        let jars = horizon_mod_package::manifest::collect_jar_requirements(
             mods.iter()
                 .map(|bundle| (bundle.manifest.id.as_str(), bundle.manifest.jar.as_slice())),
         )
@@ -2121,14 +2178,17 @@ fn pipeline(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(
-        &revision,
-        &mixins,
-        profile,
-        target,
-        platform.cache_key(),
-        &requested,
-    )?;
+    let version = wasm_internals::version(
+        version_for(
+            &revision,
+            &mixins,
+            profile,
+            target,
+            platform.cache_key(),
+            &requested,
+        )?,
+        &wasm_internals,
+    );
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -2139,7 +2199,7 @@ fn pipeline(
     };
     let exists = target.directory(&version).join(".installed").is_file();
     // The route, chosen before anything compiles: the prebuilt game when it serves these mods.
-    let prebuilt = if exists {
+    let prebuilt = if exists || !wasm_internals.is_empty() {
         None
     } else {
         let game = match prebuilt::refusal(&projects, profile) {
@@ -2147,10 +2207,7 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => {
-                    prebuilt::serves_points(&game, &point_injections)?;
-                    Ok(game)
-                }
+                Ok(game) => Ok(game),
                 Err(reason) => Err(reason),
             },
         };
@@ -2202,6 +2259,7 @@ fn pipeline(
                 "internals": m.native().internals,
                 "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
                     "id": injection.id, "target": injection.target, "kind": injection.kind,
+                    "selector": injection.selector, "ordinal": injection.ordinal, "fingerprint": injection.fingerprint,
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
@@ -2296,10 +2354,16 @@ fn pipeline(
         } else {
             sync(&source, &fresh)?;
         }
-        // The staged game gets its points as a prebuilt one does: the revision's own staging
-        // pass, so the mods' `impl Points` compiles the same on both routes.
+        // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
+        // check, as the prebuilt route validates before it creates its output.
         let listed = real.join("points.json");
-        let mut pass = cargo(&rust, &fresh, "run");
+        let pending = real.join("stage.pending");
+        let catalog_dir = real.join("catalog.partial");
+        let _ = fs::remove_dir_all(&pending);
+        let _ = fs::remove_dir_all(&catalog_dir);
+        fs::create_dir_all(&catalog_dir).map_err(|e| e.to_string())?;
+        sync(&fresh, &pending)?;
+        let mut pass = cargo(&rust, &pending, "run");
         pass.args([
             "--locked",
             "--release",
@@ -2310,12 +2374,33 @@ fn pipeline(
             "horizon-stage",
             "--",
         ])
-        .arg(&fresh)
-        .arg(&listed)
-        .arg(real.join("internals.json"))
+        .arg(&pending)
+        .arg(catalog_dir.join(inject::POINTS))
+        .arg(catalog_dir.join(internals::INTERNALS))
         .env("CARGO_TARGET_DIR", real.join("target"));
-        run(pass, "Marking the game's injection points", |_| {})?;
-        inject::check(&point_injections, &inject::listed(&listed)?).map_err(|e| e.to_string())?;
+        wasm_internals::stage(&fresh, &wasm_internals, &mut pass)?;
+        fn discard(pending: &Path, catalog: &Path, error: impl std::fmt::Display) -> String {
+            let _ = fs::remove_dir_all(pending);
+            let _ = fs::remove_dir_all(catalog);
+            error.to_string()
+        }
+        run(pass, "Marking the game's injection points", |_| {})
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let catalog = internals::Catalog::read(&catalog_dir)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        mods.iter()
+            .try_for_each(|bundle| catalog.check(&bundle.manifest))
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let _ = fs::remove_dir_all(&fresh);
+        fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(catalog_dir.join(inject::POINTS), &listed)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        fs::rename(
+            catalog_dir.join(internals::INTERNALS),
+            real.join(internals::INTERNALS),
+        )
+        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
             let mut fetch = cargo(&rust, &source, "fetch");
@@ -2349,7 +2434,7 @@ fn pipeline(
             run(metadata, "Resolving trait mod crates", |_| {})?;
         }
         // Absolute: the compiler runs from elsewhere (`compile`).
-        let stage = real.join("stage");
+        let stage = stage_dir(&real)?;
         sync(&fresh, &stage)?;
         let _ = fs::remove_dir_all(&fresh);
         if crates::any(&stage) || has_api {
@@ -2544,6 +2629,7 @@ pub fn build(
                     BuildOptions {
                         skip,
                         isolate: true,
+                        home: Some(&instance.home),
                         ..BuildOptions::default()
                     },
                     &progress,
@@ -2742,7 +2828,7 @@ fn install(
         package::copy(
             bundle,
             &partial
-                .join(horizon_mods::mod_list::NATIVE_DIR)
+                .join(horizon_mod_package::mod_list::NATIVE_DIR)
                 .join(&bundle.manifest.id),
         )?;
     }
@@ -2786,7 +2872,7 @@ fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
         "Horizon.app",
         "native-mods.json",
         "native-data",
-        horizon_mods::mod_list::NATIVE_DIR,
+        horizon_mod_package::mod_list::NATIVE_DIR,
     ]
     .iter()
     .map(|s| s.to_string())
@@ -3285,9 +3371,9 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let scoped =
-            "horizon_client::game::native_hooks::GameLevel<'_>::native_pre_remove_side_effects";
+            "horizon_client::game::native_hooks::pre_remove_side_effects::GameLevel<'_>::native_pre_remove_side_effects";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -3311,7 +3397,7 @@ mod tests {
         let points =
             horizon_mod_api_gen::hook_points(&Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))
                 .unwrap();
-        let frame = "horizon_client::game::native_hooks::Game<'_>::native_render_frame_pre";
+        let frame = "horizon_client::game::native_hooks::render_frame_pre::Game<'_>::native_render_frame_pre";
         let mods = [bundle_of(
             "alpha",
             &format!(
@@ -3427,8 +3513,8 @@ mod tests {
                 "[[native.injection]]\nid='ordinary'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
             ),
             (
-                "trait_injection",
-                "[[native.injection]]\nid='hook'\ntarget='horizon_client::game::tick'\nkind='HEAD'\ntrait_method='tick'\n",
+                "slot_injection",
+                "[[inject]]\nid='hook'\nat='horizon_client::game::tick'\nkind='head'\nwith='hook'\nhash='signature'\n",
             ),
         ] {
             let project = incoming.join(id);
@@ -3444,12 +3530,12 @@ mod tests {
             }
         }
         let mods = bundles(&incoming).unwrap();
-        // A point injection (`trait_method`) is the launcher's: it never reaches horizon-mixins.
+        // A unified slot declaration is the launcher's: it never reaches horizon-mixins.
         assert!(mods[0].needs_mixins());
         assert!(!mods[1].needs_mixins() && !mods[2].needs_mixins());
         let input = root.join("mixins");
         stage_mixins(&mods, &input).unwrap();
-        assert!(!input.join("plain").exists() && !input.join("trait_injection").exists());
+        assert!(!input.join("plain").exists() && !input.join("slot_injection").exists());
         assert!(input.join("ordinary").join(MANIFEST).is_file());
         assert!(mods
             .iter()
@@ -4021,7 +4107,7 @@ mod tests {
         )
         .unwrap();
         fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
-        let native_dir = horizon_mods::mod_list::NATIVE_DIR;
+        let native_dir = horizon_mod_package::mod_list::NATIVE_DIR;
         fs::create_dir_all(source.join(native_dir).join("stale")).unwrap();
         let project = dir("server-runtime-project");
         write_bundle(&project, "exported", "pub fn hook() {}");
@@ -4073,12 +4159,12 @@ mod tests {
         );
         assert!(!package.join("jars").exists());
         assert!(!output.join(native_dir).join("stale").exists());
-        let runtime = horizon_mods::runtime::Runtime::load(
+        let runtime = horizon_mod_package::runtime::Runtime::load(
             &output.join(Target::Server.binary()),
-            &[horizon_mods::runtime::BuiltMod {
+            &[horizon_mod_package::runtime::BuiltMod {
                 id: "exported",
                 version: "0.1.0",
-                side: horizon_mods::Side::Client,
+                side: horizon_mod_package::Side::Client,
             }],
         )
         .unwrap();
@@ -4339,6 +4425,64 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(to.join("src/b.rs")).unwrap(), "b2");
         assert!(!to.join("gone.rs").exists());
+    }
+
+    /// #10421: a Nightly's source carries its commit's time, older than a build made since on
+    /// another Nightly. Its changed files must reach the stage newer than that build, or Cargo
+    /// keeps the old crate.
+    #[test]
+    fn a_changed_file_is_newer_than_the_last_build_even_from_an_older_source() {
+        use std::time::{Duration, SystemTime};
+        let (from, to) = (dir("sync-old-from"), dir("sync-old-to"));
+        let commit = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        fs::create_dir_all(from.join("crates/horizon-core/src")).unwrap();
+        let file = from.join("crates/horizon-core/src/storage.rs");
+        fs::write(&file, "pub fn unpack_into() {}").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(commit)
+            .unwrap();
+        fs::create_dir_all(to.join("crates/horizon-core/src")).unwrap();
+        fs::write(
+            to.join("crates/horizon-core/src/storage.rs"),
+            "pub fn unpack() {}",
+        )
+        .unwrap();
+        // The older Nightly's build: Cargo records when it started.
+        let built = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        sync(&from, &to).unwrap();
+        let staged = to.join("crates/horizon-core/src/storage.rs");
+        assert_eq!(
+            fs::read_to_string(&staged).unwrap(),
+            "pub fn unpack_into() {}"
+        );
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        // A file new to the stage too.
+        fs::remove_dir_all(&to).unwrap();
+        sync(&from, &to).unwrap();
+        assert!(fs::metadata(&staged).unwrap().modified().unwrap() > built);
+        fs::remove_dir_all(from).unwrap();
+        fs::remove_dir_all(to).unwrap();
+    }
+
+    /// A stage from before #10421 may hold old times over newer content: it is made again once,
+    /// and kept on every later build.
+    #[test]
+    fn a_stage_from_before_the_time_fix_is_written_again_once() {
+        let root = dir("stage-stamped");
+        fs::create_dir_all(root.join("stage/src")).unwrap();
+        fs::write(root.join("stage/src/lib.rs"), "old").unwrap();
+        let stage = stage_dir(&root).unwrap();
+        assert_eq!(stage, root.join("stage"));
+        assert!(!stage.exists());
+        fs::create_dir_all(stage.join("src")).unwrap();
+        fs::write(stage.join("src/lib.rs"), "new").unwrap();
+        stage_dir(&root).unwrap();
+        assert_eq!(fs::read_to_string(stage.join("src/lib.rs")).unwrap(), "new");
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// levzzz5154's decision (2026-10-29): a rebuild stays on the Horizon the instance plays;

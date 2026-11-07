@@ -177,57 +177,6 @@ fn is_raider(s: Species) -> bool {
         S::Pillager | S::Vindicator | S::Evoker | S::Illusioner | S::Witch | S::Ravager
     )
 }
-/// Whether `setBaby(true)` makes the species a baby (AgeableMob and the
-/// zombies, minus the species that are never babies).
-pub fn can_be_baby(s: Species) -> bool {
-    use Species as S;
-    matches!(
-        s,
-        S::Armadillo
-            | S::Axolotl
-            | S::Bee
-            | S::Camel
-            | S::Cat
-            | S::Chicken
-            | S::Cow
-            | S::Dolphin
-            | S::Donkey
-            | S::Drowned
-            | S::Fox
-            | S::HappyGhast
-            | S::GlowSquid
-            | S::Goat
-            | S::Hoglin
-            | S::Horse
-            | S::Husk
-            | S::Llama
-            | S::Mooshroom
-            | S::Mule
-            | S::Nautilus
-            | S::Ocelot
-            | S::Panda
-            | S::Pig
-            | S::Piglin
-            | S::PolarBear
-            | S::Rabbit
-            | S::Sheep
-            | S::SkeletonHorse
-            | S::Sniffer
-            | S::Squid
-            | S::Strider
-            | S::SulfurCube
-            | S::TraderLlama
-            | S::Turtle
-            | S::Villager
-            | S::WanderingTrader
-            | S::Wolf
-            | S::Zoglin
-            | S::Zombie
-            | S::ZombieHorse
-            | S::ZombieVillager
-            | S::ZombifiedPiglin
-    )
-}
 /// The species whose body item Horizon draws and handles as armour (and whose
 /// sun-protection slot is the body): the equines (a horse's armour, a llama's
 /// carpet, a camel's harness) and the wolf, happy ghast, nautilus and sulfur cube.
@@ -815,7 +764,7 @@ mod death_loot_table_tests {
             "entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]}"#;
         let packs = [("loot_table/pack:boss".to_owned(), vec![table.to_vec()])];
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let loot = LootData::load(&root, &PackOverlay { files: &packs }, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&packs), &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,
@@ -860,7 +809,7 @@ mod death_loot_table_tests {
             return;
         }
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let loot = LootData::load(&root, &PackOverlay { files: &[] }, &defaults).unwrap();
+        let loot = LootData::load(&root, &PackOverlay::new(&[]), &defaults).unwrap();
         let death = Death {
             loot: &loot,
             damage: None,

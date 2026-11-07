@@ -18,6 +18,110 @@ use std::fmt::Write;
 /// the glue is generated; it only answers `#[non_exhaustive]` on another crate's enum.
 const EVERY_CASE: &str = r#"_ => unreachable!("every case was read from the enum's source")"#;
 
+/// A list element is flat only if lifting it cannot allocate another list or string.
+pub(super) fn flat_element(
+    types: &Types<'_>,
+    ty: &Ty,
+    seen: &mut std::collections::BTreeSet<usize>,
+) -> bool {
+    match ty {
+        Ty::Unit | Ty::Prim(..) | Ty::Wide(..) | Ty::Duration => true,
+        Ty::Array(item, n) if (1..=12).contains(n) => flat_element(types, item, seen),
+        Ty::Option(item) => flat_element(types, item, seen),
+        // Owned boxes and shared pointers allocate while converting even when their WIT is flat.
+        Ty::Ref(..) | Ty::Boxed(..) | Ty::Shared(..) => false,
+        Ty::Result(a, b) => flat_element(types, a, seen) && flat_element(types, b, seen),
+        Ty::Tuple(items) => items.iter().all(|item| flat_element(types, item, seen)),
+        Ty::Named(id) => {
+            if !seen.insert(*id) {
+                return false;
+            }
+            let def = &types.defs[*id];
+            let result = !matches!(def.kind, Kind::Json | Kind::Chain { .. } | Kind::Opaque(_))
+                && wit::def_fields(def)
+                    .into_iter()
+                    .all(|item| flat_element(types, item, seen));
+            seen.remove(id);
+            result
+        }
+        _ => false,
+    }
+}
+
+fn contains_list(types: &Types<'_>, ty: &Ty, seen: &mut std::collections::BTreeSet<usize>) -> bool {
+    match ty {
+        Ty::List(..) => true,
+        Ty::Array(_, n) if !(1..=12).contains(n) => true,
+        Ty::Array(item, _)
+        | Ty::Option(item)
+        | Ty::Ref(item, _)
+        | Ty::Boxed(item)
+        | Ty::Shared(item) => contains_list(types, item, seen),
+        Ty::Result(a, b) => contains_list(types, a, seen) || contains_list(types, b, seen),
+        Ty::Tuple(items) => items.iter().any(|item| contains_list(types, item, seen)),
+        Ty::Named(id) => {
+            if !seen.insert(*id) {
+                return false;
+            }
+            let def = &types.defs[*id];
+            let result = matches!(def.kind, Kind::Chain { .. })
+                || wit::def_fields(def)
+                    .into_iter()
+                    .any(|item| contains_list(types, item, seen));
+            seen.remove(id);
+            result
+        }
+        _ => false,
+    }
+}
+
+/// List-bearing positions not selected by the first transport rule.
+pub(super) fn list_inventory(types: &Types<'_>, method: &super::Method) -> Vec<String> {
+    let selected = flat_method(types, method);
+    let mut excluded = Vec::new();
+    for (name, ty) in &method.params {
+        let eligible = selected
+            && matches!(ty, Ty::List(item, List::Slice) if flat_element(types, item, &mut Default::default()));
+        if !eligible && contains_list(types, ty, &mut Default::default()) {
+            excluded.push(format!(
+                "{}::{} parameter {name}",
+                method.owner, method.name
+            ));
+        }
+    }
+    let eligible = selected
+        && matches!(&method.ret, Ty::List(item, List::Vec) if flat_element(types, item, &mut Default::default()));
+    if !eligible && contains_list(types, &method.ret, &mut Default::default()) {
+        excluded.push(format!("{}::{} return", method.owner, method.name));
+    }
+    excluded
+}
+
+/// Classifies an import by the flat borrowed inputs and top-level owned output it can reuse.
+/// Multiple lists of the same element type are deliberately inventoried, not selected.
+pub(super) fn flat_method(types: &Types<'_>, method: &super::Method) -> bool {
+    let mut elements = Vec::new();
+    for (_, ty) in &method.params {
+        match ty {
+            Ty::List(item, List::Slice) if flat_element(types, item, &mut Default::default()) => {
+                elements.push(item.as_ref())
+            }
+            Ty::Ref(_, true) => return false,
+            _ => {}
+        }
+    }
+    if let Ty::List(item, List::Vec) = &method.ret
+        && flat_element(types, item, &mut Default::default())
+    {
+        elements.push(item);
+    }
+    !elements.is_empty()
+        && elements
+            .iter()
+            .enumerate()
+            .all(|(i, ty)| !elements[..i].contains(ty))
+}
+
 /// The wire module of the shared types, as both bindings generators lay it out.
 const W: &str = "horizon::mod_api::types";
 pub(super) const WIRE: &str = W;
@@ -166,6 +270,13 @@ pub(super) fn lower(types: &Types<'_>, ty: &Ty, e: &str) -> String {
         Ty::Str(Str::Static) if types.guest.get() => format!("super::name_id(*{e})"),
         Ty::Str(Str::Static) => format!("super::name_id(*{e})?"),
         Ty::Str(_) => format!("{e}.to_string()"),
+        Ty::Array(item, n) if (1..=12).contains(n) => format!(
+            "({},)",
+            (0..*n)
+                .map(|i| lower(types, item, &format!("(&{e}[{i}])")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Ty::List(item, _) | Ty::Array(item, _) => {
             format!(
                 "{e}.iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?",
@@ -294,6 +405,13 @@ pub(super) fn lift(types: &Types<'_>, ty: &Ty, e: &str) -> String {
                 _ => format!("{vec}.into()"),
             }
         }
+        Ty::Array(item, n) if (1..=12).contains(n) => format!(
+            "[{}]",
+            (0..*n)
+                .map(|i| lift(types, item, &format!("{e}.{i}")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         Ty::Array(item, _) => format!(
             "super::array({e}.into_iter().map(|x| Ok({})).collect::<Result<Vec<_>, Refused>>()?)?",
             lift(types, item, "x")
@@ -370,6 +488,13 @@ impl<'t, 'a> InPlace<'t, 'a> {
             Ty::Str(Str::Borrowed) => format!("keep.str({e})"),
             Ty::List(item, List::Slice) => format!("keep.slice({})", collect(item)?),
             Ty::List(item, _) => format!("{}.into()", collect(item)?),
+            Ty::Array(item, n) if (1..=12).contains(n) => format!(
+                "[{}]",
+                (0..*n)
+                    .map(|i| self.value(item, &format!("{e}.{i}")))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ")
+            ),
             Ty::Array(item, _) => format!("super::array({})?", collect(item)?),
             Ty::Option(item) => format!(
                 "match {e} {{ Some(x) => Some({}), None => None }}",
@@ -630,27 +755,37 @@ pub(super) fn conversions(
                         .collect();
                     format!("{path} {{ {} }}", parts.join(", "))
                 }
-                Kind::TupleRecord(items) if items.iter().all(|i| *i == Ty::Unit) => {
-                    let units = vec!["()"; items.len()].join(", ");
-                    format!("{{ let _ = w; {path}({units}) }}")
-                }
-                Kind::TupleRecord(items) => match items.as_slice() {
-                    [one] => format!("{path}({})", lift(types, one, "w")),
-                    _ => {
+                Kind::TupleRecord(items) => {
+                    let (prepare, fields) = if items.iter().all(|item| *item == Ty::Unit) {
+                        ("let _ = w;".to_string(), vec!["()"; items.len()].join(", "))
+                    } else if let [one] = items.as_slice() {
+                        (String::new(), lift(types, one, "w"))
+                    } else {
                         let names: Vec<String> =
                             (0..items.len()).map(|i| format!("t{i}")).collect();
-                        let parts: Vec<String> = items
+                        let fields = items
                             .iter()
                             .zip(&names)
                             .map(|(item, name)| lift(types, item, name))
-                            .collect();
-                        format!(
-                            "{{ let ({},) = w; {path}({}) }}",
-                            names.join(", "),
-                            parts.join(", ")
+                            .collect::<Vec<_>>();
+                        (
+                            format!("let ({},) = w;", names.join(", ")),
+                            fields.join(", "),
                         )
+                    };
+                    let construct = if !types.guest.get()
+                        && let Some(constructor) = &def.host_constructor
+                    {
+                        format!("{path}::{constructor}({fields}).map_err(Refused::because)?")
+                    } else {
+                        format!("{path}({fields})")
+                    };
+                    if prepare.is_empty() {
+                        construct
+                    } else {
+                        format!("{{ {prepare} {construct} }}")
                     }
-                },
+                }
                 Kind::Unit => format!("{{ let _ = w; {path} }}"),
                 Kind::Enum(cases) => {
                     let arms: Vec<String> = cases
@@ -773,6 +908,14 @@ pub(super) fn conversions(
                 Kind::Opaque(_) => unreachable!(),
             };
             writeln!(code, "#[allow(unused_variables, clippy::all)] fn lift_{id}(w: {wire}) -> Result<{path}, Refused> {{ Ok({body}) }}").unwrap();
+            if def.rust == "mod_api::Recipe" || def.rust == "mod_api::WorldLine" {
+                let name = if def.rust == "mod_api::Recipe" {
+                    "recipe"
+                } else {
+                    "world_line"
+                };
+                writeln!(code, "#[cfg(test)] pub(super) fn {name}_roundtrip(v: &{rust}) -> Result<{path}, Refused> {{ lift_{id}(lower_{id}(v)?) }}").unwrap();
+            }
         }
         // An event's written-back fields, both ways.
         if outs.contains(&id)

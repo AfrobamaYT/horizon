@@ -11,22 +11,24 @@ use horizon_core::{
     position::ChunkPos,
     ticks::{ProtoChunkTicks, SavedTick, TickTypeId},
 };
-use horizon_world::{
-    heightmap::HeightmapType,
-    item_defaults::ItemData,
-    loot::PackOverlay,
-    nbt::Tag,
-    registry::BlockRegistry,
-    worldgen::{
-        generator::{
-            GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
+use std::{path::Path, sync::Arc};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{
+        heightmap::HeightmapType,
+        item_defaults::ItemData,
+        loot::PackOverlay,
+        registry::BlockRegistry,
+        worldgen::{
+            generator::{
+                GeneratorData, GeneratorWorker, OverworldGenerator, ProtoChunk, SurfaceSample,
+            },
+            overrides::WorldgenOverrides,
+            structure::legacy::PieceRandom,
+            terrain::PreLightChunkStage,
         },
-        overrides::WorldgenOverrides,
-        structure::legacy::PieceRandom,
-        terrain::PreLightChunkStage,
     },
 };
-use std::{path::Path, sync::Arc};
 mod lod;
 mod structure_mobs;
 use lod::VanillaLodSampler;
@@ -38,6 +40,7 @@ pub type SavedReferences = std::sync::Arc<dyn Fn(&str, i32, i32) -> i32 + Send +
 /// Borrowed generation inputs from the owner's published resource tables.
 #[derive(Clone, Copy)]
 pub struct TerrainResources<'a> {
+    pub data: Option<&'a horizon_assets::resource_source::ResourceSource>,
     pub dir: &'a Path,
     pub registry: &'static BlockRegistry,
     pub biomes: &'a Biomes,
@@ -205,8 +208,7 @@ impl VanillaTerrain {
         structures: bool,
         saved_stem: Option<&serde_json::Value>,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> =
-            shared_data_with(resources.dir, overrides, resources.registry)?;
+        let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
         let generator = OverworldGenerator::for_world_with_settings(
             data, seed, preset, dimension, structures, saved_stem,
         )?;
@@ -221,8 +223,7 @@ impl VanillaTerrain {
         flat: &horizon_world::worldgen::generator::FlatSettings,
         structures: bool,
     ) -> crate::Result<Self> {
-        let data: Arc<GeneratorData> =
-            shared_data_with(resources.dir, overrides, resources.registry)?;
+        let data: Arc<GeneratorData> = shared_resource_data(resources, overrides)?;
         let generator = OverworldGenerator::flat(data, seed, flat, structures)?;
         let mut terrain = Self::assemble(
             resources,
@@ -238,6 +239,12 @@ impl VanillaTerrain {
     pub fn is_flat(&self) -> bool {
         self.flat
     }
+    /// `NoiseGeneratorSettings.disableMobGeneration`: whether the generator
+    /// adds the creature packs of a freshly generated chunk. The End's preset
+    /// is the one shipped setting that turns it on.
+    pub fn disable_mob_generation(&self) -> bool {
+        self.generator.disable_mob_generation()
+    }
     /// The terrain around a generator, with the tables the client's chunks need.
     fn assemble(
         resources: TerrainResources<'_>,
@@ -247,6 +254,7 @@ impl VanillaTerrain {
         dimension: &str,
     ) -> crate::Result<Self> {
         let TerrainResources {
+            data: _,
             dir,
             registry,
             biomes,
@@ -358,7 +366,7 @@ impl VanillaTerrain {
         biome: &str,
         random: &mut dyn PieceRandom,
         group: &mut Option<crate::mobs::finalize::Group>,
-    ) -> Option<horizon_world::nbt::Compound> {
+    ) -> Option<horizon_core::nbt::Compound> {
         self.structure_mobs
             .spawn_generated(kind, position, yaw, biome, random, group)
     }
@@ -439,14 +447,14 @@ impl VanillaTerrain {
             .collect();
         let fluid_ticks = chunk.terrain.fluid_ticks().pack(0).to_vec();
         if !block_ticks.is_empty() || !fluid_ticks.is_empty() || !chunk.saved_root.is_empty() {
-            let attachments = horizon_world::attachments::attachment_compound(
+            let attachments = horizon_mod_runtime::attachments::attachment_compound(
                 chunk
                     .saved_root
-                    .get(&horizon_world::attachments::ATTACHMENTS_KEY.into()),
+                    .get(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into()),
             )
             .ok()
             .flatten()
-            .map(|data| horizon_world::attachments::Attachments::from_nbt(data.clone()))
+            .map(|data| horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()))
             .unwrap_or_default();
             out.saved = Some(Arc::new(crate::save::ChunkExtras {
                 block_ticks,
@@ -693,12 +701,48 @@ static SHARED_DATA: std::sync::Mutex<Vec<SharedEntry>> = std::sync::Mutex::new(V
 /// share one, and returning to a world finds it.
 const SHARED_WITH_PACKS: usize = 2;
 /// Let go of the bundles `shared_data` loaded: for a preload no world used
-/// (game/world_loading.rs). A generator that holds one keeps it.
+/// (game/world/world_loading.rs). A generator that holds one keeps it.
 pub fn forget_shared_data() {
     SHARED_DATA
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clear();
+}
+fn shared_resource_data(
+    resources: TerrainResources<'_>,
+    overrides: &WorldgenOverrides,
+) -> crate::Result<Arc<GeneratorData>> {
+    match resources.data {
+        Some(source) => shared_data_from(resources.dir, overrides, resources.registry, source),
+        None => shared_data_with(resources.dir, overrides, resources.registry),
+    }
+}
+/// Shared worldgen tables with lazy passive structure templates below world packs.
+pub fn shared_data_from(
+    dir: &Path,
+    overrides: &WorldgenOverrides,
+    registry: &'static BlockRegistry,
+    source: &horizon_assets::resource_source::ResourceSource,
+) -> crate::Result<Arc<GeneratorData>> {
+    let mut resolved = overrides.clone();
+    {
+        for name in source.list_under("data", &["structure"]) {
+            if let Some((namespace, path)) = name
+                .strip_prefix("data/")
+                .and_then(|rest| rest.split_once("/structure/"))
+                .and_then(|(ns, path)| Some((ns, path.strip_suffix(".nbt")?)))
+            {
+                let id = format!("{namespace}:{path}");
+                if !resolved.templates().contains_key(&id) {
+                    resolved.set_template(
+                        id,
+                        horizon_assets::resource_source::Resource::file(source.clone(), name),
+                    );
+                }
+            }
+        }
+    }
+    shared_data_with(dir, &resolved, registry)
 }
 /// The worldgen bundle at `dir`, loaded once and shared by every generator
 /// and by live feature placement (sapling growth, bone meal).
@@ -1114,7 +1158,7 @@ impl ChunkGenerator for VanillaTerrain {
         // Chest minecarts keep their loot table; the game rolls it on load.
         out.entities = entities
             .into_iter()
-            .map(horizon_world::nbt::Tag::Compound)
+            .map(horizon_core::nbt::Tag::Compound)
             .collect();
         for s in &mut out.sections {
             Arc::make_mut(s).compact();

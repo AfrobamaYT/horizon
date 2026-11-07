@@ -14,7 +14,7 @@ impl mod_api::BlockPart for Mud {
     }
 }
 
-// In `register`: r.block_part("mymod:mud", Mud);
+// In `register`: let mud = r.block_key("mymod:mud"); r.block_part(mud, Mud);
 ```
 
 The entity reads the block at its feet and, when that gives 1.0 (and, for speed, the block is not water or a bubble column), the block below it. A part's factor is the block's factor in that rule, so 1.0 from your part lets the block below decide, exactly as for a vanilla block.

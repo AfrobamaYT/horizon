@@ -3,18 +3,21 @@
 //! Dispatch walks the block's class chain; a handler returning `None` defers
 //! to the next class (the Java `super` call), the end of the chain returns the
 //! state unchanged (`BlockBehaviour.updateShape`).
-use super::{
-    ConnectionKind, LevelAccess, Sim,
-    classes::Class,
-    query::{axis_of, clockwise, counter_clockwise, is_horizontal},
-    states::BlockId,
-    update::{above, below, rel},
-};
 use crate::{fluid::FluidKind, registry::BlockStateId};
 use horizon_core::{
     geometry::{Axis, Direction},
     position::BlockPos,
     random::RandomSource,
+};
+use {
+    super::{
+        LevelAccess, Sim,
+        classes::Class,
+        query::{axis_of, clockwise, counter_clockwise, is_horizontal},
+        states::BlockId,
+        update::{above, below, rel},
+    },
+    horizon_core::connection_kind::ConnectionKind,
 };
 
 /// `SoundEvents.GEYSER_ERUPTION_START`.

@@ -29,7 +29,7 @@ on what the stock client renders, never on a client mod.
 
 | Part | Where | What |
 |---|---|---|
-| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks.rs` ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)) | compiled against the installed game's exact source revision, empty when no mod hooks them |
+| Server hook points | this repository, `crates/horizon-client/src/game/native_hooks/` ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)) | compiled against the installed game's exact source revision, empty when no mod hooks them |
 | The `smp` mod | [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods), `native/smp/` | a horizon-mixins bundle: `smp_store.rs`, `smp_economy.rs`, `smp_market.rs`... hold the rules and data (also the mod's own crate, with its tests, no game types), `glue.rs` and small helpers hook the points |
 | The official server's engine | built from a Horizon release's commit with the bundle applied | `horizon-server`'s `[engine] path` points at it; the rest of the server is unchanged |
 
@@ -49,7 +49,7 @@ horizon-rust/horizon#4483, horizon-rust/horizon#4302), the SMP uses theirs.
 
 | Phase | Hook points and helpers |
 |---|---|
-| 1. Economy | `native_register_commands` (commands every player's chat box completes), `native_perform_command` (a player's command on the server, with that player's state as the acting player); helpers: the online players and their game mode, a line to one player or to all, the world's folder |
+| 1. Economy | `native_register_commands` (commands every player's chat box completes), `native_run_mod_command` (a player's command on the server, with that player's state as the acting player); helpers: the online players and their game mode, a line to one player or to all, the world's folder |
 | 1. Market | the acting player's items: held, count, carried, take, room, give (plain stacks only, nothing dropped) |
 | 2. Trading | a vanilla chest menu the server opens and fills for a player, display only: its clicks and its closing go to the mod; an atomic exchange of two players' items; a player left or died |
 | 3. Gambling | nothing new |

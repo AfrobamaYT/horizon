@@ -13,6 +13,31 @@ pub const LOOK: u8 = 2;
 pub const JUMP: u8 = 4;
 pub const TARGET: u8 = 8;
 
+/// The facts of a target one mob may take, as far as [`Mob::valid_target`]
+/// reads them (#1175): another mob — what a tick's snapshot carries, or the
+/// game's own state — or a player. One rule set; both the write handle and a
+/// goal tick's view fill these from where they stand.
+pub enum TargetFacts {
+    /// A mob target: `asValidTarget`'s facts of it.
+    Mob {
+        id: u32,
+        species: Species,
+        alive: bool,
+        /// `invulnerable_flag`, the flag `asValidTarget` refuses.
+        invulnerable: bool,
+        baby: bool,
+    },
+    /// A player target: its survival liveness, its `invulnerable` ability,
+    /// the modes that cannot be attacked (creative, spectator) and its uuid.
+    Player {
+        alive: bool,
+        invulnerable: bool,
+        creative: bool,
+        spectator: bool,
+        uuid: [i32; 4],
+    },
+}
+
 /// What goals may read and emit during a tick.
 pub struct Cx<'a, 'w, 'l> {
     pub w: &'a MobWorld<'w>,
@@ -248,11 +273,12 @@ fn move_up_to_above_solid(w: &MobWorld, mut p: [i32; 3], above: i32) -> [i32; 3]
     }
     p
 }
-/// `Mob.isWithinHome(BlockPos)`.
+/// `Mob.isWithinHome(BlockPos)`: `Vec3i.distSqr` in doubles, so no
+/// coordinate pair overflows, against the radius squared as a Java `int`
+/// (which wraps past 46 340, as vanilla's does).
 pub fn within_home(c: [i32; 3], r: i32, p: [i32; 3]) -> bool {
-    let d = |i: usize| i64::from(c[i] - p[i]);
-    let r = i64::from(r);
-    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < r * r
+    let d = |i: usize| f64::from(c[i]) - f64::from(p[i]);
+    d(0) * d(0) + d(1) * d(1) + d(2) * d(2) < f64::from(r.wrapping_mul(r))
 }
 
 impl Mob {
@@ -703,11 +729,71 @@ impl Mob {
         self.ai.seen_cache.push((who, v));
         v
     }
-    /// Mob.isWithinMeleeAttackRange: the box inflated by sqrt(2.04) - 0.6.
-    pub fn within_melee_range(&self, t: &TargetInfo) -> bool {
-        let reach = 2.04f32.sqrt() as f64 - 0.6;
-        let b = self.bounds().inflate(Vec3::new(reach, 0.0, reach));
-        b.intersects(t.bounds)
+    /// Mob.isWithinMeleeAttackRange: the box inflated by sqrt(2.04) - 0.6, or
+    /// for an active item with `attack_range` (the spears) by its
+    /// `effectiveMaxRange` for a mob (`max_reach * mob_factor`), and not
+    /// within its `effectiveMinRange` (`min_reach * mob_factor`).
+    pub fn within_melee_range(&self, w: &MobWorld, t: &TargetInfo) -> bool {
+        self.melee_reaches(w, t.hitbox)
+    }
+    /// [`Self::within_melee_range`] for a target's box (`getHitbox`).
+    pub fn melee_reaches(&self, w: &MobWorld, target: Aabb) -> bool {
+        // getVehicle().getBoundingBox() now: a mob vehicle's box as the
+        // snapshot has it after its own tick, else the box positionRider
+        // left for this same vehicle (a boat, a minecart, primed TNT).
+        let vehicle = self.extra.mount.and_then(|v| {
+            w.seen(v)
+                .map(|s| s.bounds)
+                .or_else(|| self.extra.seat.filter(|s| s.0 == v).map(|s| s.2))
+        });
+        self.melee_reaches_beside(vehicle, target)
+    }
+    /// [`Self::melee_reaches`] with the vehicle's box given.
+    pub fn melee_reaches_beside(&self, vehicle: Option<Aabb>, target: Aabb) -> bool {
+        let (max, min) = match self.active_attack_range() {
+            Some((max, min)) => (f64::from(max), f64::from(min)),
+            None => (2.04f32.sqrt() as f64 - 0.6, 0.0),
+        };
+        let reaches = |range: f64| self.attack_box(range, vehicle).intersects(target);
+        reaches(max) && (min <= 0.0 || !reaches(min))
+    }
+    /// The active item's `attack_range` for a mob: `effectiveMaxRange` and
+    /// `effectiveMinRange` (`max_reach` and `min_reach` times `mob_factor`).
+    /// A patch on the held stack wins (`!minecraft:attack_range` removes it;
+    /// the codec's defaults are 0, 3 and a factor of 1); else the spears'.
+    fn active_attack_range(&self) -> Option<(f32, f32)> {
+        let item = self.active_item()?;
+        let patch = (self.extra.main_hand_id() == Some(item))
+            .then(|| self.extra.main_hand_stack().and_then(|s| s.data()))
+            .flatten();
+        if patch.is_some_and(|d| d.other("!minecraft:attack_range").is_some()) {
+            return None;
+        }
+        if let Some(range) = patch.and_then(|d| d.other("minecraft:attack_range")) {
+            let float = |key: &str, default: f32| match range.get(key) {
+                Some(horizon_core::nbt::Tag::Float(bits)) => f32::from_bits(*bits),
+                Some(horizon_core::nbt::Tag::Double(bits)) => f64::from_bits(*bits) as f32,
+                Some(horizon_core::nbt::Tag::Int(v)) => *v as f32,
+                _ => default,
+            };
+            let factor = float("mob_factor", 1.0);
+            return Some((
+                float("max_reach", 3.0) * factor,
+                float("min_reach", 0.0) * factor,
+            ));
+        }
+        crate::spear::Kinetic::of(item).map(|_| {
+            let r = &crate::spear::REACH;
+            (r.max * r.mob_factor, r.min * r.mob_factor)
+        })
+    }
+    /// `LivingEntity.getActiveItem`: the item being used, else the main hand's.
+    pub fn active_item(&self) -> Option<&str> {
+        if super::spear_use::is_using_item(self) && self.extra.using_off_hand {
+            self.extra.off_hand_id()
+        } else {
+            self.extra.main_hand_id()
+        }
     }
     /// Whether the species is a `TamableAnimal` (not the horses and llamas,
     /// which are tamed another way).
@@ -760,6 +846,100 @@ impl Mob {
             Who::Mob(id) => {
                 self.species() == Species::IronGolem
                     && w.seen(id).is_some_and(|s| s.species == Species::Creeper)
+            }
+        }
+    }
+    /// The setter's own refusal (#1175), one rule both the write handle and
+    /// a goal tick's `set_target` ask: a brain-backed species' target is its
+    /// brain's to write (`getTarget` overrides it, #934). The read path does
+    /// not ask this — it reads a brain's own target back.
+    pub fn refuses_set_target(&self) -> bool {
+        super::ai::brain_target(self).is_some()
+    }
+    /// `Mob.setTarget` with the species overrides' side effects (#933), for an
+    /// already validated target — what the write handle and a goal tick's
+    /// `set_target` store:
+    /// - `Fox.setTarget`: clearing the target ends its defending.
+    /// - `Enderman.setTarget`: a target opens the mouth (`DATA_CREEPY`) and
+    ///   stamps `targetChangeTime` (the daylight teleport waits 600 ticks from
+    ///   it); none closes the mouth and zeroes it. Its attack speed modifier
+    ///   follows the target itself ([`super::enderman::attacking_speed`]).
+    /// - `ZombifiedPiglin.setTarget`: a first target samples the first-anger
+    ///   sound delay and the alert interval; the AI step samples them, with
+    ///   the anger, on the tick it first sees the target, as for every other
+    ///   way the piglin gains one.
+    pub fn set_target(&mut self, target: Option<Who>) {
+        match self.species() {
+            Species::Fox if target.is_none() => {
+                super::fox::set_flag(self, super::fox::DEFENDING, false);
+            }
+            Species::Enderman => {
+                self.extra.flag = target.is_some();
+                self.extra.counter = if target.is_some() { self.age as i32 } else { 0 };
+            }
+            _ => {}
+        }
+        self.ai.target = target;
+    }
+    /// `Mob.asValidTarget` and the modeled `canAttack` overrides over the
+    /// target's facts (#1175): one rule set both the write handle and a goal
+    /// tick's view ask — the facts of the target, not where they were read.
+    /// The warden's own override (`Warden.canTargetEntity`) reads the
+    /// scoreboard and the world border, so the write handle answers it around
+    /// this; a goal tick refuses the brain-backed warden before it.
+    pub fn valid_target(&self, w: &MobWorld, target: &TargetFacts) -> bool {
+        match target {
+            TargetFacts::Mob {
+                id,
+                species,
+                alive,
+                invulnerable,
+                baby,
+            } => {
+                // `asValidTarget`: dead, invulnerable and ghast targets never
+                // store.
+                if !*alive || *invulnerable || *species == Species::Ghast {
+                    return false;
+                }
+                // Breeze.canAttack names only an iron golem.
+                if self.species() == Species::Breeze && *species != Species::IronGolem {
+                    return false;
+                }
+                // Illager.canAttack spares a baby villager or trader.
+                if matches!(
+                    self.species(),
+                    Species::Evoker | Species::Vindicator | Species::Illusioner | Species::Pillager
+                ) && matches!(*species, Species::Villager | Species::WanderingTrader)
+                    && *baby
+                {
+                    return false;
+                }
+                // Creeper.canAttack never names a goat.
+                if self.species() == Species::Creeper && *species == Species::Goat {
+                    return false;
+                }
+                !self.spares_target(w, Who::Mob(*id))
+            }
+            TargetFacts::Player {
+                alive,
+                invulnerable,
+                creative,
+                spectator,
+                uuid,
+            } => {
+                // The player rules the write handle always asked: a target
+                // that cannot fight, Peaceful, a player-built golem, and a
+                // pet never attacking its owner.
+                *alive
+                    && !*invulnerable
+                    && !*creative
+                    && !*spectator
+                    && w.difficulty.base != 0
+                    && !self.built_by_player()
+                    && !(self.is_tamable_animal()
+                        && self.extra.tame
+                        && super::tame::owned_by(self.extra.owner, *uuid))
+                    && !(self.species() == Species::Dolphin && self.is_baby())
             }
         }
     }
@@ -1406,7 +1586,7 @@ impl Goal for MeleeAttack {
             return false;
         }
         let path = m.create_path_to_entity(cx.w, [t.position.x, t.position.y, t.position.z], 0);
-        let ok = path.is_some() || m.within_melee_range(&t);
+        let ok = path.is_some() || m.within_melee_range(cx.w, &t);
         m.ai.pending_path = path;
         ok
     }
@@ -1485,7 +1665,7 @@ impl Goal for MeleeAttack {
                 &t,
                 cx,
             );
-        } else if self.until_attack <= 0 && m.within_melee_range(&t) && m.sees(cx.w, who) {
+        } else if self.until_attack <= 0 && m.within_melee_range(cx.w, &t) && m.sees(cx.w, who) {
             let interval = match self.baby_interval {
                 Some(baby) if m.is_baby() => baby,
                 _ => self.interval,
@@ -1625,6 +1805,11 @@ impl NearestTarget {
     }
     pub fn interval(mut self, i: i32) -> Self {
         self.interval = reduced(i);
+        self
+    }
+    /// `TargetGoal.setUnseenMemoryTicks`.
+    pub fn unseen_memory(mut self, ticks: i32) -> Self {
+        self.target_goal.unseen_memory = ticks;
         self
     }
     /// Scale the follow distance (llamas hunt wolves within a quarter of it).
@@ -3010,6 +3195,7 @@ mod breeding_variant_tests {
             let partner = [mate.seen(None)];
             for asks_baby_spawn in [false, true] {
                 let w = MobWorld {
+                    goal_host: None,
                     asks_baby_spawn,
                     mob_drops: false,
                     others: &partner,
@@ -3071,6 +3257,7 @@ mod breeding_variant_tests {
                     [(false, true), (false, false), (true, true), (true, false)]
                 {
                     let world = MobWorld {
+                        goal_host: None,
                         asks_baby_spawn: ask_mods,
                         mob_drops,
                         others: &partner,
@@ -3797,5 +3984,120 @@ mod breed_xp_tests {
                 .any(|e| matches!(e, MobEvent::Breed { parent: 1, .. })),
             "mob_drops off: the pair still breeds"
         );
+    }
+}
+
+#[cfg(test)]
+mod within_home_tests {
+    use super::within_home;
+
+    /// `Mob.isWithinHome`: `Vec3i.distSqr` in doubles against the radius
+    /// squared as a Java `int`.
+    #[test]
+    fn within_home_matches_vanilla_at_the_edges() {
+        assert!(within_home([10, 64, -5], 6, [12, 64, -2]));
+        assert!(
+            !within_home([10, 64, -5], 6, [16, 64, -5]),
+            "the radius itself is out"
+        );
+        assert!(!within_home([i32::MIN, 0, 0], 6, [i32::MAX, 0, 0]));
+        assert!(!within_home([i32::MIN; 3], i32::MAX, [i32::MAX; 3]));
+        // 65 536² wraps to 0; 46 341² wraps negative.
+        assert!(!within_home([0, 0, 0], 65_536, [0, 0, 0]));
+        assert!(!within_home([0, 0, 0], 46_341, [0, 0, 0]));
+        assert!(within_home([0, 0, 0], 46_340, [46_339, 0, 0]));
+    }
+}
+
+#[cfg(test)]
+mod melee_range_tests {
+    use super::*;
+
+    fn mob_holding(item: &str, components: Option<&str>) -> Mob {
+        let kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        let mut m = Mob::new(1, Arc::new(kind), Vec3::new(0.5, 64.0, 0.5), 0.0);
+        let mut stack = crate::items::ItemStack::new(item, 1);
+        if let Some(text) = components {
+            let tag = horizon_core::nbt::parse_snbt(text).unwrap().0;
+            (stack.damage, stack.extra) = crate::item_data::decode_components(Some(&tag));
+        }
+        m.extra.set_main_hand_stack(Some(stack));
+        m
+    }
+    /// A one-block target whose near face is `gap` blocks east of the mob's box.
+    fn target(m: &Mob, gap: f64) -> Aabb {
+        let x = m.bounds().max_position().x + gap;
+        Aabb::new(Vec3::new(x, 64.0, 0.0), Vec3::new(x + 1.0, 65.0, 1.0))
+    }
+
+    /// `Mob.isWithinMeleeAttackRange` with `getActiveItem().get(ATTACK_RANGE)`:
+    /// no component reaches sqrt(2.04) - 0.6 (about 0.83); a spear 4.5 and 2.0
+    /// times its mob factor 0.5; a patched component with the codec's
+    /// defaults (`mob_factor` 1, `min_reach` 0); a removed one the default.
+    #[test]
+    fn the_active_items_attack_range_sets_the_reach() {
+        let sword = mob_holding("minecraft:iron_sword", None);
+        assert!(sword.melee_reaches_beside(None, target(&sword, 0.8)));
+        assert!(!sword.melee_reaches_beside(None, target(&sword, 0.9)));
+
+        let spear = mob_holding("minecraft:iron_spear", None);
+        assert!(spear.melee_reaches_beside(None, target(&spear, 2.2)));
+        assert!(!spear.melee_reaches_beside(None, target(&spear, 2.3)));
+        assert!(
+            !spear.melee_reaches_beside(None, target(&spear, 0.5)),
+            "inside the minimum range"
+        );
+        assert!(spear.melee_reaches_beside(None, target(&spear, 1.1)));
+
+        let long = mob_holding(
+            "minecraft:iron_sword",
+            Some(r#"{"minecraft:attack_range":{max_reach:6.0f}}"#),
+        );
+        assert!(long.melee_reaches_beside(None, target(&long, 5.9)));
+        assert!(
+            long.melee_reaches_beside(None, target(&long, 0.0)),
+            "no minimum by default"
+        );
+        assert!(!long.melee_reaches_beside(None, target(&long, 6.1)));
+
+        let blunt = mob_holding(
+            "minecraft:iron_spear",
+            Some(r#"{"!minecraft:attack_range":{}}"#),
+        );
+        assert!(blunt.melee_reaches_beside(None, target(&blunt, 0.5)));
+        assert!(!blunt.melee_reaches_beside(None, target(&blunt, 2.0)));
+    }
+
+    /// `Mob.getAttackBoundingBox`: a rider's box widened on x and z to its
+    /// vehicle's (a 1.4 wide horse under a 0.6 wide zombie) before the reach
+    /// is added; `LivingEntity.getHitbox`: a rider is hit from its seat up.
+    #[test]
+    fn a_riders_attack_box_takes_its_vehicles_width() {
+        let mut rider = mob_holding("minecraft:iron_sword", None);
+        let at = rider.position;
+        let horse = Aabb::new(
+            Vec3::new(at.x - 0.7, at.y - 1.0, at.z - 0.7),
+            Vec3::new(at.x + 0.7, at.y + 0.6, at.z + 0.7),
+        );
+        // Its near face 0.9 past the zombie's box: past the default reach of
+        // the zombie alone (about 0.83), within it from the horse's side.
+        let target = target(&rider, 0.9);
+        assert!(!rider.melee_reaches_beside(None, target));
+        rider.extra.mount = Some(9);
+        rider.seated(9, 0.7, horse);
+        assert!(rider.melee_reaches_beside(Some(horse), target));
+        // Its own box keeps its height: the horse's lower box adds nothing.
+        let below = Aabb::new(
+            Vec3::new(at.x + 0.9, at.y - 1.0, at.z),
+            Vec3::new(at.x + 1.1, at.y - 0.5, at.z + 1.0),
+        );
+        assert!(!rider.melee_reaches_beside(Some(horse), below));
+
+        assert_eq!(rider.hitbox().min_position().y, at.y + 0.7);
+        // A seat left from another vehicle is not this one's.
+        rider.extra.mount = Some(10);
+        assert_eq!(rider.hitbox().min_position().y, at.y);
+        rider.extra.mount = None;
+        assert_eq!(rider.hitbox().min_position().y, at.y);
     }
 }

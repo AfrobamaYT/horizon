@@ -1,28 +1,6 @@
 //! Typed identities and declarations of block entity types.
-use std::{fmt, sync::Arc};
-
-/// A block entity type's namespaced registry and save identity.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct BlockEntityTypeKey(pub(super) Arc<str>);
-
-impl BlockEntityTypeKey {
-    /// The namespaced registry and save id.
-    pub fn id(&self) -> &str {
-        &self.0
-    }
-
-    pub(crate) fn registered(id: &str) -> Option<Self> {
-        let types = horizon_client_core::block_entity_types::current()?;
-        types.key(id).map(Self)
-    }
-}
-
-impl AsRef<str> for BlockEntityTypeKey {
-    fn as_ref(&self) -> &str {
-        self.id()
-    }
-}
+use crate::BlockEntityTypeKey;
+use std::fmt;
 
 /// A native Part cannot be attached to this type during registration.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,56 +26,20 @@ impl fmt::Display for BlockEntityPartError {
             Self::VanillaType { kind } => write!(
                 f,
                 "cannot attach a native block entity Part to vanilla type {}",
-                kind.id()
+                super::registry_keys::block_entity_type_display_name(*kind)
             ),
             Self::Duplicate { kind, part } => {
-                write!(f, "Part {part} is attached to type {} twice", kind.id())
+                write!(
+                    f,
+                    "Part {part} is attached to type {} twice",
+                    super::registry_keys::block_entity_type_display_name(*kind)
+                )
             }
         }
     }
 }
 
 impl std::error::Error for BlockEntityPartError {}
-
-#[derive(Debug)]
-// exhaustive: its fields are private, so mods cannot build or destructure it
-pub struct BlockEntityTypeLookupError {
-    missing: Vec<&'static super::part_table::BlockEntityTypeRequest>,
-}
-
-impl fmt::Display for BlockEntityTypeLookupError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (index, request) in self.missing.iter().enumerate() {
-            if index > 0 {
-                writeln!(f)?;
-            }
-            write!(
-                f,
-                "mod {} requested unknown block entity type {}",
-                request.mod_id,
-                request.kind.id(),
-            )?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for BlockEntityTypeLookupError {}
-
-/// Checks that every registered block entity type key names a type the game knows.
-pub fn validate_block_entity_type_keys(
-    types: &horizon_client_core::block_entity_types::BlockEntityTypes,
-) -> Result<(), BlockEntityTypeLookupError> {
-    let missing: Vec<_> = super::part_table::requested_block_entity_types()
-        .iter()
-        .filter(|request| types.key(request.kind.id()).is_none())
-        .collect();
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(BlockEntityTypeLookupError { missing })
-    }
-}
 
 /// Builds one native block entity type during mod registration.
 // exhaustive: its fields are private, so mods cannot build or destructure it

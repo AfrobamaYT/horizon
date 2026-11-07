@@ -23,7 +23,10 @@ pub struct Internal {
     /// A reachable lower-crate type's layout, without exposing it to native mods.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shape_only: bool,
-    /// Type paths resolved through imports, keyed by their spelling in this signature.
+    /// Why this reachable layout cannot be accessed by the generated game table.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opaque_reason: Option<&'static str>,
+    /// Type and called-value paths resolved through imports, keyed by their source spelling.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub refs: BTreeMap<String, String>,
 }
@@ -48,11 +51,7 @@ struct Source {
 
 impl Source {
     fn offset(&self, position: proc_macro2::LineColumn) -> usize {
-        let line = self.lines[position.line - 1];
-        self.text[line..]
-            .char_indices()
-            .nth(position.column)
-            .map_or(self.text.len(), |(i, _)| line + i)
+        crate::points::offset(&self.text, &self.lines, position)
     }
 
     fn annotate(&mut self, attrs: &[syn::Attribute], start: Span, kind: &str, path: &str) {
@@ -122,7 +121,26 @@ impl<'ast> Visit<'ast> for TypeUses {
         syn::visit::visit_type_param(self, param);
     }
 
-    fn visit_block(&mut self, _: &'ast syn::Block) {}
+    fn visit_block(&mut self, block: &'ast syn::Block) {
+        struct Calls<'a>(&'a mut BTreeSet<String>);
+        impl<'ast> Visit<'ast> for Calls<'_> {
+            fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+                if let syn::Expr::Path(path) = &*call.func {
+                    self.0.insert(
+                        path.path
+                            .segments
+                            .iter()
+                            .map(|s| s.ident.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::"),
+                    );
+                }
+                syn::visit::visit_expr_call(self, call);
+            }
+            fn visit_item(&mut self, _: &'ast Item) {}
+        }
+        Calls(&mut self.paths).visit_block(block);
+    }
     fn visit_expr(&mut self, _: &'ast syn::Expr) {}
     fn visit_item_mod(&mut self, _: &'ast syn::ItemMod) {}
 }
@@ -144,15 +162,27 @@ struct Pass {
     uses: BTreeMap<EntryKey, (String, TypeUses)>,
     /// The conditions of the module being visited.
     cfg: Vec<String>,
+    /// Widening only: the items and fields visited are made public and listed nowhere, for a
+    /// lower-crate shape the wasm internals table walks (#589 W).
+    reaching: bool,
     discovery: bool,
 }
+
+/// Crates whose types are the mod API's own: their fields stay private in every build.
+const API_CRATES: &[&str] = &["mod_api", "mod_points", "point_shape"];
 
 // Only test-only declarations are excluded. Other cfgs keep their spelling and visibility, and
 // each entry records them: changing visibility doesn't select an OS or feature for the build.
 use crate::points::{conditions, test_only};
 
+/// The attributes a layout's signature keeps: which fields exist, and whether another crate may
+/// build it.
 fn clean_attrs(attrs: &mut Vec<syn::Attribute>) {
-    attrs.retain(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"));
+    attrs.retain(|attr| {
+        attr.path().is_ident("cfg")
+            || attr.path().is_ident("cfg_attr")
+            || attr.path().is_ident("non_exhaustive")
+    });
 }
 
 fn clean_fields(fields: &Fields) -> Fields {
@@ -183,18 +213,22 @@ fn clean_fields(fields: &Fields) -> Fields {
     fields
 }
 
-fn shape_signature(item: &Item) -> Option<Item> {
+pub(crate) fn shape_signature(item: &Item) -> Option<Item> {
     match item {
         Item::Struct(value) => {
             let mut value = value.clone();
-            value.attrs.clear();
+            value
+                .attrs
+                .retain(|attr| attr.path().is_ident("non_exhaustive"));
             value.vis = Visibility::Inherited;
             value.fields = clean_fields(&value.fields);
             Some(Item::Struct(value))
         }
         Item::Enum(value) => {
             let mut value = value.clone();
-            value.attrs.clear();
+            value
+                .attrs
+                .retain(|attr| attr.path().is_ident("non_exhaustive"));
             value.vis = Visibility::Inherited;
             value.variants = value
                 .variants
@@ -210,6 +244,14 @@ fn shape_signature(item: &Item) -> Option<Item> {
         }
         _ => None,
     }
+}
+
+/// A listed signature's hash: what a mod's declaration pins.
+pub(crate) fn signature_hash(signature: &str) -> String {
+    Sha256::digest(signature.as_bytes())[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn configuration(outer: &[String], attrs: &[syn::Attribute]) -> String {
@@ -335,8 +377,7 @@ impl Shapes {
         for file in files {
             let text = fs::read_to_string(&file.path)
                 .map_err(|e| format!("{}: {e}", file.path.display()))?;
-            let parsed =
-                syn::parse_file(&text).map_err(|e| format!("{}: {e}", file.path.display()))?;
+            let parsed = crate::game_modules::parse(&file.path, &text)?;
             self.items(&file.module, &file.cfg, &parsed.items);
         }
         Ok(())
@@ -346,6 +387,7 @@ impl Shapes {
         self.scopes.entry(module.to_owned()).or_default();
         for item in items {
             let (ident, attrs) = match item {
+                Item::Fn(value) => (&value.sig.ident, &value.attrs),
                 Item::Struct(value) => (&value.ident, &value.attrs),
                 Item::Enum(value) => (&value.ident, &value.attrs),
                 Item::Type(value) => (&value.ident, &value.attrs),
@@ -437,6 +479,9 @@ impl Shapes {
                 };
             }
             "std" | "core" | "alloc" => return Ok(BTreeMap::from([(path.to_owned(), false)])),
+            _ if crate::crossing::foreign(path).is_some() => {
+                return Ok(BTreeMap::from([(path.to_owned(), false)]));
+            }
             _ => {}
         }
         if self
@@ -500,6 +545,11 @@ impl Shapes {
         }
         if self.scopes.contains_key(base) {
             self.resolve(base, &tail.join("::"), seen)
+        } else if self.definitions.contains_key(base) {
+            Ok(BTreeMap::from([(
+                format!("{base}::{}", tail.join("::")),
+                false,
+            )]))
         } else {
             Ok(BTreeMap::new())
         }
@@ -530,6 +580,9 @@ impl Pass {
             return Ok(index);
         }
         let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // Staged source copies materialize directory-derived declarations before widening them.
+        // Store that same text so source spans and edits still address the exact bytes parsed.
+        let text = crate::game_modules::expand(path, &text)?;
         let parsed = syn::parse_file(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let lines = std::iter::once(0)
             .chain(text.match_indices('\n').map(|(i, _)| i + 1))
@@ -555,13 +608,12 @@ impl Pass {
         tokens: impl ToTokens,
         uses: TypeUses,
     ) {
+        if self.reaching {
+            return;
+        }
         let cfg = configuration(&self.cfg, attrs);
         let signature = tokens.to_token_stream().to_string();
-        let digest = Sha256::digest(signature.as_bytes());
-        let hash = digest[..8]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let hash = signature_hash(&signature);
         let key = (path.to_owned(), kind, cfg.clone());
         self.uses.insert(key.clone(), (module.to_owned(), uses));
         self.entries.insert(
@@ -573,6 +625,7 @@ impl Pass {
                 signature,
                 hash,
                 shape_only: false,
+                opaque_reason: None,
                 refs: BTreeMap::new(),
             },
         );
@@ -760,7 +813,7 @@ impl Pass {
                 let (ident, generics) = (&value.ident, &value.generics);
                 let signature = shape_signature(item).expect("a struct");
                 expose!(value, "struct", value.struct_token.span(), signature);
-                if children {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -781,7 +834,7 @@ impl Pass {
                 };
                 signature.fields = fields;
                 expose!(value, "struct", value.union_token.span(), signature);
-                if children {
+                if children || self.reaching {
                     self.fields(
                         file,
                         module,
@@ -1037,8 +1090,12 @@ impl Pass {
                     continue;
                 }
                 let resolved = shapes.resolve(&module, &written, &mut BTreeSet::new())?;
+                let unique = resolved.len() == 1;
                 for (path, imported) in resolved {
-                    if imported && let Some(entry) = self.entries.get_mut(&key) {
+                    if imported
+                        && unique
+                        && let Some(entry) = self.entries.get_mut(&key)
+                    {
                         entry.refs.insert(written.clone(), path.clone());
                     }
                     let Some(definitions) = shapes.definitions.get(&path).cloned() else {
@@ -1081,6 +1138,50 @@ impl Pass {
             }
         }
         self.cfg.clear();
+        // Each shape's module path, item and fields, public in the staged copy, so the wasm
+        // internals table at the game's root can walk it. The mod API's own types keep theirs.
+        let reached: Vec<String> = self
+            .entries
+            .values()
+            .filter(|entry| {
+                matches!(entry.kind, "struct" | "enum")
+                    && !entry.path.starts_with("horizon_client::")
+                    && !API_CRATES.contains(&entry.path.split("::").next().unwrap_or_default())
+            })
+            .map(|entry| entry.path.clone())
+            .collect();
+        let manifest = root.join("crates/horizon-client/Cargo.toml");
+        let text = fs::read_to_string(&manifest).map_err(|e| e.to_string())?;
+        let manifest: toml::Value = toml::from_str(&text).map_err(|e| e.to_string())?;
+        // The table lives in the game crate. A transitive or optional dependency's name is
+        // not available in every game build, even if an unconditional layout was discovered.
+        let dependencies: BTreeSet<String> = manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .into_iter()
+            .flatten()
+            .filter(|(_, dep)| dep.get("optional").and_then(toml::Value::as_bool) != Some(true))
+            .map(|(name, _)| name.replace('-', "_"))
+            .collect();
+        self.reaching = true;
+        for path in reached {
+            let krate = path.split("::").next().expect("shape path");
+            let reason = if !dependencies.contains(krate) {
+                Some("not an unconditional game dependency")
+            } else if self.lower(root, &path).is_err() {
+                // A declaration can be discovered through a re-export that lower() cannot
+                // walk. Keep its metadata, but never emit code against an unproven layout.
+                Some("shape module walk failed")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                for entry in self.entries.values_mut().filter(|entry| entry.path == path) {
+                    entry.opaque_reason = Some(reason);
+                }
+            }
+        }
+        self.reaching = false;
         Ok(())
     }
 
@@ -1133,15 +1234,9 @@ pub fn discover(root: &Path) -> Result<Widened, String> {
 }
 
 fn stage(root: &Path, discovery: bool) -> Result<Widened, String> {
-    let mut lists = Vec::new();
-    for name in ["internals.txt", "points.txt"] {
-        let path = root.join("crates/horizon-mod-api-gen").join(name);
-        lists.push((
-            name,
-            fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?,
-        ));
-    }
-    widen_mode(root, &lists, discovery)
+    let path = root.join("crates/horizon-mod-api-gen/internals.txt");
+    let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    widen_mode(root, &[("internals.txt", text)], discovery)
 }
 
 /// [`widen`] with each list's file name and text, so an error names the file and line it came from.
@@ -1181,6 +1276,18 @@ fn widen_mode(root: &Path, lists: &[(&str, String)], discovery: bool) -> Result<
                     .map_err(|e| format!("{name}:{}: {path}: {e}", line + 1))?;
             }
         }
+    }
+    let slots =
+        crate::sites::slots(&root.join(crate::sites::DIRECTORY)).map_err(|e| e.to_string())?;
+    for (path, origin) in slots.functions.iter().chain(
+        slots
+            .calls
+            .iter()
+            .filter(|d| !d.target.starts_with("horizon_client::"))
+            .map(|d| (&d.target, &d.origin)),
+    ) {
+        pass.lower(root, path)
+            .map_err(|e| format!("{origin}: {path}: {e}"))?;
     }
     pass.shapes(root)?;
     if discovery {
@@ -1263,8 +1370,152 @@ mod tests {
         }
     }
 
+    #[test]
+    fn game_area_moves_preserve_internals_and_points() {
+        let source = "struct Game; mod feature;";
+        let module = "use super::Game; impl Game { fn action(&self) -> u8 { 7 } }";
+        let before = Fixture::new(source);
+        before.put("crates/horizon-client/src/game/feature.rs", module);
+        let after = Fixture::new(
+            "struct Game;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));",
+        );
+        after.put("crates/horizon-client/src/game/runtime/.game-area", "");
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature.rs",
+            "include!(\"feature/shared.rs\");",
+        );
+        after.put(
+            "crates/horizon-client/src/game/runtime/feature/shared.rs",
+            module,
+        );
+        fn points(root: &Path) -> BTreeSet<String> {
+            crate::points::game_files(&root.join("crates/horizon-client/src"), true)
+                .unwrap()
+                .into_iter()
+                .map(|file| file.module)
+                .collect()
+        }
+        assert_eq!(points(&before.0), points(&after.0));
+        assert_eq!(
+            widen_with(&before.0, &[]).unwrap().entries,
+            widen_with(&after.0, &[]).unwrap().entries
+        );
+        assert!(after.game().contains("pub mod feature;"));
+        assert!(!after.game().contains("game_modules.rs"));
+    }
+
+    #[test]
+    fn materialized_game_modules_survive_source_tree_relocation() {
+        let mut fixture = Fixture::new(
+            "struct Game;\nmod native_hooks;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));",
+        );
+        fixture.put("crates/horizon-client/src/game/runtime/.game-area", "");
+        fixture.put(
+            "crates/horizon-client/src/game/runtime/feature.rs",
+            "use super::Game; impl Game { fn action(&self) {} }",
+        );
+        fixture.put("crates/horizon-client/src/game/native_hooks/mod.rs", "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));\ninclude!(\"shared.rs\");");
+        fixture.put(
+            "crates/horizon-client/src/game/native_hooks/shared.rs",
+            "struct State;",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/native_hooks/area.rs",
+            "use super::super::Game; impl Game { fn native_action(&self) {} }",
+        );
+        fixture.put("crates/horizon-client/src/game/network/.game-area", "");
+        fixture.put("crates/horizon-client/src/game/network/lan_actions/mod.rs", "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));\ninclude!(\"shared.rs\");");
+        fixture.put(
+            "crates/horizon-client/src/game/network/lan_actions/shared.rs",
+            "struct GuestState;",
+        );
+        fixture.put(
+            "crates/horizon-client/src/game/network/lan_actions/turns.rs",
+            "use crate::game::Game; impl Game { fn guest_action(&self) {} }",
+        );
+        let before = widen_with(&fixture.0, &[]).unwrap().entries;
+        let moved = fixture.0.with_extension("relocated");
+        fs::rename(&fixture.0, &moved).unwrap();
+        fixture.0 = moved;
+        let files =
+            crate::points::game_files(&fixture.0.join("crates/horizon-client/src"), true).unwrap();
+        assert!(files.iter().all(|file| file.path.starts_with(&fixture.0)));
+        let modules: BTreeSet<_> = files.iter().map(|file| file.module.as_str()).collect();
+        assert!(modules.contains("horizon_client::game::feature"));
+        assert!(modules.contains("horizon_client::game::native_hooks::area"));
+        assert!(modules.contains("horizon_client::game::lan_actions::turns"));
+        assert_eq!(before, widen_with(&fixture.0, &[]).unwrap().entries);
+    }
+
+    #[test]
+    fn lan_action_areas_preserve_helpers_internals_and_point_contracts() {
+        let before = Fixture::new("struct Game; mod lan_actions;");
+        before.put(
+            "crates/horizon-client/src/game/lan_actions.rs",
+            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } fn action(&self, value: u8) -> u8 { value } }",
+        );
+        let after = Fixture::new("struct Game; mod lan_actions;");
+        let directory = "crates/horizon-client/src/game/lan_actions";
+        after.put(
+            &format!("{directory}/mod.rs"),
+            "include!(concat!(env!(\"OUT_DIR\"), \"/lan_action_modules.rs\"));\ninclude!(\"shared.rs\");",
+        );
+        after.put(
+            &format!("{directory}/shared.rs"),
+            "struct State; impl Game { fn vehicle_has_other_viewers() -> bool { true } }",
+        );
+        after.put(
+            &format!("{directory}/turns.rs"),
+            "impl Game { pub(super) fn action(&self, value: u8) -> u8 { value } }",
+        );
+        for fixture in [&before, &after] {
+            fixture.put("crates/horizon-mod-api-gen/slots/horizon.txt", "");
+            fixture.put("crates/horizon-mod-api-gen/internals.txt", "");
+            fixture.put(
+                "crates/horizon-mod-points/Cargo.toml",
+                "[package]\nname = 'horizon-mod-points'\nversion = '0.1.0'\n",
+            );
+        }
+        fn inventory(root: &Path) -> Vec<serde_json::Value> {
+            crate::points::game_points(root)
+                .unwrap()
+                .into_iter()
+                .map(|point| {
+                    let json = serde_json::to_string(&point)
+                        .unwrap()
+                        .replace("::turns", "");
+                    serde_json::from_str(&json).unwrap()
+                })
+                .collect()
+        }
+        assert_eq!(inventory(&before.0), inventory(&after.0));
+        let old = discover(&before.0).unwrap();
+        let new = discover(&after.0).unwrap();
+        let normalize = |entries: Vec<Internal>| {
+            entries
+                .into_iter()
+                .filter(|entry| !entry.path.ends_with("::turns"))
+                .map(|entry| {
+                    (
+                        entry.path.replace("::turns", ""),
+                        (entry.signature, entry.hash),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(normalize(old.entries), normalize(new.entries));
+        widen_with(&after.0, &[]).unwrap();
+        let staged = fs::read_to_string(after.0.join(format!("{directory}/mod.rs"))).unwrap();
+        assert!(staged.contains("pub mod turns;"));
+        assert!(!staged.contains("lan_action_modules.rs"));
+    }
+
     fn shapes_fixture(game: &str) -> Fixture {
         let fixture = Fixture::new(game);
+        fixture.put(
+            "crates/horizon-client/Cargo.toml",
+            "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[dependencies]\nhorizon-items = { path = '../horizon-items' }\n",
+        );
         fixture.put(
             "crates/horizon-items/Cargo.toml",
             "[package]\nname = 'horizon-items'\nversion = '0.1.0'\n[lib]\npath = 'src/items.rs'\n",
@@ -1404,6 +1655,48 @@ pub(crate) struct ItemStack { #[allow(dead_code)] kind: StackKind }
     }
 
     #[test]
+    fn called_path_imports_resolve_sites_without_changing_signature_hashes() {
+        let fixture = Fixture::new(
+            "mod child { pub fn add(value: u32) -> u32 { value } pub struct Block; impl Block { fn make(value: u32) -> u32 { value } } } use child::{add as imported, Block as Alias}; struct Game; impl Game { fn make(value: u32) -> u32 { value } fn run(&self) { imported(1); Alias::make(1); Self::make(1); } }",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let enclosing = entries
+            .iter()
+            .find(|e| e.path.ends_with("Game::run"))
+            .unwrap();
+        assert_eq!(
+            enclosing.refs["imported"],
+            "horizon_client::game::child::add"
+        );
+        assert_eq!(
+            enclosing.refs["Alias::make"],
+            "horizon_client::game::child::Block::make"
+        );
+        let rule = crate::crossing::Rule::new(&entries);
+        let sig = syn::parse_quote!(fn run(&self));
+        let lexical = crate::sites::analysis::Scope::scan(&sig, None);
+        for call in ["imported(1)", "Alias::make(1)", "Self::make(1)"] {
+            let expr = syn::parse_str(call).unwrap();
+            crate::sites::resolve::resolve(&expr, enclosing, &sig, &lexical, &entries, &rule)
+                .unwrap();
+        }
+        let old_hash = enclosing.hash.clone();
+        fixture.put(
+            "crates/horizon-client/src/game.rs",
+            "struct Game; impl Game { fn run(&self) {} }",
+        );
+        let changed = widen_with(&fixture.0, &[]).unwrap().entries;
+        assert_eq!(
+            changed
+                .iter()
+                .find(|e| e.path.ends_with("Game::run"))
+                .unwrap()
+                .hash,
+            old_hash
+        );
+    }
+
+    #[test]
     fn signatures_keep_field_and_variant_configuration() {
         let fixture = Fixture::new(
             r#"
@@ -1457,15 +1750,25 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
     }
 
     #[test]
-    fn reachable_lower_shapes_are_transitive_and_do_not_widen_sources() {
+    fn imports_of_crossing_foreign_types_resolve_and_the_rest_of_their_crate_does_not() {
+        let fixture = shapes_fixture(
+            "use winit::keyboard::KeyCode; use winit::event::ElementState as State; use winit::window::Window;\nstruct Game { key: KeyCode, state: State, window: Window }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let game = entries
+            .iter()
+            .find(|e| e.path == "horizon_client::game::Game")
+            .unwrap();
+        assert_eq!(game.refs["KeyCode"], "winit::keyboard::KeyCode");
+        assert_eq!(game.refs["State"], "winit::event::ElementState");
+        assert!(!game.refs.contains_key("Window"));
+    }
+
+    #[test]
+    fn reachable_lower_shapes_are_transitive_and_widened_for_the_wasm_table() {
         let fixture = shapes_fixture(
             "use std::time::Duration; struct Game { stack: horizon_items::ItemStack, external: Duration }\n",
         );
-        let paths = ["items.rs", "item_stack.rs", "kinds.rs"];
-        let before: Vec<_> = paths
-            .iter()
-            .map(|path| fs::read(fixture.0.join("crates/horizon-items/src").join(path)).unwrap())
-            .collect();
         let result = widen_with(&fixture.0, &[]).unwrap();
         let shapes: Vec<_> = result
             .entries
@@ -1503,16 +1806,160 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             .find(|entry| entry.path == "horizon_client::game::Game::external")
             .unwrap();
         assert_eq!(external.refs["Duration"], "std::time::Duration");
-        for (path, original) in paths.into_iter().zip(before) {
-            assert_eq!(
-                fs::read(fixture.0.join("crates/horizon-items/src").join(path)).unwrap(),
-                original
-            );
-        }
-        assert_eq!(result.files, 2); // Only game.rs and entry.rs were widened.
+        // Each shape's module path, item and fields are public in the staged copy, and listed as
+        // nothing more than the one shape entry.
+        let source = |path: &str| {
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src").join(path)).unwrap()
+        };
+        assert!(source("items.rs").starts_with("pub mod item_stack; pub mod kinds;"));
+        assert!(
+            source("item_stack.rs")
+                .contains("pub struct ItemStack { #[allow(dead_code)] pub kind: StackKind }")
+        );
+        assert!(source("kinds.rs").contains("pub enum Kind"));
+        assert!(
+            result
+                .entries
+                .iter()
+                .all(|entry| !entry.path.starts_with("horizon_items::") || entry.shape_only)
+        );
+        assert_eq!(result.files, 5);
         let again = widen_with(&fixture.0, &[]).unwrap();
         assert_eq!(result.entries, again.entries);
         assert!(again.changed.is_empty());
+    }
+
+    #[test]
+    fn explicitly_listed_lower_layouts_are_widened_and_walked() {
+        let fixture = shapes_fixture("struct Game {}\n");
+        fixture.put(
+            "crates/horizon-items/src/item_stack.rs",
+            "pub(crate) struct ItemStack { count: u8 }\n",
+        );
+        let result = widen_with(
+            &fixture.0,
+            &[(
+                "internals.txt",
+                "horizon_items::item_stack::ItemStack\n".into(),
+            )],
+        )
+        .unwrap();
+        let path = "horizon_items::item_stack::ItemStack";
+        let entry = result
+            .entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .unwrap();
+        assert!(!entry.shape_only);
+        assert_eq!(entry.opaque_reason, None);
+        let text =
+            fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs")).unwrap();
+        assert!(
+            text.contains("pub struct ItemStack { pub count: u8 }"),
+            "{text}"
+        );
+        let (code, counts) = crate::internals_table::table(&result.entries, &[path.into()]);
+        assert_eq!(counts.types, 1, "{code}");
+        assert_eq!(counts.skipped, 0);
+    }
+
+    #[test]
+    fn shapes_from_optional_or_transitive_dependencies_stay_opaque() {
+        for dependencies in [
+            "horizon-items = { path = '../horizon-items', optional = true }",
+            "",
+        ] {
+            let fixture = shapes_fixture("struct Game { stack: horizon_items::ItemStack }\n");
+            fixture.put(
+                "crates/horizon-client/Cargo.toml",
+                &format!("[package]\nname = 'horizon-client'\n[dependencies]\n{dependencies}\n"),
+            );
+            let widened = widen_with(&fixture.0, &[]).unwrap();
+            let stack = widened
+                .entries
+                .iter()
+                .find(|entry| entry.path == "horizon_items::item_stack::ItemStack")
+                .unwrap();
+            assert_eq!(
+                stack.opaque_reason,
+                Some("not an unconditional game dependency")
+            );
+            let (_, counts) = crate::internals_table::table(
+                &widened.entries,
+                &widened
+                    .entries
+                    .iter()
+                    .map(|i| i.path.clone())
+                    .collect::<Vec<_>>(),
+            );
+            assert_eq!(
+                counts.skipped_types["not an unconditional game dependency"],
+                1
+            );
+            let source =
+                fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
+                    .unwrap();
+            assert!(source.contains("pub(crate) struct ItemStack"));
+        }
+    }
+
+    #[test]
+    fn an_unwalkable_shape_stays_opaque_instead_of_failing_staging() {
+        let fixture = shapes_fixture("");
+        let mut pass = Pass::default();
+        pass.entry(
+            "horizon_items::missing",
+            "horizon_items::missing::Stack",
+            "struct",
+            &[],
+            quote!(
+                struct Stack {
+                    count: u8,
+                }
+            ),
+            TypeUses::default(),
+        );
+        pass.entries.values_mut().next().unwrap().shape_only = true;
+        pass.shapes(&fixture.0).unwrap();
+        let widened = pass.finish().unwrap();
+        assert_eq!(
+            widened.entries[0].opaque_reason,
+            Some("shape module walk failed")
+        );
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["shape module walk failed"], 1);
+    }
+
+    #[test]
+    fn non_exhaustive_stays_in_layout_signatures() {
+        let fixture = Fixture::new(
+            "#[non_exhaustive] #[derive(Clone)] struct Open { value: u8 }\nenum Cases { #[non_exhaustive] One { value: u8 } }\n",
+        );
+        let entries = widen_with(&fixture.0, &[]).unwrap().entries;
+        let signature = |name: &str| {
+            entries
+                .iter()
+                .find(|e| e.path == format!("horizon_client::game::{name}"))
+                .unwrap()
+                .signature
+                .clone()
+        };
+        assert_eq!(
+            signature("Open"),
+            "# [non_exhaustive] struct Open { value : u8 }"
+        );
+        assert_eq!(
+            signature("Cases"),
+            "enum Cases { # [non_exhaustive] One { value : u8 } }"
+        );
     }
 
     #[test]
@@ -1656,6 +2103,24 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
     }
 
     #[test]
+    fn conditional_layouts_remain_unwalkable_after_staging() {
+        let fixture = Fixture::new(
+            "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
+        );
+        let widened = widen_with(&fixture.0, &[]).unwrap();
+        let (_, counts) = crate::internals_table::table(
+            &widened.entries,
+            &widened
+                .entries
+                .iter()
+                .map(|i| i.path.clone())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(counts.types, 0);
+        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
+    }
+
+    #[test]
     fn widens_items_without_touching_uses_traits_macros_or_local_items() {
         let fixture = Fixture::new(
             r#"use std::fmt;
@@ -1676,6 +2141,8 @@ impl Trait for Game<'_> { fn call(&self) {} }
 macro_rules! untouched { () => { struct MacroItem; } }
 #[cfg(test)] mod tests { struct Private; }
 #[cfg(test)] struct TestItem;
+#[test] fn test_function() {}
+#[bench] fn bench_function() {}
 mod inline { struct Inner; }
 // café: span columns after non-ASCII text are character-based.
 const LABEL: &str = "é"; struct AfterUnicode;
@@ -1712,6 +2179,8 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "macro_rules! untouched { () => { struct MacroItem; } }",
             "#[cfg(test)] mod tests { struct Private; }",
             "#[cfg(test)] struct TestItem;",
+            "#[test] fn test_function() {}",
+            "#[bench] fn bench_function() {}",
         ] {
             assert!(source.contains(unchanged), "changed {unchanged:?}");
         }
@@ -1733,7 +2202,10 @@ const LABEL: &str = "é"; struct AfterUnicode;
             !result
                 .entries
                 .iter()
-                .any(|entry| entry.path.contains("TestItem") || entry.path.contains("Local"))
+                .any(|entry| entry.path.contains("TestItem")
+                    || entry.path.contains("Local")
+                    || entry.path.ends_with("test_function")
+                    || entry.path.ends_with("bench_function"))
         );
     }
 
@@ -1774,23 +2246,47 @@ const LABEL: &str = "é"; struct AfterUnicode;
     }
 
     #[test]
+    fn slot_functions_and_calls_are_widened_but_types_are_only_carried() {
+        for declaration in [
+            "lower::hidden::inner::Thing::run",
+            "lower::hidden::inner::Thing::run | helper | 0 |",
+        ] {
+            let fixture = Fixture::new("struct Game;\n");
+            fixture.lower();
+            fixture.put(
+                "crates/horizon-mod-api-gen/slots/test.txt",
+                &format!("{declaration}\ntype lower::FutureExtension\n"),
+            );
+            let result = widen_with(&fixture.0, &[]).unwrap();
+            assert!(
+                result
+                    .entries
+                    .iter()
+                    .any(|entry| entry.path == "lower::hidden::inner::Thing::run")
+            );
+            assert!(
+                fs::read_to_string(fixture.0.join("crates/lower/src/other.rs"))
+                    .unwrap()
+                    .contains("pub fn run")
+            );
+        }
+    }
+
+    #[test]
     fn unresolved_line_is_an_error_and_does_not_write_sources() {
         let fixture = Fixture::new("struct Game;\n");
         fixture.lower();
-        // The error names the list and line it came from, past the lists before it.
-        let error = widen_with(
-            &fixture.0,
-            &[
-                ("internals.txt", "# one\n# two\n".into()),
-                (
-                    "points.txt",
-                    "# comment\nlower::hidden::inner::Thing::missing\n".into(),
-                ),
-            ],
-        )
-        .unwrap_err();
+        fixture.put(
+            "crates/horizon-mod-api-gen/slots/horizon.txt",
+            "# comment\nlower::hidden::inner::Thing::missing\n",
+        );
+        // The error names the slot list and its own line, not the preceding internals list.
+        let error =
+            widen_with(&fixture.0, &[("internals.txt", "# one\n# two\n".into())]).unwrap_err();
         assert!(
-            error.contains("points.txt:2: lower::hidden::inner::Thing::missing"),
+            error
+                .replace('\\', "/")
+                .contains("slots/horizon.txt:2: lower::hidden::inner::Thing::missing"),
             "{error}"
         );
         assert_eq!(fixture.game(), "struct Game;\n");

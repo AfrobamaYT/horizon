@@ -36,6 +36,34 @@ pub enum UseItem {
     Spyglass,
     Other,
 }
+/// `CameraType`: where the camera sits for the local player. `key.togglePerspective` (F5) cycles
+/// it first person, third person behind, third person in front.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+// exhaustive: a closed set the game matches without a wildcard
+pub enum CameraType {
+    #[default]
+    FirstPerson,
+    ThirdPersonBack,
+    ThirdPersonFront,
+}
+impl CameraType {
+    /// `CameraType.isFirstPerson`.
+    pub fn is_first_person(self) -> bool {
+        self == Self::FirstPerson
+    }
+    /// `CameraType.isMirrored`: third person in front.
+    pub fn is_mirrored(self) -> bool {
+        self == Self::ThirdPersonFront
+    }
+    /// `CameraType.cycle` (F5).
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::FirstPerson => Self::ThirdPersonBack,
+            Self::ThirdPersonBack => Self::ThirdPersonFront,
+            Self::ThirdPersonFront => Self::FirstPerson,
+        }
+    }
+}
 /// The camera entity as `Camera.alignWithEntity` and the field-of-view
 /// death and hurt effects see it.
 #[derive(Clone, Copy, Debug, PartialEq)]

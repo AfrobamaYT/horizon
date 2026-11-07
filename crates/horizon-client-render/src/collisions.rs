@@ -244,10 +244,23 @@ impl SceneCollisions<'_, '_> {
         on_ground: bool,
         border: Option<(&BorderGeometry, [f64; 2])>,
     ) -> Result<Vec3> {
+        self.resolve_in_border_with(bounds, movement, max_step, on_ground, border, &[])
+    }
+    /// [`Self::resolve_in_border`], also stopped by `entities`: the boxes
+    /// `EntityGetter.getEntityCollisions` gave the moving entity.
+    pub fn resolve_in_border_with(
+        self,
+        bounds: Aabb,
+        movement: Vec3,
+        max_step: f32,
+        on_ground: bool,
+        border: Option<(&BorderGeometry, [f64; 2])>,
+        entities: &[Aabb],
+    ) -> Result<Vec3> {
         let context = self.context(bounds);
         EntityCollisions {
             blocks: self,
-            entities: &[],
+            entities,
             border,
         }
         .resolve_with_context(bounds, movement, max_step, on_ground, context)
@@ -947,7 +960,11 @@ mod section_tests {
             return;
         }
         let assets = crate::assets::Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = load(&root, assets.registry).unwrap();
         let mut world = World::test_scene(&assets, &render, 3).unwrap();
         let state = |name: &str| assets.registry.default_state(name).unwrap();

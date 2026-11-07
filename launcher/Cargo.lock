@@ -2641,6 +2641,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-assets"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "horizon-core",
+ "log",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "horizon-bench"
 version = "0.1.0"
 dependencies = [
@@ -2701,12 +2713,14 @@ dependencies = [
  "horizon-friends",
  "horizon-mcp",
  "horizon-mod-api-gen",
- "horizon-mods",
+ "horizon-mod-package",
+ "horizon-mod-point-shape",
  "horizon-port-pack",
  "horizon-prepare",
  "horizon-protocol",
  "horizon-release-sign",
  "horizon-server-launch",
+ "horizon-shader-api",
  "horizon-system",
  "horizon-theme",
  "horizon-world",
@@ -2753,6 +2767,7 @@ version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
  "horizon-mod-point-shape",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "serde",
@@ -2760,19 +2775,11 @@ dependencies = [
  "sha2",
  "syn 2.0.119",
  "toml 1.1.8+spec-1.1.0",
+ "wit-parser",
 ]
 
 [[package]]
-name = "horizon-mod-point-shape"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "horizon-mods"
+name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
@@ -2789,10 +2796,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-point-shape"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "horizon-mod-runtime"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+]
+
+[[package]]
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
- "horizon-mods",
+ "horizon-mod-api-gen",
+ "horizon-mod-package",
  "serde",
  "serde_json",
  "sha1",
@@ -2823,6 +2847,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "horizon-core",
+ "horizon-mod-runtime",
  "horizon-world",
  "ipconfig",
  "log",
@@ -2855,6 +2880,7 @@ dependencies = [
 name = "horizon-server-launch"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "horizon-anticheat",
  "horizon-chat-filter",
  "horizon-core",
@@ -2892,7 +2918,9 @@ name = "horizon-world"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "horizon-assets",
  "horizon-core",
+ "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",
@@ -3075,6 +3103,12 @@ name = "icu_segmenter_data"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "913a7d294ad056474749152107309fdee3ec17d2482d1ab70fdc61a81c64b9a3"
+
+[[package]]
+name = "id-arena"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
 name = "idna"
@@ -4556,6 +4590,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
+name = "prettyplease"
+version = "0.2.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5045,9 +5089,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -6379,6 +6423,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.261.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f20f20e44f7e8aeb6744823ea9d869ede51e51be4fdaedede2852282e54d2d8"
+dependencies = [
+ "bitflags 2.13.2",
+ "indexmap",
+ "semver",
+]
+
+[[package]]
 name = "wayland-backend"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7318,6 +7373,25 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "wit-parser"
+version = "0.261.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "962e43c4db2da607b50839a531e5b63473268b40efdf8028d5c54b572ca4f6f6"
+dependencies = [
+ "anyhow",
+ "hashbrown 0.17.1",
+ "id-arena",
+ "indexmap",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-ident",
+ "wasmparser",
+]
 
 [[package]]
 name = "writeable"

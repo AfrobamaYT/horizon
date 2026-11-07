@@ -380,7 +380,7 @@ pub(crate) fn dist_manhattan(a: [i32; 3], b: [i32; 3]) -> i32 {
 /// Java HashSet<BlockPos> with native bucket iteration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct JavaPos(pub [i32; 3]);
-impl crate::java_hash_map::JavaKey for JavaPos {
+impl horizon_core::java_hash_map::JavaKey for JavaPos {
     fn java_hash(&self) -> i32 {
         let [x, y, z] = self.0;
         y.wrapping_add(z.wrapping_mul(31))
@@ -398,7 +398,7 @@ impl crate::java_hash_map::JavaKey for JavaPos {
     }
 }
 #[derive(Default)]
-pub(crate) struct PosSet(crate::java_hash_map::JavaHashMap<JavaPos, ()>);
+pub(crate) struct PosSet(horizon_core::java_hash_map::JavaHashMap<JavaPos, ()>);
 impl PosSet {
     pub(crate) fn insert(&mut self, p: [i32; 3]) -> bool {
         self.0.put(JavaPos(p), ()).is_none()
@@ -449,7 +449,7 @@ mod tests {
         // insertion order within a bucket.
         let mut expected = inserted.to_vec();
         expected.sort_by_key(|p| {
-            let h = crate::java_hash_map::JavaKey::java_hash(&JavaPos(*p)) as u32;
+            let h = horizon_core::java_hash_map::JavaKey::java_hash(&JavaPos(*p)) as u32;
             (h ^ (h >> 16)) & 15
         });
         assert_eq!(set.to_vec(), expected);

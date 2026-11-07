@@ -7,15 +7,8 @@ pub trait Hooks {
         contract = "collect",
         out = "hidden",
         scope = "block",
-        key = "state"
+        key = "state",
+        neoforge = "none (Horizon-only; NeoForge has no counterpart)"
     )]
     fn block_render_visibility();
-}
-
-pub trait Helpers {
-    #[helper(
-        side = "client",
-        target = "horizon_client::game::native_render_visibility::Game<'_>::native_refresh_render_visibility"
-    )]
-    fn refresh_render_visibility();
 }

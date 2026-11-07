@@ -1,27 +1,32 @@
 //! Piece-based ("legacy") structure support: the StructurePiece helpers,
 //! object-safe world/random access and template pieces.
-use super::{
-    BlockInfo, BoundingBox, Mirror, Rotation, StructureResources, StructureTemplate,
-    processor::{PlaceSettings, Processor, ProcessorList, ProcessorRandom, place_in_world},
-};
-use crate::{
-    chunk::BlockState,
-    fluid::FluidState,
-    heightmap::HeightmapType,
-    nbt::{Compound, JavaString, Tag},
-    registry::BlockStateId,
-    worldgen::{
-        biome::BiomeId,
-        feature::FeatureWorld,
-        placement::{PlacementContext, PlacementQueryError},
-    },
-};
 use horizon_core::{
     geometry::Direction,
     position::{BlockPos, ChunkPos},
     random::{LegacyRandom, RandomSource, position_seed},
 };
 use std::sync::{Arc, Mutex};
+use {
+    super::{
+        BlockInfo, Mirror, Rotation, StructureResources, StructureTemplate,
+        processor::{PlaceSettings, Processor, ProcessorList, ProcessorRandom, place_in_world},
+    },
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{
+        chunk::BlockState,
+        fluid::FluidState,
+        heightmap::HeightmapType,
+        registry::BlockStateId,
+        worldgen::{
+            biome::BiomeId,
+            feature::FeatureWorld,
+            placement::{PlacementContext, PlacementQueryError},
+        },
+    },
+    horizon_core::nbt::{Compound, JavaString, Tag},
+};
 
 pub type Result<T> = std::result::Result<T, PlacementQueryError>;
 /// Data markers of a placed template: (metadata, absolute position).
@@ -1299,11 +1304,13 @@ mod tests {
         assert_eq!(*pos, [3, 5, 1]);
         assert_eq!(
             nbt.get(&JavaString::from("id")),
-            Some(&crate::nbt::Tag::String("minecraft:dispenser".into()))
+            Some(&horizon_core::nbt::Tag::String(
+                "minecraft:dispenser".into()
+            ))
         );
         assert_eq!(
             nbt.get(&JavaString::from("LootTable")),
-            Some(&crate::nbt::Tag::String(
+            Some(&horizon_core::nbt::Tag::String(
                 "minecraft:chests/simple_dungeon".into()
             ))
         );

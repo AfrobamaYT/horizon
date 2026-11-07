@@ -1,8 +1,8 @@
 //! Resident client chunk storage. Sections are reference-counted so worker
 //! threads can mesh and light immutable snapshots while the game thread edits
 //! (copy-on-write through `Arc::make_mut`).
+use horizon_core::nbt::{Compound, Tag};
 use horizon_core::paletted::{PalettedContainer, Strategy};
-use horizon_world::nbt::{Compound, Tag};
 use horizon_world::registry::BlockStateId;
 use std::sync::{Arc, OnceLock};
 
@@ -591,7 +591,7 @@ pub struct Chunk {
     /// Saved data Horizon keeps but does not simulate (save.rs).
     pub saved: Option<Arc<ChunkExtras>>,
     /// Entities read from a save (vanilla entity NBT), spawned on arrival.
-    pub entities: Vec<horizon_world::nbt::Tag>,
+    pub entities: Vec<horizon_core::nbt::Tag>,
     /// Structure starts reaching into this chunk (`structures.References`):
     /// structure id and the start's chunk.
     pub structure_refs: Vec<(Arc<str>, (i32, i32))>,
@@ -874,9 +874,12 @@ impl RolledLoot {
 #[derive(Clone, Debug, Default)]
 pub struct ChunkExtras {
     /// Server-owned mod data attached to this chunk.
-    pub attachments: horizon_world::attachments::Attachments,
+    pub attachments: horizon_mod_runtime::attachments::Attachments,
     /// Attachment maps of the chunk's block entities, on a save snapshot.
-    pub block_entity_attachments: Vec<((i32, i32, i32), horizon_world::attachments::Attachments)>,
+    pub block_entity_attachments: Vec<(
+        (i32, i32, i32),
+        horizon_mod_runtime::attachments::Attachments,
+    )>,
     /// Chunk root keys written back as loaded (structures, PostProcessing,
     /// InhabitedTime, blending data, ...).
     pub root: Compound,

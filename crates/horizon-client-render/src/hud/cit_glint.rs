@@ -5,8 +5,8 @@
 //! vanilla's glint's is. Without enchantment rules nothing here is made.
 
 use super::HudVertex;
+use horizon_assets::resource_source::ResourceSource;
 use horizon_optifine::cit::{Blend, Factor, Kind, Rule};
-use std::path::Path;
 
 /// Slots the shader's table holds; rules past it draw no layer (and match no stack).
 pub const MAX_SLOTS: usize = 256;
@@ -44,7 +44,7 @@ pub struct GlintTextures {
 
 impl GlintTextures {
     /// The textures of `rules` under the overlay resource root.
-    pub fn load(root: &Path, rules: &[Rule]) -> Self {
+    pub fn load(root: &ResourceSource, rules: &[Rule]) -> Self {
         let mut images = Vec::new();
         let mut past = 0;
         for (i, rule) in rules.iter().enumerate() {
@@ -58,7 +58,11 @@ impl GlintTextures {
                 past += 1;
                 continue;
             }
-            match super::decode(&root.join(path)) {
+            match root
+                .read(path)
+                .map_err(Into::into)
+                .and_then(|bytes| super::decode_bytes(&bytes))
+            {
                 Ok(image) => images.push((i, image)),
                 Err(e) => log::warn!("custom item textures: glint {path} left out: {e}"),
             }

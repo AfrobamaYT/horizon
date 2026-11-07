@@ -27,6 +27,7 @@ pub struct Illusions {
 pub const MIRROR: u8 = 4;
 pub const BLINDNESS_SPELL: u8 = 5;
 
+/// `Illusioner.registerGoals`.
 pub fn register(m: &mut Mob) {
     let g = &mut m.ai.goals;
     g.add(0, Float);
@@ -52,13 +53,17 @@ pub fn register(m: &mut Mob) {
         Species::Ravager,
     ];
     m.ai.targets.add(1, hurt);
-    m.ai.targets.add(2, NearestTarget::player(true));
+    m.ai.targets
+        .add(2, NearestTarget::player(true).unseen_memory(300));
     m.ai.targets.add(
         3,
-        NearestTarget::species(&[Species::Villager, Species::WanderingTrader], false),
+        NearestTarget::species(&[Species::Villager, Species::WanderingTrader], false)
+            .unseen_memory(300),
     );
-    m.ai.targets
-        .add(3, NearestTarget::species(&[Species::IronGolem], false));
+    m.ai.targets.add(
+        3,
+        NearestTarget::species(&[Species::IronGolem], false).unseen_memory(300),
+    );
 }
 
 /// `Illusioner.finalizeSpawn`: a bow in the main hand.
@@ -162,7 +167,7 @@ impl Goal for Spell {
 /// `Entity.isInvisible` of an illusioner on a client: the shared flag stands
 /// in for the effect the server holds, which draws the mirror images.
 pub fn set_invisible(m: &mut Mob, on: bool) {
-    m.retain_effects(|e| e.0 != INVISIBILITY);
+    m.retain_effects(|e| e.id != INVISIBILITY);
     if on {
         m.add_effect(INVISIBILITY, i32::MAX, 0);
     }

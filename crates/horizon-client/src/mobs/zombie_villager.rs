@@ -1,10 +1,10 @@
 //! Zombie villagers (`ZombieVillager`): the cure started by a golden apple on
 //! a weakened one, the conversion clock that iron bars and beds speed up, and
 //! the saved fields. Turning villagers into zombie villagers and back is done
-//! by the game (`game/zombie_villagers.rs`), which owns entity creation.
+//! by the game (`game/mobs/zombie_villagers.rs`), which owns entity creation.
 use super::{Mob, MobEvent, MobWorld, Species, goals::Cx, villager};
+use horizon_core::nbt::{Compound, Tag};
 use horizon_core::random::RandomSource;
-use horizon_world::nbt::{Compound, Tag};
 
 /// `VILLAGER_CONVERSION_WAIT_MIN` and the width of the random range.
 pub const WAIT_MIN: i32 = 3600;
@@ -64,7 +64,7 @@ pub fn start_converting(
     events: &mut Vec<MobEvent>,
 ) {
     villager::ext_mut(m).cure = Some(Cure { time, starter });
-    m.retain_effects(|e| e.0 != "minecraft:weakness");
+    m.retain_effects(|e| e.id != "minecraft:weakness");
     // Strength amplifier: min(difficulty id - 1, 0), always 0 with monsters.
     m.add_effect("minecraft:strength", time, 0);
     events.push(MobEvent::EntityEvent {
@@ -201,9 +201,15 @@ mod tests {
         let registry = assets.registry;
         let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
         let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
-        let data = super::super::MobData::load(&root, &facts);
+        let data = super::super::MobData::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+            &facts,
+        );
         let types = super::super::MobTypes::load(&root).unwrap();
-        let biomes = crate::biome::Biomes::load(&root).unwrap();
+        let biomes = crate::biome::Biomes::load(
+            &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        )
+        .unwrap();
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let items = crate::items::Items::load(
             &root,
@@ -220,17 +226,20 @@ mod tests {
         let world = crate::world::World::new(air, 0);
         let lid_openers = std::collections::HashMap::new();
         let w = MobWorld {
+            goal_host: None,
             teams: Default::default(),
             loop_context: crate::test_resources::server_loop_context(),
             world: &world,
             registry,
             facts: &facts,
             fluid_tables: &motion.fluids,
+            attributes: &motion.attributes,
             movement: &motion.blocks,
             collision: &collision,
             suffocation: &suffocation,
             data: &data,
             player: None,
+            player_identity: None,
             controlling_player_movement: None,
             nearest_player: None,
             others: &[],
@@ -325,7 +334,11 @@ mod tests {
                 })
             );
             assert!(!m.has_effect("minecraft:weakness"));
-            assert!(m.extra.effects.contains(&("minecraft:strength", 4000, 0)));
+            assert!(m.extra.effects.contains(&crate::mobs::StoredEffect::new(
+                "minecraft:strength",
+                4000,
+                0
+            )));
             assert_eq!(events.len(), 1);
             let MobEvent::EntityEvent { mob, event, at } = events[0] else {
                 panic!("Starting a cure must broadcast an entity event");

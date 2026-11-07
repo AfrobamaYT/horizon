@@ -146,6 +146,16 @@ fn frame(v: &Value) -> Frame {
     }
 }
 impl Tree {
+    /// `PlayerAdvancements.checkForAutomaticTriggers`: the advancements that
+    /// have no criteria at all, so nothing can ever grant them a criterion and
+    /// vanilla hands them over (and grants their rewards) as the player's
+    /// progress loads.
+    pub fn automatic(&self) -> Vec<usize> {
+        (0..self.list.len())
+            .filter(|&i| self.list[i].criteria.is_empty())
+            .collect()
+    }
+
     /// [`Tree::load`], shared while anyone holds it: a server's advancement
     /// packets (`ServerAdvancements`) and its game's criteria read the same
     /// files, and each kept its own copy (7 MB). A world whose data packs bring
@@ -154,19 +164,21 @@ impl Tree {
         if overlay.kind("advancement").next().is_some() {
             return Arc::new(Tree::load_with(data, overlay));
         }
-        static TREES: Mutex<Vec<(PathBuf, Weak<Tree>)>> = Mutex::new(Vec::new());
+        type TreeKey = (PathBuf, horizon_world::conditions::LoadConditions);
+        static TREES: Mutex<Vec<(TreeKey, Weak<Tree>)>> = Mutex::new(Vec::new());
         // Held while loading: a second reader waits for the first one's tree.
+        let key = (data.to_path_buf(), overlay.conditions.clone());
         let mut trees = TREES.lock().unwrap_or_else(|e| e.into_inner());
         trees.retain(|(_, tree)| tree.strong_count() > 0);
         if let Some(tree) = trees
             .iter()
-            .find(|(path, _)| path == data)
+            .find(|(held, _)| held == &key)
             .and_then(|(_, tree)| tree.upgrade())
         {
             return tree;
         }
-        let tree = Arc::new(Tree::load(data));
-        trees.push((data.to_path_buf(), Arc::downgrade(&tree)));
+        let tree = Arc::new(Tree::load_with(data, overlay));
+        trees.push((key, Arc::downgrade(&tree)));
         tree
     }
     /// Loads `<data>/<namespace>/advancement/**/*.json`.
@@ -204,6 +216,9 @@ impl Tree {
             }
         }
         for (id, v) in json {
+            if !overlay.conditions.allows(&v) {
+                continue;
+            }
             if let Some(a) = parse(&id, &v) {
                 let index = tree.list.len();
                 for (ci, c) in a.criteria.iter().enumerate() {
@@ -606,7 +621,7 @@ pub trait World {
     fn smokey(&self, pos: [i32; 3]) -> bool;
     fn in_tag(&self, registry: &str, tag: &str, id: &str) -> bool;
     /// The block entity's `saveWithFullMetadata` at `pos`, `None` without one.
-    fn block_entity_nbt(&self, _pos: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
+    fn block_entity_nbt(&self, _pos: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
         None
     }
 }
@@ -656,12 +671,19 @@ pub struct EntityView {
     pub variant: Option<String>,
     /// The data components the entity reports (`Entity.get`): id and value.
     pub components: Vec<(String, String)>,
+    /// `Entity.get(CUSTOM_NAME)`: the live Text component, preserving styles
+    /// and siblings rather than treating its contents as a registry id.
+    pub custom_name: Option<Value>,
     /// The entity as saved (`NbtPredicate.getEntityTagToCompare`), for
     /// `minecraft:nbt`; built only when a criterion may ask (`Tree::tests_nbt`).
-    pub nbt: Option<horizon_world::nbt::Tag>,
+    pub nbt: Option<horizon_core::nbt::Tag>,
     /// `Entity.getTeam().getName()` (a tamed pet answers its owner's team);
     /// `None` without a team or where the identity is not bound.
     pub team: Option<String>,
+    /// Existing objective scores for the bound command source holder. `None`
+    /// means this context did not bind a scoreboard holder; an empty map is a
+    /// real holder without scores. Named predicates snapshot current values.
+    pub scores: Option<BTreeMap<String, i32>>,
 }
 /// What `PlayerPredicate` reads of a player beyond its entity. Each part is
 /// filled only when a criterion may ask for it (`Tree::player_facts_asked`);
@@ -863,7 +885,7 @@ pub fn block(v: &Value, pos: [i32; 3], w: &dyn World) -> bool {
     // `matchesBlockEntity`: the block entity's data holds the pattern
     // (`NbtPredicate.matches`, `NbtUtils.compareNbt`); no block entity fails.
     if let Some(nbt) = v["nbt"].as_str() {
-        let Ok((pattern, _)) = horizon_world::nbt::parse_snbt(nbt) else {
+        let Ok((pattern, _)) = horizon_core::nbt::parse_snbt(nbt) else {
             return false;
         };
         if !crate::nbt_path::compare_nbt(&pattern, w.block_entity_nbt(pos).as_ref()) {
@@ -931,12 +953,20 @@ pub fn location(v: &Value, p: [f64; 3], w: &dyn World) -> bool {
 }
 /// `DataComponentExactPredicate.test` on an entity: every expected
 /// component equals what the entity reports (absent ones never match).
-fn components(expected: &Value, have: &[(String, String)]) -> bool {
+fn components(expected: &Value, entity: &EntityView) -> bool {
     expected.as_object().is_some_and(|o| {
         o.iter().all(|(id, want)| {
             let id = full(id);
+            if id == "minecraft:custom_name" {
+                return entity.custom_name.as_ref().is_some_and(|have| {
+                    crate::scoreboard::canonical_component(have)
+                        == crate::scoreboard::canonical_component(want)
+                });
+            }
             want.as_str().is_some_and(|want| {
-                have.iter()
+                entity
+                    .components
+                    .iter()
                     .any(|(k, v)| full(k) == id && full(v) == full(want))
             })
         })
@@ -1013,7 +1043,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
             // `EntityNbtPredicate.matches`: the entity's compound holds the
             // pattern (`NbtUtils.compareNbt`); no compound known fails.
             "minecraft:nbt" => p.as_str().is_some_and(|s| {
-                horizon_world::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
+                horizon_core::nbt::parse_snbt(s).is_ok_and(|(pattern, _)| {
                     crate::nbt_path::compare_nbt(&pattern, e.nbt.as_ref())
                 })
             }),
@@ -1043,7 +1073,7 @@ pub fn entity(v: &Value, e: &EntityView, w: &dyn World, origin: [f64; 3]) -> boo
             "minecraft:type_specific/fishing_hook" => p["in_open_water"]
                 .as_bool()
                 .is_none_or(|want| e.fishing_open_water == Some(want)),
-            "minecraft:components" => components(p, &e.components),
+            "minecraft:components" => components(p, e),
             // `TeamPredicate.matches`: a non-null effective team whose name
             // equals the string exactly.
             "minecraft:team" => {
@@ -1343,6 +1373,30 @@ pub fn conditions(v: &Value, ctx: &Entities, w: &dyn World) -> bool {
                 .and_then(Value::as_str)
                 .unwrap_or("");
             match &*full(ty) {
+                // EntityHasScoreCondition.test/hasScore: missing objective or
+                // score fails; this bounded path supports constant integer ranges.
+                "minecraft:entity_scores" if v["entity"].as_str() == Some("this") => {
+                    let scores = ctx.this.and_then(|e| e.scores.as_ref());
+                    v["scores"].as_object().is_some_and(|tests| {
+                        scores.is_some_and(|scores| {
+                            tests.iter().all(|(objective, range)| {
+                                // Do not treat unsupported number providers as
+                                // absent min/max bounds in the shared range helper.
+                                let numeric = range.as_i64().is_some()
+                                    || range.as_object().is_some_and(|bounds| {
+                                        bounds.iter().all(|(key, value)| {
+                                            matches!(key.as_str(), "min" | "max")
+                                                && value.as_i64().is_some()
+                                        })
+                                    });
+                                numeric
+                                    && scores
+                                        .get(objective)
+                                        .is_some_and(|score| range_i(range, i64::from(*score)))
+                            })
+                        })
+                    })
+                }
                 "minecraft:entity_properties" => ctx
                     .this
                     .is_some_and(|e| entity(&v["predicate"], e, w, ctx.origin)),
@@ -1702,6 +1756,54 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn conditional_advancements_select_before_filtering_and_cache_by_inventory() {
+        let data = std::env::temp_dir().join(format!(
+            "horizon-advancement-conditions-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&data);
+        std::fs::create_dir_all(data.join("demo/advancement")).unwrap();
+        let plain = json!({"criteria":{"never":{"trigger":"minecraft:impossible"}}});
+        let mut conditional = plain.clone();
+        conditional["neoforge:conditions"] =
+            json!([{"type":"neoforge:mod_loaded","modid":"provider"}]);
+        std::fs::write(
+            data.join("demo/advancement/entry.json"),
+            conditional.to_string(),
+        )
+        .unwrap();
+        let enabled = horizon_world::conditions::LoadConditions::new(["provider"]);
+        let off = Tree::shared(&data, &horizon_world::loot::PackOverlay::NONE);
+        let on_overlay = horizon_world::loot::PackOverlay {
+            conditions: &enabled,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        let on = Tree::shared(&data, &on_overlay);
+        assert!(off.get("demo:entry").is_none());
+        assert!(on.get("demo:entry").is_some());
+        assert!(!Arc::ptr_eq(&off, &on));
+        assert!(Arc::ptr_eq(&on, &Tree::shared(&data, &on_overlay)));
+        let files = [(
+            "advancement/demo:entry".into(),
+            vec![
+                plain.to_string().into_bytes(),
+                json!({"neoforge:conditions":[{"type":"unsupported"}]})
+                    .to_string()
+                    .into_bytes(),
+            ],
+        )];
+        let overridden = Tree::shared(
+            &data,
+            &horizon_world::loot::PackOverlay {
+                files: &files,
+                ..on_overlay
+            },
+        );
+        assert!(overridden.get("demo:entry").is_none());
+        std::fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
     fn advancement_reward_function_is_optional_and_namespaced() {
         for (raw, expected) in [
             ("parity:reward", "parity:reward"),
@@ -1878,8 +1980,8 @@ mod tests {
             fn in_tag(&self, _: &str, _: &str, _: &str) -> bool {
                 false
             }
-            fn block_entity_nbt(&self, _: [i32; 3]) -> Option<horizon_world::nbt::Tag> {
-                horizon_world::nbt::parse_snbt(r#"{id:"minecraft:beacon",x:0,y:0,z:0,Levels:0}"#)
+            fn block_entity_nbt(&self, _: [i32; 3]) -> Option<horizon_core::nbt::Tag> {
+                horizon_core::nbt::parse_snbt(r#"{id:"minecraft:beacon",x:0,y:0,z:0,Levels:0}"#)
                     .ok()
                     .map(|(t, _)| t)
             }
@@ -2057,7 +2159,7 @@ mod tests {
     /// pattern (`NbtUtils.compareNbt(…, true)`); without one it fails.
     #[test]
     fn an_entity_predicates_nbt_tests_the_saved_compound() {
-        let snbt = |s: &str| horizon_world::nbt::parse_snbt(s).unwrap().0;
+        let snbt = |s: &str| horizon_core::nbt::parse_snbt(s).unwrap().0;
         let view = |kind: &str, nbt: &str| EntityView {
             kind: kind.into(),
             nbt: Some(snbt(nbt)),
@@ -2637,6 +2739,28 @@ mod tests {
         assert!(!p.done(&a));
         p.grant("minecraft:t", "b", "now");
         assert!(p.done(&a));
+    }
+    /// `AdvancementRequirements.test` answers false with no requirement groups, so an advancement
+    /// without criteria is never done by `isDone`; `PlayerAdvancements.checkForAutomaticTriggers`
+    /// still grants its rewards as progress loads, and `Tree::automatic` is the list it walks.
+    #[test]
+    fn an_advancement_without_criteria_is_not_done_but_granted_automatically() {
+        let empty = parse("minecraft:free", &serde_json::json!({"criteria": {}})).unwrap();
+        assert!(!Progress::default().done(&empty), "no groups: not done");
+        let waiting = parse(
+            "minecraft:waits",
+            &serde_json::json!({"criteria": {"a": {"trigger": "minecraft:tick"}}}),
+        )
+        .unwrap();
+        assert!(!Progress::default().done(&waiting));
+        let tree = tree_of(&[
+            (
+                "minecraft:waits",
+                serde_json::json!({"criteria": {"a": {"trigger": "minecraft:tick"}}}),
+            ),
+            ("minecraft:free", serde_json::json!({"criteria": {}})),
+        ]);
+        assert_eq!(tree.automatic(), vec![1]);
     }
     #[test]
     fn layout_spreads_children_like_tree_node_position() {

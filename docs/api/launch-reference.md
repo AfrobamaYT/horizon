@@ -1,4 +1,4 @@
-<!-- Generated from crates/horizon-client/src/game/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api -->
+<!-- Generated from crates/horizon-client/src/game/runtime/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api -->
 # Launch API reference
 
 What `horizon-client` promises a launcher that starts it, Launch API 0.1.0. The guide: [launch.md](launch.md); stability and versions: [stability.md](stability.md).
@@ -28,6 +28,41 @@ Prints one JSON object on stdout and exits 0. `horizon` is the build's version; 
 
 ```json
 {
+  "content": {
+    "datapack": {
+      "format": [
+        121,
+        0
+      ]
+    },
+    "index": {
+      "schema": 1
+    },
+    "mod": {
+      "api": [
+        "0.2"
+      ]
+    },
+    "modpack": {
+      "format": 1
+    },
+    "native_mod": {
+      "exact_build": true,
+      "rebuild": true
+    },
+    "resourcepack": {
+      "format": [
+        97,
+        1
+      ]
+    },
+    "shader": {
+      "api": [
+        "0.1"
+      ],
+      "schema": 1
+    }
+  },
   "crash_report_line": "Horizon: crash report saved to ",
   "exit_codes": [
     0,
@@ -90,6 +125,8 @@ Prints one JSON object on stdout and exits 0. `horizon` is the build's version; 
   ]
 }
 ```
+
+`content` is what this build loads ([content.md](content.md)), so a launcher offers only what works on it: content mods of the manifest `api` lines in `mod.api`; native mods built for this exact game build (`native_mod.exact_build`), which need the game rebuilt (`rebuild`); shader packs of `shader.schema` and the lines in `shader.api` (a newer line is read, not drawn); resource and data packs of `format` (`[major, minor]`; others still load, marked too old or too new as vanilla marks them); modpacks of `modpack.format`; the mod index of `index.schema`.
 
 ## Exit codes
 

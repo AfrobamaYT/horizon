@@ -113,8 +113,8 @@ pub fn finalize(m: &mut Mob) {
 /// `Llama.getBreedOffspring` with `AbstractHorse.setOffspringAttributes`,
 /// drawn from the parent's random with the partner's stock.
 pub fn breed_offspring(m: &mut Mob, partner: &Seen) -> equine::Offspring {
-    // Seen.profession is the partner's strength.
-    let top = strength(m).max(i32::from(partner.profession));
+    // Seen.secondary_variant is the partner's strength.
+    let top = strength(m).max(i32::from(partner.secondary_variant));
     let attributes = equine::OffspringAttributes::draw(m, partner);
     let r = &mut m.random;
     let mut s = r.next_int_bound(top).unwrap_or(0) + 1;
@@ -204,15 +204,15 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld) {
 }
 /// The llama's own save fields, over the horse ones: `Variant` (the coat id),
 /// `Strength` and a trader llama's `DespawnDelay`.
-pub fn to_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn to_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     map.insert("Variant".into(), Tag::Int(i32::from(m.extra.variant)));
     map.insert("Strength".into(), Tag::Int(strength(m)));
     if is_trader(m) {
         map.insert("DespawnDelay".into(), Tag::Int(m.extra.ints[0]));
     }
 }
-pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
+pub fn from_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
     use crate::save::number;
     m.extra.variant = number(tag.get("Variant")).unwrap_or(0).clamp(0, 3) as u8;
     m.extra.variant2 = number(tag.get("Strength")).unwrap_or(1).clamp(1, 5) as u8;
@@ -317,6 +317,7 @@ mod tests {
                 [(false, true), (true, true), (false, false), (true, false)]
             {
                 let w = MobWorld {
+                    goal_host: None,
                     asks_baby_spawn: ask_mods,
                     mob_drops,
                     ..w.clone()

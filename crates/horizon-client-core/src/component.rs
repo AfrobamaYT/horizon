@@ -1,7 +1,7 @@
 //! Text components from commands: `ComponentArgument` reads an SNBT (or JSON)
 //! value, `ComponentSerialization` turns it into styled text.
 use crate::text::{InlineObject, Style, Text, named_color};
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 use serde_json::{Map, Value};
 
 /// `SnbtGrammar`, enough for components: compounds, lists, quoted and
@@ -111,7 +111,15 @@ impl Parser<'_> {
             map.insert(key, self.value()?);
             self.ws();
             match self.peek() {
-                Some(b',') => self.i += 1,
+                // SnbtGrammar: an entry may be followed by a comma before the brace.
+                Some(b',') => {
+                    self.i += 1;
+                    self.ws();
+                    if self.peek() == Some(b'}') {
+                        self.i += 1;
+                        return Ok(Value::Object(map));
+                    }
+                }
                 Some(b'}') => {
                     self.i += 1;
                     return Ok(Value::Object(map));
@@ -140,7 +148,15 @@ impl Parser<'_> {
             list.push(self.value()?);
             self.ws();
             match self.peek() {
-                Some(b',') => self.i += 1,
+                // SnbtGrammar: a list or array may end with a comma.
+                Some(b',') => {
+                    self.i += 1;
+                    self.ws();
+                    if self.peek() == Some(b']') {
+                        self.i += 1;
+                        return Ok(Value::Array(list));
+                    }
+                }
                 Some(b']') => {
                     self.i += 1;
                     return Ok(Value::Array(list));
@@ -567,6 +583,22 @@ pub fn name_text(tag: &Tag) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// SnbtGrammar: a compound or list may end with one comma; two in a row
+    /// stay an error.
+    #[test]
+    fn a_component_takes_one_trailing_comma() {
+        let parse = |s: &str| parse_snbt(s).map(|(v, _)| v);
+        assert_eq!(
+            parse("{text:\"a\",color:\"red\",}"),
+            parse("{text:\"a\",color:\"red\"}")
+        );
+        assert_eq!(
+            parse("[\"a\", {text:\"b\",} ,]"),
+            parse("[\"a\",{text:\"b\"}]")
+        );
+        assert!(parse("{text:\"a\",,}").is_err());
+        assert!(parse("[\"a\",,]").is_err());
+    }
 
     #[test]
     fn a_text_received_whole_has_the_spans_its_parts_would() {
@@ -720,7 +752,7 @@ mod tests {
     #[test]
     fn custom_click_events_keep_payloads_and_inherit_to_inline_objects() {
         use crate::text::ClickEvent;
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
 
         for (payload, expected) in [
             (None, None),

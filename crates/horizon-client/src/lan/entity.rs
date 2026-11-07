@@ -8,7 +8,7 @@
 use super::tracking;
 use horizon_protocol::{
     buf::pack_degrees,
-    entity_data::{Value, serializer},
+    entity_data::{Particle, Value, serializer},
     item::Stack,
     packets::play::{
         self, AddEntity, AttributeSnapshot, EntityPositionSync, MoveEntity, MoveEntityPos,
@@ -82,7 +82,7 @@ pub struct EntityState {
     /// which `Leashable` sends at once).
     pub idle: bool,
     /// Where it is, and none of its data: an idle entity no client can pair
-    /// with this tick, whose data the tracker then never reads (game/lan_idle.rs).
+    /// with this tick, whose data the tracker then never reads (game/network/lan_idle.rs).
     /// It is never paired.
     pub bare: bool,
     /// `Leashable.getLeashHolder`: the entity holding its lead.
@@ -796,6 +796,9 @@ pub struct Viewer<'a> {
     /// Its player's permission level: players a native mod hid from lower
     /// levels are not tracked by it.
     pub permission: u8,
+    /// Its client is Horizon's (`Guest::is_horizon`): it may be sent a native
+    /// mod's particle.
+    pub horizon: bool,
     /// It accepted a move since the last tick (ChunkMap.move): every pair
     /// of it is checked again.
     pub moved: bool,
@@ -895,16 +898,72 @@ pub struct Entities {
     is_moved: Vec<bool>,
     /// One entity's packets and their bodies, kept between entities.
     packets: Vec<play::Clientbound>,
-    bodies: Vec<Vec<u8>>,
+    bodies: Bodies,
 }
 
 /// The client sees the entity this tick, and already tracked it.
 const SEES: u8 = 1;
 const TRACKS: u8 = 2;
 
-fn encode_all(packets: &[play::Clientbound], bodies: &mut Vec<Vec<u8>>) {
-    bodies.clear();
-    bodies.extend(packets.iter().map(play::Clientbound::encode));
+/// Entity data naming a native mod's particle (`Particle::horizon_only`).
+fn names_mod_particle(packet: &play::Clientbound) -> bool {
+    let play::Clientbound::SetEntityData(data) = packet else {
+        return false;
+    };
+    (data.values.iter()).any(|(_, _, value)| {
+        matches!(value, Value::Particles(list) if list.iter().any(Particle::horizon_only))
+    })
+}
+
+/// `packet` as a client that isn't Horizon's may read it: a particle list
+/// without the native mods' particles. The list still goes out, so a client
+/// shown the swirls that a mod's particle replaced loses them too.
+fn vanilla_body(packet: &play::Clientbound) -> Vec<u8> {
+    let play::Clientbound::SetEntityData(data) = packet else {
+        return packet.encode();
+    };
+    let mut values = data.values.clone();
+    for (_, _, value) in &mut values {
+        if let Value::Particles(list) = value {
+            list.retain(|p| !p.horizon_only());
+        }
+    }
+    play::Clientbound::SetEntityData(SetEntityData {
+        id: data.id,
+        values,
+    })
+    .encode()
+}
+
+/// One entity's packets, encoded once for all the clients they go to.
+#[derive(Default)]
+struct Bodies {
+    all: Vec<Vec<u8>>,
+    /// What other clients get instead, when a native mod's particle is among them.
+    vanilla: Option<Vec<Vec<u8>>>,
+}
+
+impl Bodies {
+    fn encode(&mut self, packets: &[play::Clientbound]) {
+        self.all.clear();
+        self.all
+            .extend(packets.iter().map(play::Clientbound::encode));
+        self.vanilla = (packets.iter().any(names_mod_particle))
+            .then(|| packets.iter().map(vanilla_body).collect());
+    }
+
+    fn of(packets: &[play::Clientbound]) -> Self {
+        let mut bodies = Self::default();
+        bodies.encode(packets);
+        bodies
+    }
+
+    fn to(&self, viewer: &Viewer) -> &[Vec<u8>] {
+        match &self.vanilla {
+            Some(vanilla) if !viewer.horizon => vanilla,
+            _ => &self.all,
+        }
+    }
 }
 
 impl Entities {
@@ -966,12 +1025,9 @@ impl Entities {
                 let bodies = bodies.get_or_insert_with(|| {
                     let mut packets = Vec::new();
                     s.pairing(e, kind, riding, &mut packets);
-                    packets
-                        .iter()
-                        .map(play::Clientbound::encode)
-                        .collect::<Vec<_>>()
+                    Bodies::of(&packets)
                 });
-                v.out.extend(bodies.iter().cloned());
+                v.out.extend(bodies.to(v).iter().cloned());
                 v.tracker.seen.insert(e.id, Arc::clone(&s.tracked));
                 v.tracker.events.push(TrackEvent {
                     start: true,
@@ -1292,7 +1348,7 @@ impl Entities {
                 continue;
             }
             let mut encoded = false;
-            let mut pairing: Option<Vec<Vec<u8>>> = None;
+            let mut pairing: Option<Bodies> = None;
             for (v, flags) in viewers.iter_mut().zip(&self.flags) {
                 let f = flags[index];
                 if f & TRACKS != 0 {
@@ -1300,10 +1356,10 @@ impl Entities {
                         continue;
                     }
                     if !encoded {
-                        encode_all(&self.packets, &mut self.bodies);
+                        self.bodies.encode(&self.packets);
                         encoded = true;
                     }
-                    v.out.extend(self.bodies.iter().cloned());
+                    v.out.extend(self.bodies.to(v).iter().cloned());
                 } else if f & SEES != 0
                     && !e.bare
                     && let Some(kind) = s.kind
@@ -1311,15 +1367,15 @@ impl Entities {
                     let bodies = pairing.get_or_insert_with(|| {
                         let mut packets = Vec::new();
                         s.pairing(e, kind, riding, &mut packets);
-                        packets.iter().map(play::Clientbound::encode).collect()
+                        Bodies::of(&packets)
                     });
-                    v.out.extend(bodies.iter().cloned());
+                    v.out.extend(bodies.to(v).iter().cloned());
                     if synced && !self.packets.is_empty() {
                         if !encoded {
-                            encode_all(&self.packets, &mut self.bodies);
+                            self.bodies.encode(&self.packets);
                             encoded = true;
                         }
-                        v.out.extend(self.bodies.iter().cloned());
+                        v.out.extend(self.bodies.to(v).iter().cloned());
                     }
                     if v.tracker
                         .seen
@@ -1940,6 +1996,7 @@ mod tests {
                     entity_id: 1,
                     spectator: self.spectators[0],
                     permission: self.permissions[0],
+                    horizon: true,
                     moved: self.moved[0],
                     position: self.positions[0],
                     view_distance: 10,
@@ -1952,6 +2009,7 @@ mod tests {
                     entity_id: 2,
                     spectator: self.spectators[1],
                     permission: self.permissions[1],
+                    horizon: true,
                     moved: self.moved[1],
                     position: self.positions[1],
                     view_distance: 10,

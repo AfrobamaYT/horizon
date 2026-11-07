@@ -10,8 +10,8 @@ use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
 
-// Villager state: `variant` type, `variant2` profession (index into
-// `render::PROFESSIONS`), `villager_level` level, `home` the claimed job site,
+// Villager state: `variant` type, `profession` identity (index into
+// the frozen profession table), `villager_level` level, `home` the claimed job site,
 // `bed` and `meeting` the claimed bed head and bell, `ints[0]` the unhappy
 // counter, `ints[1]` the bed's facing while asleep (1 north, 2 south,
 // 3 west, 4 east), `trade` the offers, experience and restocks.
@@ -19,24 +19,155 @@ use std::f32::consts::PI;
 pub const NONE: u8 = 0;
 pub const NITWIT: u8 = 11;
 
-/// `PoiTypes`: the job site block of each profession.
-pub fn job_site_profession(block: &str) -> Option<u8> {
-    Some(match block.trim_start_matches("minecraft:") {
-        "blast_furnace" => 1,
-        "smoker" => 2,
-        "cartography_table" => 3,
-        "brewing_stand" => 4,
-        "composter" => 5,
-        "barrel" => 6,
-        "fletching_table" => 7,
-        "cauldron" | "water_cauldron" | "lava_cauldron" | "powder_snow_cauldron" => 8,
-        "lectern" => 9,
-        "stonecutter" => 10,
-        "loom" => 12,
-        "smithing_table" => 13,
-        "grindstone" => 14,
-        _ => return None,
-    })
+/// Vanilla profession metadata in the frozen table.
+#[derive(Debug)]
+pub struct Profession {
+    pub id: &'static str,
+    pub trade_set: Option<&'static str>,
+    pub render_index: u8,
+    held: Option<horizon_world::poi::PoiType>,
+    acquirable: Option<horizon_world::poi::PoiType>,
+}
+
+/// Immutable vanilla-only generation. A load-owned table replaces this before mod registration.
+pub struct ProfessionTable {
+    entries: Vec<Profession>,
+    by_poi: [Option<u8>; 13],
+}
+impl ProfessionTable {
+    fn vanilla() -> Self {
+        use horizon_world::poi::PoiType as P;
+        let entries = [
+            ("none", None, None),
+            ("armorer", Some("armorer"), Some(P::Armorer)),
+            ("butcher", Some("butcher"), Some(P::Butcher)),
+            ("cartographer", Some("cartographer"), Some(P::Cartographer)),
+            ("cleric", Some("cleric"), Some(P::Cleric)),
+            ("farmer", Some("farmer"), Some(P::Farmer)),
+            ("fisherman", Some("fisherman"), Some(P::Fisherman)),
+            ("fletcher", Some("fletcher"), Some(P::Fletcher)),
+            (
+                "leatherworker",
+                Some("leatherworker"),
+                Some(P::Leatherworker),
+            ),
+            ("librarian", Some("librarian"), Some(P::Librarian)),
+            ("mason", Some("mason"), Some(P::Mason)),
+            ("nitwit", None, None),
+            ("shepherd", Some("shepherd"), Some(P::Shepherd)),
+            ("toolsmith", Some("toolsmith"), Some(P::Toolsmith)),
+            ("weaponsmith", Some("weaponsmith"), Some(P::Weaponsmith)),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (id, trade_set, poi))| Profession {
+            id,
+            trade_set,
+            render_index: i as u8,
+            held: poi,
+            acquirable: poi,
+        })
+        .collect::<Vec<_>>();
+        let mut by_poi = [None; 13];
+        for p in &entries {
+            if let Some(i) = p.acquirable.and_then(P::job_index) {
+                assert!(
+                    by_poi[i].replace(p.render_index).is_none(),
+                    "duplicate vanilla POI"
+                );
+            }
+        }
+        Self { entries, by_poi }
+    }
+    pub fn entries(&self) -> &[Profession] {
+        &self.entries
+    }
+    pub fn get(&self, index: u8) -> &Profession {
+        &self.entries[index as usize % self.entries.len()]
+    }
+    pub fn find(&self, name: &str) -> Option<u8> {
+        self.entries
+            .iter()
+            .find(|p| p.id == name)
+            .map(|p| p.render_index)
+    }
+    pub(super) fn by_poi(&self, poi: horizon_world::poi::PoiType) -> Option<u8> {
+        self.by_poi[poi.job_index()?]
+    }
+    pub(super) fn held(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        self.entries
+            .get(usize::from(index))
+            .is_some_and(|p| p.held == Some(poi))
+    }
+    pub(super) fn acquirable(&self, index: u8, poi: horizon_world::poi::PoiType) -> bool {
+        if index == NONE {
+            poi.is_job()
+        } else {
+            self.entries
+                .get(usize::from(index))
+                .is_some_and(|p| p.acquirable == Some(poi))
+        }
+    }
+}
+
+/// The frozen vanilla-only generation shared by the existing context-free consumers.
+pub fn profession_table() -> &'static ProfessionTable {
+    static TABLE: std::sync::OnceLock<ProfessionTable> = std::sync::OnceLock::new();
+    TABLE.get_or_init(ProfessionTable::vanilla)
+}
+
+/// Existing u8 adapter; invalid values retain the historic wrapping behavior.
+pub fn profession(index: u8) -> &'static Profession {
+    profession_table().get(index)
+}
+
+/// A vanilla profession or an unresolved saved resource identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ProfessionState {
+    #[default]
+    None,
+    Vanilla(u8),
+    Unresolved(String),
+}
+
+impl ProfessionState {
+    pub fn from_index(index: u8) -> Self {
+        if index == NONE {
+            Self::None
+        } else {
+            Self::Vanilla(index)
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        let vanilla = id
+            .strip_prefix("minecraft:")
+            .or_else(|| (!id.contains(':')).then_some(id));
+        vanilla
+            .and_then(profession_index)
+            .map_or_else(|| Self::Unresolved(id.into()), Self::from_index)
+    }
+
+    pub fn index(&self) -> Option<u8> {
+        match self {
+            Self::None => Some(NONE),
+            Self::Vanilla(index) => Some(*index),
+            Self::Unresolved(_) => None,
+        }
+    }
+
+    pub fn id(&self) -> String {
+        match self {
+            Self::None => "minecraft:none".into(),
+            Self::Vanilla(index) => format!("minecraft:{}", profession(*index).id),
+            Self::Unresolved(id) => id.clone(),
+        }
+    }
+}
+
+/// Finds the existing storage index for a bare profession name.
+pub fn profession_index(name: &str) -> Option<u8> {
+    profession_table().find(name)
 }
 
 pub fn register(m: &mut Mob) {
@@ -291,6 +422,8 @@ pub struct Ext {
     pub may_continue_sleeping: Option<bool>,
     /// The villager's brain, built at its first tick.
     pub brain: Option<Box<super::villager_brain::Brain>>,
+    /// Saved memories awaiting the first brain initialization.
+    pub saved_memories: Option<Box<super::villager_brain::Memories>>,
 }
 pub fn ext(m: &Mob) -> Option<&Ext> {
     m.extra.villager.as_deref()
@@ -324,8 +457,8 @@ pub fn xp(m: &Mob) -> i32 {
 /// offers (`offers = null`), so the next `getOffers` rolls the new
 /// profession's trades.
 pub fn set_profession(m: &mut Mob, profession: u8) {
-    if m.extra.variant2 != profession {
-        m.extra.variant2 = profession;
+    if m.extra.profession.index() != Some(profession) {
+        m.extra.profession = ProfessionState::from_index(profession);
         if let Some(t) = m.extra.trade.as_mut() {
             t.offers.clear();
             t.unset = true;
@@ -333,8 +466,8 @@ pub fn set_profession(m: &mut Mob, profession: u8) {
     }
 }
 /// `VillagerProfession.workSound`.
-pub fn work_sound(profession: u8) -> Option<&'static str> {
-    Some(match super::render::PROFESSIONS[profession as usize % 15] {
+pub fn work_sound(index: u8) -> Option<&'static str> {
+    Some(match profession(index).id {
         "armorer" => "entity.villager.work_armorer",
         "butcher" => "entity.villager.work_butcher",
         "cartographer" => "entity.villager.work_cartographer",
@@ -382,7 +515,7 @@ pub fn gift_table(m: &Mob) -> String {
     if m.is_baby() {
         return "minecraft:gameplay/hero_of_the_village/baby_gift".into();
     }
-    let profession = super::render::PROFESSIONS[m.extra.variant2 as usize % 15];
+    let profession = profession(m.extra.profession.index().unwrap_or(0)).id;
     let name = match profession {
         "none" | "nitwit" => "unemployed",
         other => other,
@@ -415,14 +548,14 @@ pub fn farmer_items() -> &'static [&'static str] {
 }
 /// A villager's `requestedItems` by profession.
 pub fn requested_items(m: &Mob) -> &'static [&'static str] {
-    if super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer" {
+    if profession(m.extra.profession.index().unwrap_or(0)).id == "farmer" {
         farmer_items()
     } else {
         &[]
     }
 }
 pub fn is_farmer(m: &Mob) -> bool {
-    super::render::PROFESSIONS[m.extra.variant2 as usize % 15] == "farmer"
+    profession(m.extra.profession.index().unwrap_or(0)).id == "farmer"
 }
 /// `SimpleContainer(8)`: stacks the villager carries.
 const INVENTORY_SLOTS: usize = 8;
@@ -620,7 +753,7 @@ pub struct Meeting {
 /// `Villager.gossip` (at most once in 1200 ticks for both), then surplus
 /// food and wanted wares taken out of `a`'s inventory.
 pub fn meet(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     a: usize,
     b: usize,
     now: i64,
@@ -817,8 +950,8 @@ pub fn can_breed(m: &Mob) -> bool {
 
 /// The saved fields (`FoodLevel`, `Gossips`, `LastGossipDecay`, `Inventory`,
 /// `LivingEntity`'s `sleeping_pos` and the sleep and golem memories).
-pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
-    use horizon_world::nbt::Tag;
+pub fn write_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
+    use horizon_core::nbt::Tag;
     if let Some(p) = sleeping_pos(m) {
         map.insert("sleeping_pos".into(), Tag::IntArray(p.to_vec()));
     } else {
@@ -838,30 +971,134 @@ pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
     );
 }
 /// The memories of `Brain.memories` the villager keeps besides positions.
-pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_world::nbt::Tag)>) {
-    use horizon_world::nbt::Tag;
+pub fn write_memories(m: &Mob, memories: &mut Vec<(&'static str, horizon_core::nbt::Tag)>) {
+    use super::villager_brain::{Memories, NEVER, Slot};
+    use horizon_core::nbt::Tag;
+    fn push<T>(
+        out: &mut Vec<(&'static str, Tag)>,
+        key: &'static str,
+        slot: &Slot<T>,
+        encode: impl FnOnce(&T) -> Tag,
+    ) {
+        if let Some(value) = slot.get() {
+            let mut fields = vec![("value", encode(value))];
+            if slot.ttl() != NEVER {
+                fields.push(("ttl", Tag::Long(slot.ttl())));
+            }
+            out.push((key, Tag::compound(fields)));
+        }
+    }
     let Some(e) = ext(m) else { return };
-    if let Some(t) = e.last_slept {
+    let fallback = Memories::default();
+    let mm = e
+        .brain
+        .as_ref()
+        .map(|b| &b.mem)
+        .or(e.saved_memories.as_deref())
+        .unwrap_or(&fallback);
+    // The three established position fields are written by entity_nbt; replace
+    // them only when the live brain has a value (and therefore a possible TTL).
+    for (key, slot) in [
+        ("minecraft:home", &mm.home),
+        ("minecraft:job_site", &mm.job_site),
+        ("minecraft:meeting_point", &mm.meeting_point),
+        ("minecraft:potential_job_site", &mm.potential_job_site),
+    ] {
+        if slot.present() {
+            memories.retain(|(k, _)| *k != key);
+            push(memories, key, slot, |p| {
+                Tag::compound([
+                    ("dimension", Tag::String("minecraft:overworld".into())),
+                    ("pos", Tag::IntArray(p.to_vec())),
+                ])
+            });
+        }
+    }
+    push(
+        memories,
+        "minecraft:golem_detected_recently",
+        &mm.golem_detected_recently,
+        |v| Tag::Byte(i8::from(*v)),
+    );
+    if mm.last_slept.present() {
+        push(memories, "minecraft:last_slept", &mm.last_slept, |v| {
+            Tag::Long(*v)
+        });
+    } else if e.brain.is_none()
+        && e.saved_memories.is_none()
+        && let Some(t) = e.last_slept
+    {
         memories.push((
             "minecraft:last_slept",
             Tag::compound([("value", Tag::Long(t))]),
         ));
     }
+    push(memories, "minecraft:last_woken", &mm.last_woken, |v| {
+        Tag::Long(*v)
+    });
 }
-pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
-    use horizon_world::nbt::Tag;
-    let int = |t: Option<&Tag>| match t {
-        Some(Tag::Int(v)) => Some(i64::from(*v)),
-        Some(Tag::Byte(v)) => Some(i64::from(*v)),
-        Some(Tag::Short(v)) => Some(i64::from(*v)),
-        Some(Tag::Long(v)) => Some(*v),
-        _ => None,
-    };
-    let last_slept = int(tag
-        .get("Brain")
-        .and_then(|b| b.get("memories"))
-        .and_then(|b| b.get("minecraft:last_slept"))
-        .and_then(|j| j.get("value")));
+
+pub fn read_nbt(m: &mut Mob, tag: &horizon_core::nbt::Tag) {
+    use horizon_core::nbt::Tag;
+    fn int(t: Option<&Tag>) -> Option<i64> {
+        match t {
+            Some(Tag::Int(v)) => Some(i64::from(*v)),
+            Some(Tag::Byte(v)) => Some(i64::from(*v)),
+            Some(Tag::Short(v)) => Some(i64::from(*v)),
+            Some(Tag::Long(v)) => Some(*v),
+            _ => None,
+        }
+    }
+    let memories = tag.get("Brain").and_then(|b| b.get("memories"));
+    let mut saved = super::villager_brain::Memories::default();
+    fn read<T>(
+        memories: Option<&Tag>,
+        key: &str,
+        slot: &mut super::villager_brain::Slot<T>,
+        decode: impl FnOnce(&Tag) -> Option<T>,
+    ) {
+        if let Some(entry) = memories.and_then(|m| m.get(key))
+            && let Some(value) = entry.get("value").and_then(decode)
+        {
+            // `ExpirableValue.codec`: a lenient optional `Codec.LONG`.
+            match int(entry.get("ttl")) {
+                Some(ttl) => slot.set_ttl(value, ttl),
+                None => slot.set(value),
+            }
+        }
+    }
+    for (key, slot) in [
+        ("minecraft:home", &mut saved.home),
+        ("minecraft:job_site", &mut saved.job_site),
+        ("minecraft:meeting_point", &mut saved.meeting_point),
+        (
+            "minecraft:potential_job_site",
+            &mut saved.potential_job_site,
+        ),
+    ] {
+        read(memories, key, slot, |v| match v.get("pos") {
+            Some(Tag::IntArray(p)) if p.len() == 3 => Some([p[0], p[1], p[2]]),
+            _ => None,
+        });
+    }
+    read(
+        memories,
+        "minecraft:golem_detected_recently",
+        &mut saved.golem_detected_recently,
+        |v| int(Some(v)).map(|v| v != 0),
+    );
+    read(
+        memories,
+        "minecraft:last_slept",
+        &mut saved.last_slept,
+        |v| int(Some(v)),
+    );
+    read(
+        memories,
+        "minecraft:last_woken",
+        &mut saved.last_woken,
+        |v| int(Some(v)),
+    );
     let e = ext_mut(m);
     e.food_level = int(tag.get("FoodLevel")).unwrap_or(0) as i32;
     e.gossips = tag
@@ -869,7 +1106,8 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
         .map(crate::gossip::Gossips::from_nbt)
         .unwrap_or_default();
     e.last_gossip_decay = int(tag.get("LastGossipDecay")).unwrap_or(0);
-    e.last_slept = last_slept;
+    e.last_slept = saved.last_slept.value();
+    e.saved_memories = Some(Box::new(saved));
     // LivingEntity.readAdditionalSaveData: asleep in the bed again (the
     // pose; `ai_step` turns it the way the bed faces, or wakes it when the
     // bed is gone, as `baseTick`'s first tick does).
@@ -893,6 +1131,163 @@ pub fn read_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 26.3 VillagerProfession.bootstrap, PoiTypes.bootstrap and TradeSets.
+    #[test]
+    fn vanilla_profession_table_and_job_sites() {
+        let cases = [
+            ("none", &[][..]),
+            ("armorer", &["blast_furnace"][..]),
+            ("butcher", &["smoker"][..]),
+            ("cartographer", &["cartography_table"][..]),
+            ("cleric", &["brewing_stand"][..]),
+            ("farmer", &["composter"][..]),
+            ("fisherman", &["barrel"][..]),
+            ("fletcher", &["fletching_table"][..]),
+            (
+                "leatherworker",
+                &[
+                    "cauldron",
+                    "water_cauldron",
+                    "lava_cauldron",
+                    "powder_snow_cauldron",
+                ][..],
+            ),
+            ("librarian", &["lectern"][..]),
+            ("mason", &["stonecutter"][..]),
+            ("nitwit", &[][..]),
+            ("shepherd", &["loom"][..]),
+            ("toolsmith", &["smithing_table"][..]),
+            ("weaponsmith", &["grindstone"][..]),
+        ];
+        for (index, (name, sites)) in cases.iter().enumerate() {
+            let index = index as u8;
+            assert_eq!(profession(index).id, *name);
+            assert_eq!(profession_index(name), Some(index));
+            assert_eq!(profession(index).render_index, index);
+            for site in *sites {
+                let state = horizon_world::chunk::BlockState {
+                    name: format!("minecraft:{site}"),
+                    properties: Default::default(),
+                };
+                let poi = horizon_world::poi::saved_poi(&state).unwrap();
+                assert_eq!(poi.id(), format!("minecraft:{name}"));
+                assert_eq!(profession_table().by_poi(poi), Some(index));
+                assert!(profession_table().held(index, poi));
+                assert!(profession_table().acquirable(index, poi));
+            }
+            for level in 1..=5 {
+                assert_eq!(
+                    crate::merchant::Trades::set_for(name, level),
+                    format!("minecraft:{name}/level_{level}")
+                );
+            }
+        }
+        assert_eq!(profession(255).id, "none");
+        assert_eq!(profession_index("other:farmer"), None);
+        assert_eq!(
+            crate::merchant::Trades::set_for("other:farmer", 2),
+            "minecraft:other:farmer/level_2"
+        );
+    }
+
+    fn memory_fixture() -> Mob {
+        let mut m = villager();
+        super::super::villager_brain::init(&mut m, 0, 0, 1);
+        let mm = &mut ext_mut(&mut m).brain.as_mut().unwrap().mem;
+        mm.golem_detected_recently.set_ttl(true, 42);
+        mm.last_slept.set_ttl(101, 17);
+        mm.last_woken.set(202);
+        mm.last_worked_at_poi.set_ttl(303, 7);
+        mm.potential_job_site.set_ttl([4, 5, 6], 9);
+        m
+    }
+
+    #[test]
+    fn villager_memory_nbt_shape() {
+        use horizon_core::nbt::Tag;
+        let m = memory_fixture();
+        let mut entries = Vec::new();
+        write_memories(&m, &mut entries);
+        let actual = Tag::compound(entries);
+        let expected = Tag::compound([
+            (
+                "minecraft:golem_detected_recently",
+                Tag::compound([("value", Tag::Byte(1)), ("ttl", Tag::Long(42))]),
+            ),
+            (
+                "minecraft:last_slept",
+                Tag::compound([("value", Tag::Long(101)), ("ttl", Tag::Long(17))]),
+            ),
+            (
+                "minecraft:last_woken",
+                Tag::compound([("value", Tag::Long(202))]),
+            ),
+            (
+                "minecraft:potential_job_site",
+                Tag::compound([
+                    (
+                        "value",
+                        Tag::compound([
+                            ("dimension", Tag::String("minecraft:overworld".into())),
+                            ("pos", Tag::IntArray(vec![4, 5, 6])),
+                        ]),
+                    ),
+                    ("ttl", Tag::Long(9)),
+                ]),
+            ),
+        ]);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn villager_memory_round_trip() {
+        use horizon_core::nbt::Tag;
+        let m = memory_fixture();
+        let mut entries = Vec::new();
+        write_memories(&m, &mut entries);
+        entries.push((
+            "minecraft:last_worked_at_poi",
+            Tag::compound([("value", Tag::Long(303)), ("ttl", Tag::Long(7))]),
+        ));
+        let tag = Tag::compound([(
+            "Brain",
+            Tag::compound([("memories", Tag::compound(entries))]),
+        )]);
+        let mut loaded = villager();
+        read_nbt(&mut loaded, &tag);
+        super::super::villager_brain::init(&mut loaded, 500, 0, 1);
+        let mm = &mut ext_mut(&mut loaded).brain.as_mut().unwrap().mem;
+        assert_eq!(
+            (
+                mm.golem_detected_recently.value(),
+                mm.golem_detected_recently.ttl()
+            ),
+            (Some(true), 42)
+        );
+        assert_eq!(
+            (mm.last_slept.value(), mm.last_slept.ttl()),
+            (Some(101), 17)
+        );
+        assert_eq!(
+            (mm.last_woken.value(), mm.last_woken.ttl()),
+            (Some(202), i64::MAX)
+        );
+        assert_eq!(
+            (mm.last_worked_at_poi.value(), mm.last_worked_at_poi.ttl()),
+            (None, i64::MAX)
+        );
+        assert_eq!(
+            (mm.potential_job_site.value(), mm.potential_job_site.ttl()),
+            (Some([4, 5, 6]), 9)
+        );
+        for _ in 0..42 {
+            mm.golem_detected_recently.tick();
+        }
+        assert!(mm.golem_detected_recently.present());
+        mm.golem_detected_recently.tick();
+        assert!(!mm.golem_detected_recently.present());
+    }
 
     fn villager() -> Mob {
         use crate::mobs::{Anim, Brain, Flags, MobType, Part, Species};
@@ -971,22 +1366,22 @@ mod tests {
         let mut m = villager();
         m.extra.ints[1] = bed_facing_code(Some("north"));
         ext_mut(&mut m).sleeping_pos = Some([3, 64, -7]);
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&m, &mut map);
         let mut loaded = villager();
-        read_nbt(&mut loaded, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut loaded, &horizon_core::nbt::Tag::Compound(map));
         assert!(sleeping(&loaded));
         assert_eq!(sleeping_pos(&loaded), Some([3, 64, -7]));
         let mut awake = villager();
-        let mut map = horizon_world::nbt::Compound::new();
+        let mut map = horizon_core::nbt::Compound::new();
         write_nbt(&awake, &mut map);
         assert!(!map.contains_key(&"sleeping_pos".into()));
-        read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
+        read_nbt(&mut awake, &horizon_core::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
     }
     #[test]
     fn saved_sleeping_position_follows_live_state_over_stale_input() {
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         for asleep in [false, true] {
             let mut m = villager();
             if asleep {
@@ -995,7 +1390,7 @@ mod tests {
             }
             let expected = asleep.then_some(Tag::IntArray(vec![3, 64, -7]));
             for stale in [false, true] {
-                let mut map = horizon_world::nbt::Compound::new();
+                let mut map = horizon_core::nbt::Compound::new();
                 map.insert("h232_control".into(), Tag::Int(42));
                 if stale {
                     map.insert("sleeping_pos".into(), Tag::IntArray(vec![9, 90, 9]));
@@ -1004,7 +1399,7 @@ mod tests {
                 assert_eq!(map.get(&"sleeping_pos".into()), expected.as_ref());
                 assert_eq!(map.get(&"h232_control".into()), Some(&Tag::Int(42)));
             }
-            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None);
+            let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
             assert_eq!(saved.get("sleeping_pos"), expected.as_ref());
         }
     }
@@ -1040,7 +1435,7 @@ mod tests {
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
-        assert_eq!(m.extra.variant2, 2);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 2);
     }
     /// The reported sequence: a villager works at a bench, the bench is
     /// destroyed (its job site is gone, so `ResetProfession` makes it
@@ -1057,7 +1452,7 @@ mod tests {
         let mut m = villager();
         // The composter's job: the villager is a farmer.
         set_profession(&mut m, 5);
-        assert_eq!(m.extra.variant2, 5);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 5);
         // Its trades were made, so the offers are there.
         let trade = m.extra.trade.get_or_insert_default();
         trade.unset = false;
@@ -1087,7 +1482,7 @@ mod tests {
         let t = m.extra.trade.as_ref().unwrap();
         assert!(t.offers.is_empty());
         assert!(t.unset);
-        assert_eq!(m.extra.variant2, 13);
+        assert_eq!(m.extra.profession.index().unwrap_or(0), 13);
     }
 
     fn stack(item: &str, count: u32) -> ItemStack {

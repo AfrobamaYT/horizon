@@ -1,8 +1,9 @@
-//! The `camera_read` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
+pub trait Notes {
+    #[notes = r#"## Camera entity
 
-pub trait Helpers {
-    #[helper(side = "client")]
-    fn camera();
-    #[helper(side = "both")]
-    fn block_collision();
+`ClientHost::camera_entity()` returns an `EntityRef` for the entity the view follows
+(`Minecraft.getCameraEntity`): the local player, unless a server attached the camera to another
+entity. It is `None` on the title screen and outside a world. Together with `camera()` and
+`camera_type()` it lets a minimap or freecam mod tell its own view from a spectated one."#]
+    fn camera_read_note0();
 }

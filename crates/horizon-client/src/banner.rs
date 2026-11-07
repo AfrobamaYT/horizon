@@ -260,7 +260,7 @@ mod tests {
         );
         assert!(tooltip_layers(&banner).is_empty());
         banner.data_mut().custom_name =
-            Some(horizon_world::nbt::Tag::String("Captain's Standard".into()));
+            Some(horizon_core::nbt::Tag::String("Captain's Standard".into()));
         assert!(tooltip_layers(&banner).is_empty());
         banner.data_mut().ominous_banner = false;
         assert_eq!(tooltip_layers(&banner), layers(&banner));

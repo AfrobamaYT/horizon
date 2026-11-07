@@ -6,8 +6,8 @@ use super::{
     Mob, MobEvent, MobWorld, Species, Who,
     goals::{Cx, Goal, LOOK, MOVE, goal_clone},
 };
+use horizon_core::nbt::Tag;
 use horizon_core::{geometry::Vec3, random::RandomSource};
-use horizon_world::nbt::Tag;
 
 /// The ominous banner is a white banner with the raid patterns; raiders wear
 /// it as their head item.
@@ -680,7 +680,7 @@ impl Goal for HoldGroundAttack {
 }
 
 /// The saved fields (`PatrollingMonster` and `Raider.addAdditionalSaveData`).
-pub fn write_nbt(m: &Mob, map: &mut horizon_world::nbt::Compound) {
+pub fn write_nbt(m: &Mob, map: &mut horizon_core::nbt::Compound) {
     let Some(s) = state(m) else { return };
     match s.patrol_target {
         Some(p) => {
@@ -757,15 +757,15 @@ mod tests {
                 .is_some_and(|d| d.ominous_banner)
         );
         assert!(is_captain(&m));
-        let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None);
+        let saved = crate::entity_nbt::mob_to_nbt(&m, [0; 4], None, None, |_| None);
         let chances = saved.get("drop_chances").unwrap();
         assert_eq!(
             chances.get("head"),
-            Some(&horizon_world::nbt::Tag::Float(2.0_f32.to_bits()))
+            Some(&horizon_core::nbt::Tag::Float(2.0_f32.to_bits()))
         );
         assert_eq!(
             chances.get("offhand"),
-            Some(&horizon_world::nbt::Tag::Float(0.65_f32.to_bits())),
+            Some(&horizon_core::nbt::Tag::Float(0.65_f32.to_bits())),
             "equipping the banner preserves other slots' explicit chances"
         );
         // Client that only saw SetEquipment: no PatrolLeader, still a captain.

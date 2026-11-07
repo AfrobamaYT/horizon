@@ -19,9 +19,9 @@
 //!
 //! Every target keeps GL's rows (row 0 is the bottom edge): the frame is flipped into
 //! the chain's `main` and back, and each pass draws with clip y negated.
+use horizon_assets::resource_source::ResourceSource;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 /// `PostChain.MAIN_TARGET_ID`.
@@ -469,7 +469,7 @@ pub struct Request<'a> {
     /// `GameRenderer.requestedPostEffects`, in order.
     pub effects: &'a [String],
     /// The active resource root (`assets/<namespace>/post_effect/<path>.json`).
-    pub root: &'a Path,
+    pub root: &'a ResourceSource,
     /// `menuBackgroundBlurriness`, the radius of a `box_blur` pass with `Radius` 0.
     pub menu_blur_radius: f32,
     /// What the `Globals` block holds besides the screen size and the blur radius.
@@ -513,7 +513,7 @@ impl<'a> Request<'a> {
     pub fn none() -> Self {
         Request {
             effects: &[],
-            root: Path::new(""),
+            root: empty_source(),
             menu_blur_radius: 0.0,
             globals: Globals::default(),
         }
@@ -531,7 +531,7 @@ pub struct PostEffects {
     chains: HashMap<String, Option<Chain>>,
     /// `GameRenderer.failedPostEffects`.
     failed: HashSet<String>,
-    root: PathBuf,
+    root: ResourceSource,
     /// The frame as the chains see `minecraft:main`.
     work: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// The frame as copied, before it is flipped into `work`.
@@ -542,7 +542,7 @@ pub struct PostEffects {
     globals: wgpu::Buffer,
     /// Chains loading on a thread of their own ([`PostEffects::preload`]), for the
     /// root they load from; `pending` until they arrive.
-    preloading: Option<(PathBuf, mpsc::Receiver<Preloaded>)>,
+    preloading: Option<(ResourceSource, mpsc::Receiver<Preloaded>)>,
     pending: HashSet<String>,
 }
 
@@ -555,12 +555,14 @@ type Preloaded = (String, Result<Option<Chain>, String>);
 pub const SPECTATOR_CHAINS: [&str; 3] =
     ["minecraft:creeper", "minecraft:spider", "minecraft:invert"];
 
-fn resource_path(root: &Path, id: &str) -> PathBuf {
+fn empty_source() -> &'static ResourceSource {
+    static EMPTY: std::sync::OnceLock<ResourceSource> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(|| ResourceSource::indexed(Default::default()))
+}
+
+fn resource_path(id: &str) -> String {
     let (ns, path) = id.split_once(':').unwrap_or(("minecraft", id));
-    root.join("assets")
-        .join(ns)
-        .join("post_effect")
-        .join(format!("{path}.json"))
+    format!("assets/{ns}/post_effect/{path}.json")
 }
 
 impl PostEffects {
@@ -628,7 +630,7 @@ impl PostEffects {
             failed: HashSet::new(),
             preloading: None,
             pending: HashSet::new(),
-            root: PathBuf::new(),
+            root: empty_source().clone(),
             work: None,
             staging: None,
             blit: None,
@@ -643,8 +645,8 @@ impl PostEffects {
 
     /// `GameRenderer.reloadPostEffects`-alike: forget chains loaded from another
     /// root, and the failures with them (`shouldResetFailedPostEffects`).
-    fn use_root(&mut self, root: &Path) {
-        if self.root != root {
+    fn use_root(&mut self, root: &ResourceSource) {
+        if !self.root.same_generation(root) {
             self.root = root.to_owned();
             self.chains.clear();
             self.failed.clear();
@@ -660,7 +662,7 @@ impl PostEffects {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        root: &Path,
+        root: &ResourceSource,
         ids: &[&str],
         format: wgpu::TextureFormat,
     ) {
@@ -710,7 +712,7 @@ impl PostEffects {
         let Some((root, rx)) = &self.preloading else {
             return;
         };
-        if *root != self.root {
+        if !root.same_generation(&self.root) {
             self.preloading = None;
             self.pending.clear();
             return;
@@ -780,12 +782,12 @@ impl PostEffects {
 
     /// `PostChain.load` for the file of `id`: `Ok(None)` when it does not exist.
     fn load(
-        root: &Path,
+        root: &ResourceSource,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         id: &str,
     ) -> Result<Option<Chain>, String> {
-        let Ok(text) = std::fs::read_to_string(resource_path(root, id)) else {
+        let Ok(text) = root.read_to_string(&resource_path(id)) else {
             return Ok(None);
         };
         let config = Config::parse(&text)?;
@@ -839,7 +841,7 @@ impl PostEffects {
     /// A pass over the resources' own GLSL (`PostChain.createPass`).
     #[allow(clippy::too_many_arguments)]
     fn translated_pass(
-        root: &Path,
+        root: &ResourceSource,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         n: usize,
@@ -1012,20 +1014,15 @@ impl PostEffects {
 
     /// `textures/effect/<location>.png` as a texture (`PostChain.createPass`'s `TextureInput`).
     fn image(
-        root: &Path,
+        root: &ResourceSource,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         location: &str,
     ) -> Result<(wgpu::Texture, wgpu::TextureView, [u32; 2]), String> {
         let (ns, path) = location.split_once(':').unwrap_or(("minecraft", location));
-        let file = root
-            .join("assets")
-            .join(ns)
-            .join("textures/effect")
-            .join(format!("{path}.png"));
-        let mut decoder = png::Decoder::new(std::io::BufReader::new(
-            std::fs::File::open(&file).map_err(|e| format!("{}: {e}", file.display()))?,
-        ));
+        let file = format!("assets/{ns}/textures/effect/{path}.png");
+        let bytes = root.read(&file).map_err(|e| format!("{file}: {e}"))?;
+        let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
         // As the other resource-pack images: stb_image never checks chunk CRCs.
         decoder.ignore_checksums(true);
         decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -1608,6 +1605,7 @@ impl Pass {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
 
     const INVERT_THEN_BLIT: &str = r#"{
         "targets": { "swap": {} },
@@ -1763,7 +1761,9 @@ mod tests {
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
-        pollster::block_on(adapter.request_device(&Default::default())).ok()
+        let pair = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+        eprintln!("post-effect GPU: {:?}", adapter.get_info());
+        Some(pair)
     }
 
     fn scratch(name: &str, json: &str) -> PathBuf {
@@ -1779,7 +1779,7 @@ mod tests {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         effects: &mut PostEffects,
-        root: &Path,
+        root: &ResourceSource,
         names: &[String],
     ) -> (bool, [u8; 4]) {
         let frame = device.create_texture(&wgpu::TextureDescriptor {
@@ -1853,9 +1853,10 @@ mod tests {
             return;
         };
         let root = scratch("invert_then_blit", INVERT_THEN_BLIT);
+        let source = ResourceSource::directory(root.clone());
         let mut effects = PostEffects::new(&device);
         let names = ["minecraft:invert_then_blit".to_owned()];
-        let (ran, px) = run(&device, &queue, &mut effects, &root, &names);
+        let (ran, px) = run(&device, &queue, &mut effects, &source, &names);
         assert!(ran);
         // (0.8, 0.6, 0.4) * (1, 0, 0.5): 204, 0, 51.
         let near = |a: u8, b: u8| a.abs_diff(b) <= 2;
@@ -1864,14 +1865,14 @@ mod tests {
             "{px:?}"
         );
         // A second frame is the same (the chain and its targets are reused).
-        let (_, again) = run(&device, &queue, &mut effects, &root, &names);
+        let (_, again) = run(&device, &queue, &mut effects, &source, &names);
         assert_eq!(again, px);
         // Missing chains and a chain that does not load change nothing.
         let (ran, px) = run(
             &device,
             &queue,
             &mut effects,
-            &root,
+            &source,
             &["minecraft:nothing".to_owned()],
         );
         assert!(!ran);
@@ -1892,9 +1893,10 @@ mod tests {
             r#"{"passes":[{"vertex_shader":"minecraft:core/screenquad","fragment_shader":"minecraft:post/nope",
                 "inputs":[{"sampler_name":"In","target":"minecraft:main"}],"output":"minecraft:main"}]}"#,
         );
+        let source = ResourceSource::directory(root.clone());
         let mut effects = PostEffects::new(&device);
         let names = ["minecraft:unknown".to_owned()];
-        assert!(!run(&device, &queue, &mut effects, &root, &names).0);
+        assert!(!run(&device, &queue, &mut effects, &source, &names).0);
         assert!(effects.failed.contains("minecraft:unknown"));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1907,7 +1909,7 @@ mod tests {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         effects: &mut PostEffects,
-        root: &Path,
+        root: &ResourceSource,
         names: &[String],
     ) -> [[u8; 4]; 2] {
         let frame = device.create_texture(&wgpu::TextureDescriptor {
@@ -1996,12 +1998,13 @@ mod tests {
              "inputs":[{"sampler_name":"In","target":"swap"}],"output":"minecraft:main",
              "uniforms":{"BlitConfig":[{"name":"ColorModulate","type":"vec4","value":[1.0,1.0,1.0,1.0]}]}}]}"#,
         );
+        let source = ResourceSource::directory(root.clone());
         let mut effects = PostEffects::new(&device);
         let [top, bottom] = run_halves(
             &device,
             &queue,
             &mut effects,
-            &root,
+            &source,
             &["minecraft:upright".to_owned()],
         );
         assert_eq!(top, [255, 0, 0, 255]);
@@ -2032,13 +2035,14 @@ mod tests {
              "output":"minecraft:main",
              "uniforms":{"MineConfig":[{"name":"Scale","type":"float","value":1.0}]}}]}"#,
         );
+        let source = ResourceSource::directory(root.clone());
         own_glsl(&root);
         let mut effects = PostEffects::new(&device);
         let [top, bottom] = run_halves(
             &device,
             &queue,
             &mut effects,
-            &root,
+            &source,
             &["minecraft:custom".to_owned()],
         );
         // Red (1, 0, 0) * the image (0.5, 1, 1) * 0.5 * depth 1, then again * 1: 0.125.
@@ -2087,7 +2091,7 @@ mod tests {
     /// A chain `preload` loaded arrives with its pipelines compiled on the loading
     /// thread, and runs as one loaded in its frame does.
     #[test]
-    fn a_preloaded_chain_arrives_compiled() {
+    fn a_preloaded_archive_chain_arrives_compiled() {
         let Some((device, queue)) = device() else {
             return;
         };
@@ -2107,10 +2111,23 @@ mod tests {
              "output":"minecraft:main",
              "uniforms":{"MineConfig":[{"name":"Scale","type":"float","value":1.0}]}}]}"#,
         );
+        let source = ResourceSource::directory(root.clone());
         own_glsl(&root);
+        use std::io::Write;
+        let jar = root.join("selected.jar");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&jar).unwrap());
+        for name in source.list("assets/") {
+            writer
+                .start_file(&name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(&source.read(&name).unwrap()).unwrap();
+        }
+        writer.finish().unwrap();
+        let source = ResourceSource::archive(&jar).unwrap();
+        std::fs::remove_dir_all(root.join("assets")).unwrap();
         let mut effects = PostEffects::new(&device);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        effects.preload(&device, &queue, &root, &["minecraft:preloaded"], format);
+        effects.preload(&device, &queue, &source, &["minecraft:preloaded"], format);
         assert!(effects.pending.contains("minecraft:preloaded"));
         let started = std::time::Instant::now();
         while !effects.pending.is_empty() {
@@ -2130,12 +2147,19 @@ mod tests {
             &device,
             &queue,
             &mut effects,
-            &root,
+            &source,
             &["minecraft:preloaded".to_owned()],
         );
         let near = |a: u8, b: u8| a.abs_diff(b) <= 3;
         assert!(near(top[0], 32) && top[1] == 0 && top[3] == 255, "{top:?}");
         assert!(bottom[0] == 0 && near(bottom[1], 128), "{bottom:?}");
+        effects.use_root(&source.clone());
+        assert!(effects.chains.contains_key("minecraft:preloaded"));
+        // Reopening the same pack creates a new generation, even at the same path.
+        effects.use_root(&ResourceSource::archive(&jar).unwrap());
+        assert!(effects.chains.is_empty());
+        assert!(effects.pending.is_empty());
+        assert!(!root.join("assets").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2147,6 +2171,7 @@ mod tests {
             return;
         };
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
+        let source = ResourceSource::directory(root.clone());
         if !root
             .join("assets/minecraft/post_effect/invert.json")
             .exists()
@@ -2159,7 +2184,7 @@ mod tests {
                 &device,
                 &queue,
                 &mut effects,
-                &root,
+                &source,
                 &[format!("minecraft:{name}")],
             );
             assert!(effects.failed.is_empty(), "{name}");
@@ -2180,6 +2205,7 @@ mod tests {
             return;
         };
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3");
+        let source = ResourceSource::directory(root.clone());
         if !root
             .join("assets/minecraft/post_effect/invert.json")
             .exists()
@@ -2189,13 +2215,13 @@ mod tests {
         for name in ["blur", "creeper", "invert", "spider"] {
             let id = format!("minecraft:{name}");
             assert!(
-                PostEffects::load(&root, &device, &queue, &id)
+                PostEffects::load(&source, &device, &queue, &id)
                     .unwrap()
                     .is_some(),
                 "{id}"
             );
         }
         // entity_outline needs targets and shaders the world pass has of its own.
-        assert!(PostEffects::load(&root, &device, &queue, "minecraft:entity_outline").is_err());
+        assert!(PostEffects::load(&source, &device, &queue, "minecraft:entity_outline").is_err());
     }
 }

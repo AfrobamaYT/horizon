@@ -12,12 +12,8 @@ pub trait Hooks {
         contract = "listen",
         context = "loop",
         version = 2,
-        target = "mod_api::crafting::native_ingredient_test"
+        target = "mod_api::crafting::native_ingredient_test",
+        neoforge = "ICustomIngredient"
     )]
     fn ingredient_test();
-}
-
-pub trait Helpers {
-    #[helper(side = "both", backend = true)]
-    fn recipe_ingredient_test();
 }

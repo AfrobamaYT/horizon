@@ -1,11 +1,16 @@
 //! StructureTemplate: NBT loading, palettes, transforms and bounding boxes.
-use super::{BoundingBox, Mirror, Rotation, StateTransforms};
-use crate::{
-    chunk::BlockState,
-    nbt::{Compound, Tag},
-    registry::{BlockRegistry, BlockStateId},
-};
 use std::sync::{Arc, OnceLock};
+use {
+    super::{Mirror, Rotation, StateTransforms},
+    horizon_core::bounding_box::BoundingBox,
+};
+use {
+    crate::{
+        chunk::BlockState,
+        registry::{BlockRegistry, BlockStateId},
+    },
+    horizon_core::nbt::{Compound, Tag},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockInfo {
@@ -68,7 +73,7 @@ fn string(tag: Option<&Tag>) -> Option<String> {
     }
 }
 fn get<'a>(compound: &'a Compound, key: &str) -> Option<&'a Tag> {
-    compound.get(&crate::nbt::JavaString::from(key))
+    compound.get(&horizon_core::nbt::JavaString::from(key))
 }
 /// NbtUtils.readBlockState: unknown blocks read as air; missing or invalid
 /// properties keep the block's defaults.
@@ -487,6 +492,46 @@ mod save_tests {
             ),
         ]);
         BlockRegistry::from_nbt(&tag).unwrap()
+    }
+
+    #[test]
+    fn a_data_pack_template_is_found_and_others_stay_empty() {
+        let registry: &'static BlockRegistry = Box::leak(Box::new(registry()));
+        let transforms = StateTransforms::from_json(
+            r#"{"rotate":[[0,0,0],[1,1,1],[2,2,2]],"mirror":[[0,0],[1,1],[2,2]],
+                "full_block":[false,true,false],"loot_containers":[],"block_entities":{}}"#,
+            3,
+        )
+        .unwrap();
+        let tag = save_nbt(
+            registry,
+            &transforms,
+            [3, 1, 2],
+            vec![BlockInfo {
+                pos: [0, 0, 0],
+                state: BlockStateId(1),
+                nbt: None,
+            }],
+            &[],
+            DATA_VERSION,
+        );
+        let named = horizon_core::nbt::NamedTag {
+            name: "".into(),
+            tag,
+        };
+        let raw =
+            horizon_core::nbt::write_named(&named, horizon_core::nbt::Limits::templates()).unwrap();
+        let file = crate::compression::Compression::Gzip.encode(&raw).unwrap();
+        let resources = super::super::StructureResources::new(
+            registry,
+            transforms,
+            std::path::Path::new("/nonexistent"),
+            Default::default(),
+            &Default::default(),
+        )
+        .with_pack_templates([("p:room/a".to_owned(), file.into())].into());
+        assert_eq!(resources.template("p:room/a").unwrap().size, [3, 1, 2]);
+        assert_eq!(resources.template("p:room/b").unwrap().size, [0, 0, 0]);
     }
 
     #[test]

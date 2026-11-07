@@ -356,7 +356,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     if rules.spawn_mobs
                         && rules.spawn_monsters
                         && difficulty != 0
-                        && self.level.dimension() == super::Dimension::Overworld
+                        && self.level.dimension() == horizon_core::dimension::Dimension::Overworld
                         && self.rand_int(2000) < difficulty
                     {
                         self.emit(LevelEvent::BlockEvent {
@@ -503,7 +503,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if data.implements(super::classes::Interface::WeatheringCopper) {
             let upper_door = data.is(Class::Door) && b.table.text(state, p.half) == "upper";
             let right_chest = data.is(Class::Chest) && b.table.text(state, p.kind) == "right";
-            if !upper_door && !right_chest {
+            // WeatheringCopperChestBlock.randomTick: a chest someone has open
+            // does not weather, and draws nothing (#11378).
+            let viewed_chest = data.is(Class::Chest) && self.level.container_open(pos);
+            if !upper_door && !right_chest && !viewed_chest {
                 self.copper_change_over_time(state, pos);
             }
         }
@@ -643,9 +646,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         let below_state = self.below_state(pos);
         let infiniburn = match self.level.dimension() {
-            super::Dimension::Overworld => &b.tags.infiniburn_overworld,
-            super::Dimension::Nether => &b.tags.infiniburn_nether,
-            super::Dimension::End => &b.tags.infiniburn_end,
+            horizon_core::dimension::Dimension::Overworld => &b.tags.infiniburn_overworld,
+            horizon_core::dimension::Dimension::Nether => &b.tags.infiniburn_nether,
+            horizon_core::dimension::Dimension::End => &b.tags.infiniburn_end,
         };
         let infini = b.in_set(below_state, infiniburn);
         let age = b.table.int(state, p.age);
@@ -784,7 +787,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             true
         };
         if self.rand_int(3) == 0 || fewer(self, pos, 4) {
-            let brightness = if self.level.dimension() == super::Dimension::End {
+            let brightness = if self.level.dimension() == horizon_core::dimension::Dimension::End {
                 self.level.block_light(pos)
             } else {
                 self.max_local_raw_brightness(pos)
@@ -1541,12 +1544,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 if layers < max_height.min(8) {
                     let to = b.table.set_int(state, p.layers, layers + 1);
                     if self.level.allow_block_form(top, state, to) {
+                        self.emit(LevelEvent::BlockEvent {
+                            pos: top,
+                            state,
+                            kind: "push_entities_up",
+                        });
                         self.set_block_and_update(top, to);
                     }
                 }
             } else {
                 let to = b.default_of(b.named.snow);
                 if self.level.allow_block_form(top, state, to) {
+                    // Vanilla creates the first snow layer without `pushEntitiesUp`
+                    // (only an added layer over existing snow lifts).
                     self.set_block_and_update(top, to);
                 }
             }

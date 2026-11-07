@@ -46,6 +46,22 @@ A hook fires with the right host for its moment. A client-side decision that van
 library is split into decide, fire and apply: the library decides, the game fires the hook with a `ClientHost`,
 and the apply re-checks the decision's preconditions and refuses, never recomputes, if they changed.
 
+## Load access belongs to the owning thread
+
+Registration has only a `RegistrationContext`. Each side then enters Setup, Config and World;
+config loading can read settings and use its existing scoped `ConfigFiles` service, but cannot
+acquire world handles, open transactions or call other game operations. Client setup and initial
+Client/Common configs finish before title, connection or ordinary runtime callbacks begin, so the
+first client pre-tick is already in World even without an open world. Data and asset reloads
+temporarily enter Reloading and restore Setup or World when they finish or fail. The catalog marks
+published asset/data queries as `resource_read`: completion hooks can refresh sprite/recipe caches
+from the newly published generation without acquiring a world handle or transaction. Server reload
+Host reads are restricted to those published facts, registry facts, settings and the mod list;
+existing data-context callbacks keep `DataLoadContext`. A forbidden operation panics naming
+the phase. The game alone advances the thread-local boundary, so the window and integrated server
+cannot change one another's permissions. [Load phases and access](trait-mods.md#load-phases-and-access)
+lists the once-per-process, per-world and per-reload moments. No additional FML or intermod bus is added.
+
 ## Parts
 
 A per-block, per-item or per-entity moment is a method on a part, as it is a method on `Block` or `Item` in
@@ -95,7 +111,7 @@ game's one sandboxed runtime runs with no rebuild. The only difference between t
 - `[dependencies]` in `horizon-mod.toml` means the same for both: required and optional dependencies, semver
   against the manifest's versions, dispatch in dependency order, and a mod publishing functions and statics its
   dependents call. Native links through Cargo; wasm links through the runtime's linker, with one copy of each
-  library shared by its dependents.
+  library shared by its dependents. Both targets use one resolver, keep bundle-order ties, and refuse cycles.
 - There is no wasm-only packaging unit and no native-only dependency rule. A change to the model lands for both
   targets together.
 - The wasm interface is generated from the same catalog as the `Host`, at build time, and never committed: a

@@ -2,6 +2,7 @@ import argparse
 import datetime
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import tempfile
@@ -28,7 +29,87 @@ def args(host="local", quick=False):
     return argparse.Namespace(host=host, quick=quick)
 
 
+class GitChangedPathsTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.git("init")
+        for key, value in (("core.quotePath", "true"), ("core.autocrlf", "false"),
+                           ("core.hooksPath", str(self.root / "no-hooks")), ("commit.gpgsign", "false")):
+            self.git("config", key, value)
+        for module in (pr_ready, pr_ready.parity):
+            patcher = mock.patch.object(module, "ROOT", self.root)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def git(self, *arguments):
+        return subprocess.run(["git", *arguments], cwd=self.root, capture_output=True,
+                              text=True, encoding="utf-8", check=True).stdout
+
+    def write(self, path, text):
+        destination = self.root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text, encoding="utf-8", newline="\n")
+
+    def commit(self):
+        self.git("add", ".")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "base")
+
+    def test_unicode_paths_select_checks_and_keep_line_counts(self):
+        tracked = "crates/horizon-core/src/caf\u00e9 edit.rs"
+        untracked = "crates/horizon-core/src/\u65b0 file.rs"
+        self.write(tracked, "first\n")
+        self.commit()
+        self.write(tracked, "first\nsecond\n")
+        self.write(untracked, "new\nfile\n")
+        changed = pr_ready.parity.changed_files("HEAD")
+        self.assertEqual(changed, {tracked, untracked})
+        self.assertEqual(pr_ready.line_counts("HEAD", changed), {tracked: (1, 0), untracked: (2, 0)})
+        self.assertTrue(all(pr_ready.workspace_rust(path) for path in changed))
+        self.assertEqual(pr_ready.touched_crates(changed, PACKAGES), ["horizon-core"])
+
+    def test_renamed_rust_source_keeps_both_paths_and_counts(self):
+        before, after = "crates/horizon-core/src/moved.rs", "docs/moved.md"
+        self.write(before, "fn moved() {\n}\n")
+        self.commit()
+        (self.root / "docs").mkdir()
+        self.git("mv", before, after)
+        changed = pr_ready.parity.changed_files("HEAD")
+        self.assertEqual(changed, {before, after})
+        self.assertEqual(pr_ready.line_counts("HEAD", changed), {before: (0, 2), after: (2, 0)})
+        self.assertEqual(pr_ready.touched_crates(changed, PACKAGES), ["horizon-core"])
+
+    @unittest.skipIf(os.name == "nt", "Windows filenames cannot contain tabs or newlines")
+    def test_tabs_and_newlines_remain_in_paths(self):
+        tracked = "crates/horizon-core/src/tab\tfile.rs"
+        untracked = "crates/horizon-core/src/line\r\nfile.rs"
+        self.write(tracked, "first\n")
+        self.commit()
+        self.write(tracked, "first\nsecond\n")
+        self.write(untracked, "new\n")
+        changed = pr_ready.parity.changed_files("HEAD")
+        self.assertEqual(changed, {tracked, untracked})
+        self.assertEqual(pr_ready.line_counts("HEAD", changed), {tracked: (1, 0), untracked: (1, 0)})
+
+
 class PrReadyTests(unittest.TestCase):
+    def test_windows_runner_gives_a_leading_variable_to_the_environment(self):
+        step = pr_ready.Step(
+            "dispatch tests tests",
+            "CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4} cargo test --manifest-path a/Cargo.toml --locked",
+        )
+        with mock.patch.object(pr_ready.subprocess, "Popen") as popen, \
+                mock.patch.object(pr_ready, "finish"), mock.patch.dict(os.environ):
+            os.environ.pop("CARGO_BUILD_JOBS", None)
+            popen.return_value.__enter__.return_value.stdout = []
+            popen.return_value.__enter__.return_value.wait.return_value = 0
+            pr_ready.run_windows([step], False)
+        self.assertEqual(popen.call_args.args[0],
+                         ["cargo", "test", "--manifest-path", "a/Cargo.toml", "--locked"])
+        self.assertEqual(popen.call_args.kwargs["env"]["CARGO_BUILD_JOBS"], "4")
+        self.assertEqual(step.status, "pass")
+
     def test_paths_map_to_the_crates_that_own_them(self):
         self.assertEqual(pr_ready.touched_crates({"crates/horizon-core/src/jmath.rs", "crates/horizon-client/build.rs",
                                                   "xtask/src/main.rs", "tools/parity.py"}, PACKAGES),
@@ -47,7 +128,7 @@ class PrReadyTests(unittest.TestCase):
                      "examples/probe/main.rs", "tests/lan_bot.rs"]:
             self.assertEqual(pr_ready.touched_crates({f"crates/horizon-client/{path}"}, packages),
                              ["horizon-client-lib"])
-        for path in ["src/lib.rs", "src/main.rs", "src/entry.rs", "src/game.rs", "src/game/combat.rs",
+        for path in ["src/lib.rs", "src/main.rs", "src/entry.rs", "src/game.rs", "src/game/items/combat.rs",
                      "tests/launch_api.rs", "Cargo.toml", "build.rs"]:
             self.assertEqual(pr_ready.touched_crates({f"crates/horizon-client/{path}"}, packages),
                              ["horizon-client"])
@@ -86,7 +167,7 @@ class PrReadyTests(unittest.TestCase):
             return {step.name: step for step in steps}["content root tests"]
         self.assertEqual(content_step("crates/horizon-client/src/game.rs").skip, "content root untouched")
         for path in ["crates/horizon-client/src/mod_content.rs", "crates/horizon-client/src/mod_content_tests.rs",
-                     "crates/horizon-mods/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
+                     "crates/horizon-mod-package/src/content.rs", "crates/horizon-assets/src/lib.rs", "Cargo.lock"]:
             with self.subTest(path=path):
                 step = content_step(path)
                 self.assertIsNone(step.skip)
@@ -101,7 +182,7 @@ class PrReadyTests(unittest.TestCase):
                      "crates/horizon-mod-api-gen/dispatch-tests/src/lib.rs",
                      "crates/horizon-mod-api-macros/src/lib.rs",
                      "crates/horizon-mod-api/src/lib.rs",
-                     "crates/horizon-mod-api/src/part_table.rs",
+                     "crates/horizon-mod-api/src/parts/mod.rs",
                      "crates/horizon-mod-api/src/hooks/block.rs"]:
             with self.subTest(path=path):
                 by_name = suite_steps(path)
@@ -134,8 +215,8 @@ class PrReadyTests(unittest.TestCase):
     def test_tests_get_the_features_ci_s_workspace_run_gives_them(self):
         self.assertEqual(pr_ready.mod_features(["horizon-world"]), "")
         self.assertEqual(pr_ready.mod_features(["horizon-client"]), "")
-        self.assertEqual(pr_ready.mod_features(["horizon-mods"]),
-                         " --features horizon-mods/index")
+        self.assertEqual(pr_ready.mod_features(["horizon-mod-package"]),
+                         " --features horizon-mod-package/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
     def test_mod_api_data_inputs_build_and_test_the_consuming_crates(self):

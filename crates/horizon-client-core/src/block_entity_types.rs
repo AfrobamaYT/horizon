@@ -24,6 +24,14 @@ impl BlockEntityTypes {
         self.blocks.get(block).map(String::as_str)
     }
 
+    /// Registered names in protocol order, excluding empty slots.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.wire
+            .iter()
+            .filter(|id| !id.is_empty())
+            .map(AsRef::as_ref)
+    }
+
     /// A canonical registered identity, shared without allocating at lookup.
     pub fn key(&self, id: &str) -> Option<Arc<str>> {
         self.keys.get(id).cloned()

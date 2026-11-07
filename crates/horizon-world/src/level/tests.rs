@@ -89,6 +89,8 @@ pub(crate) struct TestLevel {
     /// `ShulkerBoxBlockEntity.isClosed` at a position: `true` for a shut lid,
     /// `false` for an open box. Positions not listed have no block entity.
     pub shulker_closed: HashMap<BlockPos, bool>,
+    /// The containers `container_open` reports as open.
+    pub opened: HashSet<BlockPos>,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -118,10 +120,14 @@ impl TestLevel {
             note_players: std::cell::RefCell::new(Vec::new()),
             refuse_portals: false,
             shulker_closed: HashMap::new(),
+            opened: HashSet::new(),
         }
     }
 }
 impl LevelAccess for TestLevel {
+    fn container_open(&self, pos: BlockPos) -> bool {
+        self.opened.contains(&pos)
+    }
     fn recheck_container_openers(&mut self, pos: BlockPos) -> Option<(i32, i32)> {
         self.opener_rechecks.push(pos);
         self.openers.get(&pos).copied()
@@ -582,13 +588,13 @@ impl LevelAccess for Asker {
         _: BlockPos,
         _: BlockStateId,
         _: bool,
-        updates: &mut Vec<super::NeighbourUpdate>,
+        updates: &mut Vec<horizon_core::neighbour_update::NeighbourUpdate>,
     ) {
         if self.asks {
             updates.extend([
-                super::NeighbourUpdate::NeighboursExcept(Direction::Up),
-                super::NeighbourUpdate::OutputSignal,
-                super::NeighbourUpdate::Neighbours,
+                horizon_core::neighbour_update::NeighbourUpdate::NeighboursExcept(Direction::Up),
+                horizon_core::neighbour_update::NeighbourUpdate::OutputSignal,
+                horizon_core::neighbour_update::NeighbourUpdate::Neighbours,
             ]);
         }
     }
@@ -715,6 +721,25 @@ fn block_update_notifications_follow_client_and_invisible_flags() {
             "client={client}, flags={flags}"
         );
     }
+}
+
+/// `WeatheringCopperChestBlock.randomTick`: a copper chest someone has open
+/// skips `changeOverTime` and its draws; a closed one draws (#11378).
+#[test]
+fn a_viewed_copper_chest_does_not_weather() {
+    let Some(f) = fixture() else { return };
+    let mut w = World::new(f);
+    let pos = BlockPos::new(0, 64, 0);
+    let chest = w.id("copper_chest", &[("type", "single")]);
+    w.put(pos, chest);
+    let draw = |w: &World| w.level.random.clone().next_long();
+    w.level.opened.insert(pos);
+    let before = draw(&w);
+    f.behaviours.random_tick(&mut w.level, &mut w.ticks, pos);
+    assert_eq!(draw(&w), before, "an open chest draws nothing");
+    w.level.opened.clear();
+    f.behaviours.random_tick(&mut w.level, &mut w.ticks, pos);
+    assert_ne!(draw(&w), before, "a closed one rolls changeOverTime");
 }
 
 #[test]
@@ -1498,6 +1523,7 @@ fn connections_follow_connects_to_both_ways() {
                 ConnectionKind::Bars => {
                     sim.bars_attach_to(pos, own, neighbour, sturdy, Direction::East)
                 }
+                _ => unreachable!("every connection kind is matched"),
             }
         };
         // Vanilla: a sturdy face connects, a glass block's face does not.
@@ -3037,6 +3063,49 @@ fn dispenser_buckets_pick_up_and_empty() {
         false
     ));
     assert_eq!(w.name(at), "powder_snow[]");
+}
+
+#[test]
+fn a_bucket_replaces_a_bubble_column_and_breaks_a_flower() {
+    let mut w = world!();
+    let at = BlockPos::new(0, 10, 0);
+    let sound = "minecraft:item.bucket.empty";
+    let water = BucketContent::Fluid(crate::fluid::FluidKind::Water);
+    let pour = |w: &mut World| {
+        w.f.behaviours.bucket_empty(
+            &mut w.level,
+            &mut w.ticks,
+            at,
+            None,
+            water,
+            sound,
+            false,
+            false,
+        )
+    };
+    let broke = |w: &World| {
+        w.level.events.iter().any(|e| {
+            matches!(
+                e,
+                LevelEvent::GameEvent {
+                    event: "minecraft:block_destroy",
+                    ..
+                } | LevelEvent::LevelEvent { id: 2001, .. }
+            )
+        })
+    };
+    // `BlockState.liquid()` is true: the column is replaced, not broken.
+    w.put(at, w.id("bubble_column", &[("drag", "true")]));
+    w.level.events.clear();
+    assert_eq!(pour(&mut w), Some(at));
+    assert_eq!(w.name(at), "water[level=0]");
+    assert!(!broke(&w), "a bubble column is liquid()");
+    // A replaceable plant is not `liquid()`: the bucket breaks it first.
+    w.put(at, w.id("dandelion", &[]));
+    w.level.events.clear();
+    assert_eq!(pour(&mut w), Some(at));
+    assert_eq!(w.name(at), "water[level=0]");
+    assert!(broke(&w), "a flower is broken before the water goes in");
 }
 
 #[test]

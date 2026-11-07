@@ -12,8 +12,11 @@ autotests = false
 
 [build-dependencies]
 horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
+# The build script runs on the host, but embeds resources based on the target OS.
+winresource = "0.1"
 
 [dependencies]
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-points = { path = "../horizon-mod-points" }
 horizon-mod-api-macros = { path = "../horizon-mod-api-macros" }
@@ -48,7 +51,7 @@ horizon-friends = { path = "../horizon-friends" }
 horizon-narrator = { path = "../horizon-narrator" }
 # Horizon mods: sandboxed WebAssembly components, off unless installed and turned on (docs/modding/src/how-to/content-mods.md).
 # Their runtime is the `mods` feature.
-horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
+horizon-mod-package = { path = "../horizon-mod-package", default-features = false, features = ["index"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
 winit = "0.30.13"
 pollster = "0.4"
@@ -100,7 +103,7 @@ open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Splitscreen: a window filling a monitor goes over its menu bar (game/split/windows.rs
+# Splitscreen: a window filling a monitor goes over its menu bar (game/runtime/split/windows.rs
 # `above_menu_bar`); all already in the tree through winit and wgpu.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSScreen"] }
@@ -110,10 +113,6 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
 # DirectX 12 driver (`graphicsApi`, graphics.rs).
 wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
-
-[target.'cfg(windows)'.build-dependencies]
-# The icon resource in the .exe (build.rs).
-winresource = "0.1"
 
 [features]
 default = ["audio", "controllers"]

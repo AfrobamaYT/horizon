@@ -99,7 +99,9 @@ fn main() -> Result<()> {
     drop(registry);
     step("registry dropped");
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     step("assets");
     println!(
         "  sprites: {} layers of {}px, {:.0} MB of pixels",
@@ -126,7 +128,9 @@ fn main() -> Result<()> {
         &crate::test_resources::server_load(),
     )?;
     step("recipes");
-    let biomes = Biomes::load(&root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     step("biomes");
     let light = LightTables::load(&root, assets.registry, &facts)?;
     step("light tables");
@@ -143,6 +147,7 @@ fn main() -> Result<()> {
     step("motion");
     let terrain = VanillaTerrain::new(
         horizon_client::vanillagen::TerrainResources {
+            data: None,
             dir: &root.join("worldgen"),
             registry: assets.registry,
             biomes: &biomes,

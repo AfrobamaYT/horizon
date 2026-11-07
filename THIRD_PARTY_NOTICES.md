@@ -2,10 +2,10 @@
 
 ## horizon-mixins
 
-The raw injection schema in `crates/horizon-mods/src/manifest.rs` is adapted from
+The raw injection schema in `crates/horizon-mod-package/src/manifest.rs` is adapted from
 [horizon-mixins](https://github.com/horizon-rust/horizon-mixins/tree/ddd9700b21997c95d95ac6ee5ecafe3830cf622a),
 Copyright (c) 2026 levzzz, under the MIT license
-(`crates/horizon-mods/HORIZON_MIXINS_LICENSE`).
+(`crates/horizon-mod-package/HORIZON_MIXINS_LICENSE`).
 
 ## wgpu-hal
 
@@ -219,3 +219,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+## Just Enough Items
+
+The Recipes settings icon is from [Just Enough Items 31.17.0.108](https://github.com/mezz/JustEnoughItems) by mezz and contributors. It is distributed under the MIT license in `crates/horizon-client-render/src/jei_recipes/LICENSE.txt`.

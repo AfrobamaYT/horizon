@@ -179,7 +179,7 @@ fn farmland_base_reaches_drying_cover_and_trample() {
             ),
         ],
     );
-    let root = resource_root(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
+    let root = resource_root_fixture(&base, Path::new(""), &[m], &scratch.join("cache")).unwrap();
     let assets = Assets::load(&root).unwrap();
     let registry = assets.registry;
     let behaviours = Behaviours::load(registry, &root).unwrap();

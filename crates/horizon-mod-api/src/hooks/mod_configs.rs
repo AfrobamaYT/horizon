@@ -7,7 +7,8 @@ pub trait Hooks {
     /// `Client` and `Common` configs), by a dedicated server when it starts
     /// (`Common` and `Server`) and by a server before each world it opens
     /// (`Server`); a game reads only its own kinds, so push them all every
-    /// time. A file outside `config/`, or one already registered, is skipped.
+    /// time. Runs in Config: settings reads and the scoped ConfigFiles service
+    /// are available; world handles and transactions panic naming the phase. A file outside `config/`, or one already registered, is skipped.
     #[hook(
         side = "both",
         contract = "collect",
@@ -19,7 +20,9 @@ pub trait Hooks {
     /// says whose, which file and its text, which the mod parses (TOML by
     /// convention). Every mod hears every config, so check `mod_id`. Fired
     /// where the config's kind loads (`native_register_configs`), a `Server`
-    /// one before `native_server_about_to_start`.
+    /// one before `native_server_about_to_start`. Config allows settings reads
+    /// and the scoped ConfigFiles service, not world handles or transactions. Client and Common load once on their
+    /// owning side, Server once per world.
     #[hook(
         side = "both",
         contract = "listen",
@@ -31,7 +34,7 @@ pub trait Hooks {
     /// its new text. The game looks at the files' modification times once a
     /// second, on the window and on the server's tick; a file saved with the
     /// same text, removed or unreadable fires nothing and keeps its last
-    /// text.
+    /// text. Polling does not change the current phase.
     #[hook(
         side = "both",
         contract = "listen",
@@ -42,7 +45,7 @@ pub trait Hooks {
     /// A `Server` config is dropped as its server stops
     /// (`ModConfigEvent.Unloading`), after `native_server_stopping`; the next
     /// world reads it again. `Client` and `Common` configs stay until the
-    /// game quits.
+    /// game quits. This notification leaves the World phase unchanged.
     #[hook(
         side = "server",
         contract = "listen",

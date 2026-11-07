@@ -973,7 +973,7 @@ mod tests {
             )]
         });
         let overlay = match &packs {
-            Some(p) => horizon_world::loot::PackOverlay { files: p },
+            Some(p) => horizon_world::loot::PackOverlay::new(p),
             None => horizon_world::loot::PackOverlay::NONE,
         };
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
@@ -1042,6 +1042,36 @@ mod tests {
     #[test]
     fn a_pack_recipe_unlocked_by_crafting_shows_in_the_book() {
         crafted_recipe_reaches_the_book("pack_recipe", true);
+    }
+
+    #[test]
+    fn an_owned_content_recipe_reaches_the_client_book() {
+        let recipe = r#"{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:raw_copper"],"result":{"id":"minecraft:copper_ingot","count":2}}"#;
+        let root = resources("content_namespace", &[("control", recipe)]);
+        let dir = root.join("data/recipe_pilot/recipe");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("press.json"), recipe).unwrap();
+        std::fs::write(
+            root.join(horizon_items::content_namespaces::MARKER),
+            br#"["recipe_pilot"]"#,
+        )
+        .unwrap();
+        let (sync, e) = entry(&root, "recipe_pilot:press");
+        assert_eq!(
+            e.id,
+            sync.advancements
+                .displays
+                .first_display("recipe_pilot:press")
+                .unwrap()
+        );
+        match e.display {
+            RecipeDisplay::Shapeless { result, .. } => {
+                assert_eq!(result, SlotDisplay::ItemStack(Stack::new(1, 2)));
+            }
+            other => panic!("not a shapeless content recipe: {other:?}"),
+        }
+        let _ = entry(&root, "minecraft:control");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -1155,7 +1185,7 @@ mod tests {
             "recipe/pack:a_cut".to_owned(),
             vec![cut("minecraft:redstone").into_bytes()],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let sync = SyncData::load(
             &root,
@@ -1314,7 +1344,7 @@ mod tests {
                     .to_vec(),
             ],
         )];
-        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let overlay = horizon_world::loot::PackOverlay::new(&packs);
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
         let sync = SyncData::load(
             &root,

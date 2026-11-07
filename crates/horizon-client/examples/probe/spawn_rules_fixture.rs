@@ -147,7 +147,10 @@ pub fn main() -> horizon_client::Result<()> {
     let assets = Assets::load(root)?;
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
-    let data = MobData::load(root, &facts);
+    let data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     let types = MobTypes::load(root)?;

@@ -9,7 +9,10 @@ fn biomes() -> Biomes {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../.local/horizon-client/26.3")
         });
-    Biomes::load(&root).unwrap()
+    Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))
+    .unwrap()
 }
 
 /// A chunk whose every quart cell holds `biome`.

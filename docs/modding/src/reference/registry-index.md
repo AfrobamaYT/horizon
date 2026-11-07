@@ -5,8 +5,8 @@ Horizon's registry lists what is made for Horizon and reviewed: content mods (`.
 [shaders.md](../../../shaders.md)). A project is listed by a reviewed pull request in
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods); new versions are submitted as files and pinned by SHA-256. Legacy entries may still follow their repositories. The launcher and the
 website read one file, `index.json`, which that repository's CI builds. The Rust types and every check below are
-`horizon_mods::index` and `horizon_mods::modpack` (feature `index`); the sample is
-`crates/horizon-mods/tests/index/index-v1.json`, read by the tests with the files it lists.
+`horizon_mod_package::index` and `horizon_mod_package::modpack` (feature `index`); the sample is
+`crates/horizon-mod-package/tests/index/index-v1.json`, read by the tests with the files it lists.
 
 Level: preview ([API stability](../../../api/stability.md)). Schema 1.
 
@@ -102,7 +102,7 @@ them into the profile's game folder.
 [horizon-rust/horizon-mods](https://github.com/horizon-rust/horizon-mods) holds one `mods/<id>.toml` per project and
 `revoked.toml`. An entry is **a page and its pinned versions**: new versions are submitted as files and checked. Legacy entries may name a repository whose releases are read as below; new repository-following entries are refused. What an entry can't vouch for is read from the file by the kind's own
 check (`index::inspect`): a mod's API, side and capabilities, a modpack's mods, the size. Types and rules:
-`horizon_mods::index::registry`.
+`horizon_mod_package::index::registry`.
 
 Every listed project's resolved page requires a description of 50–10,000 characters after trimming,
 1–3 categories and an icon stored in the registry. Icons and optional screenshots are registry-local
@@ -185,7 +185,7 @@ Unknown keys in an entry are refused. Its CI runs `cargo-horizon-mod` (`crates/c
 | Command | What it does |
 | --- | --- |
 | `cargo horizon-mod internals sync` | Explicitly checks a native mod's library through the launcher against an isolated copy of its pinned game source, then replaces `[native].internals` with compiler-discovered paths, kinds and hashes. Handles globs and macros, removes unused declarations, preserves retained entries and prints additions/removals. Requires a trusted mod and `horizon-launcher` on `PATH` (or `HORIZON_LAUNCHER` set to its executable). Never runs automatically on build. |
-| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to `[native].internals` in the current mod's `horizon-mod.toml`. Reads the pinned prebuilt game's `internals.json`; unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
+| `cargo horizon-mod internals add <path>…` | Adds each declared internal and its tool-written hash to `[native].internals` in the current mod's `horizon-mod.toml`. Reads the pinned prebuilt game's `internals.json` for native mods, or the newest prebuilt catalog for wasm mods (`HORIZON_MOD_INTERNALS_CATALOG` selects an absolute staged catalog path); unknown paths, shape-only entries and paths available only under a `cfg` are refused before the manifest is changed. Existing declarations are refreshed, not duplicated. |
 | `cargo horizon-mod update [--horizon <commit>]` | Moves the native game's pin and its mod API and internals dependencies' `rev` to the newest prebuilt release (or the exact commit given). For every declared internal, prints `missing`, `changed` (old signature → new signature), or `unchanged`, then refreshes the hashes still available. Missing or now-gated declarations keep their old hash and must be removed or replaced before building. |
 | `cargo horizon-mod check <file> [--json]` | A submission's checks: its kind's (above) and its signature with `--key` and `--signature`. It runs no mod's code: a native mod's source is read by the reviewers when it is listed. |
 | `cargo horizon-mod registry check <base> <head> --files <dir>` | `check` on each hosted file `head` lists and `base` doesn't: a pull request's new files. |

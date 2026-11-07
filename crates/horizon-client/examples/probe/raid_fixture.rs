@@ -20,13 +20,16 @@ use horizon_client::{
 };
 use horizon_core::random::{LegacyRandom, RandomSource};
 use horizon_world::loot::PackOverlay;
-use horizon_world::{chunk::BlockState, nbt::Tag, registry::BlockStateId};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap, HashSet},
     fmt::Write as _,
     fs,
     path::Path,
+};
+use {
+    horizon_core::nbt::Tag,
+    horizon_world::{chunk::BlockState, registry::BlockStateId},
 };
 
 #[derive(Clone, Copy)]
@@ -440,7 +443,7 @@ fn run_codec(c: &BTreeMap<&str, &str>) -> Result<String, String> {
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
     let text = String::from_utf8(text).map_err(|e| e.to_string())?;
-    let (tag, _) = horizon_world::nbt::parse_snbt(&text)?;
+    let (tag, _) = horizon_core::nbt::parse_snbt(&text)?;
     let raids = Raids::from_nbt(&tag, 0);
     let fresh = raids.dirty && raids.map.is_empty() && raids.next_id == 1 && raids.tick == 0 && {
         // A fresh Raids is dirty; a decoded one never is.
@@ -470,7 +473,10 @@ pub fn main() -> horizon_client::Result<()> {
     let assets = Assets::load(root)?;
     let registry = assets.registry;
     let facts = BlockFacts::load(root, registry)?;
-    let data = MobData::load(root, &facts);
+    let data = MobData::load(
+        &horizon_assets::resource_source::ResourceRoot::directory(root.to_path_buf()),
+        &facts,
+    );
     let defaults = horizon_world::item_defaults::read(root)?;
     let items = Items::tags_only(root, &PackOverlay::NONE, &defaults)?;
     let attributes = GameplayAttributes::load(root);

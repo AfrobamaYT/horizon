@@ -23,10 +23,6 @@ pub mod stronghold;
 pub mod template;
 pub mod temple;
 
-use crate::{
-    nbt::{self, Limits},
-    registry::{BlockRegistry, BlockStateId},
-};
 use horizon_core::geometry::Direction;
 use processor::ProcessorList;
 use std::{
@@ -36,6 +32,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 pub use template::{BlockInfo, EntityInfo, JigsawInfo, StructureTemplate, save_nbt};
+use {
+    crate::registry::{BlockRegistry, BlockStateId},
+    horizon_core::{nbt, nbt::Limits},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Rotation {
@@ -113,67 +113,6 @@ impl Mirror {
             Self::LeftRight => "LEFT_RIGHT",
             Self::FrontBack => "FRONT_BACK",
         }
-    }
-}
-
-/// Inclusive integer box (vanilla BoundingBox). The default is the one block at the origin.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct BoundingBox {
-    pub min: [i32; 3],
-    pub max: [i32; 3],
-}
-impl BoundingBox {
-    pub fn new(min: [i32; 3], max: [i32; 3]) -> Self {
-        Self { min, max }
-    }
-    pub fn from_corners(a: [i32; 3], b: [i32; 3]) -> Self {
-        Self {
-            min: std::array::from_fn(|i| a[i].min(b[i])),
-            max: std::array::from_fn(|i| a[i].max(b[i])),
-        }
-    }
-    pub fn moved(self, d: [i32; 3]) -> Self {
-        Self {
-            min: std::array::from_fn(|i| self.min[i] + d[i]),
-            max: std::array::from_fn(|i| self.max[i] + d[i]),
-        }
-    }
-    pub fn is_inside(&self, p: [i32; 3]) -> bool {
-        (0..3).all(|i| p[i] >= self.min[i] && p[i] <= self.max[i])
-    }
-    pub fn intersects(&self, other: &Self) -> bool {
-        (0..3).all(|i| self.max[i] >= other.min[i] && self.min[i] <= other.max[i])
-    }
-    pub fn encapsulate(&mut self, other: &Self) {
-        for i in 0..3 {
-            self.min[i] = self.min[i].min(other.min[i]);
-            self.max[i] = self.max[i].max(other.max[i]);
-        }
-    }
-    pub fn inflated(self, xz: i32, y: i32) -> Self {
-        Self {
-            min: [self.min[0] - xz, self.min[1] - y, self.min[2] - xz],
-            max: [self.max[0] + xz, self.max[1] + y, self.max[2] + xz],
-        }
-    }
-    pub fn span(&self) -> [i32; 3] {
-        std::array::from_fn(|i| self.max[i] - self.min[i] + 1)
-    }
-    pub fn center(&self) -> [i32; 3] {
-        std::array::from_fn(|i| self.min[i] + (self.max[i] - self.min[i] + 1) / 2)
-    }
-    pub fn corners(&self) -> [[i32; 3]; 8] {
-        let (a, b) = (self.min, self.max);
-        [
-            [a[0], a[1], a[2]],
-            [a[0], a[1], b[2]],
-            [a[0], b[1], a[2]],
-            [a[0], b[1], b[2]],
-            [b[0], a[1], a[2]],
-            [b[0], a[1], b[2]],
-            [b[0], b[1], a[2]],
-            [b[0], b[1], b[2]],
-        ]
     }
 }
 
@@ -285,6 +224,7 @@ pub struct StructureResources {
     pub registry: &'static BlockRegistry,
     pub transforms: StateTransforms,
     dir: PathBuf,
+    template_resources: BTreeMap<String, horizon_assets::resource_source::Resource>,
     templates: RwLock<HashMap<String, Option<Arc<StructureTemplate>>>>,
     pub processor_lists: BTreeMap<String, String>,
     jigsaw_states: BTreeMap<BlockStateId, bool>,
@@ -346,6 +286,7 @@ impl StructureResources {
             registry,
             transforms,
             dir: dir.to_owned(),
+            template_resources: BTreeMap::new(),
             templates: RwLock::new(HashMap::new()),
             processor_lists,
             jigsaw_states,
@@ -356,6 +297,29 @@ impl StructureResources {
                 .map(|(k, v)| (k.clone(), v.iter().cloned().collect()))
                 .collect(),
         }
+    }
+    pub fn with_templates(
+        mut self,
+        resources: BTreeMap<String, horizon_assets::resource_source::Resource>,
+    ) -> Self {
+        self.template_resources = resources;
+        self.templates = RwLock::new(HashMap::new());
+        self
+    }
+    /// In-memory template resources, retaining the same cache invalidation
+    /// as folder and archive sources.
+    pub fn with_pack_templates(self, templates: BTreeMap<String, Arc<[u8]>>) -> Self {
+        self.with_templates(
+            templates
+                .into_iter()
+                .map(|(id, bytes)| {
+                    (
+                        id,
+                        horizon_assets::resource_source::Resource::bytes(bytes.to_vec()),
+                    )
+                })
+                .collect(),
+        )
     }
     /// StructureTemplateManager.getOrCreate; missing templates are empty.
     pub fn template(&self, id: &str) -> Option<Arc<StructureTemplate>> {
@@ -369,20 +333,22 @@ impl StructureResources {
         }
         let (namespace, path) = id.split_once(':').unwrap();
         let file = self.dir.join(namespace).join(format!("{path}.nbt"));
-        let loaded = horizon_core::prepared_files::read(&file)
-            .ok()
-            .and_then(|bytes| {
-                let mut raw = Vec::new();
-                flate2::read::GzDecoder::new(bytes.as_slice())
-                    .read_to_end(&mut raw)
-                    .ok()?;
-                let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
-                Some(StructureTemplate::from_nbt(
-                    &tag,
-                    self.registry,
-                    &self.transforms,
-                ))
-            });
+        let bytes = match self.template_resources.get(&id) {
+            Some(resource) => resource.read(),
+            None => horizon_core::prepared_files::read(&file),
+        };
+        let loaded = bytes.ok().and_then(|bytes| {
+            let mut raw = Vec::new();
+            flate2::read::GzDecoder::new(bytes.as_slice())
+                .read_to_end(&mut raw)
+                .ok()?;
+            let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+            Some(StructureTemplate::from_nbt(
+                &tag,
+                self.registry,
+                &self.transforms,
+            ))
+        });
         // StructureTemplateManager.getOrCreate: missing templates are empty.
         let mut loaded = loaded.unwrap_or_else(StructureTemplate::empty);
         loaded.location = id.as_str().into();

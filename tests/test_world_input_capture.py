@@ -42,7 +42,7 @@ def function(source, name):
 class WorldInputCaptureTests(unittest.TestCase):
     def test_loading_completion_wiring(self):
         game = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        remote = (ROOT / "crates/horizon-client/src/game/remote.rs").read_text(encoding="utf-8")
+        remote = (next(ROOT.glob('crates/horizon-client/src/game/*/remote/mod.rs'))).read_text(encoding="utf-8")
         spawn = method(game, "spawn_player")
         self.assertLess(spawn.index("self.player = Some(player)"),
                         spawn.index("self.capture_loaded_world()"))
@@ -78,7 +78,10 @@ mod winit {
 }
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 struct HudBatch { scale: f32 }
-impl HudBatch { fn new(_size: [u32; 2]) -> Self { Self { scale: 2.0 } } }
+struct GuiScale;
+struct Settings;
+impl Settings { fn gui_scale_inputs(&self) -> GuiScale { GuiScale } }
+impl HudBatch { fn new(_size: [u32; 2], _inputs: GuiScale) -> Self { Self { scale: 2.0 } } }
 struct Config { width: u32, height: u32 }
 struct Renderer { config: Config }
 #[derive(Default)]
@@ -112,7 +115,7 @@ struct Game {
     captured: bool, capture_mode: Option<CursorGrabMode>, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
-    server_packs: ServerPacks, command_prompt: Option<()>, options: Options,
+    server_packs: ServerPacks, command_prompt: Option<()>, options: Options, settings: Settings,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -121,7 +124,7 @@ impl Default for Game {
             mouse: Mouse::default(), captured: false, capture_mode: None, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
             renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default(),
-            command_prompt: None, options: Options::default() }
+            command_prompt: None, options: Options::default(), settings: Settings }
     }
 }
 HELPER
@@ -419,7 +422,7 @@ fn main() {
 
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_split_layout_keeps_capture_in_the_same_window(self):
-        source = (ROOT / "crates/horizon-client/src/game/split/windows.rs").read_text(encoding="utf-8")
+        source = (next(ROOT.glob('crates/horizon-client/src/game/*/split/windows.rs'))).read_text(encoding="utf-8")
         body = function(source.replace("pub(super) fn", "pub fn"), "into_window").replace("Game<'_>", "Game")
         fixture = r'''
 use std::sync::Arc;

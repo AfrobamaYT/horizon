@@ -36,12 +36,6 @@ use horizon_core::{
     biome::{BiomeZoom, obfuscate_seed},
     paletted::PalettedContainer,
 };
-use horizon_world::{
-    chunk::BlockState,
-    nbt::{Limits, NamedTag, Tag},
-    region::RegionFile,
-    registry::BlockRegistry,
-};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -56,6 +50,10 @@ use winit::{
     event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
+};
+use {
+    horizon_core::nbt::{Limits, NamedTag, Tag},
+    horizon_world::{chunk::BlockState, region::RegionFile, registry::BlockRegistry},
 };
 
 // The game's allocator, so that `--memory`'s footprint is the game's: the system heap kept
@@ -179,7 +177,9 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let root = o.root.clone().unwrap_or_else(|| settings.resources.clone());
     let loading = Instant::now();
     let assets = Assets::load(&root)?;
-    let render = assets.reload(&root)?;
+    let render = assets.reload(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     if AtlasCheck::of(&render) != settings.atlas {
         return Err(format!(
             "the block sprites at {} are not the ones the capture was made with (resource packs \
@@ -222,6 +222,8 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
         None,
         settings.graphics_api(),
         settings.translucent_batching,
+        false,
+        false,
         false,
         false,
     ))?;
@@ -339,7 +341,7 @@ fn replay(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     }
     let loaded_ms = ms(loading.elapsed());
 
-    let hud = HudBatch::new([width, height]);
+    let hud = HudBatch::scratch([width, height]);
     let mut views = Vec::new();
     for &offset in &o.yaw_offsets {
         let mut frame = scene.frame(&hud);
@@ -562,7 +564,9 @@ fn remesh(
     let facts = BlockFacts::load(root, assets.registry)?;
     let visibility = models::load_visibility(root, assets.registry)?;
     let tables = MeshTables::new(assets, render, &facts, visibility)?;
-    let biomes = Biomes::load(root)?;
+    let biomes = Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+        root.to_path_buf(),
+    ))?;
     let seed = world_seed(save).unwrap_or_else(|| {
         eprintln!(
             "scene_replay: no seed in {}, biome blending uses 0",

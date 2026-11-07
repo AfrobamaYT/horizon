@@ -42,7 +42,7 @@ use horizon_world::{
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs, io,
+    io,
     path::Path,
     sync::Arc,
 };
@@ -184,13 +184,27 @@ impl MotionResources {
         assets: &Assets,
         facts: &crate::blocks::BlockFacts,
     ) -> Result<Self> {
-        let attributes = Arc::new(Catalog::from_json(&serde_json::from_slice(&fs::read(
-            root.join("attributes.json"),
-        )?)?)?);
+        Self::load_with_conditions(
+            root,
+            assets,
+            facts,
+            &horizon_world::conditions::LoadConditions::vanilla(),
+        )
+    }
+    /// Motion's damage definitions use the owning startup load's inventory.
+    pub fn load_with_conditions(
+        root: &Path,
+        assets: &Assets,
+        facts: &crate::blocks::BlockFacts,
+        conditions: &horizon_world::conditions::LoadConditions,
+    ) -> Result<Self> {
+        let attributes = Arc::new(Catalog::from_json(&horizon_world::json_file::read(
+            &root.join("attributes.json"),
+        )?)?);
         let file = BlockTableFile::open(&root.join("movement-properties.nbt"), assets.registry)?;
         let properties = MovementProperties::from_table(file.table("movement")?)?;
         let bundle: BTreeMap<String, String> =
-            serde_json::from_slice(&fs::read(root.join("block-tags.json"))?)?;
+            horizon_world::json_file::read(&root.join("block-tags.json"))?;
         let mut definitions = TagDefinitions::default();
         for (name, text) in bundle {
             definitions.apply_json(&name, "vanilla", &text)?;
@@ -217,7 +231,7 @@ impl MotionResources {
         )?;
         Ok(Self {
             landing: crate::landing::load(root, &properties)?,
-            health: crate::health::HealthResources::load(root)?,
+            health: crate::health::HealthResources::load_with_conditions(root, conditions)?,
             fluids: FluidResources::new(assets, facts)?,
             attributes,
             blocks: properties.bind(&MovementTags {
@@ -317,6 +331,11 @@ pub enum MotionEvent {
     /// `LayeredCauldronBlock.handleEntityOnFireInside`: a burning player in
     /// a water or powder snow cauldron; the server lowers its fill level.
     CauldronExtinguish {
+        pos: BlockPos,
+    },
+    /// `PowderSnowBlock.entityInside` (runBefore EXTINGUISH): a burning
+    /// player in powder snow destroys the block, without drops.
+    PowderSnowMelt {
         pos: BlockPos,
     },
     /// `WitherRoseBlock.entityInside`: the player's box swept through a
@@ -464,6 +483,8 @@ pub struct PlayerMotion {
     /// move.
     pub nudge: [Option<f64>; 2],
     pub last_climbable: Option<BlockPos>,
+    /// Result of the latest `LivingEntity.onClimbable` query.
+    pub on_climbable: bool,
     /// `Entity.moveDist`, `flyDist` and `nextStep`: footsteps come once per
     /// metre walked, not once per move.
     pub steps: MovementDistances,
@@ -528,9 +549,6 @@ pub struct PlayerMotion {
     /// `Entity.applyEffectsFromBlocks` runs after travel (always in the game;
     /// differential fixtures turn it off where their reference does).
     pub block_effects: bool,
-    /// The powder snow blocks this tick's movement went into: the game
-    /// destroys them if the player is burning, then puts the fire out.
-    pub powder_snow_entered: Vec<BlockPos>,
     /// The last hurts taken (`hurt_blocking`), newest last, for tests and
     /// the control socket's `hurtlog`.
     pub hurt_log: Vec<crate::health::HurtRecord>,
@@ -694,6 +712,7 @@ impl PlayerMotion {
             item_use_slows_sprint: false,
             nudge: [None; 2],
             last_climbable: None,
+            on_climbable: false,
             steps: MovementDistances {
                 next_step: 1.0,
                 ..MovementDistances::default()
@@ -721,7 +740,6 @@ impl PlayerMotion {
             entity_id: 0,
             client_loaded: true,
             block_effects: true,
-            powder_snow_entered: Vec::new(),
             hurt_log: Vec::new(),
             attack_log: Vec::new(),
             border: None,
@@ -852,7 +870,7 @@ impl PlayerMotion {
     /// `AttributeMap.pack` in `AttributeInstance.Packed.LIST_CODEC`'s form: the
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
-    pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+    pub fn saved_attributes(&self) -> horizon_core::nbt::Tag {
         self.packed_attributes(true)
     }
     /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
@@ -861,19 +879,16 @@ impl PlayerMotion {
     /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
     /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
     /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
-    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_core::nbt::Tag {
         self.packed_attributes(restore_all)
     }
-    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
-        horizon_world::nbt::Tag::List(crate::living_attributes::pack(&self.attributes, modifiers))
+    fn packed_attributes(&self, modifiers: bool) -> horizon_core::nbt::Tag {
+        horizon_core::nbt::Tag::List(crate::living_attributes::pack(&self.attributes, modifiers))
     }
     /// `AttributeMap.apply` of a saved `attributes` list
     /// (LivingEntity.readAdditionalSaveData): each known attribute takes its
     /// saved base and permanent modifiers; unknown ones are skipped.
-    pub fn apply_saved_attributes(
-        &mut self,
-        saved: Option<&horizon_world::nbt::Tag>,
-    ) -> Result<()> {
+    pub fn apply_saved_attributes(&mut self, saved: Option<&horizon_core::nbt::Tag>) -> Result<()> {
         crate::living_attributes::apply_saved(&mut self.attributes, saved)
     }
     /// `Player.readAdditionalSaveData`: the movement speed's base is the abilities' walking speed.
@@ -1126,10 +1141,15 @@ impl MotionWorld<'_, '_, '_> {
     /// matching ladder. It remembers the block.
     pub fn climbable(&mut self) -> Result<bool> {
         if self.player.flying {
+            self.player.on_climbable = false;
             return Ok(false);
         }
         let resources = self.resources;
-        climbing::on_climbable(self, &resources.climbing).map_err(|e| e.to_string().into())
+        let found: Result<bool> =
+            climbing::on_climbable(self, &resources.climbing).map_err(|e| e.to_string().into());
+        let climbable = found?;
+        self.player.on_climbable = climbable;
+        Ok(climbable)
     }
     pub fn travel_in_air(&mut self, input: Vec3) -> Result<()> {
         living_air::travel_in_air(self, input)
@@ -1725,10 +1745,16 @@ impl MotionWorld<'_, '_, '_> {
                 groups += 1;
                 last_step = step;
             }
-            if groups == 1 && !damage_only {
-                // A later group finds the fire already out.
-                self.player.powder_snow_entered.push(p);
+            // A later group finds the fire already out.
+            if groups == 1 && self.player.fire_ticks > 0 && !self.player.spectator {
+                self.player
+                    .events
+                    .push(MotionEvent::PowderSnowMelt { pos: p });
             }
+        }
+        if groups > 0 {
+            // InsideBlockEffectType.EXTINGUISH: Entity.clearFire.
+            self.player.fire_ticks = self.player.fire_ticks.min(0);
         }
         for _ in 0..groups {
             if self.player.health.dead_or_dying() {
@@ -1916,6 +1942,9 @@ impl MotionWorld<'_, '_, '_> {
                     }
                     _ => {}
                 }
+                // ServerPlayer.onInsideBlock: the server's pass reports it too,
+                // as the enter_block trigger is the server's to fire.
+                self.player.events.push(MotionEvent::EnterBlock { state });
                 if damage_only {
                     continue;
                 }
@@ -1933,8 +1962,6 @@ impl MotionWorld<'_, '_, '_> {
                         .push(MotionEvent::InsidePortal { pos: p }),
                     _ => {}
                 }
-                // ServerPlayer.onInsideBlock
-                self.player.events.push(MotionEvent::EnterBlock { state });
             }
         }
         Ok(iterations + 1)
@@ -2330,9 +2357,17 @@ impl crate::auto_jump::AutoJumpWorld for MotionWorld<'_, '_, '_> {
         Ok(binding.collision_shape_with_context(&mut self.collisions(), state, p, &context)?)
     }
     fn collision_boxes(&mut self, bounds: Aabb) -> Result<Vec<Aabb>> {
+        // EntityGetter.getEntityCollisions queries with a small inflation, and
+        // CollisionGetter.getCollisions returns these before block shapes.
+        let query = bounds.inflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+        let mut boxes: Vec<_> = self
+            .entities
+            .iter()
+            .copied()
+            .filter(|b| b.intersects(query))
+            .collect();
         let context = self.context();
         let mut scene = self.collisions();
-        let mut boxes = Vec::new();
         for hit in horizon_world::block_collision_scan::BlockCollisionScan::new(
             &mut scene, context, bounds, false, 1_000_000,
         )? {
@@ -3206,6 +3241,31 @@ pub fn block_jump_factor_at(
         |blocks, location| movement_support::block_jump_factor(blocks, location),
     )
 }
+/// `Entity.getOnPosLegacy` with the world's bound fence and wall tags.
+pub(crate) fn legacy_block_support_at(
+    world: &World,
+    properties: &BoundMovementProperties,
+    position: Vec3,
+    supporting_block: Option<BlockPos>,
+) -> BlockPos {
+    movement_support::support_position(
+        &mut RegistryMovementWorld {
+            properties,
+            edits: &NoFactorEdits,
+            world: &mut WorldBlocks(world),
+        },
+        position,
+        supporting_block,
+        movement_support::LEGACY_SUPPORT_OFFSET,
+    )
+    .unwrap_or_else(|_| {
+        BlockPos::new(
+            position.x.floor() as i32,
+            (position.y - f64::from(movement_support::LEGACY_SUPPORT_OFFSET)).floor() as i32,
+            position.z.floor() as i32,
+        )
+    })
+}
 
 #[cfg(test)]
 mod tests {
@@ -3435,7 +3495,7 @@ mod tests {
             health: 40.0,
             food: 20,
             saturation: 5.0,
-            player_extra: Some(horizon_world::nbt::Tag::compound([(
+            player_extra: Some(horizon_core::nbt::Tag::compound([(
                 "attributes",
                 p.saved_attributes(),
             )])),
@@ -3460,6 +3520,47 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn auto_jump_detects_collidable_entities() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
+        );
+        let assets = Assets::load(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let mut player = PlayerMotion::new(&resources, Vec3::new(10.0, 100.0, 10.0)).unwrap();
+        player.auto_jump_enabled = true;
+        player.ground.on_ground = true;
+        player.move_vector = [0.0, 1.0];
+        let entities = [Aabb::new(
+            Vec3::new(9.5, 100.0, 10.5),
+            Vec3::new(10.5, 100.8, 11.5),
+        )];
+        MotionWorld {
+            tag_items: None,
+            block_registries: None,
+            loop_context: crate::test_resources::server_loop_context(),
+            damage_hooks: &crate::health::DamageHooks::NONE,
+            entities: &entities,
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+            health: &resources.health,
+        }
+        .update_auto_jump(0.0, 0.1)
+        .unwrap();
+        assert_eq!(player.auto_jump_time, 1);
+    }
+
+    #[test]
     fn player_stands_walks_sneaks_and_jumps_on_ghast() {
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
             .map(std::path::PathBuf::from)
@@ -3472,7 +3573,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3552,7 +3657,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3626,7 +3735,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3679,7 +3792,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3728,6 +3845,70 @@ mod tests {
         assert_eq!(asks(&dry), 0);
     }
 
+    /// `PowderSnowBlock.entityInside`: a burning player in powder snow asks
+    /// for the block to be destroyed, and EXTINGUISH puts the fire out.
+    #[test]
+    fn a_burning_player_melts_powder_snow() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let snow = assets
+            .registry
+            .default_state("minecraft:powder_snow")
+            .unwrap();
+        scene.set(20, 4, 20, snow).unwrap();
+        let mut run = |fire: i32| {
+            let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.0, 20.5)).unwrap();
+            player.fire_ticks = fire;
+            MotionWorld {
+                tag_items: None,
+                block_registries: None,
+                loop_context: crate::test_resources::server_loop_context(),
+                damage_hooks: &crate::health::DamageHooks::NONE,
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+                health: &resources.health,
+            }
+            .controlled_simulation_tick(Default::default())
+            .unwrap();
+            player
+        };
+        let burning = run(100);
+        assert!(burning.fire_ticks <= 0, "powder snow must put the fire out");
+        assert!(
+            burning
+                .events
+                .iter()
+                .any(|e| matches!(e, MotionEvent::PowderSnowMelt { .. }))
+        );
+        let dry = run(-20);
+        assert!(
+            !dry.events
+                .iter()
+                .any(|e| matches!(e, MotionEvent::PowderSnowMelt { .. }))
+        );
+    }
+
     #[test]
     fn standing_in_a_wither_rose_asks_for_its_effect() {
         let root = std::env::var_os("HORIZON_TEST_RESOURCES")
@@ -3741,7 +3922,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3829,7 +4014,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -3907,7 +4096,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -4010,7 +4203,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -4079,7 +4276,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -4135,7 +4336,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 1).unwrap();
@@ -4201,7 +4406,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let run = |steps| {
@@ -4249,7 +4458,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let run = |name: &str, spectator: bool| {
@@ -4611,7 +4824,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         // LivingEntity.updateFallFlyingMovement run on the 26.3 JVM from
@@ -4676,7 +4893,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         // Entity.checkFallDistanceAccumulation: capped above -0.5 a tick, not below.
@@ -4729,7 +4950,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for wet in [false, true] {
@@ -4779,7 +5004,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for spectator in [false, true] {
@@ -4816,7 +5045,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for client_side in [false, true] {
@@ -4874,7 +5107,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for slow_falling in [false, true] {
@@ -4919,7 +5156,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -4969,7 +5210,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5022,7 +5267,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5060,7 +5309,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5139,7 +5392,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -5190,7 +5447,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5238,7 +5499,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5291,7 +5556,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -5360,7 +5629,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -5564,9 +5837,9 @@ mod tests {
             w.player.velocity.y > 0.02,
             "look up must steer a submerged swimmer upward"
         );
-        let extra = horizon_world::nbt::Tag::compound([
-            ("Fire", horizon_world::nbt::Tag::Short(160)),
-            ("Air", horizon_world::nbt::Tag::Short(8)),
+        let extra = horizon_core::nbt::Tag::compound([
+            ("Fire", horizon_core::nbt::Tag::Short(160)),
+            ("Air", horizon_core::nbt::Tag::Short(8)),
         ]);
         let mut level = crate::save::Level {
             health: 13.0,
@@ -5622,7 +5895,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -5702,7 +5979,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for name in ["minecraft:lava", "minecraft:water"] {
@@ -5761,7 +6042,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -5838,7 +6123,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for (water_level, lava_level, ground_jump) in [(0, 6, true), (6, 0, false)] {
@@ -5894,7 +6183,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
@@ -5953,7 +6246,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let water = assets.registry.default_state("minecraft:water").unwrap();
@@ -6028,7 +6325,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -6090,7 +6391,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -6146,7 +6451,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -6196,7 +6505,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -6257,7 +6570,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 3).unwrap();
@@ -6322,7 +6639,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         let mut scene = World::test_scene(&assets, &render, 2).unwrap();
@@ -6366,7 +6687,11 @@ mod tests {
             return;
         }
         let assets = Assets::load(&root).unwrap();
-        let render = assets.reload(&root).unwrap();
+        let render = assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.to_path_buf(),
+            ))
+            .unwrap();
         let binding = crate::collisions::load(&root, assets.registry).unwrap();
         let resources = MotionResources::load(&root, &assets).unwrap();
         for (client_side, want) in [

@@ -1,4 +1,5 @@
-//! `mod-api`: fill new native hooks' placeholder bodies in the hand-written source.
+//! `mod-api`: fill new native hooks' placeholder bodies in the hand-written source, and write
+//! the layouts of the foreign types that cross to wasm mods from the locked source.
 //! `mod-api wit <dir>`: write the mod API's generated files (`mod-api.wit` among them) to `<dir>`,
 //! as the crate's build generates them, for CI's artifact and interface report.
 use std::path::{Path, PathBuf};
@@ -12,7 +13,18 @@ fn checkout() -> Result<PathBuf, String> {
 }
 
 pub fn run() -> Result<(), String> {
-    horizon_mod_api_gen::fill_hooks(&checkout()?)
+    let root = checkout()?;
+    horizon_mod_api_gen::fill_hooks(&root)?;
+    horizon_mod_api_gen::crossing::write_foreign_layouts(&root)
+}
+
+/// Prints the hook-notes chapter for the book preprocessor, without writing a source file.
+pub fn notes() -> Result<(), String> {
+    print!(
+        "{}",
+        horizon_mod_api_gen::generate_hook_notes(&checkout()?)?
+    );
+    Ok(())
 }
 
 pub fn wit(out: &Path) -> Result<(), String> {

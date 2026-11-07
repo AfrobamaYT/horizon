@@ -11,12 +11,14 @@ use horizon_client::{
     save::{self, ChunkExtras},
 };
 use horizon_core::paletted::PalettedContainer;
-use horizon_world::{
-    DATA_VERSION,
-    nbt::{self, Limits, Tag},
-    registry::BlockRegistry,
-};
 use std::{collections::HashMap, hint::black_box, sync::Arc, time::Instant};
+use {
+    horizon_core::{
+        nbt,
+        nbt::{Limits, Tag},
+    },
+    horizon_world::{DATA_VERSION, registry::BlockRegistry},
+};
 
 type Entities = HashMap<(i32, i32, i32), BlockEntity>;
 type Names = HashMap<(i32, i32, i32), String>;
@@ -159,7 +161,9 @@ fn encoding_fixture() -> horizon_client::Result<(BlockRegistry, Biomes)> {
             encoder.write_header()?.write_image_data(&[0, 128, 0])?;
         }
         std::fs::write(biomes.join("plains.json"), b"{}")?;
-        Biomes::load(&temp)
+        Biomes::load(&horizon_assets::resource_source::ResourceRoot::directory(
+            temp.to_path_buf(),
+        ))
     })();
     std::fs::remove_dir_all(&temp)?;
     Ok((registry, result?))

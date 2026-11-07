@@ -11,12 +11,12 @@ again restores vanilla's behaviour completely.
 |---|---|
 | Settings, parsing and saving | `crates/horizon-client-render/src/extras.rs` |
 | FPS and click counters (for native mods) | `extras.rs` (pure logic, unit tested) |
-| Dynamic lights: item glow, nearest sources | `crates/horizon-client-render/src/dynamic_light.rs` (unit tested), `game/dynamic_lights.rs`, `terrain.wgsl` and `entity.wgsl` (`dynamic_block_light`) |
+| Dynamic lights: item glow, nearest sources | `crates/horizon-client-render/src/dynamic_light.rs` (unit tested), `game/interface/dynamic_lights.rs`, `terrain.wgsl` and `entity.wgsl` (`dynamic_block_light`) |
 | HUD drawing (a native mod's minimap, corner stacking) | `crates/horizon-client/src/extras_hud.rs` |
 | Minimap colours, tiles and image (for the Minimap native mod) | `crates/horizon-client-render/src/minimap.rs` |
 | Reconnect policy and backoff | `crates/horizon-client/src/reconnect.rs` |
-| Game glue (input hooks, per-frame update) | `crates/horizon-client/src/game/extras.rs` |
-| Mouse Tweaks-style controls, sort buttons | `crates/horizon-client/src/game/tweaks.rs` |
+| Game glue (input hooks, per-frame update) | `crates/horizon-client/src/game/interface/extras.rs` |
+| Mouse Tweaks-style controls, sort buttons | `crates/horizon-client/src/game/interface/tweaks.rs` |
 | Sort order and its clicks | `crates/horizon-client/src/inv_sort.rs` (pure, unit tested) |
 | The music page's rows, and the pools it filters | `options_ui.rs` (`Page::Music`), `crates/horizon-client/src/music.rs` (`track_groups`, `MusicManager::set_off`), `sound_events.rs` (`sound_except`) |
 | The settings page | `options_ui.rs` (`Page::Extras`): **Options → Horizon Settings... → Extras...**; fullbright, dynamic lights and hiding block-break particles are on the graphics screen's Quality page instead (`graphics_ui.rs`, **Options → Video Settings...**) |
@@ -75,10 +75,11 @@ The **FPS counter**, **Keystrokes**, **Zoom** and the **Minimap** are official n
 horizon-rust/horizon-mods under `native/<name>/`, [mods.md](modding/src/start/installing.md#horizons-official-mods)), with the same look and
 options. Players install them from the launcher's Mods page, and the launcher builds them into the game
 ([modding/src/how-to/native-mods.md](modding/src/how-to/native-mods.md)). The game keeps
-the hook points they use (`crates/horizon-client/src/game/native_hooks.rs`), and `horizon-extras.txt` keeps the old
-keys and `movedToMods`.
+the hook points they use (`crates/horizon-client/src/game/native_hooks/`), and `horizon-extras.txt` keeps the old
+keys and `movedToMods`. The Extras page keeps a **Zoom** row: the mod's switch and Settings button when
+it is built in, else a note saying to install it from the Mods page.
 
-The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks.rs`, [mods.md](modding/src/how-to/content-mods.md)):
+The game still draws the minimap, for the native mod (`native_minimap` in `native_hooks/`, [mods.md](modding/src/how-to/content-mods.md)):
 - a corner map (top right by default), square or round, small/medium/large, zoom 0.5 to 4 blocks per pixel, rotating
   with the player or north up, with the player arrow (vanilla's map decoration sprite);
 - vanilla's `MapColor` per block, as map items use, with the map item's height shading and water-depth dithering;
@@ -95,7 +96,7 @@ The game still draws the minimap, for the native mod (`native_minimap` in `nativ
   (`LivingEntityRenderer.shouldShowName`).
 - Hidden in first person, while sleeping, in spectator mode, while invisible, and
   whenever the team's name tag visibility would hide it, exactly as the other
-  players' tags (`game/names.rs`, `own_name_tag`). Client-only: nothing is sent.
+  players' tags (`game/interface/names.rs`, `own_name_tag`). Client-only: nothing is sent.
 
 ### Hide block-break particles (`hideBlockParticles`, default off)
 - Hides the debris particles that burst from a block when it breaks

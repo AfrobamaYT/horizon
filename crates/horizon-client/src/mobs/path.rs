@@ -10,87 +10,9 @@ use crate::blocks::Fluid;
 use crate::fast_hash::FxHashMap;
 use horizon_core::geometry::{Aabb, Vec3};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PathType {
-    Blocked,
-    Open,
-    Walkable,
-    WalkableDoor,
-    Trapdoor,
-    PowderSnow,
-    OnTopOfPowderSnow,
-    Fence,
-    Lava,
-    Water,
-    WaterBorder,
-    Rail,
-    UnpassableRail,
-    FireInNeighbor,
-    Fire,
-    DamagingInNeighbor,
-    Damaging,
-    DoorOpen,
-    DoorWoodClosed,
-    DoorIronClosed,
-    Breach,
-    Leaves,
-    StickyHoney,
-    Cocoa,
-    DamageCautious,
-    OnTopOfTrapdoor,
-    BigMobsCloseToDanger,
-}
-pub const PATH_TYPES: usize = 27;
-impl PathType {
-    pub fn from_name(name: &str) -> Self {
-        match name {
-            "OPEN" => Self::Open,
-            "WALKABLE" => Self::Walkable,
-            "WALKABLE_DOOR" => Self::WalkableDoor,
-            "TRAPDOOR" => Self::Trapdoor,
-            "POWDER_SNOW" => Self::PowderSnow,
-            "ON_TOP_OF_POWDER_SNOW" => Self::OnTopOfPowderSnow,
-            "FENCE" => Self::Fence,
-            "LAVA" => Self::Lava,
-            "WATER" => Self::Water,
-            "WATER_BORDER" => Self::WaterBorder,
-            "RAIL" => Self::Rail,
-            "UNPASSABLE_RAIL" => Self::UnpassableRail,
-            "FIRE_IN_NEIGHBOR" => Self::FireInNeighbor,
-            "FIRE" => Self::Fire,
-            "DAMAGING_IN_NEIGHBOR" => Self::DamagingInNeighbor,
-            "DAMAGING" => Self::Damaging,
-            "DOOR_OPEN" => Self::DoorOpen,
-            "DOOR_WOOD_CLOSED" => Self::DoorWoodClosed,
-            "DOOR_IRON_CLOSED" => Self::DoorIronClosed,
-            "BREACH" => Self::Breach,
-            "LEAVES" => Self::Leaves,
-            "STICKY_HONEY" => Self::StickyHoney,
-            "COCOA" => Self::Cocoa,
-            "DAMAGE_CAUTIOUS" => Self::DamageCautious,
-            "ON_TOP_OF_TRAPDOOR" => Self::OnTopOfTrapdoor,
-            "BIG_MOBS_CLOSE_TO_DANGER" => Self::BigMobsCloseToDanger,
-            _ => Self::Blocked,
-        }
-    }
-    /// PathType's default malus.
-    pub fn malus(self) -> f32 {
-        match self {
-            Self::Blocked | Self::PowderSnow | Self::Fence | Self::Lava | Self::UnpassableRail => {
-                -1.0
-            }
-            Self::Damaging | Self::DoorWoodClosed | Self::DoorIronClosed | Self::Leaves => -1.0,
-            Self::Water
-            | Self::WaterBorder
-            | Self::FireInNeighbor
-            | Self::DamagingInNeighbor
-            | Self::StickyHoney => 8.0,
-            Self::Fire => 16.0,
-            Self::Breach | Self::BigMobsCloseToDanger => 4.0,
-            _ => 0.0,
-        }
-    }
-}
+/// The node kinds, moved to `mod_api` so mods can name them (#944).
+pub use mod_api::PathType;
+pub const PATH_TYPES: usize = PathType::COUNT;
 
 impl MobWorld<'_> {
     pub fn path_type_from_state(&self, x: i32, y: i32, z: i32) -> PathType {

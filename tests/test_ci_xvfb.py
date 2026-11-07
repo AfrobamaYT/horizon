@@ -24,6 +24,7 @@ sys.exit(int(sys.argv[1]))
 """
 
 
+@unittest.skipIf(os.name == "nt", "the wrapper passes a file descriptor to Xvfb, for Linux CI")
 class XvfbTests(unittest.TestCase):
     def test_ready_display_replaces_inherited_session_and_is_cleaned_up(self):
         env = dict(os.environ, DISPLAY=":9999", WAYLAND_DISPLAY="owner-display",

@@ -1,16 +1,19 @@
 //! Dispenser use of buckets: `BucketPickup.pickupBlock` for an empty bucket and
 //! `DispensibleContainerItem.emptyContents` for filled ones (`BucketItem`,
 //! `MobBucketItem`, `SolidBucketItem`), both without a player.
-use super::{
-    Behaviours, Dimension, LevelAccess, Sim, Ticks,
-    classes::{Class, Interface},
-};
 use crate::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
 use horizon_core::{position::BlockPos, random::RandomSource};
 use std::sync::Arc;
+use {
+    super::{
+        Behaviours, LevelAccess, Sim, Ticks,
+        classes::{Class, Interface},
+    },
+    horizon_core::dimension::Dimension,
+};
 
 /// What a filled bucket empties into the world.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,7 +160,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.empty_sound(pos, sound, mob);
             return Some(pos);
         }
-        if may_replace && !b.instance_of(state, Class::Liquid) {
+        // `BlockState.liquid()`: water, lava and the bubble column. A bubble
+        // column is not a `LiquidBlock`, and breaking it first spills break
+        // particles and a `block_destroy` a sculk sensor hears.
+        if may_replace && !b.liquid(state) {
             self.destroy_block(pos, true, super::flags::UPDATE_LIMIT);
         }
         let source = FluidState::new(
