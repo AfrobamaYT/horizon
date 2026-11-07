@@ -250,12 +250,14 @@ impl Game<'_> {
                 true
             }
             Target::Boat(id) => {
-                let Some(b) = self.boats.iter_mut().find(|b| b.id == id) else {
+                let Some(i) = self.boats.iter().position(|b| b.id == id) else {
                     return false;
                 };
-                b.leash = Some(holder);
-                b.leash_player = player;
-                b.leash_pending = None;
+                self.boats.update(i, |b| {
+                    b.leash = Some(holder);
+                    b.leash_player = player;
+                    b.leash_pending = None;
+                });
                 true
             }
             _ => false,

@@ -29,7 +29,7 @@ impl Change {
 pub(super) struct ModSounds {
     /// The last handle given; handles are never reused.
     last: Cell<u64>,
-    /// Sounds asked for (`native_play_local_sound`), with their handle and the ticks each
+    /// Sounds asked for (`play_local_sound`), with their handle and the ticks each
     /// waits, until the next audio update plays them (`apply_mod_sounds`).
     pub(super) queued: RefCell<Vec<(u64, SoundPlay, u32)>>,
     /// Stops and fades asked for since the last audio update, in order.
@@ -88,7 +88,7 @@ impl Game<'_> {
     }
     /// For a client mod: where its sound is. A stop or a fade to 0 at once asked since the last
     /// audio update already reads `Stopped`. None on a server.
-    pub(super) fn native_sound_state(&self, sound: SoundRef) -> Option<SoundState> {
+    pub(super) fn sound_state(&self, sound: SoundRef) -> Option<SoundState> {
         if !self.native_window() {
             return None;
         }
@@ -122,7 +122,7 @@ impl Game<'_> {
     /// For a client mod: stops its sound for good at the next audio update. A waiting sound
     /// never starts and a looping one never repeats. False, changing nothing, for a sound that
     /// is already over, and on a server.
-    pub(super) fn native_sound_stop(&self, sound: SoundRef) -> bool {
+    pub(super) fn sound_stop(&self, sound: SoundRef) -> bool {
         self.change_mod_sound(sound, Change::Stop)
     }
     /// For a client mod: from the next audio update, its sound's volume moves to `volume` (at
@@ -134,14 +134,14 @@ impl Game<'_> {
     /// a fade up from a `SoundPlay` at volume 0 fades it in. A later fade replaces one in
     /// progress. False, changing nothing, for a volume that isn't a number at or above 0, a sound
     /// that is already over, and on a server.
-    pub(super) fn native_sound_fade(&self, sound: SoundRef, volume: f32, ticks: u32) -> bool {
+    pub(super) fn sound_fade(&self, sound: SoundRef, volume: f32, ticks: u32) -> bool {
         if !volume.is_finite() || volume < 0.0 {
             return false;
         }
         self.change_mod_sound(sound, Change::Fade { volume, ticks })
     }
     fn change_mod_sound(&self, sound: SoundRef, change: Change) -> bool {
-        match self.native_sound_state(sound) {
+        match self.sound_state(sound) {
             Some(SoundState::Waiting | SoundState::Playing) => {
                 let id = sound.fields().id;
                 self.mod_sounds.changes.borrow_mut().push((id, change));
@@ -153,7 +153,7 @@ impl Game<'_> {
     /// For a client mod: every sound event the client's resources have
     /// (`SoundManager.getAvailableSounds`), sorted. It builds a new list each call: ask from
     /// setup or a settings screen, not every frame. Empty on a server.
-    pub(super) fn native_sound_events(&self) -> Vec<Identifier> {
+    pub(super) fn sound_events(&self) -> Vec<Identifier> {
         if !self.native_window() {
             return Vec::new();
         }
@@ -167,7 +167,7 @@ impl Game<'_> {
     /// (`SoundEngine.getAvailableSoundDevices`). Listing them probes every device (tens of
     /// milliseconds on some systems): ask from a settings screen, not every frame. Empty on a
     /// server and where sound is off.
-    pub(super) fn native_audio_devices(&self) -> Vec<String> {
+    pub(super) fn audio_devices(&self) -> Vec<String> {
         if !self.native_window() {
             return Vec::new();
         }
@@ -176,7 +176,7 @@ impl Game<'_> {
     /// For a client mod: the output device the options ask for (`Options.soundDevice`), empty
     /// for the system's default. The sound plays on the default when that one can't be opened.
     /// Changing it keeps every mod sound playing, with its handle. Empty on a server.
-    pub(super) fn native_audio_device(&self) -> String {
+    pub(super) fn audio_device(&self) -> String {
         if !self.native_window() {
             return String::new();
         }
@@ -252,18 +252,18 @@ mod tests {
                 assert_ne!(stopped, faded, "a handle per play");
                 game.tick_sound_engine();
                 assert!(game.mod_sounds.queued.borrow().is_empty());
-                assert_eq!(game.native_sound_state(stopped), Some(SoundState::Stopped));
+                assert_eq!(game.sound_state(stopped), Some(SoundState::Stopped));
                 assert!(
                     !game.mod_sounds.started.contains_key(&stopped.fields().id),
                     "a stop lets the play go"
                 );
                 // Without an output device (a test machine) the engine starts nothing, so the
                 // faded loop is over here; with one it plays until its fade ends.
-                assert_ne!(game.native_sound_state(faded), Some(SoundState::Waiting));
+                assert_ne!(game.sound_state(faded), Some(SoundState::Waiting));
                 // Every event the engine has, none dropped (prepared test resources may have
                 // no sounds at all).
                 let names = game.audio.event_names();
-                let events = game.native_sound_events();
+                let events = game.sound_events();
                 assert_eq!(events.len(), names.len());
                 assert!(
                     names
@@ -272,16 +272,16 @@ mod tests {
                 );
                 // A handle no play has, and a server.
                 let unknown = sound_ref(999_999);
-                assert_eq!(game.native_sound_state(unknown), Some(SoundState::Stopped));
-                assert!(!game.native_sound_stop(unknown));
+                assert_eq!(game.sound_state(unknown), Some(SoundState::Stopped));
+                assert!(!game.sound_stop(unknown));
                 game.options.execution_role =
                     super::super::execution_role::ExecutionRole::DedicatedServer;
-                assert_eq!(game.native_sound_state(faded), None);
+                assert_eq!(game.sound_state(faded), None);
                 assert!(
-                    game.native_play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0)
+                    game.play_local_sound(&SoundPlay::ui("minecraft:ui.button.click"), 0)
                         .is_none()
                 );
-                assert!(game.native_sound_events().is_empty());
+                assert!(game.sound_events().is_empty());
             });
         });
     }
