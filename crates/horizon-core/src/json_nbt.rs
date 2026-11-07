@@ -205,14 +205,17 @@ pub fn tag_to_json(root: &Tag) -> Result<Value, JsonNbtError> {
                     Tag::Int(v) => Value::from(*v),
                     Tag::Long(v) => Value::from(*v),
                     Tag::Float(bits) => Value::Number(
-                        crate::java_number::java_float(f32::from_bits(*bits))
-                            .parse()
-                            .expect("validated finite float"),
+                        Number::from_f64(
+                            crate::java_number::java_float(f32::from_bits(*bits))
+                                .parse::<f64>()
+                                .expect("validated finite float"),
+                        )
+                        .expect("validated finite float"),
                     ),
+                    // Do not reparse through serde_json: its optional parser
+                    // features must not affect an already typed double's bits.
                     Tag::Double(bits) => Value::Number(
-                        crate::java_number::java_double(f64::from_bits(*bits))
-                            .parse()
-                            .expect("validated finite double"),
+                        Number::from_f64(f64::from_bits(*bits)).expect("validated finite double"),
                     ),
                     Tag::String(s) => Value::String(s.to_string().expect("validated UTF-16")),
                     Tag::ByteArray(values) => {
@@ -466,6 +469,28 @@ mod tests {
             tag_to_json(&json_to_tag(&json!(true)).unwrap()).unwrap(),
             json!(1)
         );
+    }
+
+    #[test]
+    fn reverse_numbers_do_not_depend_on_json_parser_features() {
+        for value in [
+            123456789012345.67,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            f64::from_bits(1),
+            -0.0,
+        ] {
+            let json = tag_to_json(&Tag::Double(value.to_bits())).unwrap();
+            assert_eq!(json.as_f64().unwrap().to_bits(), value.to_bits());
+        }
+        for (value, expected) in [
+            (0.1f32, 0.1f64),
+            (f32::from_bits(1), 1.4e-45f64),
+            (f32::MAX, 3.4028235e38f64),
+        ] {
+            let json = tag_to_json(&Tag::Float(value.to_bits())).unwrap();
+            assert_eq!(json.as_f64().unwrap().to_bits(), expected.to_bits());
+        }
     }
 
     #[test]
