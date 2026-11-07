@@ -841,23 +841,23 @@ fn merge_in_join_order<const N: usize>(
 entity_lists!(define_entity_handles,);
 horizon_client::impl_joined!(FallingBlock);
 
-macro_rules! entity_borrow {
-    (shared, $place:expr) => {
-        &$place
-    };
-    (exclusive, $place:expr) => {
-        &mut $place
+macro_rules! entity_access {
+    (shared, $list:expr, $index:expr, $entity:ident, $body:expr) => {{
+        let $entity = &$list[$index];
+        $body
+    }};
+    (exclusive, $list:expr, $index:expr, $entity:ident, $body:expr) => {
+        $list.update($index, |$entity| $body)
     };
 }
-pub(crate) use entity_borrow;
+pub(crate) use entity_access;
 
 macro_rules! match_entity {
     (($borrow:ident, $entity:ident, $game:expr, $handle:expr, $body:expr)
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         match $handle {
             $($crate::game::entity::EntityHandle::$kind(i) => {
-                let $entity = $crate::game::entity::entity_borrow!($borrow, $game$(.$list)+[i]);
-                $body
+                $crate::game::entity::entity_access!($borrow, $game$(.$list)+, i, $entity, $body)
             })*
         }
     };
@@ -948,7 +948,7 @@ pub(super) use for_each_entity;
 macro_rules! walk_lists_mut {
     (($lists:expr, $entity:ident, $body:block)
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
-        $(for $entity in $lists.$field.iter_mut() $body)*
+        $($lists.$field.for_each_mut(|$entity| $body);)*
     };
 }
 pub(crate) use walk_lists_mut;
