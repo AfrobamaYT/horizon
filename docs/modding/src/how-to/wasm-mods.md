@@ -41,6 +41,10 @@ load, and `if_installed!` keeps the mod from calling it.
 
 ## In the game
 
-The game's wasm mod boundary is being rebuilt on a generated shared-memory layout. Until it lands,
-a game refuses every `mod.wasm` and names the reason on the Mods page; a mod whose dependencies
-don't resolve is refused with that reason instead.
+The game's wasm boundary is being rebuilt. Each dependency group uses shared memory and one copy
+of the standard library; its members are core wasm shared modules, not components. A layout mismatch
+or an unresolved dependency is refused and named on the Mods page. Until the new loader lands, the
+game refuses `mod.wasm`.
+
+The game limits execution time, memory and table usage. A trap or limit hit disables the affected
+group. APIs marked `Not on wasm` in their Rust documentation cannot be used by wasm mods.

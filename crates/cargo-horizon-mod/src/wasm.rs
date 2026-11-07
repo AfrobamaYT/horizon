@@ -47,13 +47,11 @@ const STD_CRATES: &[&str] = &[
     "panic_unwind",
 ];
 
-/// Whether a member exports `name` to its group: only the component's own exports (the mod
-/// API's, `<interface>#<function>`, and the canonical ABI's `cabi_*`). Every other symbol a
-/// crate exports (the guest glue's entry into the mod, a JS runtime's glue from a dependency
-/// such as `getrandom`) is the member's own, and left out so the linker drops what only it
-/// reached.
+/// Guest boundary exports, kept even though they originate in an rlib dependency.
+const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
+
 fn group_export(name: &str) -> bool {
-    name.contains('#') || name.starts_with("cabi_")
+    GUEST_EXPORTS.contains(&name)
 }
 
 /// The pinned toolchain's version line, its sysroot's linker, installing it first if needed.
@@ -429,6 +427,10 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     );
     if role == "std" {
         out.push("--export-all".to_owned());
+    } else {
+        for name in GUEST_EXPORTS {
+            out.push(format!("--export={name}"));
+        }
     }
     let status = Command::new(&lld)
         .args(&out)
@@ -447,7 +449,7 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         {
             continue;
         }
-        // A member imports the mod API (`<package>:<name>/…`) and its group (`env`, `GOT.*`).
+        // A member imports the host ABI (`horizon`) and its group (`env`, `GOT.*`).
         // Any other import a crate declared (a JS runtime's, from `getrandom` under `zip`,
         // some under `env` itself) is never called in the game: it becomes a group import the
         // linker stubs to trap, named for this member, as the linker makes one stub per
@@ -464,8 +466,8 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
                 let js = import.name.starts_with("__wbindgen") || import.name.starts_with("__wbg");
                 let ours = !js
                     && (import.module == "env"
-                        || import.module.starts_with("GOT.")
-                        || import.module.contains(':'));
+                        || import.module == "horizon"
+                        || import.module.starts_with("GOT."));
                 let ty =
                     wasm_encoder::EntityType::try_from(import.ty).map_err(|e| format!("{e:?}"))?;
                 if ours {
@@ -502,4 +504,19 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
         }
     }
     std::fs::write(&output, module.finish()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::group_export;
+
+    #[test]
+    fn wasm_guest_exports_are_kept() {
+        for name in ["horizon_layout", "horizon_in", "horizon_hook"] {
+            assert!(group_export(name));
+        }
+        for name in ["cabi_realloc", "old:interface#hook", "unrelated"] {
+            assert!(!group_export(name));
+        }
+    }
 }
