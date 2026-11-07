@@ -221,6 +221,28 @@ impl<A: TryIntoEngine, B: TryIntoEngine<Error = A::Error>> TryIntoEngine for (A,
     }
 }
 
+impl TryIntoEngine for mod_api::NativeItemDisplayContext {
+    type Engine = horizon_assets::item_model::DisplayContext;
+    type Error = ();
+    fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
+        use horizon_assets::item_model::DisplayContext as Engine;
+        use mod_api::NativeItemDisplayContext as Api;
+        Ok(match self {
+            Api::None => Engine::None,
+            Api::ThirdPersonLeftHand => Engine::ThirdPersonLeftHand,
+            Api::ThirdPersonRightHand => Engine::ThirdPersonRightHand,
+            Api::FirstPersonLeftHand => Engine::FirstPersonLeftHand,
+            Api::FirstPersonRightHand => Engine::FirstPersonRightHand,
+            Api::Head => Engine::Head,
+            Api::Gui => Engine::Gui,
+            Api::Ground => Engine::Ground,
+            Api::Fixed => Engine::Fixed,
+            Api::OnShelf => Engine::OnShelf,
+            _ => return Err(()),
+        })
+    }
+}
+
 impl TryIntoApi for horizon_client::merchant::ItemCost {
     type Api = mod_api::ItemCost;
     type Error = StackReadError;

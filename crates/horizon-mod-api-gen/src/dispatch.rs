@@ -650,12 +650,17 @@ fn stack_crossing(
         struct Stack(bool);
         impl<'ast> Visit<'ast> for Stack {
             fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-                self.0 |= path.path.segments.last().is_some_and(|s| {
-                    matches!(
-                        s.ident.to_string().as_str(),
-                        "ItemStack" | "ItemCost" | "MerchantOffer"
-                    )
-                });
+                self.0 |= path
+                    .path
+                    .segments
+                    .first()
+                    .is_none_or(|s| s.ident != "mod_api")
+                    && path.path.segments.last().is_some_and(|s| {
+                        matches!(
+                            s.ident.to_string().as_str(),
+                            "ItemStack" | "ItemCost" | "MerchantOffer"
+                        )
+                    });
                 syn::visit::visit_type_path(self, path);
             }
         }
