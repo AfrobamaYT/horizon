@@ -3097,6 +3097,8 @@ mod item_display_saved_transform_tests {
             None,
         )
         .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
         game.build_registries();
         game.set_allow_commands(true);
 

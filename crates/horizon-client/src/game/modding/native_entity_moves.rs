@@ -22,7 +22,7 @@ fn in_bounds([x, y, z]: [f64; 3]) -> bool {
 /// `Direction.fromYRot`: the horizontal direction a yaw faces.
 fn facing(yaw: f32) -> &'static str {
     const BY_2D: [&str; 4] = ["south", "west", "north", "east"];
-    BY_2D[((f64::from(yaw) / 90.0 + 0.5).floor() as i64 & 3) as usize]
+    BY_2D[((f64::from(yaw) / 90.0 + 0.5).floor() as i32 & 3) as usize]
 }
 
 impl Game<'_> {
