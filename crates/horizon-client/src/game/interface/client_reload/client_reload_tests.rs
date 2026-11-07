@@ -968,6 +968,7 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                     Some(game.settings.clone()),
                     None,
                     Vec::new(),
+                    None,
                 )
                 .unwrap()
                 .unwrap();

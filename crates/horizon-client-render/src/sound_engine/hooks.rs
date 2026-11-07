@@ -13,10 +13,18 @@ use mod_api::{ChannelRef, HookId, OwningLoop, SoundAttenuation, SoundPlay, Sound
 #[inline(never)]
 pub fn native_play_sound(
     context: &horizon_world::native_load_context::LoopContext,
+    instance: u64,
+    starting: bool,
     original: &SoundPlay,
     sound: &mut Option<SoundPlay>,
 ) {
-    mod_api::dispatch_play_sound(&OwningLoop::new(context), original, sound);
+    mod_api::dispatch_play_sound(
+        &OwningLoop::new(context),
+        instance,
+        starting,
+        original,
+        sound,
+    );
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
@@ -51,23 +59,48 @@ pub fn native_sound_engine_load(context: &horizon_world::native_load_context::Lo
     mod_api::dispatch_sound_engine_load(&OwningLoop::new(context));
 }
 
+// Validate a mod's changed parameters at the playback boundary, leaving vanilla
+// inputs alone. Starts and refreshes use the same contract.
+fn valid_playback_edit(original: &SoundPlay, edited: &SoundPlay) -> bool {
+    (edited.volume.to_bits() == original.volume.to_bits()
+        || edited.volume.is_finite() && edited.volume >= 0.0)
+        && (edited.pitch.to_bits() == original.pitch.to_bits()
+            || edited.pitch.is_finite() && edited.pitch > 0.0)
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LiveSettings {
+    original: SoundPlay,
+    edited: Option<SoundPlay>,
+}
+
 impl SoundInstance {
     fn play_settings(&self) -> SoundPlay {
-        built::SoundPlay {
-            identifier: self.identifier.clone(),
-            source: SoundSource::ALL[self.source],
-            volume: self.volume,
-            pitch: self.pitch,
-            position: self.position,
-            looping: self.looping,
-            delay: self.delay,
-            attenuation: match self.attenuation {
-                Attenuation::None => SoundAttenuation::None,
-                Attenuation::Linear => SoundAttenuation::Linear,
-            },
-            relative: self.relative,
-        }
-        .into()
+        let mut sound = SoundPlay::ui("");
+        self.write_play_settings(&mut sound);
+        sound
+    }
+    fn live_play_settings(&self) -> &std::cell::RefCell<LiveSettings> {
+        self.live_settings.get_or_init(|| {
+            let original = self.play_settings();
+            let edited = Some(original.clone());
+            std::cell::RefCell::new(LiveSettings { original, edited })
+        })
+    }
+    // Reuse string storage for live playback; starts prepare the buffers.
+    fn write_play_settings(&self, sound: &mut SoundPlay) {
+        sound.identifier.clone_from(&self.identifier);
+        sound.source = SoundSource::ALL[self.source];
+        sound.volume = self.volume;
+        sound.pitch = self.pitch;
+        sound.position = self.position;
+        sound.looping = self.looping;
+        sound.delay = self.delay;
+        sound.attenuation = match self.attenuation {
+            Attenuation::None => SoundAttenuation::None,
+            Attenuation::Linear => SoundAttenuation::Linear,
+        };
+        sound.relative = self.relative;
     }
 
     /// A sound a mod asks for (`ClientHost::play_local_sound`), through the same mapping
@@ -136,16 +169,49 @@ impl SoundEngine {
         };
         let original = instance.play_settings();
         let mut sound = Some(original.clone());
-        native_play_sound(source, &original, &mut sound);
+        native_play_sound(source, id, true, &original, &mut sound);
         match sound {
             None => false,
             Some(edited) => {
+                if !valid_playback_edit(&original, &edited) {
+                    return false;
+                }
                 if edited != original {
                     instance.apply_play_settings(edited);
+                }
+                let mut cache = instance.live_play_settings().borrow_mut();
+                instance.write_play_settings(&mut cache.original);
+                if let Some(edited) = cache.edited.as_mut() {
+                    instance.write_play_settings(edited);
+                } else {
+                    cache.edited = Some(cache.original.clone());
                 }
                 true
             }
         }
+    }
+
+    /// Live volume/pitch refresh, through the single play_sound contract. Other
+    /// settings cannot be changed on an already allocated channel.
+    pub(super) fn playback_update_parameters(&self, id: super::InstanceId) -> Option<(f32, f32)> {
+        let instance = self.instances.get(&id)?;
+        let Some(source) = self
+            .loop_context
+            .as_ref()
+            .filter(|_| mod_api::__private::listened(HookId::PlaySound))
+        else {
+            return Some((instance.volume, instance.pitch));
+        };
+        let mut cache = instance.live_play_settings().borrow_mut();
+        let LiveSettings { original, edited } = &mut *cache;
+        instance.write_play_settings(original);
+        instance.write_play_settings(edited.as_mut()?);
+        native_play_sound(source, id, false, original, edited);
+        let edited = edited.as_ref()?;
+        if !valid_playback_edit(original, edited) {
+            return None;
+        }
+        Some((edited.volume, edited.pitch))
     }
 
     /// `play_sound_source` or `play_streaming_source`, for a sound that just started.
@@ -326,5 +392,100 @@ mod tests {
             play(&mut engine, &mut backend, "minecraft:block.mute"),
             crate::sound_engine::PlayResult::Started
         );
+    }
+    #[test]
+    fn live_play_sound_edits_reach_the_channel_without_changing_the_instance() {
+        struct Live(std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicU64);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Live {
+            fn play_sound(
+                &self,
+                _: &dyn mod_api::LoopContext,
+                event: &mut mod_api::PlaySoundEvent<'_>,
+            ) {
+                let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                assert_eq!(event.starting, n == 0 || n == 3);
+                if n == 0 {
+                    self.1
+                        .store(event.instance, std::sync::atomic::Ordering::SeqCst);
+                } else {
+                    assert_eq!(
+                        event.instance,
+                        self.1.load(std::sync::atomic::Ordering::SeqCst)
+                    );
+                }
+                if n == 1 {
+                    let sound = event.sound.as_mut().unwrap();
+                    sound.volume = 0.25;
+                    sound.pitch = 2.0;
+                } else if n == 2 {
+                    *event.sound = None;
+                }
+            }
+        }
+        let mods = vec![mod_api::ModEntry::new(
+            "live",
+            Box::new(Live(0.into(), 0.into())),
+        )];
+        mod_api::testing::with_mods(mods.into(), || {
+            let (mut engine, mut backend) = (engine(), Null::default());
+            let instance =
+                SoundInstance::for_ui("minecraft:block.plain", 1.0, 1.0, LegacyRandom::new(1));
+            let (id, result) = engine.play_new(instance, true, &mut backend);
+            assert_eq!(result, crate::sound_engine::PlayResult::Started);
+            let channel = engine.channel(id).unwrap();
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert_eq!(backend.volume[&channel], 0.25);
+            assert_eq!(backend.pitch[&channel], 2.0);
+            assert_eq!(engine.instance(id).unwrap().volume, 1.0);
+            assert_eq!(engine.instance(id).unwrap().pitch, 1.0);
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert!(engine.instance(id).unwrap().stopped);
+            engine.instance_mut(id).unwrap().stopped = false;
+            assert_eq!(
+                engine.play(id, &mut backend),
+                crate::sound_engine::PlayResult::Started
+            );
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert!(
+                !engine.instance(id).unwrap().stopped,
+                "a replay resets a cancelled live edit"
+            );
+        });
+    }
+    #[test]
+    fn invalid_play_sound_edits_refuse_starts_and_stop_live_channels() {
+        struct Poison(bool);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Poison {
+            fn play_sound(
+                &self,
+                _: &dyn mod_api::LoopContext,
+                event: &mut mod_api::PlaySoundEvent<'_>,
+            ) {
+                if event.starting == self.0 {
+                    let sound = event.sound.as_mut().unwrap();
+                    sound.volume = f32::NAN;
+                    sound.pitch = 0.0;
+                }
+            }
+        }
+        for at_start in [true, false] {
+            let mods = vec![mod_api::ModEntry::new("poison", Box::new(Poison(at_start)))];
+            mod_api::testing::with_mods(mods.into(), || {
+                let (mut engine, mut backend) = (engine(), Null::default());
+                let instance =
+                    SoundInstance::for_ui("minecraft:block.plain", 1.0, 1.0, LegacyRandom::new(1));
+                let (id, result) = engine.play_new(instance, true, &mut backend);
+                if at_start {
+                    assert_eq!(result, crate::sound_engine::PlayResult::NotStarted);
+                    assert!(backend.volume.is_empty());
+                } else {
+                    assert_eq!(result, crate::sound_engine::PlayResult::Started);
+                    engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+                    assert!(engine.instance(id).unwrap().stopped);
+                }
+            });
+        }
     }
 }

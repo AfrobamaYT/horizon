@@ -404,12 +404,14 @@ impl DebugEntries {
     pub fn is_using_profile(&self, profile: Profile) -> bool {
         self.profile == Some(profile)
     }
-    /// `getStatus`: never for an entry the statuses leave out.
+    /// `getStatus`: never for an entry the statuses leave out. The debug renderers ask every
+    /// frame, so no identifier is built for the lookup; a path with a namespace (a native mod's entry) is
+    /// matched as it is.
     pub fn status(&self, path: &str) -> Status {
         self.statuses
-            .get(&identifier(path))
-            .copied()
-            .unwrap_or(Status::Never)
+            .iter()
+            .find(|(id, _)| id.as_str() == path || id.strip_prefix("minecraft:") == Some(path))
+            .map_or(Status::Never, |(_, status)| *status)
     }
     /// `setStatus`: the statuses are custom from now on, and saved.
     pub fn set_status(&mut self, path: &str, status: Status) {
@@ -439,9 +441,13 @@ impl DebugEntries {
         };
         shown && entry(path).is_some_and(|e| e.reduced || !reduced)
     }
-    /// `getCurrentlyEnabled().isEmpty()` negated: something to draw.
+    /// `getCurrentlyEnabled().isEmpty()` negated: something to draw. Asked every frame, F3 closed
+    /// or not, so it walks the few statuses kept rather than every entry.
     pub fn any_enabled(&self, overlay: bool, reduced: bool) -> bool {
-        all().any(|e| self.enabled(e.path, overlay, reduced))
+        self.statuses
+            .keys()
+            .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
+            .any(|path| self.enabled(path, overlay, reduced))
     }
 }
 

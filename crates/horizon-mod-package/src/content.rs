@@ -1141,6 +1141,13 @@ fn check_item(item: &Item) -> Result<(), String> {
     if item.max_stack_size.is_some_and(|n| !(1..=99).contains(&n)) {
         return Err("max_stack_size is 1 to 99".into());
     }
+    if let Some(block) = &item.block
+        && (!namespaced_id(block)
+            || block.split_once(':').map(|(ns, _)| ns) != item.id.split_once(':').map(|(ns, _)| ns)
+                && !vanilla_id(block))
+    {
+        return Err("block is a vanilla block or a block in this item's namespace".into());
+    }
     check_components(&item.components, &["max_stack_size", "rarity"])
 }
 
@@ -1537,6 +1544,49 @@ capabilities = ["registries"]
         let content = package.and_then(|p| Content::read(&path, &p.manifest));
         std::fs::remove_dir_all(&dir).unwrap();
         content
+    }
+
+    #[test]
+    fn block_checks_files_and_native_declarations() {
+        for (i, target) in ["ruby:frame", "minecraft:stone"].iter().enumerate() {
+            let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
+            let content = hmod(
+                &format!("place-block-{i}"),
+                MANIFEST_TEXT,
+                &[("data/ruby/horizon/item/empty_frame.json", text.as_bytes())],
+            )
+            .unwrap();
+            assert_eq!(content.items[0].block.as_deref(), Some(*target));
+        }
+        for (i, target) in ["stone", "other:frame", "ruby:Bad", "ruby:"]
+            .iter()
+            .enumerate()
+        {
+            let text = format!(r#"{{"template":"minecraft:stick","block":"{target}"}}"#);
+            assert!(
+                hmod(
+                    &format!("bad-place-block-{i}"),
+                    MANIFEST_TEXT,
+                    &[("data/ruby/horizon/item/empty_frame.json", text.as_bytes())]
+                )
+                .is_err()
+            );
+            let mut content = Content::declared("ruby");
+            assert!(
+                content
+                    .declare(
+                        &[],
+                        &[Item {
+                            id: "ruby:empty_frame".into(),
+                            template: "minecraft:stick".into(),
+                            block: Some((*target).into()),
+                            ..Default::default()
+                        }]
+                    )
+                    .is_err()
+            );
+            assert!(content.items.is_empty());
+        }
     }
 
     #[test]

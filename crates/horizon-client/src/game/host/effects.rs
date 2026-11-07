@@ -30,6 +30,15 @@ impl EffectsClientHost for Game<'_> {
         );
         self.native_clear_particles()
     }
+    fn add_particle(
+        &mut self,
+        options: &ParticleOptions,
+        at: [f64; 3],
+        velocity: [f64; 3],
+    ) -> bool {
+        mod_api::__private::check_access("add_particle", mod_api::__private::LoadAccess::WorldOnly);
+        self.native_add_particle(options, at, velocity)
+    }
     fn sound_events(&self) -> Vec<Identifier> {
         mod_api::__private::check_access(
             "sound_events",

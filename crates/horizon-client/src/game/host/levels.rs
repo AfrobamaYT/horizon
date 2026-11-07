@@ -351,6 +351,13 @@ impl LevelsBackend for Game<'_> {
         );
         self.native_level_loaded_chunks(level)
     }
+    fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>> {
+        mod_api::__private::check_access(
+            "level_collision_boxes",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_collision_boxes(level, aabb)
+    }
 }
 impl LevelsBackendMut for Game<'_> {
     fn chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {

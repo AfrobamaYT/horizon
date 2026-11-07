@@ -860,4 +860,17 @@ pub trait PlayersBackendMut {
             crate::phase::LoadAccess::WorldOnly,
         )
     }
+    /// Side: both.
+    /// Simulate one client movement tick for this server player without changing the player. Refuses stale, absent, dead, spectator or riding players and invalid input.
+    fn player_simulate_move(
+        &mut self,
+        player: PlayerRef,
+        input: NativePlayerInput,
+    ) -> Option<NativeSimulatedMove> {
+        crate::phase::unprovided(
+            "BackendMut::player_simulate_move",
+            "player_simulate_move",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
 }

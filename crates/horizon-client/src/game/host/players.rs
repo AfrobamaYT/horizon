@@ -528,4 +528,15 @@ impl PlayersBackendMut for Game<'_> {
         );
         self.native_player_play_sound(player, sound, source, volume, pitch)
     }
+    fn player_simulate_move(
+        &mut self,
+        player: PlayerRef,
+        input: NativePlayerInput,
+    ) -> Option<NativeSimulatedMove> {
+        mod_api::__private::check_access(
+            "player_simulate_move",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_player_simulate_move(player, input)
+    }
 }
