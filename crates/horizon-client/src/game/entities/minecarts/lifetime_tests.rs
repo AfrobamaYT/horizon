@@ -81,14 +81,19 @@ fn a_bound_cart_commits_valid_nbt_and_refuses_an_invalid_load() {
     bound_cart_case(CartKind::Furnace, |game| {
         let target = super::super::commands::Target::Cart(71);
         game.carts.update(0, |cart| cart.fuel = 6);
+        let uuid = game.uuid_for(71);
         assert!(
             game.apply_entity_nbt(target, Tag::Compound(Default::default()))
                 .is_err()
         );
         assert_eq!(game.carts[0].fuel, 6);
-        let (tag, _) = horizon_core::nbt::parse_snbt("{Pos:[0.5d,70.0d,0.5d],Fuel:13s}").unwrap();
+        let (tag, _) = horizon_core::nbt::parse_snbt(
+            "{Pos:[0.5d,70.0d,0.5d],Fuel:13s,UUID:[I;9,8,7,6],DisplayState:{Name:\"test:missing\"}}",
+        ).unwrap();
         game.apply_entity_nbt(target, tag).unwrap();
         assert_eq!(game.carts[0].fuel, 13);
+        assert_eq!(game.uuid_for(71), uuid);
+        assert!(game.carts[0].custom_display.is_none());
     });
 }
 
