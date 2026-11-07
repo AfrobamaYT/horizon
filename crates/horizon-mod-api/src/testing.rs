@@ -400,6 +400,8 @@ impl crate::prelude::PlayersBackendMut for FakeHost {
 }
 crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, players));
 
+impl crate::prelude::PlayersClientBackend for FakeHost {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,5 +486,3 @@ mod tests {
         assert_eq!(given, [4]);
     }
 }
-
-impl crate::prelude::PlayersClientBackend for FakeHost {}
