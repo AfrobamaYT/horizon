@@ -125,16 +125,26 @@ mod tests {
                 .registry
                 .default_state("minecraft:sand")
                 .unwrap();
-            assert!(game.native_spawn_falling_block(
-                game.dim.id(),
+            let at = Vec3::new(0.5, 70.0, 0.5);
+            game.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
+                rotation: [0.0; 2],
+                join: Default::default(),
+                id: 71,
                 state,
-                [0.5, 70.0, 0.5],
-                [0.0; 3],
-                NativeFalling {
-                    drop_item: false,
-                    hurts: false
-                }
-            ));
+                start_pos: BlockPos::new(0, 70, 0),
+                position: at,
+                previous: at,
+                velocity: Vec3::ZERO,
+                age: 0,
+                no_gravity: false,
+                portal: Default::default(),
+                drop_item: false,
+                fall_distance: 0.0,
+                stuck: Vec3::ZERO,
+                damage: Default::default(),
+                saved: None,
+            });
             let id = game.falling[0].id;
             let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
             let index = Arc::new(Mutex::new(AttachmentIndex::default()));
