@@ -100,22 +100,81 @@ impl Game<'_> {
 mod tests {
     use super::*;
 
+    use horizon_mod_runtime::attachments::{
+        AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
+    };
+    use std::sync::{Arc, Mutex};
+
+    static VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "test",
+        name: "falling_lifetime",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn falling_tick_preserves_its_owner_on_success_and_collision_error() {
-        use horizon_mod_runtime::attachments::{
-            AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
-        };
-        use std::sync::{Arc, Mutex};
-        static VALUE: AttachmentType<i32> = AttachmentType {
-            namespace: "test",
-            name: "falling_lifetime",
-            default: || 0,
-            codec: None,
-            copy_on_death: false,
-            sync: false,
-        };
-        super::super::native_entity_refs::tests::with_game(|game| {
+        bound_falling_case(false, |game, _| {
+            game.tick_one_falling(0).unwrap();
+            assert_eq!(game.falling[0].age, 1);
+            assert!(game.falling[0].position.y < 70.0);
+            // A corrupt resident palette makes the real collision lookup fail.
+            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
+            let position = game.falling[0].position;
+            assert!(game.tick_one_falling(0).is_err());
+            assert_eq!(game.falling[0].position, position);
+            assert_eq!(game.falling[0].age, 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_client_tick_commits_state_without_detaching_its_owner() {
+        bound_falling_case(true, |game, _| {
+            for age in 1..=3 {
+                let previous = game.falling[0].position;
+                game.tick_remote_projectiles(|_, at| at);
+                assert_eq!(game.falling[0].age, age);
+                assert_eq!(game.falling[0].previous, previous);
+                assert!(game.falling[0].position.y < previous.y);
+                assert!(game.falling[0].velocity.y < 0.0);
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_parked_swap_preserves_state_and_owner_until_discard() {
+        bound_falling_case(false, |game, index| {
+            let home = game.dim;
+            game.tick_one_falling(0).unwrap();
+            let position = game.falling[0].position;
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            assert!(game.falling.is_empty());
+            assert_eq!(
+                index
+                    .lock()
+                    .unwrap()
+                    .snapshot(&("test".into(), "falling_lifetime".into()))
+                    .len(),
+                1
+            );
+            game.enter_level(home).unwrap();
+            assert_eq!(game.falling.len(), 1);
+            assert_eq!(game.falling[0].id, 71);
+            assert_eq!(game.falling[0].age, 1);
+            assert_eq!(game.falling[0].position, position);
+        });
+    }
+
+    fn bound_falling_case(
+        client: bool,
+        exercise: impl FnOnce(&mut Game<'_>, &Arc<Mutex<AttachmentIndex<mod_api::EntityRef>>>),
+    ) {
+        let test = |game: &mut Game<'_>| {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
@@ -156,24 +215,23 @@ mod tests {
             });
             let key = ("test".into(), "falling_lifetime".into());
             let before = index.lock().unwrap().snapshot(&key);
-            game.tick_one_falling(0).unwrap();
-            assert_eq!(game.falling[0].age, 1);
-            assert!(game.falling[0].position.y < 70.0);
-            // A corrupt resident palette makes the real collision lookup fail.
-            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
-            let position = game.falling[0].position;
-            assert!(game.tick_one_falling(0).is_err());
-            assert_eq!(game.falling[0].position, position);
-            assert_eq!(game.falling[0].age, 1);
+            assert_eq!(before.len(), 1);
+            exercise(game, &index);
             let current = game
                 .falling
                 .update(0, |f| f.attachment_lifetime().registration().unwrap());
             assert!(original.same_registration(&current));
             assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            assert_eq!(VALUE.get(&mut values, Holder::Entity(id)), Ok(10));
             game.falling.clear();
             assert!(index.lock().unwrap().snapshot(&key).is_empty());
             assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
-        });
+        };
+        if client {
+            super::super::native_entity_refs::tests::with_client_game(test);
+        } else {
+            super::super::native_entity_refs::tests::with_game(test);
+        }
     }
 
     #[test]
