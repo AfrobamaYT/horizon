@@ -55,15 +55,34 @@ impl ModSounds {
         self.queued.borrow_mut().push((id, sound.clone(), after));
         sound_ref(id)
     }
+    /// Forgets every mod sound: the queued plays, the changes asked of them and the started
+    /// ones' instances, as a level change stops every sound. Their handles read `Stopped`;
+    /// handles are still never reused.
+    pub(super) fn clear(&mut self) {
+        self.queued.get_mut().clear();
+        self.changes.get_mut().clear();
+        self.started.clear();
+    }
 }
 
 impl Game<'_> {
     /// Plays the sounds client mods asked for since the last update, then applies their stops
-    /// and fades, and forgets the instances the engine let go. Called from the audio update
+    /// and fades, and forgets the instances the engine let go. A play stopped (or faded to 0 at
+    /// once) before this update never reaches the engine. Called from the audio update
     /// (`tick_sound_engine`), before the engine's own tick.
     pub(super) fn apply_mod_sounds(&mut self) {
         let sounds = &mut self.mod_sounds;
+        let stopped: Vec<u64> = sounds
+            .changes
+            .get_mut()
+            .iter()
+            .filter(|(_, change)| change.stops())
+            .map(|&(id, _)| id)
+            .collect();
         for (id, sound, after) in sounds.queued.get_mut().drain(..) {
+            if stopped.contains(&id) {
+                continue;
+            }
             let instance = self.audio.play_mod_sound(&sound, after);
             sounds.started.insert(id, instance);
         }
@@ -283,6 +302,41 @@ mod tests {
                 );
                 assert!(game.sound_events().is_empty());
             });
+        });
+    }
+
+    /// A play stopped before the audio update never reaches the engine, and a level change
+    /// drops the plays still queued: their handles read `Stopped`, nothing plays later, and
+    /// handles are still never reused.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stopped_and_level_cleared_plays_never_reach_the_engine() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            game.audio.heard.clear();
+            let harp = "minecraft:block.note_block.harp";
+            let bell = "minecraft:block.note_block.bell";
+            let stopped = game.play_local_sound(&SoundPlay::ui(harp), 0).unwrap();
+            assert!(game.sound_stop(stopped));
+            game.tick_sound_engine();
+            assert!(
+                !game.audio.heard.contains_key(harp),
+                "stopped before the update"
+            );
+            assert_eq!(game.sound_state(stopped), Some(SoundState::Stopped));
+
+            let queued = game.play_local_sound(&SoundPlay::ui(bell), 20).unwrap();
+            assert_eq!(game.sound_state(queued), Some(SoundState::Waiting));
+            game.stop_sounds_for_new_level();
+            assert_eq!(game.sound_state(queued), Some(SoundState::Stopped));
+            assert!(!game.sound_stop(queued), "already over");
+            game.tick_sound_engine();
+            assert!(
+                !game.audio.heard.contains_key(bell),
+                "cleared with the level"
+            );
+
+            let next = game.play_local_sound(&SoundPlay::ui(harp), 0).unwrap();
+            assert!(next != stopped && next != queued, "a new handle");
         });
     }
 }
