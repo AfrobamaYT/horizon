@@ -56,8 +56,9 @@ pub struct EntityMemory {
     /// increasing order), type, and whether the last leave sweep saw it.
     /// Only filled while a mod is loaded.
     pub(super) live: Vec<(u32, String, bool)>,
-    /// Entities a native mod removed (`entity_discard`), taken out at
-    /// the next sweep of departed entities. Mobs go at once and never wait here.
+    /// Entities a native mod removed (`entity_discard`): gone for every
+    /// lookup from the call on, taken out of their lists at the next sweep of
+    /// departed entities. Mobs go at once and never wait here.
     pub(super) removals: Vec<super::commands::Target>,
 }
 
@@ -625,13 +626,20 @@ impl Game<'_> {
     }
 
     /// A saved llama spit or shulker bullet.
-    pub(super) fn load_spit_or_bullet(&mut self, tag: Tag, player_uuid: Option<[i32; 4]>) {
+    pub(super) fn load_spit_or_bullet(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
         let target = self.bullet_target(&tag);
         if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid, target) {
             self.claim_owner(&mut p);
             self.next_entity += 1;
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -1865,7 +1873,7 @@ impl Game<'_> {
         self.persist.uuids.retain(|id, _| alive.contains(id));
         self.persist.raw.retain(|id, _| alive.contains(id));
     }
-    /// A loaded projectile's `Owner`: a connected guest, else a mob by UUID.
+    /// A loaded projectile's `Owner`: living hit credit and vehicle collision identity.
     fn claim_owner(&self, p: &mut horizon_client::projectiles::Projectile) {
         let Some(uuid) = p.owner_uuid else {
             return;
@@ -1883,6 +1891,12 @@ impl Game<'_> {
         } else if p.owner.is_none() {
             p.owner = self.mob_by_uuid(uuid).map(Who::Mob);
         }
+        use super::commands::Target;
+        p.owner_vehicle =
+            match self.target_by_uuid(horizon_client::lan::playerdata::ints_uuid(uuid)) {
+                Some(Target::Boat(id) | Target::Cart(id)) => Some(id),
+                _ => None,
+            };
     }
     /// Save and remove the entities of chunks that unloaded.
     pub(super) fn unload_entities(&mut self, unloaded: &[Arc<Chunk>]) {

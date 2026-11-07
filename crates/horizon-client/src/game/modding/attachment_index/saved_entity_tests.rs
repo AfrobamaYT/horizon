@@ -1,7 +1,99 @@
 use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use horizon_core::nbt::Tag;
+use horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, AttachmentCodec, AttachmentError};
 use mod_api::{AttachmentQueriesMut, AttachmentType};
+use std::collections::HashSet;
+
+static PROJECTILE_VALUE: AttachmentType<i32> = AttachmentType {
+    namespace: "saved_projectile",
+    name: "value",
+    default: || 0,
+    codec: Some(AttachmentCodec {
+        encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
+        decode: |tag| match tag.get(&"n".into()) {
+            Some(Tag::Int(n)) => Ok(*n),
+            _ => Err(AttachmentError::Decode),
+        },
+    }),
+    copy_on_death: false,
+    sync: false,
+};
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn saved_spit_and_bullet_query_before_access_and_round_trip() {
+    with_game(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let contents = Tag::compound([(
+            "saved_projectile",
+            Tag::compound([(
+                "value",
+                Tag::compound([("value", Tag::compound([("n", Tag::Int(37))]))]),
+            )]),
+        )]);
+        for (n, kind) in ["llama_spit", "shulker_bullet"].into_iter().enumerate() {
+            let uuid = [71, 72, 73, n as i32];
+            let tag = Tag::compound([
+                (
+                    "id",
+                    Tag::String(format!("minecraft:{kind}").as_str().into()),
+                ),
+                ("UUID", Tag::IntArray(uuid.to_vec())),
+                (
+                    "Pos",
+                    Tag::List(
+                        [1.0f64, 70.0, 3.0]
+                            .map(|n| Tag::Double(n.to_bits()))
+                            .to_vec(),
+                    ),
+                ),
+                (ATTACHMENTS_KEY, contents.clone()),
+            ]);
+            game.world.loaded_entities.push(((0, 0), vec![tag]));
+            game.spawn_loaded_entities();
+            let index = game.attachment_indexes[&Dim::Overworld].clone();
+            let key = ("saved_projectile".into(), "value".into());
+            let batch = index.lock().unwrap().snapshot(&key);
+            assert_eq!(batch.len(), 1, "{kind} before attachment access");
+            assert_eq!(batch[0].entry.read(&PROJECTILE_VALUE), Ok(&37), "{kind}");
+            let AttachmentHolder::Entity(entity) = batch[0].holder else {
+                panic!("not entity");
+            };
+            // Change the live map so an opaque raw-NBT echo cannot satisfy the save check.
+            PROJECTILE_VALUE
+                .set(game, Holder::Entity(entity.id()), 59)
+                .unwrap();
+            let saved = game.entity_chunks(&HashSet::from([(0, 0)]), false);
+            let saved = saved
+                .iter()
+                .flat_map(|(_, tags)| tags)
+                .find(|tag| horizon_client::entity_nbt::uuid(tag) == Some(uuid))
+                .unwrap_or_else(|| panic!("{kind} saved without its UUID"))
+                .clone();
+            assert!(game.entity_discard(entity));
+            game.native_removals_flush();
+            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            // Reload from the serialized data, not a retained in-memory map.
+            game.entity_attachments.remove(&uuid);
+            game.world.loaded_entities.push(((0, 0), vec![saved]));
+            game.spawn_loaded_entities();
+            let restored = index.lock().unwrap().snapshot(&key);
+            assert_eq!(restored.len(), 1, "{kind} after reload");
+            assert_eq!(
+                restored[0].entry.read(&PROJECTILE_VALUE),
+                Ok(&59),
+                "{kind} saved value"
+            );
+            let AttachmentHolder::Entity(entity) = restored[0].holder else {
+                panic!("not entity");
+            };
+            assert!(game.entity_discard(entity));
+            game.native_removals_flush();
+        }
+    });
+}
 
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "saved_entity",
