@@ -4663,7 +4663,9 @@ impl Game<'_> {
         dragon.id = self.next_entity + 1;
         self.next_entity += 9;
         let id = dragon.id;
-        assert!(self.dragon.install(dragon).is_ok());
+        // Finalization listeners can install another dragon after the initial
+        // refusal check. Keep the constructor's existing replacement order.
+        self.dragon.replace(dragon);
         self.place_dragon_parts();
         self.native_joins_flush(false, id).then_some(id)
     }
