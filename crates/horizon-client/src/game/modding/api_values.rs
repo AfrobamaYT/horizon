@@ -6,9 +6,8 @@ use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 #[path = "api_values/block_state.rs"]
 pub(in crate::game) mod block_state;
-pub(in crate::game) use block_state::{
-    install as install_block_states, prepare as prepare_block_states,
-};
+pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
+pub(in crate::game) use block_state::install as install_block_states;
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
 #[path = "api_values/recipe_inputs.rs"]
@@ -21,7 +20,7 @@ pub(in crate::game) fn resolve_block_definitions(
 ) -> Result<(), String> {
     block_state::clear();
     if mod_api::__private::block_definitions().is_some() {
-        return block_state::bind(registry);
+        return bind_worker_blocks(registry);
     }
     let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
     for index in 0..registry.len() {
@@ -56,7 +55,18 @@ pub(in crate::game) fn resolve_block_definitions(
             .map_err(|error| format!("block {name}: {error:?}"))
     })
     .map_err(|errors| errors.join("\n"))?;
-    block_state::bind(registry)
+    bind_worker_blocks(registry)
+}
+
+fn bind_worker_blocks(registry: &horizon_world::registry::BlockRegistry) -> Result<(), String> {
+    block_state::bind(registry)?;
+    let index = block_state::current().map_err(|error| format!("worker index: {error:?}"))?;
+    let retained = super::native_worldgen::retain(registry, index).map_err(|error| {
+        block_state::clear();
+        error
+    })?;
+    block_state::install(retained);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -202,6 +212,12 @@ fn block_metadata_table()
     mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)
 }
 impl super::Game<'_> {
+    pub(in crate::game) fn block_metadata_name(
+        &self,
+        block: mod_api::BlockKey,
+    ) -> Result<&str, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::name(block_metadata_table()?, block)
+    }
     pub(in crate::game) fn block_metadata_property(
         &self,
         state: mod_api::BlockStateRecord,
@@ -2814,11 +2830,19 @@ fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T)
     })
 }
 pub(in crate::game) fn install_parts(mods: &[mod_api::ModEntry]) -> Result<(), Vec<String>> {
-    with_rule_schema(|schema| mod_api::__private::install_parts(mods, schema))
+    with_rule_schema(|schema| {
+        mod_api::__private::install_parts(mods, schema, super::native_dimensions::valid_shape)
+    })
 }
 #[cfg(test)]
 pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>) {
-    with_rule_schema(|schema| mod_api::__private::part_tests::register_game_keys(ids, schema));
+    with_rule_schema(|schema| {
+        mod_api::__private::part_tests::register_game_keys(
+            ids,
+            schema,
+            super::native_dimensions::valid_shape,
+        )
+    });
 }
 
 pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {

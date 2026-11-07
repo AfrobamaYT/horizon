@@ -80,7 +80,11 @@ pub trait BlockStatesServerHost {
 #[horizon_mod_api_macros::host_area]
 pub trait BlockStatesBackend {
     /// Side: both.
-    /// Borrow an immutable property through the block metadata resource.
+    /// Borrow the canonical block name through the block metadata resource.
+    #[access(Metadata)]
+    fn block_metadata_name(&self, block: BlockKey) -> Result<&str, BlockStateError>;
+    /// Side: both.
+    /// Borrow a property's serialized value from the block metadata resource.
     #[access(Metadata)]
     fn block_metadata_property(
         &self,
