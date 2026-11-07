@@ -15635,6 +15635,7 @@ impl Game<'_> {
             self.item_activation_geometry(camera_alpha as f32, view, aspect, &mut hand);
         }
         pr.lap("pr_hand");
+        let hud_fov = self.hud_fov_degrees(camera_alpha as f32, camera.to_array());
         let screen = if title {
             Vec::new()
         } else {
@@ -15643,7 +15644,13 @@ impl Game<'_> {
                 .as_mut()
                 .and_then(|p| p.attribute("minecraft:scale").ok())
                 .unwrap_or(1.0) as f32;
-            self.screen_quads(alpha as f32, size, scale)
+            let hand_projection = horizon_client::camera::hand_projection(
+                hud_fov,
+                size[0] as f32,
+                size[1].max(1) as f32,
+                depth_far,
+            );
+            self.screen_quads(alpha as f32, size, scale, hand_projection)
         };
         if !title {
             self.end_geometry(camera, &mut entities);
@@ -15811,7 +15818,7 @@ impl Game<'_> {
             stars: stars.filter(|_| self.settings.horizon.sky || title),
             hand: &hand,
             hand_items: &hand_items,
-            hand_fov_degrees: self.hud_fov_degrees(camera_alpha as f32, camera.to_array()),
+            hand_fov_degrees: hud_fov,
             screen: &screen,
             pack: pack_inputs,
             border,

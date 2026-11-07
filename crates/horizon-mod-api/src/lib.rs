@@ -3038,6 +3038,40 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The world's respawn data (`LevelData.RespawnData`): where a player without a spawn point of
+/// their own appears, and facing which way. Horizon keeps it in the Overworld.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct RespawnData {
+    /// The spawn block.
+    pub pos: [i32; 3],
+    /// The yaw in degrees, -180 to 180 (`Mth.wrapDegrees`).
+    pub yaw: f32,
+    /// The pitch in degrees, -90 to 90.
+    pub pitch: f32,
+}
+
+/// A map's saved data (`MapItemSavedData`) as it stands: where it is, how far it reaches and
+/// its pixels. The markers (players, banners, frames) are not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct MapState {
+    /// The centre block `[x, z]`.
+    pub center: [i32; 2],
+    /// A map pixel is `1 << scale` blocks, 0 to 4.
+    pub scale: u8,
+    /// The dimension it shows, `minecraft:overworld`.
+    pub dimension: String,
+    /// A locked map (a cartography table's glass pane) no longer reveals the world.
+    pub locked: bool,
+    /// Whether it shows its holders' markers.
+    pub tracking: bool,
+    /// Whether it shows them however far away they are.
+    pub unlimited: bool,
+    /// 128 by 128 map colour ids, row by row (`x + z * 128`).
+    pub colors: Vec<u8>,
+}
+
 /// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
 /// `ProjectileUtil.getEntityHitResult` tests for each candidate.
 #[derive(Clone, Copy, Debug, PartialEq)]
