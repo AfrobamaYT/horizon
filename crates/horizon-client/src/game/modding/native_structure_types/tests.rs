@@ -241,10 +241,24 @@ impl horizon_world::worldgen::structure::start::StartContext for StubContext {
         &mut self,
         _: i32,
         _: i32,
-        _: usize,
-        _: &dyn Fn(usize) -> horizon_world::heightmap::HeightmapType,
+        count: usize,
+        kinds: &dyn Fn(usize) -> horizon_world::heightmap::HeightmapType,
     ) -> Vec<Vec<bool>> {
-        Vec::new()
+        use horizon_world::heightmap::HeightmapType::*;
+        let all = [
+            WorldSurfaceWg,
+            WorldSurface,
+            OceanFloorWg,
+            OceanFloor,
+            MotionBlocking,
+            MotionBlockingNoLeaves,
+        ];
+        (0..count)
+            .map(|index| {
+                let selected = kinds(index);
+                all.iter().map(|kind| *kind == selected).collect()
+            })
+            .collect()
     }
     fn noise_column_into(
         &mut self,
@@ -252,7 +266,11 @@ impl horizon_world::worldgen::structure::start::StartContext for StubContext {
         _: i32,
         column: &mut dyn horizon_world::worldgen::structure::start::NoiseColumnTarget,
     ) {
-        column.resize(0, 0);
+        use horizon_world::worldgen::structure::start::NoiseBlock::*;
+        column.resize(-2, 5);
+        for (index, block) in [Air, Water, Lava, Solid, Other].into_iter().enumerate() {
+            column.set(index, block);
+        }
     }
     fn cold_enough_to_snow(
         &mut self,
