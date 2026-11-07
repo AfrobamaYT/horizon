@@ -3,6 +3,7 @@
 //! breeding, conversions, drops), projectiles, player interactions
 //! (feeding, shearing, milking, spawn eggs, throwing) and rendering.
 mod pufferfish_player;
+use super::api_values::{TryIntoApi, TryIntoEngine};
 
 use super::level_sounds::LevelSound;
 use super::{
@@ -36,7 +37,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops, SoundSource};
+use mod_api::{EquipmentSlot, NativeLootDrops, SoundSource};
 use std::sync::Arc;
 
 /// `AbstractArrow.onHitEntity` when `hurtOrSimulate` returned false.
@@ -686,7 +687,9 @@ impl Game<'_> {
         }
         // ArmorHurtEvent for a mob's body armor.
         let mut amount = amount;
-        if mod_api::__private::listened(mod_api::HookId::ArmorHurt) {
+        if mod_api::__private::listened(mod_api::HookId::ArmorHurt)
+            && let Ok(body_snapshot) = body.try_into_api()
+        {
             let kind = self
                 .mobs
                 .iter()
@@ -695,7 +698,7 @@ impl Game<'_> {
                 .unwrap_or_default();
             let mut entries = vec![mod_api::NativeArmorHurt {
                 slot: EquipmentSlot::Body,
-                stack: body.clone(),
+                stack: body_snapshot,
                 damage: super::durability_damage(damage),
                 new_damage: super::durability_damage(damage),
             }];
@@ -2090,6 +2093,9 @@ impl Game<'_> {
                     _ => return choice.chance,
                 };
                 let mut chance = choice.chance;
+                let Ok(stack) = stack.try_into_api() else {
+                    return chance;
+                };
                 self.native_get_equipment_drop_chance(
                     mod_api::__private::GetEquipmentDropChanceCall {
                         entity: id,
@@ -2207,22 +2213,35 @@ impl Game<'_> {
         };
         // Vanilla builds each item entity (and draws its motion) when it
         // collects the drop, before the event sees the list.
-        let mut drops: Vec<NativeItemDrop> = stacks
+        let mut drops: Vec<super::spill::BlockItemDrop> = stacks
             .into_iter()
-            .map(|(stack, position)| {
-                NativeItemDrop::new(stack, position, velocity(self), pickup_delay)
+            .map(|(stack, position)| super::spill::BlockItemDrop {
+                stack,
+                position,
+                velocity: velocity(self),
+                pickup_delay,
             })
+            .filter(|drop| drop.stack.count > 0 && &*drop.stack.item != "minecraft:air")
             .collect();
         let mut cancel = false;
-        self.native_living_drops(mod_api::__private::LivingDropsCall {
-            entity: dying.entity,
-            kind: dying.kind,
-            player: dying.player,
-            source,
-            recently_hit: dying.recently_hit,
-            drops: &mut drops,
-            cancel: &mut cancel,
-        });
+        if mod_api::__private::listened(mod_api::HookId::LivingDrops)
+            && let Ok(mut snapshots) = drops.try_into_api()
+        {
+            self.native_living_drops(mod_api::__private::LivingDropsCall {
+                entity: dying.entity,
+                kind: dying.kind,
+                player: dying.player,
+                source,
+                recently_hit: dying.recently_hit,
+                drops: &mut snapshots,
+                cancel: &mut cancel,
+            });
+            if let Ok(next) = snapshots.try_into_engine(self.items()) {
+                drops = next;
+            } else {
+                cancel = false;
+            }
+        }
         if cancel {
             return;
         }
@@ -7780,7 +7799,7 @@ impl Game<'_> {
                 if hidden {
                     let mut skin = self.skin_frame.borrow_mut();
                     let end = skin.vertices as usize;
-                    mod_api::render::EntitySpan::hide(&mut skin.spans, mark.2 as usize, end);
+                    mod_render::render::EntitySpan::hide(&mut skin.spans, mark.2 as usize, end);
                 }
             }
             out.truncate(len - 2);
@@ -10973,7 +10992,11 @@ mod living_drops_tests {
                 let items: Vec<_> = event
                     .drops
                     .iter()
-                    .map(|d| d.stack.item.to_string())
+                    .map(|d| {
+                        mod_api::__private::item_key_id(d.stack.item())
+                            .unwrap()
+                            .to_string()
+                    })
                     .collect();
                 self.0.lock().unwrap().push(format!(
                     "{} {:?} {} {}",
@@ -11053,6 +11076,7 @@ mod living_drops_tests {
 #[cfg(test)]
 mod armor_destroy_tests {
     use super::MobEvent;
+    use horizon_client::items::ItemStack;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -11112,12 +11136,16 @@ mod armor_destroy_tests {
         });
     }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
-    use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
+    use mod_api::{EquipmentSlot, NativeArmorHurt};
 
     fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
         NativeArmorHurt {
             slot,
-            stack: ItemStack::new("minecraft:diamond_helmet", 1),
+            stack: mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:diamond_helmet").unwrap(),
+                1,
+            )
+            .unwrap(),
             damage: 2.0,
             new_damage,
         }
@@ -11126,14 +11154,17 @@ mod armor_destroy_tests {
     /// A mod that clears the entries, or removes one, leaves vanilla's wear (no panic).
     #[test]
     fn a_cleared_armor_hurt_entry_keeps_vanilla_wear() {
-        assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
-        let entries = [entry(EquipmentSlot::Head, 5.0)];
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
-        assert_eq!(
-            answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
-            0
-        );
+        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+            mod_api::__private::resolve_items(["minecraft:diamond_helmet"]).unwrap();
+            assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
+            let entries = [entry(EquipmentSlot::Head, 5.0)];
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
+            assert_eq!(
+                answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
+                0
+            );
+        });
     }
 
     /// `(int) Math.max(1.0F, damage / 4.0F)`.
