@@ -32,7 +32,16 @@ pub(in crate::game) fn resolve_block_definitions(
             .iter()
             .position(|(index, _)| *index == default.0 as usize)
             .expect("default belongs to block");
-        let states: Vec<_> = states.iter().map(|(_, properties)| *properties).collect();
+        let states: Vec<std::collections::BTreeMap<_, _>> = states
+            .iter()
+            .map(|(_, properties)| {
+                properties
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .collect();
+        let states: Vec<_> = states.iter().collect();
         horizon_mod_runtime::block_definitions::BlockDefinition::new(&states, ordinal as u16)
             .map_err(|error| format!("block {name}: {error:?}"))
     })
@@ -47,7 +56,7 @@ fn block_definition_import_preserves_defaults_and_is_immutable_after_load() {
         ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north"}}],
         ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east"}}]
     ]}"#;
-    mod_api::install_parts(&[]).unwrap();
+    mod_api::__private::install_parts(&[]).unwrap();
     let registry =
         horizon_world::registry::BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
     resolve_block_definitions(&registry).unwrap();
