@@ -72,6 +72,14 @@ macro_rules! impl_joined {
 }
 
 /// One kind's entity list, with explicit structural operations and immutable slice access.
+/// `DIRECT = false` closes mutable element access: state edits are scoped and
+/// whole-value replacement must carry the attachment slot through `store_back`.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// list[0] = 1;
+/// ```
 /// An entity put in without a join number gets the next one; a numbered entity
 /// keeps its number when taken out and put back. Mutable element access is for
 /// entity state; identity changes and whole-entity replacement remain audited
@@ -107,15 +115,15 @@ macro_rules! impl_joined {
 /// let _: Vec<u32> = list.into();
 /// ```
 #[derive(Clone, Debug)]
-pub struct JoinList<T>(Vec<T>);
+pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
 
-impl<T> Default for JoinList<T> {
+impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-impl<T> JoinList<T> {
+impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn with_capacity(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
     }
@@ -141,14 +149,17 @@ impl<T> JoinList<T> {
     pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
         self.0.retain(keep);
     }
-    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
-        self.0.retain_mut(keep);
-    }
     pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
         self.0.drain(range)
     }
     pub fn swap(&mut self, a: usize, b: usize) {
         self.0.swap(a, b);
+    }
+}
+
+impl<T> JoinList<T> {
+    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
+        self.0.retain_mut(keep);
     }
     /// Run an audited state edit without returning a mutable entity reference.
     /// Whole-entity replacement belongs to the owning residency boundary.
@@ -183,18 +194,62 @@ impl<T> JoinList<T> {
     }
 }
 
-impl<T> Deref for JoinList<T> {
+impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, false> {
+    /// Edit state without allowing the owning registration to be overwritten.
+    pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
+        checked_edit(&mut self.0[index], edit)
+    }
+    pub fn for_each_mut(&mut self, mut edit: impl FnMut(&mut T)) {
+        for entity in &mut self.0 {
+            checked_edit(entity, &mut edit);
+        }
+    }
+    /// Store a tick clone without dropping the owner's lifetime slot.
+    pub fn store_back(&mut self, index: usize, entity: T) {
+        store_back(&mut self.0[index], entity);
+    }
+}
+
+fn checked_edit<T: horizon_mod_runtime::attachments::HasAttachmentLifetime, R>(
+    entity: &mut T,
+    edit: impl FnOnce(&mut T) -> R,
+) -> R {
+    #[cfg(debug_assertions)]
+    let before = entity.attachment_lifetime().registration();
+    let result = edit(entity);
+    #[cfg(debug_assertions)]
+    debug_assert!(
+        before.is_none_or(|old| entity
+            .attachment_lifetime()
+            .registration()
+            .is_some_and(|current| old.same_registration(&current))),
+        "entity edit overwrote its registration"
+    );
+    result
+}
+
+/// Carry lifetime authority from a stored owner into its unbound tick clone.
+pub fn store_back<T: horizon_mod_runtime::attachments::HasAttachmentLifetime>(
+    old: &mut T,
+    mut new: T,
+) {
+    debug_assert!(!new.attachment_lifetime().is_bound());
+    std::mem::swap(old.attachment_lifetime(), new.attachment_lifetime());
+    *old = new;
+}
+
+impl<T, const DIRECT: bool> Deref for JoinList<T, DIRECT> {
     type Target = [T];
     fn deref(&self) -> &[T] {
         &self.0
     }
 }
-impl<T> AsRef<[T]> for JoinList<T> {
+impl<T, const DIRECT: bool> AsRef<[T]> for JoinList<T, DIRECT> {
     fn as_ref(&self) -> &[T] {
         self
     }
 }
-impl<T, I: SliceIndex<[T]>> Index<I> for JoinList<T> {
+impl<T, I: SliceIndex<[T]>, const DIRECT: bool> Index<I> for JoinList<T, DIRECT> {
     type Output = I::Output;
     fn index(&self, index: I) -> &Self::Output {
         &self.0[index]
@@ -206,7 +261,7 @@ impl<T> IndexMut<usize> for JoinList<T> {
     }
 }
 
-impl<T: Joined> JoinList<T> {
+impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
     fn number(entity: &mut T) {
         if !entity.join_seq().is_joined() {
             entity.set_join_seq(JoinSeq::next());
@@ -227,7 +282,7 @@ impl<T: Joined> JoinList<T> {
     }
 }
 
-impl<T: Joined> FromIterator<T> for JoinList<T> {
+impl<T: Joined, const DIRECT: bool> FromIterator<T> for JoinList<T, DIRECT> {
     fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
         let entities = entities.into_iter();
         let mut list = Self::with_capacity(entities.size_hint().0);
@@ -236,7 +291,7 @@ impl<T: Joined> FromIterator<T> for JoinList<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a JoinList<T> {
+impl<'a, T, const DIRECT: bool> IntoIterator for &'a JoinList<T, DIRECT> {
     type Item = &'a T;
     type IntoIter = std::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
@@ -277,7 +332,7 @@ impl<'a, T> IntoIterator for &'a mut JoinList<T> {
         self.iter_mut()
     }
 }
-impl<T> IntoIterator for JoinList<T> {
+impl<T, const DIRECT: bool> IntoIterator for JoinList<T, DIRECT> {
     type Item = T;
     type IntoIter = std::vec::IntoIter<T>;
     fn into_iter(self) -> Self::IntoIter {

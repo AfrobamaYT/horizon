@@ -693,6 +693,16 @@ macro_rules! entity_lists {
 }
 pub(crate) use entity_lists;
 
+macro_rules! direct_entity_edit {
+    (Boat) => {
+        false
+    };
+    ($kind:ident) => {
+        true
+    };
+}
+pub(crate) use direct_entity_edit;
+
 macro_rules! define_entity_handles {
     (() $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         /// Every list, borrowed apart from the rest of `Game`, for
@@ -711,7 +721,7 @@ macro_rules! define_entity_handles {
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
         /// world stays readable while the entities change.
         pub(super) struct TakenEntities {
-            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty>,)*
+            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty, { $crate::game::entity::direct_entity_edit!($kind) }>,)*
         }
 
 
@@ -2098,7 +2108,7 @@ mod join_order_tests {
         stands: JoinList<ArmorStand>,
         tridents: JoinList<ThrownTrident>,
         rockets: JoinList<Rocket>,
-        boats: JoinList<Boat>,
+        boats: JoinList<Boat, false>,
     }
 
     impl Lists {

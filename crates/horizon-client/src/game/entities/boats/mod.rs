@@ -42,6 +42,7 @@ pub(super) struct Boat {
     pub pitch: f32,
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
     pub(super) join: horizon_client::join_seq::JoinSeq,
+    pub(super) attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub id: u32,
     /// Wood type (`oak`, `bamboo` for the raft).
     pub wood: Arc<str>,
@@ -166,6 +167,7 @@ impl Boat {
         Self {
             pitch: 0.0,
             join: Default::default(),
+            attachment_lifetime: Default::default(),
             id,
             wood,
             position,
@@ -1836,3 +1838,4 @@ mod tests {
     }
 }
 horizon_client::impl_joined!(Boat);
+horizon_mod_runtime::impl_attachment_lifetime!(Boat);
