@@ -762,6 +762,7 @@ mod fox_consumption_hook_tests {
     struct Probe {
         mode: Arc<AtomicU8>,
         heard: Arc<Mutex<Vec<(u32, ItemStack)>>>,
+        spawned: Arc<Mutex<Vec<u32>>>,
     }
     impl Hooks for Probe {
         fn item_consumption_teleport(
@@ -801,6 +802,50 @@ mod fox_consumption_hook_tests {
                     assert!(event.consumer.entity().discard(host));
                     Flow::Continue
                 }
+                5 => {
+                    match event.consumer.entity().id() {
+                        200 => {
+                            // Full owning-host access, before this fox moves and
+                            // before any later mob's AI/consumption step.
+                            let next = host.entity(201).unwrap();
+                            assert_eq!(next.position(host), Some([11.5, 64.0, 8.5]));
+                            let next_living = host.living(next).unwrap();
+                            assert_eq!(next_living.hand_item(host, Hand::Main).unwrap().count, 7);
+                            assert!(next_living.set_hand_item(
+                                host,
+                                Hand::Main,
+                                Some(ItemStack::new("minecraft:stone", 1))
+                            ));
+                            assert!(next.teleport_to(host, [12.5, 64.0, 8.5], None));
+                            assert!(host.entity(202).unwrap().discard(host));
+                            let spawned = host
+                                .summon(
+                                    "minecraft:overworld",
+                                    "minecraft:cow",
+                                    [2.5, 64.0, 2.5],
+                                    Default::default(),
+                                )
+                                .unwrap();
+                            self.spawned.lock().unwrap().push(spawned);
+                            *event.target = [4.5, 70.0, 4.5];
+                            Flow::Continue
+                        }
+                        204 => {
+                            // The earlier fox resumed before this one, and the
+                            // listener's unrelated actor writes survived it.
+                            let first = host.living(host.entity(200).unwrap()).unwrap();
+                            assert_eq!(first.hand_item(host, Hand::Main).unwrap().count, 6);
+                            let next = host.living(host.entity(201).unwrap()).unwrap();
+                            assert_eq!(
+                                &*next.hand_item(host, Hand::Main).unwrap().item,
+                                "minecraft:stone"
+                            );
+                            assert!(host.entity(202).is_none());
+                            Flow::Cancel
+                        }
+                        other => panic!("unexpected consumption by {other}"),
+                    }
+                }
                 _ => unreachable!(),
             }
         }
@@ -816,6 +861,7 @@ mod fox_consumption_hook_tests {
             Box::new(Probe {
                 mode: Arc::clone(&mode),
                 heard: Arc::clone(&heard),
+                spawned: Arc::new(Mutex::new(Vec::new())),
             }),
         )]
         .into();
@@ -904,6 +950,89 @@ mod fox_consumption_hook_tests {
                     heard.lock().unwrap().len(),
                     5,
                     "one callback per first attempt"
+                );
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    fn fox_tick_pauses_before_movement_and_next_actor_and_preserves_full_host_writes() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let spawned = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "fox-tick-consumption-proof",
+            Box::new(Probe {
+                mode: Arc::new(AtomicU8::new(5)),
+                heard: Arc::clone(&heard),
+                spawned: Arc::clone(&spawned),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                game.world
+                    .chunks
+                    .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+                let stone = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap();
+                for x in 0..16 {
+                    for z in 0..16 {
+                        game.world.set(x, 63, z, stone).unwrap();
+                    }
+                }
+                game.next_entity = 300;
+                let ty = game.res.mob_types().get("minecraft:fox").unwrap().clone();
+                let from = Vec3::new(8.5, 64.0, 8.5);
+                for (id, x) in [(200, 8.5), (201, 11.5), (202, 13.5), (204, 6.5)] {
+                    let mut actor = Mob::new(id, ty.clone(), Vec3::new(x, 64.0, 8.5), 0.0);
+                    actor.persistent = true;
+                    actor.on_ground = true;
+                    actor.extra.ints[1] = 600;
+                    actor
+                        .extra
+                        .set_main_hand_stack(Some(ItemStack::new("minecraft:chorus_fruit", 7)));
+                    if id == 200 {
+                        actor.velocity = Vec3::new(0.2, 0.0, 0.0);
+                    }
+                    game.mobs.push(actor);
+                }
+                game.tick_creature_entities().unwrap();
+                let heard = heard.lock().unwrap();
+                assert_eq!(
+                    heard.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                    [200, 204]
+                );
+                assert!(heard.iter().all(|(_, stack)| stack.count == 7));
+                let first = game.mobs.iter().find(|m| m.id == 200).unwrap();
+                assert_eq!(first.age, 1, "base tick must not repeat after the callback");
+                assert_eq!(first.previous, from);
+                assert_eq!(first.extra.main_hand_stack().unwrap().count, 6);
+                assert!(
+                    first.position.x < 6.0,
+                    "movement resumes at the redirected landing"
+                );
+                let next = game.mobs.iter().find(|m| m.id == 201).unwrap();
+                assert_eq!(next.age, 1);
+                assert_eq!(
+                    &*next.extra.main_hand_stack().unwrap().item,
+                    "minecraft:stone"
+                );
+                assert_eq!(next.previous, Vec3::new(12.5, 64.0, 8.5));
+                assert!(!game.mobs.iter().any(|m| m.id == 202));
+                let last = game.mobs.iter().find(|m| m.id == 204).unwrap();
+                assert_eq!(last.age, 1);
+                assert_eq!(last.extra.main_hand_stack().unwrap().count, 6);
+                let spawned = spawned.lock().unwrap();
+                assert_eq!(spawned.len(), 1);
+                let cow = game.mobs.iter().find(|m| m.id == spawned[0]).unwrap();
+                assert_eq!(
+                    cow.age, 0,
+                    "a listener's new entity waits until the next batch"
                 );
             })
         });

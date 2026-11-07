@@ -162,12 +162,15 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   the pearl without teleport, sound, damage or endermite roll. Players retain acting-player context and
   mutable fall damage (5). Mobs preserve rotation, reset fall distance, take no player fall damage and
   make no endermite draw. The pending move refuses an owner changed by the listener.
-- **`native_item_consumption_teleport(consumer, consumed, from, target, cancel)`**: a server player whose `teleport_randomly`
+- **`native_item_consumption_teleport(consumer, consumed, from, target, cancel)`**: a server player or fox whose `teleport_randomly`
   consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ItemConsumption`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
   `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
   the border. Canceling ends the effect: no
-  teleport and no more attempts. Foxes eating chorus fruit are not heard.
+  teleport and no more attempts, but the food is consumed. `consumer` is a `LivingRef` and `consumed` is the
+  captured stack before consumption (count and components included). A fox's listener receives the full server
+  host before its living movement and before the next mob ticks; writes to actors or the level survive the
+  continuation. Changing the consumer's mouth item, position or eligibility refuses the captured effect.
 - **`native_player_clone(player, name, was_death)`**: a player's data was copied to their new player (NeoForge's
   `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): after a death respawn (`was_death` true) and when a player
   leaves the End after the credits (`was_death` false, vanilla's `keepAllPlayerData`). It is heard after the copy and

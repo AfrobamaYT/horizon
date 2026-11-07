@@ -441,6 +441,24 @@ pub fn tick_until_consumption(
     tick_with(mobs, index, w, level, events, Mob::tick_until_consumption)
 }
 
+/// Resume the paused living AI step with the current vehicle/navigation owner.
+pub fn resume_after_consumption(
+    mobs: &mut JoinList<Mob>,
+    index: usize,
+    w: &MobWorld,
+    level: &mut super::DamageLevel<'_>,
+    events: &mut Vec<super::MobEvent>,
+) -> bool {
+    tick_with(
+        mobs,
+        index,
+        w,
+        level,
+        events,
+        super::ai::resume_after_consumption,
+    )
+}
+
 fn tick_with<R>(
     mobs: &mut JoinList<Mob>,
     index: usize,

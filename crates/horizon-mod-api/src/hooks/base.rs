@@ -2985,7 +2985,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         reason: &str,
         cancel: &mut bool,
     );
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -2996,8 +2996,12 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// more attempts. `consumer` names the living actor through its handle.
     /// `consumed` is the stack captured before consumption, including
     /// its count and components; it is not reread from the hand after listener writes.
-    /// The player's state is swapped in
-    /// (`host.players().acting_player()`). Foxes are not heard. Diverges from upstream: renamed from
+    /// A player's state is swapped in (`host.players().acting_player()`). A fox's
+    /// callback has the full server host before its living AI/movement step and
+    /// before the next mob ticks. Listener writes survive; changing the consumer's
+    /// item, position or eligibility refuses the captured effect instead of
+    /// overwriting that write. Cancellation still finishes consumption.
+    /// Diverges from upstream: renamed from
     /// `chorus_fruit_teleport`.
     #[hook(
         side = "server",
