@@ -5,8 +5,10 @@ impl HitLevel<'_> {
     /// `distance` blocks. `damage` is the fall damage `causeFallDamage` calculated, before hurt
     /// handling and the fall sounds: change it, and zero prevents both. A creative or
     /// fall-immune entity is told with zero damage and keeps its immunity. Players and mobs
-    /// land here; dropped items, projectiles and the other entities do not yet.
-    pub(in crate::game) fn native_fall_on(&mut self, call: mod_api::__private::FallOnCall<'_>) {
+    /// land here; dropped items also land with zero damage. Generated dispatch stages
+    /// every requested API LandingWrite before committing damage or the engine write
+    /// queue; an invalid state refuses the whole callback's output.
+    pub(in crate::game) fn native_fall_on(&mut self, call: super::fire::FallOnCall<'_>) {
         self.fire_fall_on(call);
     }
     /// `Block.bounceOn`: entity `entity` of type `kind` bounced off `state` at `pos` and fell

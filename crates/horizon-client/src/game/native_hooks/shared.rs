@@ -1300,21 +1300,22 @@ impl Game<'_> {
         }
     }
 
-    /// Apply one write a landing asked for, at the block the entity landed on.
+    /// Apply one already-validated engine write, at the block the entity landed on.
+    /// The original-state guard runs once before the ordered batch, not between writes.
     fn apply_landing_write(
         &mut self,
         level: mod_api::LevelRef,
         pos: BlockPos,
-        write: LandingWrite,
+        write: horizon_world::level::LandingWrite,
     ) {
         let at = [pos.x, pos.y, pos.z];
         match write {
             // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
-            LandingWrite::SetBlock(state) => {
+            horizon_world::level::LandingWrite::SetBlock(state) => {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
                 self.level_set_block(level, at, state, flags);
             }
-            LandingWrite::DestroyBlock { drop } => {
+            horizon_world::level::LandingWrite::DestroyBlock { drop } => {
                 self.level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
@@ -1567,16 +1568,18 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
-            HitLevel(level.reborrow()).native_fall_on(mod_api::__private::FallOnCall {
-                dimension,
-                entity: c.entity,
-                kind: c.kind,
-                state: c.state,
-                pos: c.position,
-                distance,
-                damage,
-                writes,
-            });
+            HitLevel(level.reborrow()).native_fall_on(
+                crate::game::native_hooks::fire::FallOnCall {
+                    dimension,
+                    entity: c.entity,
+                    kind: c.kind,
+                    state: c.state,
+                    pos: c.position,
+                    distance,
+                    damage,
+                    writes,
+                },
+            );
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
             let mut answer = [movement.x, movement.y, movement.z];
@@ -5182,7 +5185,7 @@ mod item_fall_on_tests {
                 event.distance,
                 event.damage,
             ));
-            event.request(LandingWrite::DestroyBlock { drop: false });
+            event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }
     }
     struct Mod(Lands);

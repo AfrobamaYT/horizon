@@ -18,7 +18,7 @@ pub use {
         AttachmentType, AttachmentValue, AttachmentWrite, Holder,
     },
     horizon_world::{
-        level::{BlockId, LandingWrite},
+        level::BlockId,
         loot::{LootStack, NativeLootContext},
         registry::BlockStateId,
     },
