@@ -318,17 +318,27 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn item_and_block_registry_facts_use_the_loaded_tables() {
+        use super::super::api_values::TryIntoApi;
         use mod_api::Host;
         super::super::native_entity_refs::tests::with_game(|game| {
             let host: &dyn Host = game;
             let remainder = host
-                .item_crafting_remainder(&ItemStack::new("minecraft:water_bucket", 1))
+                .item_crafting_remainder(
+                    &ItemStack::new("minecraft:water_bucket", 1)
+                        .try_into_api()
+                        .unwrap(),
+                )
                 .unwrap();
-            assert_eq!(&*remainder.item, "minecraft:bucket");
-            assert_eq!(remainder.count, 1);
+            assert_eq!(
+                remainder.item(),
+                mod_api::__private::item_key("minecraft:bucket").unwrap()
+            );
+            assert_eq!(remainder.count(), 1);
             assert!(
-                host.item_crafting_remainder(&ItemStack::new("minecraft:stone", 1))
-                    .is_none()
+                host.item_crafting_remainder(
+                    &ItemStack::new("minecraft:stone", 1).try_into_api().unwrap()
+                )
+                .is_none()
             );
             assert_eq!(
                 host.block_item(mod_api::__private::part_tests::block_key("minecraft:stone"))
