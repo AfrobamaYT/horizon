@@ -1135,15 +1135,6 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
-            // The server names its mods; the answer is ours, and the server judges.
-            cfg::Clientbound::CustomPayload(p)
-                if p.channel == horizon_protocol::mod_list::CHANNEL =>
-            {
-                reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                    channel: horizon_protocol::mod_list::CHANNEL.into(),
-                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::local()),
-                }))?;
-            }
             cfg::Clientbound::CustomPayload(p) => {
                 // Horizon servers use the client brand to negotiate their extensions.
                 // Announce those only after the server identifies itself as Horizon.
@@ -1159,6 +1150,14 @@ fn configure(
                     reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                         channel: "minecraft:brand".into(),
                         data: w.data,
+                    }))?;
+                    // Announce before replying to known packs, even when the
+                    // server has no mods. Never disclose this to vanilla servers.
+                    reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                        channel: horizon_protocol::mod_list::CHANNEL.into(),
+                        data: horizon_protocol::mod_list::encode(
+                            &horizon_protocol::mod_list::local(),
+                        ),
                     }))?;
                 }
                 receive_brand(&p, send);
@@ -1488,6 +1487,98 @@ mod tests {
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
         (root, data)
+    }
+
+    #[test]
+    fn configuration_keeps_mod_lists_private_until_the_server_identifies_as_horizon() {
+        for server_brand in ["vanilla", "horizon"] {
+            let (root, data) = empty_item_data(&format!("mod-list-{server_brand}"));
+            let (client, server) = horizon_protocol::connection::Pipe::pair();
+            let (mut reader, writer) = Connection::local(client).split();
+            reader
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let thread = std::thread::spawn(move || {
+                let (send, _events) = channel();
+                configure(
+                    &mut reader,
+                    &Mutex::new(Some(writer)),
+                    &AtomicBool::new(true),
+                    &Language::new(),
+                    &send,
+                    &Cookies::default(),
+                    &data,
+                )
+            });
+            let mut server = Connection::local(server);
+            server
+                .reader
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            // A payload alone must not solicit private identities.
+            server
+                .send(
+                    &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: horizon_protocol::mod_list::CHANNEL.into(),
+                        data: horizon_protocol::mod_list::encode(&[]),
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            server
+                .send(&cfg::Clientbound::Ping(cfg::Ping { id: 17 }).encode())
+                .unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::Pong(cfg::Ping { id: 17 }),
+                "an unidentified server received a mod announcement"
+            );
+            let mut brand = horizon_protocol::buf::Writer::new();
+            brand.string(server_brand);
+            server
+                .send(
+                    &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: "minecraft:brand".into(),
+                        data: brand.data,
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            server
+                .send(
+                    &cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
+                        .encode(),
+                )
+                .unwrap();
+            let mut declared_mods = false;
+            loop {
+                let (id, body) = server.recv().unwrap();
+                match cfg::Serverbound::decode(id, &body).unwrap() {
+                    cfg::Serverbound::CustomPayload(p)
+                        if p.channel == horizon_protocol::mod_list::CHANNEL =>
+                    {
+                        declared_mods = true;
+                    }
+                    cfg::Serverbound::SelectKnownPacks(_) => break,
+                    _ => {}
+                }
+            }
+            assert_eq!(declared_mods, server_brand == "horizon");
+            server
+                .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+                .unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::FinishConfiguration(Empty)
+            );
+            thread
+                .join()
+                .unwrap()
+                .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text));
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     fn pack(namespace: &str, id: &str, version: &str) -> cfg::KnownPack {
@@ -1835,13 +1926,18 @@ mod tests {
                     })
                 );
             }
-            // The response to the pack query proves any brand reply precedes it.
-            // Non-Horizon servers must receive no additional brand announcement.
-            let (id, body) = server.recv().unwrap();
-            assert_eq!(
-                cfg::Serverbound::decode(id, &body).unwrap(),
-                cfg::Serverbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
-            );
+            // Wait for the pack reply without pinning unrelated extension payloads.
+            // The negotiated brand must not be announced a second time.
+            loop {
+                let (id, body) = server.recv().unwrap();
+                match cfg::Serverbound::decode(id, &body).unwrap() {
+                    cfg::Serverbound::SelectKnownPacks(_) => break,
+                    cfg::Serverbound::CustomPayload(p) => {
+                        assert_ne!(p.channel, "minecraft:brand");
+                    }
+                    packet => panic!("unexpected configuration reply: {packet:?}"),
+                }
+            }
             drop(server);
             drop(session);
         }

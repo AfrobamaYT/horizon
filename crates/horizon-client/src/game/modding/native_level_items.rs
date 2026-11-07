@@ -261,7 +261,7 @@ mod tests {
                 .collect()
         };
         let before = joins(&game);
-        let out = std::mem::take(&mut game.dropped);
+        let out = game.dropped.lift();
         let hooked = game
             .level_spawn_item(level, 1.5, 70.0, 2.5, stone(), 0)
             .unwrap();

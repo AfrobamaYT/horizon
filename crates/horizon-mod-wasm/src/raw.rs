@@ -118,20 +118,16 @@ fn check_slot(table: &Table, mod_id: &str, injection: &inject::Inject) -> Result
 }
 
 pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Listeners>, Refusal> {
-    let wasm = manifest
-        .wasm
-        .as_ref()
-        .expect("wasm loading checked the package");
     let injections: Vec<_> = manifest
         .inject
         .iter()
         .filter(|i| i.access == Access::Internals)
         .collect();
-    if wasm.internals().is_empty() && injections.is_empty() {
+    if manifest.internals.is_empty() && injections.is_empty() {
         return Ok(None);
     }
     let table = crate::INTERNALS.get().copied().unwrap_or(&Table::EMPTY);
-    for path in wasm.internals().iter().map(|i| i.path.as_str()) {
+    for path in manifest.internals.iter().map(|i| i.path.as_str()) {
         if table.native_only.contains(&path) {
             return Err(Refusal::missing_internal(table, &manifest.id, path));
         }
@@ -172,7 +168,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         .ok_or_else(|| {
             Refusal::Points("its raw listeners didn't answer their declared internals".into())
         })?;
-    check_declared(wasm.internals(), &listed)?;
+    check_declared(&manifest.internals, &listed)?;
     let pairs: Vec<_> = listed
         .iter()
         .map(|(path, hash)| (path.as_str(), hash.as_str()))
@@ -180,8 +176,8 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     let resolved = view::resolve(table, &manifest.id, &pairs)?;
     for ((path, hash), resolved) in listed.iter().zip(&resolved) {
         if !matches!(resolved, Resolved::Type(_))
-            && !wasm
-                .internals()
+            && !manifest
+                .internals
                 .iter()
                 .any(|entry| entry.path == *path && entry.hash == *hash)
         {

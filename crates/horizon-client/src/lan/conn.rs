@@ -982,18 +982,10 @@ fn login_and_configure(
             features: sync.features.clone(),
         }),
     )?;
-    // Send before the existing known-pack request: its reply is the ordering
-    // barrier for the client's mod-list answer, with no extra Ping/Pong.
-    // Vanilla clients ignore the unknown payload and offer an empty list.
+    // Horizon clients announce their list after recognizing our brand, before
+    // answering known packs. That reply orders the announcement without a ping.
     let server_mods = horizon_protocol::mod_list::local();
     let mut client_mods = Vec::new();
-    send(
-        c,
-        cfg::Clientbound::CustomPayload(cfg::CustomPayload {
-            channel: horizon_protocol::mod_list::CHANNEL.into(),
-            data: horizon_protocol::mod_list::encode(&server_mods),
-        }),
-    )?;
     let core = KnownPack {
         namespace: CORE_PACK.0.into(),
         id: CORE_PACK.1.into(),
@@ -1015,6 +1007,15 @@ fn login_and_configure(
                 brand = horizon_protocol::buf::Reader::new(&p.data)
                     .string(32767)
                     .unwrap_or(brand);
+                if brand == "horizon" {
+                    send(
+                        c,
+                        cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                            channel: horizon_protocol::mod_list::CHANNEL.into(),
+                            data: horizon_protocol::mod_list::encode(&server_mods),
+                        }),
+                    )?;
+                }
             }
             cfg::Serverbound::CustomPayload(p)
                 if p.channel == horizon_protocol::mod_list::CHANNEL =>
@@ -1897,29 +1898,24 @@ mod tests {
             .encode(),
         )
         .unwrap();
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: mod_list::CHANNEL.into(),
+                data: mod_list::encode(&[Entry {
+                    id: "shared_extra".into(),
+                    version: "2.0".into(),
+                    side: Side::Both,
+                }]),
+            })
+            .encode(),
+        )
+        .unwrap();
         loop {
             let (id, payload) = c.recv().unwrap();
             match cfg::Clientbound::decode(id, &payload).unwrap() {
                 cfg::Clientbound::SelectKnownPacks(p) => c
                     .send(&cfg::Serverbound::SelectKnownPacks(p).encode())
                     .unwrap(),
-                cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
-                    assert!(mod_list::decode(&p.data).unwrap().is_empty());
-                    let data = mod_list::encode(&[Entry {
-                        id: "shared_extra".into(),
-                        version: "2.0".into(),
-                        side: Side::Both,
-                    }]);
-                    c.send(
-                        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                            channel: mod_list::CHANNEL.into(),
-                            data,
-                        })
-                        .encode(),
-                    )
-                    .unwrap();
-                }
-                cfg::Clientbound::Ping(_) => panic!("unexpected mod-list round trip"),
                 cfg::Clientbound::Disconnect(d) => {
                     assert!(
                         horizon_protocol::text::plain(&d.reason, &Default::default())
@@ -1934,88 +1930,50 @@ mod tests {
     }
 
     #[test]
-    fn mod_lists_use_the_known_pack_barrier_without_a_ping() {
-        use horizon_protocol::mod_list::{self, Entry, Side};
-        for (brand, reply) in [
-            ("horizon", None),
-            ("vanilla", None),
-            ("horizon", Some(vec![])),
-            (
-                "horizon",
-                Some(vec![Entry {
-                    id: "client_only".into(),
-                    version: "1".into(),
-                    side: Side::Client,
-                }]),
-            ),
-        ] {
-            let config = crate::lan::NetConfig {
-                announce: false,
-                listen: false,
-                ..crate::lan::NetConfig::lan(0, "Owner - World".into(), 8)
-            };
-            let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
-            let mut c = Connection::local(lan.connect_local().unwrap());
-            c.reader
-                .set_read_timeout(Some(Duration::from_secs(10)))
-                .unwrap();
-            login_profile(&mut c, "Owner");
-            c.send(
-                &login::Serverbound::LoginAcknowledged(horizon_protocol::packets::Empty).encode(),
-            )
+    fn vanilla_configuration_does_not_disclose_horizon_mods() {
+        let config = crate::lan::NetConfig {
+            announce: false,
+            listen: false,
+            ..crate::lan::NetConfig::lan(0, "Owner - World".into(), 8)
+        };
+        let lan = crate::lan::Lan::start_with(Arc::new(SyncData::empty()), config).unwrap();
+        let mut c = Connection::local(lan.connect_local().unwrap());
+        c.reader
+            .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
-            let mut data = horizon_protocol::buf::Writer::new();
-            data.string(brand);
-            c.send(
-                &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                    channel: "minecraft:brand".into(),
-                    data: data.data,
-                })
-                .encode(),
-            )
+        login_profile(&mut c, "Owner");
+        c.send(&login::Serverbound::LoginAcknowledged(horizon_protocol::packets::Empty).encode())
             .unwrap();
-            let mut offered = false;
-            let mut barrier = false;
-            loop {
-                let (id, payload) = c.recv().unwrap();
-                match cfg::Clientbound::decode(id, &payload).unwrap() {
-                    cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
-                        assert!(!barrier, "mod offer must precede the ordering barrier");
-                        assert!(!offered);
-                        assert!(mod_list::decode(&p.data).unwrap().is_empty());
-                        offered = true;
-                        if let Some(list) = &reply {
-                            c.send(
-                                &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                                    channel: mod_list::CHANNEL.into(),
-                                    data: mod_list::encode(list),
-                                })
-                                .encode(),
-                            )
-                            .unwrap();
-                        }
-                    }
-                    cfg::Clientbound::SelectKnownPacks(p) => {
-                        assert!(offered);
-                        barrier = true;
-                        c.send(&cfg::Serverbound::SelectKnownPacks(p).encode())
-                            .unwrap();
-                    }
-                    cfg::Clientbound::Ping(_) => panic!("mod negotiation added a round trip"),
-                    cfg::Clientbound::Disconnect(d) => panic!("unexpected refusal: {:?}", d.reason),
-                    cfg::Clientbound::FinishConfiguration(_) => {
-                        assert!(barrier);
-                        c.send(
-                            &cfg::Serverbound::FinishConfiguration(
-                                horizon_protocol::packets::Empty,
-                            )
-                            .encode(),
-                        )
-                        .unwrap();
-                        break;
-                    }
-                    _ => {}
+        let mut data = horizon_protocol::buf::Writer::new();
+        data.string("vanilla");
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: "minecraft:brand".into(),
+                data: data.data,
+            })
+            .encode(),
+        )
+        .unwrap();
+        loop {
+            let (id, payload) = c.recv().unwrap();
+            match cfg::Clientbound::decode(id, &payload).unwrap() {
+                cfg::Clientbound::CustomPayload(p) => {
+                    assert_ne!(p.channel, horizon_protocol::mod_list::CHANNEL);
                 }
+                cfg::Clientbound::SelectKnownPacks(p) => {
+                    c.send(&cfg::Serverbound::SelectKnownPacks(p).encode())
+                        .unwrap();
+                }
+                cfg::Clientbound::Disconnect(d) => panic!("unexpected refusal: {:?}", d.reason),
+                cfg::Clientbound::FinishConfiguration(_) => {
+                    c.send(
+                        &cfg::Serverbound::FinishConfiguration(horizon_protocol::packets::Empty)
+                            .encode(),
+                    )
+                    .unwrap();
+                    break;
+                }
+                _ => {}
             }
         }
     }
@@ -2048,6 +2006,14 @@ mod tests {
         .unwrap();
         let mut malformed = mod_list::encode(&[]);
         malformed.push(0); // Trailing bytes: the list is refused whole, not read as empty.
+        c.send(
+            &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                channel: mod_list::CHANNEL.into(),
+                data: malformed,
+            })
+            .encode(),
+        )
+        .unwrap();
         loop {
             let (id, payload) = c.recv().unwrap();
             match cfg::Clientbound::decode(id, &payload).unwrap() {
@@ -2056,17 +2022,6 @@ mod tests {
                 cfg::Clientbound::SelectKnownPacks(p) => {
                     let _ = c.send(&cfg::Serverbound::SelectKnownPacks(p).encode());
                 }
-                cfg::Clientbound::CustomPayload(p) if p.channel == mod_list::CHANNEL => {
-                    c.send(
-                        &cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                            channel: mod_list::CHANNEL.into(),
-                            data: malformed.clone(),
-                        })
-                        .encode(),
-                    )
-                    .unwrap();
-                }
-                cfg::Clientbound::Ping(_) => panic!("unexpected mod-list round trip"),
                 cfg::Clientbound::Disconnect(d) => {
                     let text = horizon_protocol::text::plain(&d.reason, &Default::default());
                     assert!(text.contains("couldn't be read"));

@@ -88,14 +88,22 @@ pub fn cache_catalogs(
     body: impl Read,
     expected: &str,
 ) -> Result<Vec<ListedInternal>, CatalogError> {
-    let unique = format!(
-        "{}.{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
+    cache_with_limit(cache, name, body, expected, ARCHIVE_LIMIT)
+}
+
+fn cache_with_limit(
+    cache: &Dir,
+    name: &str,
+    body: impl Read,
+    expected: &str,
+    limit: u64,
+) -> Result<Vec<ListedInternal>, CatalogError> {
+    let pid = std::process::id();
+    let serial = NEXT.fetch_add(1, Ordering::Relaxed);
+    let unique = format!("{pid}.{serial}");
     let archive = format!("prebuilt.{unique}.partial");
     let result = (|| {
-        let mut body = body.take(ARCHIVE_LIMIT + 1);
+        let mut body = body.take(limit + 1);
         let mut file = cache.create(&archive)?;
         let mut hash = Sha256::new();
         let mut size = 0;
@@ -106,7 +114,7 @@ pub fn cache_catalogs(
                 break;
             }
             size += read as u64;
-            if size > ARCHIVE_LIMIT {
+            if size > limit {
                 return Err(CatalogError::ArchiveTooLarge {
                     archive: name.into(),
                 });
@@ -191,22 +199,18 @@ mod tests {
     fn archive(path: &str, kind: tar::EntryType, contents: &str, points: Option<&str>) -> Vec<u8> {
         let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         let mut archive = tar::Builder::new(gzip);
+        let unrelated = ("bin/game", tar::EntryType::Regular, "not code");
         for (path, kind, contents) in std::iter::once((path, kind, contents))
             .chain(points.map(|text| (POINTS, tar::EntryType::Regular, text)))
-            .chain(std::iter::once((
-                "bin/game",
-                tar::EntryType::Regular,
-                "not code",
-            )))
+            .chain(std::iter::once(unrelated))
         {
             let mut header = tar::Header::new_gnu();
             header.set_size(contents.len() as u64);
             header.set_mode(0o644);
             header.set_entry_type(kind);
+            header.as_mut_bytes()[..path.len()].copy_from_slice(path.as_bytes());
             header.set_cksum();
-            archive
-                .append_data(&mut header, path, contents.as_bytes())
-                .unwrap();
+            archive.append(&header, contents.as_bytes()).unwrap();
         }
         archive.into_inner().unwrap().finish().unwrap()
     }
@@ -222,16 +226,27 @@ mod tests {
         let found = catalogs_from_archive(bytes.as_slice()).unwrap();
         assert_eq!(found.internals, JSON);
         assert_eq!(found.points, "{}");
+        for path in [
+            "deps/internals.json",
+            "../internals.json",
+            "/internals.json",
+        ] {
+            let bytes = archive(path, tar::EntryType::Regular, JSON, Some("{}"));
+            assert!(matches!(
+                catalogs_from_archive(bytes.as_slice()),
+                Err(CatalogError::Missing { file: CATALOG })
+            ));
+        }
+        let mut oversized = format!("[{}]", " ".repeat((64 << 20) - 1));
+        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized, Some("{}"));
+        assert!(matches!(
+            catalogs_from_archive(bytes.as_slice()),
+            Err(CatalogError::CatalogTooLarge { file: CATALOG })
+        ));
+        oversized.remove(1);
+        let bytes = archive(CATALOG, tar::EntryType::Regular, &oversized, Some("{}"));
+        assert!(catalogs_from_archive(bytes.as_slice()).is_ok());
         for (bytes, expected) in [
-            (
-                archive(
-                    "deps/internals.json",
-                    tar::EntryType::Regular,
-                    JSON,
-                    Some("{}"),
-                ),
-                "no internals.json",
-            ),
             (
                 archive(CATALOG, tar::EntryType::Symlink, JSON, Some("{}")),
                 "not a file",
@@ -262,6 +277,15 @@ mod tests {
             .join(std::process::id().to_string());
         std::fs::create_dir_all(&path).unwrap();
         let dir = Dir::open_ambient_dir(&path, cap_std::ambient_authority()).unwrap();
+        let mut bytes = archive(CATALOG, tar::EntryType::Regular, JSON, Some("{}"));
+        bytes.resize(4 * 1024 + 1, 0);
+        let hash = format!("{:x}", Sha256::digest(&bytes));
+        let mut reader = std::io::Cursor::new(bytes.as_slice());
+        assert!(matches!(
+            cache_with_limit(&dir, "game.tar.gz", &mut reader, &hash, ARCHIVE_LIMIT >> 20),
+            Err(CatalogError::ArchiveTooLarge { .. })
+        ));
+        assert_eq!(reader.position(), 4 * 1024 + 1);
         let bytes = archive(CATALOG, tar::EntryType::Regular, JSON, Some("{}"));
         assert!(
             cache_catalogs(&dir, "game.tar.gz", bytes.as_slice(), "wrong")
@@ -280,14 +304,33 @@ mod tests {
             assert!(cache_catalogs(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
         }
         assert_eq!(dir.entries().unwrap().count(), 0);
+        let outside = path.with_extension("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "protected").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, path.join("diagnostic-link")).unwrap();
+        let diagnostic = if cfg!(unix) {
+            path.join("diagnostic-link/sentinel")
+        } else {
+            outside.join("sentinel")
+        };
         let hash = format!("{:x}", Sha256::digest(&bytes));
         assert_eq!(
-            cache_catalogs(&dir, "../game.tar.gz", bytes.as_slice(), &hash).unwrap()[0].path,
+            cache_catalogs(&dir, diagnostic.to_str().unwrap(), bytes.as_slice(), &hash).unwrap()[0]
+                .path,
             "Example"
         );
         assert_eq!(dir.read_to_string(CATALOG).unwrap(), JSON);
         assert_eq!(dir.read_to_string(POINTS).unwrap(), "{}");
-        assert_eq!(dir.entries().unwrap().count(), 2);
+        assert_eq!(
+            std::fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "protected"
+        );
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 1);
+        assert_eq!(
+            dir.entries().unwrap().count(),
+            if cfg!(unix) { 3 } else { 2 }
+        );
         let invalid = archive(CATALOG, tar::EntryType::Regular, JSON, Some("not JSON"));
         let hash = format!("{:x}", Sha256::digest(&invalid));
         assert!(cache_catalogs(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
@@ -295,5 +338,6 @@ mod tests {
         assert_eq!(dir.read_to_string(POINTS).unwrap(), "{}");
         drop(dir);
         std::fs::remove_dir_all(path).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
     }
 }

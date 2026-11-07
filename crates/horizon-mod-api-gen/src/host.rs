@@ -180,6 +180,7 @@ fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>
                         | "Messages"
                         | "Players"
                         | "RenderAssets"
+                        | "InstanceGroups"
                 )
             ) {
                 continue;

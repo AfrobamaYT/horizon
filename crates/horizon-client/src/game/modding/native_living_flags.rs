@@ -180,7 +180,7 @@ impl Game<'_> {
                 let Some(at) = self.sleeping_position(pos) else {
                     return false;
                 };
-                let mut mobs = std::mem::take(&mut self.mobs);
+                let mut mobs = self.mobs.lift();
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
                 let slept = mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {
@@ -220,7 +220,7 @@ impl Game<'_> {
                 if !villager::sleeping(m) {
                     return false;
                 }
-                let mut mobs = std::mem::take(&mut self.mobs);
+                let mut mobs = self.mobs.lift();
                 let w = self.mob_world_base(&[]);
                 let mut events = Vec::new();
                 if let Some(m) = mobs.iter_mut().find(|m| m.id == id) {

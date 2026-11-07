@@ -55,10 +55,10 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&text)?;
-    let (declared, catalog) = if let Some(wasm) = &manifest.wasm {
-        (wasm.internals(), internals::read(&wasm_catalog(dir)?)?)
+    let catalog = if manifest.wasm.is_some() {
+        internals::read(&wasm_catalog(dir)?)?
     } else if let Some(native) = &manifest.native {
-        (native.internals.as_slice(), load(dir, &native.horizon)?)
+        load(dir, &native.horizon)?
     } else {
         return Err("internals add needs a [native] or [wasm] mod".into());
     };
@@ -72,14 +72,14 @@ fn add(dir: &Path, paths: &[&str], kind: Option<&str>) -> Result<(), String> {
     let mut doc: DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    upsert(&mut doc, declared, &entries)?;
+    upsert(&mut doc, &manifest.internals, &entries)?;
     for entry in entries {
         println!("Added internal {}", entry.path);
     }
     fs::write(&path, doc.to_string()).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Adds or refreshes `entries` in `[native].internals`, which also holds a `[wasm]` mod's.
+/// Adds or refreshes `entries` in `internals`, shared by both code targets.
 fn upsert(
     doc: &mut DocumentMut,
     declared: &[horizon_mod_package::manifest::Internal],
@@ -103,11 +103,11 @@ fn upsert(
             }
             listed.insert(key, index);
         } else {
-            let item = &mut doc["native"]["internals"];
+            let item = &mut doc["internals"];
             if item.is_none() {
                 *item = toml_edit::value(toml_edit::Array::new());
             }
-            // The manifest accepts both inline arrays and [[native.internals]] tables.
+            // The manifest accepts both inline arrays and [[internals]] tables.
             if let Some(array) = item.as_array_mut() {
                 let mut internal = toml_edit::InlineTable::new();
                 internal.insert("path", entry.path.as_str().into());
@@ -122,7 +122,7 @@ fn upsert(
                 internal["kind"] = toml_edit::value(&entry.kind);
                 array.push(internal);
             } else {
-                return Err(format!("{MANIFEST}: native.internals must be an array"));
+                return Err(format!("{MANIFEST}: internals must be an array"));
             }
             listed.insert(key, listed.len());
         }
@@ -135,7 +135,7 @@ fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
     let path = dir.join(MANIFEST);
     let original = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let manifest = Manifest::parse(&original)?;
-    if let Some(wasm) = &manifest.wasm {
+    if manifest.wasm.is_some() {
         let repo = match repo {
             Some(repo) => repo.to_path_buf(),
             None => dir
@@ -154,8 +154,8 @@ fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
             return Err(format!("{}: not a Horizon workspace", repo.display()));
         }
         let output = directory.join(format!("{}.txt", manifest.id));
-        let paths: BTreeSet<&str> = wasm
-            .internals()
+        let paths: BTreeSet<&str> = manifest
+            .internals
             .iter()
             .map(|entry| entry.path.as_str())
             .chain(
@@ -232,7 +232,7 @@ fn atomic_write(path: &Path, contents: String) -> Result<(), String> {
 
 fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), String> {
     let manifest = Manifest::parse(text)?;
-    let native = manifest
+    manifest
         .native
         .as_ref()
         .ok_or("internals sync needs a [native] mod")?;
@@ -243,9 +243,9 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
         .iter()
         .map(|entry| (entry.path.as_str(), entry.kind.as_str()))
         .collect();
-    let mut keep = vec![false; native.internals.len()];
+    let mut keep = vec![false; manifest.internals.len()];
     for typed in [true, false] {
-        for (index, old) in native.internals.iter().enumerate() {
+        for (index, old) in manifest.internals.iter().enumerate() {
             if old.kind.is_some() != typed {
                 continue;
             }
@@ -262,9 +262,9 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
         }
     }
     let mut report = String::new();
-    for (index, old) in native.internals.iter().enumerate().rev() {
+    for (index, old) in manifest.internals.iter().enumerate().rev() {
         if !keep[index] {
-            let item = &mut doc["native"]["internals"];
+            let item = &mut doc["internals"];
             if let Some(array) = item.as_array_mut() {
                 // TOML stores a trailing comment after the previous comma as this
                 // value's prefix. Keep it when dropping the declaration that follows it.
@@ -297,11 +297,7 @@ fn replace(text: &str, entries: &[ListedInternal]) -> Result<(String, String), S
         report.push_str(&format!("added: {path} ({kind})\n"));
     }
     let entries: Vec<_> = entries.iter().collect();
-    upsert(
-        &mut doc,
-        &retained.native.as_ref().expect("native manifest").internals,
-        &entries,
-    )?;
+    upsert(&mut doc, &retained.internals, &entries)?;
     Ok((doc.to_string(), report))
 }
 
@@ -313,12 +309,12 @@ pub fn refresh(
     old: &[ListedInternal],
     new: &[ListedInternal],
 ) -> Result<String, String> {
-    let native = manifest
+    manifest
         .native
         .as_ref()
         .ok_or("update needs a [native] mod")?;
     let mut report = String::new();
-    for (index, declared) in native.internals.iter().enumerate() {
+    for (index, declared) in manifest.internals.iter().enumerate() {
         let path = &declared.path;
         let entry = match internals::resolve(new, &manifest.id, path, declared.kind.as_deref()) {
             Ok(entry) => entry,
@@ -351,7 +347,7 @@ fn set_fingerprint(
     hash: &str,
     kind: Option<&str>,
 ) -> Result<(), String> {
-    let item = &mut doc["native"]["internals"];
+    let item = &mut doc["internals"];
     let value = if let Some(array) = item.as_array_mut() {
         array
             .get_mut(index)
@@ -463,18 +459,21 @@ mod tests {
             "a".repeat(40),
             "b".repeat(40)
         );
+        let (metadata, pins) = header.split_once("[native]").unwrap();
         let entries: Vec<ListedInternal> = serde_json::from_str(r#"[{"path":"Used","kind":"struct","signature":"struct Used","hash":"new"},{"path":"New","kind":"fn","signature":"fn new()","hash":"added"}]"#).unwrap();
         for body in [
             "internals = [\n  { path = 'Used', hash = 'old' }, # keep\n  { path = 'Unused', hash = 'gone' },\n]\n",
-            "[[native.internals]] # keep\npath = 'Used'\nhash = 'old' # hash\n[[native.internals]]\npath = 'Unused'\nhash = 'gone'\n",
+            "[[internals]] # keep\npath = 'Used'\nhash = 'old' # hash\n[[internals]]\npath = 'Unused'\nhash = 'gone'\n",
         ] {
-            let (candidate, report) = replace(&(header.clone() + body), &entries).unwrap();
-            let native = Manifest::parse(&candidate).unwrap().native.unwrap();
-            assert_eq!(native.internals.len(), 2);
-            assert_eq!(native.internals[0].hash, "new");
-            assert_eq!(native.internals[0].kind.as_deref(), Some("struct"));
+            let (candidate, report) =
+                replace(&format!("{metadata}{body}[native]{pins}"), &entries).unwrap();
+            let manifest = Manifest::parse(&candidate).unwrap();
+            assert_eq!(manifest.internals.len(), 2);
+            assert_eq!(manifest.internals[0].hash, "new");
+            assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
             assert!(candidate.contains("# keep"));
-            assert!(candidate.starts_with(&header));
+            assert!(candidate.starts_with(metadata));
+            assert!(candidate.contains(&format!("[native]{pins}")));
             assert!(report.contains("removed: Unused"));
             assert!(report.contains("added: New (fn)"));
             assert!(!report.contains("added: Used"));
@@ -482,23 +481,17 @@ mod tests {
             assert_eq!(unchanged, candidate);
             assert!(report.is_empty());
             let (empty, report) = replace(&candidate, &[]).unwrap();
-            assert!(
-                Manifest::parse(&empty)
-                    .unwrap()
-                    .native
-                    .unwrap()
-                    .internals
-                    .is_empty()
-            );
+            assert!(Manifest::parse(&empty).unwrap().internals.is_empty());
             assert!(report.contains("removed: Used"));
         }
         // An untyped and a typed row for one access leave one current declaration.
         let body = "internals = [{ path = 'Used', hash = 'stale' }, { path = 'Used', kind = 'struct', hash = 'stale' }]\n";
-        let (candidate, _) = replace(&(header.clone() + body), &entries[..1]).unwrap();
-        let native = Manifest::parse(&candidate).unwrap().native.unwrap();
-        assert_eq!(native.internals.len(), 1);
-        assert_eq!(native.internals[0].hash, "new");
-        assert_eq!(native.internals[0].kind.as_deref(), Some("struct"));
+        let (candidate, _) =
+            replace(&format!("{metadata}{body}[native]{pins}"), &entries[..1]).unwrap();
+        let manifest = Manifest::parse(&candidate).unwrap();
+        assert_eq!(manifest.internals.len(), 1);
+        assert_eq!(manifest.internals[0].hash, "new");
+        assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
     }
 
     #[test]

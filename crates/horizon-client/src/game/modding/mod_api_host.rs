@@ -93,10 +93,13 @@ impl Game<'_> {
             self.world.attachment_syncs.insert(holder);
             return self.attachment_map_quiet(holder, access);
         }
-        match self.remote.as_mut() {
-            Some(remote) => Ok(remote.attachments.entry(holder).or_default()),
-            None => Err(mod_api::AttachmentError::MissingHolder),
-        }
+        let Some(remote) = self.remote.as_mut() else {
+            return Err(mod_api::AttachmentError::MissingHolder);
+        };
+        remote.attachments.entry(holder).or_default();
+        self.bind_remote_attachment(holder);
+        let remote = self.remote.as_mut().unwrap();
+        Ok(remote.attachments.get_mut(&holder).unwrap())
     }
 
     /// `attachment_map` without recording the holder for the sync. Inside a transaction, the
