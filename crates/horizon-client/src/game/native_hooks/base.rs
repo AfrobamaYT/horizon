@@ -1860,24 +1860,24 @@ impl Game<'_> {
     ) {
         self.fire_player_command(player, name, command, canceled, replies);
     }
-    /// A server player's ender pearl landed and is about to teleport them
-    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
-    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
-    /// entity id, `from` their feet now, `target` where the pearl started
-    /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` (a value that is not a number is ignored) or change
-    /// `damage` (0 or less: none). Canceling
-    /// keeps the player where they are: no endermite roll, no teleport, no
-    /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`native_acting_player`). The hit itself is
-    /// heard by `native_projectile_impact`.
+    /// A server player's or mob's ender pearl is about to teleport its `owner`
+    /// (`EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`). `owner` is
+    /// the live entity handle, `pearl` its projectile id, `from` the owner's feet
+    /// and `target` the pearl's previous position. A mod may move the target;
+    /// non-finite changes keep the original spot. Canceling leaves the owner
+    /// in place with no teleport sound, damage or endermite roll; the pearl is
+    /// used up. Player owners keep their acting-player context and mutable fall
+    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// make no endermite draw; their `damage` starts at zero and is player-only.
+    /// An owner moved, removed, killed or put to sleep by a listener is not moved
+    /// again using the old decision. The impact hook still hears the hit.
     pub(in crate::game) fn native_ender_pearl_teleport(
         &mut self,
         call: mod_api::__private::EnderPearlTeleportCall<'_>,
     ) {
         self.fire_ender_pearl_teleport(call);
     }
-    /// A server player who ate chorus fruit (or another item with the
+    /// A server player or fox that ate chorus fruit (or another item with the
     /// `teleport_randomly` consume effect) is about to try a random spot
     /// (NeoForge's `EntityTeleportEvent.ItemConsumption`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
@@ -1885,17 +1885,19 @@ impl Game<'_> {
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. The player's state is swapped in
-    /// (`native_acting_player`). Foxes are not heard.
+    /// more attempts. `consumed` is the stack captured before use, including its
+    /// count and components. The player's state is swapped in
+    /// (`native_acting_player`); a fox's full-host callback runs at its inline
+    /// consumption boundary, before living AI and movement.
     pub(in crate::game) fn native_item_consumption_teleport(
         &mut self,
-        player: u128,
-        name: &str,
+        consumer: mod_api::LivingRef,
+        consumed: &mod_api::ItemStack,
         from: [f64; 3],
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        self.fire_item_consumption_teleport(player, name, from, target, cancel);
+        self.fire_item_consumption_teleport(consumer, consumed, from, target, cancel);
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
