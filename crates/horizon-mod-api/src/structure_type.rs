@@ -181,6 +181,7 @@ pub enum HeightmapType {
 pub struct BiomeId(pub(crate) u32);
 
 /// Construct the game's biome identity at the hidden integration boundary.
+// hidden: only the game's adapter builds a biome identity; mods receive one from the context.
 #[doc(hidden)]
 pub fn biome_id(index: u32) -> BiomeId {
     BiomeId(index)
@@ -273,6 +274,7 @@ pub(crate) struct StructureTypeInfo {
 }
 
 /// Registered structure behaviours, for the hidden game integration boundary.
+// hidden: the game's startup adapter reads the registered behaviours; mods declare them through the registrar.
 #[doc(hidden)]
 pub fn structure_type_declarations() -> Vec<(String, Arc<dyn StructureType>)> {
     super::parts::installed_structure_type_list()

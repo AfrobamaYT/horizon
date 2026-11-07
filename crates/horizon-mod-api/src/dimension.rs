@@ -57,6 +57,7 @@ pub(crate) struct DimensionInfo {
 }
 
 /// The dimensions registered at startup, for the game's pack-entry adapter.
+// hidden: the game's pack-entry adapter reads the registered dimensions; mods declare them through the registrar.
 #[doc(hidden)]
 pub fn dimension_declarations() -> Vec<(String, DimensionSettings)> {
     super::parts::installed_dimension_list()

@@ -51,6 +51,7 @@ pub(crate) struct ChunkGeneratorInfo {
 }
 
 /// Registered generators for the hidden game integration boundary.
+// hidden: the game's startup adapter reads the registered generators; mods declare them through the registrar.
 #[doc(hidden)]
 pub fn chunk_generator_declarations() -> Vec<(String, Arc<dyn ChunkGenerator>)> {
     super::parts::installed_chunk_generator_list()
