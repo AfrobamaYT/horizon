@@ -107,9 +107,11 @@ A payload that breaks the format (an oversized list, a duplicate id, trailing by
 mismatch is: the join ends in a translated disconnect naming the decode error, never in play, and never as a
 silently empty list.
 
-Every Horizon join pays one mod-list exchange: the server's list, the client's answer and the ping that orders
-them are one request/response round trip in the configuration phase. A server with no both-side mods asks too;
-a vanilla or other non-Horizon client skips the branch. Nothing here repeats per tick.
+Horizon peers identify themselves before sharing mod lists. After receiving the server's `horizon` brand, the
+client announces its own brand and list before answering known packs; that reply orders the compatibility
+check without an extra ping. The server sends its list only to an identified Horizon client, including when
+either list is empty. Vanilla clients receive no mod-list payload, and clients do not disclose their mod
+identities to servers that have not identified themselves as Horizon. Nothing here repeats per tick.
 
 A block names its template and what differs from it:
 
