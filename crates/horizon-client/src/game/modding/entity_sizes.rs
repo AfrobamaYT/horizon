@@ -33,7 +33,9 @@ impl Game<'_> {
         // exceeds even the dragon's natural width (16), while capping a path node's
         // bounding-box scan at 33^3 cells and keeping integer extents representable.
         // Invalid answers retain vanilla size, just like non-finite answers.
-        let usable = size.iter().all(|v| v.is_finite() && *v > 0.0 && *v <= 32.0);
+        let usable = size
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0 && *v <= 32.0);
         Some(SizeAnswer {
             pose,
             vanilla,
@@ -225,7 +227,6 @@ mod tests {
                     f32::NAN,
                     f32::INFINITY,
                     f32::NEG_INFINITY,
-                    0.0,
                     -1.0,
                     32.001,
                     1e30,
@@ -246,11 +247,32 @@ mod tests {
                 game.mobs[i].size_answer = None;
                 game.native_mob_sizes();
                 assert_eq!(game.mobs[i].dims(), default_dims);
-                // The inclusive upper bound still permits oversized mod entities.
-                *size.lock().unwrap() = [32.0; 3];
+                // Both endpoints are valid: zero-size entities are vanilla too.
+                for accepted in [0.0, 32.0] {
+                    *size.lock().unwrap() = [accepted; 3];
+                    game.mobs[i].size_answer = None;
+                    game.native_mob_sizes();
+                    assert_eq!(
+                        game.mobs[i].dims(),
+                        (accepted.into(), accepted.into(), accepted.into())
+                    );
+                }
+                *size.lock().unwrap() = [0.0; 3];
                 game.mobs[i].size_answer = None;
-                game.native_mob_sizes();
-                assert_eq!(game.mobs[i].dims(), (32.0, 32.0, 32.0));
+                for _ in 0..4 {
+                    game.native_mob_sizes();
+                    let mob = &game.mobs[i];
+                    let path_mob = mob.path_mob();
+                    assert_eq!((path_mob.width, path_mob.height), (0.0, 0.0));
+                    let world = game.mob_world_base(&[]);
+                    assert!(world.no_collision(mob.bounds()));
+                    use horizon_client::mobs::path::{Evaluator, Finder};
+                    for evaluator in [Evaluator::Walk, Evaluator::Swim { breach: true }] {
+                        let finder = Finder::new(&world, &path_mob, evaluator);
+                        let _ = finder.walk_path_type(1, 70, 3);
+                        let _ = finder.find(&[[3, 70, 3]], 8.0, 0, 32);
+                    }
+                }
             })
         });
     }
