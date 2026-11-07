@@ -177,11 +177,13 @@ impl Game<'_> {
             .and_then(|info| info.use_remainder.as_deref())
             .map(std::sync::Arc::<str>::from);
         let dim = self.dim;
-        let consumed = consumed_snapshot(&decision.stack);
+        let consumed = std::cell::OnceCell::new();
         let result: Result<bool, ()> = mod_api::run_transaction(self, |game, _| {
             if let Some(consumable) = &consumable {
                 for effect in &consumable.effects {
                     if let ConsumeEffect::TeleportRandomly(teleport) = effect {
+                        let consumed =
+                            consumed.get_or_init(|| consumed_snapshot(&decision.stack));
                         let mut actor = FoxTeleporter {
                             game,
                             consumer,
