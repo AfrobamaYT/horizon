@@ -1279,3 +1279,136 @@ mod tests {
         assert!(mobs.is_empty());
     }
 }
+
+#[cfg(test)]
+mod transfer_lifetime_tests {
+    use super::*;
+    use horizon_mod_runtime::attachments::{
+        AttachmentLifetime, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
+        index::AttachmentIndex,
+    };
+    use std::sync::{Arc, Mutex};
+
+    static VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "test",
+        name: "transfer",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    fn removal<T: Rideable + horizon_client::join_seq::Joined + HasAttachmentLifetime>(
+        mut owner: T,
+    ) {
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        VALUE.set(&mut map, Holder::Entity(owner.id()), 17).unwrap();
+        owner.attachment_lifetime().bind(&mut map, &index, 42u32);
+        let mut list: horizon_client::join_seq::JoinList<T> = [owner].into_iter().collect();
+        let id = list[0].id();
+        let key = ("test".into(), "transfer".into());
+        let retained = index.lock().unwrap().snapshot(&key);
+        let moved = take_vehicle(&mut list, id, Vec3::ZERO, 0.0, Vec3::ZERO).unwrap();
+        assert!(list.is_empty());
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        VALUE.set(&mut map, Holder::Entity(id), 18).unwrap();
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        assert_eq!(retained[0].entry.read(&VALUE), Ok(&17));
+        drop(moved);
+    }
+
+    #[test]
+    fn transfer_removal_retires_before_returning_the_vehicle() {
+        removal(minecarts::Minecart::new(
+            71,
+            minecarts::CartKind::Rideable,
+            Vec3::ZERO,
+        ));
+        removal(boats::Boat::new(72, Arc::from("oak"), Vec3::ZERO, 0.0));
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn transfer_arrival_rebinds_only_bound_owners_with_the_same_id() {
+        for kind in ["minecraft:minecart", "minecraft:oak_boat", "minecraft:pig"] {
+            for bound in [true, false] {
+                super::super::native_entity_refs::tests::with_game(|game| {
+                    game.tickets.update(None);
+                    let id = game.summon_with_nbt(kind, [0.5, 70.0, 0.5], "{}").unwrap();
+                    let uuid = game.uuid_for(id);
+                    let source = game.dim;
+                    let source_ref = game.entity(id).unwrap();
+                    let source_index = game.attachment_indexes.entry(source).or_default().clone();
+                    let mut map = Attachments::default();
+                    VALUE.set(&mut map, Holder::Entity(id), 17).unwrap();
+                    let old = if bound {
+                        Some(map.bind_index(
+                            &source_index,
+                            mod_api::AttachmentHolder::Entity(source_ref),
+                        ))
+                    } else {
+                        None
+                    };
+                    macro_rules! slot {
+                        ($list:ident) => {
+                            game.$list.update(0, |entity| {
+                                if let Some(old) = &old {
+                                    *entity.attachment_lifetime() =
+                                        AttachmentLifetime::new(old.clone());
+                                }
+                            })
+                        };
+                    }
+                    match kind {
+                        "minecraft:minecart" => slot!(carts),
+                        "minecraft:oak_boat" => slot!(boats),
+                        _ => slot!(mobs),
+                    }
+                    let key = ("test".into(), "transfer".into());
+                    let retained = source_index.lock().unwrap().snapshot(&key);
+                    let mut stale_map = map.clone();
+                    game.entity_attachments.insert(uuid, map);
+                    game.enter_level(Dim::Nether).unwrap();
+                    let destination_ref =
+                        mod_api::EntityRef::new(game.level(game.dim.id()).unwrap().epoch(), id);
+                    assert_ne!(source_ref, destination_ref);
+                    game.arrive_vehicle(source, id, Vec3::ZERO, 0.0);
+                    assert!(source_index.lock().unwrap().snapshot(&key).is_empty());
+                    let destination_index =
+                        game.attachment_indexes.entry(game.dim).or_default().clone();
+                    let rows = destination_index.lock().unwrap().snapshot(&key);
+                    assert_eq!(rows.len(), usize::from(bound));
+                    if let Some(old) = old {
+                        let current = match kind {
+                            "minecraft:minecart" => game
+                                .carts
+                                .update(0, |e| e.attachment_lifetime().registration().unwrap()),
+                            "minecraft:oak_boat" => game
+                                .boats
+                                .update(0, |e| e.attachment_lifetime().registration().unwrap()),
+                            _ => game.mobs[0].attachment_lifetime.registration().unwrap(),
+                        };
+                        assert!(!old.same_registration(&current));
+                        assert_eq!(
+                            rows[0].holder,
+                            mod_api::AttachmentHolder::Entity(destination_ref)
+                        );
+                        assert_eq!(rows[0].entry.read(&VALUE), Ok(&17));
+                        assert!(!old.unregister());
+                        drop(AttachmentLifetime::new(old));
+                        VALUE.set(&mut stale_map, Holder::Entity(id), 99).unwrap();
+                        assert_eq!(
+                            destination_index.lock().unwrap().snapshot(&key)[0]
+                                .entry
+                                .read(&VALUE),
+                            Ok(&17)
+                        );
+                        assert_eq!(retained[0].entry.read(&VALUE), Ok(&17));
+                    }
+                    assert_eq!(game.persist.uuids.get(&id), Some(&uuid));
+                });
+            }
+        }
+    }
+}
