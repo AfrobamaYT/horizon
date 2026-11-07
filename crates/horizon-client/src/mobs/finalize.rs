@@ -1081,11 +1081,22 @@ pub fn equip_stack(
         let trim = stack
             .components
             .iter()
+            .rev()
             .find(|(id, _)| id == "minecraft:trim")
             .and_then(|(_, v)| {
+                use horizon_core::nbt::Tag;
+                let Tag::Compound(map) = v.as_ref()? else {
+                    return None;
+                };
+                let Tag::String(material) = map.get(&"material".into())? else {
+                    return None;
+                };
+                let Tag::String(pattern) = map.get(&"pattern".into())? else {
+                    return None;
+                };
                 Some((
-                    Arc::from(v["material"].as_str()?),
-                    Arc::from(v["pattern"].as_str()?),
+                    Arc::from(material.to_string_lossy()),
+                    Arc::from(pattern.to_string_lossy()),
                 ))
             });
         gear::set_trim(m, gear_slot(slot), trim);

@@ -209,7 +209,7 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         assert_eq!(id, "minecraft:stone");
         Some(mod_api::__private::ResolvedBlock {
             default: mod_api::BlockStateId(17),
-            states: mod_api::BlockStateRange::new(mod_api::BlockStateId(17), 1),
+            states: horizon_world::registry::BlockStateRange::new(mod_api::BlockStateId(17), 1),
             block: horizon_world::level::states::BlockId(1),
         })
     })
