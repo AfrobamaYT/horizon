@@ -56,7 +56,7 @@ pub(crate) static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "private-source-calls-v1";
+const STAGING: &str = "area-aware-mixins-input-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -1691,6 +1691,22 @@ fn tool(rust: &Toolchain, rev: &str, progress: &impl Fn(Step)) -> Result<PathBuf
     Ok(bin)
 }
 
+/// External mixins traverse ordinary module declarations, not generated OUT_DIR includes.
+/// Prepare their input separately so neither the downloaded source nor a cached snapshot changes.
+fn prepare_mixins_source(source: &Path, prepared: &Path) -> Result<(), String> {
+    // sync removes old files, not their directories. A leftover area directory without its
+    // marker would make module discovery refuse the next revision after an interrupted build.
+    if prepared.exists() {
+        fs::remove_dir_all(prepared).map_err(|e| format!("{}: {e}", prepared.display()))?;
+    }
+    let result = sync(source, prepared)
+        .and_then(|()| horizon_mod_api_gen::materialize_game_modules(prepared));
+    if result.is_err() {
+        let _ = fs::remove_dir_all(prepared);
+    }
+    result
+}
+
 /// `horizon-mixins apply`: the mods in `mods` applied to `source`, into `out`. It runs
 /// `cargo metadata`, so it gets the launcher's toolchain like a build does: on a computer with no
 /// Rust of its own, a plain command found no cargo (E_METADATA).
@@ -2286,14 +2302,17 @@ fn pipeline(
                 let tool = tool(&rust, &mixins, &progress)?;
                 let mixin_input = real.join("mixins.incoming");
                 stage_mixins(&ordered, &mixin_input)?;
+                let mixin_source = real.join("mixins.source");
+                prepare_mixins_source(&source, &mixin_source)?;
                 progress(Step::Mixins);
                 let result = run_checked(
-                    apply(&rust, &tool, &source, &mixin_input, &fresh),
+                    apply(&rust, &tool, &mixin_source, &mixin_input, &fresh),
                     "horizon-mixins",
                     |_| {},
                     None,
                 );
                 let _ = fs::remove_dir_all(&mixin_input);
+                let _ = fs::remove_dir_all(&mixin_source);
                 if let Err(ran) = result {
                     check_cancelled()?;
                     let error = blame(ran.error);
@@ -3102,6 +3121,69 @@ mod tests {
         )
         .unwrap();
         fs::write(project.join("src/lib.rs"), helper).unwrap();
+    }
+
+    #[test]
+    fn mixins_input_materializes_modules_without_changing_the_download() {
+        let root = dir("mixins-area-input");
+        let source = root.join("download");
+        let prepared = root.join("prepared");
+        let src = source.join("crates/horizon-client/src");
+        let area = src.join("game/items");
+        let hooks = src.join("game/native_hooks");
+        fs::create_dir_all(&area).unwrap();
+        fs::create_dir_all(&hooks).unwrap();
+        let game = "struct Game; mod native_hooks;\ninclude!(concat!(env!(\"OUT_DIR\"), \"/game_modules.rs\"));\n";
+        let native = "include!(concat!(env!(\"OUT_DIR\"), \"/native_hook_modules.rs\"));\n";
+        let helper = "use super::*; impl Game { fn area_helper(&mut self) {} }";
+        fs::write(src.join("game.rs"), game).unwrap();
+        fs::write(area.join(".game-area"), "").unwrap();
+        fs::write(area.join("using_item.rs"), helper).unwrap();
+        fs::write(hooks.join("mod.rs"), native).unwrap();
+        fs::write(
+            hooks.join("base.rs"),
+            "use super::super::*; impl Game { fn native_helper(&mut self) {} }",
+        )
+        .unwrap();
+        prepare_mixins_source(&source, &prepared).unwrap();
+        // External tools parse ordinary mod declarations, without our expansion pass.
+        fn modules(path: &Path) -> Vec<String> {
+            syn::parse_file(&fs::read_to_string(path).unwrap())
+                .unwrap()
+                .items
+                .into_iter()
+                .filter_map(|item| match item {
+                    syn::Item::Mod(module) => Some(module.ident.to_string()),
+                    _ => None,
+                })
+                .collect()
+        }
+        let output = prepared.join("crates/horizon-client/src");
+        assert!(modules(&output.join("game.rs")).contains(&"using_item".into()));
+        assert_eq!(modules(&output.join("game/native_hooks/mod.rs")), ["base"]);
+        assert_eq!(
+            fs::read_to_string(output.join("game/items/using_item.rs")).unwrap(),
+            helper
+        );
+        assert_eq!(fs::read_to_string(src.join("game.rs")).unwrap(), game);
+        assert_eq!(fs::read_to_string(hooks.join("mod.rs")).unwrap(), native);
+        let first = fs::read(output.join("game.rs")).unwrap();
+        // A failed older preparation may have left an area that the next source no longer has.
+        let stale_area = output.join("game/removed");
+        fs::create_dir_all(&stale_area).unwrap();
+        fs::write(stale_area.join(".game-area"), "").unwrap();
+        fs::write(stale_area.join("old.rs"), "fn old() {}").unwrap();
+        prepare_mixins_source(&source, &prepared).unwrap();
+        assert!(!stale_area.exists());
+        assert_eq!(fs::read(output.join("game.rs")).unwrap(), first);
+        let invalid = src.join("game/unmarked");
+        fs::create_dir_all(&invalid).unwrap();
+        fs::write(invalid.join("misplaced.rs"), "fn misplaced() {}").unwrap();
+        let error = prepare_mixins_source(&source, &prepared).unwrap_err();
+        assert!(error.contains("missing .game-area marker"), "{error}");
+        assert!(!prepared.exists());
+        assert!(invalid.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
