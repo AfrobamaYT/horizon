@@ -1924,6 +1924,7 @@ impl LevelAccess for GameLevel<'_> {
 /// FallingBlockEntity carrying a block state.
 #[derive(Clone, Debug)]
 struct FallingBlock {
+    attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list (`horizon_client::join_seq`); set by the list.
@@ -1953,6 +1954,8 @@ struct FallingBlock {
     /// The UUID and compound it was loaded with, kept while it moves.
     saved: Option<Box<([i32; 4], horizon_core::nbt::Tag)>>,
 }
+horizon_mod_runtime::impl_attachment_lifetime!(FallingBlock);
+
 impl FallingBlock {
     /// Where `FallingBlockRenderer` draws the block's model corner, `alpha`
     /// into the tick: centred on the entity, then moved by `offset`, the
@@ -3050,7 +3053,7 @@ struct Game<'a> {
     tickets: horizon_client::ticket_levels::ChunkTickets,
     random_tick_sections: horizon_client::random_tick_sections::RandomTickSections,
     level_events: Vec<LevelEvent>,
-    falling: horizon_client::join_seq::JoinList<FallingBlock>,
+    falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     /// Blocks the server shows for a moment (`ClientboundAddTransientBlockPacket`).
     transient_blocks: transient_blocks::TransientBlocks,
     paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
@@ -6080,6 +6083,7 @@ impl Game<'_> {
                     );
                     self.next_entity += 1;
                     self.falling.push(FallingBlock {
+                        attachment_lifetime: Default::default(),
                         rotation: [0.0, 0.0],
                         join: Default::default(),
                         id: self.next_entity,
@@ -6438,7 +6442,8 @@ impl Game<'_> {
             Ok(FallStep::Dropped(at)) => self.drop_falling_block(f.state, at),
             Ok(FallStep::Landed(pos)) => self.finish_falling_block(f, pos),
             Err(error) => {
-                self.falling.insert(i.min(self.falling.len()), original);
+                horizon_client::join_seq::store_back(&mut f, original);
+                self.falling.insert(i.min(self.falling.len()), f);
                 return Err(error);
             }
         }
@@ -25702,6 +25707,7 @@ mod tests {
     fn a_falling_block_keeps_its_model_offset() {
         let at = Vec3::new(3.5, 70.25, -1.5);
         let falling = FallingBlock {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             id: 0,
