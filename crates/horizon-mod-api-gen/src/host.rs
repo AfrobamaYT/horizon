@@ -294,14 +294,14 @@ pub(super) fn areas_source(root: &Path) -> Result<String, String> {
     ))
 }
 
-/// Generate every area impl explicitly. Full-path inherent calls cannot fall back to
-/// a trait default if the game's implementation is absent or has the wrong signature.
+/// Generate every area impl explicitly. Full-path calls plus a hard recursion lint
+/// refuse a missing inherent implementation instead of inheriting a trait default.
 pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
     let mut code = String::from("use crate::game::Game;\nuse mod_api::*;\n");
     for area in load(root)? {
         for (tier, entries) in &area.tiers {
             code.push_str(&format!(
-                "impl mod_api::prelude::{} for Game<'_> {{\n",
+                "#[deny(unconditional_recursion)]\nimpl mod_api::prelude::{} for Game<'_> {{\n",
                 area.trait_name(*tier)
             ));
             for entry in entries {
@@ -884,6 +884,12 @@ mod tests {
         let mut actual = BTreeSet::new();
         for item in file.items {
             if let Item::Impl(item) = item {
+                assert!(item.attrs.iter().any(|attr| {
+                    attr.path().is_ident("deny")
+                        && attr
+                            .parse_args::<syn::Ident>()
+                            .is_ok_and(|lint| lint == "unconditional_recursion")
+                }));
                 let owner = item
                     .trait_
                     .unwrap()
@@ -903,8 +909,8 @@ mod tests {
             }
         }
         assert_eq!(actual, expected, "Game must not inherit an area default");
-        // Area traits must not be in scope: otherwise Game::name could resolve to
-        // a trait default instead of failing to compile for a missing inherent fn.
+        // Other area traits must not be in scope. The current impl's own trait is
+        // implicitly in scope; deny(unconditional_recursion) rejects that fallback.
         assert!(!source.contains("prelude::*"));
     }
 
