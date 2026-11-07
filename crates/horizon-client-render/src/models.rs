@@ -51,7 +51,7 @@ pub fn standalone() -> Vec<String> {
 }
 
 /// Installs standalone names until dropped, including on the bake worker, without sealing
-/// process registration. Different fixture sets wait until the active holders finish.
+/// process registration. Other fixture holders wait until the active fixture finishes.
 #[cfg(feature = "test-support")]
 pub struct StandaloneFixture;
 
@@ -61,21 +61,12 @@ pub fn standalone_fixture(names: Vec<String>) -> StandaloneFixture {
     let mut fixture = STANDALONE_FIXTURE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    while fixture
-        .as_ref()
-        .is_some_and(|(current, _)| current != &names)
-    {
+    while fixture.is_some() {
         fixture = FIXTURE_CHANGED
             .wait(fixture)
             .unwrap_or_else(std::sync::PoisonError::into_inner);
     }
-    match fixture.as_mut() {
-        Some((current, holders)) => {
-            debug_assert_eq!(current, &names);
-            *holders += 1;
-        }
-        None => *fixture = Some((names, 1)),
-    }
+    *fixture = Some((names, 1));
     StandaloneFixture
 }
 
