@@ -18,7 +18,7 @@ pub(super) struct ObservedScreen {
     /// it open or close.
     overlay: bool,
     menu: Option<String>,
-    title: Option<Text>,
+    title: Option<std::sync::Arc<mod_api::Text>>,
     rect: [f32; 4],
     slots: usize,
     mouse: [f32; 2],
@@ -30,7 +30,7 @@ impl ObservedScreen {
         NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: self.id,
             menu: self.menu.as_deref(),
-            title: self.title.as_ref(),
+            title: self.title.as_deref(),
             rect: self.rect,
             slots: self.slots,
             mouse: self.mouse,
@@ -226,13 +226,18 @@ impl Game<'_> {
             title: self
                 .remote
                 .as_ref()
-                .and_then(|r| r.menu_title.as_ref())
+                .and_then(|r| r.menu_title_snapshot())
                 .filter(|_| !none),
             rect,
             slots: if none { 0 } else { self.slot_count() },
             mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
         })
+    }
+    #[cfg(test)]
+    pub(super) fn test_observed_title(&self) -> Option<std::sync::Arc<mod_api::Text>> {
+        self.observe_view(self.screen_change_view(self.screen))
+            .title
     }
     /// A mod's own screen cannot open now: over the title screen, a book, a
     /// sign editor, a dialog or a prompt, with no player or a
@@ -294,17 +299,23 @@ impl Game<'_> {
     /// What `observe_screen` compares with the last frame's.
     fn observed_now(&self) -> Option<ObservedScreen> {
         // Only the title's screens and the overlays show over `Screen::Playing`.
-        let overlay = self.screen == Screen::Playing;
-        self.observed_screen_view().map(|view| ObservedScreen {
+        self.observed_screen_view()
+            .map(|view| self.observe_view(view))
+    }
+
+    fn observe_view(&self, view: NativeScreenView<'_>) -> ObservedScreen {
+        ObservedScreen {
             id: view.id,
-            overlay,
+            overlay: self.screen == Screen::Playing,
             menu: view.menu.map(str::to_owned),
-            title: view.title.cloned(),
+            title: view
+                .title
+                .and_then(|_| self.remote.as_ref()?.shared_menu_title_snapshot()),
             rect: view.rect,
             slots: view.slots,
             mouse: view.mouse,
             partial_tick: view.partial_tick,
-        })
+        }
     }
 
     /// Opens the title screen `Title::set_mode` asked for, as
@@ -945,7 +956,7 @@ impl Game<'_> {
         NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
-            title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
+            title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
             rect: self.screen_rect(batch, screen),
             slots: self.slot_count(),
             mouse: self.cursor(),
@@ -4206,8 +4217,8 @@ mod tests {
             let forward =
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
-                (forward.down, forward.label.plain()),
-                (false, "W".to_owned())
+                (forward.down, forward.label),
+                (false, mod_api::Text::literal("W"))
             );
             game.keys.insert(KeyCode::KeyW);
             assert!(
@@ -4217,7 +4228,7 @@ mod tests {
             );
             let attack =
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
-            assert_eq!(attack.label.plain(), "Left Button");
+            assert_eq!(attack.label, mod_api::Text::literal("Left Button"));
             assert!(
                 mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
             );

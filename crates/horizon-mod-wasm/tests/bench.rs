@@ -77,7 +77,10 @@ fn chat(hooks: &dyn Hooks, work: &str) -> String {
         replies: &mut replies,
     };
     hooks.server_chat(&mut World, &mut event);
-    message.plain()
+    let mod_api::text::TextContent::Literal(answer) = message.content else {
+        panic!("expected a literal reply");
+    };
+    answer
 }
 
 /// The median time per call of `calls` calls, over 9 batches after one warm-up batch.

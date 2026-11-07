@@ -625,7 +625,7 @@ struct StackCrossing {
     after: String,
 }
 
-/// Only stack-bearing declared argument types select this seam. Event records
+/// Declared owned-value arguments select this guarded conversion seam. Event records
 /// are built explicitly at their game call sites, not inferred from game bodies.
 fn stack_crossing(
     args: &[(String, &Type)],
@@ -634,29 +634,44 @@ fn stack_crossing(
     scoped: bool,
     surfaces: &std::collections::HashMap<&str, String>,
 ) -> Option<StackCrossing> {
-    fn contains_stack(ty: &Type) -> bool {
+    const STACK_VALUES: &[&str] = &[
+        "ItemStack",
+        "ItemCost",
+        "MerchantOffer",
+        "Suggestion",
+        "GameRuleValue",
+        "PlacementContext",
+    ];
+    const INFALLIBLE_VALUES: &[&str] = &["GuiDraw", "Text"];
+    fn contains_boundary(ty: &Type, names: &[&str]) -> bool {
         use syn::visit::Visit;
-        struct Stack(bool);
-        impl<'ast> Visit<'ast> for Stack {
+        struct Boundary<'a> {
+            found: bool,
+            names: &'a [&'a str],
+        }
+        impl<'ast> Visit<'ast> for Boundary<'_> {
             fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-                // Bare names resolve to the owned records in the emitted API module.
-                // Qualified names do not acquire that provenance from their last segment.
-                self.0 |= path.path.segments.len() == 1
-                    && path.path.segments.last().is_some_and(|s| {
-                        matches!(
-                            s.ident.to_string().as_str(),
-                            "ItemStack" | "ItemCost" | "MerchantOffer" | "Suggestion"
-                        )
-                    });
+                // Only bare names have the emitted API module's provenance.
+                self.found |= path.path.segments.len() == 1
+                    && path
+                        .path
+                        .segments
+                        .last()
+                        .is_some_and(|s| self.names.contains(&s.ident.to_string().as_str()));
                 syn::visit::visit_type_path(self, path);
             }
         }
-        let mut stack = Stack(false);
-        stack.visit_type(ty);
-        stack.0
+        let mut boundary = Boundary {
+            found: false,
+            names,
+        };
+        boundary.visit_type(ty);
+        boundary.found
     }
     let parameters = args.iter().chain(output).collect::<Vec<_>>();
-    if !parameters.iter().any(|(_, ty)| contains_stack(ty)) {
+    if !parameters.iter().any(|(_, ty)| {
+        contains_boundary(ty, STACK_VALUES) || contains_boundary(ty, INFALLIBLE_VALUES)
+    }) {
         return None;
     }
     let guard = if scoped { "has_part_hook" } else { "listened" };
@@ -664,22 +679,32 @@ fn stack_crossing(
         "if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} use crate::game::api_values::TryIntoApi; "
     );
     if parameters.iter().any(|(_, ty)| {
-        contains_stack(ty) && matches!(ty, Type::Reference(r) if r.mutability.is_some())
+        (contains_boundary(ty, STACK_VALUES) || contains_boundary(ty, INFALLIBLE_VALUES))
+            && matches!(ty, Type::Reference(r) if r.mutability.is_some())
     }) {
-        before.push_str("use crate::game::api_values::{TryIntoEngine, ItemBoundary}; ");
+        before.push_str("use crate::game::api_values::TryIntoEngine; ");
+    }
+    if parameters.iter().any(|(_, ty)| {
+        contains_boundary(ty, STACK_VALUES)
+            && matches!(ty, Type::Reference(r) if r.mutability.is_some())
+    }) {
+        before.push_str("use crate::game::api_values::ItemBoundary; ");
     }
     let mut arguments = Vec::new();
     let mut validations = String::new();
     let mut writes = String::new();
     for (name, ty) in parameters {
-        let stack = contains_stack(ty);
+        let stack = contains_boundary(ty, STACK_VALUES);
+        let infallible = contains_boundary(ty, INFALLIBLE_VALUES);
         let mutable = matches!(ty, Type::Reference(r) if r.mutability.is_some());
-        if surfaces.contains_key(name.as_str()) || (!stack && !mutable) {
+        if surfaces.contains_key(name.as_str()) || (!stack && !infallible && !mutable) {
             arguments.push(name.clone());
             continue;
         }
         let local = format!("__api_{name}");
-        let value = if stack {
+        let value = if infallible {
+            format!("{name}.try_into_api().unwrap()")
+        } else if stack {
             format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
         } else {
             format!("(*{name}).to_owned()")
@@ -699,7 +724,9 @@ fn stack_crossing(
         });
         if mutable {
             let converted = format!("__engine_{name}");
-            let value = if stack {
+            let value = if infallible {
+                format!("{local}.try_into_engine(&()).unwrap()")
+            } else if stack {
                 let result = format!("__checked_{name}");
                 validations.push_str(&format!("let {result}: Result<_, mod_api::StackWriteError> = self.boundary_items().ok_or(mod_api::StackWriteError::Unavailable).and_then(|items| {local}.try_into_engine(items)); "));
                 format!("match {result} {{ Ok(value) => value, Err(_) => return }}")
@@ -720,6 +747,33 @@ fn stack_crossing(
 #[cfg(test)]
 mod stack_crossing_tests {
     use super::*;
+
+    #[test]
+    fn gui_snapshot_and_writeback_are_guarded_and_context_free() {
+        let draws: Type = syn::parse_quote!(&mut Option<Vec<GuiDraw>>);
+        let crossing = stack_crossing(
+            &[("draws".into(), &draws)],
+            None,
+            "HealthHud",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(
+            crossing
+                .before
+                .starts_with("if !mod_api::__private::listened")
+        );
+        assert!(crossing.before.contains("draws.try_into_api().unwrap()"));
+        assert!(
+            crossing
+                .after
+                .contains("__api_draws.try_into_engine(&()).unwrap()")
+        );
+        assert!(crossing.after.ends_with("*draws = __engine_draws; "));
+        assert!(!crossing.before.contains("ItemBoundary"));
+        assert!(!crossing.after.contains("StackWriteError"));
+    }
     #[test]
     fn stack_hook_gates_before_conversion_and_stages_every_write() {
         let stack: Type = syn::parse_quote!(&mut ItemStack);
@@ -896,6 +950,52 @@ fn main() {
             .is_some()
         );
     }
+    #[test]
+    fn rule_hook_gates_before_copying_value() {
+        let ty: Type = syn::parse_quote!(GameRuleValue);
+        let crossing = stack_crossing(
+            &[("value".to_owned(), &ty)],
+            None,
+            "GameRuleChanged",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(
+            crossing
+                .before
+                .starts_with("if !mod_api::__private::listened")
+        );
+        assert!(crossing.before.contains("value.try_into_api()"));
+        assert_eq!(crossing.arguments, ["__api_value"]);
+        assert!(crossing.after.is_empty());
+    }
+
+    #[test]
+    fn placement_hook_gates_before_snapshot_and_stages_the_answer() {
+        let context: Type = syn::parse_quote!(&PlacementContext);
+        let answer: Type = syn::parse_quote!(&mut Option<Option<BlockStateId>>);
+        let crossing = stack_crossing(
+            &[
+                ("context".to_owned(), &context),
+                ("answer".to_owned(), &answer),
+            ],
+            None,
+            "StateForPlacement",
+            true,
+            &Default::default(),
+        )
+        .unwrap();
+        assert!(
+            crossing
+                .before
+                .starts_with("if !mod_api::__private::has_part_hook")
+        );
+        assert!(crossing.before.contains("context.try_into_api()"));
+        assert_eq!(crossing.arguments, ["&__api_context", "&mut __api_answer"]);
+        assert!(crossing.after.contains("*answer = __engine_answer"));
+    }
+
     #[test]
     fn plain_hook_has_no_stack_seam() {
         let scalar: Type = syn::parse_quote!(&mut u32);
