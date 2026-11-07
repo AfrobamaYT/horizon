@@ -88,23 +88,13 @@ impl LevelAccess for RainView<'_> {
 impl Game<'_> {
     /// `Level.getSkyDarken`: the same dimension, time and weather calculation used by gameplay.
     pub(super) fn sky_darken_in(&self, world: &World, dimension: Dim) -> i32 {
-        if dimension == Dim::Nether {
-            return 11;
-        }
-        if dimension == Dim::End {
-            let sky = self
-                .res
-                .end_environment()
-                .sample(world.day_time, None, None);
-            return (15.0 - 15.0 * sky.sky_light_level).round() as i32;
-        }
-        let (rain, thunder) = weather_for_world(world, false);
-        horizon_client::environment::sky_darken(
-            self.res.environment(),
-            world.day_time,
-            rain,
-            thunder,
-        )
+        let environment = match dimension {
+            Dim::Overworld => self.res.environment(),
+            Dim::Nether => self.res.nether_environment(),
+            Dim::End => self.res.end_environment(),
+        };
+        let (rain, thunder) = weather_for_world(world, dimension == Dim::End);
+        horizon_client::environment::sky_darken(environment, world.day_time, rain, thunder)
     }
 
     /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.

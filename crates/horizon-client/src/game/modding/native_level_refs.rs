@@ -1754,14 +1754,13 @@ mod environment_read_tests {
             let stone = registry.default_state("minecraft:stone").unwrap();
             let slab = registry.default_state("minecraft:oak_slab").unwrap();
             let fence = registry.default_state("minecraft:oak_fence").unwrap();
-            for (x, block, height) in [(2, stone, 1.0), (5, slab, 0.5), (8, fence, 1.5)] {
+            for (x, block, height, above) in [
+                (2, stone, 1.0, 0.0),
+                (5, slab, 0.5, f64::NEG_INFINITY),
+                (8, fence, 1.5, 0.5),
+            ] {
                 game.world.set(x, 100, 8, block).unwrap();
                 assert_eq!(level.block_floor_height(game, [x, 100, 8]), Some(height));
-                let above = if height >= 1.0 {
-                    height - 1.0
-                } else {
-                    f64::NEG_INFINITY
-                };
                 assert_eq!(level.block_floor_height(game, [x, 101, 8]), Some(above));
             }
             assert_eq!(
@@ -1929,6 +1928,172 @@ mod environment_read_tests {
                 stale.find_closest_biome(game, "#minecraft:is_nether", parameters),
                 None
             );
+        });
+    }
+
+    /// API results over original fixture worlds, compared with independently recorded vanilla calls.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn level_environment_reads_match_vanilla_vectors() {
+        use horizon_client::vanillagen::{TerrainResources, VanillaTerrain};
+        use serde_json::{Value, json};
+        use std::collections::HashMap;
+
+        let fixture = |name: &str, variable: &str| {
+            let path = std::env::var_os(variable)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../tests/fixtures")
+                        .join(name)
+                });
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let inputs = fixture("level_environment_reads.jsonl", "HORIZON_LEVEL_READ_CASES");
+        let expected = fixture(
+            "level_environment_reads_expected.jsonl",
+            "HORIZON_LEVEL_READ_EXPECTED",
+        );
+        assert!(inputs.len() >= 173);
+        assert_eq!(inputs.len(), expected.len());
+        let position =
+            |value: &Value| std::array::from_fn::<_, 3, _>(|i| value[i].as_i64().unwrap() as i32);
+        with_game(|game| {
+            let mut generators = HashMap::new();
+            for (input, expected) in inputs.iter().zip(&expected) {
+                assert_eq!(input["name"], expected["name"]);
+                let dimension = input["dimension"].as_str().unwrap_or("minecraft:overworld");
+                let dim = Dim::from_id(dimension);
+                if game.dim != dim {
+                    game.enter_level(dim).unwrap();
+                }
+                let kind = input["kind"].as_str().unwrap();
+                match kind {
+                    "biome" => {
+                        game.world.chunks.clear();
+                        let ids = ["minecraft:plains", "minecraft:desert", "minecraft:forest"]
+                            .map(|name| world_biomes!(game).id(name));
+                        for column in input["loaded"].as_array().unwrap() {
+                            let (cx, cz) = (
+                                column[0].as_i64().unwrap() as i32,
+                                column[1].as_i64().unwrap() as i32,
+                            );
+                            let mut chunk = Chunk::empty(cx, cz);
+                            for y in 0..chunk.sections.len() as i32 * 4 {
+                                for x in 0..4 {
+                                    for z in 0..4 {
+                                        let qy = -16 + y;
+                                        let index =
+                                            ((cx * 4 + x) * 31 + qy * 7 + (cz * 4 + z) * 17)
+                                                .rem_euclid(3);
+                                        chunk.set_biome_cell(x, y, z, ids[index as usize]);
+                                    }
+                                }
+                            }
+                            game.world.chunks.insert((cx, cz), Arc::new(chunk));
+                        }
+                        game.streaming.biome_zoom = horizon_core::biome::BiomeZoom::new(
+                            input["zoom_seed"].as_i64().unwrap(),
+                        );
+                    }
+                    "floor" => {
+                        game.world.chunks.clear();
+                        game.world
+                            .chunks
+                            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                        for (field, y) in [("here", 100), ("below", 99)] {
+                            let state = game
+                                .pack
+                                .assets
+                                .registry
+                                .default_state(input[field].as_str().unwrap())
+                                .unwrap();
+                            game.world.set(8, y, 8, state).unwrap();
+                        }
+                    }
+                    "sky" => {
+                        game.world.day_time = input["time"].as_i64().unwrap();
+                        let rain = input["rain"].as_f64().unwrap() as f32;
+                        let thunder = input["thunder"].as_f64().unwrap() as f32;
+                        game.world.weather.rain_level = (rain, rain);
+                        game.world.weather.thunder_level = (thunder, thunder);
+                    }
+                    "search" => {
+                        let seed = input["seed"].as_i64().unwrap();
+                        let key = (dimension.to_owned(), seed);
+                        let generator = generators.entry(key).or_insert_with(|| {
+                            let directory = game.options.resources.join("worldgen");
+                            let terrain = VanillaTerrain::for_dimension(
+                                TerrainResources {
+                                    data: Some(&game.pack.data_changes),
+                                    dir: &directory,
+                                    registry: game.pack.assets.registry,
+                                    biomes: world_biomes!(game),
+                                    item_data: &game.res.core.item_data,
+                                },
+                                seed,
+                                dimension,
+                            )
+                            .unwrap();
+                            Arc::new(terrain)
+                        });
+                        game.end.set_locator(Some(generator.clone()));
+                    }
+                    "logical_height" => {}
+                    other => panic!("unknown fixture {other}"),
+                }
+                let level = game.level(dimension).unwrap();
+                let before = (game.world.chunks.len(), game.streaming.pending());
+                let value = match kind {
+                    "biome" => json!(level.biome_at(game, position(&input["position"]))),
+                    "floor" => json!(level.block_floor_height(game, [8, 100, 8]).map(|height| {
+                        if height == f64::NEG_INFINITY {
+                            json!("-Infinity")
+                        } else {
+                            json!(height)
+                        }
+                    })),
+                    "sky" => json!(level.get_sky_darken(game)),
+                    "logical_height" => json!(level.logical_height(game)),
+                    "search" => {
+                        let parameters = BiomeSearch::new(
+                            position(&input["position"]),
+                            input["radius"].as_i64().unwrap() as i32,
+                            input["horizontal"].as_i64().unwrap() as i32,
+                            input["vertical"].as_i64().unwrap() as i32,
+                        );
+                        json!(
+                            level
+                                .find_closest_biome(
+                                    game,
+                                    input["selector"].as_str().unwrap(),
+                                    parameters
+                                )
+                                .map(
+                                    |found| json!({"biome":found.biome,"position":found.position})
+                                )
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+                assert_eq!(
+                    json!({"name":input["name"],"value":value}),
+                    *expected,
+                    "{}",
+                    input["name"]
+                );
+                assert_eq!(
+                    before,
+                    (game.world.chunks.len(), game.streaming.pending()),
+                    "read queued or loaded a chunk: {}",
+                    input["name"]
+                );
+            }
         });
     }
 }
