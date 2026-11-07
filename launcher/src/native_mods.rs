@@ -47,7 +47,7 @@ pub use isolate::LeftOut;
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "embedded-inventory-packages-v1";
+const STAGING: &str = "private-source-points-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -1292,6 +1292,7 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
+    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -2387,7 +2388,7 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        source::stage(&pending, &catalog_dir, &ordered)
+        source::stage(&pending, &catalog_dir, &ordered, &append_log)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -3808,6 +3809,26 @@ mod tests {
             .unwrap(),
             "the ARM64 toolchain has a separate installed build"
         );
+        let path = d.join("horizon-mod.toml");
+        let original = fs::read_to_string(&path).unwrap();
+        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        fs::write(&path, format!("{original}{declaration}")).unwrap();
+        let source = key(A);
+        assert_ne!(
+            first, source,
+            "source adapters require another game artifact"
+        );
+        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        fs::write(
+            &path,
+            format!(
+                "{original}{}",
+                declaration.replace("id='source'", "id='changed'")
+            ),
+        )
+        .unwrap();
+        assert_ne!(source, key(A), "private point identity is part of the key");
+        fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(
             first,
