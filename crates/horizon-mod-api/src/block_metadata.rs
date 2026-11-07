@@ -14,7 +14,9 @@ pub struct BlockStateRecord {
 }
 impl BlockStateRecord {
     /// Construct transport data; registry-dependent bounds belong to the receiving boundary.
-    pub const fn new(block: BlockKey, state: u16) -> Self { Self { block, state } }
+    pub const fn new(block: BlockKey, state: u16) -> Self {
+        Self { block, state }
+    }
 }
 
 /// A refused metadata read or state operation.
@@ -55,25 +57,64 @@ impl From<horizon_mod_runtime::block_definitions::StateError> for BlockStateErro
 #[doc(hidden)]
 pub trait BlockMetadata {
     /// Borrow a property's serialized value; a missing property returns None.
-    fn property(&self, state: BlockStateRecord, name: &str) -> Result<Option<&str>, BlockStateError>;
+    fn property(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, BlockStateError>;
     /// Change one property while retaining the others.
-    fn with(&self, state: BlockStateRecord, name: &str, value: &str) -> Result<BlockStateRecord, BlockStateError>;
+    fn with(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<BlockStateRecord, BlockStateError>;
     /// Apply partial constraints to the block's default state.
-    fn of(&self, block: BlockKey, properties: &[StateConstraint]) -> Result<BlockStateRecord, BlockStateError>;
+    fn of(
+        &self,
+        block: BlockKey,
+        properties: &[StateConstraint],
+    ) -> Result<BlockStateRecord, BlockStateError>;
 }
 impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
-    fn property(&self, state: BlockStateRecord, name: &str) -> Result<Option<&str>, BlockStateError> {
-        self.definitions.get(state.block.0 as usize).ok_or(BlockStateError::UnknownBlock)?
-            .property(state.state, name).map_err(Into::into)
+    fn property(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, BlockStateError> {
+        self.definitions
+            .get(state.block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?
+            .property(state.state, name)
+            .map_err(Into::into)
     }
-    fn with(&self, state: BlockStateRecord, name: &str, value: &str) -> Result<BlockStateRecord, BlockStateError> {
-        let ordinal = self.definitions.get(state.block.0 as usize).ok_or(BlockStateError::UnknownBlock)?
+    fn with(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        let ordinal = self
+            .definitions
+            .get(state.block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?
             .with(state.state, name, value)?;
         Ok(BlockStateRecord::new(state.block, ordinal))
     }
-    fn of(&self, block: BlockKey, properties: &[StateConstraint]) -> Result<BlockStateRecord, BlockStateError> {
-        let constraints: Vec<_> = properties.iter().map(|p| (p.name.as_str(), p.value.as_str())).collect();
-        let ordinal = self.definitions.get(block.0 as usize).ok_or(BlockStateError::UnknownBlock)?.of(&constraints)?;
+    fn of(
+        &self,
+        block: BlockKey,
+        properties: &[StateConstraint],
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        let constraints: Vec<_> = properties
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.as_str()))
+            .collect();
+        let ordinal = self
+            .definitions
+            .get(block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?
+            .of(&constraints)?;
         Ok(BlockStateRecord::new(block, ordinal))
     }
 }

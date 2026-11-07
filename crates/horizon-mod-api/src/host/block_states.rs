@@ -87,13 +87,26 @@ pub trait BlockStatesServerHost {
 pub trait BlockStatesBackend {
     /// Side: both. Borrow an immutable property through the block metadata resource.
     #[access(Metadata)]
-    fn block_metadata_property(&self, state: BlockStateRecord, name: &str) -> Result<Option<&str>, BlockStateError>;
+    fn block_metadata_property(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, BlockStateError>;
     /// Side: both. Change a property through the block metadata resource.
     #[access(Metadata)]
-    fn block_metadata_with(&self, state: BlockStateRecord, name: &str, value: &str) -> Result<BlockStateRecord, BlockStateError>;
+    fn block_metadata_with(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<BlockStateRecord, BlockStateError>;
     /// Side: both. Apply partial properties through the block metadata resource.
     #[access(Metadata)]
-    fn block_metadata_of(&self, block: BlockKey, properties: &[StateConstraint]) -> Result<BlockStateRecord, BlockStateError>;
+    fn block_metadata_of(
+        &self,
+        block: BlockKey,
+        properties: &[StateConstraint],
+    ) -> Result<BlockStateRecord, BlockStateError>;
     /// Side: both.
     /// `BlockState.canBeReplaced()`: whether placing a block where this state stands
     /// replaces it (air, grass, water, snow layers). None for an unknown state.
