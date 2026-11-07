@@ -64,13 +64,13 @@ use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, ClientAudioOptions, ClientChatOptions, ClientGraphicsOptions,
-    ClientGuiOptions, ClientInputOptions, ClientModifiers, ClientReloadListeners,
-    CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
-    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
-    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
-    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
-    ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, BlockTintSources, ClientAudioOptions, ClientChatOptions,
+    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientModifiers,
+    ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor,
+    InteractionKey, LayerDefinition, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
+    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
+    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening,
+    ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
