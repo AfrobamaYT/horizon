@@ -1,8 +1,36 @@
 //! Fixed-capacity output for a view's custom geometry; the GPU consumer owns drawing.
 use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY};
 use crate::{gizmos, mesher::Vertex};
-use glam::Mat4;
-use mod_api::{DrawError, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad};
+use glam::{DVec3, Mat4, Vec3, Vec4};
+use mod_api::{
+    DrawError, InstanceError, ModelInstance, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad,
+};
+
+/// Copies of resolved models accepted for one view. Reserved once, never grown in a frame.
+pub(crate) const INSTANCE_CAPACITY: u32 = 16_384;
+
+/// One accepted copy, already checked. `light` and `overlay` are the renderer's vanilla packing.
+#[derive(Clone, Copy)]
+pub struct ModelCopy {
+    pub slot: u32,
+    pub generation: u64,
+    pub origin: [f64; 3],
+    pub transform: [f32; 12],
+    pub tint: u32,
+    pub light: u32,
+    pub overlay: u32,
+    pub gpu: bool,
+}
+
+/// The model a batch draws. Resolved once, then applied to every copy.
+#[derive(Clone, Copy)]
+pub struct ModelBatch {
+    pub slot: u32,
+    pub generation: u64,
+    pub translucent: bool,
+    pub bounds: [[f32; 3]; 2],
+    pub gpu: bool,
+}
 
 /// Reused between views, including frames with no subscribers or output.
 pub struct WorldGeometry {
@@ -11,6 +39,7 @@ pub struct WorldGeometry {
     white: [f32; 2],
     lines: [Vec<[f32; 8]>; 2],
     quads: [Vec<Vertex>; 2],
+    copies: Vec<ModelCopy>,
 }
 impl Default for WorldGeometry {
     fn default() -> Self {
@@ -20,6 +49,7 @@ impl Default for WorldGeometry {
             white: [0.0; 2],
             lines: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize)),
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
+            copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
         }
     }
 }
@@ -31,6 +61,7 @@ impl WorldGeometry {
         self.white = white;
         self.lines.iter_mut().for_each(Vec::clear);
         self.quads.iter_mut().for_each(Vec::clear);
+        self.copies.clear();
     }
     /// The current counts and setup-time limits across both depth modes.
     pub fn usage(&self) -> WorldDrawUsage {
@@ -39,7 +70,82 @@ impl WorldGeometry {
             CAPACITY,
             self.quads.iter().map(|v| v.len() as u32 / 4).sum(),
             CAPACITY,
+            self.copies.len() as u32,
+            INSTANCE_CAPACITY,
         )
+    }
+    /// Accept every visible copy, or leave the output unchanged.
+    ///
+    /// Culled copies are omitted and do not count. A fault in any input, including one
+    /// that would have been culled, refuses the whole batch.
+    pub fn submit_model(
+        &mut self,
+        batch: ModelBatch,
+        instances: &[ModelInstance],
+        cull: Option<&impl crate::gfx::Cull>,
+    ) -> Result<(), InstanceError> {
+        if instances.is_empty() {
+            return Ok(());
+        }
+        if batch.translucent {
+            return Err(InstanceError::Translucent);
+        }
+        for instance in instances {
+            if instance.origin.iter().any(|v| !v.is_finite())
+                || instance.transform.iter().any(|v| !v.is_finite())
+            {
+                return Err(InstanceError::NonFinite);
+            }
+            if instance.light.block > 15 || instance.light.sky > 15 {
+                return Err(InstanceError::InvalidLight);
+            }
+        }
+        let visible = instances
+            .iter()
+            .filter(|instance| {
+                copy_visible(
+                    batch.bounds,
+                    instance.transform,
+                    instance.origin,
+                    self.camera,
+                    cull,
+                )
+            })
+            .count();
+        if visible > INSTANCE_CAPACITY as usize - self.copies.len() {
+            return Err(InstanceError::CapacityExceeded);
+        }
+        for instance in instances {
+            if !copy_visible(
+                batch.bounds,
+                instance.transform,
+                instance.origin,
+                self.camera,
+                cull,
+            ) {
+                continue;
+            }
+            self.copies.push(ModelCopy {
+                slot: batch.slot,
+                generation: batch.generation,
+                origin: instance.origin,
+                transform: instance.transform,
+                tint: instance.tint,
+                light: pack_light(instance.light),
+                overlay: pack_overlay(instance.overlay),
+                gpu: batch.gpu,
+            });
+        }
+        Ok(())
+    }
+    pub fn copy_count(&self) -> usize {
+        self.copies.len()
+    }
+    pub fn copy(&self, index: usize) -> ModelCopy {
+        self.copies[index]
+    }
+    pub fn clear_copies(&mut self) {
+        self.copies.clear();
     }
     /// Validate once at the submission boundary, before any output is appended.
     fn validate_positions(&self, points: impl Iterator<Item = [f64; 3]>) -> Result<(), DrawError> {
@@ -111,6 +217,63 @@ impl WorldGeometry {
     }
 }
 
+/// Row-major 3×4 to a column-major matrix. The last row is the affine 0,0,0,1.
+pub fn row_major_3x4(m: [f32; 12]) -> Mat4 {
+    Mat4::from_cols(
+        Vec4::new(m[0], m[4], m[8], 0.0),
+        Vec4::new(m[1], m[5], m[9], 0.0),
+        Vec4::new(m[2], m[6], m[10], 0.0),
+        Vec4::new(m[3], m[7], m[11], 1.0),
+    )
+}
+
+/// Block-entity vertex light: sky in byte 0 and block in byte 1, both in sixteenths.
+pub fn pack_light(light: mod_api::LightCoords) -> u32 {
+    u32::from(light.sky) * 16 | u32::from(light.block) * 16 << 8
+}
+
+/// `LivingEntityRenderer.getOverlayCoords` as the entity shader's overlay code.
+pub fn pack_overlay(overlay: mod_api::Overlay) -> u32 {
+    if overlay.hurt {
+        return 1;
+    }
+    match u32::from(overlay.white.min(15)) {
+        0 => 0,
+        column => crate::overlay::WHITE + column,
+    }
+}
+
+fn copy_visible(
+    bounds: [[f32; 3]; 2],
+    transform: [f32; 12],
+    origin: [f64; 3],
+    camera: [f64; 3],
+    cull: Option<&impl crate::gfx::Cull>,
+) -> bool {
+    let Some(cull) = cull else {
+        return true;
+    };
+    if !bounds.iter().flatten().all(|v| v.is_finite()) {
+        return true;
+    }
+    let local = row_major_3x4(transform);
+    let delta = DVec3::from(origin) - DVec3::from(camera);
+    let shift = Vec3::new(delta.x as f32, delta.y as f32, delta.z as f32);
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for corner in 0..8 {
+        let point = Vec3::new(
+            bounds[usize::from(corner & 1 != 0)][0],
+            bounds[usize::from(corner & 2 != 0)][1],
+            bounds[usize::from(corner & 4 != 0)][2],
+        );
+        let world = local.transform_point3(point) + shift;
+        min = min.min(world);
+        max = max.max(world);
+    }
+    !min.is_finite() || !max.is_finite() || cull.intersects(min, max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +334,91 @@ mod tests {
                 draw.quads.each_ref().map(Vec::capacity)
             )
         );
+    }
+
+    struct NearX;
+    impl crate::gfx::Cull for NearX {
+        fn intersects(&self, min: glam::Vec3, max: glam::Vec3) -> bool {
+            max.x >= 0.0 && min.x <= 4.0
+        }
+        fn contains(&self, min: glam::Vec3, max: glam::Vec3) -> bool {
+            min.x >= 0.0 && max.x <= 4.0
+        }
+    }
+
+    #[test]
+    fn model_batches_are_atomic_cull_and_stop_at_the_view_budget() {
+        let mut draw = WorldGeometry::default();
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+        let batch = ModelBatch {
+            slot: 3,
+            generation: 9,
+            translucent: false,
+            bounds: [[0.0; 3], [1.0; 3]],
+            gpu: true,
+        };
+        let kept = draw.usage();
+        let mut bad = ModelInstance::at([1.0, 0.0, 0.0], 0xFF11_2233);
+        bad.light.block = 16;
+        assert_eq!(
+            draw.submit_model(
+                batch,
+                &[ModelInstance::at([1.0, 0.0, 0.0], 1), bad],
+                None::<&NearX>
+            ),
+            Err(InstanceError::InvalidLight)
+        );
+        bad.light.block = 15;
+        bad.origin[0] = f64::NAN;
+        assert_eq!(
+            draw.submit_model(batch, &[bad], None::<&NearX>),
+            Err(InstanceError::NonFinite)
+        );
+        bad.origin[0] = 1.0;
+        bad.transform[4] = f32::INFINITY;
+        assert_eq!(
+            draw.submit_model(batch, &[bad], None::<&NearX>),
+            Err(InstanceError::NonFinite)
+        );
+        assert_eq!(
+            draw.submit_model(
+                ModelBatch {
+                    translucent: true,
+                    ..batch
+                },
+                &[ModelInstance::at([1.0, 0.0, 0.0], 1)],
+                None::<&NearX>,
+            ),
+            Err(InstanceError::Translucent)
+        );
+        assert_eq!(draw.usage(), kept);
+        let near = ModelInstance::at([1.0, 2.0, 3.0], 0xFF80_C040);
+        let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFF80_C040);
+        draw.submit_model(batch, &[near, far], Some(&NearX))
+            .unwrap();
+        assert_eq!(draw.copy_count(), 1);
+        assert_eq!(draw.copy(0).light, 0xF0F0);
+        assert_eq!(draw.copy(0).overlay, 0);
+        assert!(draw.copy(0).gpu);
+        assert_eq!(draw.usage().instances_used, 1);
+        assert_eq!(draw.usage().instances_capacity, INSTANCE_CAPACITY);
+        let mut hurt = near;
+        hurt.overlay = mod_api::Overlay::new(8, true).unwrap();
+        hurt.light = mod_api::LightCoords::new(15, 3).unwrap();
+        draw.submit_model(batch, &[hurt], None::<&NearX>).unwrap();
+        assert_eq!(draw.copy(1).light, 0xF030);
+        assert_eq!(draw.copy(1).overlay, 1);
+        let fill = INSTANCE_CAPACITY as usize - draw.copy_count();
+        draw.submit_model(batch, &vec![near; fill], None::<&NearX>)
+            .unwrap();
+        assert_eq!(
+            draw.submit_model(batch, &[near], None::<&NearX>),
+            Err(InstanceError::CapacityExceeded)
+        );
+        assert_eq!(draw.copy_count(), INSTANCE_CAPACITY as usize);
+        let reserved = draw.copies.capacity();
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+        assert_eq!(draw.copy_count(), 0);
+        assert!(draw.copies.capacity() >= reserved);
     }
 }
