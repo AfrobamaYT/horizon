@@ -344,6 +344,13 @@ impl LevelsBackend for Game<'_> {
         );
         self.native_level_fluid_state(level, pos)
     }
+    fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>> {
+        mod_api::__private::check_access(
+            "level_loaded_chunks",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_loaded_chunks(level)
+    }
     fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>> {
         mod_api::__private::check_access(
             "level_collision_boxes",

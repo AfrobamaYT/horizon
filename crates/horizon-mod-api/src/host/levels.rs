@@ -572,6 +572,16 @@ pub trait LevelsBackend {
         )
     }
     /// Side: both.
+    /// Every loaded chunk of an open server level as handles, ordered by chunk x then z. None for
+    /// a stale handle or on a client. Loads nothing.
+    fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>> {
+        crate::phase::unprovided(
+            "Backend::level_loaded_chunks",
+            "level_loaded_chunks",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
     /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
     fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>> {
         crate::phase::unprovided(

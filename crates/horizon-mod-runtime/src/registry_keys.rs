@@ -134,12 +134,48 @@ pub struct Effects {
     pub keys: Vec<u32>,
 }
 
+/// A failure to resolve an effect declaration against the complete registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EffectResolutionError {
+    /// A requesting mod named an effect absent from the registry.
+    UnknownEffect { mod_id: &'static str, id: String },
+    /// The resolver returned an index outside the supplied registry.
+    InvalidIndex {
+        id: String,
+        index: usize,
+        registry_len: usize,
+    },
+}
+
+impl std::fmt::Display for EffectResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownEffect { mod_id, id } => {
+                write!(f, "mod {mod_id} requested unknown effect {id}")
+            }
+            Self::InvalidIndex {
+                id,
+                index,
+                registry_len,
+            } => {
+                write!(
+                    f,
+                    "effect {id} resolved to index {index} outside registry of length {registry_len}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for EffectResolutionError {}
+
 /// Resolve requested effects once, after every mod's content has been registered.
+/// Refuses missing effects and resolver indices outside the supplied registry.
 pub fn resolve_effects<'a>(
     requests: &Names,
     ids: impl IntoIterator<Item = &'a str>,
     mut resolve: impl FnMut(&str) -> Option<usize>,
-) -> Result<Effects, Vec<String>> {
+) -> Result<Effects, Vec<EffectResolutionError>> {
     let all: Vec<_> = ids.into_iter().collect();
     let mut names = requests.clone();
     // Hooks and effect enumeration may expose entries no mod explicitly requested.
@@ -149,11 +185,21 @@ pub fn resolve_effects<'a>(
             .expect("registry owns valid ids");
     }
     let indices = names.resolve(&mut resolve, |mod_id, id| {
-        format!("mod {mod_id} requested unknown effect {id}")
+        EffectResolutionError::UnknownEffect {
+            mod_id,
+            id: id.to_owned(),
+        }
     })?;
     let mut keys = vec![u32::MAX; all.len()];
     for (slot, &index) in indices.iter().enumerate() {
-        keys[index] = slot as u32;
+        let Some(key) = keys.get_mut(index) else {
+            return Err(vec![EffectResolutionError::InvalidIndex {
+                id: names.entries[slot].id.clone(),
+                index,
+                registry_len: all.len(),
+            }]);
+        };
+        *key = slot as u32;
     }
     Ok(Effects {
         names,

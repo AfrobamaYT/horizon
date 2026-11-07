@@ -1,5 +1,7 @@
 //! Independent fixtures for the registry lookup boundary, copied by move.py.
-use horizon_mod_runtime::registry_keys::{Names, dimension_id, dimension_slot};
+use horizon_mod_runtime::registry_keys::{
+    EffectResolutionError, Names, dimension_id, dimension_slot,
+};
 
 #[test]
 fn requests_canonicalize_deduplicate_and_report_each_requesting_mod_once() {
@@ -39,25 +41,47 @@ fn effect_registry_order_is_distinct_from_requested_slot_order() {
     names.request("mod", "test:later").unwrap();
     let resolved = horizon_mod_runtime::registry_keys::resolve_effects(
         &names,
-        ["minecraft:speed", "test:later", "test:unrequested"],
+        ["minecraft:speed", "test:unrequested", "test:later"],
         |id| match id {
             "minecraft:speed" => Some(0),
-            "test:later" => Some(1),
-            "test:unrequested" => Some(2),
+            "test:later" => Some(2),
+            "test:unrequested" => Some(1),
             _ => None,
         },
     )
     .unwrap();
-    assert_eq!(resolved.indices, [1, 0, 2]);
-    assert_eq!(resolved.keys, [1, 0, 2]);
+    assert_eq!(resolved.indices, [2, 0, 1]);
+    assert_eq!(resolved.keys, [1, 2, 0]);
     assert_eq!(resolved.names.id(0), Some("test:later"));
     assert_eq!(resolved.names.id(1), Some("minecraft:speed"));
     assert_eq!(resolved.names.id(2), Some("test:unrequested"));
     let errors = horizon_mod_runtime::registry_keys::resolve_effects(&names, [], |_| None);
     assert_eq!(
         errors.err().unwrap(),
-        ["mod mod requested unknown effect test:later"]
+        [EffectResolutionError::UnknownEffect {
+            mod_id: "mod",
+            id: "test:later".to_owned(),
+        }]
     );
+}
+
+#[test]
+fn effect_resolution_refuses_indices_outside_the_registry() {
+    for index in [1, usize::MAX] {
+        let result = horizon_mod_runtime::registry_keys::resolve_effects(
+            &Names::default(),
+            ["minecraft:speed"],
+            |_| Some(index),
+        );
+        assert_eq!(
+            result.err().unwrap(),
+            [EffectResolutionError::InvalidIndex {
+                id: "minecraft:speed".to_owned(),
+                index,
+                registry_len: 1,
+            }]
+        );
+    }
 }
 
 #[test]
