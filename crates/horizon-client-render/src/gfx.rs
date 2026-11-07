@@ -202,7 +202,10 @@ pub use prepared_model::{
     PreparedModelDraw, PreparedModelInstance, PreparedModelVertex, PreparedModels, camera_matrix,
 };
 #[cfg(feature = "test-support")]
-pub use prepared_model::{cap_prepared_instance_slots, capped_prepared_room};
+pub use prepared_model::{
+    cap_prepared_instance_slots, capped_prepared_room, set_test_prepared_generation,
+    test_prepared_generation,
+};
 #[cfg(test)]
 mod inter_stage_tests;
 #[cfg(test)]
@@ -11990,6 +11993,12 @@ fn shadow_box(view: &pack_post::ShadowView) -> Frustum {
 #[derive(Clone, Copy, Debug)]
 pub struct Frustum {
     planes: [Vec4; 6],
+}
+
+/// A frustum with the given clip planes, for tests that drive the public draw call.
+#[cfg(feature = "test-support")]
+pub fn test_frustum(planes: [Vec4; 6]) -> Frustum {
+    Frustum { planes }
 }
 impl Frustum {
     /// Whether the camera-relative box `min..max` is at least partly inside.

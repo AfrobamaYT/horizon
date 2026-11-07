@@ -38,6 +38,10 @@ mod package;
 mod prebuilt;
 mod sites;
 mod slots;
+#[cfg(test)]
+mod source;
+#[cfg(all(test, target_os = "linux"))]
+mod source_server;
 mod wasm_internals;
 
 pub use isolate::LeftOut;

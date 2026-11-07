@@ -2714,6 +2714,7 @@ dependencies = [
  "horizon-mcp",
  "horizon-mod-api-gen",
  "horizon-mod-package",
+ "horizon-mod-point-shape",
  "horizon-port-pack",
  "horizon-prepare",
  "horizon-protocol",

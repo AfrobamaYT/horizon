@@ -3008,6 +3008,10 @@ impl PreparedModelFace {
         }
     }
 
+    pub(super) fn positions(&self) -> [[f32; 3]; 4] {
+        self.positions
+    }
+
     pub(super) fn gpu_vertex(&self, corner: usize) -> horizon_client::gfx::PreparedModelVertex {
         let normal = horizon_client::item_render::direction_vector(self.facing);
         horizon_client::gfx::PreparedModelVertex {
@@ -3083,6 +3087,24 @@ pub(super) fn emit_model_faces(
                 light,
                 glint_uv: [0.0, 0.0],
             });
+        }
+    }
+}
+
+/// Vanilla multiplies tint, alpha included, only when `tintIndex != -1`.
+pub(super) fn scale_tint_alpha(vertices: &mut [Vertex], faces: &[PreparedModelFace], tint: u32) {
+    let alpha = tint >> 24;
+    if alpha == 255 {
+        return;
+    }
+    let (quads, _) = vertices.as_chunks_mut::<4>();
+    for (face, quad) in faces.iter().zip(quads) {
+        if face.tint_index < 0 {
+            continue;
+        }
+        for vertex in quad {
+            let scaled = (vertex.color >> 24) * alpha / 255;
+            vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
         }
     }
 }
