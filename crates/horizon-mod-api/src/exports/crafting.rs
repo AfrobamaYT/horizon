@@ -2,5 +2,6 @@
 #[doc(hidden)]
 pub mod crafting;
 pub use crate::crafting::{
-    Ingredient, Recipe, RecipeInput, RecipeLookupError, RecipeMatch, RecipePropertyAddition,
+    Ingredient, IngredientKeysError, Recipe, RecipeInput, RecipeLookupError, RecipeMatch,
+    RecipePropertyAddition,
 };

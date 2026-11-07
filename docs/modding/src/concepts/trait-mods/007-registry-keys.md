@@ -120,6 +120,15 @@ levels are typed errors. A type without an engine matcher returns
 with zero crossings per tick. Dynamic custom outputs and contextual predicates
 remain mod-owned; the host does not call guest code to match recipes.
 
+At publication, call `ingredient.item_keys(host)` once per ingredient to retain
+`Arc<[ItemKey]>` for local matching. This load-time read returns exactly the plain
+item membership for lists, expanded tags and standard shapes, using the engine
+matcher. It returns `IngredientKeysError::NotEnumerable` if any custom or component
+predicate occurs anywhere in the tree; a displayed item list is not a safe substitute.
+`UnknownItem` refuses a missing registry identity. Do not call this method per tick.
+The sample's `ProcessingRecipes::publish` retains these keys; `result` then checks
+`input.item()` locally, with no `Ingredient::test` host call per candidate.
+
 ### API-owned values: migration table
 
 | Previous engine value | API-owned value | Mod changes |

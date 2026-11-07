@@ -445,7 +445,33 @@ pub enum Shape {
     /// The first child must, and the second must not.
     Difference,
 }
+/// Why an ingredient cannot be retained as an exact, component-independent key set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum IngredientKeysError {
+    /// A custom predicate may inspect components or context at match time.
+    NotEnumerable,
+    /// An ingredient name cannot be resolved in the completed item registry.
+    UnknownItem,
+}
+impl crate::NoBackend for IngredientKeysError {
+    fn no_backend() -> Self {
+        Self::UnknownItem
+    }
+}
 impl Ingredient {
+    /// Resolve exact membership once per load/reload for local matching in mod memory.
+    /// Plain item lists, expanded tags and standard shapes with no custom descendants
+    /// are component-independent. A custom/component predicate anywhere in the tree
+    /// returns `NotEnumerable`: the display item list is not an exact predicate (and
+    /// for differences containing custom predicates is not even necessarily a superset).
+    /// Such predicates remain mod-owned; this method never invokes a match-time hook.
+    /// One host call per ingredient at publication; never call this per tick or candidate.
+    pub fn item_keys(&self, host: &dyn Host) -> Result<Arc<[crate::ItemKey]>, IngredientKeysError> {
+        backend_of(host)
+            .ok_or(IngredientKeysError::UnknownItem)?
+            .recipe_ingredient_item_keys(self)
+    }
     /// The items of a list, in order.
     pub fn of(items: Vec<String>) -> Self {
         Self {

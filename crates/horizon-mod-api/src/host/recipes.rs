@@ -87,6 +87,13 @@ pub trait RecipesClientHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait RecipesBackend {
+    /// Side: both. Exact load-time membership for component-independent ingredients.
+    /// Custom/component predicates anywhere in the tree are NotEnumerable.
+    #[access(PublishedResources)]
+    fn recipe_ingredient_item_keys(
+        &self,
+        ingredient: &Ingredient,
+    ) -> Result<Arc<[ItemKey]>, IngredientKeysError>;
     /// Side: both.
     /// Whether `stack` fits `ingredient` (`Ingredient.test`), matched with this
     /// game's loop context.

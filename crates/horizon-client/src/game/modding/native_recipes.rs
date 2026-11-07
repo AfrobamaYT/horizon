@@ -832,6 +832,21 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn recipe_for_refuses_mod_owned_types_instead_of_empty_matches() {
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            with_game(|game| {
+                let level = game.level(game.dim.id()).unwrap();
+                let kind = mod_api::Identifier::parse("test:crusher").unwrap();
+                assert_eq!(
+                    level.recipe_for(game, &kind, &RecipeInput::Single(stack("dirt").unwrap())),
+                    Err(RecipeLookupError::NotMatchable)
+                );
+            })
+        });
+    }
+
     /// What one `level.recipe_for` costs, for benchmarks/craft-match-2026-11-04: a grid that matches
     /// early, one that matches late, a special recipe and a grid no recipe takes (the whole list).
     #[test]
