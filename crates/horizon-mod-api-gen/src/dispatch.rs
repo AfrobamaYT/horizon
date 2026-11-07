@@ -30,7 +30,7 @@ pub(super) fn is_render(hook: &Hook) -> bool {
     hook.target.starts_with("mod_render::render::")
 }
 
-/// Render emission reads only the catalog and its API-owned raw target signatures.
+/// Render emission reads only the catalog and its native raw target signatures.
 pub(super) fn render(root: &Path, catalog: &Catalog) -> Result<HookSources, String> {
     emit(
         root,

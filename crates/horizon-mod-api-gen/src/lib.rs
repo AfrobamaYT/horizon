@@ -464,7 +464,7 @@ const ENTITY_PART_DOCS: &str = "/// An entity type's part (arismoko/horizon#1077
 /// The crate whose generated sources are being built.
 #[derive(Clone, Copy)]
 pub enum Target {
-    /// `horizon-mod-api`: the hook and render traits, their dispatch, and the host traits.
+    /// `horizon-mod-api`: the hook traits, their dispatch, and the host traits.
     Api,
     /// The game: the host traits' implementation on `Game`.
     Client,
