@@ -34,7 +34,10 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
         {
             let uuid = [31, 32, 33, n as i32];
             let tag = Tag::compound([
-                ("id", Tag::String(format!("minecraft:{kind}").into())),
+                (
+                    "id",
+                    Tag::String(format!("minecraft:{kind}").as_str().into()),
+                ),
                 ("UUID", Tag::IntArray(uuid.to_vec())),
                 (
                     "Pos",
