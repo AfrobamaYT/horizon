@@ -315,33 +315,27 @@ mod tests {
             game.audio.heard.clear();
             let harp = "minecraft:block.note_block.harp";
             let bell = "minecraft:block.note_block.bell";
-            let stopped = game
-                .native_play_local_sound(&SoundPlay::ui(harp), 0)
-                .unwrap();
-            assert!(game.native_sound_stop(stopped));
+            let stopped = game.play_local_sound(&SoundPlay::ui(harp), 0).unwrap();
+            assert!(game.sound_stop(stopped));
             game.tick_sound_engine();
             assert!(
                 !game.audio.heard.contains_key(harp),
                 "stopped before the update"
             );
-            assert_eq!(game.native_sound_state(stopped), Some(SoundState::Stopped));
+            assert_eq!(game.sound_state(stopped), Some(SoundState::Stopped));
 
-            let queued = game
-                .native_play_local_sound(&SoundPlay::ui(bell), 20)
-                .unwrap();
-            assert_eq!(game.native_sound_state(queued), Some(SoundState::Waiting));
+            let queued = game.play_local_sound(&SoundPlay::ui(bell), 20).unwrap();
+            assert_eq!(game.sound_state(queued), Some(SoundState::Waiting));
             game.stop_sounds_for_new_level();
-            assert_eq!(game.native_sound_state(queued), Some(SoundState::Stopped));
-            assert!(!game.native_sound_stop(queued), "already over");
+            assert_eq!(game.sound_state(queued), Some(SoundState::Stopped));
+            assert!(!game.sound_stop(queued), "already over");
             game.tick_sound_engine();
             assert!(
                 !game.audio.heard.contains_key(bell),
                 "cleared with the level"
             );
 
-            let next = game
-                .native_play_local_sound(&SoundPlay::ui(harp), 0)
-                .unwrap();
+            let next = game.play_local_sound(&SoundPlay::ui(harp), 0).unwrap();
             assert!(next != stopped && next != queued, "a new handle");
         });
     }
