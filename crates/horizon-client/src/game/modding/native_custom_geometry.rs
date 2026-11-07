@@ -175,3 +175,114 @@ impl Game<'_> {
         draw.clear_copies();
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::{DVec3, Mat4, Quat, Vec3};
+    use mod_api::{Identifier, LightCoords, ModelInstance, Overlay};
+
+    fn rows(local: Mat4) -> [f32; 12] {
+        let column = local.to_cols_array_2d();
+        [
+            column[0][0],
+            column[1][0],
+            column[2][0],
+            column[3][0],
+            column[0][1],
+            column[1][1],
+            column[2][1],
+            column[3][1],
+            column[0][2],
+            column[1][2],
+            column[2][2],
+            column[3][2],
+        ]
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
+    fn draw_model_instances_matches_cpu_pixels() {
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let model = game
+                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            let local = Mat4::from_scale(Vec3::splat(1.0));
+            let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
+            let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
+            let instance = ModelInstance::new(
+                origin.to_array(),
+                rows(local),
+                0xFF80_C040,
+                LightCoords::new(3, 15).unwrap(),
+                Overlay::NONE,
+            );
+            let mut draw = WorldGeometry::default();
+            draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+            game.native_world_draw_model_instances(&mut draw, model, &[instance])
+                .unwrap();
+            let copy = draw.copy(0);
+            let mut entities = Vec::new();
+            game.commit_model_instances(&mut draw, camera, &mut entities);
+            assert!(!entities.is_empty(), "the public call drew nothing");
+            let atlas = &game.gui.atlas;
+            let pixels = atlas.pixels().to_vec();
+            let view = Mat4::from_scale_rotation_translation(
+                Vec3::new(1.4, 1.4, 0.2),
+                Quat::IDENTITY,
+                Vec3::new(-0.55, -0.85, 0.5),
+            );
+            let cpu = horizon_client::gfx::entity_pixel_test::render(
+                &entities,
+                [atlas.width, atlas.height],
+                &pixels,
+                view,
+                false,
+            )
+            .expect("software Vulkan entity pixels");
+            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+            let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
+                horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                    vertices: &vertices,
+                    ranges,
+                    uploaded: copy.generation,
+                    requested: copy.generation,
+                    slot: copy.slot,
+                    instances: std::slice::from_ref(
+                        &super::super::native_block_entity_draw::prepared_instance(
+                            world_geometry::row_major_3x4(copy.transform),
+                            origin,
+                            camera,
+                            copy.tint,
+                            copy.light,
+                        ),
+                    ),
+                    per_copy: false,
+                    hdr: false,
+                    atlas_size: [atlas.width, atlas.height],
+                    atlas: &pixels,
+                    view_proj: view,
+                },
+            )
+            .expect("software Vulkan prepared instance");
+            let worst = cpu
+                .iter()
+                .zip(gpu.iter())
+                .map(|(cpu, gpu)| cpu.abs_diff(*gpu))
+                .max()
+                .unwrap_or(0);
+            assert!(
+                worst <= 2,
+                "public instance and cpu pixels differed by {worst}"
+            );
+            assert!(
+                cpu.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0),
+                "the model drew no colour"
+            );
+        });
+    }
+}
