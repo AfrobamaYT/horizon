@@ -2413,21 +2413,36 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn mod_dispenser_answers_preserve_fallback_and_own_consumption() {
-        assert!(
-            mod_dispensed(None).is_none(),
-            "no registered behaviour keeps vanilla"
-        );
-        assert_eq!(mod_dispensed(Some((None, CLICK))), Some((None, CLICK)));
-        let stack = ItemStack::new("minecraft:stone", 7);
-        let Some((Some(left), event)) = mod_dispensed(Some((Some(stack.clone()), FAIL))) else {
-            panic!("handled stack")
-        };
-        assert_eq!(left, stack, "the returned remainder is not consumed again");
-        assert_eq!(event, FAIL, "the answer chooses its sound");
-        assert_eq!(
-            mod_dispensed(Some((Some(ItemStack { count: 0, ..stack }), 0))),
-            Some((None, 0))
-        );
+        use super::super::api_values::{StackReadError, TryIntoApi};
+        super::super::native_entity_refs::tests::with_game(|game| {
+            assert!(
+                mod_dispensed(None, game.items()).is_none(),
+                "no registered behaviour keeps vanilla"
+            );
+            assert_eq!(
+                mod_dispensed(Some((None, CLICK)), game.items()),
+                Some((None, CLICK))
+            );
+            let stack = ItemStack::new("minecraft:stone", 7);
+            let Some((Some(left), event)) = mod_dispensed(
+                Some((Some(stack.try_into_api().unwrap()), FAIL)),
+                game.items(),
+            ) else {
+                panic!("handled stack")
+            };
+            assert_eq!(left, stack, "the returned remainder is not consumed again");
+            assert_eq!(event, FAIL, "the answer chooses its sound");
+            // An empty engine value is refused before a mod answer can be constructed.
+            assert_eq!(
+                ItemStack { count: 0, ..stack }.try_into_api(),
+                Err(StackReadError::Empty)
+            );
+            assert_eq!(
+                mod_dispensed(Some((None, 0)), game.items()),
+                Some((None, 0))
+            );
+        });
     }
 }

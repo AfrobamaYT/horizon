@@ -37,7 +37,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops, SoundSource};
+use mod_api::{EquipmentSlot, NativeLootDrops, SoundSource};
 use std::sync::Arc;
 
 /// `AbstractArrow.onHitEntity` when `hurtOrSimulate` returned false.
@@ -10638,7 +10638,11 @@ mod living_drops_tests {
                 let items: Vec<_> = event
                     .drops
                     .iter()
-                    .map(|d| d.stack.item.to_string())
+                    .map(|d| {
+                        mod_api::__private::item_key_id(d.stack.item())
+                            .unwrap()
+                            .to_string()
+                    })
                     .collect();
                 self.0.lock().unwrap().push(format!(
                     "{} {:?} {} {}",
@@ -10718,6 +10722,7 @@ mod living_drops_tests {
 #[cfg(test)]
 mod armor_destroy_tests {
     use super::MobEvent;
+    use horizon_client::items::ItemStack;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -10777,12 +10782,16 @@ mod armor_destroy_tests {
         });
     }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
-    use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
+    use mod_api::{EquipmentSlot, NativeArmorHurt};
 
     fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
         NativeArmorHurt {
             slot,
-            stack: ItemStack::new("minecraft:diamond_helmet", 1),
+            stack: mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:diamond_helmet").unwrap(),
+                1,
+            )
+            .unwrap(),
             damage: 2.0,
             new_damage,
         }
@@ -10791,14 +10800,17 @@ mod armor_destroy_tests {
     /// A mod that clears the entries, or removes one, leaves vanilla's wear (no panic).
     #[test]
     fn a_cleared_armor_hurt_entry_keeps_vanilla_wear() {
-        assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
-        let entries = [entry(EquipmentSlot::Head, 5.0)];
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
-        assert_eq!(
-            answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
-            0
-        );
+        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+            mod_api::__private::resolve_items(["minecraft:diamond_helmet"]).unwrap();
+            assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
+            let entries = [entry(EquipmentSlot::Head, 5.0)];
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
+            assert_eq!(
+                answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
+                0
+            );
+        });
     }
 
     /// `(int) Math.max(1.0F, damage / 4.0F)`.
