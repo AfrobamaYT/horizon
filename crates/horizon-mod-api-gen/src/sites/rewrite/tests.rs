@@ -130,7 +130,7 @@ fn site_rewrite_preserves_method_path_closure_and_question_mark_results() {
 }
 
 #[test]
-fn site_fingerprint_changes_when_an_identical_call_is_inserted_earlier() {
+fn site_fingerprint_ignores_formatting_but_duplicate_contexts_are_lost() {
     let hash = |source: &str| {
         rewrite(
             source,
@@ -144,10 +144,14 @@ fn site_fingerprint_changes_when_an_identical_call_is_inserted_earlier() {
         .hash
     };
     let original = hash("impl Game { fn run(&mut self) { self.step(1); } }");
-    assert_ne!(
-        original,
-        hash("impl Game { fn run(&mut self) { self.step(1); self.step(1); } }")
-    );
+    let error = rewrite(
+        "impl Game { fn run(&mut self) { self.step(1); self.step(1); } }",
+        "horizon_client::game",
+        &entries(),
+        &[declaration(".step", Some(0))],
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("E_INJECT_LOST"));
     assert_eq!(
         original,
         hash("impl Game { fn run(&mut self) { let ready = true; self.step(1); } }")
@@ -194,7 +198,7 @@ fn site_rewrite_ordinals_hashes_and_refusals() {
         )
         .unwrap_err()
         .to_string()
-        .contains("overlap")
+        .contains("E_INJECT_LOST")
     );
     let bad = "impl Game { fn run(&mut self) { self.step(self.value); } }";
     assert!(
@@ -248,4 +252,119 @@ fn site_rewrite_places_records_after_eof_without_a_final_newline() {
         let parsed = syn::parse_file(&actual).unwrap();
         assert!(matches!(parsed.items.last(), Some(syn::Item::Type(_))));
     }
+}
+
+#[test]
+fn site_identity_uses_resolved_callees_for_aliases_and_non_record_safe_calls() {
+    let mut catalog = entries();
+    catalog[1]
+        .refs
+        .insert("alias".into(), "horizon_client::game::add".into());
+    let source = "impl Game { fn run(&mut self) { alias(1); add(2); } }";
+    for selector in ["alias", "add", "horizon_client::game::add"] {
+        let (_, sites) = rewrite(
+            source,
+            "horizon_client::game",
+            &catalog,
+            &[declaration(selector, Some(1))],
+        )
+        .unwrap();
+        assert_eq!(sites[0].ordinal, 1);
+        assert_eq!(sites[0].call, "horizon_client::game::add");
+        let json = serde_json::to_value(&sites[0]).unwrap();
+        assert_eq!(json["ctx"], sites[0].ctx);
+        assert_eq!(json["hash"], sites[0].hash);
+    }
+    // The first call cannot be lowered, but still counts toward the same callee's nth.
+    let (_, sites) = rewrite(
+        "impl Game { fn run(&mut self) { self.step(self.value); self.step(2); } }",
+        "horizon_client::game",
+        &catalog,
+        &[declaration(".step", Some(1))],
+    )
+    .unwrap();
+    assert_eq!(sites[0].ordinal, 1);
+}
+
+#[test]
+fn pinned_site_context_refusal_table() {
+    let source = "impl Game { fn run(&mut self) { self.step(2); } }";
+    let request = declaration(".step", Some(0));
+    let (_, mut sites) = rewrite(
+        source,
+        "horizon_client::game",
+        &entries(),
+        std::slice::from_ref(&request),
+    )
+    .unwrap();
+    let mut request = request;
+    request.ctx = sites.remove(0).ctx;
+    for (body, reason) in [
+        ("self . step (2);", None),
+        ("add(9); self.step(2);", None),
+        (
+            "self.step(1); self.step(2);",
+            Some("E_INJECT_MOVED: now at nth=1"),
+        ),
+        ("self.step(3);", Some("E_INJECT_LOST")),
+        ("add(2);", Some("E_INJECT_LOST")),
+        ("self.step(2); self.step(2);", Some("E_INJECT_LOST")),
+        ("if true { self.step(2); }", Some("E_INJECT_LOST")),
+    ] {
+        let source = format!("impl Game {{ fn run(&mut self) {{ {body} }} }}");
+        let actual = rewrite(
+            &source,
+            "horizon_client::game",
+            &entries(),
+            std::slice::from_ref(&request),
+        );
+        match reason {
+            None => {
+                actual.unwrap();
+            }
+            Some(reason) => assert!(actual.unwrap_err().to_string().contains(reason), "{body}"),
+        }
+    }
+    // The same statement in different branches/arms must have distinct nesting paths.
+    for body in [
+        "if true { self.step(2); } else { self.step(2); }",
+        "let value = match 1 { 0 => self.step(2), _ => self.step(2) };",
+    ] {
+        let source = format!("impl Game {{ fn run(&mut self) {{ {body} }} }}");
+        let (_, sites) = rewrite(
+            &source,
+            "horizon_client::game",
+            &entries(),
+            &[declaration(".step", Some(0)), declaration(".step", Some(1))],
+        )
+        .unwrap();
+        assert_ne!(sites[0].ctx, sites[1].ctx);
+    }
+}
+
+#[test]
+fn changing_an_import_to_a_same_signature_callee_changes_the_fingerprint() {
+    let mut catalog = entries();
+    catalog.push(internal(
+        "horizon_client::other::add",
+        "fn",
+        "fn add(value: u32) -> u32",
+    ));
+    let mut sites = Vec::new();
+    for path in ["horizon_client::game::add", "horizon_client::other::add"] {
+        catalog[1].refs.insert("alias".into(), path.into());
+        sites.push(
+            rewrite(
+                "impl Game { fn run(&mut self) { alias(2); } }",
+                "horizon_client::game",
+                &catalog,
+                &[declaration("alias", Some(0))],
+            )
+            .unwrap()
+            .1
+            .remove(0),
+        );
+    }
+    assert_eq!(sites[0].ctx, sites[1].ctx);
+    assert_ne!(sites[0].hash, sites[1].hash);
 }

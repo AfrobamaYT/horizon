@@ -222,7 +222,8 @@ pub(crate) fn calls<'a>(body: &'a syn::Block, selector: &str) -> Vec<&'a Expr> {
                 _ => String::new(),
             };
             if !spelling.is_empty()
-                && (spelling == self.selector
+                && (self.selector.is_empty()
+                    || spelling == self.selector
                     || self.selector.starts_with('.') && spelling.ends_with(self.selector))
             {
                 self.calls.push(expr);
