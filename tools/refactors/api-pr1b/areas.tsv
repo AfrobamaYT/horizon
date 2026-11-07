@@ -715,6 +715,7 @@ level_reads	level_in_spawnable_bounds	levels
 living_writes	living_used_item_hand	living
 living_writes	living_start_using_item	living
 living_writes	living_release_using_item	living
+player_stats	player_discovered_recipes	players
 mob_refs	mob_set_brain_target	mobs
 local_sounds	sound_state	effects
 local_sounds	sound_stop	effects
