@@ -116,6 +116,7 @@ pub enum InstanceError {
 }
 
 /// Persistent copies of one resolved model, retired on reload, world close or destroy.
+/// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the engine creates handles
 #[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
@@ -151,7 +152,7 @@ impl InstanceGroupRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GroupError {
-    /// The group was destroyed or its world/resources retired.
+    /// The group belongs to another mod, was destroyed, or its world/resources retired.
     Stale,
     /// The model could not be resolved.
     Model(crate::ModelError),
