@@ -16,7 +16,7 @@ class ScreenKeyReleasedHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
     def test_cancelled_release_still_releases_every_binding(self):
         source = "".join((ROOT / "crates/horizon-client/src" / path).read_text(encoding="utf-8")
-                         for path in ("game/interface/play_input.rs", "game/runtime/window_handler.rs", "game.rs"))
+                         for path in ("game/interface/play_input.rs", "game/interface/key_codes.rs", "game/runtime/window_handler.rs", "game.rs"))
         hooks = native_hook_sources()
         gate = method(hooks.replace("pub(super) fn", "fn"), "screen_key_released")
         mapping = method(source, "mapped_key_event")
