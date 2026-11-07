@@ -460,21 +460,24 @@ impl Game<'_> {
                 let (position, velocity, yaw) =
                     entity_nbt::boat_from_nbt(&tag).ok_or_else(stale)?;
                 let uuid = self.uuid_for(id);
-                let b = self
+                let i = self
                     .boats
-                    .iter_mut()
-                    .find(|b| b.id == id)
+                    .iter()
+                    .position(|b| b.id == id)
                     .ok_or_else(stale)?;
-                b.position = position;
-                b.previous = position;
-                b.velocity = velocity;
-                b.yaw = yaw;
-                b.previous_yaw = yaw;
-                b.pitch = entity_nbt::rotation(&tag)[1];
-                b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
-                if b.chest {
-                    b.items = save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
-                }
+                self.boats.update(i, |b| {
+                    b.position = position;
+                    b.previous = position;
+                    b.velocity = velocity;
+                    b.yaw = yaw;
+                    b.previous_yaw = yaw;
+                    b.pitch = entity_nbt::rotation(&tag)[1];
+                    b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+                    if b.chest {
+                        b.items =
+                            save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
+                    }
+                });
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
             Target::Tnt(id) => {

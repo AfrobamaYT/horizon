@@ -14,6 +14,25 @@ static VALUE: AttachmentType<i32> = AttachmentType {
 };
 
 #[test]
+fn a_tick_clone_follows_its_join_but_cannot_replace_a_later_resident() {
+    let mut boats = crate::join_seq::JoinList::<Boat, false>::default();
+    for id in [1, 2] {
+        boats.push(Boat::new(id, "oak".into(), Vec3::ZERO, 0.0));
+    }
+    let mut clone = boats[1].clone();
+    clone.age = 7;
+    boats.remove(0);
+    assert!(boats.store_back(1, clone));
+    assert_eq!(boats[0].id, 2);
+    assert_eq!(boats[0].age, 7);
+    let stale = boats.pop().unwrap().clone();
+    boats.push(Boat::new(3, "oak".into(), Vec3::ZERO, 0.0));
+    assert!(!boats.store_back(0, stale));
+    assert_eq!(boats[0].id, 3);
+    assert_eq!(boats[0].age, 0);
+}
+
+#[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn a_bound_boat_keeps_its_registration_through_ticks_until_discard() {
     super::super::native_entity_refs::tests::with_game(|game| {
