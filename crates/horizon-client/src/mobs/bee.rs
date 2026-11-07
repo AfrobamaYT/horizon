@@ -1318,7 +1318,7 @@ mod tests {
             |w, _| {
                 let mut m = bee();
                 m.position = Vec3::new(0.5, 64.0, 0.5);
-                let mut random = LegacyRandom::new(1);
+                let mut test_level = crate::health::TestLevel::new(1);
                 let mut events = Vec::new();
                 // The goal grows on a 1-in-reduced(30) roll.
                 for _ in 0..1000 {
@@ -1327,7 +1327,7 @@ mod tests {
                     }
                     let mut cx = Cx {
                         w,
-                        lr: &mut random,
+                        level: &mut test_level.level(),
                         events: &mut events,
                     };
                     super::GrowCrop.tick(&mut m, &mut cx);

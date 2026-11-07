@@ -3043,7 +3043,7 @@ impl Menu {
             return None;
         }
         if after_take || matches!(self.kind, Kind::Inventory | Kind::Crafting) {
-            // Furnace and merchant takes pass the original slot stack.
+            // Furnace and merchant takes pass the remaining slot stack.
             let taken = if matches!(self.kind, Kind::Furnace(_))
                 || self.slots[index].role == Role::MerchantResult
             {
@@ -3889,6 +3889,9 @@ pub(crate) mod tests {
         let enchantments = crate::enchant::Enchantments::default();
         let names = crate::creative::Names::default();
         let env = Env {
+            player: None,
+            player_entity_id: None,
+            loop_context: &crate::test_resources::loop_context(LoopSide::Server),
             items: &items,
             recipes: &recipes,
             brewing: &brewing,

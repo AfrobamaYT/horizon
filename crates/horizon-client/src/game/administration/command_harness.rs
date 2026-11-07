@@ -809,7 +809,9 @@ impl Game<'_> {
                             };
                             eprintln!("merchant action receipt: action={} owner={owner:032x} conn={conn} menu={:?} clock={}",
                                 op["action"], g.harness_merchant(&host, conn).map(|(w, r, _)| (w, r)), g.world.game_time);
-                            g.lan_guest_packet(&mut host, conn, packet);
+                            g.lan = Some(host);
+                            g.lan_guest_packet(conn, packet);
+                            host = g.lan.take().ok_or("merchant oracle: lost hub")?;
                             Ok(Value::Null)
                         })();
                         g.lan = Some(host);

@@ -40,7 +40,7 @@ impl Game<'_> {
     /// Development oracle: observe the actual open guest merchant, never a synthetic menu.
     pub(super) fn harness_merchant(
         &self,
-        host: &LanHost,
+        host: &super::lan::LanHost,
         conn: u32,
     ) -> Option<(i32, i32, serde_json::Value)> {
         use serde_json::json;
@@ -343,7 +343,7 @@ impl Game<'_> {
         }
         self.register_exploration_maps(made);
         if !crafted_counts.is_empty() {
-            self.as_guest(host, conn, |g| {
+            self.as_guest(conn, |g| {
                 for (item, count) in crafted_counts {
                     g.award_stat("crafted", &item, count);
                 }

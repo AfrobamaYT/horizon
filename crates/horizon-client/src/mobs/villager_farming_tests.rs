@@ -388,13 +388,13 @@ fn planting_posts_block_place_with_villager_and_crop_state() {
             let mut m = farmer(types);
             super::super::villager::ext_mut(&mut m).inventory =
                 vec![ItemStack::new("minecraft:wheat_seeds", 1)];
-            let mut lr = LegacyRandom::new(13);
+            let mut test_level = crate::health::TestLevel::new(13);
             let mut events = Vec::new();
             harvest_tick(
                 &mut m,
                 &mut Bx {
                     w,
-                    lr: &mut lr,
+                    level: &mut test_level.level(),
                     events: &mut events,
                     now: 1000,
                     refresh: false,
