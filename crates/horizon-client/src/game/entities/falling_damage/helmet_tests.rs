@@ -67,7 +67,7 @@ fn falling_impacts_wear_the_helmet_before_normal_armor_and_reduction() {
                 if case["unbreakable"].as_bool().unwrap_or(false) {
                     stack.data_mut().set_other(
                         "minecraft:unbreakable",
-                        Some(horizon_world::nbt::Tag::Compound(Default::default())),
+                        Some(horizon_core::nbt::Tag::Compound(Default::default())),
                     );
                 }
                 game.armor[0] = Some(stack);
