@@ -145,7 +145,7 @@ impl Game<'_> {
         else {
             return;
         };
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
         let w = self.mob_world_base(&[]);
         for m in &mut mobs {
             if m.species() == Species::Panda

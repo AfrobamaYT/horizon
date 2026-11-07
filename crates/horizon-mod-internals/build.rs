@@ -19,11 +19,7 @@ fn generate() -> Result<String, String> {
         fs::read_to_string(&catalog).map_err(|e| format!("{}: {e}", catalog.display()))?;
     let entries = internals_view::catalog(&catalog)?;
     let declared = manifest
-        .wasm
-        .as_ref()
-        .map(|w| w.internals())
-        .or_else(|| manifest.native.as_ref().map(|n| n.internals.as_slice()))
-        .unwrap_or(&[])
+        .internals
         .iter()
         .map(|i| Declaration {
             path: i.path.clone(),

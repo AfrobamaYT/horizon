@@ -2580,6 +2580,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
+    instance_groups: std::cell::RefCell<native_instance_groups::InstanceGroupStorage>,
     standalone_geometry: native_block_entity_draw::StandaloneGeometry,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
@@ -4761,7 +4762,7 @@ impl Game<'_> {
         lent.give_back(&mut self.world);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
-        let mut items = std::mem::take(&mut self.dropped);
+        let mut items = self.dropped.lift();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
         let mut removed = vec![false; items.len()];
@@ -5015,8 +5016,10 @@ impl Game<'_> {
     /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
     /// They keep their join numbers; the spawned ones got theirs on joining.
     fn put_back_dropped(&mut self, items: horizon_client::join_seq::JoinList<ItemEntity>) {
-        let spawned = std::mem::replace(&mut self.dropped, items);
-        self.dropped.extend(spawned);
+        self.dropped.restore(
+            items,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
     /// becomes an item entity where that item lay (`new ItemEntity(level, x,
@@ -6525,16 +6528,16 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
-        let mut f = self.falling.remove(i);
+        let mut f = self.falling.extract(self.falling[i].join).unwrap();
         let original = f.clone();
         match self.fall_step(&mut f, entity_drops, entities) {
-            Ok(FallStep::Falling) => self.falling.insert(i.min(self.falling.len()), f),
+            Ok(FallStep::Falling) => self.falling.put_back(i.min(self.falling.len()), f),
             Ok(FallStep::Gone) => {}
             Ok(FallStep::Dropped(at)) => self.drop_falling_block(f.state, at),
             Ok(FallStep::Landed(pos)) => self.finish_falling_block(f, pos),
             Err(error) => {
                 horizon_client::join_seq::store_back(&mut f, original);
-                self.falling.insert(i.min(self.falling.len()), f);
+                self.falling.put_back(i.min(self.falling.len()), f);
                 return Err(error);
             }
         }
@@ -15724,7 +15727,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.merge_orbs();
         }
-        let mut orbs = std::mem::take(&mut self.orbs);
+        let mut orbs = self.orbs.lift();
         let mut gained = 0;
         let mut taken = Vec::new();
         if let Some((min, max)) = bounds {
@@ -21544,6 +21547,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
+            instance_groups: Default::default(),
             standalone_geometry,
             fog: Default::default(),
             screen_fx: Default::default(),

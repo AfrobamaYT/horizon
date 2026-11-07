@@ -117,7 +117,7 @@ impl Game<'_> {
             Vec3::new(at[0] + w, at[1] + f64::from(dims.height), at[2] + w),
         )
         .inflate(Vec3::new(1.0, 0.5, 1.0));
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
         let mut picked = Vec::new();
         projectiles.retain(|shot| {
             let Some(a) = shot.arrow.as_ref().filter(|a| !a.removed) else {
