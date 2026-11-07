@@ -3618,6 +3618,10 @@ mod tnt_impact_tests {
     fn runs_into_the_wall(rails: bool, at: Vec3, velocity: Vec3) -> bool {
         let mut result = false;
         with_game(|game| {
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             let registry = game.pack.assets.registry;
             let stone = registry.default_state("minecraft:stone").unwrap();
             let rail = registry.default_state("minecraft:rail").unwrap();

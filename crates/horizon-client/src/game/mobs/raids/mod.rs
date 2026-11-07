@@ -1708,6 +1708,9 @@ mod entity_ticking_tests {
         with_game(|game| {
             game.world
                 .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.world
+                .chunks
                 .insert((6, 0), Arc::new(Chunk::empty(6, 0)));
             // A player in chunk (0, 0) with a simulation distance of 5: chunk
             // (6, 0) is loaded but its entities do not tick.
