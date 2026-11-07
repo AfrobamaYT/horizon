@@ -90,10 +90,10 @@ impl Game<'_> {
         };
         let [qx, qy, qz] = streaming.biome_zoom.quart_at_block(block_pos(pos));
         let chunk = world.chunks.get(&(qx >> 2, qz >> 2))?;
-        // Noise-biome storage clamps the quart Y before block-coordinate conversion.
-        // Clamping first also preserves queries near the signed block-coordinate limits.
-        let min_qy = chunk.min_y() >> 2;
-        let max_qy = min_qy + chunk.sections.len() as i32 * 4 - 1;
+        // ChunkAccess clamps to the dimension's height, not our padded storage.
+        // Clamp before conversion to preserve signed block-coordinate extremes.
+        let min_qy = world.shape.min_y >> 2;
+        let max_qy = (world.shape.max_y() - 1) >> 2;
         let y = qy.clamp(min_qy, max_qy) << 2;
         let biome = chunk.biome(qx << 2, y, qz << 2);
         Some(world_biomes!(self).get(biome).name.clone())
@@ -2041,7 +2041,7 @@ mod environment_read_tests {
             "level_environment_reads_expected.jsonl",
             "HORIZON_LEVEL_READ_EXPECTED",
         );
-        assert!(inputs.len() >= 173);
+        assert!(inputs.len() >= 476);
         assert_eq!(inputs.len(), expected.len());
         let position =
             |value: &Value| std::array::from_fn::<_, 3, _>(|i| value[i].as_i64().unwrap() as i32);
@@ -2069,7 +2069,7 @@ mod environment_read_tests {
                             for y in 0..chunk.sections.len() as i32 * 4 {
                                 for x in 0..4 {
                                     for z in 0..4 {
-                                        let qy = -16 + y;
+                                        let qy = (chunk.min_y() >> 2) + y;
                                         let index =
                                             ((cx * 4 + x) * 31 + qy * 7 + (cz * 4 + z) * 17)
                                                 .rem_euclid(3);

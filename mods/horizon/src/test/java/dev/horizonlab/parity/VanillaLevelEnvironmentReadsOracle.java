@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.dimension.*;
+import net.minecraft.world.level.chunk.*;
 import net.minecraft.world.level.levelgen.*;
 import net.minecraft.world.level.levelgen.presets.*;
 import net.minecraft.world.level.material.FluidState;
@@ -32,18 +33,23 @@ public final class VanillaLevelEnvironmentReadsOracle {
     private static ResourceKey<LevelStem> dimensionKey(String name) {
         return ResourceKey.create(Registries.LEVEL_STEM, Identifier.parse(name));
     }
-    private static JsonElement biome(JsonObject input) {
+    private static JsonElement biome(JsonObject input, DimensionType dimension) {
         var lookup = ParityData.access.lookupOrThrow(Registries.BIOME);
-        var loaded = new HashSet<String>();
+        var chunks = new HashMap<ChunkPos, ProtoChunk>();
+        var factory = PalettedContainerFactory.create(ParityData.access);
         for (var column : input.getAsJsonArray("loaded")) {
             var pair = column.getAsJsonArray();
-            loaded.add(pair.get(0).getAsInt() + "," + pair.get(1).getAsInt());
+            var pos = new ChunkPos(pair.get(0).getAsInt(), pair.get(1).getAsInt());
+            var chunk = new ProtoChunk(pos, UpgradeData.EMPTY,
+                LevelHeightAccessor.create(dimension.minY(), dimension.height()), factory, null);
+            chunk.fillBiomesFromNoise((x, y, z) -> lookup.getOrThrow(ResourceKey.create(
+                Registries.BIOME, Identifier.parse(BIOMES[Math.floorMod(x * 31 + y * 7 + z * 17, BIOMES.length)]))));
+            chunk.setPersistedStatus(net.minecraft.world.level.chunk.status.ChunkStatus.BIOMES);
+            chunks.put(pos, chunk);
         }
         var manager = new BiomeManager((x, y, z) -> {
-            if (!loaded.contains((x >> 2) + "," + (z >> 2))) return null;
-            int clampedY = Math.clamp(y, -16, 79);
-            String id = BIOMES[Math.floorMod(x * 31 + clampedY * 7 + z * 17, BIOMES.length)];
-            return lookup.getOrThrow(ResourceKey.create(Registries.BIOME, Identifier.parse(id)));
+            var chunk = chunks.get(new ChunkPos(x >> 2, z >> 2));
+            return chunk == null ? null : chunk.getNoiseBiome(x, y, z);
         }, input.get("zoom_seed").getAsLong());
         int[] p = position(input.getAsJsonArray("position"));
         var result = manager.getBiome(new BlockPos(p[0], p[1], p[2]));
@@ -124,9 +130,10 @@ public final class VanillaLevelEnvironmentReadsOracle {
                 var input = JsonParser.parseString(line).getAsJsonObject();
                 var row = new JsonObject(); row.add("name", input.get("name"));
                 String kind = input.get("kind").getAsString();
-                LevelStem stem = input.has("dimension") ? dimensions.get(dimensionKey(input.get("dimension").getAsString())) : null;
+                LevelStem stem = dimensions.get(dimensionKey(input.has("dimension")
+                    ? input.get("dimension").getAsString() : "minecraft:overworld"));
                 row.add("value", switch (kind) {
-                    case "biome" -> biome(input);
+                    case "biome" -> biome(input, stem.type().value());
                     case "floor" -> floor(input);
                     case "sky" -> sky(input, stem.type().value());
                     case "search" -> search(input, stem);
