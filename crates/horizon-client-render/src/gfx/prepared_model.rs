@@ -73,6 +73,7 @@ struct PreparedNormal {
 
 impl PreparedInstanceBuilder {
     /// Construct the same instance as `PreparedModelInstance::new`, including singular poses.
+    #[inline]
     pub fn instance(
         &mut self,
         local: Mat4,
