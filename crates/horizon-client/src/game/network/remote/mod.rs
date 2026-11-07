@@ -11763,10 +11763,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn menu_title_snapshot_follows_packet_and_close_paths() {
-        use horizon_protocol::{
-            nbt::Tag,
-            packets::play::{self, Clientbound as C},
-        };
+        use horizon_core::nbt::Tag;
+        use horizon_protocol::packets::play::{self, Clientbound as C};
         use std::sync::Arc;
 
         super::super::native_entity_refs::tests::with_client_game(|game| {
