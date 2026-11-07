@@ -365,6 +365,13 @@ pub(in crate::game) fn assert_projectile_spawn_survives(
         p.id = ID;
         game.creatures.projectiles.push(p);
     }
+    let mut expected: Vec<_> = game
+        .creatures
+        .projectiles
+        .iter()
+        .filter(|p| p.id != 72)
+        .map(|p| (p.id, p.join))
+        .collect();
     with_spawn(spawn, || action(game));
     let p = game
         .creatures
@@ -374,6 +381,15 @@ pub(in crate::game) fn assert_projectile_spawn_survives(
         .expect("pickup dropped a nested projectile");
     assert_eq!(p.age, 0);
     let join = p.join;
+    expected.push((ID, join));
+    assert_eq!(
+        game.creatures
+            .projectiles
+            .iter()
+            .map(|p| (p.id, p.join))
+            .collect::<Vec<_>>(),
+        expected
+    );
     let mut original = game.creatures.projectiles.lift();
     game.creatures
         .projectiles
