@@ -22,3 +22,55 @@ impl ParticlesRegistrar for PartRegistrar {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Hooks, ModEntry, RegistrationContext};
+    use std::sync::Mutex;
+    #[test]
+    fn particle_registration_retains_requested_slots_until_atomic_publication() {
+        struct Keys(Arc<Mutex<Vec<crate::ParticleKey>>>);
+        #[mod_api::__subscriptions]
+        impl Hooks for Keys {
+            fn register(&self, registrar: &mut dyn Registrar, _: &RegistrationContext) {
+                let custom = registrar.particle_key("test:spark");
+                let smoke = registrar.particle_key("smoke");
+                assert_eq!(crate::ParticleKey::from_slot(custom.0), Ok(custom));
+                assert_eq!(smoke, registrar.particle_key("minecraft:smoke"));
+                self.0.lock().unwrap().extend([custom, smoke]);
+            }
+        }
+        let keys = Arc::new(Mutex::new(Vec::new()));
+        install_parts(
+            &[ModEntry::new("keys", Box::new(Keys(keys.clone())))],
+            &crate::parts::tests::rule_schema(),
+        )
+        .unwrap();
+        let keys = keys.lock().unwrap();
+        assert!(
+            crate::particle_keys::resolve_particles(["minecraft:smoke"], |_| Some(
+                horizon_mod_runtime::registry_keys::ParticleKind::Custom
+            ))
+            .is_err()
+        );
+        assert!(!crate::particle_keys::particles_resolved());
+        crate::particle_keys::resolve_particles(["minecraft:smoke", "test:spark"], |id| {
+            Some(if id == "minecraft:smoke" {
+                horizon_mod_runtime::registry_keys::ParticleKind::Vanilla(5)
+            } else {
+                horizon_mod_runtime::registry_keys::ParticleKind::Custom
+            })
+        })
+        .unwrap();
+        assert_eq!(
+            crate::particle_keys::particle_name(keys[0]),
+            Some("test:spark")
+        );
+        assert_eq!(crate::particle_keys::particle_vanilla_key(5), Some(keys[1]));
+        assert_eq!(
+            crate::particle_keys::particle_kind(keys[0]),
+            Some(horizon_mod_runtime::registry_keys::ParticleKind::Custom)
+        );
+    }
+}

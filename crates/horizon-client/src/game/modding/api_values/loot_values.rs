@@ -255,6 +255,85 @@ mod tests {
             place: None,
         }
     }
+    #[test]
+    fn loot_context_owns_entity_tool_damage_and_place_facts() {
+        super::super::prepare_stack_boundary_tests();
+        let mut victim = engine::LootEntity::new("minecraft:sheep");
+        victim.baby = true;
+        victim.on_fire = true;
+        victim.sheep = Some(("red".into(), true));
+        victim.equipment.push(("mainhand".into(), stack()));
+        victim.vehicle = Some(Box::new(engine::LootEntity::new("minecraft:boat")));
+        let damage = engine::LootDamage {
+            kind: "minecraft:arrow".into(),
+            source: Some(engine::LootEntity::new("minecraft:skeleton")),
+            direct: Some(engine::LootEntity::new("minecraft:arrow")),
+        };
+        let value = engine::NativeLootContext {
+            entity: Some(&victim),
+            damage: Some(&damage),
+            player: None,
+            tool: Some(engine::NativeLootTool {
+                item: "minecraft:stick".into(),
+                enchantments: vec![("minecraft:fortune".into(), 3)],
+            }),
+            block: Some("minecraft:stone"),
+            biome: Some("minecraft:plains"),
+            luck: 1.5,
+            seed: -42,
+            place: Some(std::sync::Arc::new(engine::NativeLootPlace {
+                origin: Some([1.0, 2.0, 3.0]),
+                block_entity: Some(Tag::ByteArray(vec![7])),
+                level: Some(engine::NativeLootLevel {
+                    dimension: "test:level".into(),
+                    game_time: 17,
+                    day_time: -3,
+                    raining: true,
+                    thundering: false,
+                }),
+            })),
+        }
+        .try_into_api()
+        .unwrap();
+        let victim = value.entity.unwrap();
+        assert!(victim.baby && victim.on_fire);
+        assert_eq!(victim.sheep, Some(("red".into(), true)));
+        assert_eq!(victim.vehicle.unwrap().kind, "minecraft:boat");
+        assert_eq!(victim.equipment[0].1.count, -7);
+        let damage = value.damage.unwrap();
+        assert_eq!(damage.source.unwrap().kind, "minecraft:skeleton");
+        assert_eq!(damage.direct.unwrap().kind, "minecraft:arrow");
+        let tool = value.tool.unwrap();
+        assert_eq!(
+            mod_api::__private::item_key_id(tool.item),
+            Some("minecraft:stick")
+        );
+        assert_eq!(tool.enchantments, vec![("minecraft:fortune".into(), 3)]);
+        assert_eq!(
+            (
+                value.block.as_deref(),
+                value.biome.as_deref(),
+                value.luck,
+                value.seed
+            ),
+            (Some("minecraft:stone"), Some("minecraft:plains"), 1.5, -42)
+        );
+        let place = value.place.unwrap();
+        assert_eq!(place.origin, Some([1.0, 2.0, 3.0]));
+        assert_eq!(place.block_entity, Some(Tag::ByteArray(vec![7])));
+        let level = place.level.unwrap();
+        assert_eq!(
+            (
+                level.dimension.as_str(),
+                level.game_time,
+                level.day_time,
+                level.raining,
+                level.thundering
+            ),
+            ("test:level", 17, -3, true, false)
+        );
+    }
+
     struct Edit;
     #[mod_api::__subscriptions]
     impl Hooks for Edit {
@@ -319,9 +398,9 @@ mod tests {
                     &mut holds,
                 );
             }
+            assert_eq!(CONVERSIONS.with(|count| count.get()), 0);
             assert_eq!(output, before);
             assert!(!holds);
-            assert_eq!(CONVERSIONS.with(|count| count.get()), 0);
         });
     }
     #[test]
@@ -339,6 +418,37 @@ mod tests {
         assert_eq!(
             value.try_into_engine(&()),
             Err(LootValueError::InvalidPatch)
+        );
+    }
+
+    #[test]
+    fn loot_writeback_keeps_repeated_patch_order() {
+        super::super::prepare_stack_boundary_tests();
+        let mut value =
+            api::LootStack::new(mod_api::__private::item_key("minecraft:stick").unwrap(), -3);
+        value.components = vec![
+            ("test:value".into(), Some(Tag::Byte(7))),
+            ("test:value".into(), Some(Tag::ByteArray(vec![8]))),
+        ];
+        let output = value.try_into_engine(&()).unwrap();
+        assert_eq!(output.count, -3);
+        assert_eq!(
+            output.components,
+            vec![
+                ("test:value".into(), Some(Tag::Byte(7))),
+                ("test:value".into(), Some(Tag::ByteArray(vec![8]))),
+            ]
+        );
+    }
+    #[test]
+    fn loot_writeback_keeps_component_removals() {
+        super::super::prepare_stack_boundary_tests();
+        let mut value =
+            api::LootStack::new(mod_api::__private::item_key("minecraft:stick").unwrap(), 1);
+        value.components = vec![("test:removed".into(), None)];
+        assert_eq!(
+            value.try_into_engine(&()).unwrap().components,
+            vec![("test:removed".into(), None)]
         );
     }
 
