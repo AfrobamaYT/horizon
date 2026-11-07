@@ -35,6 +35,25 @@ pub fn read(root: &Path) -> Result<Vec<Point>, String> {
 /// Mark checked source targets after normal point staging, retaining their lexical type scope.
 pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
     let below = below_points(root)?;
+    let mut names = game_points(root)?
+        .into_iter()
+        .flat_map(|point| {
+            [
+                point_shape::camel(&point.name),
+                format!("{}Return", point_shape::camel(&point.name)),
+            ]
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for point in points.iter() {
+        for name in [
+            point_shape::camel(&point.name),
+            format!("{}Return", point_shape::camel(&point.name)),
+        ] {
+            if !names.insert(name.clone()) {
+                return Err(format!("E_SOURCE_COLLISION: {name} for {}", point.target));
+            }
+        }
+    }
     let mut packages = std::collections::BTreeSet::new();
     for point in points.iter_mut() {
         let krate = point
@@ -169,8 +188,22 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
         module: String::new(),
         record: String::new(),
     }];
+    let mut collision = private.clone();
+    collision[0].name = "listed".into();
+    assert!(
+        stage(&root, &mut collision)
+            .unwrap_err()
+            .contains("E_SOURCE_COLLISION: Listed")
+    );
     stage(&root, &mut private).unwrap();
     assert_eq!(private[0].record, "__HiddenRaw");
+    let mut cycle = private.clone();
+    cycle[0].target = "horizon_mod_points::blocked".into();
+    assert!(
+        stage(&root, &mut cycle)
+            .unwrap_err()
+            .contains("E_SOURCE_DEPENDENCY: horizon_mod_points::blocked")
+    );
     let after = game_points(&root)
         .unwrap()
         .into_iter()
@@ -181,6 +214,27 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     let ids = records(&[], &private);
     assert!(ids.contains("Source123Return"));
     syn::parse_file(&ids).unwrap();
+    let file = root.join("ids.rs");
+    fs::write(&file, format!("{ids}\nfn main() {{ assert_eq!(POINT_COUNT, 2); assert_eq!(places::NAMES, [\"source123\", \"source123_return\"]); assert_eq!(places::SHAPES, [\"\", \"\"]); assert_eq!(places::IDS[1], PointId::Source123Return); }}")).unwrap();
+    let binary = root.join(format!("ids{}", std::env::consts::EXE_SUFFIX));
+    let output = std::process::Command::new("rustc")
+        .args(["--edition=2024", "--cfg", "feature=\"wasm-host\""])
+        .arg(&file)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        std::process::Command::new(&binary)
+            .status()
+            .unwrap()
+            .success()
+    );
     put(
         "crates/horizon-client/src/game.rs",
         "pub struct Game; impl Game { #[horizon_mod_api_macros::point(raw)] fn listed(&mut self) {} }",
