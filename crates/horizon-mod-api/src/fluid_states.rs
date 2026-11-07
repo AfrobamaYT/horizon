@@ -41,7 +41,7 @@ pub trait HostFluidStates {
     fn fluid_states(&self) -> FluidStates<'_>;
 }
 
-/// The fluid-state facts service.
+/// The fluid-state facts service, available in setup, reload and world callbacks after keys resolve.
 // exhaustive: only the host constructs this service
 pub struct FluidStates<'a> {
     backend: Option<&'a dyn Backend>,

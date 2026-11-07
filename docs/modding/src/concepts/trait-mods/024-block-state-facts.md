@@ -27,6 +27,8 @@ Import `HostFluidStates` to reach `host.fluid_states()` on either owning side.
 `definition(key)` returns `Some(FluidDefinition::World { default, properties })` for a world fluid,
 `Some(FluidDefinition::TankOnly)` for a registered tank-only fluid, and `None` without a loaded registry.
 The properties and typed default come from the loaded preparation, not a second vanilla table.
+These metadata reads are available in setup, reload and world callbacks after the fluid keys resolve,
+not during registration or configuration.
 
 `validate(key, constraints)` checks partial `StateConstraint` values in input order without matching
 any particular state. It returns `Result<(), FluidStateError>`: `UnknownProperty(index)`,
