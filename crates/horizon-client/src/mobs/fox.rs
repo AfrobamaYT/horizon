@@ -345,13 +345,14 @@ pub fn apply_consumption(
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if let Some(decision) = ai_step_until_consumption(m, w, events) {
         apply_consumption(&decision, w, m, events);
-        finish_ai_step(m, w, events);
+        before_living_ai_step(m, w);
     }
+    finish_ai_step(m, w, events);
 }
 
 /// Run `Fox.aiStep` until its mouth item must be consumed. `Some` pauses before
 /// effect RNG draws and remainder replacement; the owner applies consumption and
-/// resumes `finish_ai_step`. `None` means the complete step already ran.
+/// resumes `before_living_ai_step`. `None` means the pre-living step already ran.
 #[inline]
 pub fn ai_step_until_consumption(
     m: &mut Mob,
@@ -387,17 +388,24 @@ pub fn ai_step_until_consumption(
             });
         }
     }
-    finish_ai_step(m, w, events);
+    before_living_ai_step(m, w);
     None
 }
 
-/// The part of `Fox.aiStep` after mouth-item consumption: flags, growl and snow.
-/// Consumption's teleport and RNG draws must finish before this continuation.
+/// `Fox.aiStep` after eating, before `super.aiStep`: forget the absent target's
+/// pose and suppress input when sleeping or immobile.
 #[inline]
-pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
+pub fn before_living_ai_step(m: &mut Mob, w: &MobWorld) {
     if !m.target_info(w).is_some_and(|t| t.alive) {
         set_flag(m, CROUCHING | INTERESTED, false);
     }
+    pre_ai_step(m);
+}
+
+/// The fox's post-living tick: weather/sitting flags, growl and snow particles.
+/// Eating and the living movement step have already finished.
+#[inline]
+pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     let in_water = m.fluids.in_water;
     if in_water || m.ai.target.is_some() || w.thundering {
         set_flag(m, SLEEPING, false);
@@ -425,9 +433,9 @@ pub fn finish_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         });
     }
 }
-/// `Fox.aiStep` before the living step: a sleeping fox takes no input.
+/// `Fox.aiStep` before the living step: a sleeping or immobile fox takes no input.
 pub fn pre_ai_step(m: &mut Mob) {
-    if flag(m, SLEEPING) {
+    if flag(m, SLEEPING) || !m.alive() {
         m.ai.jumping = false;
         m.ai.xxa = 0.0;
         m.ai.zza = 0.0;

@@ -686,8 +686,7 @@ pub fn tick(
         TickProgress::Complete(kept) => kept,
         TickProgress::Consumption(decision) => {
             super::fox::apply_consumption(&decision, w, m, events);
-            super::fox::finish_ai_step(m, w, events);
-            finish_tick(m, w, level, events)
+            resume_after_consumption(m, w, level, events)
         }
     }
 }
@@ -766,6 +765,37 @@ pub fn tick_until_consumption(
         super::villager::stop_sleeping(m, w, events);
         super::villager_brain::woken(m, w.game_time);
     }
+    // Fox.aiStep consumes before its super.aiStep, so the hook and its RNG
+    // precede goals, travel and block effects at the resumed position.
+    if m.species() == Species::Fox
+        && !m.no_ai
+        && let Some(decision) = super::fox::ai_step_until_consumption(m, w, events)
+    {
+        return TickProgress::Consumption(decision);
+    }
+    TickProgress::Complete(ai_and_finish_tick(m, w, level, events))
+}
+
+/// Resume a fox after its item effect, before the living AI/movement step.
+pub fn resume_after_consumption(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) -> bool {
+    if m.removed {
+        return false;
+    }
+    super::fox::before_living_ai_step(m, w);
+    ai_and_finish_tick(m, w, level, events)
+}
+
+fn ai_and_finish_tick(
+    m: &mut Mob,
+    w: &MobWorld,
+    level: &mut DamageLevel<'_>,
+    events: &mut Vec<MobEvent>,
+) -> bool {
     if m.no_ai {
         reset_effect_fall_distance(m);
         // Mob.aiStep still runs without AI (only serverAiStep is skipped),
@@ -819,10 +849,13 @@ pub fn tick_until_consumption(
         if m.species() == Species::GlowSquid {
             aquatic::glow_squid_dark_tick(m);
         }
-    } else if let Some(decision) = ai_step(m, w, level, events) {
-        return TickProgress::Consumption(decision);
+    } else {
+        ai_step(m, w, level, events);
     }
-    TickProgress::Complete(finish_tick(m, w, level, events))
+    if m.no_ai && m.species() == Species::Fox {
+        super::fox::finish_ai_step(m, w, events);
+    }
+    finish_tick(m, w, level, events)
 }
 
 /// Resume the living tick after species AI, before block effects and animation.
@@ -1667,12 +1700,7 @@ fn reset_effect_fall_distance(m: &mut Mob) {
 }
 
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
-fn ai_step(
-    m: &mut Mob,
-    w: &MobWorld,
-    level: &mut DamageLevel<'_>,
-    events: &mut Vec<MobEvent>,
-) -> Option<super::fox::Consumption> {
+fn ai_step(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Parrot {
         super::parrot::ai_step(m, w, level.random(), events);
     }
@@ -1682,9 +1710,6 @@ fn ai_step(
             .target_info(w)
             .is_some_and(|t| t.position.distance_squared(m.position) > 121.0);
         super::witch::ai_step(m, w.loop_context, events, far);
-    }
-    if m.species() == Species::Fox {
-        super::fox::pre_ai_step(m);
     }
     // AbstractHorse.aiStep: the tail swishes now and then (moveTail).
     if super::equine::is_equine(m.species()) {
@@ -1750,7 +1775,7 @@ fn ai_step(
     ageable_step(m, w, level, events);
     animal_step(m, events);
     burn_undead(m, w, events);
-    species_ai_step(m, w, level, events)
+    species_ai_step(m, w, level, events);
 }
 /// The end of `LivingEntity.aiStep`: a mob that water hurts (an enderman, a
 /// blaze, a snow golem) takes 1 drowning damage in water or rain
@@ -2102,7 +2127,7 @@ fn species_ai_step(
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
-) -> Option<super::fox::Consumption> {
+) {
     if family(m.species()) == Family::Aquatic {
         aquatic::ai_step(m, w, level, events);
     }
@@ -2156,14 +2181,13 @@ fn species_ai_step(
         Species::Armadillo => super::armadillo::tick(m),
         Species::Frog => super::frog::tick(m),
         Species::Goat => super::goat::tick(m),
-        Species::Fox => return super::fox::ai_step_until_consumption(m, w, events),
+        Species::Fox => super::fox::finish_ai_step(m, w, events),
         Species::Turtle => super::turtle::ai_step(m, w, events),
         Species::Sheep if m.extra.anim_ticks > 0 => {
             m.extra.anim_ticks -= 1;
         }
         _ => {}
     }
-    None
 }
 /// `Entity.checkDespawn` alone, for a mob outside the entity-ticking
 /// chunks. Returns false when the mob is gone.
