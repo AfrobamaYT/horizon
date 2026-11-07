@@ -15,8 +15,9 @@ inject = [
     { id = "api_return", at = "horizon_client::game::Game<'_>::next_autosave_interval", kind = "return", with = "api_return", priority = 3, hash = "0000000000000000" },
 ]
 
+internals = [{ path = "horizon_client::game::Game", hash = "0000000000000000" }, { path = "horizon_client::game::Game<'_>::ticks_until_autosave", hash = "0000000000000000" }]
+
 [native]
 game = "26.3"
 horizon = "0000000000000000000000000000000000000000"
 mixins = "0000000000000000000000000000000000000000"
-internals = [{ path = "horizon_client::game::Game", hash = "0000000000000000" }, { path = "horizon_client::game::Game<'_>::ticks_until_autosave", hash = "0000000000000000" }]

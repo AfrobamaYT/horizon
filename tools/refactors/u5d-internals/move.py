@@ -12,6 +12,7 @@ from collections import Counter
 import json
 from pathlib import Path
 import subprocess
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
@@ -24,7 +25,7 @@ def source(base, path):
 
 
 def lines(text):
-    return Counter(line for line in text.splitlines() if line.strip())
+    return Counter(text.splitlines())
 
 
 def main():
@@ -38,7 +39,8 @@ def main():
         before = source(spec["base"], path)
         expected = before
         for operation in operations:
-            old, new, count = (operation[key] for key in ("old", "new", "count"))
+            old, new = ("".join(operation[key]) for key in ("old", "new"))
+            count = operation["count"]
             actual_count = expected.count(old)
             if actual_count != count:
                 raise SystemExit(f"{path}: expected {count} occurrences, found {actual_count}: {old!r}")
@@ -56,6 +58,20 @@ def main():
         added.update(lines(actual) - lines(before))
     if removed + expected_added != added + expected_removed:
         raise SystemExit("removed/added line multisets differ beyond declared edits")
+    for path in spec["fixture_manifests"]:
+        before = tomllib.loads(source(spec["base"], path))
+        after = tomllib.loads((ROOT / path).read_text())
+        declarations = before["native"].pop("internals")
+        if not before["native"]:
+            del before["native"]
+        if declarations != after.pop("internals") or before != after:
+            raise SystemExit(f"{path}: declaration records or unrelated manifest fields changed")
+    changed = subprocess.check_output(
+        ["git", "diff", "--name-only", spec["base"]], cwd=ROOT, text=True
+    ).splitlines()
+    unexpected = set(changed) - set(spec["files"]) - set(spec["manual_files"])
+    if unexpected:
+        raise SystemExit(f"undeclared changed files: {sorted(unexpected)}")
     print(f"Verified {len(spec['files'])} files against {spec['base']}")
     print("Removed lines + declared additions = added lines + declared removals")
 

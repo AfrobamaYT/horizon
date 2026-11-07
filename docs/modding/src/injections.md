@@ -311,14 +311,15 @@ or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the 
 to the typed API.
 
 ```toml
-[native]
-game = "26.3"
-horizon = "<exact game commit>"
-mixins = "<exact mixins commit>"
 internals = [
     { path = "horizon_client::game::Game", hash = "<written by the tool>" },
     { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
 ]
+
+[native]
+game = "26.3"
+horizon = "<exact game commit>"
+mixins = "<exact mixins commit>"
 
 [[native.injection]]
 id = "count"

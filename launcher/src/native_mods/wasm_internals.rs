@@ -40,12 +40,14 @@ pub(super) fn installed(home: Option<&Path>) -> Result<Declarations, String> {
         if !crate::browser::java::is_enabled(home, &manifest.id) {
             continue;
         }
-        let Some(wasm) = &manifest.wasm else { continue };
-        if wasm.internals().is_empty() {
+        if manifest.wasm.is_none() {
+            continue;
+        }
+        if manifest.internals.is_empty() {
             continue;
         }
         let paths = declared.entry(manifest.id.clone()).or_default();
-        paths.extend(wasm.internals().iter().map(|i| i.path.clone()));
+        paths.extend(manifest.internals.iter().map(|i| i.path.clone()));
         paths.extend(
             manifest
                 .inject
@@ -129,7 +131,7 @@ mod tests {
         install(
             &root,
             "wasm_only",
-            "\n[[native.internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
+            "\n[[internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
         );
         fs::write(root.join(mod_list::FILE), "mod.wasm_only:true\n").unwrap();
         let native = super::super::stage_installed(&root, native).unwrap();
@@ -156,7 +158,7 @@ mod tests {
         fs::create_dir_all(&seed).unwrap();
         fs::write(seed.join("uninstalled.txt"), "Never::include").unwrap();
         install(&root, "plain", "");
-        let internal = "\n[[native.internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n[[inject]]\nid = 'tick'\nat = \"horizon_client::game::Game<'_>::tick\"\nkind = 'head'\naccess = 'internals'\nhash = 'signature'\nwith = 'tick'\n";
+        let internal = "\n[[internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n[[inject]]\nid = 'tick'\nat = \"horizon_client::game::Game<'_>::tick\"\nkind = 'head'\naccess = 'internals'\nhash = 'signature'\nwith = 'tick'\n";
         install(&root, "example", internal);
         fs::write(
             root.join(mod_list::FILE),
