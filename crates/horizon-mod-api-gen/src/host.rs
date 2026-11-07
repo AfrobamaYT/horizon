@@ -1023,6 +1023,28 @@ mod tests {
     }
 
     #[test]
+    fn text_arguments_are_infallible_even_with_checked_stack_writes() {
+        let text = entry("fn set_text(&mut self, text: &Text);");
+        let (setup, args, checked) = boundary_arguments(&text.sig, "set_text").unwrap();
+        assert!(!checked);
+        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert_eq!(args, "&text");
+        let mixed = entry(
+            "fn update(&mut self, stack: ItemStack, text: Option<&Text>) -> Result<Text, Refused>;",
+        );
+        let (setup, args, checked) = boundary_arguments(&mixed.sig, "update").unwrap();
+        assert!(checked);
+        assert!(setup.contains("stack.try_into_engine(self.items())?"));
+        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert_eq!(args, "stack, text.as_ref()");
+        let syn::ReturnType::Type(_, output) = &mixed.sig.output else {
+            panic!()
+        };
+        assert!(infallible_value(output));
+        assert!(!boundary_value(output));
+    }
+
+    #[test]
     fn game_provides_every_area_method_explicitly() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         use std::collections::BTreeSet;
