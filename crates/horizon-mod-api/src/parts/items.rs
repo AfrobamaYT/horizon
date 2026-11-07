@@ -1,19 +1,20 @@
+use super::*;
 #[derive(Clone)]
-struct PlaceProviderPart {
-    mod_id: &'static str,
-    mod_index: usize,
-    provider: Arc<dyn PlaceProvider>,
+pub(crate) struct PlaceProviderPart {
+    pub(crate) mod_id: &'static str,
+    pub(crate) mod_index: usize,
+    pub(crate) provider: Arc<dyn PlaceProvider>,
 }
 
 /// A tooltip appender a mod registered, as the game reads it ([`tooltip_appenders`]).
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct TooltipAppenderPart {
-    mod_id: &'static str,
-    mod_index: usize,
-    component: Box<str>,
-    placement: super::TooltipPlacement,
-    appender: Arc<dyn super::TooltipAppender>,
+    pub(crate) mod_id: &'static str,
+    pub(crate) mod_index: usize,
+    pub(crate) component: Box<str>,
+    pub(crate) placement: crate::TooltipPlacement,
+    pub(crate) appender: Arc<dyn crate::TooltipAppender>,
 }
 
 impl TooltipAppenderPart {
@@ -22,28 +23,28 @@ impl TooltipAppenderPart {
         &self.component
     }
     /// Where its lines go among the other components' lines.
-    pub fn placement(&self) -> &super::TooltipPlacement {
+    pub fn placement(&self) -> &crate::TooltipPlacement {
         &self.placement
     }
     /// The appender that adds the lines.
-    pub fn appender(&self) -> &dyn super::TooltipAppender {
+    pub fn appender(&self) -> &dyn crate::TooltipAppender {
         self
     }
     /// Whether its mod is enabled.
     pub fn enabled(&self) -> bool {
-        super::mod_index_on(self.mod_index)
+        crate::mod_index_on(self.mod_index)
     }
 }
 
-impl super::TooltipAppender for TooltipAppenderPart {
+impl crate::TooltipAppender for TooltipAppenderPart {
     fn append(
         &self,
-        host: &dyn super::ClientHost,
-        stack: &super::ItemStack,
-        context: &super::TooltipAppendContext,
-        lines: &mut Vec<(super::Text, u32)>,
+        host: &dyn crate::ClientHost,
+        stack: &crate::ItemStack,
+        context: &crate::TooltipAppendContext,
+        lines: &mut Vec<(crate::Text, u32)>,
     ) {
-        let _guard = super::crash::enter_native_mod(super::crash::NativeModCall {
+        let _guard = crate::crash::enter_native_mod(crate::crash::NativeModCall {
             id: self.mod_id,
             hook: "tooltip_appender",
             part: Some(std::any::type_name_of_val(&*self.appender)),
@@ -73,38 +74,6 @@ where
 /// An item capability provider, as the registrar keeps it.
 pub type ItemProvider<T> = dyn ItemCapabilityProvider<T>;
 
-/// How a lookup reads the capability providers mods registered, in the order they are asked
-/// (those registered `before_game`, then the others, each in registration order): the game's
-/// table, which a wasm mod reads through the game.
-// hidden: a lookup's view of the registrar's table, not part of the mod surface
-#[doc(hidden)]
-pub trait CapabilityProviders {
-    /// The next enabled provider of item capability `name` for item `item`, advancing `index`.
-    fn item_provider(
-        &self,
-        name: &str,
-        item: &str,
-        index: &mut u32,
-    ) -> Option<(ItemProviderOf, &'static str, bool)>;
-    /// The enabled provider of the item places named `name`, with its mod.
-    fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)>;
-}
-
-impl CapabilityProviders for InstalledProviders {
-    fn item_provider(
-        &self,
-        name: &str,
-        item: &str,
-        index: &mut u32,
-    ) -> Option<(ItemProviderOf, &'static str, bool)> {
-        next(&installed()?.keys.item_capabilities, name, item, index)
-    }
-    fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)> {
-        let part = installed()?.keys.place_providers.get(name)?;
-        super::mod_index_on(part.mod_index).then(|| (part.provider.clone(), part.mod_id))
-    }
-}
-
 /// An item registration request that the loaded item registry cannot resolve.
 #[derive(Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -124,57 +93,13 @@ impl HookParts {
     }
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Request an item by registry id, validated after all declarations.
-    fn item_key(&mut self, id: &str) -> super::ItemKey;
-    /// Attach `part`, of kind `kind`, to item `item`.
-    fn attach_item_part(
-        &mut self,
-        item: super::ItemKey,
-        kind: &'static str,
-        part: Arc<dyn ItemPart>,
-    );
-    /// Attach `part`, of kind `kind`, to every item in tag `tag`.
-    fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>);
-    /// Answer item capability `name` for item `item` with `provider`; mods reach it through
-    /// `item_capability`.
-    fn provide_item_capability(
-        &mut self,
-        name: &'static str,
-        item: &str,
-        before_game: bool,
-        provider: ItemProviderOf,
-    );
-    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
-    /// as an accessory mod exposes its slots. One provider a name.
-    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>);
-    /// Register `appender` as the lines data component `component` (`mymod:charge`) adds to a
-    /// stack's tooltip, where `placement` puts them (NeoForge's `RegisterTooltipAppendersEvent`).
-    /// Only this mod's appender is asked, for a stack that carries the component and whose
-    /// tooltip shows it, and only while the mod is enabled. A component id that isn't namespaced,
-    /// or a `Before`/`After` anchor the game doesn't list as a component detail, refuses the mods
-    /// at startup, naming the mod.
-    fn register_tooltip_appender(
-        &mut self,
-        component: &str,
-        placement: super::TooltipPlacement,
-        appender: Arc<dyn super::TooltipAppender>,
-    );
-}
-
 impl dyn Registrar + '_ {
     /// Attach `part` to every item in tag `tag` (`minecraft:axes`, without `#`).
     pub fn item_part_tag<P: ItemPart>(&mut self, tag: &str, part: P) {
         self.attach_item_part_tag(tag, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to item `item` (`mymod:wrench`).
-    pub fn item_part<P: ItemPart>(&mut self, item: super::ItemKey, part: P) {
+    pub fn item_part<P: ItemPart>(&mut self, item: crate::ItemKey, part: P) {
         self.attach_item_part(item, type_name::<P>(), Arc::new(part));
     }
     /// Answer item capability `key` for item `item` (`mymod:backpack`) with `provider`, which
@@ -205,139 +130,15 @@ impl dyn Registrar + '_ {
     }
 }
 
-impl Registrar for PartRegistrar {
-    fn item_key(&mut self, id: &str) -> super::ItemKey {
-        match self
-            .registry_keys
-            .borrow_mut()
-            .items
-            .request(self.mod_id, id)
-        {
-            Ok(slot) => super::ItemKey(slot),
-            Err(error) => {
-                self.refused.push(error);
-                super::ItemKey(u32::MAX)
-            }
-        }
-    }
-
-    fn attach_item_part(
-        &mut self,
-        item: super::ItemKey,
-        kind: &'static str,
-        part: Arc<dyn ItemPart>,
-    ) {
-        let id = self
-            .registry_keys
-            .borrow()
-            .items
-            .id(item.0)
-            .map(str::to_owned);
-        let Some(id) = id else {
-            self.refused.push(format!(
-                "mod {}: invalid item key slot {}",
-                self.mod_id, item.0
-            ));
-            return;
-        };
-        self.attach(|p| &mut p.items, kind, &id, part);
-    }
-
-    fn attach_item_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn ItemPart>) {
-        let part = self.tagged(kind, tag, part);
-        self.tags.items.extend(part);
-    }
-
-    fn provide_item_capability(
-        &mut self,
-        name: &'static str,
-        item: &str,
-        before_game: bool,
-        provider: ItemProviderOf,
-    ) {
-        self.capability(
-            |p| &mut p.item_capabilities,
-            name,
-            ProviderTarget::Id(item),
-            before_game,
-            {
-                let handler = provider.handler();
-                (provider, handler)
-            },
-        );
-    }
-
-    /// Read and write the item places `ItemPlace::Mod { provider: name, .. }` with `provider`,
-    /// as an accessory mod exposes its slots. One provider a name.
-    fn place_provider(&mut self, name: &'static str, provider: Arc<dyn PlaceProvider>) {
-        if !namespaced(name) {
-            self.refused.push(format!(
-                "{} provides item places {name:?}, which is not a namespaced name",
-                self.mod_id
-            ));
-            return;
-        }
-        if let Some(other) = self.parts.place_providers.get(name) {
-            self.refused.push(format!(
-                "item places {name} are provided twice, by {} and {}",
-                other.mod_id, self.mod_id
-            ));
-            return;
-        }
-        self.parts.place_providers.insert(
-            name,
-            PlaceProviderPart {
-                mod_id: self.mod_id,
-                mod_index: self.mod_index,
-                provider,
-            },
-        );
-    }
-
-    fn register_tooltip_appender(
-        &mut self,
-        component: &str,
-        placement: super::TooltipPlacement,
-        appender: Arc<dyn super::TooltipAppender>,
-    ) {
-        let refusal = if !namespaced(component) {
-            Some(format!(
-                "{} registers a tooltip appender for {component:?}, which is not a namespaced data component id",
-                self.mod_id
-            ))
-        } else {
-            match &placement {
-                super::TooltipPlacement::Before(anchor)
-                | super::TooltipPlacement::After(anchor)
-                    if !super::TOOLTIP_DETAILS.contains(&anchor.as_str()) =>
-                {
-                    Some(format!(
-                        "{} anchors a tooltip appender for {component:?} to {anchor:?}, which is not a component detail Horizon lists",
-                        self.mod_id
-                    ))
-                }
-                _ => None,
-            }
-        };
-        if let Some(refusal) = refusal {
-            self.refused.push(refusal);
-            return;
-        }
-        self.parts.tooltip_appenders.push(TooltipAppenderPart {
-            mod_id: self.mod_id,
-            mod_index: self.mod_index,
-            component: component.into(),
-            placement,
-            appender,
-        });
-    }
-}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    use super::*;
+    use crate::parts::tests::*;
+    use crate::*;
 
     #[test]
-    fn item_keys_validate_forward_references_and_reused_slots() {
+    pub(crate) fn item_keys_validate_forward_references_and_reused_slots() {
         struct Keys(Arc<std::sync::Mutex<Vec<crate::ItemKey>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Keys {
@@ -352,7 +153,7 @@ pub mod tests {
         }
         let keys = Arc::new(std::sync::Mutex::new(Vec::new()));
         let mods: Mods = vec![ModEntry::new("requester", Box::new(Keys(keys.clone())))].into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         let check = |known: &dyn Fn(&str) -> bool| {
             resolve_parts(
@@ -388,7 +189,7 @@ pub mod tests {
     }
 
     #[test]
-    fn tooltip_appender_restores_owner_even_on_panic() {
+    pub(crate) fn tooltip_appender_restores_owner_even_on_panic() {
         struct Check(bool);
         impl TooltipAppender for Check {
             fn append(
@@ -437,7 +238,7 @@ pub mod tests {
     /// A pipe's item capability, reached through `.0`: one slot from every side but its top,
     /// and what goes in is handed to the container east of it, through that container's west
     /// side.
-    struct Pipe(BlockSide);
+    pub(crate) struct Pipe(pub(crate) BlockSide);
     impl ResourceHandler<ItemResource> for Pipe {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             usize::from(self.0.side != Some(Direction::Up))
@@ -483,7 +284,7 @@ pub mod tests {
     }
 
     /// A pipe that hands what it's offered on as [`Pipe`] does, and answers one more than went.
-    struct Greedy(BlockSide);
+    pub(crate) struct Greedy(pub(crate) BlockSide);
     impl ResourceHandler<ItemResource> for Greedy {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -522,14 +323,14 @@ pub mod tests {
     #[cfg(test)]
     /// A pipe at (0, 64, 0), and a one-slot vanilla chest east of it, answered by the game.
     #[derive(Clone, Default)]
-    struct PipeWorld {
-        chest: Option<ItemStack>,
-        kept: Vec<Self>,
+    pub(crate) struct PipeWorld {
+        pub(crate) chest: Option<ItemStack>,
+        pub(crate) kept: Vec<Self>,
     }
     #[cfg(test)]
-    const PIPE: [i32; 3] = [0, 64, 0];
+    pub(crate) const PIPE: [i32; 3] = [0, 64, 0];
     #[cfg(test)]
-    const CHEST: [i32; 3] = [1, 64, 0];
+    pub(crate) const CHEST: [i32; 3] = [1, 64, 0];
     #[cfg(test)]
     impl Journal for PipeWorld {
         fn kept(&mut self) -> &mut Vec<Self> {
@@ -620,11 +421,11 @@ pub mod tests {
     #[cfg(test)]
     mod_api::impl_server_host_areas!(PipeWorld, except(mod_state));
 
-    fn stick() -> ItemStack {
+    pub(crate) fn stick() -> ItemStack {
         stack("minecraft:stick", 1, 0)
     }
 
-    fn stack(item: &str, count: u32, damage: u32) -> ItemStack {
+    pub(crate) fn stack(item: &str, count: u32, damage: u32) -> ItemStack {
         ItemStack {
             item: Arc::from(item),
             count,
@@ -635,7 +436,7 @@ pub mod tests {
 
     /// A pouch of sticks at `.0`: one slot, its stick count kept in the pouch's own stack (its
     /// damage, for the test), so the handler holds nothing.
-    struct Pouch(ItemPlace);
+    pub(crate) struct Pouch(pub(crate) ItemPlace);
     impl ResourceHandler<ItemResource> for Pouch {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -680,7 +481,7 @@ pub mod tests {
 
     /// A bag at `.0` holding one pouch: the pouch's sticks plus one kept in the bag's damage, 0
     /// when empty.
-    struct Bag(ItemPlace);
+    pub(crate) struct Bag(pub(crate) ItemPlace);
     impl ResourceHandler<ItemResource> for Bag {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1
@@ -731,7 +532,7 @@ pub mod tests {
     /// A case at `.0` with two slots kept in its damage: diamonds in the hundreds, sticks in
     /// the units. Before taking sticks it tries emptying its diamond slot in a transaction of
     /// its own and aborts that, as a handler checking what a write would do may.
-    struct Case(ItemPlace);
+    pub(crate) struct Case(pub(crate) ItemPlace);
     impl Case {
         fn held(&self, host: &mut dyn ServerHost, index: usize) -> u32 {
             let damage = self.0.stack(host).map_or(0, |case| case.damage);
@@ -804,7 +605,7 @@ pub mod tests {
     /// An accessory mod's charm slots: charm `key` is kept in player 1's inventory slot 20 +
     /// `key`. A charm slot has nowhere to put what doesn't stack with its charm, so it refuses
     /// that.
-    struct Charms;
+    pub(crate) struct Charms;
     impl PlaceProvider for Charms {
         fn stack(&self, host: &mut dyn ServerHost, key: u64) -> Option<ItemStack> {
             backend_mut_of(host).and_then(|backend| backend.game_stack(&charm_slot(key)))
@@ -837,7 +638,7 @@ pub mod tests {
             charm_slot(key).extract(host, tx, resource, amount)
         }
     }
-    fn charm_slot(key: u64) -> ItemPlace {
+    pub(crate) fn charm_slot(key: u64) -> ItemPlace {
         ItemPlace::PlayerSlot {
             player: 1,
             slot: 20 + key as i32,
@@ -847,13 +648,13 @@ pub mod tests {
     #[cfg(test)]
     /// Player 1's hands and slots, and what was given to them: an item split off their hand.
     #[derive(Clone, Default)]
-    struct Player {
-        main_hand: Option<ItemStack>,
-        slots: HashMap<i32, ItemStack>,
-        given: Vec<ItemStack>,
-        kept: Vec<Self>,
+    pub(crate) struct Player {
+        pub(crate) main_hand: Option<ItemStack>,
+        pub(crate) slots: HashMap<i32, ItemStack>,
+        pub(crate) given: Vec<ItemStack>,
+        pub(crate) kept: Vec<Self>,
     }
-    const HAND: ItemPlace = ItemPlace::PlayerHand {
+    pub(crate) const HAND: ItemPlace = ItemPlace::PlayerHand {
         player: 1,
         hand: Hand::Main,
     };
@@ -1037,7 +838,7 @@ pub mod tests {
     }
 
     /// A mod robot's three empty slots.
-    struct Cargo;
+    pub(crate) struct Cargo;
     impl ResourceHandler<ItemResource> for Cargo {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             3
@@ -1074,7 +875,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_players_items_are_their_inventory_and_each_index_takes_only_what_fits_there() {
+    pub(crate) fn a_players_items_are_their_inventory_and_each_index_takes_only_what_fits_there() {
         game_thread();
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
         let helmet = || stack("minecraft:iron_helmet", 1, 0);
@@ -1133,7 +934,8 @@ pub mod tests {
     }
 
     #[test]
-    fn an_entitys_items_come_from_its_types_provider_and_none_outside_the_level_in_place() {
+    pub(crate) fn an_entitys_items_come_from_its_types_provider_and_none_outside_the_level_in_place()
+     {
         game_thread();
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
         let mut player = Player::default();
@@ -1148,7 +950,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// Items counted with what they hold: a pouch's sticks, a bag's pouch and its sticks.
-    fn items(stacks: impl IntoIterator<Item = ItemStack>) -> u32 {
+    pub(crate) fn items(stacks: impl IntoIterator<Item = ItemStack>) -> u32 {
         stacks
             .into_iter()
             .map(|s| match &*s.item {
@@ -1172,17 +974,17 @@ pub mod tests {
     /// gives at most one item per extract, unless `whole_extract`; with `one_per_insert`, it
     /// takes at most one per insert.
     #[derive(Clone)]
-    struct Shelf {
-        slots: [Option<ItemStack>; 3],
-        limit: u32,
-        output: Option<usize>,
-        one_per_insert: bool,
-        whole_extract: bool,
-        overstates: bool,
-        kept: Vec<Self>,
+    pub(crate) struct Shelf {
+        pub(crate) slots: [Option<ItemStack>; 3],
+        pub(crate) limit: u32,
+        pub(crate) output: Option<usize>,
+        pub(crate) one_per_insert: bool,
+        pub(crate) whole_extract: bool,
+        pub(crate) overstates: bool,
+        pub(crate) kept: Vec<Self>,
     }
     #[cfg(test)]
-    fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
+    pub(crate) fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
         Shelf {
             slots,
             limit: 64,
@@ -1193,9 +995,9 @@ pub mod tests {
             kept: Vec::new(),
         }
     }
-    const SHELF: [i32; 3] = [2, 64, 0];
+    pub(crate) const SHELF: [i32; 3] = [2, 64, 0];
     #[cfg(test)]
-    fn shelf_slot(slot: usize) -> ItemPlace {
+    pub(crate) fn shelf_slot(slot: usize) -> ItemPlace {
         ItemPlace::BlockEntity {
             level: here(),
             pos: SHELF,
@@ -1350,7 +1152,7 @@ pub mod tests {
 
     /// A mod's handler for the shelf whose calls overstate: an extract takes and answers 5 more
     /// than asked, and an insert keeps nothing and answers 5 more than was offered.
-    struct ItemOverstates;
+    pub(crate) struct ItemOverstates;
     impl ResourceHandler<ItemResource> for ItemOverstates {
         fn size(&self, host: &mut dyn ServerHost) -> usize {
             backend_of(&*host)
@@ -1405,7 +1207,7 @@ pub mod tests {
     }
 
     #[test]
-    fn an_item_handler_writes_its_stack_back_where_it_lives_splitting_one_off() {
+    pub(crate) fn an_item_handler_writes_its_stack_back_where_it_lives_splitting_one_off() {
         game_thread();
         let mut player = Player {
             main_hand: Some(stack("test:pouch", 2, 0)),
@@ -1434,7 +1236,7 @@ pub mod tests {
 
     /// A mod's energy cell at `.0`: up to 1000, kept in the cell's own stack (its damage, for the
     /// test), so the handler holds nothing.
-    struct Cell(ItemPlace);
+    pub(crate) struct Cell(pub(crate) ItemPlace);
     impl Cell {
         /// The cell here rewritten as holding `energy`: `moved` when that goes through, else 0.
         fn rewrite(
@@ -1475,7 +1277,7 @@ pub mod tests {
     }
 
     #[test]
-    fn an_items_energy_moves_through_its_place_and_a_charged_one_splits_off_its_stack() {
+    pub(crate) fn an_items_energy_moves_through_its_place_and_a_charged_one_splits_off_its_stack() {
         game_thread();
         let slot = ItemPlace::PlayerSlot { player: 1, slot: 9 };
         let mut player = Player {
@@ -1508,7 +1310,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_stack_inside_an_item_and_a_mods_place_are_reached_through_their_handlers() {
+    pub(crate) fn a_stack_inside_an_item_and_a_mods_place_are_reached_through_their_handlers() {
         game_thread();
         let mut player = Player {
             main_hand: Some(stack("test:bag", 1, 1)),
@@ -1542,7 +1344,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// `place.insert` of `stack` in a transaction of its own: how much went.
-    fn insert(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
+    pub(crate) fn insert(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
         let went = host
             .transaction(|host, tx| Ok::<_, ()>(place.insert(host, tx, &resource, stack.count)));
@@ -1552,7 +1354,7 @@ pub mod tests {
     #[cfg(test)]
     /// `place.exchange` of `stack.count` of what is there for `stack`, in a transaction of its
     /// own: how many.
-    fn exchange(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
+    pub(crate) fn exchange(host: &mut dyn ServerHost, place: &ItemPlace, stack: ItemStack) -> u32 {
         let resource = ItemResource::of(&stack);
         let swapped = host
             .transaction(|host, tx| Ok::<_, ()>(place.exchange(host, tx, &resource, stack.count)));
@@ -1562,16 +1364,16 @@ pub mod tests {
     #[cfg(test)]
     /// Two three-slot game chests, `FROM` and `INTO`; `INTO`'s slots hold up to `limit` each.
     #[derive(Clone)]
-    struct TwoChests {
-        from: [Option<ItemStack>; 3],
-        into: [Option<ItemStack>; 3],
-        limit: u32,
-        kept: Vec<Self>,
+    pub(crate) struct TwoChests {
+        pub(crate) from: [Option<ItemStack>; 3],
+        pub(crate) into: [Option<ItemStack>; 3],
+        pub(crate) limit: u32,
+        pub(crate) kept: Vec<Self>,
     }
     #[cfg(test)]
-    const FROM: [i32; 3] = [3, 64, 0];
+    pub(crate) const FROM: [i32; 3] = [3, 64, 0];
     #[cfg(test)]
-    const INTO: [i32; 3] = [4, 64, 0];
+    pub(crate) const INTO: [i32; 3] = [4, 64, 0];
     #[cfg(test)]
     impl TwoChests {
         #[cfg(test)]
@@ -1716,7 +1518,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// A target that answers one more than it was given, and keeps nothing.
-    struct TakesMore;
+    pub(crate) struct TakesMore;
     #[cfg(test)]
     impl ResourceHandler<ItemResource> for TakesMore {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
@@ -1754,7 +1556,8 @@ pub mod tests {
     }
 
     #[test]
-    fn a_move_takes_what_the_filter_accepts_up_to_max_and_leaves_what_the_target_refuses() {
+    pub(crate) fn a_move_takes_what_the_filter_accepts_up_to_max_and_leaves_what_the_target_refuses()
+     {
         game_thread();
         let sticks = |n| Some(stack("minecraft:stick", n, 0));
         let apples = Some(stack("minecraft:apple", 3, 0));
@@ -1790,7 +1593,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_move_into_a_handler_answering_more_than_it_was_given_is_undone() {
+    pub(crate) fn a_move_into_a_handler_answering_more_than_it_was_given_is_undone() {
         game_thread();
         let mut world = TwoChests {
             from: [Some(stack("minecraft:stick", 5, 0)), None, None],
@@ -1809,11 +1612,12 @@ pub mod tests {
         let owner = "doubler".to_owned();
         assert_eq!(moved, Err(Overanswered { owner }));
         assert_eq!(world.from[0], Some(stack("minecraft:stick", 5, 0)));
-        assert!(super::super::item_place::warned_about("doubler"));
+        assert!(crate::item_place::warned_about("doubler"));
     }
 
     #[test]
-    fn a_changed_component_is_an_exchange_of_one_that_splits_it_off_and_an_abort_puts_it_back() {
+    pub(crate) fn a_changed_component_is_an_exchange_of_one_that_splits_it_off_and_an_abort_puts_it_back()
+     {
         game_thread();
         let sword = |count, damage| stack("minecraft:iron_sword", count, damage);
         let mut shelf_ = shelf([Some(sword(2, 0)), None, None]);
@@ -1837,7 +1641,8 @@ pub mod tests {
     }
 
     #[test]
-    fn a_removed_default_component_is_recorded_in_the_patch_and_a_default_set_one_is_dropped() {
+    pub(crate) fn a_removed_default_component_is_recorded_in_the_patch_and_a_default_set_one_is_dropped()
+     {
         game_thread();
         let shelf_ = shelf([None, None, None]);
         let host: &dyn Host = &shelf_;
@@ -1889,7 +1694,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_component_set_keeps_a_change_its_codec_reads_and_raw_nbt_keeps_its_types() {
+    pub(crate) fn a_component_set_keeps_a_change_its_codec_reads_and_raw_nbt_keeps_its_types() {
         /// A stick's report: `custom_data` `{x: 1}`, a huge `max_damage` and a mod's `test:long`.
         struct Report;
         impl mod_api::prelude::ItemsHost for Report {
@@ -1933,7 +1738,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_component_id_is_a_namespaced_identifier() {
+    pub(crate) fn a_component_id_is_a_namespaced_identifier() {
         for id in ["minecraft:damage", "mymod:charge/level"] {
             assert_eq!(
                 ComponentId::new(id).map(|id| id.as_str().to_owned()),
@@ -1953,7 +1758,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_write_that_cant_go_through_changes_nothing_and_no_item_is_made_or_lost() {
+    pub(crate) fn a_write_that_cant_go_through_changes_nothing_and_no_item_is_made_or_lost() {
         game_thread();
         let bread = |count| stack("minecraft:bread", count, 0);
         let stone = || Some(stack("minecraft:stone", 64, 0));
@@ -2021,7 +1826,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_truthful_handler_moving_one_per_call_is_moved_in_passes_and_never_named() {
+    pub(crate) fn a_truthful_handler_moving_one_per_call_is_moved_in_passes_and_never_named() {
         game_thread();
         // A slot that gives one item per extract and takes one per insert: the 3 apples come
         // out, and the 3 bread go in, one pass each.
@@ -2030,11 +1835,12 @@ pub mod tests {
         let bread = stack("minecraft:bread", 3, 0);
         assert_eq!(exchange(&mut shelf_, &shelf_slot(0), bread.clone()), 3);
         assert_eq!(shelf_.slots, [Some(bread), None, None]);
-        assert!(!super::super::item_place::warned_about("the game"));
+        assert!(!crate::item_place::warned_about("the game"));
     }
 
     #[test]
-    fn an_item_handler_answering_more_than_it_was_asked_or_offered_moves_nothing_and_is_named() {
+    pub(crate) fn an_item_handler_answering_more_than_it_was_asked_or_offered_moves_nothing_and_is_named()
+     {
         game_thread();
         let apples = |count| stack("minecraft:apple", count, 0);
         let bread = stack("minecraft:bread", 1, 0);
@@ -2048,11 +1854,11 @@ pub mod tests {
         // Offered 2 apples, it keeps none and answers 7 taken: undone, and the slot stays empty.
         assert_eq!(insert(&mut shelf_, &shelf_slot(1), apples(2)), 0);
         assert_eq!(shelf_.slots, [Some(apples(10)), None, None]);
-        assert!(super::super::item_place::warned_about("doubler"));
+        assert!(crate::item_place::warned_about("doubler"));
     }
 
     #[test]
-    fn a_change_inside_one_of_two_bags_splits_that_bag_off_whole() {
+    pub(crate) fn a_change_inside_one_of_two_bags_splits_that_bag_off_whole() {
         game_thread();
         // Two bags in the hand, each holding an empty pouch.
         let mut player = Player {
@@ -2073,7 +1879,7 @@ pub mod tests {
     }
 
     #[test]
-    fn an_aborted_write_inside_a_nested_item_puts_every_level_back() {
+    pub(crate) fn an_aborted_write_inside_a_nested_item_puts_every_level_back() {
         game_thread();
         // The pouch in the bag in the hand is filled in a transaction that then aborts: the
         // bag and its pouch are as they were, and nothing was given.
@@ -2096,7 +1902,7 @@ pub mod tests {
     }
 
     #[test]
-    fn an_aborted_inner_write_of_a_handler_inside_an_item_changes_nothing() {
+    pub(crate) fn an_aborted_inner_write_of_a_handler_inside_an_item_changes_nothing() {
         game_thread();
         // A case of one diamond and one stick in the hand: its stick is taken and two put in;
         // on the way it tries emptying its diamond slot in a transaction it aborts. The
@@ -2121,12 +1927,12 @@ pub mod tests {
         assert!(player.given.is_empty());
     }
 
-    mod deep_places {
+    pub(crate) mod deep_places {
         use super::*;
 
         /// An outer bag at `.0` holding one `test:bag`, kept in its damage as `Bag` keeps its
         /// pouch: 0 when empty.
-        pub(super) struct Wrap(pub ItemPlace);
+        pub(crate) struct Wrap(pub ItemPlace);
         impl ResourceHandler<ItemResource> for Wrap {
             fn size(&self, _: &mut dyn ServerHost) -> usize {
                 1
@@ -2172,7 +1978,7 @@ pub mod tests {
         }
 
         /// A mod place that is the player's hand, and answers one more than it moved.
-        pub(super) struct LyingPlace;
+        pub(crate) struct LyingPlace;
         impl PlaceProvider for LyingPlace {
             fn stack(&self, host: &mut dyn ServerHost, _: u64) -> Option<ItemStack> {
                 HAND.stack(host)
@@ -2314,12 +2120,12 @@ pub mod tests {
             })
             .unwrap();
             assert!(p.given.is_empty());
-            assert!(super::super::super::item_place::warned_about("doubler"));
+            assert!(crate::item_place::warned_about("doubler"));
         }
     }
 
     #[test]
-    fn a_place_provider_given_twice_is_refused() {
+    pub(crate) fn a_place_provider_given_twice_is_refused() {
         let mut r = super::PartRegistrar::new("first");
         (&mut r as &mut dyn Registrar).place_provider("test:charms", Arc::new(Charms));
         r.mod_id = "second";
@@ -2339,7 +2145,7 @@ pub mod tests {
     }
 
     #[test]
-    fn disabled_place_providers_refuse_reads_and_writes_and_resume() {
+    pub(crate) fn disabled_place_providers_refuse_reads_and_writes_and_resume() {
         game_thread();
         let mut player = Player::default();
         let charm = ItemPlace::Mod {
@@ -2381,7 +2187,7 @@ pub mod tests {
     #[cfg(test)]
     /// Player 1 holding one stack in their hand, which has game slots (`item_container`) when
     /// its damage is 1.
-    struct HeldItem(ItemStack);
+    pub(crate) struct HeldItem(pub(crate) ItemStack);
     #[cfg(test)]
     impl mod_api::prelude::ItemsBackend for HeldItem {
         fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {

@@ -3490,7 +3490,7 @@ pub mod testing {
             }
         }
         let controllers: &'static [_] =
-            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
+            Box::leak(super::parts::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
         let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));

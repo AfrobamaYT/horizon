@@ -1,11 +1,17 @@
+#[cfg(test)]
+use super::*;
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
+    use super::*;
+    use crate::parts::tests::*;
+    use crate::*;
 
     /// A mod's battery: the game's at its position, misanswering by 100 as `lie` says.
-    struct ModBattery {
-        at: BlockSide,
-        lie: Lie,
+    pub(crate) struct ModBattery {
+        pub(crate) at: BlockSide,
+        pub(crate) lie: Lie,
     }
     impl EnergyHandler for ModBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
@@ -39,10 +45,10 @@ pub mod tests {
     /// Batteries as the game answers them, by position: what each holds, and the most one
     /// insert moves, of a capacity of 1000; and the mod block entity types standing at some.
     #[derive(Clone, Default)]
-    struct EnergyWorld {
-        batteries: HashMap<[i32; 3], (u32, u32)>,
-        types: HashMap<[i32; 3], &'static str>,
-        kept: Vec<Self>,
+    pub(crate) struct EnergyWorld {
+        pub(crate) batteries: HashMap<[i32; 3], (u32, u32)>,
+        pub(crate) types: HashMap<[i32; 3], &'static str>,
+        pub(crate) kept: Vec<Self>,
     }
     #[cfg(test)]
     impl EnergyWorld {
@@ -141,7 +147,7 @@ pub mod tests {
     mod_api::impl_backend_mut_areas!(EnergyWorld, except(fluids_energy));
 
     #[test]
-    fn an_energy_move_takes_what_the_targets_room_and_limit_let_in_and_loses_none() {
+    pub(crate) fn an_energy_move_takes_what_the_targets_room_and_limit_let_in_and_loses_none() {
         game_thread();
         let mut world = EnergyWorld::default();
         world.batteries.insert(SOURCE, (900, 1000));
@@ -162,7 +168,8 @@ pub mod tests {
     }
 
     #[test]
-    fn a_battery_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_energy() {
+    pub(crate) fn a_battery_answering_more_than_it_was_asked_aborts_the_whole_move_and_loses_no_energy()
+     {
         game_thread();
         for (liar, at) in [
             ("test:battery_gives_more", SOURCE),

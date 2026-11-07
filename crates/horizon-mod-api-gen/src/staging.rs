@@ -1,4 +1,5 @@
 //! One source staging pass for the launcher and `horizon-stage`.
+pub use crate::sites::identity::{CallIdentity, Selection, select};
 use crate::{internals, points, sites};
 use std::path::Path;
 

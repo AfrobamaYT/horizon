@@ -19,6 +19,7 @@ pub(crate) enum Cause {
     Record(&'static str),
     Conflict(String),
     Source(String),
+    Identity(identity::Refusal),
 }
 
 /// The declaration that failed and its machine-distinguishable cause.
@@ -65,6 +66,7 @@ impl std::fmt::Display for Error {
             | Cause::Signature(s)
             | Cause::Record(s) => f.write_str(s),
             Cause::Source(message) => f.write_str(message),
+            Cause::Identity(refusal) => write!(f, "{refusal}"),
             Cause::Conflict(other) => {
                 write!(f, "conflicts with {other}: both select the same call")
             }
@@ -198,6 +200,10 @@ pub(crate) struct Site {
     pub selector: String,
     pub ordinal: usize,
     pub hash: String,
+    /// Canonical internals catalog path of the callee, independent of source aliases.
+    pub call: String,
+    /// Statement and nesting-path fingerprint, independent of ordinal drift.
+    pub ctx: String,
     pub listener: String,
     pub record: String,
     pub receiver: String,
@@ -206,6 +212,7 @@ pub(crate) struct Site {
 }
 
 pub(crate) mod analysis;
+pub mod identity;
 pub(crate) mod resolve;
 pub(crate) mod rewrite;
 mod stage;

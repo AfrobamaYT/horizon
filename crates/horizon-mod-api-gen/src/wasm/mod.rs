@@ -139,8 +139,14 @@ const LOAD_CONTEXTS: &[&str] = &[
 /// their pieces, which keep no mutable state and get no `Host`.
 const WORLDGEN: &[&str] = &["StructureType", "StructurePiece"];
 
-/// What a call of `method` is to the runtime (`wasm_host::Call`), for its limits and its wait.
+/// Predicates that may synchronously borrow the store lent by their triggering import.
+pub(super) const CALLBACKS: &[&str] = &["CriterionTest"];
+
+/// What a call of `method` is to the runtime, for its limits and its wait.
 pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str {
+    if CALLBACKS.contains(&method.owner) {
+        return "super::Call::Callback";
+    }
     if WORLDGEN.contains(&method.owner) {
         "super::Call::Worldgen"
     } else if loads(types, method) {

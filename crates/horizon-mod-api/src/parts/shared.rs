@@ -1,21 +1,22 @@
 //! Shared table state, cross-kind registration and common test fixtures only.
+use super::*;
 /// A part, with the mod that attached it.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Attached<P: ?Sized> {
     /// The mod's bundle id, retained for diagnostics after registration.
-    pub(super) mod_id: &'static str,
+    pub(crate) mod_id: &'static str,
     /// The mod's place in dispatch order.
-    pub(super) mod_index: usize,
+    pub(crate) mod_index: usize,
     /// Its place in its mod's registrations: a mod's parts on one thing keep this order, key or
     /// tag (#41 §3).
-    order: usize,
+    pub(crate) order: usize,
     /// The part's kind, its Rust type's name: one part of each kind per thing.
-    pub(super) type_name: &'static str,
-    pub(super) part: Arc<P>,
+    pub(crate) type_name: &'static str,
+    pub(crate) part: Arc<P>,
 }
 
 impl<P: ?Sized> Attached<P> {
-    fn with_part<Q: ?Sized>(&self, part: Arc<Q>) -> Attached<Q> {
+    pub(crate) fn with_part<Q: ?Sized>(&self, part: Arc<Q>) -> Attached<Q> {
         Attached {
             mod_id: self.mod_id,
             mod_index: self.mod_index,
@@ -47,7 +48,7 @@ impl<P: ?Sized> Clone for Attached<P> {
     }
 }
 
-fn insert_part<P: ?Sized>(
+pub(crate) fn insert_part<P: ?Sized>(
     table: &mut HashMap<Box<str>, Vec<Attached<P>>>,
     id: &str,
     part: Attached<P>,
@@ -69,47 +70,47 @@ fn insert_part<P: ?Sized>(
 #[derive(Clone, Default)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct Parts {
-    key_mappings: Vec<(&'static str, super::NativeKeyRegistration)>,
+    pub(crate) key_mappings: Vec<(&'static str, crate::NativeKeyRegistration)>,
     /// Block parts, and block entity parts as the block parts they also are.
-    blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
     /// Block entity parts by block, for the hooks asked by block (`block_entity`, `screen`).
-    block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    pub(crate) block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
     /// Block entity parts by block entity type, for the hooks asked by the entity
     /// (`block_entity_tick`, `menu_button`): its type id need not be its block's id.
-    block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
-    items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
-    menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
+    pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
     /// Entity parts by entity type id (`minecraft:zombie`), for the goal
     /// registration at every `Mob` construction (#1077). They carry no scoped
     /// hook, so they never enter `hooks`.
-    entities: HashMap<Box<str>, Vec<Attached<dyn EntityPart>>>,
+    pub(crate) entities: HashMap<Box<str>, Vec<Attached<dyn EntityPart>>>,
     /// Capability providers by capability name, then by block entity type, in registration
     /// order.
-    capabilities: Capabilities<BlockProviderOf>,
+    pub(crate) capabilities: Capabilities<BlockProviderOf>,
     /// Item capability providers by capability name, then by item, in registration order.
-    item_capabilities: Capabilities<ItemProviderOf>,
+    pub(crate) item_capabilities: Capabilities<ItemProviderOf>,
     /// Entity capability providers by capability name, then by entity type, in registration
     /// order.
-    entity_capabilities: Capabilities<EntityProviderOf>,
+    pub(crate) entity_capabilities: Capabilities<EntityProviderOf>,
     /// The mods' own item places (`ItemPlace::Mod`), by provider name.
-    place_providers: HashMap<&'static str, PlaceProviderPart>,
+    pub(crate) place_providers: HashMap<&'static str, PlaceProviderPart>,
     /// The tooltip appenders, in registration order.
-    tooltip_appenders: Vec<TooltipAppenderPart>,
+    pub(crate) tooltip_appenders: Vec<TooltipAppenderPart>,
     /// Only the parts that override each scoped hook, resolved at load or reload.
-    hooks: Vec<Option<HookParts>>,
+    pub(crate) hooks: Vec<Option<HookParts>>,
 }
 
 #[derive(Clone, Default)]
 /// The Parts attached to blocks for one hook, with which hooks have a subscriber.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct HookParts {
-    blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
-    block_states: Vec<Option<NonZeroU32>>,
-    block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
-    block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
-    block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
-    items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
-    menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
+    pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    pub(crate) block_states: Vec<Option<NonZeroU32>>,
+    pub(crate) block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
+    pub(crate) block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    pub(crate) block_entity_kinds: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
+    pub(crate) items: HashMap<Box<str>, Vec<Attached<dyn ItemPart>>>,
+    pub(crate) menus: HashMap<Box<str>, Vec<Attached<dyn MenuPart>>>,
 }
 
 /// Which things a capability's providers are registered by.
@@ -125,29 +126,29 @@ pub enum ProvidedBy {
 
 /// The parts attached by tag, by tag name, in registration order.
 #[derive(Default)]
-struct TagParts {
-    blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
-    items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
+pub(crate) struct TagParts {
+    pub(crate) blocks: Vec<(Box<str>, Attached<dyn BlockPart>)>,
+    pub(crate) items: Vec<(Box<str>, Attached<dyn ItemPart>)>,
 }
 
-/// What every mod's [`Hooks::register`](super::Hooks::register) attached.
+/// What every mod's [`Hooks::register`](crate::Hooks::register) attached.
 #[derive(Default)]
-struct Installed {
-    game_rule_categories: Vec<String>,
-    game_rules: Vec<horizon_client_core::gamerules::Rule>,
-    game_rule_slots: Vec<u32>,
-    keys: Parts,
-    tags: TagParts,
-    block_entity_types: Vec<BlockEntityType>,
-    registry_keys: horizon_mod_runtime::registry_keys::Requests,
-    effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
-    resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
-    fluids: OnceLock<horizon_mod_runtime::registry_keys::Names>,
+pub(crate) struct Installed {
+    pub(crate) game_rule_categories: Vec<String>,
+    pub(crate) game_rules: Vec<horizon_client_core::gamerules::Rule>,
+    pub(crate) game_rule_slots: Vec<u32>,
+    pub(crate) keys: Parts,
+    pub(crate) tags: TagParts,
+    pub(crate) block_entity_types: Vec<BlockEntityType>,
+    pub(crate) registry_keys: horizon_mod_runtime::registry_keys::Requests,
+    pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
+    pub(crate) resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
+    pub(crate) fluids: OnceLock<horizon_mod_runtime::registry_keys::Names>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
-    controllers: Vec<ControllerInfo>,
-    structure_types: Vec<super::structure_type::StructureTypeInfo>,
-    hook_bits: Vec<bool>,
-    tag_hook_bits: Vec<bool>,
+    pub(crate) controllers: Vec<ControllerInfo>,
+    pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
+    pub(crate) hook_bits: Vec<bool>,
+    pub(crate) tag_hook_bits: Vec<bool>,
 }
 
 pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::Requests {
@@ -159,7 +160,7 @@ pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::R
 thread_local! {
     // A reference to the registrar's canonical requests while Hooks::register is in flight.
     // The table is moved, not copied, into Installed when registration finishes.
-    static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>> = const { RefCell::new(None) };
+    pub(crate) static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn with_registering_keys<T>(
@@ -171,25 +172,25 @@ pub(crate) fn with_registering_keys<T>(
     })
 }
 
-static INSTALLED: OnceLock<Installed> = OnceLock::new();
+pub(crate) static INSTALLED: OnceLock<Installed> = OnceLock::new();
 #[cfg(any(test, feature = "testing"))]
 thread_local! {
     /// Tests install their own parts per thread, as they do their mods (`TEST_MODS`).
-    static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
-    static TEST_PART_LOOKUPS: Cell<usize> = const { Cell::new(0) };
+    pub(crate) static TEST_PARTS: Cell<Option<&'static Installed>> = const { Cell::new(None) };
+    pub(crate) static TEST_PART_LOOKUPS: Cell<usize> = const { Cell::new(0) };
 }
-static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
-static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
+pub(crate) static NO_PARTS: LazyLock<Parts> = LazyLock::new(Parts::default);
+pub(crate) static OFF_THREAD_WARNED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     /// This thread's game's parts, its tags resolved; none before its world opens.
-    static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
+    pub(crate) static GAME_PARTS: RefCell<Option<Rc<Parts>>> = const { RefCell::new(None) };
     /// Whether a `Game` runs on this thread.
-    static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
-    static PRE_WORLD: Cell<bool> = const { Cell::new(false) };
+    pub(crate) static GAME_THREAD: Cell<bool> = const { Cell::new(false) };
+    pub(crate) static PRE_WORLD: Cell<bool> = const { Cell::new(false) };
 }
 
-fn installed() -> Option<&'static Installed> {
+pub(crate) fn installed() -> Option<&'static Installed> {
     #[cfg(any(test, feature = "testing"))]
     if let Some(installed) = TEST_PARTS.get() {
         return Some(installed);
@@ -204,7 +205,7 @@ pub fn has_part_hook(hook: HookId) -> bool {
 
 /// Preserve the no-mod fast path for level hooks.
 pub fn has_scoped_hook(hook: HookId) -> bool {
-    !super::mods().is_empty() && has_part_hook(hook)
+    !crate::mods().is_empty() && has_part_hook(hook)
 }
 
 /// The parts table a dispatch reads: the process-wide one, or this game thread's.
@@ -252,7 +253,10 @@ impl std::fmt::Display for MissingResolvedParts {
     }
 }
 
-fn try_parts(hook: HookId, name: &'static str) -> Result<PartsRef, MissingResolvedParts> {
+pub(crate) fn try_parts(
+    hook: HookId,
+    name: &'static str,
+) -> Result<PartsRef, MissingResolvedParts> {
     #[cfg(any(test, feature = "testing"))]
     TEST_PART_LOOKUPS.set(TEST_PART_LOOKUPS.get() + 1);
     let Some(installed) = installed() else {
@@ -383,7 +387,7 @@ pub fn resolve_parts(
 }
 
 /// A line for each part attached to an id `known` refuses.
-fn unknown_keys<'a, P: ?Sized>(
+pub(crate) fn unknown_keys<'a, P: ?Sized>(
     table: &'a HashMap<Box<str>, Vec<Attached<P>>>,
     known: &'a dyn Fn(&str) -> bool,
     scope: &'a str,
@@ -403,7 +407,7 @@ fn unknown_keys<'a, P: ?Sized>(
 
 /// Attach each tag part to its tag's members, in dispatch order: by mod, then by registration
 /// within a mod.
-fn add_tagged<P: ?Sized>(
+pub(crate) fn add_tagged<P: ?Sized>(
     table: &mut HashMap<Box<str>, Vec<Attached<P>>>,
     tagged: &[(Box<str>, Attached<P>)],
     tags: &HashMap<String, HashSet<String>>,
@@ -477,20 +481,20 @@ impl Parts {
 
 /// Walk only this capability and type's registrations, once each even if a provider switches
 /// a mod off during the lookup. The table and the game's direct lookups share this path.
-fn next_provider<P: Clone>(
+pub(crate) fn next_provider<P: Clone>(
     parts: &[CapabilityPart<P>],
     index: &mut u32,
 ) -> Option<(P, &'static str, bool)> {
     while let Some(part) = parts.get(*index as usize) {
         *index += 1;
-        if super::mod_index_on(part.mod_index) {
+        if crate::mod_index_on(part.mod_index) {
             return Some((part.provider.clone(), part.mod_id, part.before_game));
         }
     }
     None
 }
 
-fn attached<'a, 'k, P: ?Sized>(
+pub(crate) fn attached<'a, 'k, P: ?Sized>(
     table: &'a HashMap<Box<str>, Vec<Attached<P>>>,
     id: impl FnOnce() -> Option<&'k str>,
 ) -> &'a [Attached<P>] {
@@ -503,24 +507,24 @@ fn attached<'a, 'k, P: ?Sized>(
 /// The game's [`Registrar`]: every mod's registrations, checked as they come.
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct PartRegistrar {
-    game_rule_categories: Vec<String>,
-    game_rules: Vec<horizon_client_core::gamerules::Rule>,
-    mod_id: &'static str,
-    mod_index: usize,
+    pub(crate) game_rule_categories: Vec<String>,
+    pub(crate) game_rules: Vec<horizon_client_core::gamerules::Rule>,
+    pub(crate) mod_id: &'static str,
+    pub(crate) mod_index: usize,
     /// Parts registered so far, by every mod: the next part's `order`.
-    registered: usize,
-    parts: Parts,
-    tags: TagParts,
-    block_entity_types: Vec<BlockEntityType>,
-    registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
-    effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
-    controllers: Vec<ControllerInfo>,
-    structure_types: Vec<super::structure_type::StructureTypeInfo>,
-    refused: Vec<String>,
+    pub(crate) registered: usize,
+    pub(crate) parts: Parts,
+    pub(crate) tags: TagParts,
+    pub(crate) block_entity_types: Vec<BlockEntityType>,
+    pub(crate) registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
+    pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
+    pub(crate) controllers: Vec<ControllerInfo>,
+    pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
+    pub(crate) refused: Vec<String>,
 }
 
 impl PartRegistrar {
-    fn new(mod_id: &'static str) -> Self {
+    pub(crate) fn new(mod_id: &'static str) -> Self {
         Self {
             game_rule_categories: Vec::new(),
             game_rules: Vec::new(),
@@ -538,7 +542,7 @@ impl PartRegistrar {
         }
     }
     /// `part`, of kind `kind`, for tag `tag`; none if it is refused.
-    fn tagged<P: ?Sized>(
+    pub(crate) fn tagged<P: ?Sized>(
         &mut self,
         kind: &'static str,
         tag: &str,
@@ -565,7 +569,7 @@ impl PartRegistrar {
     }
 
     /// Attach `part`, of kind `kind`, to `id` in `table`; false if it is refused.
-    fn attach<P: ?Sized>(
+    pub(crate) fn attach<P: ?Sized>(
         &mut self,
         table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
         kind: &'static str,
@@ -582,7 +586,7 @@ impl PartRegistrar {
         self.attach_known(table, kind, id, part)
     }
 
-    fn attach_known<P: ?Sized>(
+    pub(crate) fn attach_known<P: ?Sized>(
         &mut self,
         table: fn(&mut Parts) -> &mut HashMap<Box<str>, Vec<Attached<P>>>,
         kind: &'static str,
@@ -604,13 +608,13 @@ impl PartRegistrar {
     }
 }
 
-fn namespaced(id: &str) -> bool {
+pub(crate) fn namespaced(id: &str) -> bool {
     id.split_once(':')
         .is_some_and(|(namespace, path)| !namespace.is_empty() && !path.is_empty())
 }
 
-/// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
-fn register_all(mods: &[ModEntry]) -> PartRegistrar {
+/// Every mod's [`Hooks::register`](crate::Hooks::register) run against one registrar, in dispatch order.
+pub(crate) fn register_all(mods: &[ModEntry]) -> PartRegistrar {
     let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
     struct RestoreKeys(Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>);
     impl Drop for RestoreKeys {
@@ -619,8 +623,8 @@ fn register_all(mods: &[ModEntry]) -> PartRegistrar {
         }
     }
     let _scope = RestoreKeys(REGISTERING_KEYS.replace(Some(registrar.registry_keys.clone())));
-    let context = super::RegistrationContext::new();
-    for (index, hooks) in super::entered_registration(mods, "register").enumerate() {
+    let context = crate::RegistrationContext::new();
+    for (index, hooks) in crate::entered_registration(mods, "register").enumerate() {
         registrar.mod_id = mods[index].id;
         registrar.mod_index = index;
         hooks.register(&mut registrar, &context);
@@ -629,13 +633,13 @@ fn register_all(mods: &[ModEntry]) -> PartRegistrar {
     registrar
 }
 
-/// Builds the parts from every mod's [`Hooks::register`](super::Hooks::register), in dispatch order. Once, at startup;
+/// Builds the parts from every mod's [`Hooks::register`](crate::Hooks::register), in dispatch order. Once, at startup;
 /// the error lists every part refused, naming its mods.
 pub fn install_parts(mods: &[ModEntry]) -> Result<(), Vec<String>> {
     install_registrar(register_all(mods))
 }
 
-fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
+pub(crate) fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
     let registry = horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
         &registrar.game_rule_categories,
         &registrar.game_rules,
@@ -711,21 +715,18 @@ fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<String>> {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
-    use super::super::*;
+    use super::super::items::tests::Cell;
     use super::mark_game_thread;
+    use super::*;
+    use crate::parts::tests::*;
+    use crate::*;
 
-    #[cfg(test)]
-    use super::{Attached, KnownIds, resolve_parts};
-    #[cfg(test)]
-    use std::any::type_name;
-    #[cfg(test)]
-    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 
     /// Register the game fixture's final block registry through the actual registrar, retaining
     /// its installed test mods and Parts. Production mods request only the entries they use.
     pub fn register_game_keys(ids: impl IntoIterator<Item = String>) {
-        let mut registrar = super::register_all(super::super::mods());
+        let mut registrar = super::register_all(crate::mods());
         registrar.mod_id = "horizon";
         registrar.declare_fluid("definition_test");
         for id in ids {
@@ -777,7 +778,7 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    fn type_key(id: &str) -> BlockEntityTypeKey {
+    pub(crate) fn type_key(id: &str) -> BlockEntityTypeKey {
         BlockEntityTypeKey(
             *super::requested_keys()
                 .block_entity_types
@@ -788,12 +789,12 @@ pub mod tests {
     }
 
     /// The level the test worlds are.
-    fn here() -> LevelRef {
+    pub(crate) fn here() -> LevelRef {
         LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD)
     }
 
     /// The block at `pos` in [`here`], through `side`.
-    fn on(pos: [i32; 3], side: Option<Direction>) -> BlockSide {
+    pub(crate) fn on(pos: [i32; 3], side: Option<Direction>) -> BlockSide {
         BlockSide {
             level: here(),
             pos,
@@ -802,7 +803,7 @@ pub mod tests {
     }
 
     #[test]
-    fn registry_keys_reject_unknown_unattached_requests_with_the_requesting_mod() {
+    pub(crate) fn registry_keys_reject_unknown_unattached_requests_with_the_requesting_mod() {
         struct Unknown;
         #[mod_api::__subscriptions]
         impl Hooks for Unknown {
@@ -828,7 +829,7 @@ pub mod tests {
     }
 
     #[test]
-    fn invalid_lookup_ids_refuse_registration_naming_the_requesting_mod() {
+    pub(crate) fn invalid_lookup_ids_refuse_registration_naming_the_requesting_mod() {
         struct Invalid;
         #[mod_api::__subscriptions]
         impl Hooks for Invalid {
@@ -847,7 +848,7 @@ pub mod tests {
         );
     }
     #[cfg(test)]
-    struct NoHost;
+    pub(crate) struct NoHost;
     #[cfg(test)]
     impl Host for NoHost {}
     #[cfg(test)]
@@ -862,7 +863,7 @@ pub mod tests {
     mod_api::impl_client_host_areas!(NoHost);
 
     #[test]
-    fn a_host_without_a_backend_refuses_handle_calls() {
+    pub(crate) fn a_host_without_a_backend_refuses_handle_calls() {
         // NoHost implements nothing, so Host::backend keeps its None default:
         // every handle answers its typed refusal, never a no-op success.
         let level = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::OVERWORLD);
@@ -875,7 +876,7 @@ pub mod tests {
 
     /// Doubles every comparator reading, and attaches `Gauge` to `test:gauge`, `TagGauge` to
     /// tag `test:gauged` and `Press` to `test:press`.
-    struct Doubler;
+    pub(crate) struct Doubler;
     #[mod_api::__subscriptions]
     impl Hooks for Doubler {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
@@ -987,17 +988,17 @@ pub mod tests {
     #[cfg(test)]
     /// A test host's whole state, kept on each transaction it opens and put back on an abort, as
     /// the game's journal keeps its storages.
-    trait Journal: Clone {
+    pub(crate) trait Journal: Clone {
         fn kept(&mut self) -> &mut Vec<Self>;
     }
     #[cfg(test)]
-    fn open<J: Journal>(host: &mut J) {
+    pub(crate) fn open<J: Journal>(host: &mut J) {
         let mut now = host.clone();
         now.kept().clear();
         host.kept().push(now);
     }
     #[cfg(test)]
-    fn close<J: Journal>(host: &mut J, commit: bool) {
+    pub(crate) fn close<J: Journal>(host: &mut J, commit: bool) {
         let Some(was) = host.kept().pop() else {
             return;
         };
@@ -1010,7 +1011,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// State 1 is a `test:gauge`, state 2 a `test:other`.
-    struct Level;
+    pub(crate) struct Level;
     #[cfg(test)]
     impl LevelHost for Level {
         fn block_state(&self, _: [i32; 3]) -> BlockStateId {
@@ -1026,7 +1027,7 @@ pub mod tests {
         }
     }
 
-    struct FixtureContent;
+    pub(crate) struct FixtureContent;
     #[mod_api::__subscriptions]
     impl Hooks for FixtureContent {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
@@ -1052,14 +1053,14 @@ pub mod tests {
     }
 
     /// The test mods, their parts installed, on a thread that runs a game.
-    pub fn game_thread() -> super::super::Mods {
-        let mods: super::super::Mods = vec![
+    pub fn game_thread() -> crate::Mods {
+        let mods: crate::Mods = vec![
             ModEntry::new("doubler", Box::new(Doubler)),
             ModEntry::new("chemist", Box::new(Chemist)),
             ModEntry::new("test", Box::new(FixtureContent)),
         ]
         .into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         crate::registry_keys::resolve_fluids(&[
             "minecraft:water",
@@ -1075,7 +1076,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// Block entities of one type, or vanilla ones (none).
-    struct TypeOf(Option<&'static str>);
+    pub(crate) struct TypeOf(pub(crate) Option<&'static str>);
     #[cfg(test)]
     impl mod_api::prelude::BlockEntitiesBackend for TypeOf {
         fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
@@ -1104,7 +1105,7 @@ pub mod tests {
     /// How a mod tank misanswers: an extract takes and answers 100 mB more than asked
     /// (`GivesMore`), or an insert answers 100 mB more than went in (`TakesMore`).
     #[derive(Clone, Copy, PartialEq)]
-    enum Lie {
+    pub(crate) enum Lie {
         GivesMore,
         TakesMore,
     }

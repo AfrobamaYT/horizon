@@ -344,6 +344,13 @@ impl LevelsBackend for Game<'_> {
         );
         self.native_level_fluid_state(level, pos)
     }
+    fn level_loaded_chunks(&self, level: LevelRef) -> Option<Vec<ChunkRef>> {
+        mod_api::__private::check_access(
+            "level_loaded_chunks",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_loaded_chunks(level)
+    }
 }
 impl LevelsBackendMut for Game<'_> {
     fn chunk_set_forced(&mut self, chunk: ChunkRef, forced: bool) -> bool {
@@ -568,5 +575,19 @@ impl LevelsBackendMut for Game<'_> {
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_level_set_random(level, random)
+    }
+    fn level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        mod_api::__private::check_access(
+            "level_bone_meal",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_bone_meal(level, pos)
+    }
+    fn level_set_biome(&mut self, level: LevelRef, pos: [i32; 3], biome: &str) -> bool {
+        mod_api::__private::check_access(
+            "level_set_biome",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_set_biome(level, pos, biome)
     }
 }
