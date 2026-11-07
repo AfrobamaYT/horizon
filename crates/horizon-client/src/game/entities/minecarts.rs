@@ -2331,8 +2331,10 @@ impl Game<'_> {
         let items = items.clone();
         if let Some(c) = self.carts.iter_mut().find(|c| c.id as i32 == key.2) {
             c.items = items;
-        } else if let Some(b) = self.boats.iter_mut().find(|b| b.id as i32 == key.2) {
-            b.items = items;
+        } else if let Some(i) = self.boats.iter().position(|b| b.id as i32 == key.2) {
+            self.boats.update(i, |b| {
+                b.items = items;
+            });
         }
     }
     /// The open cart's kind when a cart container is shown.
