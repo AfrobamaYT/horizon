@@ -97,3 +97,21 @@ impl LifecycleFixture {
         });
     }
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_fixture_walks_fangs_owners() {
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.fangs.list.clear();
+            for &(id, at) in entries {
+                game.insert_fangs(id, at, 0.0, 0, 0);
+            }
+        },
+        ids: |game| game.fangs.list.iter().map(|f| f.id).collect(),
+        target: crate::game::commands::Target::Fangs,
+        unloads_with_chunk: true,
+        remote: None,
+    }
+    .run();
+}
