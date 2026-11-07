@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn append_preserves_batch_numbers_and_receiver_order() {
-        let mut list = JoinList::default();
+        let mut list = JoinList::<Entity>::default();
         for value in 1..=2 {
             list.push(Entity {
                 join: JoinSeq::UNJOINED,
