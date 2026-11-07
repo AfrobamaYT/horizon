@@ -546,7 +546,7 @@ impl Game<'_> {
             if places_on_block && (self.may_build() || self.can_place_on_in_adventure(hit.pos)) {
                 return Some(Verb::Place);
             }
-            if self.may_build() && self.block_transform(&stack, hit.pos, hit.face).is_some() {
+            if self.may_build() && self.block_transform(&stack, hit).is_some() {
                 return Some(Verb::Use);
             }
             if id == "firework_rocket" && !gliding {
@@ -605,7 +605,7 @@ impl Game<'_> {
                 if info.food.is_some() && !self.can_eat(&stack, info.can_always_eat) {
                     return None;
                 }
-                use horizon_world::consumable::UseAnimation;
+                use horizon_core::use_animation::UseAnimation;
                 match consumable.animation {
                     UseAnimation::Eat => Verb::Eat,
                     UseAnimation::Drink => Verb::Drink,
