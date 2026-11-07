@@ -32,14 +32,15 @@ mod component_hover_tests {
             &self,
             _: &dyn mod_api::ClientHost,
             event: &mut ComponentHoverEvent<'_>,
-        ) {
-            if let TextHover::Text(text) = event.hover
-                && text.content == TextContent::Literal("secret".into())
-            {
-                *event.cancel = true;
-                event.draw.fill([1.0, 2.0, 3.0, 4.0], 0xff00ff00);
-            }
+        ) -> mod_api::Flow {
             SEEN.lock().unwrap().push(event.hover.clone());
+            match event.hover {
+                TextHover::Text(text) if text.content == TextContent::Literal("secret".into()) => {
+                    event.draw.fill([1.0, 2.0, 3.0, 4.0], 0xff00ff00);
+                    mod_api::Flow::Cancel
+                }
+                _ => mod_api::Flow::Continue,
+            }
         }
     }
 
