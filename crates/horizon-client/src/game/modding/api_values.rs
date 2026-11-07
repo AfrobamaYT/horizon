@@ -101,6 +101,21 @@ impl ItemBoundary for super::native_hooks::HitLevel<'_> {
     }
 }
 
+fn block_metadata_table() -> Result<&'static horizon_mod_runtime::block_definitions::Blocks, mod_api::BlockStateError> {
+    mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)
+}
+impl super::Game<'_> {
+    pub(in crate::game) fn block_metadata_property(&self, state: mod_api::BlockStateRecord, name: &str) -> Result<Option<&str>, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::property(block_metadata_table()?, state, name)
+    }
+    pub(in crate::game) fn block_metadata_with(&self, state: mod_api::BlockStateRecord, name: &str, value: &str) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::with(block_metadata_table()?, state, name, value)
+    }
+    pub(in crate::game) fn block_metadata_of(&self, block: mod_api::BlockKey, properties: &[mod_api::StateConstraint]) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::of(block_metadata_table()?, block, properties)
+    }
+}
+
 /// Normalize an existing game write's answer without changing its implementation.
 /// Generated API forwarders add the checked-input refusal around successful native answers.
 pub(in crate::game) trait IntoWriteResult {
