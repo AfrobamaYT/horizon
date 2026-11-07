@@ -749,8 +749,8 @@ pub(super) mod tests {
                 Ok::<_, ()>(handler.insert(host, tx, 4, &ItemResource::of(&chest), 1))
             });
             // Through `set_equipment`.
-            let through_setter = game.native_living(game.native_entity(31).unwrap()).unwrap();
-            assert!(game.native_living_set_equipment(
+            let through_setter = game.living(game.entity(31).unwrap()).unwrap();
+            assert!(game.living_set_equipment(
                 through_setter,
                 EquipmentSlot::Chest,
                 Some(chest.clone())
@@ -763,7 +763,7 @@ pub(super) mod tests {
             );
             // The attribute map answers the same armour for both (#941).
             let read = |game: &super::Game<'_>, id: u32| {
-                let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+                let living = game.living(game.entity(id).unwrap()).unwrap();
                 let host: &dyn mod_api::Host = game;
                 living.attribute_value(host, "minecraft:armor")
             };
@@ -2015,8 +2015,8 @@ pub(super) mod tests {
                     Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1))
                 });
             }
-            let through_setter = game.native_living(game.native_entity(41).unwrap()).unwrap();
-            assert!(game.native_living_set_equipment(
+            let through_setter = game.living(game.entity(41).unwrap()).unwrap();
+            assert!(game.living_set_equipment(
                 through_setter,
                 EquipmentSlot::Chest,
                 Some(ItemStack::new("minecraft:diamond_chestplate", 1)),
