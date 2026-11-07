@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use serde_json::Value;
+use std::sync::Arc;
 // Engine-owned recipe snapshots.
 
 use super::{Ingredient, ItemStack};
@@ -286,4 +286,3 @@ impl RecipeSnapshot {
         }
     }
 }
-

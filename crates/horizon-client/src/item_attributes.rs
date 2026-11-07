@@ -41,7 +41,7 @@ fn modified<'a>(stack: &ItemStack, rows: Cow<'a, [ModifierRow]>) -> Cow<'a, [Mod
         }
     }
     let mut modifiers = mod_api::__private::game::item_attribute_modifiers(entries);
-    mod_api::item_attributes::native_item_attribute_modifier(stack, &mut modifiers);
+    crate::native_stack_hooks::attributes(stack, &mut modifiers);
     match mod_api::__private::game::changed_item_attribute_modifiers(modifiers) {
         Some(entries) => {
             kept.extend(entries.iter().map(row));

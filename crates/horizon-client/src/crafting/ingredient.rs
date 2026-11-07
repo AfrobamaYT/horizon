@@ -1,11 +1,11 @@
 //! Engine recipe ingredients and stack matching.
 use super::{ItemStack, Items};
+use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
 use horizon_world::native_load_context::LoadContext;
+pub use mod_api::crafting::Shape;
+use mod_api::crafting::{WalkedIngredient, native_ingredient};
 use serde_json::Value;
 use std::collections::HashSet;
-use mod_api::crafting::{WalkedIngredient, native_ingredient};
-pub use mod_api::crafting::Shape;
-use crate::native_client_hooks::ingredient_test as native_ingredient_test;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
 /// it resolved. Written and read only here; the loads that own the sources
 /// never send or save it.
@@ -56,17 +56,6 @@ pub struct Ingredient {
     /// stack asks each child its own `test` (a mod's kind among them),
     /// as on NeoForge — the flat list above only names items.
     pub children: Option<(Shape, Vec<Self>)>,
-}
-/// How a shape's children combine at match time.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-// exhaustive: a closed set the game matches without a wildcard
-pub enum Shape {
-    /// Any child matching the stack is enough.
-    Compound,
-    /// Every child must match it.
-    Intersection,
-    /// The first child must, and the second must not.
-    Difference,
 }
 impl Ingredient {
     /// The items of a list, in order.

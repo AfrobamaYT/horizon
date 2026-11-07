@@ -2,6 +2,7 @@
 use super::ItemStack;
 /// Operations on the clicked slot, including its placement and take rules.
 pub trait SlotView {
+    fn items(&self) -> &horizon_items::items::Items;
     fn item(&self) -> Option<ItemStack>;
     fn may_place(&self, stack: &ItemStack) -> bool;
     fn may_pickup(&self) -> bool;

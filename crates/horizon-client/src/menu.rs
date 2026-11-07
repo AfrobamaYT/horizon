@@ -19,7 +19,10 @@ use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs
 use horizon_world::native_load_context::{LoopContext, LoopSide};
 pub use mod_api::menu::{LogicalSide, MenuButtonContext};
 mod models;
-pub use models::{AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake, SlotView, StackedOnOther};
+pub use models::{
+    AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
+    SlotView, StackedOnOther,
+};
 use std::sync::Arc;
 
 mod bundle;
@@ -311,6 +314,10 @@ struct MenuSlotView<'a, 'e> {
 }
 
 impl SlotView for MenuSlotView<'_, '_> {
+    fn items(&self) -> &crate::items::Items {
+        self.env.items
+    }
+
     fn item(&self) -> Option<ItemStack> {
         self.menu.slot(self.slot).cloned()
     }
