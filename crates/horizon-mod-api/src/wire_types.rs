@@ -792,3 +792,43 @@ mod tests {
         assert!(Reader::decode::<DimensionKey>(&[]).is_err());
     }
 }
+
+/// The whole generator, through its own constructor, which masks the state to 48 bits.
+impl Wire for crate::LegacyRandom {
+    const MIN: usize = 9;
+    fn put(&self, out: &mut Writer) {
+        out.put(&<(u64, Option<f64>)>::from(self));
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::from(input.take::<(u64, Option<f64>)>()?))
+    }
+}
+
+/// The converted files of a reload, as the game hands them over: ids that parsed, with their bytes.
+impl Wire for crate::reload::ReloadFiles {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.0);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new(input.take()?))
+    }
+}
+impl Wire for crate::ServerReloadContext {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.files);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new(input.take()?))
+    }
+}
+impl Wire for crate::ClientReloadContext {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.files);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new(input.take()?))
+    }
+}

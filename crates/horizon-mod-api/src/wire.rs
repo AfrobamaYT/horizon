@@ -247,6 +247,17 @@ impl Wire for String {
     }
 }
 
+/// A mod's own text, owned once read: a `Cow<'static, str>` field is how the API takes either.
+impl Wire for std::borrow::Cow<'static, str> {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put_str(self);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        String::take(input).map(Self::Owned)
+    }
+}
+
 impl Wire for Box<str> {
     const MIN: usize = 4;
     fn put(&self, out: &mut Writer) {
