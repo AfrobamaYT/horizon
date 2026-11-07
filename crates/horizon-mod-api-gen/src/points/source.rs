@@ -149,6 +149,19 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                 let mut out = text.clone();
                 out.insert_str(end, &format!("\n{}\n", point.items));
                 out.insert_str(at, &attribute);
+                // Attribute spans precede both insertions; remove backwards to retain their offsets.
+                for attr in function.attrs.iter().rev().filter(|attr| {
+                    attr.path().is_ident("inline")
+                        && attr
+                            .parse_args::<syn::Ident>()
+                            .is_ok_and(|arg| arg == "always")
+                }) {
+                    let span = syn::spanned::Spanned::span(attr);
+                    out.replace_range(
+                        offset(&text, &lines, span.start())..offset(&text, &lines, span.end()),
+                        "",
+                    );
+                }
                 fs::write(&file.path, out).map_err(|error| error.to_string())?;
                 point.module = function.module.clone();
                 point.record_export = format!("__{}Raw", point_shape::camel(&function.name()));
@@ -223,7 +236,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     );
     put(
         GAME,
-        "pub struct Game; impl Game { fn listed(&mut self) {} } mod nested { use super::Game; impl Game { #[inline(always)] fn hidden(&mut self, value: i32) -> i32 { value } } }",
+        "pub struct Game; impl Game { fn listed(&mut self) {} } mod nested { use super::Game; impl Game { #[must_use] #[inline(always)] fn hidden(&mut self, value: i32) -> i32 { value } #[inline(always)] fn untouched(&self) {} } }",
     );
     let sig = syn::parse_quote!(fn hidden(&mut self, value: i32) -> i32);
     let shape = point_shape::shape(quote!(raw, name = "source123"), &sig).unwrap();
@@ -277,6 +290,33 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     stage(&root, &mut private).unwrap();
     assert_eq!(private, [expected.clone()]);
     assert_eq!(read(&root).unwrap(), [expected]);
+    let staged = syn::parse_file(&fs::read_to_string(root.join(GAME)).unwrap()).unwrap();
+    let mut found = Vec::new();
+    file_functions(
+        "horizon_client::game",
+        &staged.items,
+        &|function| function.target() == private[0].target,
+        &|_, _| true,
+        &mut found,
+    );
+    assert_eq!(found.len(), 1);
+    assert!(point_shape::eligible(found[0].attrs, found[0].sig));
+    assert!(
+        found[0]
+            .attrs
+            .iter()
+            .any(|attr| attr.path().is_ident("must_use"))
+    );
+    let mut untouched = Vec::new();
+    file_functions(
+        "horizon_client::game",
+        &staged.items,
+        &|function| function.sig.ident == "untouched",
+        &|_, _| true,
+        &mut untouched,
+    );
+    assert_eq!(untouched.len(), 1);
+    assert!(!point_shape::eligible(untouched[0].attrs, untouched[0].sig));
     let public = game_points(&root).unwrap();
     assert_eq!(before, serde_json::to_value(&public).unwrap());
     let parsed = syn::parse_file(&records(&public, &private)).unwrap();

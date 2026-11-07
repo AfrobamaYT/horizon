@@ -630,12 +630,19 @@ fn all_points<'a>(
 }
 
 /// The game's points, by name: every point function of the game module, and the listed ones of
-/// the crates below it.
+/// the crates below it. Staged private source targets are never part of this public list.
 pub fn game_points(root: &Path) -> Result<Vec<GamePoint>, String> {
+    let private = source::read(root)?
+        .into_iter()
+        .map(|point| plain_path(&point.target))
+        .collect::<std::collections::BTreeSet<_>>();
     let (scanned, list) = scan(root)?;
     let mut points = Vec::new();
     for (_, found) in all_points(&scanned, &list)? {
         let target = found.target();
+        if private.contains(&plain_path(&target)) {
+            continue;
+        }
         let shape = found.shape()?;
         let api = shape.api_items(&target);
         points.push(GamePoint {
