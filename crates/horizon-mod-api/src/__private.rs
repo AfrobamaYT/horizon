@@ -42,8 +42,11 @@ pub fn backend_ref(inner: &dyn Backend) -> crate::BackendRef<'_> {
 /// Call `read` on `host`'s real backend, or `None` where the host has none:
 /// the mob tick's goal view forwards the level's own reads — blocks, loaded
 /// chunks, time, height, weather, block entities — through it (#1077); the
-/// entity data its snapshot does not carry stays refused.
-pub fn backend_read<R>(host: &dyn crate::Host, read: impl FnOnce(&dyn Backend) -> R) -> Option<R> {
+/// entity data its snapshot does not carry stays refused. Returned borrows stay tied to the host.
+pub fn backend_read<'a, R>(
+    host: &'a dyn crate::Host,
+    read: impl FnOnce(&'a dyn Backend) -> R,
+) -> Option<R> {
     host.backend().map(|backend| read(backend.open()))
 }
 /// The game's side of wasm mods, for `horizon-mod-wasm`.

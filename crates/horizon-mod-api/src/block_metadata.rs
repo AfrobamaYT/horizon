@@ -23,7 +23,7 @@ impl BlockStateRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BlockStateError {
-    /// Metadata has not been published for this context.
+    /// Metadata is unavailable in this context.
     Unavailable,
     /// The context does not contain the block key.
     UnknownBlock,
@@ -37,6 +37,11 @@ pub enum BlockStateError {
     DuplicateProperty(u32),
     /// The requested combination is not a registered state.
     InvalidCombination,
+}
+impl crate::NoBackend for BlockStateError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
 }
 impl From<horizon_mod_runtime::block_definitions::StateError> for BlockStateError {
     fn from(error: horizon_mod_runtime::block_definitions::StateError) -> Self {
@@ -141,6 +146,12 @@ mod tests {
         assert_eq!(on.state, 1);
         assert_eq!(metadata.property(on, "lit"), Ok(Some("true")));
         assert_eq!(metadata.property(off, "lit"), Ok(Some("false")));
+        let borrowed = crate::__private::backend_read(&host, |backend| {
+            backend.block_metadata_property(off, "lit")
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(borrowed, Some("false"));
         assert_eq!(metadata.property(off, "missing"), Ok(None));
         assert_eq!(
             metadata.with(off, "lit", "bad"),
