@@ -1948,6 +1948,12 @@ mod tests {
     struct Hide(AttributeFilter, Vec<(&'static str, u32)>);
     impl AttributeTooltipListener for Hide {
         fn skipped(&self, _: &ItemStack, _: &AttributeTooltipContext) -> AttributeFilter {
+            // Only a shown display gathers skips; the second case below hides the modifiers.
+            assert_ne!(
+                self.0,
+                AttributeFilter::default(),
+                "gather asked with nothing shown"
+            );
             self.0.clone()
         }
         fn extra(

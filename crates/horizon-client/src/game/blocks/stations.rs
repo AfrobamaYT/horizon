@@ -3556,13 +3556,13 @@ mod tests {
                 let shown = plain(game);
                 let heading = shown
                     .iter()
-                    .position(|l| l.contains("On Head"))
+                    .position(|l| l.contains("on Head"))
                     .unwrap_or_else(|| panic!("{shown:?}"));
                 let rune = shown.iter().position(|l| l == "Rune: warding").unwrap();
                 assert!(rune > heading, "after the attribute lines: {shown:?}");
                 HIDE.store(true, Ordering::Relaxed);
                 let hidden = plain(game);
-                assert!(!hidden.iter().any(|l| l.contains("On Head")), "{hidden:?}");
+                assert!(!hidden.iter().any(|l| l.contains("on Head")), "{hidden:?}");
                 assert!(!hidden.iter().any(|l| l.contains("Armor")), "{hidden:?}");
                 assert!(hidden.iter().any(|l| l == "Rune: warding"), "{hidden:?}");
             });
