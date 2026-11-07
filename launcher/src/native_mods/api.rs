@@ -55,33 +55,36 @@ pub(super) fn main_rs(
             format!("        mod_{i}_internals::raw::{place}({:?}, mod_{i}::{}){order}, // injection {:?}\n", manifest.id, injection.method, injection.id)
         })
     }).collect::<String>();
-    let raw = raw + &mods
-        .iter()
-        .enumerate()
-        .flat_map(|(i, manifest)| {
-            manifest
-                .inject
-                .iter()
-                .filter(|entry| {
-                    entry.access == horizon_mod_package::manifest::inject::Access::Api
-                        && entry.call.is_none()
-                })
-                .map(move |entry| {
-                    let point = listed
-                        .iter()
-                        .find(|point| {
-                            internals::plain_path(&point.target) == internals::plain_path(&entry.at)
-                        })
-                        .expect("API slot checked");
-                    let place = point
-                        .place(entry.kind == horizon_mod_package::manifest::inject::Kind::Return);
-                    format!(
+    let raw = raw
+        + &mods
+            .iter()
+            .enumerate()
+            .flat_map(|(i, manifest)| {
+                manifest
+                    .inject
+                    .iter()
+                    .filter(|entry| {
+                        entry.access == horizon_mod_package::manifest::inject::Access::Api
+                            && entry.call.is_none()
+                    })
+                    .map(move |entry| {
+                        let point = listed
+                            .iter()
+                            .find(|point| {
+                                internals::plain_path(&point.target)
+                                    == internals::plain_path(&entry.at)
+                            })
+                            .expect("API slot checked");
+                        let place = point.place(
+                            entry.kind == horizon_mod_package::manifest::inject::Kind::Return,
+                        );
+                        format!(
                         "        mod_points::listeners::{place}({:?}, {}, {:?}, mod_{i}::{}),\n",
                         manifest.id, entry.priority, entry.id, entry.with
                     )
-                })
-        })
-        .collect::<String>();
+                    })
+            })
+            .collect::<String>();
     let raw = raw
         + &mods
             .iter()

@@ -4,9 +4,16 @@ use mod_points::__private::{POINTS, RawKind, SlotListener, seal};
 use mod_points::{PointId, RegisterError, register, stop};
 use std::sync::atomic::Ordering;
 
-fn tick(_: mod_api::HostSide<'_>, _: &mut mod_points::TickArgs) {}
+fn tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
+    assert_eq!(mod_api::crash::current_native_mod(), Some("tick_mod"));
+    args.cancel = true;
+}
 
 struct Quiet;
+impl mod_api::Host for Quiet {}
+mod_api::impl_host_areas!(Quiet);
+impl mod_api::ServerHost for Quiet {}
+mod_api::impl_server_host_areas!(Quiet);
 
 #[mod_api::__subscriptions]
 impl mod_api::Hooks for Quiet {}
@@ -94,6 +101,10 @@ fn one_list_registered_sealed_and_stopped() {
     );
     seal();
     assert_eq!(register(&raw_at("late", place)), Err(RegisterError::Sealed));
+    assert_eq!(
+        register(&mod_points::listeners::tick("late", 0, "head", tick)),
+        Err(RegisterError::Sealed)
+    );
     assert!(POINTS[PointId::Tick as usize].load(Ordering::Acquire));
     assert!(POINTS[PointId::TickReturn as usize].load(Ordering::Acquire));
     assert!(!POINTS[raw].load(Ordering::Acquire));
@@ -120,6 +131,13 @@ fn one_list_registered_sealed_and_stopped() {
     });
     assert_eq!(order, ["typed", "erased", "typed"]);
     assert_eq!((heard, raw_heard), (1, 3));
+    let mut args = mod_points::TickArgs::__new();
+    mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
+    assert!(
+        args.cancel,
+        "the checked function runs under its owner's guard and writes back"
+    );
+    assert_eq!(mod_api::crash::current_native_mod(), None);
     assert!(mod_api::__private::set_mod_enabled("tick_mod", false));
     mod_points::__private::fire_api(PointId::Tick, &mut |_| heard += 1);
     mod_points::__private::fire_raw(PointId::Tick, "tick", &mut |_| raw_heard += 1);
