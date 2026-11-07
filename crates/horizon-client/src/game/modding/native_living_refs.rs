@@ -441,11 +441,11 @@ impl Game<'_> {
             Target::Guest(conn) => {
                 let g = self.command_guest(conn)?;
                 let p = g.motion.as_deref()?;
-                Some(!p.health.dead_or_dying() && g.vehicle.is_none() && !p.sleeping)
+                Some(self.can_use_portal_of(p, g.vehicle.is_some(), g.sleeping))
             }
             Target::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-                Some(self.mob_can_use_portal(m))
+                Some(self.mob_portal_eligible(m))
             }
             _ => None,
         }
@@ -466,12 +466,13 @@ impl Game<'_> {
             return None;
         };
         let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-        let [min, max] = self.native_entity_bounding_box(target)?;
+        let [min, max] = self.entity_bounding_box(target)?;
         let bounds = horizon_core::geometry::Aabb::new(
             horizon_core::geometry::Vec3::new(min[0], min[1], min[2]),
             horizon_core::geometry::Vec3::new(max[0], max[1], max[2]),
         );
-        Some(m.melee_reaches(bounds))
+        let w = self.mob_world_base(&[]);
+        Some(m.melee_reaches(&w, bounds))
     }
 
     /// `LivingEntity.canFreeze`: the decision the freeze tick itself runs — a
@@ -515,7 +516,7 @@ impl Game<'_> {
     /// one of `#minecraft:beds`. None where the sleeper keeps no position,
     /// the block is not a bed, or the handle is stale.
     pub(super) fn living_bed_orientation(&self, living: LivingRef) -> Option<Direction> {
-        let pos = self.native_living_sleeping_pos(living)?;
+        let pos = self.living_sleeping_pos(living)?;
         let w = self.mob_world_base(&[]);
         let name = w.block_name(pos[0], pos[1], pos[2]);
         if !w.has_tag("minecraft:beds", name) {
@@ -2463,9 +2464,9 @@ mod tests {
                 .push(Mob::new(31, zombie.clone(), Vec3::new(1.5, 64.0, 0.5), 0.0));
             game.mobs
                 .push(Mob::new(32, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
-            let near = game.native_living(game.native_entity(30).unwrap()).unwrap();
-            let beside = game.native_entity(31).unwrap();
-            let far = game.native_entity(32).unwrap();
+            let near = game.living(game.entity(30).unwrap()).unwrap();
+            let beside = game.entity(31).unwrap();
+            let far = game.entity(32).unwrap();
 
             // The walk gate's own answers: alive and travelling, until dead.
             {
@@ -2509,7 +2510,7 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
-            let player = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let player = game.living(game.entity(20).unwrap()).unwrap();
             {
                 let host: &dyn Host = game;
                 assert_eq!(player.can_use_portal(host), Some(true));
@@ -2531,7 +2532,7 @@ mod tests {
             let squid = game.res.mob_types().get("minecraft:squid").unwrap().clone();
             game.mobs
                 .push(Mob::new(33, squid, Vec3::new(7.5, 64.0, 0.5), 0.0));
-            let squid = game.native_living(game.native_entity(33).unwrap()).unwrap();
+            let squid = game.living(game.entity(33).unwrap()).unwrap();
             let golem_kind = game
                 .res
                 .mob_types()
@@ -2540,7 +2541,7 @@ mod tests {
                 .clone();
             game.mobs
                 .push(Mob::new(34, golem_kind, Vec3::new(9.5, 64.0, 0.5), 0.0));
-            let golem = game.native_living(game.native_entity(34).unwrap()).unwrap();
+            let golem = game.living(game.entity(34).unwrap()).unwrap();
             {
                 let host: &dyn Host = game;
                 // A squid and a copper golem (#can_breathe_under_water)
@@ -2602,7 +2603,7 @@ mod tests {
                 .clone();
             game.mobs
                 .push(Mob::new(30, villager, Vec3::new(0.5, 64.0, 0.5), 0.0));
-            let sleeper = game.native_living(game.native_entity(30).unwrap()).unwrap();
+            let sleeper = game.living(game.entity(30).unwrap()).unwrap();
             let host: &dyn Host = game;
             // Awake: no sleeping position, no bed.
             assert_eq!(sleeper.bed_orientation(host), None);
@@ -2624,12 +2625,44 @@ mod tests {
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
             game.sleeping = Some([2, 63, 2]);
-            let player = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let player = game.living(game.entity(20).unwrap()).unwrap();
             let host: &dyn Host = game;
             assert_eq!(player.bed_orientation(host), Some(Direction::North));
             game.mobs.clear();
             let host: &dyn Host = game;
             assert_eq!(sleeper.bed_orientation(host), None);
+        });
+    }
+
+    /// #943, review: a guest answers the same one portal rule over their
+    /// body and vehicle (`can_use_portal_of`), not a hand-rolled copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_guest_answers_the_one_portal_rule() {
+        use mod_api::Host;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            // The fixture leaves the guest without a body: give one, as a
+            // joined player's server record keeps.
+            game.lan.as_mut().unwrap().hub.update_guest(12, |g| {
+                g.motion = Some(Box::new(
+                    horizon_client::motion::PlayerMotion::new(
+                        game.motion,
+                        horizon_core::geometry::Vec3::new(3.0, 64.0, 5.0),
+                    )
+                    .unwrap(),
+                ))
+            });
+            let living = game.living(game.entity(12).unwrap()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(living.can_use_portal(host), Some(true));
+            // Asleep: the rule's sleep half answers, over their body.
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .update_guest(12, |g| g.sleeping = true);
+            let host: &dyn Host = game;
+            assert_eq!(living.can_use_portal(host), Some(false));
         });
     }
 }

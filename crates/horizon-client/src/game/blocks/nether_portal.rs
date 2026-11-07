@@ -739,18 +739,26 @@ impl Game<'_> {
             },
         );
     }
-    /// `LivingEntity.canUsePortal` for the player of this game (#943):
-    /// `Entity.canUsePortal(false)` (alive, nobody's passenger) and not
-    /// asleep (`isSleeping`). The one decision the client's portal entry and
-    /// the `LivingRef` read answer — a parity fix: the client's own entry
-    /// used to skip the sleep half (vanilla `LivingEntity.canUsePortal`
-    /// checks it).
+    /// `LivingEntity.canUsePortal` over a player's body and its transport
+    /// (#943): `Entity.canUsePortal(false)` (alive, nobody's passenger) and
+    /// not asleep (`isSleeping`). The one rule the client's portal entry,
+    /// the player in place and the guest arm of the `LivingRef` read answer
+    /// — a parity fix: the client's own entry used to skip the sleep half
+    /// (vanilla `LivingEntity.canUsePortal` checks it).
+    pub(super) fn can_use_portal_of(
+        &self,
+        p: &horizon_client::motion::PlayerMotion,
+        riding: bool,
+        sleeping: bool,
+    ) -> bool {
+        !p.health.dead_or_dying() && !riding && !sleeping
+    }
+    /// [`can_use_portal_of`](Self::can_use_portal_of) for the player of
+    /// this game.
     pub(super) fn player_can_use_portal(&self) -> bool {
         self.player
             .as_ref()
-            .is_some_and(|p| !p.health.dead_or_dying())
-            && self.riding.is_none()
-            && !self.player.as_ref().is_some_and(|p| p.sleeping)
+            .is_some_and(|p| self.can_use_portal_of(p, self.riding.is_some(), p.sleeping))
     }
     /// `canUsePortal(false)` of a mob: what the mob itself decides
     /// (`mobs::mob_can_use_portal`), riding nothing, not asleep, and not
