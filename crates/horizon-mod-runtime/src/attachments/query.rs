@@ -46,6 +46,12 @@ impl<H> AttachmentBatch<H> {
         Self { rows: None }
     }
 
+    /// Borrow the captured rows for an owned boundary conversion.
+    /// Native query construction does not invoke that conversion.
+    pub fn rows(&self) -> &[AttachmentRow<H>] {
+        self.rows.as_deref().map_or(&[], |rows| rows.as_slice())
+    }
+
     /// Bind the key once, checking its policy before any row is read.
     /// The query borrows only the key, never the index or host.
     pub fn query<T: Send + Sync + 'static>(
@@ -71,12 +77,7 @@ impl<H: Copy, T: Send + Sync + 'static> AttachmentQuery<'_, H, T> {
     /// or per-item allocation. A first saved decode may allocate in the codec/cache.
     pub fn iter(&self) -> AttachmentIter<'_, H, T> {
         AttachmentIter {
-            rows: self
-                .batch
-                .rows
-                .as_deref()
-                .map_or(&[][..], |rows| rows.as_slice())
-                .iter(),
+            rows: self.batch.rows().iter(),
             key: self.key,
         }
     }
