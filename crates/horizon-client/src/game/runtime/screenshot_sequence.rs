@@ -260,9 +260,10 @@ impl Game<'_> {
         }
         let outcome = match (queued, renderer.screenshot_result.take()) {
             (false, Some(Ok(pending))) => {
-                let [w, h] = pending.save().map_err(|e| e.to_string())?;
+                let saved = pending.save_with_details().map_err(|e| e.to_string())?;
+                let [w, h] = saved.size;
                 let timing = sequence.timing();
-                let value = json!({
+                let mut value = json!({
                     "ok": true,
                     "path": sequence.path,
                     "frames": sequence.frames,
@@ -276,6 +277,9 @@ impl Game<'_> {
                     "pack": sequence.pack.clone(),
                 });
 
+                if let Some(hdr) = saved.hdr_path {
+                    value["hdr_path"] = json!(hdr);
+                }
                 Ok(value)
             }
             (_, Some(Err(e))) => Err(e.into()),

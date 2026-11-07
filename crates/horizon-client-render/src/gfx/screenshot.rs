@@ -16,6 +16,12 @@ pub(super) struct HdrScreenshot {
     pub paper_white: f32,
 }
 
+/// Files successfully written for a requested screenshot.
+pub struct SavedScreenshot {
+    pub size: [u32; 2],
+    pub hdr_path: Option<PathBuf>,
+}
+
 impl PendingScreenshot {
     /// The frame the screenshot hook may read and change (`ScreenshotEvent.getImage`).
     pub fn image_mut(&mut self) -> &mut mod_api::ScreenshotImage {
@@ -36,11 +42,20 @@ impl PendingScreenshot {
 
     /// Save an agent capture or world icon to its requested destination.
     pub fn save(&self) -> Result<[u32; 2]> {
+        self.save_with_details().map(|saved| saved.size)
+    }
+
+    /// Save a capture and report the HDR sibling only when its write succeeds.
+    pub fn save_with_details(&self) -> Result<SavedScreenshot> {
         let image = self.rgba()?;
+        let mut hdr_path = None;
         if let Some(hdr) = &self.hdr {
             let path = hdr_screenshot_path(&self.path);
             match hdr.save(&path) {
-                Ok(()) => log::info!("Saved HDR screenshot to {}", path.display()),
+                Ok(()) => {
+                    log::info!("Saved HDR screenshot to {}", path.display());
+                    hdr_path = Some(path);
+                }
                 Err(e) => log::warn!("Horizon renderer: HDR screenshot {}: {e}", path.display()),
             }
         }
@@ -52,7 +67,10 @@ impl PendingScreenshot {
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.write_header()?.write_image_data(&image.rgba)?;
-        Ok([image.width, image.height])
+        Ok(SavedScreenshot {
+            size: [image.width, image.height],
+            hdr_path,
+        })
     }
 
     /// Validate a mod's relative file name at the write boundary, then save
