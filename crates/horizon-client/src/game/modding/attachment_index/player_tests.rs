@@ -86,6 +86,7 @@ fn saved_placement_respawn_removal_and_reconnect_publish_player_rows() {
         assert!(!current.unregister());
         let fresh = snapshot(game, Dim::Overworld);
         assert_eq!(fresh.len(), 1);
+        assert_ne!(fresh[0].holder, before[0].holder);
         let AttachmentHolder::Player(player) = fresh[0].holder else {
             panic!("not a player")
         };
@@ -157,6 +158,12 @@ fn travel_moves_rows_before_guest_callbacks_and_keeps_captured_values() {
             panic!("not a player")
         };
         assert_eq!(player, game.native_player_ref(12).unwrap());
+        game.enter_level(Dim::Overworld).unwrap();
+        let host: &mut dyn ServerHost = game;
+        VALUE.set(host, Holder::Player(12), 18).unwrap();
+        assert!(snapshot(game, Dim::Overworld).is_empty());
+        assert_eq!(snapshot(game, Dim::Nether)[0].entry.read(&VALUE), Ok(&18));
+        assert_eq!(nether[0].entry.read(&VALUE), Ok(&17));
         game.lan.as_mut().unwrap().hub.guests.clear();
         assert!(snapshot(game, Dim::Nether).is_empty());
         assert!(

@@ -4,7 +4,7 @@ use mod_api::{AttachmentHolder, EntityRef};
 impl Game<'_> {
     /// Publish a placed player's saved map, or bind before its first store.
     /// Scope changes always replace the registration, even for an emptied map.
-    pub(super) fn bind_player_attachments(&mut self, conn: u32, first_store: bool) {
+    pub(in crate::game) fn bind_player_attachments(&mut self, conn: u32, first_store: bool) {
         if !self.native_authoritative() {
             return;
         }
