@@ -148,11 +148,20 @@ fn read_attachments(
     tag: &Tag,
     uuid: [i32; 4],
     maps: &mut HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    live: bool,
 ) {
     if let Ok(Some(data)) = attachment_compound(tag.get(ATTACHMENTS_KEY)) {
-        maps.entry(uuid).or_insert_with(|| {
-            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone())
-        });
+        match maps.get_mut(&uuid) {
+            // Made by `entity_constructing` listeners just now: saved values win.
+            Some(map) if !live => map.read_saved_over(data.clone()),
+            Some(_) => {}
+            None => {
+                maps.insert(
+                    uuid,
+                    horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
+                );
+            }
+        }
     }
 }
 
@@ -1353,6 +1362,7 @@ impl Game<'_> {
     /// Forget an entity that left the world (its UUID and loaded compound).
     pub(super) fn forget_entity(&mut self, id: u32) {
         if let Some(uuid) = self.persist.uuids.remove(&id) {
+            self.forget_entity_initialization(uuid);
             self.entity_attachments.remove(&uuid);
         }
         self.persist.raw.remove(&id);
@@ -1446,7 +1456,16 @@ impl Game<'_> {
     pub(super) fn remember_uuid(&mut self, id: u32, uuid: Option<[i32; 4]>, tag: &Tag) {
         if let Some(u) = uuid {
             self.persist.uuids.insert(id, u);
-            read_attachments(tag, u, &mut self.entity_attachments);
+        }
+        // `EntityType.create` then `Entity.load`: the constructing listeners set their
+        // values first and the saved attachments are read over them. An entity whose map
+        // is already live (told before) keeps it, as before.
+        let live = uuid.is_some_and(|u| self.entity_attachments.contains_key(&u));
+        if let Some(kind) = text(tag.get("id")) {
+            self.initialize_entity(mod_api::Holder::Entity(id), &kind);
+        }
+        if let Some(u) = uuid {
+            read_attachments(tag, u, &mut self.entity_attachments, live);
         }
         self.join_saved_team(id, tag);
     }
@@ -2383,11 +2402,70 @@ mod tests {
             panic!("passenger missing");
         };
         let mut loaded = HashMap::new();
-        read_attachments(&children[0], child_id, &mut loaded);
+        read_attachments(&children[0], child_id, &mut loaded, false);
         assert_eq!(
             key.get(loaded.get_mut(&child_id).unwrap(), Holder::Level),
             Ok(29)
         );
+    }
+
+    /// `remember_uuid`'s read: a map an `entity_constructing` listener made just now takes the
+    /// saved values over its own (`Entity.load` after the constructor), a live map that came
+    /// with the entity keeps its values, and no map at all is the saved one.
+    #[test]
+    fn saved_attachments_read_over_a_constructed_map_but_not_a_live_one() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+        };
+        fn key(name: &'static str) -> AttachmentType<i32> {
+            AttachmentType {
+                namespace: "test",
+                name,
+                default: || 0,
+                codec: Some(AttachmentCodec {
+                    encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                    decode: |c| match c.get(&"count".into()) {
+                        Some(Tag::Int(n)) => Ok(*n),
+                        _ => Err(AttachmentError::Decode),
+                    },
+                }),
+                copy_on_death: false,
+                sync: false,
+            }
+        }
+        let (saved, unsaved) = (key("saved"), key("unsaved"));
+        let uuid = [1, 2, 3, 4];
+        let mut data = Attachments::default();
+        saved.set(&mut data, Holder::Level, 7).unwrap();
+        let tag = Tag::compound([
+            ("UUID", Tag::IntArray(uuid.to_vec())),
+            (ATTACHMENTS_KEY, Tag::Compound(data.to_nbt())),
+        ]);
+        let listener = || {
+            let mut map = Attachments::default();
+            saved.set(&mut map, Holder::Level, 41).unwrap();
+            unsaved.set(&mut map, Holder::Level, 41).unwrap();
+            HashMap::from([(uuid, map)])
+        };
+
+        let mut constructed = listener();
+        read_attachments(&tag, uuid, &mut constructed, false);
+        let map = constructed.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(41));
+
+        let mut live = listener();
+        read_attachments(&tag, uuid, &mut live, true);
+        assert_eq!(
+            saved.get(live.get_mut(&uuid).unwrap(), Holder::Level),
+            Ok(41)
+        );
+
+        let mut none = HashMap::new();
+        read_attachments(&tag, uuid, &mut none, false);
+        let map = none.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(0));
     }
 
     /// Entities as a save before every entity held attachments wrote them (a vanilla compound

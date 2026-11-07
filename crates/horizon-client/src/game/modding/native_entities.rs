@@ -174,6 +174,9 @@ impl Game<'_> {
             let (kind, at) = self.slot_kind_and_position(slot);
             let mut canceled = false;
             let dimension = self.dim.id();
+            // `Entity.<init>` comes before `addFreshEntity`: an entity that started on a
+            // path that doesn't tell it (`entity_initialization.rs`) is told here.
+            self.initialize_entity(mod_api::Holder::Entity(id), &kind);
             self.native_entity_join_level(
                 dimension,
                 id,
