@@ -222,6 +222,11 @@ impl Game<'_> {
 mod input_tests {
     use super::*;
 
+    fn keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        mod_api::__private::resolve_items(["minecraft:stick"]).unwrap();
+    }
+
     fn stick(slot: u32) -> NativeHeldItem {
         NativeHeldItem {
             id: mod_api::__private::item_key("minecraft:stick").unwrap(),
@@ -251,6 +256,7 @@ mod input_tests {
 
     #[test]
     fn events_wait_for_their_mod_up_to_a_limit() {
+        keys();
         let mut input = ModInput::default();
         for _ in 0..EVENTS_MAX + 10 {
             input.push("a", NativeModEvent::UseStart(stick(0), 0));
@@ -263,6 +269,7 @@ mod input_tests {
 
     #[test]
     fn a_claimed_use_is_the_mods_while_it_runs() {
+        keys();
         let mut input = ModInput::default();
         input.start("orbital", stick(2), 2);
         assert!(input.owns(Some((2, 0))));
@@ -282,6 +289,7 @@ mod input_tests {
 
     #[test]
     fn an_interrupted_claimed_use_leaves_the_next_use_alone() {
+        keys();
         // A respawn ends the use: the mod hears it stop, and a vanilla use
         // begun next in the same slot is not taken for the mod's.
         let mut input = ModInput::default();

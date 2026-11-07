@@ -757,6 +757,19 @@ mod tests {
     use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
     use mod_api::FluidStack;
 
+    fn keys() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        mod_api::__private::resolve_items([
+            "minecraft:oak_log",
+            "minecraft:oak_planks",
+            "minecraft:stone",
+            "minecraft:dirt",
+            "minecraft:crafting_table",
+            "recipe_pilot:pressed_fragment",
+        ])
+        .unwrap();
+        mod_api::__private::resolve_fluids(&["minecraft:water", "minecraft:lava"]).unwrap();
+    }
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {
             item: mod_api::__private::item_key(item).unwrap(),
@@ -768,7 +781,6 @@ mod tests {
         FluidStack::new(mod_api::__private::fluid_key(id).unwrap(), amount)
     }
     fn view() -> NativeRecipeView {
-        mod_api::__private::part_tests::game_thread();
         NativeRecipeView {
             layout: NativeRecipeLayout::Grid,
             width: 5,
@@ -791,6 +803,7 @@ mod tests {
     /// its owner (who hears the panel's events) is that mod.
     #[test]
     fn native_owner_holds_the_panel() {
+        keys();
         let mut panel = Panel::default();
         let items = vec![stack("minecraft:stone"), stack("minecraft:dirt")];
         panel.show_items("recipes", items.clone());
@@ -839,6 +852,7 @@ mod tests {
 
     #[test]
     fn empty_search_can_be_edited_and_an_explicit_clear_still_hides_the_panel() {
+        keys();
         let mut panel = Panel::default();
         let items = vec![stack("recipe_pilot:pressed_fragment")];
         panel.show_items("recipes", items.clone());
