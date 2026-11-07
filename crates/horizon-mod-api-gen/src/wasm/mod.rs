@@ -1083,7 +1083,12 @@ mod tests {
                         }),
                         _ => None,
                     }).unwrap();
-                    assert!(method.to_token_stream().to_string().contains("LoadAccess :: PublishedResources"));
+                    if owner == "ServicesClientHost" {
+                        let access = method.attrs.iter().find(|attr| attr.path().is_ident("access")).unwrap();
+                        assert_eq!(access.parse_args::<syn::Ident>().unwrap(), "PublishedResources");
+                    } else {
+                        assert!(method.to_token_stream().to_string().contains("LoadAccess :: PublishedResources"));
+                    }
                 }
                 assert!(wasm.host.contains("Ok(h.render_assets())"));
                 assert!(wasm.host.contains("ModelRef::from_parts"));
