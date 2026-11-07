@@ -189,25 +189,41 @@ mod tests {
     use super::super::host::draw::GameWorldDrawContext;
     use super::*;
     use glam::{DVec3, Mat4, Quat, Vec3};
+    use horizon_client::mesher::Vertex;
     use mod_api::{
-        Identifier, InstanceError, LightCoords, ModelInstance, Overlay, WorldDrawContext,
+        ClientHost, Hooks, Identifier, InstanceError, LightCoords, ModEntry, ModelInstance,
+        ModelRef, Overlay, SubmitCustomGeometryEvent, WorldDrawContext,
     };
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static FILL_MODEL: Mutex<Option<ModelRef>> = Mutex::new(None);
+    static FILL_ARMED: AtomicBool = AtomicBool::new(false);
+
+    struct FillBatch;
+    #[mod_api::__subscriptions]
+    impl Hooks for FillBatch {
+        fn submit_custom_geometry(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut SubmitCustomGeometryEvent<'_>,
+        ) {
+            if !FILL_ARMED.load(Ordering::Relaxed) {
+                return;
+            }
+            let model = FILL_MODEL.lock().unwrap().unwrap();
+            event
+                .draw
+                .draw_model_instances(model, &[ModelInstance::at([1.0, 0.0, 0.0], 0xFFFF_FFFF)])
+                .unwrap();
+        }
+    }
 
     fn rows(local: Mat4) -> [f32; 12] {
-        let column = local.to_cols_array_2d();
+        let c = local.to_cols_array_2d();
         [
-            column[0][0],
-            column[1][0],
-            column[2][0],
-            column[3][0],
-            column[0][1],
-            column[1][1],
-            column[2][1],
-            column[3][1],
-            column[0][2],
-            column[1][2],
-            column[2][2],
-            column[3][2],
+            c[0][0], c[1][0], c[2][0], c[3][0], c[0][1], c[1][1], c[2][1], c[3][1], c[0][2],
+            c[1][2], c[2][2], c[3][2],
         ]
     }
 
@@ -239,6 +255,50 @@ mod tests {
             .unwrap_or([0; 4])
     }
 
+    fn worst_pixels(
+        game: &Game<'_>,
+        cpu_vertices: &[Vertex],
+        instance: &horizon_client::gfx::PreparedModelInstance,
+        slot: u32,
+        uploaded: u64,
+        view: Mat4,
+    ) -> (u8, [u8; 4], [u8; 4]) {
+        let pixels = game.gui.atlas.pixels().to_vec();
+        let size = [game.gui.atlas.width, game.gui.atlas.height];
+        let cpu = horizon_client::gfx::entity_pixel_test::render(
+            cpu_vertices,
+            size,
+            &pixels,
+            view,
+            false,
+        )
+        .expect("software Vulkan entity pixels");
+        let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+        let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
+            horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                vertices: &vertices,
+                ranges,
+                uploaded,
+                requested: uploaded,
+                slot,
+                instances: std::slice::from_ref(instance),
+                per_copy: false,
+                hdr: false,
+                atlas_size: size,
+                atlas: &pixels,
+                view_proj: view,
+            },
+        )
+        .expect("software Vulkan prepared instance");
+        let worst = cpu
+            .iter()
+            .zip(gpu.iter())
+            .map(|(left, right)| left.abs_diff(*right))
+            .max()
+            .unwrap_or(0);
+        (worst, first_colour(&cpu), first_colour(&gpu))
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn draw_model_instances_matches_cpu_pixels() {
@@ -252,7 +312,11 @@ mod tests {
             let generation = mod_api::__private::game::Fields::fields(&model).generation;
             horizon_client::gfx::set_test_prepared_generation(Some(generation));
             horizon_client::gfx::cap_prepared_instance_slots(8);
-            let local = Mat4::from_scale(Vec3::splat(1.0));
+            let local = Mat4::from_scale_rotation_translation(
+                Vec3::new(0.85, 1.15, 0.7),
+                Quat::from_rotation_y(0.6),
+                Vec3::new(0.12, -0.05, 0.08),
+            );
             let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
             let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
             let lit = ModelInstance::new(
@@ -291,8 +355,6 @@ mod tests {
                 entities.iter().all(|vertex| vertex.layer == 1),
                 "overlay copies must follow the instanced prefix"
             );
-            let atlas = &game.gui.atlas;
-            let pixels = atlas.pixels().to_vec();
             let view = Mat4::from_scale_rotation_translation(
                 Vec3::new(1.4, 1.4, 0.2),
                 Quat::IDENTITY,
@@ -322,41 +384,10 @@ mod tests {
                     vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
                 }
             }
-            let cpu = horizon_client::gfx::entity_pixel_test::render(
-                &cpu_vertices,
-                [atlas.width, atlas.height],
-                &pixels,
-                view,
-                false,
-            )
-            .expect("software Vulkan entity pixels");
-            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
-            let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
-                horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
-                    vertices: &vertices,
-                    ranges,
-                    uploaded,
-                    requested: uploaded,
-                    slot,
-                    instances: std::slice::from_ref(&instance),
-                    per_copy: false,
-                    hdr: false,
-                    atlas_size: [atlas.width, atlas.height],
-                    atlas: &pixels,
-                    view_proj: view,
-                },
-            )
-            .expect("software Vulkan prepared instance");
-            let worst = cpu
-                .iter()
-                .zip(gpu.iter())
-                .map(|(left, right)| left.abs_diff(*right))
-                .max()
-                .unwrap_or(0);
-            let cpu_px = first_colour(&cpu);
-            let gpu_px = first_colour(&gpu);
+            let (worst, cpu_px, gpu_px) =
+                worst_pixels(game, &cpu_vertices, &instance, slot, uploaded, view);
             eprintln!("worst {worst} cpu {cpu_px:?} gpu {gpu_px:?}");
-            assert!(worst <= 2, "instanced and cpu pixels differed by {worst}");
+            assert_eq!(worst, 0, "instanced and cpu pixels differed by {worst}");
             assert!(cpu_px != [0; 4], "the model drew no colour");
         });
     }
@@ -387,8 +418,6 @@ mod tests {
                 Quat::IDENTITY,
                 Vec3::new(-0.55, -0.85, 0.5),
             );
-            let pixels = game.gui.atlas.pixels().to_vec();
-            let size = [game.gui.atlas.width, game.gui.atlas.height];
             horizon_client::gfx::set_test_prepared_generation(Some(generation));
             horizon_client::gfx::cap_prepared_instance_slots(8);
             let mut draw = WorldGeometry::default();
@@ -420,39 +449,77 @@ mod tests {
                 entities.iter().any(|vertex| vertex.color >> 24 == 0x40),
                 "a tinted face takes the tint alpha"
             );
-            let cpu = horizon_client::gfx::entity_pixel_test::render(
-                &entities, size, &pixels, view, false,
-            )
-            .expect("software Vulkan entity pixels");
-            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
-            let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
-                horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
-                    vertices: &vertices,
-                    ranges,
-                    uploaded,
-                    requested: uploaded,
-                    slot,
-                    instances: std::slice::from_ref(&instance),
-                    per_copy: false,
-                    hdr: false,
-                    atlas_size: size,
-                    atlas: &pixels,
-                    view_proj: view,
-                },
-            )
-            .expect("software Vulkan prepared instance");
-            let worst = cpu
-                .iter()
-                .zip(gpu.iter())
-                .map(|(left, right)| left.abs_diff(*right))
-                .max()
-                .unwrap_or(0);
-            eprintln!(
-                "partial worst {worst} cpu {:?} gpu {:?}",
-                first_colour(&cpu),
-                first_colour(&gpu)
+            let (worst, cpu_px, gpu_px) =
+                worst_pixels(game, &entities, &instance, slot, uploaded, view);
+            eprintln!("partial worst {worst} cpu {cpu_px:?} gpu {gpu_px:?}");
+            assert_eq!(worst, 0, "partial tint alpha differed by {worst}");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn draw_model_instances_bakes_overflow_after_the_instanced_prefix() {
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = game
+                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(1);
+            let camera = DVec3::new(8_000_000.0, 70.0, -4_000_000.0);
+            let copy = |x: f64| {
+                ModelInstance::new(
+                    [camera.x + x, camera.y, camera.z],
+                    rows(Mat4::IDENTITY),
+                    0xFFFF_FFFF,
+                    LightCoords::FULL_BRIGHT,
+                    Overlay::NONE,
+                )
+            };
+            let mut draw = WorldGeometry::default();
+            draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[copy(0.0), copy(3.0), copy(6.0)])
+                .unwrap();
+            let mut entities = Vec::new();
+            game.commit_model_instances(&mut draw, camera, &mut entities);
+            let staged = game.prepared_model_draws.borrow();
+            assert_eq!(staged.len(), 1, "only the first copy fits the room");
+            assert_eq!(staged[0].cpu_vertices, 0, "baked copies follow the prefix");
+            let placed = staged[0].instance.model[3][0];
+            assert!(
+                placed.abs() < 1.5,
+                "the instanced copy must be the first one, got {placed}"
             );
-            assert!(worst <= 2, "partial tint alpha differed by {worst}");
+            let slot = staged[0].slot;
+            drop(staged);
+            let faces = game
+                .standalone_geometry
+                .faces(slot)
+                .expect("prepared faces")
+                .len();
+            assert_eq!(
+                entities.len(),
+                faces * 8,
+                "both overflow copies must be baked"
+            );
+            let mean_x = |verts: &[Vertex]| {
+                verts.iter().map(|vertex| vertex.pos[0]).sum::<f32>() / verts.len() as f32
+            };
+            let half = entities.len() / 2;
+            let first = mean_x(&entities[..half]);
+            let second = mean_x(&entities[half..]);
+            assert!(
+                (first - 3.0).abs() < 1.5,
+                "first overflow copy, got {first}"
+            );
+            assert!(
+                (second - 6.0).abs() < 1.5,
+                "second overflow copy, got {second}"
+            );
         });
     }
 
@@ -462,9 +529,13 @@ mod tests {
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
             let model = game
                 .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
                 .unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(8);
             game.view_frustum = Some(horizon_client::gfx::test_frustum([
                 glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
                 glam::Vec4::W,
@@ -477,14 +548,28 @@ mod tests {
             draw.reset([0.0; 3], Mat4::IDENTITY, [0.0, 0.0]);
             let near = ModelInstance::at([1.0, 0.0, 0.0], 0xFFFF_FFFF);
             let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[far, near])
+                .unwrap();
+            assert_eq!(
+                draw.usage().instances_used,
+                1,
+                "an offscreen copy must not count"
+            );
+            let mut committed = Vec::new();
+            game.commit_model_instances(&mut draw, DVec3::ZERO, &mut committed);
+            assert_eq!(
+                game.prepared_model_draws.borrow().len(),
+                1,
+                "an accepted copy must be staged"
+            );
+            assert_eq!(draw.usage().instances_used, 0, "commit takes the copies");
+            assert!(committed.is_empty(), "the staged copy is not also baked");
+            game.prepared_model_draws.borrow_mut().clear();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0, 0.0]);
             {
                 let mut ctx = context(game, &mut draw);
-                ctx.draw_model_instances(model, &[far, near]).unwrap();
-                assert_eq!(
-                    ctx.usage().instances_used,
-                    1,
-                    "an offscreen copy must not count"
-                );
+                ctx.draw_model_instances(model, &[near]).unwrap();
                 let mut bad = near;
                 bad.light.block = 16;
                 assert_eq!(
@@ -512,6 +597,43 @@ mod tests {
                 ctx.draw_model_instances(model, &vec![far; 16_384]).unwrap();
                 assert_eq!(ctx.usage().instances_used, 0);
             }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn fill_world_geometry_commits_an_accepted_batch() {
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = game
+                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(8);
+            *FILL_MODEL.lock().unwrap() = Some(model);
+            mod_api::__private::install(vec![ModEntry::new("batch", Box::new(FillBatch))].into());
+            FILL_ARMED.store(true, Ordering::Relaxed);
+            let mut draw = WorldGeometry::default();
+            let mut entities = Vec::new();
+            game.fill_world_geometry(
+                false,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut entities,
+            );
+            FILL_ARMED.store(false, Ordering::Relaxed);
+            assert_eq!(
+                game.prepared_model_draws.borrow().len(),
+                1,
+                "fill_world_geometry must commit the accepted copy"
+            );
+            assert_eq!(draw.usage().instances_used, 0);
+            assert!(entities.is_empty());
         });
     }
 }
