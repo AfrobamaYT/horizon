@@ -3040,7 +3040,7 @@ pub(super) mod tests {
             game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 14;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             for (id, max) in [(12, 20.0), (13, 20.0), (14, 200.0)] {
                 let living = game.living(game.entity(id).unwrap()).unwrap();
                 assert_eq!(

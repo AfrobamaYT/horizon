@@ -1401,10 +1401,10 @@ where
                 let name = resolver
                     .sample_prepared(context, volume.as_ref(), quart)
                     .map_err(|e| e.to_string())?;
-                if let Some((pointer, id)) = last {
-                    if std::ptr::eq(pointer, name) {
-                        return Ok(id);
-                    }
+                if let Some((pointer, id)) = last
+                    && std::ptr::eq(pointer, name)
+                {
+                    return Ok(id);
                 }
                 let id = ids.get(name).copied().ok_or_else(|| name.to_owned())?;
                 last = Some((name as *const str, id));
@@ -3275,7 +3275,12 @@ pub struct BiomeSearch<'a> {
 
 /// `Mth.outFromOrigin(origin, lower, upper, step)`.
 pub fn out_from_origin(origin: i32, lower: i32, upper: i32, step: i32) -> Vec<i32> {
-    let center = origin.clamp(lower, upper);
+    assert!(lower <= upper, "outFromOrigin requires ordered bounds");
+    assert!(step > 0, "outFromOrigin requires a positive step");
+    // Public generator callers may supply any positive i32 step. Intermediates can
+    // exceed the coordinate range even though every emitted height stays within it.
+    let (lower, upper, step) = (i64::from(lower), i64::from(upper), i64::from(step));
+    let center = i64::from(origin).clamp(lower, upper);
     let mut out = Vec::new();
     let mut cursor = center;
     loop {
@@ -3283,7 +3288,7 @@ pub fn out_from_origin(origin: i32, lower: i32, upper: i32, step: i32) -> Vec<i3
         if !(center - distance >= lower || center + distance <= upper) {
             return out;
         }
-        out.push(cursor);
+        out.push(cursor as i32);
         let negative = cursor <= center;
         let can_move_positive = center + distance + step <= upper;
         let mut next = center + distance + step;
@@ -3849,6 +3854,27 @@ impl GeneratorWorker {
 mod tests {
     use super::*;
     #[test]
+    fn out_from_origin_preserves_order_and_handles_extreme_positive_steps() {
+        assert_eq!(out_from_origin(4, 0, 8, 2), [4, 6, 2, 8, 0]);
+        assert_eq!(out_from_origin(0, 0, 8, 3), [0, 3, 6]);
+        assert_eq!(out_from_origin(8, 0, 8, 3), [8, 5, 2]);
+        for (lower, upper) in [(-63, 320), (1, 256)] {
+            for origin in [i32::MIN, 64, i32::MAX] {
+                assert_eq!(
+                    out_from_origin(origin, lower, upper, i32::MAX),
+                    [origin.clamp(lower, upper)]
+                );
+            }
+        }
+        assert_eq!(
+            out_from_origin(0, i32::MIN, i32::MAX, i32::MAX),
+            [0, i32::MAX, -i32::MAX]
+        );
+        assert!(std::panic::catch_unwind(|| out_from_origin(0, 0, 8, 0)).is_err());
+        assert!(std::panic::catch_unwind(|| out_from_origin(0, 8, 0, 1)).is_err());
+    }
+
+    #[test]
     fn settings_default_states_read_the_26_3_block_state_form() {
         let facts = br#"{"states": [
             ["minecraft:stone", false, false, "x", "minecraft:stone"],
@@ -3904,6 +3930,38 @@ mod tests {
         )]);
         let none = WorldgenOverrides::default();
         assert!(build_tags(&broken, &none, "biome_tags", &mut dropped, known).is_err());
+    }
+    /// A pack's level on a generator nobody registered: opening it is an
+    /// error for the caller to report, and the noise levels still build.
+    #[test]
+    fn a_level_stem_naming_an_unknown_generator_is_an_error() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
+            });
+        if !root.join("worldgen/world_presets.json").exists() {
+            eprintln!("skipping: no worldgen bundle at {}", root.display());
+            return;
+        }
+        let registry = Box::leak(Box::new(crate::level::data::load_registry(&root).unwrap()));
+        let mut ov = WorldgenOverrides::default();
+        ov.set(
+            overrides::DIMENSIONS,
+            "test:gone",
+            r#"{"type":"minecraft:overworld","generator":{"type":"test:gone"}}"#.to_owned(),
+        );
+        let data = GeneratorData::load_with(&root.join("worldgen"), registry, &ov).unwrap();
+        let open = |dimension| {
+            OverworldGenerator::for_world(data.clone(), 0, "minecraft:normal", dimension, false)
+        };
+        let error = open("test:gone").err().expect("no such generator");
+        assert!(
+            error
+                .to_string()
+                .contains("test:gone is not a noise generator")
+        );
+        assert!(open("minecraft:overworld").is_ok());
     }
     #[test]
     fn a_pack_level_stem_names_taller_noise_which_clamps_to_the_build_height() {

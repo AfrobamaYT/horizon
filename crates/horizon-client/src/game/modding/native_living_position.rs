@@ -210,7 +210,7 @@ mod tests {
         with_game(|game| {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 55;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let living = game.living(game.entity(55).unwrap()).unwrap();
             assert_eq!(
                 living.dimensions_for_pose(game, Pose::Standing),

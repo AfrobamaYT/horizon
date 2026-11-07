@@ -178,11 +178,10 @@ pub struct Guest {
     pub input: u8,
     /// The boat or minecart the player rides (`Entity.getVehicle`).
     pub vehicle: Option<u32>,
-    /// When the player last got into its vehicle, from `Hub.seat_order`:
-    /// `Entity.addPassenger` seats a rider behind the players already in the
-    /// vehicle, so the smallest order on a boat is its controlling rider
-    /// (`getControllingPassenger`).
-    pub vehicle_order: u64,
+    /// The player's place in its vehicle's `getPassengers`, from `Game::boarding_order`, beside
+    /// the mobs' `vehicle_order`: the lowest goes first, so the smallest among a boat's players
+    /// is its controlling rider (`getControllingPassenger`).
+    pub vehicle_order: i64,
     /// `ServerGamePacketListenerImpl.lastGoodX/Y/Z` of the vehicle it controls.
     pub vehicle_good: Option<[f64; 3]>,
     pub sprinting: bool,
@@ -315,6 +314,9 @@ pub struct Guest {
     /// The 36 inventory slots (hotbar first), armor (head..feet) and off hand.
     pub inventory: Vec<Option<ItemStack>>,
     pub armor: [Option<ItemStack>; 4],
+    /// Armor as of this player's last `collectEquipmentChanges` look; swapped
+    /// with `armor` so each player compares against their own snapshot.
+    pub location_armor: [Option<ItemStack>; 4],
     pub offhand: Option<ItemStack>,
     /// `EquipmentSlot.BODY` and `SADDLE`, kept and saved like `Game::equipment`.
     pub equipment: horizon_items::equipment::Equipment,
@@ -653,6 +655,7 @@ impl Guest {
             logs_kept: None,
             inventory: vec![None; 36],
             armor: [None, None, None, None],
+            location_armor: [None, None, None, None],
             offhand: None,
             equipment: Default::default(),
             selected: 0,
