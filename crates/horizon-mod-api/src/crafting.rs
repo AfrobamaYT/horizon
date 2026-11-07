@@ -120,25 +120,25 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// its hook left at load, a fluid one none, which fails the file. An empty
 /// result is no ingredient, as an empty list or an unloaded tag is.
 #[derive(Clone, Debug)]
-pub(crate) struct WalkedIngredient {
+pub struct WalkedIngredient {
     /// The ids it accepts, however the source shape named them.
-    pub(crate) set: HashSet<String>,
+    pub set: HashSet<String>,
     /// The same ids in the sources' order (`HolderSet`).
-    pub(crate) order: Vec<String>,
+    pub order: Vec<String>,
     /// NeoForge's shapes, with their children walked.
-    pub(crate) children: Option<(Shape, Vec<Self>)>,
+    pub children: Option<(Shape, Vec<Self>)>,
     /// A kind outside the standard shapes: the kind and its JSON, as the
     /// file wrote it, without the wrapper's answer.
-    pub(crate) custom: Option<(String, serde_json::Map<String, Value>)>,
+    pub custom: Option<(String, serde_json::Map<String, Value>)>,
 }
 /// The wrapper's answer for a kind outside the standard shapes: the ids it
 /// matches, taken out of its JSON, or none to fail the file.
-pub(crate) type CustomIds<'a> =
+pub type CustomIds<'a> =
     &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
 impl WalkedIngredient {
     /// The walk of `v`: the shapes' flat lists in the sources' order, their
     /// children kept for matching a concrete stack.
-    pub(crate) fn walk(
+    pub fn walk(
         v: &Value,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
@@ -146,7 +146,7 @@ impl WalkedIngredient {
         Self::walk_resolved(v, tags, custom, &|id| Some(id.to_owned()))
     }
 
-    pub(crate) fn walk_resolved(
+    pub fn walk_resolved(
         v: &Value,
         tags: &std::collections::HashMap<String, Vec<String>>,
         custom: CustomIds<'_>,
