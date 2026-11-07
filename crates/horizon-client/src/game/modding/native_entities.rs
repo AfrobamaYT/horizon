@@ -200,9 +200,9 @@ impl Game<'_> {
         self.falling.for_each_mut(|f| {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id);
         });
-        for p in &mut self.creatures.projectiles {
+        self.creatures.projectiles.for_each_mut(|p| {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut p.id);
-        }
+        });
         for t in &mut self.tridents {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
         }
