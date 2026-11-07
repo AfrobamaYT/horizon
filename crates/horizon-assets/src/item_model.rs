@@ -21,7 +21,8 @@ mod foreign;
 mod mod_properties;
 mod special;
 pub use mod_properties::{
-    is_range_property, is_select_property, register_range_properties, register_select_properties,
+    is_range_property, is_select_property, is_tint_source, register_range_properties,
+    register_select_properties, register_tint_sources,
 };
 pub use special::{SpecialKind, SpecialModel};
 
@@ -623,12 +624,24 @@ impl SwitchCase {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TintSource {
     Constant(i32),
-    CustomModelData { index: i32, default: i32 },
+    CustomModelData {
+        index: i32,
+        default: i32,
+    },
     Dye(i32),
-    Grass { temperature: f32, downfall: f32 },
+    Grass {
+        temperature: f32,
+        downfall: f32,
+    },
     Firework(i32),
     Potion(i32),
     Team(i32),
+    /// A source a native mod registered (`register_tint_sources`), read through
+    /// [`ItemEnv::item_tint_source`] with its entry in the model's `tints`.
+    Mod {
+        id: String,
+        config: Value,
+    },
 }
 impl TintSource {
     fn decode(v: &Value) -> Result<Self> {
@@ -656,6 +669,10 @@ impl TintSource {
             "minecraft:firework" => Self::Firework(default()?),
             "minecraft:potion" => Self::Potion(default()?),
             "minecraft:team" => Self::Team(default()?),
+            other if is_tint_source(other) => Self::Mod {
+                id: other.to_owned(),
+                config: v.clone(),
+            },
             // A mod's own tint source, which its Java code computes: untinted here.
             other if foreign::is_foreign(other) => Self::Constant(-1),
             _ => return Err(err("unknown item tint source")),
@@ -1029,6 +1046,11 @@ pub trait ItemEnv {
     /// mod answers.
     fn item_model_select_property(&self, _property: &str, _stack: &StackView) -> Option<String> {
         None
+    }
+    /// A mod's registered tint source for `stack`, with its entry in the model's `tints`:
+    /// ARGB, white when no mod answers.
+    fn item_tint_source(&self, _source: &str, _config: &Value, _stack: &StackView) -> i32 {
+        -1
     }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
@@ -1707,6 +1729,7 @@ impl Resolve<'_> {
                     .and_then(|o| o.team_color)
                     .unwrap_or(*default),
             ),
+            TintSource::Mod { id, config } => self.env.item_tint_source(id, config, self.stack),
         }
     }
 }
