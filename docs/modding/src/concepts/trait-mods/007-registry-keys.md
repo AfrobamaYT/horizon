@@ -180,3 +180,18 @@ skips the parts: a mod reacting to its own blocks uses a part, one reacting to e
 thing, an invalid key declaration, or an unnamespaced id in the other Part registrations stops
 the game at startup with a message naming the mods. A panic in a part
 adds `, part <type>` to the mod and hook it names. Parts take `&self` and are `Send + Sync`, like `Hooks`.
+
+### Recipe-file fields and small values
+
+`Host::recipe_ingredient` and `Host::recipe_result` take the field's JSON **text**,
+not a `serde_json::Value`. Pass a quoted item id (`r#""iron_ingot""#`), a quoted
+`#tag`, or an ingredient array. Parse failures return `RecipeJsonError::InvalidJson`;
+unknown items and empty tags still return `Ok(None)`. Result objects retain their
+`components` patch. These helpers are reload-time reads, not per-tick JSON parsers.
+
+| Former engine value | API-owned value |
+| --- | --- |
+| `mod_list::KeyConflictContext` | `mod_api::KeyConflictContext` |
+| `firework::FireworkShape` | `mod_api::FireworkShape` |
+| `manifest::JarInputsError` | `mod_api::JarInputsError`, with owned diagnostics and original-jar identity |
+| Recipe helper `&serde_json::Value` | JSON `&str`, returning `Result<Option<_>, RecipeJsonError>` |
