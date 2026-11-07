@@ -18,11 +18,13 @@ impl PartRegistrar {
 }
 
 /// The immutable declarations installed after schema validation.
+// hidden: the game builds engine registries from the installed declaration snapshot.
 #[doc(hidden)]
 pub fn game_rules() -> &'static [crate::GameRuleDecl] {
     installed().map_or(&[], |parts| &parts.game_rules)
 }
 /// The immutable category declarations installed by mods.
+// hidden: the game builds engine registries from the installed category snapshot.
 #[doc(hidden)]
 pub fn game_rule_categories() -> &'static [String] {
     installed().map_or(&[], |parts| &parts.game_rule_categories)
