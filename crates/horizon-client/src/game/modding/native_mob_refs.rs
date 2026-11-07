@@ -493,7 +493,7 @@ impl Game<'_> {
         let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) else {
             return false;
         };
-        if !mobs::drops::can_be_baby(mob.species()) {
+        if !mobs::species::can_be_a_baby(mob.species()) {
             return false;
         }
         mobs::finalize::set_baby(mob, baby);
