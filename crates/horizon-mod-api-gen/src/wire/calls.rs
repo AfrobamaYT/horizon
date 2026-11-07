@@ -128,10 +128,49 @@ fn has_frame(ty: &Ty) -> bool {
 }
 
 fn borrowed_ret(ty: &Ty) -> bool {
-    matches!(
-        ty,
-        Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice)
-    )
+    match ty {
+        Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => true,
+        Ty::Option(t) | Ty::Boxed(t) | Ty::Shared(t) | Ty::Array(t, _) | Ty::List(t, _) => {
+            borrowed_ret(t)
+        }
+        Ty::Result(a, b) => borrowed_ret(a) || borrowed_ret(b),
+        Ty::Tuple(v) => v.iter().any(borrowed_ret),
+        _ => false,
+    }
+}
+
+/// Whether `ty` holds a `&'static str`, which the guest takes from the game's interned names.
+fn has_static(ty: &Ty) -> bool {
+    match ty {
+        Ty::Str(Str::Static) => true,
+        Ty::Option(t) | Ty::Boxed(t) | Ty::Shared(t) | Ty::Array(t, _) | Ty::List(t, _) => {
+            has_static(t)
+        }
+        Ty::Result(a, b) => has_static(a) || has_static(b),
+        Ty::Tuple(v) => v.iter().any(has_static),
+        _ => false,
+    }
+}
+
+/// `e`, the owned value an import answered with, as the borrowed form its method returns: kept
+/// until the call in progress returns, as a borrow of the game's data is for the same time.
+fn lend_ret(ty: &Ty, e: &str) -> Option<String> {
+    let kept = "unsafe { crate::wire::guest::kept";
+    let needs = |t: &Ty| borrowed_ret(t) || has_static(t);
+    Some(match ty {
+        Ty::Str(Str::Static) => format!(
+            "crate::wire::intern(&{e}).expect(\"the host named a string longer than the boundary allows\")"
+        ),
+        Ty::Str(Str::Borrowed) => format!("{kept}({e}) }}.as_str()"),
+        Ty::List(_, List::Slice) => format!("{kept}({e}) }}.as_slice()"),
+        Ty::Ref(..) => format!("{kept}({e}) }}"),
+        Ty::Option(t) if needs(t) => format!("{e}.map(|x| {})", lend_ret(t, "x")?),
+        Ty::Result(a, b) if needs(a) && !needs(b) => {
+            format!("{e}.map(|x| {})", lend_ret(a, "x")?)
+        }
+        ty if !needs(ty) => e.to_string(),
+        _ => return None,
+    })
 }
 
 /// A plain method: nothing in it needs the call frame.
@@ -147,6 +186,7 @@ pub(super) fn plain(m: &Method) -> bool {
 pub(super) fn guest(
     types: &Types<'_>,
     methods: &[Method],
+    dropped: &[Method],
     parts: &[(&'static str, String)],
 ) -> String {
     let mut out =
@@ -171,9 +211,37 @@ pub(super) fn guest(
         {
             writeln!(out, "{}", import_body(types, m, id)).unwrap();
         }
+        for m in dropped.iter().filter(|m| {
+            !exports().contains(&m.owner) && m.via.as_deref().unwrap_or(m.owner) == owner
+        }) {
+            writeln!(
+                out,
+                "{} {{ crate::wire::guest::unsupported(\"{}::{}\") }}",
+                rust_sig(types, m),
+                m.owner,
+                m.name
+            )
+            .unwrap();
+        }
         out.push_str("}\n");
     }
     out
+}
+
+/// Whether `ty` names a type that borrows (`CubeFace<'_>`), which has no owned wire form.
+fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
+    match ty {
+        Ty::Named(d) => types.defs[*d].lifetimes != 0,
+        Ty::Ref(t, _)
+        | Ty::Option(t)
+        | Ty::Array(t, _)
+        | Ty::Boxed(t)
+        | Ty::Shared(t)
+        | Ty::List(t, _) => lifetime_def(types, t),
+        Ty::Result(a, b) => lifetime_def(types, a) || lifetime_def(types, b),
+        Ty::Tuple(v) => v.iter().any(|t| lifetime_def(types, t)),
+        _ => false,
+    }
 }
 
 /// A borrow inside a list, tuple or `Option` the generated code can't write as one value
@@ -249,7 +317,7 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
                     m.owner, m.name
                 );
             }
-            ty if has_ref_in_data(ty) => {
+            ty if has_ref_in_data(ty) || lifetime_def(types, ty) => {
                 return format!(
                     "{sig} {{ {guest}::unsupported(\"{}::{}\") }}",
                     m.owner, m.name
@@ -269,16 +337,20 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
             _ => put.push_str(&format!("w.put(&p{i});")),
         }
     }
-    if has_frame(&m.ret) || borrowed_ret(&m.ret) {
+    let lent =
+        held_in(types, &m.ret, true).and_then(|owned| Some((owned, lend_ret(&m.ret, "answer")?)));
+    let (Some((owned, lent)), false) = (lent, has_frame(&m.ret)) else {
         return format!(
             "{sig} {{ {guest}::unsupported(\"{}::{}\") }}",
             m.owner, m.name
         );
-    }
+    };
     let take = if m.ret == Ty::Unit {
-        ""
+        String::new()
     } else {
-        "r.take().expect(\"the host answered with a value of the wrong type\")"
+        format!(
+            "let answer: {owned} = r.take().expect(\"the host answered with a value of the wrong type\"); {lent}"
+        )
     };
     format!(
         "{sig} {{ let mut w = {guest}::begin(); {put} let r = {guest}::host({id}u32, w); {take} }}"
@@ -286,17 +358,28 @@ fn import_body(types: &Types<'_>, m: &Method, id: usize) -> String {
 }
 
 /// The type a decoded argument is held as: the owned form of a borrowed one.
-pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
+fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
     Some(match ty {
         Ty::Str(Str::Borrowed) => "String".into(),
-        Ty::List(item, List::Slice) => format!("Vec<{}>", held(types, item)?),
-        Ty::Ref(inner, _) => held(types, inner)?,
+        Ty::List(item, List::Slice) => format!("Vec<{}>", held_in(types, item, statics)?),
+        Ty::Ref(inner, _) => held_in(types, inner, statics)?,
+        Ty::Str(Str::Static) if statics => "String".into(),
+        ty if has_static(ty) => return None,
         Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
         Ty::Dyn(..) | Ty::Handler(..) => return None,
-        Ty::Option(inner) => format!("Option<{}>", held(types, inner)?),
-        Ty::List(item, List::Vec) => format!("Vec<{}>", held(types, item)?),
+        Ty::Option(inner) => format!("Option<{}>", held_in(types, inner, statics)?),
+        Ty::Result(ok, err) => format!(
+            "Result<{}, {}>",
+            held_in(types, ok, statics)?,
+            held_in(types, err, statics)?
+        ),
+        Ty::List(item, List::Vec) => format!("Vec<{}>", held_in(types, item, statics)?),
         other => rust_ty(types, other, false),
     })
+}
+
+pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
+    held_in(types, ty, false)
 }
 
 /// How a field of a borrowed record is read into one: the expression building it from `local`,

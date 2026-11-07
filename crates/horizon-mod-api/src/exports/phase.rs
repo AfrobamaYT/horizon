@@ -1,7 +1,7 @@
 mod phase;
 pub use phase::{
     DataLoadContext, DataLoadOrigin, LoadedMods, LoopContext, LoopSide, OwningLoad, OwningLoop,
-    PackageInfo, PackageKind, RegistrationContext,
+    PackageInfo, PackageKind, RegistrationContext, install_guest_packages,
 };
 mod __private {
     pub use crate::phase::{
