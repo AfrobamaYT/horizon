@@ -106,6 +106,34 @@ pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
     Ok(modules)
 }
 
+/// Generate the native-only raw render records, without trait dispatch or subscriptions.
+pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
+    track(root)?;
+    let source = sources(root, super::FillMode::Require)?.render;
+    use syn::spanned::Spanned;
+    let file = syn::parse_file(&source).map_err(|error| error.to_string())?;
+    let lines: Vec<_> = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(index, _)| index + 1))
+        .collect();
+    let offset = |point: proc_macro2::LineColumn| lines[point.line - 1] + point.column;
+    let mut records = String::from("use super::*;\n");
+    for item in file.items {
+        let syn::Item::Struct(record) = item else {
+            continue;
+        };
+        let start = record
+            .attrs
+            .iter()
+            .find(|attr| !attr.path().is_ident("doc"))
+            .map_or_else(|| record.vis.span().start(), |attr| attr.span().start());
+        records.push_str(&source[offset(start)..offset(record.span().end())]);
+        records.push('\n');
+    }
+    syn::parse_file(&records).map_err(|error| error.to_string())?;
+    fs::write(out_dir.join("native_render_generated.rs"), records)
+        .map_err(|error| error.to_string())
+}
+
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {

@@ -618,7 +618,7 @@ pub mod staging;
 mod wasm;
 /// Shared registration emitter for component-model WIT worlds.
 pub mod wasm_imports;
-pub use build::{generate, generate_points};
+pub use build::{generate, generate_points, generate_render};
 pub use notes::generate as generate_hook_notes;
 pub use wasm::{Wasm, generate as generate_wasm};
 
