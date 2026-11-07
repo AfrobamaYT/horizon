@@ -86,7 +86,7 @@ pub(super) fn trait_path(owner: &str) -> String {
 }
 
 /// A method's Rust signature, its arguments named `p0…`.
-fn rust_sig(types: &Types<'_>, method: &Method) -> String {
+pub(super) fn rust_sig(types: &Types<'_>, method: &Method) -> String {
     let mut params = Vec::new();
     match method.receiver {
         Some(true) => params.push("&mut self".to_string()),
@@ -135,7 +135,7 @@ fn borrowed_ret(ty: &Ty) -> bool {
 }
 
 /// A plain method: nothing in it needs the call frame.
-fn plain(m: &Method) -> bool {
+pub(super) fn plain(m: &Method) -> bool {
     !m.params
         .iter()
         .any(|p| has_frame(&p.1) || matches!(&p.1, Ty::Ref(_, true)))
@@ -186,7 +186,7 @@ pub(super) fn guest(types: &Types<'_>, methods: &[Method]) -> String {
 }
 
 /// The type a decoded argument is held as: the owned form of a borrowed one.
-fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
+pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
     Some(match ty {
         Ty::Str(Str::Borrowed) => "String".into(),
         Ty::List(item, List::Slice) => format!("Vec<{}>", held(types, item)?),
@@ -201,13 +201,13 @@ fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
 
 /// How a field of a borrowed record is read into one: the expression building it from `local`,
 /// the local's owned type, and whether the mod may change it (so it is sent back).
-struct Lent {
-    owned: String,
-    expr: String,
-    mutable: bool,
+pub(super) struct Lent {
+    pub(super) owned: String,
+    pub(super) expr: String,
+    pub(super) mutable: bool,
 }
 
-fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
+pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
     let (owned, expr, mutable) = match ty {
         Ty::Ref(inner, m) if !matches!(**inner, Ty::Dyn(..)) => (
             held(types, inner)?,
@@ -282,7 +282,7 @@ fn borrowed(
 
 /// Whether an export has what its dispatch arm needs: every argument decodes to an owned value
 /// or is the frame's host, and the answer is owned.
-fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
+pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
     !has_frame(&m.ret)
         && !borrowed_ret(&m.ret)
         && m.params.iter().all(|(_, ty)| match ty {
