@@ -1,9 +1,9 @@
-# CI's slot/source check: tools/ci/mixins_check.sh pins the game and fills both
-# function hashes and the Game declaration from this checkout's generated catalog.
+# CI's slot/source check: tools/ci/mixins_check.sh pins the game and fills the
+# function hashes and the Game declaration, including an area-file method, from the generated catalog.
 id = "mixins_check"
 name = "Mixins check"
 version = "0.1.0"
-description = "CI: unified API slot and native internals source routing"
+description = "CI: unified API and area slots plus native internals source routing"
 authors = []
 api = "0.2"
 side = "both"
@@ -30,3 +30,11 @@ kind = "head"
 with = "count"
 access = "internals"
 hash = "COUNT_HASH"
+
+[[inject]]
+id = "area"
+at = "horizon_client::game::using_item::Game<'_>::start_eating"
+kind = "return"
+with = "area"
+access = "internals"
+hash = "AREA_HASH"

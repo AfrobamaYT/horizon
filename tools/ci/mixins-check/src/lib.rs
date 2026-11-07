@@ -1,4 +1,6 @@
-//! The API slot and internals source callbacks share one unified manifest.
+//! API and area slots and the internals source callback share one unified manifest.
+mod area;
+pub use area::area;
 mod count;
 pub use count::count;
 #[derive(Default)]

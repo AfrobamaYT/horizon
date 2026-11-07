@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build one API slot and one unified internals source listener at this checkout's exact head.
+# Build API and area-file slots plus a unified internals source listener at this exact head.
 # Force the latter off the compiled slot list in the disposable source copy, as the
 # native source regression does; assert the logged route after the real build.
 # Compile-only: no game runs and no vanilla data is read.
@@ -61,11 +61,14 @@ scratch, manifest = map(Path, sys.argv[1:])
 rows = json.loads((scratch/'internals.json').read_text())
 points = json.loads((scratch/'points.json').read_text())['points']
 target = "horizon_client::game::Game<'_>::tick_mobs"
+area = "horizon_client::game::using_item::Game<'_>::start_eating"
 assert not any(row['target'] == target for row in points)
+assert any(row['target'] == area and row['raw'] and row['at_return'] for row in points)
 text = manifest.read_text()
 for token, path, kind in [('GAME_HASH', 'horizon_client::game::Game', 'struct'),
                           ('TICK_HASH', "horizon_client::game::Game<'_>::tick", 'method'),
-                          ('COUNT_HASH', target, 'method')]:
+                          ('COUNT_HASH', target, 'method'),
+                          ('AREA_HASH', area, 'method')]:
     matches = [row for row in rows if row['path'] == path and row['kind'] == kind]
     assert len(matches) == 1
     assert text.count(token) == 1
@@ -81,3 +84,5 @@ HORIZON_HOME=$scratch/home HORIZON_LAUNCHER_HOME=$data XDG_DATA_HOME=$scratch/da
   --profile developer --trust-native-code
 test -x "$scratch/engine/horizon-engine"
 grep -F 'mixins_check:count:' "$data/native/build.log" | grep -F -- '-> source (private slot,'
+grep -F 'mixins_check:area:' "$data/native/build.log" | grep -F -- '-> slot (return, internals)'
+grep -F 'mod_0::area).ordered(0, "area")' "$data/native/stage/crates/native-game/src/main.rs"

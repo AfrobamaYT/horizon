@@ -3504,9 +3504,20 @@ impl Game<'_> {
     /// `ClientHooks.onClickInput`: tells `native_interaction_key_mapping_triggered` that
     /// `key` is about to act with `hand`. `None` when the action goes on; when a mod
     /// cancelled it, `Some` of whether the hand swings.
-    pub(super) fn native_interaction(&mut self, key: InteractionKey, hand: Hand) -> Option<bool> {
+    pub(super) fn native_interaction(
+        &mut self,
+        key: InteractionKey,
+        hand: Hand,
+        attempt: InteractionAttempt,
+    ) -> Option<bool> {
         let (mut swing_hand, mut canceled) = (true, false);
-        self.native_interaction_key_mapping_triggered(key, hand, &mut swing_hand, &mut canceled);
+        self.native_interaction_key_mapping_triggered(
+            key,
+            hand,
+            attempt,
+            &mut swing_hand,
+            &mut canceled,
+        );
         canceled.then_some(swing_hand)
     }
     /// A client mod's command (the `command` hook); a server never asks.
