@@ -224,6 +224,11 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
     }
+    /// Extract selected owners in list order, compacting survivors in place.
+    /// The predicate cannot replace an entity or change its identity.
+    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> impl Iterator<Item = T> {
+        self.0.extract_if(.., move |entity| take(entity))
+    }
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.0.swap_remove(index)
     }

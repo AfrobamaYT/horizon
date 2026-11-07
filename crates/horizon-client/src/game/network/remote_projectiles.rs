@@ -133,7 +133,7 @@ fn shulker_bullet_trail_at(at: Vec3, random: &mut impl RandomSource) -> [f64; 3]
 /// the item the guest draws the fireball as, through `Fireball.setItem`;
 /// a kind that is no `Fireball` has none.
 pub(super) fn remote_projectile_item(
-    projectiles: &mut horizon_client::join_seq::JoinList<Projectile>,
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: u32,
     stack: ItemStack,
 ) {
@@ -149,7 +149,7 @@ pub(super) fn remote_projectile_item(
 /// projectile (`AbstractHurtingProjectile`) accelerates by, found by id;
 /// anything else is ignored.
 pub(super) fn remote_projectile_power(
-    projectiles: &mut horizon_client::join_seq::JoinList<Projectile>,
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: i32,
     power: f64,
 ) {
@@ -997,7 +997,7 @@ mod tests {
     fn a_power_packet_gives_a_fireball_the_power_its_next_tick_uses() {
         // ClientPacketListener.handleProjectilePowerPacket: the fireball with
         // id 12 gets the power the server sends bundled with its motion.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> =
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> =
             [tracked(ProjectileKind::LargeFireball { power: 1 }, 12)]
                 .into_iter()
                 .collect();
@@ -1012,7 +1012,7 @@ mod tests {
     fn a_power_packet_ignores_an_arrow_an_unknown_id_and_a_thrown_item() {
         // Vanilla's instanceof AbstractHurtingProjectile: an arrow and a
         // thrown egg are none, and no entity is id 99.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> = [
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(
                 ProjectileKind::Arrow {
                     base_damage: 2.0,
@@ -1040,7 +1040,7 @@ mod tests {
         // `ClientPacketListener.handleSetEntityData` of
         // Fireball.DATA_ITEM_STACK: the item `Fireball.getItem` returns, which
         // is the fire charge the default was until the server says otherwise.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> = [
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
             tracked(ProjectileKind::SmallFireball, 13),
             tracked(ProjectileKind::Snowball, 14),
