@@ -72,7 +72,17 @@ impl PrimedTnt {
         border: Option<&horizon_core::geometry::border::BorderGeometry>,
         blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
     ) -> Result<Vec<BlockPos>> {
-        self.tick_among(world, collision, assets, facts, fluids, border, blocks, &[])
+        self.tick_among(
+            world,
+            collision,
+            assets,
+            facts,
+            fluids,
+            context,
+            border,
+            blocks,
+            &[],
+        )
     }
     /// [`Self::tick`], its move also stopped by `entities`: the boxes of the
     /// entities that `canBeCollidedWith` it (`EntityGetter.getEntityCollisions`).
@@ -84,6 +94,7 @@ impl PrimedTnt {
         assets: &horizon_client::assets::Assets,
         facts: &horizon_client::blocks::BlockFacts,
         fluids: &horizon_client::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
         border: Option<&horizon_core::geometry::border::BorderGeometry>,
         blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
         entities: &[Aabb],

@@ -1386,6 +1386,7 @@ impl ExperienceOrb {
             next_float,
             border,
             fluids,
+            context,
             on_sound,
             &[],
         )
@@ -1403,6 +1404,7 @@ impl ExperienceOrb {
         next_float: &mut dyn FnMut() -> f32,
         border: Option<&BorderGeometry>,
         fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
     ) -> bool {
