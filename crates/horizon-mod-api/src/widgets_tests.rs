@@ -37,12 +37,12 @@ impl EffectsClientHost for Fake {
 /// field's view; every character 6 pixels wide, from 4 pixels in.
 #[derive(Default)]
 struct Recorder {
-    buttons: Vec<(String, bool, bool)>,
+    buttons: Vec<(Text, bool, bool)>,
     fields: Vec<TextFieldView>,
 }
 impl DrawContext for Recorder {
     fn widget_button(&mut self, _: [f32; 4], label: &Text, active: bool, highlighted: bool) {
-        self.buttons.push((label.plain(), active, highlighted));
+        self.buttons.push((label.clone(), active, highlighted));
     }
     fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
         self.fields.push(field.clone());
@@ -232,8 +232,8 @@ fn drawing_asks_the_game_for_each_widget() {
     assert_eq!(
         draw.buttons,
         [
-            ("Copy".to_owned(), true, true),
-            ("Done".to_owned(), false, false)
+            (Text::literal("Copy"), true, true),
+            (Text::literal("Done"), false, false)
         ]
     );
     assert_eq!(

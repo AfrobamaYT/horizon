@@ -14,12 +14,12 @@ pub struct Text {
     pub children: Vec<Text>,
     /// Unrecognised component metadata survives an engine round trip.
     #[serde(default)]
-    metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    pub metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// What supplies the characters or inline object of a component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+// exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextContent {
     /// Literal characters, without interpreting legacy formatting codes.
     Literal(String),
@@ -65,7 +65,7 @@ pub enum TextContent {
 
 /// The source of an NBT component, not the NBT itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
+// exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextNbtSource {
     /// Block position expression.
     Block(String),
@@ -77,7 +77,7 @@ pub enum TextNbtSource {
 
 /// An inline object embedded in text.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+// exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextObject {
     /// A player head, retaining the profile properties carried by the component.
     Player {
@@ -127,7 +127,7 @@ pub struct TextStyle {
     pub font: Option<String>,
     /// Unknown style metadata remains owned data, without engine types.
     #[serde(default)]
-    metadata: std::collections::BTreeMap<String, serde_json::Value>,
+    pub metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// A text component's click action.
@@ -136,7 +136,7 @@ pub struct TextStyle {
 /// round-trip `OpenFile`. Capture drops untrusted file-opening action metadata.
 /// Part of the [per-node origin tracking follow-up](https://github.com/arismoko/horizon/issues/1738).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+// exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextClick {
     /// Open an HTTP or HTTPS URL.
     OpenUrl(String),
@@ -161,7 +161,7 @@ pub enum TextClick {
 
 /// A text component's hover action.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
+// exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextHover {
     /// Show another styled component tree.
     Text(Box<Text>),
@@ -191,25 +191,26 @@ impl Default for Text {
     }
 }
 impl Text {
-    /// A literal component, with no inherited style overrides or children.
-    pub fn literal(value: impl Into<String>) -> Self {
+    /// A component with the given contents, with no style overrides or children.
+    pub fn new(content: TextContent) -> Self {
         Self {
-            content: TextContent::Literal(value.into()),
+            content,
             style: TextStyle::default(),
             children: Vec::new(),
             metadata: Default::default(),
         }
     }
+    /// A literal component, with no inherited style overrides or children.
+    pub fn literal(value: impl Into<String>) -> Self {
+        Self::new(TextContent::Literal(value.into()))
+    }
     /// A translatable component. The key and arguments remain unresolved data.
     pub fn translate(key: impl Into<String>, arguments: Vec<Text>) -> Self {
-        Self {
-            content: TextContent::Translatable {
-                key: key.into(),
-                fallback: None,
-                arguments,
-            },
-            ..Self::default()
-        }
+        Self::new(TextContent::Translatable {
+            key: key.into(),
+            fallback: None,
+            arguments,
+        })
     }
     /// Append a child without flattening its style or translation.
     pub fn append(mut self, child: Text) -> Self {
@@ -232,7 +233,9 @@ pub struct TextForm {
     pub tree: String,
 }
 /// Maximum nested JSON containers in a text form, below serde_json's recursion limit.
-pub const MAX_TEXT_FORM_DEPTH: usize = 100;
+pub const MAX_TEXT_DEPTH: usize = 20;
+/// Maximum JSON container nesting, including arbitrary metadata.
+pub const MAX_TEXT_FORM_DEPTH: usize = MAX_TEXT_DEPTH * 5;
 
 /// A text form was too deeply nested or could not be serialized or parsed.
 #[derive(Debug)]
@@ -296,9 +299,61 @@ impl std::io::Write for DepthWriter {
         Ok(())
     }
 }
+impl Text {
+    /// Refuse component trees deeper than [`MAX_TEXT_DEPTH`] nodes.
+    pub fn validate_depth(&self) -> Result<(), TextFormError> {
+        let mut pending = vec![(self, 1)];
+        while let Some((text, depth)) = pending.pop() {
+            if depth > MAX_TEXT_DEPTH {
+                return Err(TextFormError::TooDeep);
+            }
+            macro_rules! push {
+                ($child:expr) => {
+                    pending.push(($child, depth + 1))
+                };
+            }
+            for child in &text.children {
+                push!(child);
+            }
+            match &text.content {
+                TextContent::Translatable { arguments, .. } => {
+                    for child in arguments {
+                        push!(child);
+                    }
+                }
+                TextContent::Selector {
+                    separator: Some(child),
+                    ..
+                }
+                | TextContent::Nbt {
+                    separator: Some(child),
+                    ..
+                }
+                | TextContent::Object(TextObject::Player {
+                    fallback: Some(child),
+                    ..
+                })
+                | TextContent::Object(TextObject::Atlas {
+                    fallback: Some(child),
+                    ..
+                }) => push!(child),
+                _ => {}
+            }
+            match &text.style.hover {
+                Some(TextHover::Text(child))
+                | Some(TextHover::Entity {
+                    name: Some(child), ..
+                }) => push!(child),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
 impl TryFrom<&Text> for TextForm {
     type Error = TextFormError;
     fn try_from(value: &Text) -> Result<Self, Self::Error> {
+        value.validate_depth()?;
         let mut writer = DepthWriter::default();
         if let Err(error) = serde_json::to_writer(&mut writer, value) {
             return Err(if writer.too_deep {
@@ -321,7 +376,9 @@ impl TryFrom<TextForm> for Text {
         writer
             .write_all(value.tree.as_bytes())
             .map_err(|_| TextFormError::TooDeep)?;
-        serde_json::from_str(&value.tree).map_err(TextFormError::Invalid)
+        let text: Text = serde_json::from_str(&value.tree).map_err(TextFormError::Invalid)?;
+        text.validate_depth()?;
+        Ok(text)
     }
 }
 
@@ -401,6 +458,32 @@ mod tests {
             Text::try_from(TextForm::try_from(&text).unwrap()).unwrap(),
             text
         );
+    }
+    #[test]
+    fn text_node_limit_round_trips_worst_wrapped_hover_and_refuses_next_node() {
+        let mut text = Text::literal("leaf");
+        for _ in 1..MAX_TEXT_DEPTH {
+            text = Text::literal("parent").with_style(TextStyle {
+                hover: Some(TextHover::Entity {
+                    kind: "test".into(),
+                    id: [0, 0],
+                    name: Some(Box::new(text)),
+                }),
+                ..Default::default()
+            });
+        }
+        let form = TextForm::try_from(&text).unwrap();
+        assert_eq!(Text::try_from(form).unwrap(), text);
+        let too_deep = Text::literal("root").append(text);
+        assert!(matches!(
+            TextForm::try_from(&too_deep),
+            Err(TextFormError::TooDeep)
+        ));
+        let json = serde_json::to_string(&too_deep).unwrap();
+        assert!(matches!(
+            Text::try_from(TextForm { tree: json }),
+            Err(TextFormError::TooDeep)
+        ));
     }
     #[test]
     fn via_accepts_infallible_and_fallible_forms() {

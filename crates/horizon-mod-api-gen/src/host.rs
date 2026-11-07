@@ -345,24 +345,30 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     syn::ReturnType::Type(_, ty) => boundary_value(ty),
                     syn::ReturnType::Default => false,
                 };
+                let infallible_output = match &entry.sig.output {
+                    syn::ReturnType::Type(_, ty) => infallible_value(ty),
+                    syn::ReturnType::Default => false,
+                };
                 let call = if checked_write {
                     if crosses_output {
                         format!("call_stack_write(|| {call})")
+                    } else if infallible_output {
+                        format!("call_write(|| {call}).try_into_api().unwrap()")
                     } else {
                         format!("call_write(|| {call})")
                     }
                 } else if crosses_output {
-                    let is_result = match &entry.sig.output {
-                        syn::ReturnType::Type(_, ty) => outer_type(ty, "Result"),
-                        _ => false,
-                    };
-                    if is_result {
-                        format!(
+                    match result_error(&entry.sig.output) {
+                        Some(error) if outer_type(error, "LevelReadError") => format!(
+                            "{call}.try_into_api().unwrap_or(Err(mod_api::LevelReadError::Unavailable))"
+                        ),
+                        Some(_) => format!(
                             "{call}.try_into_api().unwrap_or_else(|error| Err(error.into_write_error().into()))"
-                        )
-                    } else {
-                        format!("{call}.try_into_api().unwrap_or_default()")
+                        ),
+                        None => format!("{call}.try_into_api().unwrap_or_default()"),
                     }
+                } else if infallible_output {
+                    format!("{call}.try_into_api().unwrap()")
                 } else {
                     call
                 };
@@ -379,36 +385,67 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 
 /// API records whose game representation is owned by another crate. Conversions are
 /// implemented once by the game; this rule only selects the boundary, never its behaviour.
+fn infallible_value(ty: &Type) -> bool {
+    contains_value(ty, &["Text"])
+}
+
 fn boundary_value(ty: &Type) -> bool {
-    struct Values(bool);
-    impl<'ast> Visit<'ast> for Values {
+    contains_value(
+        ty,
+        &[
+            "ItemStack",
+            "GameRuleValue",
+            "ItemResource",
+            "ItemCost",
+            "MerchantOffer",
+            "Ingredient",
+            "Recipe",
+            "RecipeRule",
+            "RecipeTemplate",
+            "RecipeTrimPattern",
+            "FireworkShapeIngredient",
+            "AnvilResult",
+            "AnvilCraft",
+            "AnvilUpdate",
+            "GrindstonePlace",
+            "GrindstoneTake",
+        ],
+    )
+}
+
+fn contains_value(ty: &Type, names: &[&str]) -> bool {
+    struct Values<'a>(bool, &'a [&'a str]);
+    impl<'ast> Visit<'ast> for Values<'_> {
         fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-            self.0 |= path.path.segments.last().is_some_and(|segment| {
-                matches!(
-                    segment.ident.to_string().as_str(),
-                    "ItemStack"
-                        | "ItemResource"
-                        | "ItemCost"
-                        | "MerchantOffer"
-                        | "Ingredient"
-                        | "Recipe"
-                        | "RecipeRule"
-                        | "RecipeTemplate"
-                        | "RecipeTrimPattern"
-                        | "FireworkShapeIngredient"
-                        | "AnvilResult"
-                        | "AnvilCraft"
-                        | "AnvilUpdate"
-                        | "GrindstonePlace"
-                        | "GrindstoneTake"
-                )
-            });
+            self.0 |= path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| self.1.contains(&segment.ident.to_string().as_str()));
             syn::visit::visit_type_path(self, path);
         }
     }
-    let mut values = Values(false);
+    let mut values = Values(false, names);
     values.visit_type(ty);
     values.0
+}
+
+fn result_error(output: &syn::ReturnType) -> Option<&Type> {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return None;
+    };
+    let Type::Path(path) = &**ty else { return None };
+    let segment = path.path.segments.last()?;
+    if segment.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(error) = args.args.last()? else {
+        return None;
+    };
+    Some(error)
 }
 
 fn outer_type(ty: &Type, expected: &str) -> bool {
@@ -438,12 +475,19 @@ fn boundary_arguments(
             return Err(format!("{method}: unsupported argument"));
         };
         let name = pat.ident.to_string();
-        if !boundary_value(&arg.ty) {
+        let infallible = infallible_value(&arg.ty);
+        if !boundary_value(&arg.ty) && !infallible {
             args.push(name);
             continue;
         }
-        let conversion = format!("{name}.try_into_engine(self.items())");
-        let value = if checked_write {
+        let conversion = if infallible {
+            format!("{name}.try_into_engine(&())")
+        } else {
+            format!("{name}.try_into_engine(self.items())")
+        };
+        let value = if infallible {
+            format!("{conversion}.unwrap()")
+        } else if checked_write {
             format!("{conversion}?")
         } else {
             format!(
@@ -977,6 +1021,28 @@ mod tests {
                 .unwrap(),
             "duplicate handle receiver url",
         );
+    }
+
+    #[test]
+    fn text_arguments_are_infallible_even_with_checked_stack_writes() {
+        let text = entry("fn set_text(&mut self, text: &Text);");
+        let (setup, args, checked) = boundary_arguments(&text.sig, "set_text").unwrap();
+        assert!(!checked);
+        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert_eq!(args, "&text");
+        let mixed = entry(
+            "fn update(&mut self, stack: ItemStack, text: Option<&Text>) -> Result<Text, Refused>;",
+        );
+        let (setup, args, checked) = boundary_arguments(&mixed.sig, "update").unwrap();
+        assert!(checked);
+        assert!(setup.contains("stack.try_into_engine(self.items())?"));
+        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert_eq!(args, "stack, text.as_ref()");
+        let syn::ReturnType::Type(_, output) = &mixed.sig.output else {
+            panic!()
+        };
+        assert!(infallible_value(output));
+        assert!(!boundary_value(output));
     }
 
     #[test]
