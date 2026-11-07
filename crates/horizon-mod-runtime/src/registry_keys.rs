@@ -305,6 +305,24 @@ pub fn resolve_effects<'a>(
     })
 }
 
+/// Resolve all block entity types after registration and content loading.
+pub fn resolve_block_entity_types<'a, T>(
+    requests: &Names,
+    ids: impl IntoIterator<Item = &'a str>,
+    resolve: impl FnMut(&str) -> Option<T>,
+) -> Result<Names, Vec<String>> {
+    let mut names = requests.clone();
+    names.resolve(resolve, |mod_id, id| {
+        format!("mod {mod_id} requested unknown block entity type {id}")
+    })?;
+    for id in ids {
+        names
+            .request("horizon", id)
+            .expect("registry owns valid ids");
+    }
+    Ok(names)
+}
+
 #[cfg(test)]
 mod item_tag_tests {
     use super::*;
@@ -330,22 +348,4 @@ mod item_tag_tests {
         assert!(with_tag_name(slot, |name| name == Some("test:retained_tag_name")));
         assert!(with_tag_name(u32::MAX, |name| name.is_none()));
     }
-}
-
-/// Resolve all block entity types after registration and content loading.
-pub fn resolve_block_entity_types<'a, T>(
-    requests: &Names,
-    ids: impl IntoIterator<Item = &'a str>,
-    resolve: impl FnMut(&str) -> Option<T>,
-) -> Result<Names, Vec<String>> {
-    let mut names = requests.clone();
-    names.resolve(resolve, |mod_id, id| {
-        format!("mod {mod_id} requested unknown block entity type {id}")
-    })?;
-    for id in ids {
-        names
-            .request("horizon", id)
-            .expect("registry owns valid ids");
-    }
-    Ok(names)
 }
