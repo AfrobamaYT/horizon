@@ -29,6 +29,7 @@ wit-component = "0.261"
 wit-parser = "0.261"
 
 [dev-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 
 [lints]
