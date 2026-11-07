@@ -1075,9 +1075,9 @@ pub fn tooltip_style_sprites(namespace: &str, path: &str) -> [String; 2] {
     ["background", "frame"].map(|part| format!("{prefix}gui/sprites/tooltip/{path}_{part}"))
 }
 /// `TooltipRenderUtil.renderTooltipBackground`: the background sprite, then the frame sprite,
-/// nine-sliced 12 pixels out from the tooltip's contents `[x, y, w, h]` (`PADDING` 3 and
-/// `MARGIN` 9 on every side). Whether the atlas has both sprites; one that lacks either draws
-/// nothing.
+/// each drawn by `blitSprite` (nine-sliced as its `gui.scaling` says, stretched without it)
+/// 12 pixels out from the tooltip's contents `[x, y, w, h]` (`PADDING` 3 and `MARGIN` 9 on
+/// every side). Whether the atlas has both sprites; one that lacks either draws nothing.
 pub fn tooltip_sprites(
     batch: &mut HudBatch,
     atlas: &HudAtlas,
@@ -1091,7 +1091,7 @@ pub fn tooltip_sprites(
         return false;
     }
     for sprite in [background, frame] {
-        nine_slice(
+        blit_sprite(
             batch,
             atlas,
             sprite,
@@ -2453,7 +2453,9 @@ mod tests {
         assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
     /// A tooltip style names its sprites as `TooltipRenderUtil` does, in the GUI atlas's names;
-    /// the box draws both 12 pixels out from the contents, and nothing without either sprite.
+    /// the box draws the background, then the frame, 12 pixels out from the contents, each
+    /// stretched when it has no `gui.scaling` (`GuiMetadataSection.DEFAULT`), and nothing
+    /// without either sprite.
     #[test]
     fn a_tooltip_style_draws_its_own_background_and_frame() {
         assert_eq!(
@@ -2480,8 +2482,17 @@ mod tests {
             [20.0, 20.0, 50.0, 8.0]
         ));
         assert!(batch.vertices.is_empty());
+        // Two 16 × 16 sprites without metadata, in different places on the atlas.
+        let region = |u0: f32| Rect {
+            u0,
+            v0: 0.0,
+            u1: u0 + 0.25,
+            v1: 0.25,
+            w: 16,
+            h: 16,
+        };
         // A background without its frame would draw a box with no border.
-        atlas.sprites.insert(background.clone(), sprite(1, 1));
+        atlas.sprites.insert(background.clone(), region(0.0));
         assert!(!tooltip_sprites(
             &mut batch,
             &atlas,
@@ -2489,17 +2500,21 @@ mod tests {
             [20.0, 20.0, 50.0, 8.0]
         ));
         assert!(batch.vertices.is_empty());
-        atlas.sprites.insert(frame.clone(), sprite(1, 1));
+        atlas.sprites.insert(frame.clone(), region(0.5));
         assert!(tooltip_sprites(
             &mut batch,
             &atlas,
             [&background, &frame],
             [20.0, 20.0, 50.0, 8.0]
         ));
-        let q = quads(&batch);
-        assert!(!q.is_empty());
-        let left = q.iter().map(|(p, _)| p[0]).fold(f32::MAX, f32::min);
-        let bottom = q.iter().map(|(p, _)| p[3]).fold(f32::MIN, f32::max);
-        assert_eq!((left, bottom), (8.0, 40.0));
+        // Each is one stretched picture over the whole box, the background under the frame.
+        let box_ = [8.0, 8.0, 82.0, 40.0];
+        assert_eq!(
+            quads(&batch),
+            [
+                (box_, [0.0, 0.0, 0.25, 0.25]),
+                (box_, [0.5, 0.0, 0.75, 0.25])
+            ]
+        );
     }
 }
