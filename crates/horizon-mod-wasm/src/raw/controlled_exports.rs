@@ -4,9 +4,7 @@ use wasm_encoder::{CodeSection, Function, Instruction as Op, Module, reencode::R
 // Only load metadata and the raw fixture functions get executable bodies.
 fn component(names: &[(&str, &str)]) -> Exports {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let dir = root
-        .join("target")
-        .join(format!("raw-exports-{}", std::process::id()));
+    let dir = root.join(format!("target/raw-exports-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     horizon_mod_api_gen::generate(&root, &dir, horizon_mod_api_gen::Target::Api).unwrap();
     let mut resolve = wit_parser::Resolve::default();
@@ -30,12 +28,7 @@ fn component(names: &[(&str, &str)]) -> Exports {
             .insert(wit_parser::WorldKey::Name(format!("{prefix}-{name}")), item);
     }
     let raw_world = resolve.select_world(&[raw_package], Some("raw")).unwrap();
-    let raw_item = resolve.worlds[raw_world]
-        .exports
-        .values()
-        .next()
-        .unwrap()
-        .clone();
+    let raw_item = resolve.worlds[raw_world].exports[0].clone();
     resolve.worlds[world].exports.insert(
         wit_parser::WorldKey::Name(format!("{prefix}-raw-listeners")),
         raw_item,
@@ -66,9 +59,8 @@ fn component(names: &[(&str, &str)]) -> Exports {
         .unwrap();
     // Canonical aliases in this fixture require component interface identities.
     let mut config = wasmtime::Config::new();
-    config
-        .consume_fuel(true)
-        .wasm_component_model_implements(true);
+    config.consume_fuel(true);
+    config.wasm_component_model_implements(true);
     let engine = wasmtime::Engine::new(&config).unwrap();
     let component = wasmtime::component::Component::new(&engine, bytes).unwrap();
     let mut budgets = Budgets::default();
@@ -183,12 +175,8 @@ impl Reencode for Fixture {
 }
 #[test]
 fn manifest_listener_loads_at_its_declared_place() {
-    use mod_points::internals::{Op, Reply, Type};
-    unsafe fn node(
-        _: *mut (),
-        _: bool,
-        _: Op<'_>,
-    ) -> Result<Reply, mod_points::internals::Refusal> {
+    use mod_points::internals::{Op, Refusal, Reply, Type};
+    unsafe fn node(_: *mut (), _: bool, _: Op<'_>) -> Result<Reply, Refusal> {
         Err(mod_points::internals::not_here("fixture has no fields"))
     }
     static TABLE: Table = Table {
