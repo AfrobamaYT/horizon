@@ -1,13 +1,17 @@
 //! Snapshot cleanup under held directory capabilities. Cargo has no launcher exclusion contract:
 //! pin a `.cargo-lock` in every visited directory before enumerating it, and keep those inodes
 //! and their ancestry forever rather than strand a Cargo already waiting on an unlinked lock.
-//! Newly created entries are never in the deletion plan; rewritten files are retained too.
+//! Newly created entries are never in the deletion plan. Stamps retain files seen changed before
+//! deletion, best effort; hostile same-user swaps inside the cache are not a security boundary.
 pub use crate::native_cache::Error;
 use crate::native_cache::{locked, Locked};
 use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
 use cap_std::fs::{Dir, Metadata, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
 const LOCKS: [&str; 3] = [".cargo-lock", ".package-cache", ".package-cache-mutate"];
 
@@ -30,7 +34,7 @@ impl Stamp {
 }
 
 struct Output {
-    parent: Dir,
+    parent: Arc<Dir>,
     name: PathBuf,
     stamp: Stamp,
 }
@@ -67,7 +71,7 @@ impl Plan {
             return Err(Error::Unsafe(name.to_owned()));
         }
         plan.outputs.push(Output {
-            parent: directory.try_clone()?,
+            parent: Arc::new(directory.try_clone()?),
             name: name.to_owned(),
             stamp: Stamp::read(&meta)?,
         });
@@ -90,6 +94,7 @@ impl Plan {
 
     fn visit(&mut self, directory: &Dir) -> Result<(), Error> {
         self.lock_directory(directory)?;
+        let parent = Arc::new(directory.try_clone()?);
         for entry in directory.entries()? {
             let name = PathBuf::from(entry?.file_name());
             if LOCKS.iter().any(|lock| name == Path::new(lock)) || name == Path::new(".build.lock")
@@ -104,7 +109,7 @@ impl Plan {
                 self.visit(&directory.open_dir_nofollow(&name)?)?;
             } else if meta.is_file() {
                 self.outputs.push(Output {
-                    parent: directory.try_clone()?,
+                    parent: Arc::clone(&parent),
                     name,
                     stamp: Stamp::read(&meta)?,
                 });
