@@ -255,6 +255,9 @@ pub(super) struct Unbound {
 }
 
 pub(super) struct Surface<'a> {
+    /// The methods that mention a type that does not cross: the traits still need them, and
+    /// each answers that it is not available.
+    pub(super) dropped: Vec<Method>,
     /// The variants of the generated `HookId`, each with its hook's name.
     pub(super) hooks: Vec<(String, String)>,
     pub(super) types: Types<'a>,
@@ -388,7 +391,7 @@ pub(super) fn surface<'a>(
         }
     }
     report.push_str("\nMethods that do not cross:\n");
-    methods.retain(|m| {
+    let (methods, dropped): (Vec<Method>, Vec<Method>) = methods.into_iter().partition(|m| {
         let excluded = m
             .params
             .iter()
@@ -404,6 +407,7 @@ pub(super) fn surface<'a>(
     std::fs::write(target.join("wire-skipped.txt"), report)
         .map_err(|e| format!("writing wire report: {e}"))?;
     Ok(Surface {
+        dropped,
         hooks,
         types,
         methods,
@@ -541,7 +545,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
     let mut wire = emit::types(&surface.types);
-    let mut guest = calls::guest(&surface.types, &surface.methods, &surface.parts);
+    let mut guest = calls::guest(&surface.types, &surface.methods, &surface.dropped, &surface.parts);
     guest.push_str(&calls::hook_names(&surface.hooks));
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
     let _ = writeln!(wire, "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};", layout(&surface));
@@ -660,7 +664,7 @@ mod tests {
                         .or_default() += 1;
                 }
                 println!("classes {classes:?}");
-                let code = super::calls::guest(&surface.types, &surface.methods, &surface.parts);
+                let code = super::calls::guest(&surface.types, &surface.methods, &surface.dropped, &surface.parts);
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
                 for m in super::calls::imports(&surface.methods) { if !super::calls::plain_pub(m) { println!("nonplain {}::{} ({:?}) -> {:?}", m.owner, m.name, m.params.iter().map(|p| &p.1).collect::<Vec<_>>(), m.ret); } }
                 let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
