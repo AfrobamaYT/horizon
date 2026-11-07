@@ -446,7 +446,8 @@ mod block_tests {
 
     #[test]
     fn completed_blocks_preserve_slots_and_bind_unrequested_states() {
-        crate::install_parts(&[ModEntry::new("test", Box::new(Requests))]).unwrap();
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
+            .unwrap();
         let definition = |_: &str| {
             horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&Default::default()], 0)
                 .map_err(|error| format!("{error:?}"))
@@ -509,7 +510,8 @@ mod block_tests {
         assert!(prepare_blocks(|_| None).is_err());
         assert_eq!(block(stone).unwrap().default, BlockStateId(1));
         // Reversing the registry's enumeration cannot change any completed key.
-        crate::install_parts(&[ModEntry::new("test", Box::new(Requests))]).unwrap();
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
+            .unwrap();
         resolve_block_keys(names.into_iter().rev(), definition).unwrap();
         for (name, slot) in [
             ("minecraft:stone", 0),
@@ -521,7 +523,7 @@ mod block_tests {
             assert_eq!(block_key(name), Some(BlockKey(slot)));
         }
         // Replacing Parts replaces the load-owned identities, not a second global registry.
-        crate::install_parts(&[]).unwrap();
+        crate::install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
         assert!(block_key("minecraft:air").is_none());
         assert!(BlockKey::from_slot(air.0).is_err());
     }
@@ -542,7 +544,11 @@ mod item_tests {
 
     #[test]
     fn completed_items_preserve_forward_slots_and_refuse_unresolved_requests() {
-        crate::install_parts(&[ModEntry::new("test", Box::new(Requests))]).unwrap();
+        crate::install_parts(
+            &[ModEntry::new("test", Box::new(Requests))],
+            &crate::parts::tests::rule_schema(),
+        )
+        .unwrap();
         assert!(resolve_items(["minecraft:stone"]).is_err());
         assert!(item_key("minecraft:stone").is_none());
         resolve_items(["minecraft:stone", "minecraft:stick", "minecraft:apple"]).unwrap();

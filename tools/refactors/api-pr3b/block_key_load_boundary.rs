@@ -40,7 +40,7 @@ fn complete(registry: &BlockRegistry) -> Result<(), String> {
 
 #[test]
 fn production_block_key_load_boundary() {
-    mod_api::__private::install_parts(&[]).unwrap();
+    mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
     let facts = br#"{"defaults":{"minecraft:air":1,"minecraft:stone":2,"minecraft:zombie_head":0,"probe:machine":3},"states":[
         ["z",false,false,"","minecraft:zombie_head"],
         ["a",true,false,"","minecraft:air"],

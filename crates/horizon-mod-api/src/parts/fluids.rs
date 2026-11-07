@@ -50,7 +50,7 @@ pub mod tests {
         ]
         .into();
         crate::install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
         let error = resolve_fluids(&[]).unwrap_err();
         assert_eq!(
             error,

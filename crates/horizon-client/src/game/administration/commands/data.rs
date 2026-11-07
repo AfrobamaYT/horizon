@@ -194,6 +194,21 @@ impl Game<'_> {
             }
             Target::Projectile(id) => {
                 let uuid = self.uuid_for(id);
+                // A homing bullet's `Target` is the entity's, not the raw
+                // compound's, as `save_projectile` writes it.
+                let who = self
+                    .creatures
+                    .projectiles
+                    .iter()
+                    .find(|p| p.id == id)
+                    .and_then(|p| match &p.kind {
+                        horizon_client::projectiles::ProjectileKind::ShulkerBullet {
+                            target: Some(who),
+                            ..
+                        } => Some(*who),
+                        _ => None,
+                    });
+                let target = who.and_then(|who| self.save_who_uuid(who));
                 let p = self.creatures.projectiles.iter().find(|p| p.id == id)?;
                 let owner = if p.owner == Some(horizon_client::mobs::Who::Player) {
                     player_uuid
@@ -211,7 +226,7 @@ impl Game<'_> {
                 entity_nbt::arrow_to_nbt(p, uuid, p.owner_uuid.or(owner), in_block, raw)
                     .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw))
                     .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw))
-                    .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw))?
+                    .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, target, raw))?
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
@@ -263,6 +278,7 @@ impl Game<'_> {
                 // the raw compound alone does not contain generated clouds.
                 let mut tag = self.other_to_nbt(
                     &super::OtherEntity {
+                        join: Default::default(),
                         id,
                         kind: "minecraft:area_effect_cloud".into(),
                         item_transformation: None,
@@ -406,7 +422,8 @@ impl Game<'_> {
                     .position(|o| o.id == id)
                     .ok_or_else(stale)?;
                 let slot = &self.others[i];
-                let new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
+                let mut new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
+                new.join = slot.join;
                 let is_display = matches!(
                     slot.kind.as_str(),
                     "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
@@ -1405,6 +1422,7 @@ mod tests {
             game.persist.raw.insert(12, Tag::Compound(raw));
             game.persist.uuids.insert(12, [1, 2, 3, 4]);
             game.others.push(super::super::OtherEntity {
+                join: Default::default(),
                 item_transformation: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),
@@ -1772,6 +1790,9 @@ mod loot_table_tests {
         assert!(saved.get("Items").is_none());
     }
 }
+
+#[cfg(test)]
+mod saved_tag_tests;
 
 #[cfg(test)]
 mod mod_block_entity_tests;
