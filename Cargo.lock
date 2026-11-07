@@ -1953,6 +1953,8 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "wasm-encoder 0.261.0",
+ "wasmparser 0.261.0",
  "wasmtime",
  "wat",
  "wgpu",

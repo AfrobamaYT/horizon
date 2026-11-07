@@ -1097,11 +1097,12 @@ whatever conditions the mod reads:
   anything was granted. `TriggerCriterionError` distinguishes an invalid trigger (`minecraft:` is reserved; empty
   namespace/path is refused), a remote client, an unavailable player, a missing game backend, and a failed test.
   A failed test stops further tests; earlier matching criteria may already be granted. The test itself is not retained.
-- Both resource interfaces and their glue are generated from the traits. **Runtime limitation:** the wasm runtime
-  refuses callbacks into a group already executing a hook. When a wasm mod triggers a criterion from its own hook,
-  the test currently returns `CriterionTestError::Unavailable`, propagated as `TriggerCriterionError::Test`, rather
-  than silently treating it as a nonmatch. Generated bindings alone do not make this synchronous same-group callback
-  executable; runtime support is still required. Native predicates execute synchronously through the same criterion context.
+- Both resource interfaces and their glue are generated from the traits. Native and wasm predicates execute
+  synchronously through the same criterion context. Wasm callbacks into the triggering group borrow the import's
+  store while the outer call retains its group lock; fuel or epoch deadlines are shared, never refreshed for a
+  callback, and the memory limit remains in force. The nested context expires on return and the outer call's frame
+  is restored. A stopped or unavailable group returns `CriterionTestError::Unavailable`, propagated as
+  `TriggerCriterionError::Test`, rather than silently treating the criterion as a nonmatch.
 
 Diverges from upstream: this replaces the unscoped `Host` closure helper with a player receiver and generated
 criterion resources; the private advancement world remains solely in the native implementation.

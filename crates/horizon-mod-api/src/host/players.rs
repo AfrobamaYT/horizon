@@ -601,8 +601,8 @@ pub trait PlayersBackendMut {
     ///
     /// `test` is lent to this call only. A failed test stops further testing
     /// and reports `Test`; earlier matching criteria may already be granted.
-    /// Wasm's generated resource route exists, but a callback into the group
-    /// currently firing the trigger is refused by the runtime's reentry guard.
+    /// Wasm predicates run synchronously, including callbacks into the group
+    /// firing the trigger, within that call's remaining execution and memory limits.
     fn player_trigger_criterion(
         &mut self,
         player: PlayerRef,
