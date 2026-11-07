@@ -295,7 +295,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.is_some_and(|s| s.has_foil(item_glint)) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {
@@ -1324,7 +1324,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(&stack.item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.has_foil(item_glint) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {

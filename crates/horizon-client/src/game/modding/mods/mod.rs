@@ -312,6 +312,16 @@ pub(super) fn register_item_tint_sources(role: ExecutionRole) {
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
 }
+/// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
+/// start, before resources load; every resource load applies them to its mesh tables.
+pub(super) fn register_block_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::BlockTintRegistry::default();
+    Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_block_tint_sources(registry.into_layers());
+}
 
 /// `root` with the content mods that are on layered over it
 /// (docs/modpacks.md): their blocks, items, data and assets. Read once at
