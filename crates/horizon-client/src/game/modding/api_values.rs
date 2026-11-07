@@ -2817,11 +2817,19 @@ fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T)
     })
 }
 pub(in crate::game) fn install_parts(mods: &[mod_api::ModEntry]) -> Result<(), Vec<String>> {
-    with_rule_schema(|schema| mod_api::__private::install_parts(mods, schema))
+    with_rule_schema(|schema| {
+        mod_api::__private::install_parts(mods, schema, super::native_dimensions::valid_shape)
+    })
 }
 #[cfg(test)]
 pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>) {
-    with_rule_schema(|schema| mod_api::__private::part_tests::register_game_keys(ids, schema));
+    with_rule_schema(|schema| {
+        mod_api::__private::part_tests::register_game_keys(
+            ids,
+            schema,
+            super::native_dimensions::valid_shape,
+        )
+    });
 }
 
 pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {

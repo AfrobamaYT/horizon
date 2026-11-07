@@ -24993,7 +24993,7 @@ pub fn run_with(
     }
     // The levels they registered, below the data packs of every world opened.
     if horizon_world::worldgen::overrides::install_mod_dimensions(
-        mod_api::__private::installed_dimensions(),
+        native_dimensions::installed_dimensions(),
     )
     .is_err()
     {
