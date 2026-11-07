@@ -221,6 +221,31 @@ impl<A: TryIntoEngine, B: TryIntoEngine<Error = A::Error>> TryIntoEngine for (A,
     }
 }
 
+impl TryIntoApi for super::spill::BlockItemDrop {
+    type Api = mod_api::NativeItemDrop;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::NativeItemDrop::new(
+            self.stack.try_into_api()?,
+            self.position,
+            self.velocity,
+            self.pickup_delay,
+        ))
+    }
+}
+impl TryIntoEngine for mod_api::NativeItemDrop {
+    type Engine = super::spill::BlockItemDrop;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            stack: self.stack.try_into_engine(items)?,
+            position: self.position,
+            velocity: self.velocity,
+            pickup_delay: self.pickup_delay,
+        })
+    }
+}
+
 impl TryIntoEngine for mod_api::NativeItemDisplayContext {
     type Engine = horizon_assets::item_model::DisplayContext;
     type Error = ();
@@ -321,27 +346,29 @@ impl TryIntoEngine for mod_api::ItemResource {
     }
 }
 
+/// Encode an API value for a read-only engine predicate, without imposing resident maxima.
+/// The write conversion below adds authoritative registry-dependent validation.
+pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
+    let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
+    let patch = value
+        .components()
+        .map(|patch| Tag::Compound(patch.as_nbt().clone()));
+    let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
+    Ok(EngineStack {
+        item: id.clone(),
+        count: value.count(),
+        damage: value.damage(),
+        extra,
+    })
+}
+
 impl TryIntoEngine for ApiStack {
     type Engine = EngineStack;
     type Error = StackWriteError;
 
     fn try_into_engine(&self, items: &Items) -> Result<EngineStack, Self::Error> {
-        let id =
-            mod_api::__private::item_key_id(self.item()).ok_or(StackWriteError::UnknownItem)?;
-        let (id, definition) = items
-            .items
-            .get_key_value(id)
-            .ok_or(StackWriteError::UnknownItem)?;
-        let patch = self
-            .components()
-            .map(|patch| Tag::Compound(patch.as_nbt().clone()));
-        let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-        let stack = EngineStack {
-            item: id.clone(),
-            count: self.count(),
-            damage: self.damage(),
-            extra,
-        };
+        let stack = stack_value(self)?;
+        let definition = items.get(&stack.item).ok_or(StackWriteError::UnknownItem)?;
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -675,11 +702,32 @@ impl mod_api::menu::SlotView for ApiSlot<'_> {
     }
 }
 /// Adapt a synchronous slot event; engine slot rules still own every write.
+pub(crate) fn menu_slot_rules(
+    context: &horizon_world::native_load_context::LoopContext,
+    menu: &str,
+    slot: usize,
+    stack: &EngineStack,
+    may_place: &mut bool,
+    max_stack: &mut u32,
+) {
+    if !mod_api::__private::has_part_hook(mod_api::HookId::MenuSlotRules) {
+        return;
+    }
+    let Ok(stack) = stack.try_into_api() else {
+        return;
+    };
+    let context = mod_api::OwningLoop::new(context);
+    mod_api::dispatch_menu_slot_rules(&context, menu, slot, &stack, may_place, max_stack);
+}
+
 pub(crate) fn stacked_on_other(
     context: &horizon_world::native_load_context::LoopContext,
     event: &mut crate::menu::StackedOnOther<'_>,
     canceled: &mut bool,
 ) {
+    if !mod_api::__private::listened(mod_api::HookId::ItemStackedOnOther) {
+        return;
+    }
     let Ok(mut carried) = event.carried.0.try_into_api() else {
         return;
     };
@@ -1257,6 +1305,9 @@ impl super::Game<'_> {
         entity: &mut crate::containers::ModBlockEntity,
         carried: &mut Option<EngineStack>,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::MenuButton) {
+            return;
+        }
         let (Ok(mut api), Ok(mut cursor)) = (entity.try_into_api(), carried.try_into_api()) else {
             return;
         };
@@ -1277,6 +1328,9 @@ impl super::Game<'_> {
         stack: &mut EngineStack,
         handled: &mut bool,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::MenuQuickMove) {
+            return;
+        }
         let (Ok(mut api), Ok(mut held)) = (entity.try_into_api(), stack.try_into_api()) else {
             return;
         };
@@ -1299,14 +1353,15 @@ impl super::GameLevel<'_> {
         entity: &crate::containers::ModBlockEntity,
         drops: &mut Vec<EngineStack>,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::PreRemoveSideEffects) {
+            return;
+        }
         let Ok(api) = entity.try_into_api() else {
             return;
         };
         let mut added = Vec::new();
         self.native_pre_remove_side_effects(pos, state, &api, &mut added);
-        if let Ok(added) = added.try_into_engine(self.items) {
-            drops.extend(added);
-        }
+        drops.extend(added);
     }
 }
 

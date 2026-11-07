@@ -1,3 +1,5 @@
+use horizon_client::containers::ModBlockEntity as EngineBlockEntity;
+
 struct ContentsChangedGuard<'a, 'game> {
     game: &'a mut Game<'game>,
 }
@@ -1929,7 +1931,7 @@ fn block_entity_for_block(
     initial: Compound,
 ) -> Option<BlockEntity> {
     if let Some(kind) = horizon_client::block_entity_types::type_for(name) {
-        return Some(BlockEntity::Mod(Box::new(ModBlockEntity::new(
+        return Some(BlockEntity::Mod(Box::new(EngineBlockEntity::new(
             kind.to_owned(),
             ModBlockEntityFields {
                 nbt: initial,
@@ -2076,7 +2078,7 @@ impl Game<'_> {
     pub(super) fn native_with_mod_block_entity<R>(
         &mut self,
         pos: [i32; 3],
-        change: impl FnOnce(&mut ModBlockEntity) -> R,
+        change: impl FnOnce(&mut EngineBlockEntity) -> R,
     ) -> Option<R> {
         let key = (pos[0], pos[1], pos[2]);
         let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&key) else {
@@ -3251,7 +3253,7 @@ impl Game<'_> {
     pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
-        mut taken: ModBlockEntity,
+        mut taken: EngineBlockEntity,
         items: &[Option<ItemStack>],
     ) {
         if let Some(BlockEntity::Mod(m)) = self.world.block_entities.get_mut(&pos)
