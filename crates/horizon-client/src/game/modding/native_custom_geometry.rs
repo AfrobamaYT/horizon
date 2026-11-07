@@ -362,6 +362,101 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
+    fn a_partial_tint_alpha_matches_on_tinted_faces_only() {
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = game
+                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            let local = Mat4::from_scale(Vec3::splat(1.0));
+            let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
+            let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
+            let lit = ModelInstance::new(
+                origin.to_array(),
+                rows(local),
+                0x40FF_3040,
+                LightCoords::new(3, 15).unwrap(),
+                Overlay::NONE,
+            );
+            let view = Mat4::from_scale_rotation_translation(
+                Vec3::new(1.4, 1.4, 0.2),
+                Quat::IDENTITY,
+                Vec3::new(-0.55, -0.85, 0.5),
+            );
+            let pixels = game.gui.atlas.pixels().to_vec();
+            let size = [game.gui.atlas.width, game.gui.atlas.height];
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(8);
+            let mut draw = WorldGeometry::default();
+            draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[lit])
+                .unwrap();
+            let mut spare = Vec::new();
+            game.commit_model_instances(&mut draw, camera, &mut spare);
+            let staged = game.prepared_model_draws.borrow();
+            let instance = staged[0].instance;
+            let slot = staged[0].slot;
+            let uploaded = staged[0].generation;
+            drop(staged);
+            game.prepared_model_draws.borrow_mut().clear();
+            horizon_client::gfx::set_test_prepared_generation(None);
+            let mut cpu_draw = WorldGeometry::default();
+            cpu_draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+            context(game, &mut cpu_draw)
+                .draw_model_instances(model, &[lit])
+                .unwrap();
+            let mut entities = Vec::new();
+            game.commit_model_instances(&mut cpu_draw, camera, &mut entities);
+            assert!(
+                entities.iter().any(|vertex| vertex.color >> 24 == 255),
+                "an untinted face stays opaque"
+            );
+            assert!(
+                entities.iter().any(|vertex| vertex.color >> 24 == 0x40),
+                "a tinted face takes the tint alpha"
+            );
+            let cpu = horizon_client::gfx::entity_pixel_test::render(
+                &entities, size, &pixels, view, false,
+            )
+            .expect("software Vulkan entity pixels");
+            let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+            let gpu = horizon_client::gfx::entity_pixel_test::render_instance(
+                horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                    vertices: &vertices,
+                    ranges,
+                    uploaded,
+                    requested: uploaded,
+                    slot,
+                    instances: std::slice::from_ref(&instance),
+                    per_copy: false,
+                    hdr: false,
+                    atlas_size: size,
+                    atlas: &pixels,
+                    view_proj: view,
+                },
+            )
+            .expect("software Vulkan prepared instance");
+            let worst = cpu
+                .iter()
+                .zip(gpu.iter())
+                .map(|(left, right)| left.abs_diff(*right))
+                .max()
+                .unwrap_or(0);
+            eprintln!(
+                "partial worst {worst} cpu {:?} gpu {:?}",
+                first_colour(&cpu),
+                first_colour(&gpu)
+            );
+            assert!(worst <= 2, "partial tint alpha differed by {worst}");
+        });
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn draw_model_instances_refuses_offscreen_and_over_budget() {
         let _fixture =
@@ -408,6 +503,14 @@ mod tests {
                     Err(InstanceError::CapacityExceeded)
                 );
                 assert_eq!(ctx.usage().instances_used, 16_384);
+                ctx.surface.reset([0.0; 3], Mat4::IDENTITY, [0.0, 0.0]);
+                assert_eq!(
+                    ctx.draw_model_instances(model, &vec![far; 16_385]),
+                    Err(InstanceError::CapacityExceeded)
+                );
+                assert_eq!(ctx.usage().instances_used, 0);
+                ctx.draw_model_instances(model, &vec![far; 16_384]).unwrap();
+                assert_eq!(ctx.usage().instances_used, 0);
             }
         });
     }
