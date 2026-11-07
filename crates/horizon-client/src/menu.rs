@@ -17,11 +17,9 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
-use mod_api::__private::game::IngredientTest;
-pub use mod_api::menu::{
-    AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
-    LogicalSide, MenuButtonContext, SlotView, StackedOnOther,
-};
+pub use mod_api::menu::{LogicalSide, MenuButtonContext};
+mod models;
+pub use models::{AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake, SlotView, StackedOnOther};
 use std::sync::Arc;
 
 mod bundle;
