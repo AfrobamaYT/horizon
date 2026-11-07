@@ -396,6 +396,9 @@ mod build_script {
             "id='generation'\nname='Generation'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[native]\ninternals=[{{path=\"horizon_client::game::Game<'_>::tick\",hash='h'}}]\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='internals'\nhash='h'\nwith='chosen'",
             "0".repeat(128)
         );
+        let manifest = format!(
+            "{manifest}\n[[inject]]\nid='api_listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='api'\nhash='h'\nwith='api_listener'"
+        );
         // SAFETY: only this test sets the build-script environment in this process.
         unsafe {
             env::set_var(
@@ -413,6 +416,7 @@ mod build_script {
             let _entry_point = main;
             let code = generate().unwrap();
             assert!(code.contains(&format!("crate :: {function}")));
+            assert!(!code.contains("crate :: api_listener"));
         }
     }
 }
