@@ -41,8 +41,9 @@ pub(super) struct Level {
     players: HashMap<u128, KeptPlayer>,
     /// Each entity's inventory (`entity_slots`) before this transaction first wrote it.
     entities: HashMap<u32, Vec<Option<ItemStack>>>,
-    /// Each mob's equipment before this transaction first wrote it (#932).
-    equipment: HashMap<u32, Vec<Option<ItemStack>>>,
+    /// Each mob's or armor stand's equipment before this transaction first
+    /// wrote it (#932), told apart for the way back.
+    equipment: HashMap<u32, KeptEquipment>,
     /// Each chested mob's item list's length before `entity_slots` first grew it to its slots
     /// in this transaction.
     mob_lengths: HashMap<u32, usize>,
@@ -96,6 +97,14 @@ struct KeptPlayer {
     offhand: Option<ItemStack>,
     equipment: horizon_items::equipment::Equipment,
     carried: Option<ItemStack>,
+}
+
+/// A mob's or an armor stand's equipment as a transaction first wrote it
+/// (#932): the same eight slots, restored their own way.
+#[derive(Clone)]
+enum KeptEquipment {
+    Mob(Vec<Option<ItemStack>>),
+    Stand(Vec<Option<ItemStack>>),
 }
 
 #[derive(Clone)]
@@ -336,11 +345,14 @@ impl Game<'_> {
         if level.equipment.contains_key(&id) {
             return;
         }
-        let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) else {
+        let kept = if let Some(mob) = self.mobs.iter().find(|m| m.id == id && !m.removed) {
+            KeptEquipment::Mob(mob.equipment_stacks().iter().cloned().collect())
+        } else if let Some(stand) = self.armor_stands.iter().find(|a| a.id == id) {
+            KeptEquipment::Stand(stand.equipment.iter().cloned().collect())
+        } else {
             return;
         };
-        let stacks = mob.equipment_stacks().iter().cloned().collect();
-        level.equipment.insert(id, stacks);
+        level.equipment.insert(id, kept);
     }
     /// Sets item entity `id`'s stack, keeping it as it was if a transaction is open and hasn't
     /// yet. Emptied in one, it stays, empty, until the root commit removes it, so an abort can
@@ -505,14 +517,29 @@ impl Game<'_> {
         // Each mob's equipment goes back as it was, and the attribute map is
         // made over it again (#932).
         let equipment = std::mem::take(&mut level.equipment);
-        for (id, stacks) in equipment {
-            let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
-                continue;
-            };
-            for (slot, stack) in stacks.into_iter().enumerate() {
-                mob.set_equipment_stack(slot, stack);
+        for (id, kept) in equipment {
+            match kept {
+                KeptEquipment::Mob(stacks) => {
+                    let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed)
+                    else {
+                        continue;
+                    };
+                    for (slot, stack) in stacks.into_iter().enumerate() {
+                        mob.set_equipment_stack(slot, stack);
+                    }
+                    self.collect_mob_equipment_attributes(id);
+                }
+                // An armor stand keeps no live attribute map of its gear; the
+                // plain write puts its slots back as they were.
+                KeptEquipment::Stand(stacks) => {
+                    let Some(stand) = self.armor_stands.iter_mut().find(|a| a.id == id) else {
+                        continue;
+                    };
+                    for (slot, stack) in stacks.into_iter().enumerate() {
+                        stand.equipment.set(slot, stack);
+                    }
+                }
             }
-            self.collect_mob_equipment_attributes(id);
         }
 
         for (pos, kept) in level.block_entities {
