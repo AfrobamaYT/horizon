@@ -302,10 +302,13 @@ impl TryIntoApi for horizon_assets::item_model::StackView {
             .ok_or(StackReadError::Empty)?;
         let components = Tag::compound(self.patch.iter().map(|(name, value)| match value {
             Some(value) => (
-                name.clone(),
+                horizon_core::nbt::JavaString::from(name.as_str()),
                 horizon_client_core::scoreboard::json_to_tag(value),
             ),
-            None => (format!("!{name}"), Tag::compound([] as [(String, Tag); 0])),
+            None => (
+                horizon_core::nbt::JavaString::from(format!("!{name}").as_str()),
+                Tag::Compound(Compound::new()),
+            ),
         }));
         let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
         EngineStack {
