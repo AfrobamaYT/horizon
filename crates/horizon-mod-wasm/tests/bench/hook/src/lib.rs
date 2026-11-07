@@ -24,10 +24,10 @@ use mod_api::{
 #[derive(Default)]
 pub struct Mod;
 
-#[mod_api::horizon_mod]
-impl mod_points::Points for Mod {
-    fn tick(&self, _host: mod_api::HostSide<'_>, _args: &mut mod_points::TickArgs) {}
-}
+pub fn tick(_host: mod_api::HostSide<'_>, _args: &mut mod_points::TickArgs) {}
+
+#[cfg(target_arch = "wasm32")]
+include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 
 #[mod_api::horizon_mod]
 impl Hooks for Mod {

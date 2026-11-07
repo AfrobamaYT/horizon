@@ -21,6 +21,12 @@ pub trait LevelsHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait LevelsBackend {
+    /// Side: server.
+    /// The level's world border as [min_x, min_z, max_x, max_z], using the
+    /// previous size while it moves. Horizon currently shares one border
+    /// across its dimensions. None for a stale handle or a closed level.
+    #[access(WorldOnly)]
+    fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]>;
     /// Side: both.
     /// The name of a dimension's key.
     #[access(Metadata)]

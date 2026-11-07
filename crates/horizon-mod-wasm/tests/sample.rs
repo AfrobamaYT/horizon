@@ -33,7 +33,7 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
     Manifest::parse(&format!(
         "id = \"hello_wasm\"\nname = \"Hello Wasm\"\nversion = \"0.1.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
-         [[native.injection]]\nid = \"listen\"\nkind = \"HEAD\"\n{injection}\n",
+         [[inject]]\nid = \"listen\"\nkind = \"head\"\nwith = \"tick\"\nhash = \"signature\"\n{injection}\n",
         wasm.sha512(),
         wasm.toolchain(),
     ))
@@ -138,33 +138,30 @@ impl mod_api::Messages for Server {
 
 #[test]
 #[ignore = "needs the sample built to mod.wasm (CI's wasm-mods job)"]
-fn the_sample_mod_loads_subscribes_and_registers_its_part() {
+fn declarations_require_a_place_and_matching_guest_export() {
     let (manifest, module, std_member) = sample();
     // A manifest that doesn't list where the mod listens, or lists a point this game lacks, refuses
     // it; neither registers anything.
-    let tick = "target = \"horizon_client::game::Game<'_>::tick\"";
-    let undeclared = load(
-        listing(&manifest, &format!("{tick}\ntrait_method = \"tick_world\"")),
-        module.clone(),
-        &std_member,
-    );
+    let gone = "at = \"horizon_client::game::Game<'_>::gone\"";
+    let undeclared = load(listing(&manifest, gone), module.clone(), &std_member);
     assert!(
         matches!(&undeclared.refused[..], [(_, Refusal::NoSuchPoint { .. })]),
-        "a target that isn't the method's function: {:?}",
+        "an unavailable target: {:?}",
         undeclared.refused
     );
-    let elsewhere = "target = \"horizon_client::game::Game<'_>::tick_world\"\n\
-                     trait_method = \"tick_world\"";
+    let elsewhere = "at = \"horizon_client::game::Game<'_>::tick_world\"";
     let undeclared = load(listing(&manifest, elsewhere), module.clone(), &std_member);
     assert!(
-        matches!(
-            &undeclared.refused[..],
-            [(_, Refusal::UndeclaredPoint { point })] if point == "tick"
-        ),
+        matches!(&undeclared.refused[..], [(_, Refusal::UndeclaredPoint { point })] if point == "tick"),
         "the mod listens at tick, which its manifest doesn't list: {:?}",
         undeclared.refused
     );
+}
 
+#[test]
+#[ignore = "needs the sample built to mod.wasm (CI's wasm-mods job)"]
+fn the_sample_mod_loads_subscribes_and_registers_its_part() {
+    let (manifest, module, std_member) = sample();
     let mut loaded = load(manifest, module, &std_member);
     assert!(loaded.refused.is_empty(), "{:?}", loaded.refused);
     let [entry] = loaded.mods.as_slice() else {
