@@ -371,6 +371,12 @@ pub(super) fn load_resources(
 ) -> Result<Loaded> {
     let mut root = resolved.prepared().to_path_buf();
     let headless = !role.is_client();
+    let runtime_sprites = if headless {
+        Vec::new()
+    } else {
+        client_reload::collect_runtime_sprites()
+    };
+    resolved = client_reload::stage_runtime_sprites(resolved, &runtime_sprites);
     let threads = settings.horizon.worker_threads();
     // One pool of workers for every level's streaming, the client's and the
     // server thread's (horizon_threads::jobs), sized before any world opens.
@@ -452,7 +458,10 @@ pub(super) fn load_resources(
         pack_error = Some(failure);
         can_rollback = false;
         root = vanilla_root.to_path_buf();
-        resolved = horizon_assets::resource_source::ResourceRoot::directory(root.clone());
+        resolved = client_reload::stage_runtime_sprites(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            &runtime_sprites,
+        );
     };
     log::info!("load core tables: {:.2}s", started.elapsed().as_secs_f32());
     let entity_models = entity_models.map(Arc::new);
