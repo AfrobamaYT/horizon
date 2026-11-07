@@ -10,11 +10,7 @@ impl BlockKey {
         crate::parts::with_registering_keys(|registering| {
             registering
                 .map(|requests| &requests.blocks)
-                .unwrap_or_else(|| {
-                    resolved_block_keys()
-                        .get()
-                        .unwrap_or(&crate::parts::requested_keys().blocks)
-                })
+                .unwrap_or_else(|| block_names())
                 .id(slot)
                 .ok_or("unknown BlockKey slot")?;
             Ok(Self(slot))
@@ -73,28 +69,47 @@ pub fn resolve_items<'a>(
     Ok(())
 }
 
-fn resolved_block_keys() -> &'static std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names>
-{
-    static EMPTY: std::sync::OnceLock<horizon_mod_runtime::registry_keys::Names> =
+fn resolved_block_keys()
+-> &'static std::sync::OnceLock<horizon_mod_runtime::block_definitions::Blocks> {
+    static EMPTY: std::sync::OnceLock<horizon_mod_runtime::block_definitions::Blocks> =
         std::sync::OnceLock::new();
     crate::parts::installed().map_or(&EMPTY, |installed| &installed.resolved_blocks)
 }
 
-/// Complete block identities at the same load boundary as item identities. World mappings
-/// remain owning-thread data; these names belong to the installed mod registry.
-pub fn resolve_block_keys<'a>(ids: impl IntoIterator<Item = &'a str>) -> Result<(), Vec<String>> {
+fn block_names() -> &'static horizon_mod_runtime::registry_keys::Names {
+    resolved_block_keys()
+        .get()
+        .map(|blocks| &blocks.names)
+        .unwrap_or(&crate::parts::requested_keys().blocks)
+}
+
+/// Publish completed identities and immutable definitions together before constructing mesh tables.
+/// World-number mappings remain owning-thread data.
+pub fn resolve_block_keys<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+    definition: impl FnMut(
+        &str,
+    )
+        -> Result<horizon_mod_runtime::block_definitions::BlockDefinition, String>,
+) -> Result<(), Vec<String>> {
     let names = crate::parts::requested_keys()
         .blocks
         .complete(ids, |mod_id, id| {
             format!("mod {mod_id} requested unknown block {id}")
         })?;
-    let _ = resolved_block_keys().set(names);
+    let blocks = horizon_mod_runtime::block_definitions::Blocks::prepare(names, definition)?;
+    let _ = resolved_block_keys().set(blocks);
     Ok(())
 }
 
 /// Find a block in the completed registry without allocating at a hook boundary.
 pub fn block_key(id: &str) -> Option<BlockKey> {
-    Some(BlockKey(*resolved_block_keys().get()?.slots.get(id)?))
+    Some(BlockKey(*resolved_block_keys().get()?.names.slots.get(id)?))
+}
+
+/// Borrow the immutable definitions published with completed block identities.
+pub fn block_definitions() -> Option<&'static horizon_mod_runtime::block_definitions::Blocks> {
+    resolved_block_keys().get()
 }
 
 /// Find an item in the completed registry without allocating at a hook boundary.
@@ -316,12 +331,9 @@ thread_local! {
 pub fn prepare_blocks(
     mut resolve: impl FnMut(&str) -> Option<ResolvedBlock>,
 ) -> Result<Vec<ResolvedBlock>, Vec<String>> {
-    resolved_block_keys()
-        .get()
-        .unwrap_or(&crate::parts::requested_keys().blocks)
-        .resolve(&mut resolve, |mod_id, id| {
-            format!("mod {mod_id} requested unknown block {id}")
-        })
+    block_names().resolve(&mut resolve, |mod_id, id| {
+        format!("mod {mod_id} requested unknown block {id}")
+    })
 }
 
 /// Install a prepared mapping on its owning game thread.
@@ -386,10 +398,7 @@ pub fn effect_id(key: EffectKey) -> Option<&'static str> {
 
 /// Canonical diagnostic name of a trusted, load-owned slot, independent of world resolution.
 pub fn block_id(key: BlockKey) -> Option<&'static str> {
-    resolved_block_keys()
-        .get()
-        .unwrap_or(&crate::parts::requested_keys().blocks)
-        .id(key.0)
+    block_names().id(key.0)
 }
 
 /// Canonical diagnostic name retained by an item registration slot.
@@ -437,12 +446,20 @@ mod block_tests {
 
     #[test]
     fn completed_blocks_preserve_slots_and_bind_unrequested_states() {
-        crate::install_parts(
-            &[ModEntry::new("test", Box::new(Requests))],
-            &crate::parts::tests::rule_schema(),
-        )
-        .unwrap();
-        assert!(resolve_block_keys(["minecraft:air"]).is_err());
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
+            .unwrap();
+        let definition = |_: &str| {
+            horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&Default::default()], 0)
+                .map_err(|error| format!("{error:?}"))
+        };
+        assert!(resolve_block_keys(["minecraft:air"], definition).is_err());
+        assert!(block_key("minecraft:air").is_none());
+        assert!(
+            resolve_block_keys(["minecraft:stone", "minecraft:air"], |_| Err(
+                "missing definition".into()
+            ))
+            .is_err()
+        );
         assert!(block_key("minecraft:air").is_none());
         let names = [
             "test:machine",
@@ -452,7 +469,7 @@ mod block_tests {
             "minecraft:birch_log",
             "minecraft:air",
         ];
-        resolve_block_keys(names).unwrap();
+        resolve_block_keys(names, definition).unwrap();
         let stone = block_key("minecraft:stone").unwrap();
         let air = block_key("minecraft:air").unwrap();
         assert_eq!(stone, BlockKey(0));
@@ -493,12 +510,9 @@ mod block_tests {
         assert!(prepare_blocks(|_| None).is_err());
         assert_eq!(block(stone).unwrap().default, BlockStateId(1));
         // Reversing the registry's enumeration cannot change any completed key.
-        crate::install_parts(
-            &[ModEntry::new("test", Box::new(Requests))],
-            &crate::parts::tests::rule_schema(),
-        )
-        .unwrap();
-        resolve_block_keys(names.into_iter().rev()).unwrap();
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Requests))])
+            .unwrap();
+        resolve_block_keys(names.into_iter().rev(), definition).unwrap();
         for (name, slot) in [
             ("minecraft:stone", 0),
             ("minecraft:air", 1),

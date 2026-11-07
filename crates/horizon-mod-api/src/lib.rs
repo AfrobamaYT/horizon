@@ -1132,7 +1132,7 @@ pub struct NativeScreenView<'a> {
     /// menu type the client does not know.
     pub menu: Option<&'a str>,
     /// The title the server gave the open menu, if it has one: the component
-    /// itself, not a copy (`.plain()` it to draw, `chars()` for the styles).
+    /// itself, borrowed as an owned API component tree.
     /// None when the server gave none, on a screen the client opened, and
     /// while playing.
     pub title: Option<&'a Text>,
@@ -5186,8 +5186,7 @@ mod tests {
             );
             assert_eq!(claimed, expected, "{block}");
             let player = host.players.get(7).unwrap();
-            let told: Vec<String> = player.action_bar.iter().map(Text::plain).collect();
-            assert_eq!(told, [block], "{block}");
+            assert_eq!(player.action_bar, [Text::literal(block)], "{block}");
         }
     }
 
@@ -5492,17 +5491,35 @@ mod tests {
         let mut host = FakeHost::new();
         let mut rules = horizon_client_core::gamerules::GameRules::default();
         // What `set_game_rule` and the other setters do.
-        let mut set = |name: &str, value: GameRuleValue| {
-            if rules.set(name, value) {
+        use horizon_client_core::gamerules::Value as EngineValue;
+        // Independent engine inputs and expected API values: production conversion lives in Game.
+        for (name, engine, value) in [
+            (
+                "keep_inventory",
+                EngineValue::Bool(true),
+                GameRuleValue::Bool(true),
+            ),
+            (
+                "random_tick_speed",
+                EngineValue::Int(-1),
+                GameRuleValue::Int(-1),
+            ),
+            ("keep_inventory", EngineValue::Int(1), GameRuleValue::Int(1)),
+            (
+                "no_such_rule",
+                EngineValue::Bool(true),
+                GameRuleValue::Bool(true),
+            ),
+            (
+                "random_tick_speed",
+                EngineValue::Int(7),
+                GameRuleValue::Int(7),
+            ),
+        ] {
+            if rules.set(name, engine) {
                 dispatch_game_rule_changed(&mut host, &["minecraft:", name].concat(), value, None);
             }
-        };
-        set("keep_inventory", GameRuleValue::Bool(true));
-        // Out of range, of the wrong type, unknown: GameRules.set refuses them.
-        set("random_tick_speed", GameRuleValue::Int(-1));
-        set("keep_inventory", GameRuleValue::Int(1));
-        set("no_such_rule", GameRuleValue::Bool(true));
-        set("random_tick_speed", GameRuleValue::Int(7));
+        }
         assert_eq!(
             *seen.lock().unwrap(),
             [

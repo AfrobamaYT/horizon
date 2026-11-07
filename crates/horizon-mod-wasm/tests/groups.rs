@@ -167,7 +167,10 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
                 replies: &mut replies,
             };
             entry.fields().hooks.server_chat(&mut World, &mut event);
-            message.plain()
+            let mod_api::text::TextContent::Literal(answer) = message.content else {
+                panic!("expected a literal reply");
+            };
+            answer
         })
         .filter(|answer| !answer.is_empty())
         .collect();

@@ -1,5 +1,5 @@
 //! The game's side of the `services` area (`horizon-mod-api/src/host/services.rs`).
-use crate::game::Game;
+use crate::game::{Game, api_values::TryIntoEngine};
 use mod_api::{prelude::*, *};
 
 impl ClientSession for Game<'_> {
@@ -35,7 +35,7 @@ impl Commands for Game<'_> {
     }
     fn feedback(&mut self, line: Text) {
         mod_api::__private::check_access("feedback", mod_api::__private::LoadAccess::WorldOnly);
-        self.native_feedback(line)
+        self.native_feedback(line.try_into_engine(&()).unwrap())
     }
     fn run_command(&mut self, line: &str) -> bool {
         mod_api::__private::check_access("run_command", mod_api::__private::LoadAccess::WorldOnly);
@@ -55,7 +55,7 @@ impl Messages for Game<'_> {
     }
     fn broadcast(&self, line: Text) {
         mod_api::__private::check_access("broadcast", mod_api::__private::LoadAccess::WorldOnly);
-        self.native_broadcast(line)
+        self.native_broadcast(line.try_into_engine(&()).unwrap())
     }
 }
 impl Players for Game<'_> {

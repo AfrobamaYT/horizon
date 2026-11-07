@@ -204,7 +204,7 @@ impl Parser<'_> {
 }
 /// `click_event` / `hover_event`, or the pre-datafixer `clickEvent` /
 /// `hoverEvent` names SNBT and older chat JSON still use.
-fn style_event_object<'a>(
+pub fn style_event_object<'a>(
     o: &'a serde_json::Map<String, Value>,
     modern: &str,
     legacy: &str,
@@ -215,7 +215,7 @@ fn style_event_object<'a>(
 }
 
 /// Style flags from JSON bools, or SNBT `1b`/`0b` which parse as numbers.
-fn style_flag(v: Option<&Value>) -> Option<bool> {
+pub fn style_flag(v: Option<&Value>) -> Option<bool> {
     match v {
         Some(Value::Bool(b)) => Some(*b),
         Some(Value::Number(n)) => n.as_i64().map(|i| i != 0),
@@ -235,7 +235,7 @@ pub fn untrusted_http_url(url: &str) -> bool {
 
 /// `ClickEvent.CODEC` plus the legacy `value` field TextComponentHoverAndClickEventFix
 /// renames (`url` / `command` / `page`).
-fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::text::ClickEvent> {
+pub fn parse_click_event(e: &serde_json::Map<String, Value>) -> Option<crate::text::ClickEvent> {
     let text = |k: &str| e.get(k).and_then(Value::as_str).map(str::to_owned);
     let legacy = || text("value");
     match e.get("action").and_then(Value::as_str) {
@@ -333,7 +333,7 @@ pub(crate) fn hex_color(c: &str) -> Option<u32> {
 }
 
 /// `Style.shadow_color`: a packed ARGB int or normalized RGBA array.
-pub(crate) fn shadow_color(value: &Value) -> Option<u32> {
+pub fn shadow_color(value: &Value) -> Option<u32> {
     if let Some(packed) = value.as_i64() {
         return i32::try_from(packed).ok().map(|n| n as u32);
     }
@@ -412,10 +412,11 @@ impl Sourced {
             }
         }
     }
-    fn translate(self, key: &str, args: &[Text]) -> Text {
-        match self.0 {
-            true => Text::translate(key, args),
-            false => crate::text::format_translation(&crate::lang::get(key), args),
+    fn translate(self, key: &str, fallback: Option<&str>, args: &[Text]) -> Text {
+        match (self.0, fallback) {
+            (true, Some(fallback)) => Text::translate_with_fallback(key, fallback, args),
+            (true, None) => Text::translate(key, args),
+            (false, fallback) => crate::text::format_translatable(key, fallback, args),
         }
     }
 }
@@ -475,13 +476,7 @@ fn build(
                             .collect()
                     })
                     .unwrap_or_default();
-                let translated = sourced.translate(key, &args);
-                match o.get("fallback").and_then(Value::as_str) {
-                    Some(fallback) if translated.plain() == key => {
-                        sourced.translate(fallback, &args)
-                    }
-                    _ => translated,
-                }
+                sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args)
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
                 resolve(sel)
             } else if let Some(key) = o.get("keybind").and_then(Value::as_str) {
@@ -513,7 +508,8 @@ fn build(
     }
 }
 
-fn inline_object(
+/// Decode inline object fields, including the engine's profile and atlas defaults.
+pub fn inline_object(
     object: &serde_json::Map<String, Value>,
     resolve: &mut dyn FnMut(&str) -> Text,
     contents: &mut dyn FnMut(&serde_json::Map<String, Value>) -> Option<Text>,
@@ -583,6 +579,32 @@ pub fn name_text(tag: &Tag) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_fallback_is_a_literal_template_not_a_second_key() {
+        let language = crate::lang::Language::of(
+            "en_us",
+            [
+                ("test.fallback".into(), "Wrong translation".into()),
+                ("test.same".into(), "test.same".into()),
+            ],
+        );
+        crate::lang::scoped(language, || {
+            for (key, fallback, expected) in [
+                ("test.missing", "test.fallback", "test.fallback"),
+                ("test.same", "Wrong fallback", "test.same"),
+            ] {
+                let value = serde_json::json!({"translate":key, "fallback":fallback});
+                assert_eq!(Text::from(value.clone()).plain(), expected);
+                assert_eq!(to_text(&value, &mut |s| Text::literal(s)).plain(), expected);
+            }
+            let value = serde_json::json!({"translate":"test.missing", "fallback":"value: %s", "with":[{"text":"argument", "bold":true}]});
+            let text = Text::from(value);
+            assert_eq!(text.plain(), "value: argument");
+            assert_eq!(text.spans.last().unwrap().style.bold, Some(true));
+        });
+    }
+
     /// SnbtGrammar: a compound or list may end with one comma; two in a row
     /// stay an error.
     #[test]

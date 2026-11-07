@@ -5,6 +5,100 @@ use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
+/// Publish immutable metadata with completed keys before any mesh tables or callbacks use it.
+/// Registry definitions do not change on pack reload; world-number mappings are separate.
+pub(in crate::game) fn resolve_block_definitions(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> Result<(), String> {
+    if mod_api::__private::block_definitions().is_some() {
+        return Ok(());
+    }
+    let mut blocks = std::collections::BTreeMap::<_, Vec<_>>::new();
+    for index in 0..registry.len() {
+        let state = registry
+            .state(horizon_world::registry::BlockStateId(index as u32))
+            .expect("registry index is in bounds");
+        blocks
+            .entry(state.name.as_str())
+            .or_default()
+            .push((index, &state.properties));
+    }
+    mod_api::__private::resolve_block_keys(blocks.keys().copied(), |name| {
+        let states = &blocks[name];
+        let default = registry
+            .default_state(name)
+            .expect("registry owns block defaults");
+        let ordinal = states
+            .iter()
+            .position(|(index, _)| *index == default.0 as usize)
+            .expect("default belongs to block");
+        let states: Vec<std::collections::BTreeMap<_, _>> = states
+            .iter()
+            .map(|(_, properties)| {
+                properties
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .collect();
+        let states: Vec<_> = states.iter().collect();
+        horizon_mod_runtime::block_definitions::BlockDefinition::new(&states, ordinal as u16)
+            .map_err(|error| format!("block {name}: {error:?}"))
+    })
+    .map_err(|errors| errors.join("\n"))
+}
+
+#[cfg(test)]
+#[test]
+fn block_definition_import_preserves_defaults_and_is_immutable_after_load() {
+    let facts = r#"{"defaults":{"minecraft:air":0,"minecraft:stairs":2},"states":[
+        ["air",true,false,"","minecraft:air"],
+        ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north"}}],
+        ["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east"}}]
+    ]}"#;
+    mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+    let registry =
+        horizon_world::registry::BlockRegistry::from_facts_json(facts.as_bytes()).unwrap();
+    resolve_block_definitions(&registry).unwrap();
+    let blocks = mod_api::__private::block_definitions().unwrap();
+    let key = blocks.names.slots["minecraft:stairs"] as usize;
+    assert_eq!(blocks.definitions[key].of(&[]), Ok(1));
+    assert_eq!(
+        blocks.definitions[key].property(0, "facing"),
+        Ok(Some("north"))
+    );
+    assert_eq!(
+        blocks.definitions[key].property(1, "facing"),
+        Ok(Some("east"))
+    );
+    let changed = facts.replace("east", "south");
+    let registry =
+        horizon_world::registry::BlockRegistry::from_facts_json(changed.as_bytes()).unwrap();
+    resolve_block_definitions(&registry).unwrap();
+    assert_eq!(
+        mod_api::__private::block_definitions().unwrap().definitions[key].property(1, "facing"),
+        Ok(Some("east"))
+    );
+}
+
+impl TryIntoApi for horizon_client::boss_overlay::ModBar {
+    type Api = mod_api::ClientBossBar;
+    type Error = std::convert::Infallible;
+
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(mod_api::ClientBossBar {
+            uuid: self.uuid,
+            name: self.name.try_into_api()?,
+            progress: self.progress,
+            color: self.color,
+            overlay: self.overlay,
+            darken_screen: self.darken_screen,
+            play_boss_music: self.play_boss_music,
+            create_world_fog: self.create_world_fog,
+        })
+    }
+}
+
 /// Registry access for generated stack write-back in full and narrowed hook hosts.
 pub(in crate::game) trait ItemBoundary {
     fn boundary_items(&self) -> Option<&Items>;
@@ -22,6 +116,35 @@ impl ItemBoundary for super::GameLevel<'_> {
 impl ItemBoundary for super::native_hooks::HitLevel<'_> {
     fn boundary_items(&self) -> Option<&Items> {
         self.0.tags()
+    }
+}
+
+fn block_metadata_table()
+-> Result<&'static horizon_mod_runtime::block_definitions::Blocks, mod_api::BlockStateError> {
+    mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)
+}
+impl super::Game<'_> {
+    pub(in crate::game) fn block_metadata_property(
+        &self,
+        state: mod_api::BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::property(block_metadata_table()?, state, name)
+    }
+    pub(in crate::game) fn block_metadata_with(
+        &self,
+        state: mod_api::BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::with(block_metadata_table()?, state, name, value)
+    }
+    pub(in crate::game) fn block_metadata_of(
+        &self,
+        block: mod_api::BlockKey,
+        properties: &[mod_api::StateConstraint],
+    ) -> Result<mod_api::BlockStateRecord, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::of(block_metadata_table()?, block, properties)
     }
 }
 
@@ -58,7 +181,7 @@ macro_rules! write_answers {
 write_answers!(bool, u32, ());
 
 /// Convert an engine value into an owned API value after resolving registry identities.
-pub(in crate::game) trait TryIntoApi {
+pub(crate) trait TryIntoApi {
     type Api;
     type Error;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error>;
@@ -76,14 +199,14 @@ where
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
-pub(in crate::game) trait TryIntoEngine<Context: ?Sized = Items> {
+pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
     fn try_into_engine(&self, context: &Context) -> Result<Self::Engine, Self::Error>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::game) enum StackReadError {
+pub(crate) enum StackReadError {
     UnknownItem,
     Empty,
     InvalidComponents(mod_api::StackError),
@@ -136,6 +259,14 @@ macro_rules! scalar_values {
 }
 scalar_values!(u32, i32, bool, ());
 
+impl TryIntoApi for String {
+    type Api = Self;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self, Self::Error> {
+        Ok(self.clone())
+    }
+}
+
 impl<T: TryIntoApi + ?Sized> TryIntoApi for &T {
     type Api = T::Api;
     type Error = T::Error;
@@ -143,11 +274,11 @@ impl<T: TryIntoApi + ?Sized> TryIntoApi for &T {
         (*self).try_into_api()
     }
 }
-impl<T: TryIntoEngine + ?Sized> TryIntoEngine for &T {
+impl<C: ?Sized, T: TryIntoEngine<C> + ?Sized> TryIntoEngine<C> for &T {
     type Engine = T::Engine;
     type Error = T::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        (*self).try_into_engine(items)
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
+        (*self).try_into_engine(context)
     }
 }
 
@@ -158,12 +289,12 @@ impl<T: TryIntoApi> TryIntoApi for Option<T> {
         self.as_ref().map(TryIntoApi::try_into_api).transpose()
     }
 }
-impl<T: TryIntoEngine> TryIntoEngine for Option<T> {
+impl<C: ?Sized, T: TryIntoEngine<C>> TryIntoEngine<C> for Option<T> {
     type Engine = Option<T::Engine>;
     type Error = T::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         self.as_ref()
-            .map(|value| value.try_into_engine(items))
+            .map(|value| value.try_into_engine(context))
             .transpose()
     }
 }
@@ -189,13 +320,13 @@ impl<T: TryIntoApi, const N: usize> TryIntoApi for [T; N] {
         Ok(output.map(|value| value.expect("every array element converted")))
     }
 }
-impl<T: TryIntoEngine, const N: usize> TryIntoEngine for [T; N] {
+impl<C: ?Sized, T: TryIntoEngine<C>, const N: usize> TryIntoEngine<C> for [T; N] {
     type Engine = [T::Engine; N];
     type Error = T::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         let mut output: [Option<T::Engine>; N] = std::array::from_fn(|_| None);
         for (target, source) in output.iter_mut().zip(self) {
-            *target = Some(source.try_into_engine(items)?);
+            *target = Some(source.try_into_engine(context)?);
         }
         Ok(output.map(|value| value.expect("every array element converted")))
     }
@@ -221,22 +352,37 @@ impl<T: TryIntoApi> TryIntoApi for Vec<T> {
         self.iter().map(TryIntoApi::try_into_api).collect()
     }
 }
-impl<T: TryIntoEngine> TryIntoEngine for Vec<T> {
+impl<C: ?Sized, T: TryIntoEngine<C>> TryIntoEngine<C> for Vec<T> {
     type Engine = Vec<T::Engine>;
     type Error = T::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        self.as_slice().try_into_engine(items)
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
+        self.as_slice().try_into_engine(context)
     }
 }
-impl<T: TryIntoEngine> TryIntoEngine for [T] {
+impl<C: ?Sized, T: TryIntoEngine<C>> TryIntoEngine<C> for [T] {
     type Engine = Vec<T::Engine>;
     type Error = T::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         self.iter()
-            .map(|value| value.try_into_engine(items))
+            .map(|value| value.try_into_engine(context))
             .collect()
     }
 }
+impl TryIntoApi for (horizon_client::text::Text, u32) {
+    type Api = (mod_api::Text, u32);
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok((self.0.try_into_api()?, self.1))
+    }
+}
+impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, u32) {
+    type Engine = (horizon_client::text::Text, u32);
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
+        Ok((self.0.try_into_engine(context)?, self.1))
+    }
+}
+
 impl<A: TryIntoApi, B: TryIntoApi<Error = A::Error>> TryIntoApi for (A, B) {
     type Api = (A::Api, B::Api);
     type Error = A::Error;
@@ -244,13 +390,13 @@ impl<A: TryIntoApi, B: TryIntoApi<Error = A::Error>> TryIntoApi for (A, B) {
         Ok((self.0.try_into_api()?, self.1.try_into_api()?))
     }
 }
-impl<A: TryIntoEngine, B: TryIntoEngine<Error = A::Error>> TryIntoEngine for (A, B) {
-    type Engine = (A::Engine, B::Engine);
-    type Error = A::Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, mod_api::Text) {
+    type Engine = (horizon_client::text::Text, horizon_client::text::Text);
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         Ok((
-            self.0.try_into_engine(items)?,
-            self.1.try_into_engine(items)?,
+            self.0.try_into_engine(context)?,
+            self.1.try_into_engine(context)?,
         ))
     }
 }
@@ -2250,6 +2396,1160 @@ mod declaration_snapshot_tests {
         assert_eq!(
             registry.rule("test:active").unwrap().default,
             horizon_client_core::gamerules::Value::Bool(true)
+        );
+    }
+}
+
+macro_rules! gui_draw_value {
+    ($draw:expr, $from:ident, $to:ident, $convert:ident($($args:expr),*)) => {
+        match $draw {
+            $from::Sprite {
+                sprite,
+                x,
+                y,
+                w,
+                h,
+                region,
+                color,
+                blend,
+            } => $to::Sprite {
+                sprite: sprite.clone(),
+                x: *x,
+                y: *y,
+                w: *w,
+                h: *h,
+                region: *region,
+                color: *color,
+                blend: *blend,
+            },
+            $from::AtlasSprite {
+                sprite,
+                x,
+                y,
+                w,
+                h,
+                color,
+            } => $to::AtlasSprite {
+                sprite: sprite.clone(),
+                x: *x,
+                y: *y,
+                w: *w,
+                h: *h,
+                color: *color,
+            },
+            $from::Blit {
+                texture,
+                blend,
+                x,
+                y,
+                w,
+                h,
+                uv,
+                src,
+                tex,
+                color,
+            } => $to::Blit {
+                texture: texture.clone(),
+                blend: *blend,
+                x: *x,
+                y: *y,
+                w: *w,
+                h: *h,
+                uv: *uv,
+                src: *src,
+                tex: *tex,
+                color: *color,
+            },
+            $from::Fill {
+                x0,
+                y0,
+                x1,
+                y1,
+                color,
+            } => $to::Fill {
+                x0: *x0,
+                y0: *y0,
+                x1: *x1,
+                y1: *y1,
+                color: *color,
+            },
+            $from::Text {
+                text,
+                x,
+                y,
+                color,
+                shadow,
+            } => $to::Text {
+                text: text.$convert($($args),*).unwrap(),
+                x: *x,
+                y: *y,
+                color: *color,
+                shadow: *shadow,
+            },
+            $from::Item {
+                slot,
+                x,
+                y,
+                seed,
+                scale,
+                pivot,
+            } => $to::Item {
+                slot: *slot,
+                x: *x,
+                y: *y,
+                seed: *seed,
+                scale: *scale,
+                pivot: *pivot,
+            },
+            $from::Push(ops) => $to::Push(ops.clone()),
+            $from::Pop => $to::Pop,
+        }
+    };
+}
+
+impl TryIntoApi for horizon_client::hud_layout::GuiDraw {
+    type Api = mod_api::hud_layout::GuiDraw;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        use horizon_client::hud_layout::GuiDraw as Engine;
+        use mod_api::hud_layout::GuiDraw as Api;
+        Ok(gui_draw_value!(self, Engine, Api, try_into_api()))
+    }
+}
+impl<C: ?Sized> TryIntoEngine<C> for mod_api::hud_layout::GuiDraw {
+    type Engine = horizon_client::hud_layout::GuiDraw;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
+        use horizon_client::hud_layout::GuiDraw as Engine;
+        use mod_api::hud_layout::GuiDraw as Api;
+        Ok(gui_draw_value!(self, Api, Engine, try_into_engine(&())))
+    }
+}
+
+impl TryIntoApi for horizon_client_core::text::Text {
+    type Api = mod_api::text::Text;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(captured_text(&self.component()))
+    }
+}
+
+fn captured_text(value: &serde_json::Value) -> mod_api::text::Text {
+    use mod_api::text::Text;
+    use serde_json::Value;
+    match value {
+        Value::Object(fields) => {
+            let mut metadata = text_metadata(fields).into_iter().collect();
+            let mut text = Text::new(captured_text_content(fields, &mut metadata));
+            text.style = captured_text_style(fields);
+            text.children = fields
+                .get("extra")
+                .and_then(Value::as_array)
+                .map(|children| children.iter().map(captured_text).collect())
+                .unwrap_or_default();
+            text.metadata = metadata;
+            text
+        }
+        Value::Array(values) => {
+            let Some((first, rest)) = values.split_first() else {
+                return Text::default();
+            };
+            let mut text = captured_text(first);
+            text.children.extend(rest.iter().map(captured_text));
+            text
+        }
+        Value::String(value) => Text::literal(value),
+        Value::Null => Text::default(),
+        Value::Number(_) | Value::Bool(_) => Text::literal(value.to_string()),
+    }
+}
+
+fn captured_text_content(
+    fields: &serde_json::Map<String, serde_json::Value>,
+    metadata: &mut std::collections::BTreeMap<String, serde_json::Value>,
+) -> mod_api::text::TextContent {
+    use horizon_client_core::{
+        component,
+        text::{InlineObject, Text},
+    };
+    use mod_api::text::{TextContent as C, TextNbtSource as N, TextObject as O};
+    use serde_json::Value;
+    let separator = || fields.get("separator").map(|v| Box::new(captured_text(v)));
+    // Keep structured fallback data; reuse the engine's profile/hat/atlas defaults.
+    if let Some(object) = component::inline_object(fields, &mut |s| Text::literal(s), &mut |_| None)
+    {
+        let fallback = fields.get("fallback").map(|v| Box::new(captured_text(v)));
+        return C::Object(match object {
+            InlineObject::Player { profile, hat, .. } => O::Player {
+                profile,
+                hat,
+                fallback,
+            },
+            InlineObject::Atlas { atlas, sprite, .. } => O::Atlas {
+                atlas,
+                sprite,
+                fallback,
+            },
+        });
+    }
+    if let Some(value) = fields.get("text") {
+        return C::Literal(
+            value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string()),
+        );
+    }
+    if let Some(key) = fields.get("translate").and_then(Value::as_str) {
+        return C::Translatable {
+            key: key.into(),
+            fallback: fields
+                .get("fallback")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            arguments: fields
+                .get("with")
+                .and_then(Value::as_array)
+                .map(|v| v.iter().map(captured_text).collect())
+                .unwrap_or_default(),
+        };
+    }
+    if let Some(pattern) = fields.get("selector").and_then(Value::as_str) {
+        return C::Selector {
+            pattern: pattern.into(),
+            separator: separator(),
+        };
+    }
+    if let Some(key) = fields.get("keybind").and_then(Value::as_str) {
+        return C::Keybind(key.into());
+    }
+    if let Some(score) = fields.get("score").and_then(Value::as_object)
+        && let (Some(name), Some(objective)) = (
+            score.get("name").and_then(Value::as_str),
+            score.get("objective").and_then(Value::as_str),
+        )
+    {
+        let extra: serde_json::Map<_, _> = score
+            .iter()
+            .filter(|(key, _)| !["name", "objective"].contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        if !extra.is_empty() {
+            metadata.insert("score".into(), Value::Object(extra));
+        }
+        return C::Score {
+            name: name.into(),
+            objective: objective.into(),
+        };
+    }
+    if let Some(path) = fields.get("nbt").and_then(Value::as_str) {
+        let source = [
+            ("block", N::Block as fn(String) -> N),
+            ("entity", N::Entity),
+            ("storage", N::Storage),
+        ]
+        .into_iter()
+        .find_map(|(field, make)| {
+            fields
+                .get(field)
+                .and_then(Value::as_str)
+                .map(|v| make(v.into()))
+        });
+        if let Some(source) = source {
+            return C::Nbt {
+                path: path.into(),
+                interpret: component::style_flag(fields.get("interpret")).unwrap_or(false),
+                source,
+                separator: separator(),
+            };
+        }
+    }
+    C::Literal(String::new())
+}
+
+fn captured_click(
+    event: &serde_json::Map<String, serde_json::Value>,
+) -> Option<mod_api::text::TextClick> {
+    use horizon_client_core::{component, text::ClickEvent as E};
+    use mod_api::text::TextClick as A;
+    Some(match component::parse_click_event(event)? {
+        E::OpenUrl(v) => A::OpenUrl(v),
+        E::ChangePage(v) => A::ChangePage(v),
+        E::SuggestCommand(v) => A::SuggestCommand(v),
+        E::RunCommand(v) => A::RunCommand(v),
+        E::CopyToClipboard(v) => A::CopyToClipboard(v),
+        E::ShowDialog(_) => A::ShowDialog(event["dialog"].clone()),
+        E::Custom { id, .. } => A::Custom {
+            id,
+            payload: event.get("payload").filter(|v| !v.is_null()).cloned(),
+        },
+        E::OpenFile(_) => return None,
+    })
+}
+
+fn captured_hover(
+    event: &serde_json::Map<String, serde_json::Value>,
+) -> Option<mod_api::text::TextHover> {
+    use mod_api::text::TextHover as H;
+    use serde_json::Value;
+    match event.get("action")?.as_str()? {
+        "show_text" => Some(H::Text(Box::new(captured_text(
+            event
+                .get("value")
+                .or_else(|| event.get("contents"))
+                .or_else(|| event.get("text"))?,
+        )))),
+        "show_item" => Some(H::Item {
+            id: event.get("id")?.as_str()?.into(),
+            count: event
+                .get("count")
+                .and_then(Value::as_u64)
+                .and_then(|v| u32::try_from(v).ok())
+                .unwrap_or(1),
+            components: event.get("components").cloned(),
+        }),
+        "show_entity" => {
+            let uuid = event.get("uuid")?;
+            let words = if let Some(text) = uuid.as_str() {
+                horizon_client_core::uuid::uuid_from_text(text)?
+            } else {
+                let values: &[Value; 4] = uuid.as_array()?.as_slice().try_into().ok()?;
+                let mut words = [0; 4];
+                for (out, value) in words.iter_mut().zip(values) {
+                    *out = i32::try_from(value.as_i64()?).ok()?;
+                }
+                words
+            }
+            .map(|word| word as u32 as u64);
+            Some(H::Entity {
+                kind: event.get("id")?.as_str()?.into(),
+                id: [words[0] << 32 | words[1], words[2] << 32 | words[3]],
+                name: event.get("name").map(|v| Box::new(captured_text(v))),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn captured_text_style(
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> mod_api::text::TextStyle {
+    use horizon_client_core::component;
+    use serde_json::Value;
+    let mut style = mod_api::text::TextStyle::default();
+    style.color = fields
+        .get("color")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    style.shadow_color = fields.get("shadow_color").and_then(component::shadow_color);
+    style.bold = component::style_flag(fields.get("bold"));
+    style.italic = component::style_flag(fields.get("italic"));
+    style.underlined = component::style_flag(fields.get("underlined"));
+    style.strikethrough = component::style_flag(fields.get("strikethrough"));
+    style.obfuscated = component::style_flag(fields.get("obfuscated"));
+    style.font = fields
+        .get("font")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    style.insertion = fields
+        .get("insertion")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let click = component::style_event_object(fields, "click_event", "clickEvent");
+    let hover = component::style_event_object(fields, "hover_event", "hoverEvent");
+    style.click = click.and_then(captured_click);
+    style.hover = hover.and_then(captured_hover);
+    for (field, event) in [
+        ("click_event", click.filter(|_| style.click.is_some())),
+        ("hover_event", hover.filter(|_| style.hover.is_some())),
+    ] {
+        if let Some(event) = event {
+            let metadata = text_event_metadata(event);
+            if !metadata.is_empty() {
+                style.metadata.insert(field.into(), Value::Object(metadata));
+            }
+        }
+    }
+    style
+}
+
+impl<C: ?Sized> TryIntoEngine<C> for mod_api::text::Text {
+    type Engine = horizon_client_core::text::Text;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
+        Ok(owned_text_component(self).into())
+    }
+}
+
+fn text_metadata<'a>(
+    metadata: impl IntoIterator<Item = (&'a String, &'a serde_json::Value)>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let reserved = [
+        "type",
+        "text",
+        "translate",
+        "with",
+        "fallback",
+        "keybind",
+        "selector",
+        "separator",
+        "score",
+        "nbt",
+        "interpret",
+        "block",
+        "entity",
+        "storage",
+        "object",
+        "player",
+        "hat",
+        "atlas",
+        "sprite",
+        "extra",
+        "color",
+        "shadow_color",
+        "bold",
+        "italic",
+        "underlined",
+        "strikethrough",
+        "obfuscated",
+        "font",
+        "insertion",
+        "click_event",
+        "hover_event",
+        "clickEvent",
+        "hoverEvent",
+    ];
+    metadata
+        .into_iter()
+        .filter(|(key, _)| !reserved.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn owned_text_component(text: &mod_api::text::Text) -> serde_json::Value {
+    use mod_api::text::{TextContent as C, TextNbtSource as N, TextObject as O};
+    use serde_json::Value;
+    let mut out = text_metadata(&text.metadata);
+    match &text.content {
+        C::Literal(value) => {
+            out.insert("text".into(), value.clone().into());
+        }
+        C::Translatable {
+            key,
+            fallback,
+            arguments,
+        } => {
+            let arguments: Vec<horizon_client_core::text::Text> = arguments
+                .iter()
+                .map(|t| owned_text_component(t).into())
+                .collect();
+            // Reuse the engine's numeric-argument and fallback construction rules.
+            let translated = match fallback {
+                Some(fallback) => horizon_client_core::text::Text::translate_with_fallback(
+                    key, fallback, &arguments,
+                ),
+                None => horizon_client_core::text::Text::translate(key, &arguments),
+            };
+            let Value::Object(fields) = translated.component() else {
+                unreachable!("translation constructor returns a component object")
+            };
+            out.extend(fields);
+        }
+        C::Keybind(value) => {
+            out.insert("keybind".into(), value.clone().into());
+        }
+        C::Selector { pattern, separator } => {
+            out.insert("selector".into(), pattern.clone().into());
+            if let Some(separator) = separator {
+                out.insert("separator".into(), owned_text_component(separator));
+            }
+        }
+        C::Score { name, objective } => {
+            let mut score = text
+                .metadata
+                .get("score")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            score.insert("name".into(), name.clone().into());
+            score.insert("objective".into(), objective.clone().into());
+            out.insert("score".into(), Value::Object(score));
+        }
+        C::Nbt {
+            path,
+            interpret,
+            source,
+            separator,
+        } => {
+            out.insert("nbt".into(), path.clone().into());
+            out.insert("interpret".into(), (*interpret).into());
+            let (key, value) = match source {
+                N::Block(v) => ("block", v),
+                N::Entity(v) => ("entity", v),
+                N::Storage(v) => ("storage", v),
+            };
+            out.insert(key.into(), value.clone().into());
+            if let Some(separator) = separator {
+                out.insert("separator".into(), owned_text_component(separator));
+            }
+        }
+        C::Object(object) => {
+            let fallback = match object {
+                O::Player {
+                    profile,
+                    hat,
+                    fallback,
+                } => {
+                    out.extend([
+                        ("object".into(), "player".into()),
+                        ("player".into(), profile.clone()),
+                        ("hat".into(), (*hat).into()),
+                    ]);
+                    fallback
+                }
+                O::Atlas {
+                    atlas,
+                    sprite,
+                    fallback,
+                } => {
+                    out.extend([
+                        ("object".into(), "atlas".into()),
+                        ("atlas".into(), atlas.clone().into()),
+                        ("sprite".into(), sprite.clone().into()),
+                    ]);
+                    fallback
+                }
+            };
+            if let Some(fallback) = fallback {
+                out.insert("fallback".into(), owned_text_component(fallback));
+            }
+        }
+    }
+    out.extend(owned_text_style(&text.style));
+    if !text.children.is_empty() {
+        out.insert(
+            "extra".into(),
+            text.children.iter().map(owned_text_component).collect(),
+        );
+    }
+    Value::Object(out)
+}
+
+fn text_action_metadata(
+    style: &mod_api::text::TextStyle,
+    field: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    style
+        .metadata
+        .get(field)
+        .and_then(serde_json::Value::as_object)
+        .map(text_event_metadata)
+        .unwrap_or_default()
+}
+
+fn text_event_metadata(
+    event: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let reserved = [
+        "action",
+        "url",
+        "page",
+        "command",
+        "value",
+        "contents",
+        "dialog",
+        "id",
+        "payload",
+        "path",
+        "count",
+        "components",
+        "uuid",
+        "name",
+        "text",
+    ];
+    event
+        .iter()
+        .filter(|(key, _)| !reserved.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn text_action(
+    action: &str,
+    field: &str,
+    value: serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    [("action".into(), action.into()), (field.into(), value)]
+        .into_iter()
+        .collect()
+}
+
+fn owned_text_style(
+    style: &mod_api::text::TextStyle,
+) -> serde_json::Map<String, serde_json::Value> {
+    use mod_api::text::{TextClick as C, TextHover as H};
+    use serde_json::Value;
+    let mut out = text_metadata(&style.metadata);
+    for (key, value) in [
+        ("color", style.color.clone().map(Value::String)),
+        (
+            "shadow_color",
+            style.shadow_color.map(|c| Value::from(c as i32)),
+        ),
+        ("bold", style.bold.map(Value::Bool)),
+        ("italic", style.italic.map(Value::Bool)),
+        ("underlined", style.underlined.map(Value::Bool)),
+        ("strikethrough", style.strikethrough.map(Value::Bool)),
+        ("obfuscated", style.obfuscated.map(Value::Bool)),
+        ("font", style.font.clone().map(Value::String)),
+        ("insertion", style.insertion.clone().map(Value::String)),
+    ] {
+        if let Some(value) = value {
+            out.insert(key.into(), value);
+        }
+    }
+    if let Some(click) = &style.click {
+        let fields = match click {
+            C::OpenUrl(v) => text_action("open_url", "url", v.clone().into()),
+            C::ChangePage(v) => text_action("change_page", "page", (*v).into()),
+            C::SuggestCommand(v) => text_action("suggest_command", "command", v.clone().into()),
+            C::RunCommand(v) => text_action("run_command", "command", v.clone().into()),
+            C::CopyToClipboard(v) => text_action("copy_to_clipboard", "value", v.clone().into()),
+            C::ShowDialog(v) => text_action("show_dialog", "dialog", v.clone()),
+            C::Custom { id, payload } => {
+                let mut fields = text_action("custom", "id", id.clone().into());
+                if let Some(payload) = payload {
+                    fields.insert("payload".into(), payload.clone());
+                }
+                fields
+            }
+        };
+        let mut action = text_action_metadata(style, "click_event");
+        action.extend(fields);
+        out.insert("click_event".into(), Value::Object(action));
+    }
+    if let Some(hover) = &style.hover {
+        let mut action = text_action_metadata(style, "hover_event");
+        match hover {
+            H::Text(value) => {
+                action.insert("action".into(), "show_text".into());
+                action.insert("value".into(), owned_text_component(value));
+            }
+            H::Item {
+                id,
+                count,
+                components,
+            } => {
+                action.insert("action".into(), "show_item".into());
+                action.insert("id".into(), id.clone().into());
+                action.insert("count".into(), (*count).into());
+                if let Some(components) = components {
+                    action.insert("components".into(), components.clone());
+                }
+            }
+            H::Entity { kind, id, name } => {
+                action.insert("action".into(), "show_entity".into());
+                action.insert("id".into(), kind.clone().into());
+                action.insert(
+                    "uuid".into(),
+                    horizon_client_core::uuid::uuid_text([
+                        (id[0] >> 32) as i32,
+                        id[0] as i32,
+                        (id[1] >> 32) as i32,
+                        id[1] as i32,
+                    ])
+                    .into(),
+                );
+                if let Some(name) = name {
+                    action.insert("name".into(), owned_text_component(name));
+                }
+            }
+        }
+        out.insert("hover_event".into(), Value::Object(action));
+    }
+    out
+}
+
+#[cfg(test)]
+mod gui_draw_boundary_tests {
+    use super::{TryIntoApi, TryIntoEngine};
+    use horizon_client::{
+        hud_layout::{Blend, GuiDraw as D, PoseOp},
+        text::Text,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn gui_commands_keep_every_variant_field_order_and_text_source() {
+        let text = Text::from(
+            json!({"translate":"test.hud", "fallback":"%s", "with":[{"text":"name"}], "bold":false, "test:meta":{"n":null}}),
+        );
+        let commands = vec![
+            D::Sprite {
+                sprite: String::from("test:sprite").into(),
+                x: -1,
+                y: 2,
+                w: 3,
+                h: 4,
+                region: Some([5, 6, 7, 8]),
+                color: 0x12345678,
+                blend: Blend::Crosshair,
+            },
+            D::AtlasSprite {
+                sprite: "test:atlas".into(),
+                x: 11,
+                y: 12,
+                w: 13,
+                h: 14,
+                color: 15,
+            },
+            D::Blit {
+                texture: "test:texture".into(),
+                blend: Blend::Nausea,
+                x: 21,
+                y: 22,
+                w: 23,
+                h: 24,
+                uv: [0.25, 0.5],
+                src: [26, 27],
+                tex: [28, 29],
+                color: 30,
+            },
+            D::Fill {
+                x0: -31,
+                y0: 32,
+                x1: 33,
+                y1: 34,
+                color: 35,
+            },
+            D::Text {
+                text: text.clone(),
+                x: 41,
+                y: 42,
+                color: 43,
+                shadow: false,
+            },
+            D::Item {
+                slot: 40,
+                x: 51,
+                y: 52,
+                seed: -53,
+                scale: [0.5, 1.5],
+                pivot: [55., 56.],
+            },
+            D::Push(vec![PoseOp::Translate(61., 62.), PoseOp::Scale(0.5, 1.5)]),
+            D::Pop,
+        ];
+        let api = commands.try_into_api().unwrap();
+        let actual: Result<Vec<D>, std::convert::Infallible> = api.try_into_engine(&());
+        let actual = actual.unwrap();
+        assert_eq!(actual, commands);
+        let D::Text { text: actual, .. } = &actual[4] else {
+            panic!("text command")
+        };
+        assert_eq!(actual.component(), text.component());
+    }
+
+    #[test]
+    fn tooltip_pairs_round_trip_without_an_item_registry() {
+        let lines = vec![(horizon_client::text::Text::literal("tip"), 0xff00ff00)];
+        let snapshot: Result<Vec<(mod_api::Text, u32)>, std::convert::Infallible> =
+            lines.try_into_api();
+        let snapshot = snapshot.unwrap();
+        assert_eq!(snapshot[0], (mod_api::Text::literal("tip"), 0xff00ff00));
+        let restored: Result<Vec<(horizon_client::text::Text, u32)>, std::convert::Infallible> =
+            snapshot.try_into_engine(&());
+        let restored = restored.unwrap();
+        assert_eq!(restored[0].0.component(), lines[0].0.component());
+        assert_eq!(restored[0].0.spans, lines[0].0.spans);
+        assert_eq!(restored[0].1, lines[0].1);
+    }
+
+    #[test]
+    fn nested_text_containers_need_no_item_registry_or_stack_error() {
+        let pair = (
+            mod_api::text::Text::literal("a"),
+            mod_api::text::Text::literal("b"),
+        );
+        let values = Some(vec![[pair.clone(), pair]]);
+        let reference = &values;
+        let actual: Result<_, std::convert::Infallible> = reference.try_into_engine(&());
+        let actual = actual.unwrap().unwrap();
+        assert_eq!(actual[0][1].0.plain(), "a");
+        assert_eq!(actual[0][1].1.plain(), "b");
+    }
+}
+
+#[cfg(test)]
+mod text_capture_tests {
+    use super::{TryIntoApi, TryIntoEngine};
+
+    #[test]
+    fn native_translation_fallback_survives_noop_owned_round_trip() {
+        let language = horizon_client_core::lang::Language::of(
+            "en_us",
+            [("test.fallback".into(), "Wrong translation".into())],
+        );
+        horizon_client_core::lang::scoped(language, || {
+            let native = horizon_client_core::text::Text::translate_with_fallback(
+                "test.missing",
+                "test.fallback",
+                &[],
+            );
+            let mut api = native.try_into_api().unwrap();
+            let listener = |_: &mut mod_api::text::Text| {};
+            listener(&mut api);
+            let actual = api.try_into_engine(&()).unwrap();
+            assert_eq!(actual.plain(), "test.fallback");
+            assert_eq!(actual.spans, native.spans);
+            assert_eq!(actual.component(), native.component());
+        });
+    }
+    use horizon_client_core::text::Text as EngineText;
+    use mod_api::text::{TextContent as C, TextHover};
+    use serde_json::json;
+
+    #[test]
+    fn untrusted_file_action_cannot_become_local_after_a_noop_value_round_trip() {
+        let source = json!({"text":"server", "click_event":{"action":"open_file", "path":"test-file"},
+            "extra":[{"text":"child", "clickEvent":{"action":"open_file", "value":"test-file"}}]});
+        let mut api = EngineText::from(source).try_into_api().unwrap();
+        assert!(api.style.click.is_none());
+        assert!(!api.metadata.contains_key("click_event"));
+        assert!(!api.style.metadata.contains_key("click_event"));
+        assert!(api.children[0].style.click.is_none());
+        let listener = |_: &mut mod_api::text::Text| {};
+        listener(&mut api);
+        let engine = api.try_into_engine(&()).unwrap();
+        assert!(engine.spans.iter().all(|span| span.style.click.is_none()));
+        let component = engine.component();
+        assert!(component.get("click_event").is_none());
+        assert!(component["extra"][0].get("clickEvent").is_none());
+    }
+
+    #[test]
+    fn component_tree_capture_keeps_dynamic_contents_and_unknown_metadata() {
+        let source = json!({"translate":"test.message", "fallback":"%s", "with":[{"text":"name", "color":"red"}],
+            "bold":false, "test:meta":{"n":null}, "click_event":{"action":"custom", "id":"test:open", "payload":{"n":null}, "test:trace":true},
+            "extra":[{"nbt":"value", "storage":"test:data", "interpret":true, "separator":{"text":","}},
+                {"score":{"name":"@s", "objective":"test", "test:trace":2}}]});
+        let api = EngineText::from(source.clone()).try_into_api().unwrap();
+        assert!(
+            matches!(&api.content, C::Translatable { key, fallback:Some(fallback), arguments } if key == "test.message" && fallback == "%s" && arguments.len() == 1)
+        );
+        assert_eq!(api.style.bold, Some(false));
+        assert!(
+            matches!(&api.children[0].content, C::Nbt { path, interpret:true, .. } if path == "value")
+        );
+        assert_eq!(
+            api.style.metadata["click_event"],
+            json!({"test:trace":true})
+        );
+        assert_eq!(api.try_into_engine(&()).unwrap().component(), source);
+    }
+
+    #[test]
+    fn object_fallback_round_trip_keeps_omitted_styled_and_translatable() {
+        for object in [
+            json!({"object":"player", "player":{"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}, "hat":true}),
+            json!({"object":"atlas", "atlas":"minecraft:blocks", "sprite":"test:icon"}),
+        ] {
+            for fallback in [
+                None,
+                Some(
+                    json!({"text":"label", "italic":false, "extra":[{"text":"child", "bold":true}]}),
+                ),
+                Some(json!({"translate":"test.head", "with":[{"text":"name"}]})),
+            ] {
+                let mut source = object.clone();
+                if let Some(fallback) = fallback {
+                    source["fallback"] = fallback;
+                }
+                let api = EngineText::from(source.clone()).try_into_api().unwrap();
+                assert_eq!(api.try_into_engine(&()).unwrap().component(), source);
+            }
+        }
+    }
+
+    #[test]
+    fn hover_uuid_forms_keep_identity_and_unresolved_name() {
+        for uuid in [
+            json!("11223344-5566-7788-99aa-bbccddeeff00"),
+            json!([287454020, 1432778632, -1716864052_i64, -571539712]),
+        ] {
+            let source = json!({"text":"entity", "hover_event":{"action":"show_entity", "id":"minecraft:pig", "uuid":uuid, "name":{"translate":"test.name"}, "test:trace":true}});
+            let api = EngineText::from(source).try_into_api().unwrap();
+            let Some(TextHover::Entity {
+                id,
+                name: Some(name),
+                ..
+            }) = &api.style.hover
+            else {
+                panic!("entity hover")
+            };
+            assert_eq!(*id, [0x1122334455667788, 0x99aabbccddeeff00]);
+            assert!(matches!(&name.content, C::Translatable { key, .. } if key == "test.name"));
+            assert_eq!(
+                api.try_into_engine(&()).unwrap().component()["hover_event"],
+                json!({"action":"show_entity", "id":"minecraft:pig", "uuid":"11223344-5566-7788-99aa-bbccddeeff00", "name":{"translate":"test.name"}, "test:trace":true})
+            );
+        }
+    }
+
+    #[test]
+    fn style_capture_reuses_snbt_flags_and_rgba_shadow_rules() {
+        let source = json!({"text":"styled", "bold":0, "italic":1, "shadow_color":[1,0,0.5,1]});
+        let api = EngineText::from(source).try_into_api().unwrap();
+        assert_eq!(api.style.bold, Some(false));
+        assert_eq!(api.style.italic, Some(true));
+        assert_eq!(api.style.shadow_color, Some(0xffff007f));
+    }
+}
+
+#[cfg(test)]
+mod text_encoding_tests {
+    use super::TryIntoEngine;
+    use mod_api::text::{Text, TextClick, TextContent as C, TextHover, TextNbtSource, TextObject};
+    use serde_json::json;
+
+    #[test]
+    fn owned_text_keeps_unresolved_translation_style_and_ordered_children() {
+        let mut text = Text::translate("test.message", vec![Text::literal("7")]);
+        text.style.bold = Some(false);
+        text.style.color = Some("red".into());
+        text.style.shadow_color = Some(0xff001122);
+        text.style.click = Some(TextClick::RunCommand("/test".into()));
+        text.style
+            .metadata
+            .insert("click_event".into(), json!({"test:extra":true}));
+        text.metadata
+            .insert("test:context".into(), json!({"value":null}));
+        text.children.push(Text::literal("first"));
+        text.children.push(Text::literal("second"));
+        let engine: Result<horizon_client_core::text::Text, std::convert::Infallible> =
+            text.try_into_engine(&());
+        assert_eq!(
+            engine.unwrap().component(),
+            json!({
+                "translate":"test.message", "with":[7], "bold":false, "color":"red",
+                "shadow_color":-16772830, "click_event":{"action":"run_command", "command":"/test", "test:extra":true},
+                "test:context":{"value":null}, "extra":[{"text":"first"}, {"text":"second"}]
+            })
+        );
+    }
+
+    #[test]
+    fn owned_text_retains_dynamic_sources_and_inline_profile_properties() {
+        for (content, expected) in [
+            (C::Keybind("key.jump".into()), json!({"keybind":"key.jump"})),
+            (
+                C::Selector {
+                    pattern: "@p".into(),
+                    separator: Some(Box::new(Text::literal(","))),
+                },
+                json!({"selector":"@p", "separator":{"text":","}}),
+            ),
+            (
+                C::Score {
+                    name: "@s".into(),
+                    objective: "test".into(),
+                },
+                json!({"score":{"name":"@s", "objective":"test"}}),
+            ),
+            (
+                C::Nbt {
+                    path: "value".into(),
+                    interpret: true,
+                    source: TextNbtSource::Storage("test:data".into()),
+                    separator: None,
+                },
+                json!({"nbt":"value", "interpret":true, "storage":"test:data"}),
+            ),
+            (
+                C::Object(TextObject::Player {
+                    profile: json!({"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}),
+                    hat: false,
+                    fallback: Some(Box::new(Text::literal("head"))),
+                }),
+                json!({"object":"player", "player":{"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}, "hat":false, "fallback":{"text":"head"}}),
+            ),
+        ] {
+            let engine = Text::new(content).try_into_engine(&()).unwrap();
+            assert_eq!(engine.component(), expected);
+        }
+    }
+
+    #[test]
+    fn object_fallback_encoder_keeps_default_styling_and_translation_tree() {
+        let mut styled = Text::literal("styled");
+        styled.style.italic = Some(false);
+        for player in [true, false] {
+            for (fallback, expected) in [
+                (None, None),
+                (
+                    Some(Box::new(styled.clone())),
+                    Some(json!({"text":"styled", "italic":false})),
+                ),
+                (
+                    Some(Box::new(Text::translate("test.head", vec![]))),
+                    Some(json!({"translate":"test.head"})),
+                ),
+            ] {
+                let object = if player {
+                    TextObject::Player {
+                        profile: json!({"name":"Test"}),
+                        hat: true,
+                        fallback,
+                    }
+                } else {
+                    TextObject::Atlas {
+                        atlas: "minecraft:blocks".into(),
+                        sprite: "test:icon".into(),
+                        fallback,
+                    }
+                };
+                let engine = Text::new(C::Object(object)).try_into_engine(&()).unwrap();
+                match expected {
+                    None => {
+                        assert!(engine.component().get("fallback").is_none());
+                        assert_eq!(
+                            engine.plain(),
+                            if player { "[Test head]" } else { "[test:icon]" }
+                        );
+                    }
+                    Some(expected) => assert_eq!(engine.component()["fallback"], expected),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn raw_file_action_metadata_does_not_reach_the_engine() {
+        let mut text = Text::literal("remote");
+        for metadata in [&mut text.metadata, &mut text.style.metadata] {
+            for field in ["click_event", "clickEvent"] {
+                metadata.insert(
+                    field.into(),
+                    json!({"action":"open_file", "path":"test-file"}),
+                );
+            }
+        }
+        let engine = text.try_into_engine(&()).unwrap();
+        assert!(engine.spans.iter().all(|span| span.style.click.is_none()));
+        assert!(engine.component().get("click_event").is_none());
+        assert!(engine.component().get("clickEvent").is_none());
+    }
+
+    #[test]
+    fn owned_text_keeps_hover_uuid_name_and_nullable_component_patch() {
+        let mut text = Text::literal("entity");
+        text.style.hover = Some(TextHover::Entity {
+            kind: "minecraft:pig".into(),
+            id: [0x1122334455667788, 0x99aabbccddeeff00],
+            name: Some(Box::new(Text::literal("name"))),
+        });
+        let engine = text.try_into_engine(&()).unwrap();
+        assert_eq!(
+            engine.component()["hover_event"],
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":"11223344-5566-7788-99aa-bbccddeeff00", "name":{"text":"name"}})
+        );
+        text.style.hover = Some(TextHover::Item {
+            id: "minecraft:stone".into(),
+            count: 3,
+            components: Some(json!({"minecraft:custom_name":null})),
+        });
+        let engine = text.try_into_engine(&()).unwrap();
+        assert_eq!(
+            engine.component()["hover_event"],
+            json!({"action":"show_item", "id":"minecraft:stone", "count":3, "components":{"minecraft:custom_name":null}})
+        );
+    }
+}
+
+impl TryIntoApi for horizon_world::level::PlacementContext {
+    type Api = mod_api::PlacementContext;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        let item = if self.item.is_empty() {
+            None
+        } else {
+            Some(mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?)
+        };
+        let mut snapshot = mod_api::PlacementContext::new(self.pos, self.face, item);
+        snapshot.hit_pos = self.hit_pos;
+        snapshot.hit = [self.hit.x, self.hit.y, self.hit.z];
+        snapshot.inside = self.inside;
+        snapshot.yaw = self.yaw;
+        snapshot.pitch = self.pitch;
+        snapshot.sneaking = self.sneaking;
+        snapshot.replace_clicked = self.replace_clicked;
+        Ok(snapshot)
+    }
+}
+
+#[cfg(test)]
+mod placement_snapshot_tests {
+    use super::*;
+    #[test]
+    fn placement_keeps_click_view_flags_and_empty_hand_without_fallback() {
+        install_parts(&[]).unwrap();
+        mod_api::__private::resolve_items(["minecraft:stone"]).unwrap();
+        let mut engine = horizon_world::level::PlacementContext {
+            pos: horizon_core::position::BlockPos::new(1, 2, 3),
+            hit_pos: horizon_core::position::BlockPos::new(4, 5, 6),
+            face: horizon_core::geometry::Direction::Up,
+            hit: horizon_core::geometry::Vec3::new(4.25, 5.5, 6.75),
+            inside: true,
+            yaw: -45.0,
+            pitch: 90.0,
+            sneaking: true,
+            item: "minecraft:stone".into(),
+            replace_clicked: true,
+        };
+        let snapshot = engine.try_into_api().unwrap();
+        assert_eq!(snapshot.pos, horizon_core::position::BlockPos::new(1, 2, 3));
+        assert_eq!(
+            snapshot.hit_pos,
+            horizon_core::position::BlockPos::new(4, 5, 6)
+        );
+        assert_eq!(snapshot.face, horizon_core::geometry::Direction::Up);
+        assert_eq!(snapshot.hit, [4.25, 5.5, 6.75]);
+        assert!(snapshot.inside);
+        assert_eq!(snapshot.yaw, -45.0);
+        assert_eq!(snapshot.pitch, 90.0);
+        assert!(snapshot.sneaking && snapshot.replace_clicked);
+        assert_eq!(
+            snapshot.item,
+            mod_api::__private::item_key("minecraft:stone")
+        );
+        engine.item.clear();
+        let mut empty = snapshot;
+        empty.item = None;
+        assert_eq!(engine.try_into_api(), Ok(empty));
+        engine.item = "missing:item".into();
+        assert_eq!(engine.try_into_api(), Err(StackReadError::UnknownItem));
+    }
+}
+
+impl TryIntoApi for horizon_client_core::gamerules::Value {
+    type Api = mod_api::GameRuleValue;
+    type Error = StackReadError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(match *self {
+            Self::Bool(value) => mod_api::GameRuleValue::Bool(value),
+            Self::Int(value) => mod_api::GameRuleValue::Int(value),
+        })
+    }
+}
+
+#[test]
+fn game_rule_int_snapshot_preserves_full_range() {
+    for value in [i32::MIN, -1, 0, 256, i32::MAX] {
+        assert_eq!(
+            horizon_client_core::gamerules::Value::Int(value)
+                .try_into_api()
+                .unwrap(),
+            mod_api::GameRuleValue::Int(value)
         );
     }
 }

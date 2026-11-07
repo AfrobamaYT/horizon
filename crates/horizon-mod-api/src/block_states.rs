@@ -1,7 +1,10 @@
 //! Facts about block states that need no world (`host.block_states()`): a `BlockStateId` is a
 //! registry value, not a live object, so these are a read-only service reached from the host
 //! rather than handle methods. Both sides read the game's tables; definitions are copied out.
-use super::{Backend, BackendRef, BlockSoundType, BlockStateId, BlockStateRange, Host};
+use super::{
+    Backend, BackendRef, BlockKey, BlockMetadata, BlockSoundType, BlockStateError, BlockStateId,
+    BlockStateRange, BlockStateRecord, Host,
+};
 
 /// One property and its legal values in a state definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +70,37 @@ impl<H: Host + ?Sized> HostBlockStates for H {
         BlockStates {
             backend: self.backend().map(BackendRef::open),
         }
+    }
+}
+
+impl BlockMetadata for BlockStates<'_> {
+    fn property(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+    ) -> Result<Option<&str>, BlockStateError> {
+        self.backend
+            .ok_or(BlockStateError::Unavailable)?
+            .block_metadata_property(state, name)
+    }
+    fn with(
+        &self,
+        state: BlockStateRecord,
+        name: &str,
+        value: &str,
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        self.backend
+            .ok_or(BlockStateError::Unavailable)?
+            .block_metadata_with(state, name, value)
+    }
+    fn of(
+        &self,
+        block: BlockKey,
+        properties: &[StateConstraint],
+    ) -> Result<BlockStateRecord, BlockStateError> {
+        self.backend
+            .ok_or(BlockStateError::Unavailable)?
+            .block_metadata_of(block, properties)
     }
 }
 

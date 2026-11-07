@@ -70,6 +70,13 @@ fn generated_host_constructors_refuse_nested_inputs_and_hook_outputs() {
         types.guest.set(false);
         code
     };
+    let borrowed = Ty::Result(
+        Box::new(Ty::Option(Box::new(Ty::Str(
+            crate::wasm::ty::Str::Borrowed,
+        )))),
+        Box::new(Ty::Prim("u32", "u32")),
+    );
+    let borrowed_ret = crate::wasm::sides::guest_ret(&types, &borrowed, "wire");
     let (fixture, tests) = fixture.split_once("// TESTS").unwrap();
     let mut source = fixture.replace("// END DECLARATIONS", "");
     // The fixture supplies wire data only; every lifting/lowering/write-back expression and
@@ -83,10 +90,19 @@ mod host {{
     {tests}
     pub fn lower_block(key: &BlockKey) -> Result<u32, Refused> {{ Ok({lower_block}) }}
 }}
+// The runtime's borrowing primitive is stubbed; the nested conversion is generated.
+fn intern(value: String) -> &'static str {{ Box::leak(value.into_boxed_str()) }}
 mod guest {{
     use super::*;
     {guest_block}
     pub fn block(slot: u32) -> Result<BlockKey, Refused> {{ Ok({guest_lift}) }}
+    fn borrowed(wire: Result<Option<String>, u32>) -> Result<Option<&'static str>, u32> {{ {borrowed_ret} }}
+    #[test]
+    fn nested_borrowed_returns_keep_values_and_errors() {{
+        assert_eq!(borrowed(Ok(Some(String::from("true")))), Ok(Some("true")));
+        assert_eq!(borrowed(Ok(None)), Ok(None));
+        assert_eq!(borrowed(Err(7)), Err(7));
+    }}
 }}
 "#, lower_block = glue::lower(&types, &block, "key"), guest_lift = glue::lift(&types, &block, "slot")));
     // Build output remains in the ignored checkout target, never /tmp.
@@ -120,7 +136,10 @@ mod guest {{
         "{output}\n{}",
         String::from_utf8_lossy(&ran.stderr)
     );
-    assert!(output.contains("4 passed"), "{output}");
+    assert!(
+        output.contains("nested_borrowed_returns_keep_values_and_errors ... ok"),
+        "{output}"
+    );
     println!("{output}");
     fs::remove_dir_all(dir).unwrap();
 }

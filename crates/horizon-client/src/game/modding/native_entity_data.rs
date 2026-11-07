@@ -268,6 +268,7 @@ fn named_id(t: Target) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::api_values::TryIntoApi;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::{entities::ArmorStand, mobs::Mob, text::Text};
     use horizon_core::geometry::Vec3;
@@ -288,7 +289,7 @@ mod tests {
             let mob = push_mob(game, 12, "minecraft:zombie");
             assert_eq!(mob.custom_name_visible(game), Some(false));
             let name = Text::colored("Grumbles", 0xFF5555);
-            assert!(mob.set_custom_name(game, Some(name.clone())));
+            assert!(mob.set_custom_name(game, Some(name.try_into_api().unwrap())));
             assert!(mob.set_custom_name_visible(game, true));
             assert_eq!(mob.name(game).as_deref(), Some("Grumbles"));
             assert_eq!(mob.custom_name_visible(game), Some(true));
@@ -315,7 +316,7 @@ mod tests {
             // An armor stand keeps its name in its own field.
             game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
             let stand = game.entity(13).unwrap();
-            assert!(stand.set_custom_name(game, Some(Text::literal("Sign"))));
+            assert!(stand.set_custom_name(game, Some(mod_api::Text::literal("Sign"))));
             assert_eq!(stand.name(game).as_deref(), Some("Sign"));
             let saved = game.entity_nbt(stand).unwrap();
             let loaded = saved
@@ -331,10 +332,10 @@ mod tests {
             dragon.id = 14;
             game.dragon.replace(dragon);
             let dragon = game.entity(14).unwrap();
-            assert!(!dragon.set_custom_name(game, Some(Text::literal("Puff"))));
+            assert!(!dragon.set_custom_name(game, Some(mod_api::Text::literal("Puff"))));
             assert!(!dragon.set_custom_name_visible(game, true));
             assert!(mob.discard(game));
-            assert!(!mob.set_custom_name(game, Some(Text::literal("Gone"))));
+            assert!(!mob.set_custom_name(game, Some(mod_api::Text::literal("Gone"))));
             assert_eq!(mob.custom_name_visible(game), None);
         });
     }

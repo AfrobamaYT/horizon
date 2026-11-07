@@ -51,6 +51,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "PackFinders",
     "BlockTintSources",
     "BlockAndTintGetter",
+    "BlockMetadata",
     "ServerReloadResources",
     "CriterionContext",
     "UnspawnedMobEdits",
@@ -1060,6 +1061,7 @@ mod tests {
                     ("commands", &["run-command", "feedback"][..]),
                     ("messages", &["broadcast", "text-allowed"][..]),
                     ("players", &["acting-player", "server-players"][..]),
+                    ("block-metadata", &["property", "with", "of"][..]),
                 ] {
                     let interface = &resolve.interfaces[package.interfaces[service]];
                     for method in methods {
@@ -1074,6 +1076,9 @@ mod tests {
                         assert!(!host.functions.contains_key(*method));
                     }
                 }
+                assert!(wasm.guest.contains("impl crate :: BlockMetadata for Guest"));
+                assert!(wasm.host.contains("pub(crate) fn block_metadata("));
+                assert!(!wasm.unbound.iter().any(|method| method.starts_with("BlockMetadata::")));
                 let client = &resolve.interfaces[package.interfaces["client-host"]];
                 let session = &resolve.interfaces[package.interfaces["client-session"]];
                 assert!(!client.functions.contains_key("client-session"));

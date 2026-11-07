@@ -9,6 +9,7 @@ use super::{
     native_living_effects::{active_effect, mob_effect},
     shield::OFFHAND_SLOT,
 };
+use crate::game::api_values::{TryIntoApi, TryIntoEngine};
 use event_timings::EventTimings;
 use horizon_client::crafting::ResolvedSources;
 use horizon_client::{
@@ -2490,20 +2491,25 @@ impl Game<'_> {
                     let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
-                    self.native_server_chat(mod_api::__private::ServerChatCall {
-                        player_id: id,
-                        player: sender,
-                        username: &name,
-                        raw_text: &raw,
-                        message: &mut text,
-                        replies: &mut replies,
-                        cancel: &mut cancel,
-                    });
+                    if mod_api::__private::listened(mod_api::HookId::ServerChat) {
+                        let mut api_text = text.try_into_api().unwrap();
+                        self.native_server_chat(mod_api::__private::ServerChatCall {
+                            player_id: id,
+                            player: sender,
+                            username: &name,
+                            raw_text: &raw,
+                            message: &mut api_text,
+                            replies: &mut replies,
+                            cancel: &mut cancel,
+                        });
+                        text = api_text.try_into_engine(&()).unwrap();
+                    }
                     // The mods' replies reach the sender alone, as a
                     // command's do, before the message (if any) goes out.
                     if !replies.is_empty() {
                         let host = self.lan.as_ref()?;
                         for line in replies {
+                            let line = line.try_into_engine(&()).unwrap();
                             host.hub.send_to(
                                 conn,
                                 &C::SystemChat(play::SystemChat {
@@ -4627,9 +4633,7 @@ mod tests {
                 super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
                 (meta, defaults)
             };
-            assert!(
-                mob.set_custom_name(game, Some(horizon_client::text::Text::literal("Grumbles")))
-            );
+            assert!(mob.set_custom_name(game, Some(mod_api::Text::literal("Grumbles"))));
             assert!(mob.set_custom_name_visible(game, true));
             let (meta, _) = meta_of(game);
             let sent = horizon_protocol::text::literal("Grumbles");
@@ -4813,7 +4817,7 @@ mod tests {
             ) -> Flow {
                 event
                     .replies
-                    .push(Text::literal(format!("heard {}", event.raw_text)));
+                    .push(mod_api::Text::literal(format!("heard {}", event.raw_text)));
                 if event.raw_text == "secret" {
                     Flow::Cancel
                 } else {

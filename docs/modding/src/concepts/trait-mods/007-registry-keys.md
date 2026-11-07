@@ -17,7 +17,15 @@ The completed block identity table includes every vanilla and mod block, even bl
 requested. Completion preserves requested slots and appends the remaining canonical names in
 sorted order. Names belong to the installed mod registry; world load and reload prepare a
 separate numeric mapping for every retained key before publishing it. A missing requested
-block refuses completion without publishing a partial table.
+block refuses completion without publishing a partial table. Immutable block definitions
+(property names, legal values, state combinations and defaults) are published with those
+names before mesh tables are constructed. Workers share read-only definitions; property
+reads allocate nothing. Pack reload does not mutate definitions or identities. The world's
+numeric mappings and tag membership remain separate reloadable data.
+
+Metadata contexts are read-only and borrow the same table on the host and on workers.
+Wire transport records are internal, not saved block values. Persist canonical identifiers
+and property strings rather than slots or state ordinals.
 
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
@@ -60,7 +68,17 @@ and remain strings, as do labels and tags.
 | Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
 | Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
 | Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
+| Component protocol vocabulary | `text::{TextContent, TextNbtSource, TextObject, TextClick, TextHover}` | Match these enums exhaustively: their serialized vocabulary is closed. Records remain `non_exhaustive`. |
+| Renderer GUI commands | `mod_api::GuiDraw` | Mods pass API command records to `DrawContext::gui_paint` and HUD hooks. The renderer keeps its own command buffer and engine text; conversion happens at the game boundary. |
 | File-opening click actions | Not in `text::TextClick` | Mods can neither produce nor round-trip `OpenFile`; untrusted file-opening action metadata is dropped. Part of [per-node origin tracking #1738](https://github.com/arismoko/horizon/issues/1738). |
+
+`mod_api::GameRuleValue` owns the `Bool(bool)` and `Int(i32)` cases, in that order.
+`level.game_rule(host, id)` returns `Result<Option<GameRuleValue>, LevelReadError>`:
+`Ok(None)` means unknown rule, `Stale` means a gone/reopened level, and `Unavailable`
+means the side or phase cannot read it. `level.game_rules(host)` returns the typed
+result containing every available rule, not an optional list. The existing boolean
+key getter is unchanged. The game converts values after the subscription guard for
+`game_rule_changed`; no subscriber means no conversion work.
 
 The API's `GameRuleDecl` records a mod's boolean rule name, category and default.
 Its internal `RuleSchema` input describes vanilla categories and dense rule positions
@@ -87,9 +105,49 @@ Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `Non
 keeps the engine-computed default; `Some` preserves a styled or translatable component
 rather than flattening it to a string.
 
-The recursive tree has one serde model. `TextForm` carries its serialized form for
-finite generated wasm bindings; encoding and decoding refuse more than 100 nested JSON containers, and decoding refuses malformed trees. Component and style
-metadata is retained through serialization rather than discarded by flattening text.
+`TextForm` crosses the generated wasm boundary as a flat node table. Conversion
+is iterative, refuses component depth above 512 and rejects malformed tables. Each
+node's JSON metadata is still limited to 100 nested containers; a separate Value
+boundary is planned. Component and style metadata remain intact.
+`Text::new(content)` constructs any content kind without exposing an engine value.
+The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
+new cases change the link contract, just as enum-case order does. Mod matches should
+name every case rather than silently treating a new protocol case as an old one.
+Typed content and style fields are authoritative; metadata retains unrecognized
+properties, not overrides of those typed fields. Game-side encoding is infallible
+and reuses the engine's translation-argument and fallback construction rules.
+Capture keeps dynamic contents and metadata rather than flattening the rendered spans.
+It shares the engine's SNBT flag, shadow-colour, click-policy and inline-object parsers.
+File-opening metadata is discarded before a listener receives the owned value; a
+no-op listener cannot promote an untrusted file action into a local action.
+A translatable's fallback is a literal format template, not another language key.
+A missing key whose fallback equals an existing key therefore still displays the
+fallback text itself; parsing and native constructors follow the same rule.
+
+### Particle identities
+
+`ParticleKey` is an opaque slot in the load-owned registry tables. One completed
+snapshot retains both canonical names and provider identities: a vanilla provider's
+numeric index or a custom named sprite provider. The load resolves each provider once;
+reads of a retained key do not parse identifiers or scan the provider list. Unknown
+forward references refuse publication of the entire particle snapshot. Name-table
+completion shares the item registry's requested-slot preservation and sorted enumeration.
+
+### Placement and loot snapshots
+
+`mod_api::PlacementContext` owns the placement inputs, including world-space click
+coordinates and the placer view/flags. Its `item` is `Option<ItemKey>`: `None` is a
+real empty hand, including falling-block placement contexts, not an invented air
+item. Nonempty items resolve through the existing load-owned item table. The game
+captures this read-only snapshot after the scoped subscription guard; no subscriber
+means no snapshot or item lookup. The block-state answer is applied as before.
+
+The `snapshots` module owns placement inputs and loot-roll facts. Placement and tool
+items are resolved `ItemKey`s. Loot context entities, damage sources, tools, biome,
+block and place facts are owned values; retaining one never retains a borrowed engine
+context or a live level. A loot candidate is not an inventory `ItemStack`: its signed
+count can be non-positive while loot functions run, in which case it produces no item.
+Exploration searches remain deferred data, and name components remain unresolved text.
 
 ### Item values and tag names
 
