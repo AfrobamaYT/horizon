@@ -4795,7 +4795,7 @@ impl Game<'_> {
         );
         let feet = [p.position.x, p.position.y, p.position.z];
         let own = self.level.ensure_player_uuid();
-        let mut kept = Vec::with_capacity(items.len());
+        let mut kept = horizon_client::join_seq::JoinList::with_capacity(items.len());
         for mut item in items {
             let b = item.bounds();
             let touching = b.min_position().x < max[0]
@@ -4864,11 +4864,8 @@ impl Game<'_> {
     /// The item entities `tick_dropped_items` took out, back in the level,
     /// before those its hooks spawned meanwhile (`addFreshEntity` appends).
     /// They keep their join numbers; the spawned ones got theirs on joining.
-    fn put_back_dropped(
-        &mut self,
-        items: impl Into<horizon_client::join_seq::JoinList<ItemEntity>>,
-    ) {
-        let spawned = std::mem::replace(&mut self.dropped, items.into());
+    fn put_back_dropped(&mut self, items: horizon_client::join_seq::JoinList<ItemEntity>) {
+        let spawned = std::mem::replace(&mut self.dropped, items);
         self.dropped.extend(spawned);
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held

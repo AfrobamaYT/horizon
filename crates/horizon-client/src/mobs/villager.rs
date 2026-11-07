@@ -751,7 +751,7 @@ pub struct Meeting {
 /// `Villager.gossip` (at most once in 1200 ticks for both), then surplus
 /// food and wanted wares taken out of `a`'s inventory.
 pub fn meet(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     a: usize,
     b: usize,
     now: i64,

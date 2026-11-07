@@ -295,7 +295,13 @@ pub fn resolve_effects<'a>(
         &crate::parts::requested_keys().effects,
         ids,
         resolve,
-    )?;
+    )
+    .map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+    })?;
     let _ = crate::parts::resolved_effects().set(effects);
     Ok(())
 }

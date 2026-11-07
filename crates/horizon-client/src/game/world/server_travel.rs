@@ -148,7 +148,7 @@ fn drop_hook(host: &mut LanHost, conn: u32) {
 }
 
 fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined>(
-    list: &mut Vec<T>,
+    list: &mut horizon_client::join_seq::JoinList<T>,
     id: u32,
     at: Vec3,
     yaw: f32,
@@ -1125,11 +1125,13 @@ mod tests {
     /// 26.3 sent the client a cart arriving with motion (0.4, 0, 0).
     #[test]
     fn a_minecart_a_player_rides_keeps_its_clamped_motion_through_a_portal() {
-        let mut carts = vec![minecarts::Minecart::new(
+        let mut carts: horizon_client::join_seq::JoinList<_> = [minecarts::Minecart::new(
             3,
             minecarts::CartKind::Rideable,
             Vec3::new(9.9, 100.0, 4.5),
-        )];
+        )]
+        .into_iter()
+        .collect();
         let at = Vec3::new(1.5, 100.0, 0.5);
         let cart = take_vehicle(&mut carts, 3, at, 0.0, Vec3::new(1.6, -0.1, -0.7))
             .expect("the cart travels");
@@ -1144,14 +1146,16 @@ mod tests {
     /// ride the vehicle that is recreated in the other dimension).
     #[test]
     fn the_vehicle_a_player_rides_travels_with_it() {
-        let mut boats = vec![boats::Boat::new(
+        let mut boats: horizon_client::join_seq::JoinList<_> = [boats::Boat::new(
             7,
             Arc::from("oak"),
             Vec3::new(0.0, 64.0, 0.0),
             0.0,
-        )];
-        let mut carts: Vec<minecarts::Minecart> = Vec::new();
-        let mut mobs: Vec<Mob> = Vec::new();
+        )]
+        .into_iter()
+        .collect();
+        let mut carts = horizon_client::join_seq::JoinList::<minecarts::Minecart>::default();
+        let mut mobs = horizon_client::join_seq::JoinList::<Mob>::default();
         let at = Vec3::new(1.5, 65.0, -2.5);
         let boat = take_vehicle(&mut boats, 7, at, 90.0, Vec3::ZERO)
             .expect("the vehicle the player rides travels with it");

@@ -67,7 +67,7 @@ ServerLevel.getEntityInAnyDimension	missing		minor: owner and target references 
 ServerLevel.getEntityOrPart	inline	crates/horizon-client/src/game/network/lan_actions/interaction.rs::Game::look_at_entity	an entity id from a guest finds a mob, an object or a tracked dragon part or end crystal
 ServerLevel.findClosestBiome3d	port	crates/horizon-client/src/vanillagen.rs::VanillaTerrain::find_closest_biome	
 ServerLevel.getWorldBorder	inline	crates/horizon-client/src/game/interface/scoreboard/mod.rs::Game::load_scoreboard	the border is unpacked from saved data next to the scoreboard
-ServerLevel.setChunkForced	port	crates/horizon-client/src/game/administration/commands/terrain_cmds.rs::Game::cmd_forceload	
+ServerLevel.setChunkForced	port	crates/horizon-client-render/src/streaming.rs::Streaming::set_forced_loaded	load newly forced columns before returning; repeated adds and removals do not load
 ServerLevel.updatePOIOnBlockStateChange	inline	crates/horizon-client-render/src/poi_sections.rs::PoiSections::get	no incremental records: a section's POI list is rebuilt from its blocks after any edit
 ServerLevel.saveDebugReport	skip:debug		
 ServerLevel.dumpEntities	skip:debug		
