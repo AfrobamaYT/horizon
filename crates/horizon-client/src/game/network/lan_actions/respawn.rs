@@ -1,7 +1,7 @@
 use super::*;
 
 impl Game<'_> {
-    pub(super) fn guest_respawn(&mut self, conn: u32) {
+    pub(in crate::game) fn guest_respawn(&mut self, conn: u32) {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
