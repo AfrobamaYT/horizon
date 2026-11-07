@@ -1,7 +1,7 @@
 // game-module-visibility: pub(crate)
 //! The game-owned conversion boundary between API records and engine values.
 //! Rust's orphan rule prevents foreign From/TryFrom implementations here.
-use horizon_core::nbt::{JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
@@ -65,6 +65,17 @@ pub(in crate::game) trait TryIntoApi {
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
+/// Tests use the production snapshot conversion, never a second fixture codec.
+#[cfg(test)]
+pub(in crate::game) fn test_snapshot<T: TryIntoApi + ?Sized>(value: &T) -> T::Api
+where
+    T::Error: std::fmt::Debug,
+{
+    value
+        .try_into_api()
+        .expect("fixture snapshot has resolved item keys and a nonempty count")
+}
+
 pub(in crate::game) trait TryIntoEngine {
     type Engine;
     type Error;
@@ -75,6 +86,7 @@ pub(in crate::game) trait TryIntoEngine {
 pub(in crate::game) enum StackReadError {
     UnknownItem,
     Empty,
+    InvalidComponents(mod_api::StackError),
 }
 
 impl StackReadError {
@@ -82,6 +94,7 @@ impl StackReadError {
         match self {
             Self::UnknownItem => StackWriteError::UnknownItem,
             Self::Empty => StackWriteError::EmptyEngineStack,
+            Self::InvalidComponents(reason) => StackWriteError::InvalidComponents { reason },
         }
     }
 }
@@ -329,10 +342,13 @@ impl TryIntoApi for EngineStack {
     fn try_into_api(&self) -> Result<ApiStack, Self::Error> {
         let key = mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?;
         let mut result = ApiStack::new(key, self.count).ok_or(StackReadError::Empty)?;
-        result.set_damage(self.damage);
-        if let Some(Tag::Compound(mut patch)) = horizon_items::item_data::encode_components(self) {
-            patch.remove(&JavaString::from("minecraft:damage"));
-            result.set_components(patch);
+        if self.damage != 0 {
+            result.set_damage(self.damage);
+        }
+        if let Some(Tag::Compound(patch)) = horizon_items::item_data::encode_components(self) {
+            result
+                .set_components(patch)
+                .map_err(StackReadError::InvalidComponents)?;
         }
         Ok(result)
     }
@@ -357,14 +373,15 @@ impl TryIntoApi for horizon_assets::item_model::StackView {
                 Tag::Compound(Compound::new()),
             ),
         }));
-        let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
-        EngineStack {
-            item: self.item.as_str().into(),
-            count,
-            damage,
-            extra,
-        }
-        .try_into_api()
+        let key = mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?;
+        let mut stack = ApiStack::new(key, count).ok_or(StackReadError::Empty)?;
+        let Tag::Compound(patch) = components else {
+            unreachable!("model patch is constructed as a compound")
+        };
+        stack
+            .set_components(patch)
+            .map_err(StackReadError::InvalidComponents)?;
+        Ok(stack)
     }
 }
 
@@ -380,16 +397,25 @@ impl TryIntoEngine for mod_api::ItemResource {
 /// The write conversion below adds authoritative registry-dependent validation.
 pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
     let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
-    let patch = value
-        .components()
-        .map(|patch| Tag::Compound(patch.as_nbt().clone()));
+    Ok(encode_stack(value, id.into()))
+}
+
+fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
+    let mut patch = value.components().map(|patch| patch.as_nbt().clone());
+    // Let the existing component codec preserve explicit zero versus prototype inheritance.
+    if value.damage_component() == Some(0) {
+        patch
+            .get_or_insert_with(Default::default)
+            .insert(JavaString::from("minecraft:damage"), Tag::Int(0));
+    }
+    let patch = patch.map(Tag::Compound);
     let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    Ok(EngineStack {
-        item: id.clone(),
+    EngineStack {
+        item,
         count: value.count(),
         damage: value.damage(),
         extra,
-    })
+    }
 }
 
 impl TryIntoEngine for ApiStack {
@@ -397,8 +423,13 @@ impl TryIntoEngine for ApiStack {
     type Error = StackWriteError;
 
     fn try_into_engine(&self, items: &Items) -> Result<EngineStack, Self::Error> {
-        let stack = stack_value(self)?;
-        let definition = items.get(&stack.item).ok_or(StackWriteError::UnknownItem)?;
+        let id =
+            mod_api::__private::item_key_id(self.item()).ok_or(StackWriteError::UnknownItem)?;
+        let (id, definition) = items
+            .items
+            .get_key_value(id)
+            .ok_or(StackWriteError::UnknownItem)?;
+        let stack = encode_stack(self, id.clone());
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -1330,6 +1361,30 @@ impl super::Game<'_> {
             self.native_block_entity_render_bounding_box(pos, block, state, &api, bounds);
         }
     }
+    /// Shared click metadata borrows the already-converted API snapshot for this call.
+    pub(in crate::game) fn block_click<'a>(
+        &mut self,
+        hit: &super::Hit,
+        hand: mod_api::Hand,
+        stack: Option<&'a ApiStack>,
+    ) -> mod_api::NativeBlockClick<'a> {
+        let (player, player_entity_id) = self.native_clicker();
+        mod_api::NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
+            side: if self.remote.is_some() {
+                mod_api::LogicalSide::Client
+            } else {
+                mod_api::LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        })
+    }
+
     pub(in crate::game) fn api_menu_button(
         &mut self,
         context: &mod_api::menu::MenuButtonContext,
@@ -1521,11 +1576,18 @@ mod item_model_snapshot_tests {
         assert_eq!(snapshot.damage(), 7);
         let patch = snapshot.components().unwrap().as_nbt();
         assert_eq!(
-            patch.get("example:charge").unwrap().get("amount"),
+            patch
+                .get(&JavaString::from("example:charge"))
+                .unwrap()
+                .get("amount"),
             Some(&Tag::Int(4))
         );
-        assert!(patch.get("!minecraft:custom_name").is_some());
-        assert!(patch.get("bundle_selected").is_none());
+        assert!(
+            patch
+                .get(&JavaString::from("!minecraft:custom_name"))
+                .is_some()
+        );
+        assert!(patch.get(&JavaString::from("bundle_selected")).is_none());
         assert_eq!(view.bundle_selected, 3);
     }
 

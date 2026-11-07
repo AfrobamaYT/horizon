@@ -405,8 +405,8 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn indexed_consumable_effects_apply_to_a_mob() {
+        use horizon_client::items::ItemStack;
         use horizon_core::random::RandomSource;
-        use mod_api::ItemStack;
         with_game(|game| {
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));

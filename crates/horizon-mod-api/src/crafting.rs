@@ -120,7 +120,9 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// its hook left at load, a fluid one none, which fails the file. An empty
 /// result is no ingredient, as an empty list or an unloaded tag is.
 #[derive(Clone, Debug)]
+// hidden: shared parser output for the game-owned ingredient adapter, not a mod-facing recipe.
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct WalkedIngredient {
     /// The ids it accepts, however the source shape named them.
     pub set: HashSet<String>,
@@ -134,6 +136,7 @@ pub struct WalkedIngredient {
 }
 /// The wrapper's answer for a kind outside the standard shapes: the ids it
 /// matches, taken out of its JSON, or none to fail the file.
+// hidden: the game-owned ingredient adapter supplies custom ids while walking JSON.
 #[doc(hidden)]
 pub type CustomIds<'a> = &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
 impl WalkedIngredient {
@@ -147,6 +150,7 @@ impl WalkedIngredient {
         Self::walk_resolved(v, tags, custom, &|id| Some(id.to_owned()))
     }
 
+    // hidden: the game-owned adapter resolves ids using its own load-time registry.
     #[doc(hidden)]
     pub fn walk_resolved(
         v: &Value,
