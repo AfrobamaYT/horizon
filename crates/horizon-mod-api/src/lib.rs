@@ -5168,12 +5168,7 @@ mod tests {
     }
 
     fn stick() -> ItemStack {
-        ItemStack {
-            item: Arc::from("minecraft:stick"),
-            count: 1,
-            damage: 0,
-            extra: None,
-        }
+        crate::parts::tests::stack("minecraft:stick", 1, 0)
     }
 
     #[test]
@@ -5620,7 +5615,7 @@ mod tests {
                 .fished
                 .drops
                 .iter()
-                .any(|s| &*s.item == "minecraft:cod");
+                .any(|s| s.item() == crate::parts::tests::fixture_item_key("minecraft:cod"));
             if cod { Flow::Cancel } else { Flow::Continue }
         }
     }
@@ -5643,6 +5638,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        install_parts(&[]).unwrap();
         let mut host = Reader {
             block: "minecraft:water",
             lines: Vec::new(),
@@ -5653,7 +5649,7 @@ mod tests {
         ];
         install(mods.into());
         let ask = |host: &mut Reader, item: &str| {
-            let drops = [ItemStack::new(item, 1)];
+            let drops = [crate::parts::tests::stack(item, 1, 0)];
             let fished = NativeItemFished {
                 hook: 9,
                 position: [0.5, 62.0, 0.5],
@@ -5666,7 +5662,7 @@ mod tests {
         assert_eq!(ask(&mut host, "minecraft:cod"), (4, true));
         let mods: Vec<ModEntry> = vec![ModEntry::new("cod-keeper", Box::new(CodKeeper))];
         install(mods.into());
-        let drops = [ItemStack::new("minecraft:salmon", 1)];
+        let drops = [crate::parts::tests::stack("minecraft:salmon", 1, 0)];
         let fished = NativeItemFished {
             hook: 9,
             position: [0.5, 62.0, 0.5],
