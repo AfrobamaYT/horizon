@@ -3,6 +3,7 @@ use super::Game;
 use super::mods;
 use glam::{DVec3, Mat4, Vec3};
 use horizon_client::mesher::Vertex;
+use horizon_client::screen_effects::{CameraQuads, sampling};
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
     DrawError, InstanceError, ModelInstance, ModelRef, RenderLevelStage, WorldDrawUsage, WorldLine,
@@ -10,6 +11,32 @@ use mod_api::{
 };
 
 impl Game<'_> {
+    /// A camera-space quad in solid `argb`, of the atlas's white texel.
+    pub(super) fn native_camera_quad(
+        &self,
+        draw: &mut CameraQuads,
+        corners: [[f32; 3]; 4],
+        argb: u32,
+    ) -> bool {
+        self.native_camera_sprite(draw, "horizon/white", corners, [[0.5; 2]; 4], argb)
+    }
+    /// A camera-space quad of sprite `name`, sampled as `ScreenEffects::build` samples it; false
+    /// for an unknown sprite or a coordinate that is not finite.
+    pub(super) fn native_camera_sprite(
+        &self,
+        draw: &mut CameraQuads,
+        name: &str,
+        corners: [[f32; 3]; 4],
+        uv: [[f32; 2]; 4],
+        argb: u32,
+    ) -> bool {
+        let Some(r) = self.gui.atlas.sprites.get(name) else {
+            return false;
+        };
+        let flags = self.gui.atlas.flags.get(name).copied();
+        let sampling = flags.map_or(0, sampling);
+        draw.push(corners, uv, [r.u0, r.v0, r.u1, r.v1], argb, sampling)
+    }
     /// `DebugRenderer.refreshRendererList`: the active renderers are replaced by those the mods
     /// push now whose entries are on. Runs at start, at login and when the selection changes.
     pub(in crate::game) fn refresh_debug_renderers(&mut self) {
