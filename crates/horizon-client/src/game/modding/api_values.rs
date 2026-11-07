@@ -101,7 +101,7 @@ pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::game) enum StackReadError {
+pub(crate) enum StackReadError {
     UnknownItem,
     Empty,
     InvalidComponents(mod_api::StackError),

@@ -216,7 +216,7 @@ pub(super) struct Spawn {
 /// What a broken block spawns (`GameLevel::block_dropped`).
 /// Prepared engine item entity; API snapshots exist only while a listener runs.
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct BlockItemDrop {
+pub(crate) struct BlockItemDrop {
     pub(super) stack: ItemStack,
     pub(super) position: [f64; 3],
     pub(super) velocity: [f64; 3],
