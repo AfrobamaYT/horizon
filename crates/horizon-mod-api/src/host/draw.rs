@@ -298,6 +298,11 @@ pub trait BlockEntityDrawContext {
 }
 /// Per-view untextured geometry, cleared even without listeners; `usage` reports fixed setup-time limits shared across listeners and depth modes.
 pub trait WorldDrawContext {
+    /// Draw a retained group once per view, with per-view culling and the batch route rules.
+    /// Repeated submissions in one view are ignored. Only visible copies consume its budget.
+    fn draw_instance_group(&mut self, group: InstanceGroupRef) -> Result<(), GroupError> {
+        unimplemented!("WorldDrawContext::draw_instance_group")
+    }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
     /// or a batch exceeding the view's fixed capacity, leave the batch unchanged.
     fn lines(&mut self, lines: &[WorldLine]) -> Result<(), DrawError> {

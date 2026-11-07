@@ -182,6 +182,9 @@ pub(crate) struct GameWorldDrawContext<'a, 'g> {
     pub(crate) surface: &'a mut crate::world_geometry::WorldGeometry,
 }
 impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
+    fn draw_instance_group(&mut self, group: InstanceGroupRef) -> Result<(), GroupError> {
+        self.game.draw_instance_group(self.surface, group)
+    }
     fn lines(&mut self, lines: &[WorldLine]) -> Result<(), DrawError> {
         self.game.native_world_draw_lines(&mut *self.surface, lines)
     }

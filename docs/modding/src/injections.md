@@ -311,14 +311,15 @@ or Part on the [roadmap](https://github.com/arismoko/horizon/issues/771) so the 
 to the typed API.
 
 ```toml
-[native]
-game = "26.3"
-horizon = "<exact game commit>"
-mixins = "<exact mixins commit>"
 internals = [
     { path = "horizon_client::game::Game", hash = "<written by the tool>" },
     { path = "horizon_client::game::native_ticks::TickRound::listening", kind = "method", hash = "<written by the tool>" },
 ]
+
+[native]
+game = "26.3"
+horizon = "<exact game commit>"
+mixins = "<exact mixins commit>"
 
 [[native.injection]]
 id = "count"
@@ -330,7 +331,7 @@ raw = "count"
 Run `cargo horizon-mod internals sync` in the mod's folder after editing its Rust code. It
 checks the mod against a discovery-only copy of the pinned game's source, uses compiler
 warnings to find actual internal uses (including glob imports and macros), and replaces
-`[native].internals` with their exact paths, kinds and hashes. Unused declarations are removed;
+top-level `internals` with their exact paths, kinds and hashes. Unused declarations are removed;
 retained declarations keep their formatting. The command prints added and removed entries.
 It is explicit: a normal build never changes the declarations reviewers and players read.
 
@@ -471,7 +472,7 @@ non-unit site raises `E_SITE_KIND`. These raw sites are not available to wasm mo
 
 ### Wasm raw listeners
 
-A wasm mod uses the same `[native] internals` declarations and `raw` injections beside `[wasm]`,
+A wasm mod uses the same top-level `internals` declarations and `[[inject]]` listeners beside `[wasm]`,
 but omits all three native pins and carries no helper or support-module source. Its generated view
 imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.
 The compiled declaration includes each manifest internal and every named type whose layout it walks.

@@ -15,6 +15,7 @@ Prefer a hook or Part method; otherwise a unified `[[inject]]` with `access = "a
 - [Installing and using mods](start/installing.md)
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Query attachment holders](how-to/attachments.md): snapshots, explicit server writes, scope and costs.
 - [Trait mods, Parts and attachments](concepts/trait-mods.md)
 - [Publishing your mod](how-to/publish.md)
 

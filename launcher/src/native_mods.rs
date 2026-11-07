@@ -2103,9 +2103,9 @@ fn pipeline(
         .collect::<Result<_, _>>()
         .map_err(|error| error.to_string())?;
     for bundle in &ordered {
-        let native = bundle.native();
-        if !native.internals.is_empty() {
-            let paths = native
+        if !bundle.manifest.internals.is_empty() {
+            let paths = bundle
+                .manifest
                 .internals
                 .iter()
                 .map(|internal| internal.path.as_str())
@@ -2115,7 +2115,7 @@ fn pipeline(
                 "{mod} uses {count} game internals: {paths}",
                 &[
                     ("mod", &bundle.manifest.id),
-                    ("count", &native.internals.len().to_string()),
+                    ("count", &bundle.manifest.internals.len().to_string()),
                     ("paths", &paths),
                 ],
             ))?;
@@ -2240,7 +2240,7 @@ fn pipeline(
                 "id": m.manifest.id,
                 "version": m.manifest.version,
                 "sha256": digests.get(&m.manifest.id).cloned().flatten(),
-                "internals": m.native().internals,
+                "internals": m.manifest.internals,
                 "raw": m.native().injection.iter().filter(|injection| injection.raw.is_some()).map(|injection| serde_json::json!({
                     "id": injection.id, "target": injection.target, "kind": injection.kind,
                     "selector": injection.selector, "ordinal": injection.ordinal, "fingerprint": injection.fingerprint,
