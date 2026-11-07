@@ -20,6 +20,7 @@ heck = "0.5"
 wit-parser = "0.261"
 
 [dev-dependencies]
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 # `FakeHost`, the host the tests run mods against.
 horizon-mod-api = { path = "../horizon-mod-api", features = ["testing"] }
 wit-component = { version = "0.261", features = ["dummy-module"] }
