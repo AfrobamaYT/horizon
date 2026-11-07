@@ -136,7 +136,7 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
                 .collect::<std::collections::HashSet<_>>(),
         );
         mod_api::__private::mark_game_thread();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(&game).unwrap();
         let old = spawn(&mut game, 13);
         game.tick_items();
         let item = &game.dropped[0];

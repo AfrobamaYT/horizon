@@ -333,7 +333,7 @@ mod tests {
         crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
-                game.resolve_parts().unwrap();
+                crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
                 game.player = Some(
                     horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
                 );
@@ -344,7 +344,7 @@ mod tests {
                 let player = game.living(game.entity(20).unwrap()).unwrap();
                 test(game, &uses, player);
                 crate::game::api_values::install_parts(&[]).unwrap();
-                game.resolve_parts().unwrap();
+                crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
             });
         });
     }

@@ -766,6 +766,11 @@ mod ray_tests {
 
 #[cfg(test)]
 pub(super) mod tests {
+    /// Resolve a fixture after registration or a late Parts reinstall from its loaded table.
+    pub(in crate::game) fn resolve_parts(game: &super::Game<'_>) -> Result<(), String> {
+        crate::game::api_values::resolve_block_definitions(game.pack.assets.registry)?;
+        game.resolve_parts().map_err(|error| error.to_string())
+    }
     use mod_api::__private::game::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
@@ -913,16 +918,12 @@ pub(super) mod tests {
             })
             .collect();
         crate::game::api_values::register_game_keys(ids);
-        // Re-registering fixture keys installs a fresh Parts registry after resource loading.
-        // Publish its complete immutable definitions before preparing the numeric owner index.
-        crate::game::api_values::resolve_block_definitions(registry)
-            .expect("fixture block definitions resolve against its loaded state registry");
         mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
             .expect("fixture item keys resolve against its loaded catalog");
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
-        game.resolve_parts().unwrap();
+        resolve_parts(&game).unwrap();
         // The title's save folder is under the working directory: give each test its own, so a
         // test that saves leaves the checkout clean and parallel tests don't share files.
         let saves = std::env::temp_dir().join(format!(

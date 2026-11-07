@@ -726,7 +726,7 @@ mod tests {
                     Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
                 game.visible_hands[0].1 = game.inventory[game.selected].clone();
                 crate::game::api_values::install_parts(&[]).unwrap();
-                game.resolve_parts().unwrap();
+                crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
                 let (vanilla, _) = game.hand_geometry(0.0);
                 assert!(!overridden.is_empty());
                 assert_eq!(overridden.len(), vanilla.len());

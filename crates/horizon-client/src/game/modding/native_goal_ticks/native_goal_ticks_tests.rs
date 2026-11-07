@@ -195,7 +195,7 @@ fn goals_register_after_the_species_own_and_only_on_their_type() {
             names
         };
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 91, [3.5, 65.0, 3.5]);
         let entries: Vec<_> = game.mobs.last().unwrap().ai.goals.entries().collect();
         assert_eq!(entries[0], bare[0], "the species goals lead");
@@ -221,7 +221,7 @@ fn two_mobs_keep_independent_state_and_random_streams() {
     EVENTS.lock().unwrap().clear();
     with_game(|game| {
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 10, [3.5, 65.0, 3.5]);
         zombie(game, 11, [23.5, 65.0, 23.5]);
         // Only the mod goal, so the species' own draws stay out of the count.
@@ -260,7 +260,7 @@ fn reads_answer_the_tick_view_and_refuse_what_it_lacks() {
     READS.lock().unwrap().clear();
     with_game(|game| {
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 20, [3.5, 65.0, 3.5]);
         zombie(game, 21, [13.5, 65.0, 13.5]);
         game.mobs[1].health = 12.5;
@@ -288,7 +288,7 @@ fn a_higher_priority_goal_interrupts_a_running_mod_goal() {
     EVENTS.lock().unwrap().clear();
     with_game(|game| {
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 30, [3.5, 65.0, 3.5]);
         // Just the two competing goals: the mod goal (registered at 7 by the
         // part) and a vanilla standin above it at 3.
@@ -365,7 +365,7 @@ fn set_target_follows_the_write_rules() {
         mod_api::__private::install(vec![ModEntry::new("targets", Box::new(TargetMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("targets", Box::new(TargetMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 40, [3.5, 65.0, 3.5]);
         zombie(game, 41, [13.5, 65.0, 13.5]);
         let other = game.entity(41).unwrap();
@@ -480,7 +480,7 @@ fn the_host_answers_without_panicking() {
         mod_api::__private::install(vec![ModEntry::new("reader", Box::new(ReaderMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("reader", Box::new(ReaderMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 70, [3.5, 65.0, 3.5]);
         zombie(game, 71, [13.5, 65.0, 13.5]);
         game.mobs[1].health = 12.5;
@@ -586,7 +586,7 @@ fn view_player(at: [f64; 3]) -> horizon_client::mobs::PlayerView {
 fn a_client_copy_registers_no_mod_goals() {
     with_game(|game| {
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         // The authoritative construction registers the part's goal…
         zombie(game, 80, [3.5, 65.0, 3.5]);
         assert!(
@@ -653,7 +653,7 @@ fn a_goal_jump_goes_through_the_jump_control_input() {
         mod_api::__private::install(vec![ModEntry::new("jumps", Box::new(JumpMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("jumps", Box::new(JumpMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 82, [3.5, 65.0, 3.5]);
         game.mobs[0].ai.goals.clear();
         mobs::part_goals::attach(&mut game.mobs[0]);
@@ -715,7 +715,7 @@ fn set_target_refuses_what_the_write_handle_refuses() {
         mod_api::__private::install(vec![ModEntry::new("golems", Box::new(TargetMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("golems", Box::new(TargetMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         mob_of(game, 90, "minecraft:iron_golem", [3.5, 65.0, 3.5]);
         mob_of(game, 91, "minecraft:zombie", [13.5, 65.0, 13.5]);
         mob_of(game, 92, "minecraft:creeper", [23.5, 65.0, 23.5]);
@@ -830,7 +830,7 @@ fn move_and_look_inputs_pass_the_navigation_boundary() {
         mod_api::__private::install(vec![ModEntry::new("moves", Box::new(MoveMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("moves", Box::new(MoveMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 83, [3.5, 65.0, 3.5]);
         game.mobs[0].ai.goals.clear();
         mobs::part_goals::attach(&mut game.mobs[0]);
@@ -894,7 +894,7 @@ fn the_player_the_tick_sees_resolves_by_its_captured_identity() {
         mod_api::__private::install(vec![ModEntry::new("players", Box::new(PlayerMod))].into());
         crate::game::api_values::install_parts(&[ModEntry::new("players", Box::new(PlayerMod))])
             .unwrap();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 84, [3.5, 65.0, 3.5]);
         game.mobs[0].ai.goals.clear();
         mobs::part_goals::attach(&mut game.mobs[0]);
@@ -952,7 +952,7 @@ fn mod_goal_tick_cost() {
     EVENTS.lock().unwrap().clear();
     with_game(|game| {
         install_game_mods();
-        game.resolve_parts().unwrap();
+        crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
         zombie(game, 60, [3.5, 65.0, 3.5]);
         let mut mobs = game.mobs.lift();
         let snapshot: Vec<_> = mobs
