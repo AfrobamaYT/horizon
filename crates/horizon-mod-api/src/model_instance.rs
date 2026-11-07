@@ -119,7 +119,7 @@ pub enum InstanceError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the engine creates handles
 #[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
-pub struct InstanceGroupRef(u64, u32);
+pub struct InstanceGroupRef(pub(crate) u64, pub(crate) u32);
 
 impl InstanceGroupRef {
     pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
@@ -137,7 +137,7 @@ impl InstanceGroupRef {
     ) -> Result<(), GroupError> {
         host.instance_group_write(self, first, instances)
     }
-    /// Atomically change the drawn length. Newly exposed copies start at identity, full bright.
+    /// Atomically change the drawn length. Unwritten slots contain identity, full-bright copies.
     pub fn set_len(self, host: &dyn crate::ClientHost, len: u32) -> Result<(), GroupError> {
         host.instance_group_set_len(self, len)
     }
@@ -191,5 +191,15 @@ mod tests {
             ModelInstance::at([1.0, 2.0, 3.0], 0xFF80_C040).tint,
             0xFF80_C040
         );
+    }
+}
+
+impl crate::__private::game::Fields for InstanceGroupRef {
+    type Fields<'a> = crate::__private::game::ModelRefFields;
+    fn fields(&self) -> Self::Fields<'_> {
+        crate::__private::game::ModelRefFields {
+            generation: self.0,
+            slot: self.1,
+        }
     }
 }

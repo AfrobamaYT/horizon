@@ -38,6 +38,7 @@ pub struct WorldGeometry {
     lines: [Vec<[f32; 8]>; 2],
     quads: [Vec<Vertex>; 2],
     copies: Vec<ModelCopy>,
+    groups: Vec<mod_api::InstanceGroupRef>,
     accepted_models: u32,
     model_cut: u32,
 }
@@ -50,6 +51,7 @@ impl Default for WorldGeometry {
             lines: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize)),
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
+            groups: Vec::with_capacity(INSTANCE_CAPACITY as usize),
             accepted_models: 0,
             model_cut: 0,
         }
@@ -65,6 +67,7 @@ impl WorldGeometry {
         self.quads.iter_mut().for_each(Vec::clear);
         self.clear_copies();
         self.model_cut = 0;
+        self.groups.clear();
     }
     /// Entity-stream cut used by directly staged instances in this view.
     pub fn set_model_cut(&mut self, cut: u32) {
@@ -97,6 +100,17 @@ impl WorldGeometry {
         batch: ModelBatch,
         instances: &[ModelInstance],
         cull: Option<&impl crate::gfx::Cull>,
+        stage: impl FnMut(&ModelCopy) -> bool,
+    ) -> Result<(), InstanceError> {
+        validate_instances(instances)?;
+        self.submit_validated_model(batch, instances, cull, stage)
+    }
+    /// Submit copies validated when written into persistent storage.
+    pub fn submit_validated_model(
+        &mut self,
+        batch: ModelBatch,
+        instances: &[ModelInstance],
+        cull: Option<&impl crate::gfx::Cull>,
         mut stage: impl FnMut(&ModelCopy) -> bool,
     ) -> Result<(), InstanceError> {
         if instances.is_empty() {
@@ -107,16 +121,6 @@ impl WorldGeometry {
         }
         if batch.translucent {
             return Err(InstanceError::Translucent);
-        }
-        for instance in instances {
-            if instance.origin.iter().any(|v| !v.is_finite())
-                || instance.transform.iter().any(|v| !v.is_finite())
-            {
-                return Err(InstanceError::NonFinite);
-            }
-            if instance.light.block > 15 || instance.light.sky > 15 {
-                return Err(InstanceError::InvalidLight);
-            }
         }
         let start = self.copies.len();
         let accepted = self.accepted_models;
@@ -152,6 +156,15 @@ impl WorldGeometry {
             self.accepted_models += 1;
         }
         Ok(())
+    }
+    pub fn group_room(&self) -> bool {
+        self.groups.len() < INSTANCE_CAPACITY as usize
+    }
+    pub fn has_group(&self, group: mod_api::InstanceGroupRef) -> bool {
+        self.groups.contains(&group)
+    }
+    pub fn mark_group(&mut self, group: mod_api::InstanceGroupRef) {
+        self.groups.push(group);
     }
     pub fn copy_count(&self) -> usize {
         self.copies.len()
@@ -590,4 +603,18 @@ mod tests {
             }
         }
     }
+}
+
+pub fn validate_instances(instances: &[ModelInstance]) -> Result<(), InstanceError> {
+    for instance in instances {
+        if instance.origin.iter().any(|v| !v.is_finite())
+            || instance.transform.iter().any(|v| !v.is_finite())
+        {
+            return Err(InstanceError::NonFinite);
+        }
+        if instance.light.block > 15 || instance.light.sky > 15 {
+            return Err(InstanceError::InvalidLight);
+        }
+    }
+    Ok(())
 }

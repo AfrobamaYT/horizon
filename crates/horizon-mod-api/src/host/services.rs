@@ -208,7 +208,8 @@ pub trait RenderAssets {
 /// Client-side persistent copies of resolved models.
 pub trait InstanceGroups {
     /// Allocate up to 16,384 copies, initially length zero. Each mod may reserve 65,536
-    /// copies total. Only the drawn length, not capacity, consumes the view budget.
+    /// copies total (an empty group reserves one slot). Only visible copies in the drawn
+    /// length, not capacity, consume the view budget. At most 16,384 groups per view.
     /// Create at setup/reload, not each frame. Copies upload in full each drawn frame.
     fn create_group(&self, model: ModelRef, capacity: u32) -> Result<InstanceGroupRef, GroupError>;
 }

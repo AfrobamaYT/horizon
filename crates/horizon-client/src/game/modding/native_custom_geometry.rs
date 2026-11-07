@@ -84,6 +84,15 @@ impl Game<'_> {
         model: ModelRef,
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
+        horizon_client::world_geometry::validate_instances(instances)?;
+        self.draw_validated_model_instances(draw, model, instances)
+    }
+    pub(super) fn draw_validated_model_instances(
+        &self,
+        draw: &mut WorldGeometry,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
         if fields.generation != self.standalone_geometry.generation() {
@@ -116,7 +125,7 @@ impl Game<'_> {
         let cut = draw.model_cut();
         let camera = DVec3::from(draw.camera());
         let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
-        let result = draw.submit_model(
+        let result = draw.submit_validated_model(
             ModelBatch {
                 slot: fields.slot,
                 generation: fields.generation,
@@ -307,6 +316,79 @@ mod tests {
         let generation = mod_api::__private::game::Fields::fields(&model).generation;
         horizon_client::gfx::set_test_prepared_generation(Some(generation));
         model
+    }
+
+    #[test]
+    #[ignore = "needs software Vulkan"]
+    fn persistent_groups_match_batch() {
+        use mod_api::{GroupError, InstanceGroups};
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = grass(game);
+            let group = game.create_group(model, 8).unwrap();
+            let near = ModelInstance::at([0.0; 3], 0xFF80_C040);
+            let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
+            group.write(game, 0, &[far, near]).unwrap();
+            assert_eq!(group.write(game, 8, &[near]), Err(GroupError::OutOfRange));
+            let mut bad = near;
+            bad.light.block = 16;
+            assert_eq!(
+                group.write(game, 1, &[far, bad]),
+                Err(GroupError::InvalidLight)
+            );
+            assert_eq!(group.set_len(game, 9), Err(GroupError::OutOfRange));
+            game.view_frustum = Some(horizon_client::gfx::test_frustum([
+                glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+            ]));
+            let mut draw = WorldGeometry::default();
+            let render = |game: &Game<'_>| {
+                let staged = game.prepared_model_draws.borrow();
+                assert_eq!(staged.len(), 1, "the far copy must be culled");
+                let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+                horizon_client::gfx::entity_pixel_test::render_instance(
+                    horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                        vertices: &vertices,
+                        ranges,
+                        uploaded: model.fields().generation,
+                        requested: model.fields().generation,
+                        slot: model.fields().slot,
+                        instances: &[staged[0].instance],
+                        per_copy: false,
+                        hdr: false,
+                        atlas_size: [game.gui.atlas.width, game.gui.atlas.height],
+                        atlas: game.gui.atlas.pixels(),
+                        view_proj: Mat4::IDENTITY,
+                    },
+                )
+                .expect("software Vulkan group pixels")
+            };
+            use mod_api::__private::game::Fields;
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[far, near])
+                .unwrap();
+            let expected = render(game);
+            assert!(expected.chunks_exact(4).any(|p| p[..3] != [0; 3]));
+            game.prepared_model_draws.borrow_mut().clear();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(draw.usage().instances_used, 1);
+            assert_eq!(expected, render(game));
+            group.destroy(game).unwrap();
+            assert_eq!(group.set_len(game, 1), Err(GroupError::Stale));
+            assert_eq!(
+                context(game, &mut draw).draw_instance_group(group),
+                Err(GroupError::Stale)
+            );
+        });
     }
 
     #[test]
