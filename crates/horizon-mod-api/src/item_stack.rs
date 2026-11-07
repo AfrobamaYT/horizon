@@ -43,6 +43,11 @@ impl From<&Components> for Compound {
 
 /// A nonempty, owned item value. Maxima are checked when the game accepts a write,
 /// not by this record: item definitions and effective component overrides belong to the game.
+/// `Clone` deep-copies a nonempty component patch; an absent patch allocates nothing.
+///
+/// A refused hook output retains its captured engine value. The clicked-slot bridge also
+/// stages the slot, cursor and cancellation flags together. Independent host effects,
+/// including storage writes, commands and messages, are not undone by output validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 #[horizon_mod_api_macros::wasm(via = StackRecord)]
@@ -112,7 +117,7 @@ pub enum StackWriteError {
         /// Effective maximum, including component overrides.
         maximum: u32,
     },
-    /// A maximum component is not a valid nonnegative integer.
+    /// A maximum is malformed or negative, or a stack limit lies outside 1..=99.
     InvalidMaximum,
     /// An engine result contained a zero-count stack instead of an empty slot.
     EmptyEngineStack,
@@ -121,6 +126,8 @@ pub enum StackWriteError {
         /// The record-level normalization refusal.
         reason: StackError,
     },
+    /// A stack carries both maximum durability and a stack limit above one.
+    StackableDamageable,
 }
 
 impl crate::NoBackend for StackWriteError {

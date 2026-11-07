@@ -788,8 +788,8 @@ pub trait Hooks {
     /// (`HealthHud::layout`, not under F1): `inputs` carries the health,
     /// food, air and vehicle state the layout reads, `wi`/`hi` the screen's
     /// GUI size. A mod that sets `draws` replaces every row — armour,
-    /// hearts, food, air and the heights (`left_height`/`right_height`)
-    /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
+    /// hearts, food and air are the answer's to give; `bubble_pop_sound`
+    /// too.
     /// Nothing set draws Horizon's own.
     #[hook(
         side = "client",

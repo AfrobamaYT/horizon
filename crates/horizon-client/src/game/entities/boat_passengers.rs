@@ -312,6 +312,7 @@ impl Game<'_> {
                         m.extra.passenger = true;
                         m.ai.nav.stop();
                         count += 1;
+                        self.seat_mob(mob);
                         // Mob.startRiding drops its lead.
                         self.break_leash(mob, true, false);
                         self.note_started_riding(id);
@@ -375,7 +376,8 @@ impl Game<'_> {
                 || guest_carts.contains(&cid)
                 || self.mobs.iter().any(|m| m.extra.mount == Some(cid));
             if !ridden {
-                self.carts[c].velocity = self.carts[c].velocity.add_vector(v);
+                self.carts
+                    .update(c, |c| c.velocity = c.velocity.add_vector(v));
             }
         }
     }

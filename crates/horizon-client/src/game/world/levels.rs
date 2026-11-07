@@ -47,7 +47,7 @@ pub(super) struct Parked {
     level_events: Vec<LevelEvent>,
     /// Entity portal processes and cooldowns belong to this level's entities.
     portal_states: HashMap<u32, horizon_client::nether_portal::PortalState>,
-    falling: horizon_client::join_seq::JoinList<FallingBlock>,
+    falling: horizon_client::join_seq::JoinList<FallingBlock, false>,
     paintings: horizon_client::join_seq::JoinList<horizon_client::entities::Painting>,
     item_frames: horizon_client::join_seq::JoinList<horizon_client::entities::ItemFrame>,
     armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
@@ -55,22 +55,23 @@ pub(super) struct Parked {
     others: horizon_client::join_seq::ResidentList<commands::OtherEntity>,
     fangs: super::fangs::FangState,
     pub(super) boats: horizon_client::join_seq::JoinList<boats::Boat, false>,
-    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
+    pub(super) carts: horizon_client::join_seq::JoinList<minecarts::Minecart, false>,
     jukebox_sounds: HashMap<(i32, i32, i32), u64>,
     bolts: Vec<lightning::Bolt>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
-    dragon: Option<dragon::Dragon>,
+    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
-    breath_clouds: Vec<dragon::Breath>,
+    breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
     tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
     rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
-    ominous_spawners: Vec<ominous_item_spawner::OminousItemSpawner>,
+    ominous_spawners:
+        horizon_client::join_seq::ResidentList<ominous_item_spawner::OminousItemSpawner>,
     tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     pub(super) mobs: horizon_client::join_seq::JoinList<Mob>,
     /// The entity ids of the level's fence knots (`knot_ids`).
     knot_ids: HashMap<[i32; 3], u32>,
-    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile>,
+    projectiles: horizon_client::join_seq::JoinList<horizon_client::projectiles::Projectile, false>,
     dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     persist: persist::EntityMemory,
@@ -168,6 +169,11 @@ impl Levels {
             .iter()
             .find(|(dim, _)| dim.id() == dimension)
             .map(|(_, level)| &level.streaming)
+    }
+
+    /// A parked level's existing generator query worker, without switching levels.
+    pub(super) fn parked_locator_of(&self, dimension: &str) -> Option<Arc<VanillaTerrain>> {
+        self.parked_of(dimension)?.locator.clone()
     }
 
     /// The streaming of the level not in place whose dimension is `dimension`, to change.
@@ -326,12 +332,12 @@ impl Game<'_> {
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
             crystals: Default::default(),
-            dragon: None,
+            dragon: Default::default(),
             dragon_fireballs: Vec::new(),
-            breath_clouds: Vec::new(),
+            breath_clouds: Default::default(),
             tridents: Default::default(),
             rockets: Default::default(),
-            ominous_spawners: Vec::new(),
+            ominous_spawners: Default::default(),
             tnts: Default::default(),
             hoppers: HashMap::new(),
             mobs: Default::default(),
@@ -558,6 +564,7 @@ impl Game<'_> {
                 Dim::Overworld => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
+                Dim::Extra(_) => "level_extra",
             });
             if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
@@ -729,7 +736,7 @@ impl Game<'_> {
             .lan
             .as_ref()
             .map_or(&[][..], |h| h.hub.guests.as_slice());
-        let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
+        let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native mod's tickets.
@@ -850,7 +857,7 @@ impl Game<'_> {
     /// (`MinecraftServer.stopServer`'s `level.close()` loop), in vanilla's
     /// order of its levels: the Overworld, the Nether, the End.
     pub(super) fn native_levels_closing(&mut self) {
-        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+        for dim in Dim::all() {
             self.native_level_closed(dim);
         }
     }
