@@ -58,6 +58,39 @@ fn lifecycle_carts_keep_registrations_through_commands_unload_park_and_remote() 
     });
 }
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn connecting_to_a_remote_level_clears_the_existing_cart_list() {
+    use horizon_protocol::connection::Pipe;
+    super::super::native_entity_refs::tests::with_game(|game| {
+        game.carts.push(Minecart::new(
+            71,
+            CartKind::Rideable,
+            Vec3::new(0.5, 70.0, 0.5),
+        ));
+        assert_eq!(game.carts.len(), 1);
+        let (client, _server) = Pipe::pair();
+        game.connect_local(client, "Cart reset").unwrap();
+        // Observe the production reset before any fixture reseeding or cleanup.
+        assert!(game.carts.is_empty());
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn exploding_a_cart_removes_only_its_owner_and_keeps_a_bound_survivor() {
+    bound_cart_case(CartKind::Rideable, |game| {
+        let doomed = Minecart::new(72, CartKind::Tnt, Vec3::new(40.5, 70.0, 0.5));
+        game.carts.push(doomed.clone());
+        game.explode_cart(&doomed, 0.0);
+        assert_eq!(
+            game.carts.iter().map(|cart| cart.id).collect::<Vec<_>>(),
+            [71]
+        );
+        // bound_cart_case also checks the survivor's registration and value.
+    });
+}
+
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "test",
     name: "cart_lifetime",
