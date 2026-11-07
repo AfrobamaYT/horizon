@@ -1844,7 +1844,7 @@ mod tests {
             assert!(game.living_set_equipment(
                 living,
                 EquipmentSlot::Chest,
-                SomeItemStack::new("minecraft:iron_helmet", 1)
+                Some(ItemStack::new("minecraft:iron_helmet", 1))
             ));
             assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
             let events = super::super::dispense_fixture::stop_recording();
@@ -2161,7 +2161,7 @@ mod tests {
                     let events = super::super::dispense_fixture::stop_recording();
                     assert_eq!(
                         game.armor_stands[0].equipment[5],
-                        SomeItemStack::new("minecraft:iron_helmet", 1),
+                        Some(ItemStack::new("minecraft:iron_helmet", 1)),
                         "real listener/handle write control",
                     );
                     assert!(!game.armor_stands[0].first_tick);
