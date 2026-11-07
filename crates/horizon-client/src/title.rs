@@ -4040,6 +4040,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
         true
     }
+    /// Edit the focused field for the character hook; false when there is none. Preparing
+    /// screens take no text and the game rules' boxes keep their own validators.
+    pub fn edit_focused_text_field(&mut self, f: impl FnOnce(&mut crate::ui::EditBox)) -> bool {
+        !self.preparing && self.rules.get_mut().is_none() && self.edit_field(f)
+    }
     /// EditBox.charTyped / insertText at the cursor.
     pub fn type_text(&mut self, text: &str) {
         // `GenericMessageScreen`: no field takes input during the read.

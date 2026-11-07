@@ -1024,15 +1024,17 @@ impl Game<'_> {
                 // key event fires it. A cancelled character is dropped, so
                 // `type` types the survivors only.
                 // `\b` is the socket's backspace sentinel, not two characters.
-                let typed = if text == "\\b" {
-                    text.to_owned()
-                } else {
-                    let Some(typed) = self.screen_text_typed(text) else {
-                        return ok();
-                    };
-                    typed
-                };
-                self.type_into_screen(&typed)?;
+                if text == "\\b" {
+                    self.type_into_screen(text)?;
+                    return ok();
+                }
+                let mut typed = Ok(());
+                self.screen_text_each(text, |game, c| {
+                    if typed.is_ok() {
+                        typed = game.type_into_screen(c);
+                    }
+                });
+                typed?;
                 ok()
             }
             "options" => {

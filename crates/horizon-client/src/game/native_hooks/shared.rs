@@ -786,24 +786,17 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
     Some(left)
 }
 
-/// What a key press's characters leave for a text box after the
-/// `ScreenEvent.CharacterTyped.Pre` hook: the characters no mod cancelled,
-/// control ones gone (the key's own handling takes those, and vanilla fires
-/// no `charTyped` for them). `None` when nothing is left to type.
+/// What of a key press's text is characters for the
+/// `ScreenEvent.CharacterTyped.Pre` hook: control ones are gone (the key's own
+/// handling takes those, and vanilla fires no `charTyped` for them).
 /// With the edit modifier held the key is a shortcut and its characters are
 /// not text (`types_text`): no hook hears them, as vanilla's `textInput`
 /// gets none for Ctrl+A.
-fn chars_to_type(
-    text: &str,
-    types_text: bool,
-    canceled: impl FnMut(char) -> bool,
-) -> Option<String> {
+fn chars_to_type(text: &str, types_text: bool) -> String {
     if !types_text {
-        return None;
+        return String::new();
     }
-    let left = screen_text_hooked(text, canceled)?;
-    let text: String = left.chars().filter(|c| !c.is_control()).collect();
-    (!text.is_empty()).then_some(text)
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// The hook points. Each does nothing in Horizon.
@@ -1167,21 +1160,45 @@ impl Game<'_> {
         );
         canceled
     }
+    /// `native_screen_char_typed_pre` for one character, with the focused
+    /// box's edit: what the listeners leave of `field` goes back to the box
+    /// before the character does. Whether they cancelled the character.
+    fn screen_char_canceled(&mut self, c: char) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ScreenCharTypedPre)
+            || !self.screen_hooks_open()
+        {
+            return false;
+        }
+        let modifiers = super::glfw_modifiers(self.modifiers);
+        self.with_focused_text_edit(|game, field| {
+            let Some(screen) = game.screen_view_now() else {
+                return false;
+            };
+            let mut canceled = false;
+            game.native_screen_char_typed_pre(&screen, c, modifiers, field, &mut canceled);
+            canceled
+        })
+    }
     /// Text on its way to a text box after the open screen's character hooks
     /// (`native_screen_char_typed_pre` per printable character): the cancelled
     /// characters are gone and every other one stays, control characters
     /// included (a text box reads Backspace, Delete and the like as keys).
-    /// `None` when none of them is left to type.
-    pub(super) fn screen_text_typed(&self, text: &str) -> Option<String> {
-        let Some(screen) = self.screen_view_now() else {
-            return Some(text.to_owned());
-        };
-        let modifiers = super::glfw_modifiers(self.modifiers);
-        screen_text_hooked(text, |c| {
-            let mut canceled = false;
-            self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
-            canceled
-        })
+    /// `None` when none of them is left to type. For a key's text that stays
+    /// on the key, which no box with a `field` takes.
+    pub(super) fn screen_text_typed(&mut self, text: &str) -> Option<String> {
+        screen_text_hooked(text, |c| self.screen_char_canceled(c))
+    }
+    /// Text into a text box a character at a time (`Screen.charTyped`): each
+    /// printable one is offered to `native_screen_char_typed_pre`, and `take`
+    /// gets it unless cancelled, before the next is offered. A control
+    /// character goes straight to `take`: a text box reads it as a key.
+    pub(super) fn screen_text_each(&mut self, text: &str, mut take: impl FnMut(&mut Self, &str)) {
+        let mut encoded = [0; 4];
+        for c in text.chars() {
+            if c.is_control() || !self.screen_char_canceled(c) {
+                take(self, c.encode_utf8(&mut encoded));
+            }
+        }
     }
     /// A key press's characters (`ScreenEvent.CharacterTyped.Pre`, vanilla's
     /// `KeyboardHandler.charTyped`), dispatched once the screen has acted on
@@ -1195,22 +1212,17 @@ impl Game<'_> {
         let Some(text) = text else {
             return;
         };
-        let Some(screen) = self.screen_view_now() else {
+        if !self.screen_hooks_open() {
             return;
-        };
-        let modifiers = super::glfw_modifiers(self.modifiers);
-        // A held edit modifier makes a shortcut of the key, not text.
-        let Some(text) = chars_to_type(text, self.types_text(), |c| {
-            let mut canceled = false;
-            self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
-            canceled
-        }) else {
-            return;
-        };
-        // `Err` only says no text box of the screen takes the characters.
-        if self.type_chars_into_screen(&text).is_err() {
-            self.screen_chars_post(&text);
         }
+        // A held edit modifier makes a shortcut of the key, not text.
+        let text = chars_to_type(text, self.types_text());
+        self.screen_text_each(&text, |game, c| {
+            // `Err` only says no text box of the screen takes the character.
+            if game.type_chars_into_screen(c).is_err() {
+                game.screen_chars_post(c);
+            }
+        });
     }
     pub(super) fn observe_client_packet(
         &mut self,
@@ -4668,35 +4680,16 @@ mod tests {
         );
     }
 
-    /// The window's key path: a key whose press a mod cancelled still types
-    /// the characters no mod cancelled (vanilla's separate `charTyped`), while
-    /// the key characters never reach the text box.
+    /// The window's key path: only a key's printable characters go on to the
+    /// hook and the text box.
     #[test]
-    fn a_cancelled_key_still_types_the_characters_left() {
-        // `axb` with 'x' cancelled: the key went no further, `ab` still types.
-        assert_eq!(
-            super::chars_to_type("axb", true, |c| c == 'x').as_deref(),
-            Some("ab")
-        );
+    fn a_key_offers_only_its_printable_characters() {
         // Backspace, Escape and the like are keys, not text.
-        assert_eq!(
-            super::chars_to_type("a\u{7f}\u{1b}b", true, |_| false).as_deref(),
-            Some("ab")
-        );
-        // Every character cancelled: the box takes none of them.
-        assert_eq!(super::chars_to_type("ab", true, |_| true), None);
+        assert_eq!(super::chars_to_type("a\u{7f}\u{1b}b", true), "ab");
         // Nothing typed: nothing to hand over.
-        assert_eq!(super::chars_to_type("", true, |_| false), None);
+        assert_eq!(super::chars_to_type("", true), "");
         // Ctrl+A is a shortcut: its `a` reaches no hook and no box.
-        let mut offered = Vec::new();
-        assert_eq!(
-            super::chars_to_type("a", false, |c| {
-                offered.push(c);
-                false
-            }),
-            None
-        );
-        assert!(offered.is_empty());
+        assert_eq!(super::chars_to_type("a", false), "");
     }
 
     /// A mod's camera replaces vanilla's value by value; one that isn't finite keeps vanilla's.
