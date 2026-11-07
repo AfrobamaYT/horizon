@@ -76,3 +76,20 @@ impl Hash for BucketKey {
         (self.0.as_ref() as &dyn Lookup).hash(state);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn lookup_equality_checks_both_components_and_lossless_units() {
+        let key: AttachmentKey = ("namespace".into(), "name".into());
+        let lookup = &key as &dyn Lookup;
+        assert!(lookup == &Named("namespace", "name") as &dyn Lookup);
+        assert!(lookup != &Named("namespace", "different") as &dyn Lookup);
+        assert!(lookup != &Named("different", "name") as &dyn Lookup);
+        let unpaired = (horizon_core::nbt::JavaString(vec![0xd800]), "name".into());
+        assert!(&unpaired as &dyn Lookup != &Named("\u{fffd}", "name") as &dyn Lookup);
+        let same_units = (horizon_core::nbt::JavaString(vec![0xd800]), "name".into());
+        assert!(&unpaired as &dyn Lookup == &same_units as &dyn Lookup);
+    }
+}

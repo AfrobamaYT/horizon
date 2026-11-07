@@ -242,6 +242,14 @@ mod tests {
         index.remove(&two, &key()).into_result();
         assert_eq!(values(&captured), [(1, 10), (2, 20), (3, 30)]);
         assert_eq!(values(&query(&index)), [(1, 11), (3, 30)]);
+        let mut other_index = AttachmentIndex::default();
+        other_index
+            .register(1, [(key(), entry(100u32))])
+            .into_result();
+        assert_eq!(
+            other_index.validate_owner(&tokens[0]),
+            Err(AttachmentRowError::StaleHolder)
+        );
         for (row, token) in captured.iter().zip(&tokens) {
             assert_eq!(row.unwrap().validate_write(&index), Ok(()));
             assert_eq!(index.validate_owner(token), Ok(()));
@@ -365,6 +373,17 @@ mod tests {
         assert_eq!(empty.iter().len(), 0);
         index.unload(1).into_result();
         assert!(index.snapshot_named("query😀", "value水").is_empty());
+    }
+
+    #[test]
+    fn unpaired_surrogate_lookup_preserves_stored_units() {
+        let mut index = AttachmentIndex::default();
+        let key = (horizon_core::nbt::JavaString(vec![0xd800]), "name".into());
+        index
+            .register(1u32, [(key.clone(), entry(42u32))])
+            .into_result();
+        assert!(index.snapshot_named("\u{fffd}", "name").is_empty());
+        assert_eq!(index.snapshot(&key).len(), 1);
     }
 
     #[test]
