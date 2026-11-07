@@ -431,7 +431,18 @@ mod tests {
                 game.rockets[0].id,
             ];
             assert_eq!(ids, [base + 1, base + 2, base + 3, base + 4, base + 5]);
+            let mut identities = super::super::entity::taken_pass_tests::SlotIdentities::default();
+            identities.observe(
+                &mut game.falling,
+                game.native_lifecycle.epoch().unwrap(),
+                |f| f.id,
+            );
             game.assign_pending_join_ids();
+            identities.observe(
+                &mut game.falling,
+                game.native_lifecycle.epoch().unwrap(),
+                |f| f.id,
+            );
             assert_eq!(game.next_entity, base + 5);
             assert_eq!(game.persist.joined_seq, joined);
             assert_eq!(game.persist.live, announced);
@@ -475,6 +486,20 @@ mod tests {
                 assert_eq!(id, base + 1);
                 assert_eq!(game.next_entity, base + 1);
                 assert!(game.entity(id).is_some());
+                if kind == "minecraft:falling_block" {
+                    let (Tag::Compound(invalid), _) = horizon_core::nbt::parse_snbt(
+                        "{BlockState:{Name:\"test:missing\"},Time:1}",
+                    )
+                    .unwrap() else {
+                        unreachable!()
+                    };
+                    assert!(
+                        game.summon(game.dim.id(), kind, [1.0, 70.0, 1.0], invalid)
+                            .is_none()
+                    );
+                    assert_eq!(game.next_entity, base + 1);
+                    assert_eq!(game.falling.len(), 1);
+                }
             });
         }
     }
