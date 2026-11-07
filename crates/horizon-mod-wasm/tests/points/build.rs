@@ -26,11 +26,14 @@ fn main() {
             },
         })
         .collect::<Vec<_>>();
-    let root = dir.join("../../../../..");
-    for path in horizon_mod_api_gen::points::tracked(&root).unwrap() {
+    let root = dir
+        .ancestors()
+        .find(|root| root.join("crates/horizon-mod-api-gen").is_dir())
+        .expect("fixture in a Horizon checkout");
+    for path in horizon_mod_api_gen::points::tracked(root).unwrap() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let code = guest_exports(&root, &entries).unwrap();
+    let code = guest_exports(root, &entries).unwrap();
     fs::write(
         PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("guest_injects.rs"),
         code,

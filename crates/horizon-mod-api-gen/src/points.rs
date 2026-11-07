@@ -895,9 +895,13 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
             let back = (
                 format!("{}_return", point.name),
                 &*point.target,
-                &*point.wire_shape,
+                if point.at_return {
+                    &*point.wire_shape
+                } else {
+                    ""
+                },
             );
-            // A raw-only return has a place too, which no wasm listener names.
+            // A raw-only return has a place too, but no API wire shape.
             std::iter::once(head).chain((point.at_return || point.raw).then_some(back))
         })
         .collect();

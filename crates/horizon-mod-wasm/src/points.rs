@@ -81,7 +81,13 @@ fn declared_place(inject: &Inject) -> Result<usize, Refusal> {
             )));
         }
     };
-    target_place(&inject.at, kind)
+    let place = target_place(&inject.at, kind)?;
+    if SHAPES[place].is_empty() {
+        return Err(Refusal::NoSuchPoint {
+            point: NAMES[place].into(),
+        });
+    }
+    Ok(place)
 }
 
 /// The point at a target's head or return, shared by API and raw listener validation.
@@ -158,10 +164,13 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         "{}-listeners",
         horizon_mod_package::manifest::export_prefix(&manifest.id)
     );
+    let unfilled = || Refusal::UnfilledPoint {
+        point: NAMES[*declared.first().expect("nonempty inject declarations")].to_owned(),
+    };
     let subscribed: Subscribed = exports
         .func(&interface, "subscribed")
-        .map_err(Refusal::Load)?;
-    let fire: Fire = exports.func(&interface, "fire").map_err(Refusal::Load)?;
+        .map_err(|_| unfilled())?;
+    let fire: Fire = exports.func(&interface, "fire").map_err(|_| unfilled())?;
     let listed = exports
         .load(|store| Ok(subscribed.call(store, ())?.0))
         .ok_or_else(|| {
@@ -238,6 +247,16 @@ mod tests {
         inject.kind = Kind::Head;
         inject.priority = 0;
         inject.at = "game::gone".into();
+        assert!(matches!(
+            declared_place(&inject),
+            Err(Refusal::NoSuchPoint { .. })
+        ));
+        inject.access = Access::Api;
+        inject.priority = 0;
+        inject.kind = Kind::Head;
+        inject.at = "horizon_client::game::commands::Game<'_>::acting_player_name".into();
+        assert!(declared_place(&inject).is_ok());
+        inject.kind = Kind::Return;
         assert!(matches!(
             declared_place(&inject),
             Err(Refusal::NoSuchPoint { .. })
