@@ -13,7 +13,8 @@ static VALUE: AttachmentType<u32> = AttachmentType {
     sync: false,
 };
 fn values(game: &Game<'_>) -> Vec<u32> {
-    game.query(&VALUE)
+    let host: &dyn mod_api::Host = game;
+    host.query(&VALUE)
         .unwrap()
         .iter()
         .map(|row| *row.unwrap().value)
