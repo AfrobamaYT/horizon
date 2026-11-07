@@ -82,7 +82,7 @@ pub fn repairable(component: &Tag, item: &str, in_tag: impl FnMut(&str) -> bool)
     }
 }
 
-/// An NBT number read as Java's `Number.intValue`.
+/// An NBT numeric component converted with Java's integer conversion rules.
 pub fn component_int(value: &Tag) -> Option<i32> {
     Some(match value {
         Tag::Byte(n) => i32::from(*n),

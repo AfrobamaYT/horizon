@@ -81,8 +81,7 @@ def main():
             directory = Path(scratch) / key
             directory.mkdir()
             env[key] = str(directory)
-        env.update(HORIZON_NO_AUDIO='1', HORIZON_LAUNCHER_NO_SELF_UPDATE='1',
-                   HORIZON_TEST_RESOURCES=str(lab.RESOURCES),
+        env.update(HORIZON_TEST_RESOURCES=str(lab.RESOURCES),
                    HORIZON_ITEM_PROPERTIES_CASES=str(inputs),
                    HORIZON_ITEM_PROPERTIES_EXPECTED=str(build / 'server-expected.jsonl'))
         with (build / 'rust.log').open('w') as output:
