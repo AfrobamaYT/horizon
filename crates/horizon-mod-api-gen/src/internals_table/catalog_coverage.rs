@@ -430,14 +430,15 @@ fn guest_compiler_ignores_another_toolchains_driver() {
         {
             let dest = other.join(path.file_name().unwrap());
             if !dest.exists() {
-                fs::hard_link(path, dest).unwrap();
+                fs::copy(path, dest).unwrap();
             }
         }
     }
     let other = other.canonicalize().unwrap();
+    let polluted = std::env::join_paths([other.clone(), root.join("lib")]).unwrap();
     let wrong = checked(
         Command::new(rustc)
-            .env("LD_LIBRARY_PATH", &other)
+            .env("LD_LIBRARY_PATH", &polluted)
             .args(["--print", "sysroot"]),
     );
     assert_eq!(
@@ -447,7 +448,7 @@ fn guest_compiler_ignores_another_toolchains_driver() {
     let source = temp.join("probe.rs");
     fs::write(&source, "pub fn probe() -> std::vec::Vec<u8> { vec![1] }").unwrap();
     let mut command = Command::new(rustc);
-    guest_compiler(&mut command, rustc, Some(other.into_os_string()));
+    guest_compiler(&mut command, rustc, Some(polluted));
     checked(
         command
             .args([
