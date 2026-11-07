@@ -1076,7 +1076,7 @@ pub fn tooltip_style_sprites(namespace: &str, path: &str) -> [String; 2] {
 }
 /// `TooltipRenderUtil.renderTooltipBackground`: the background sprite, then the frame sprite,
 /// nine-sliced 12 pixels out from the tooltip's contents `[x, y, w, h]` (`PADDING` 3 and
-/// `MARGIN` 9 on every side). Whether the atlas has the background sprite; one it lacks draws
+/// `MARGIN` 9 on every side). Whether the atlas has both sprites; one that lacks either draws
 /// nothing.
 pub fn tooltip_sprites(
     batch: &mut HudBatch,
@@ -1084,7 +1084,10 @@ pub fn tooltip_sprites(
     [background, frame]: [&str; 2],
     [x, y, w, h]: [f32; 4],
 ) -> bool {
-    if !atlas.sprites.contains_key(background) {
+    if ![background, frame]
+        .iter()
+        .all(|sprite| atlas.sprites.contains_key(*sprite))
+    {
         return false;
     }
     for sprite in [background, frame] {
@@ -2450,7 +2453,7 @@ mod tests {
         assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
     /// A tooltip style names its sprites as `TooltipRenderUtil` does, in the GUI atlas's names;
-    /// the box draws both 12 pixels out from the contents, and nothing without its background.
+    /// the box draws both 12 pixels out from the contents, and nothing without either sprite.
     #[test]
     fn a_tooltip_style_draws_its_own_background_and_frame() {
         assert_eq!(
@@ -2477,7 +2480,15 @@ mod tests {
             [20.0, 20.0, 50.0, 8.0]
         ));
         assert!(batch.vertices.is_empty());
+        // A background without its frame would draw a box with no border.
         atlas.sprites.insert(background.clone(), sprite(1, 1));
+        assert!(!tooltip_sprites(
+            &mut batch,
+            &atlas,
+            [&background, &frame],
+            [20.0, 20.0, 50.0, 8.0]
+        ));
+        assert!(batch.vertices.is_empty());
         atlas.sprites.insert(frame.clone(), sprite(1, 1));
         assert!(tooltip_sprites(
             &mut batch,

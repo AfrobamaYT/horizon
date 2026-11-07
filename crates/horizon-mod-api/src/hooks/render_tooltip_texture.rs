@@ -5,8 +5,8 @@ pub trait Hooks {
     /// to a tooltip style (`<namespace>:<name>`) and the box draws as vanilla draws a
     /// `tooltip_style`: the GUI sprites `<namespace>:tooltip/<name>_background` and
     /// `<namespace>:tooltip/<name>_frame` from the resource packs, nine-sliced as their
-    /// `gui.scaling` says (a style whose background sprite no pack has keeps the fills, where
-    /// vanilla draws the missing texture). Left `None`, the box is Horizon's solid fills, in
+    /// `gui.scaling` says (a style whose background or frame no pack has keeps the fills,
+    /// where vanilla draws the missing texture). Left `None`, the box is Horizon's solid fills, in
     /// `background` and the `border_top` to `border_bottom` gradient, as ARGB. `stack` is the
     /// item the tooltip describes, `None` for a text tooltip. Asked each frame a tooltip shows,
     /// only while a mod listens. Client-side.
