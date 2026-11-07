@@ -5,6 +5,7 @@
 //! content root's — with the server's recipes of the types its native mods
 //! had it send (`horizon:recipe_content`) in their place, while the known
 //! displays follow the server's book as the recipe book does.
+use super::api_values::TryIntoApi;
 use super::{
     Game,
     native_hooks::{
@@ -131,8 +132,11 @@ impl Game<'_> {
             .find_with(&self.loop_context, &grid, size, &scale)
             .filter(|(_, output)| output.count > 0)?;
         let mut placed = recipes.remainders(recipe, &grid, size);
-        let remainders = (0..w * h).map(|i| placed[at(i)].take()).collect();
-        Some(CraftResult::new(output, remainders))
+        let remainders: Vec<_> = (0..w * h).map(|i| placed[at(i)].take()).collect();
+        Some(CraftResult::new(
+            output.try_into_api().ok()?,
+            remainders.try_into_api().ok()?,
+        ))
     }
     pub(super) fn registered_recipe_book_category(
         &mut self,

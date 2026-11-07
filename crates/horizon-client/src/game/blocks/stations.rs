@@ -2708,11 +2708,11 @@ impl Game<'_> {
             );
         }
         // ItemTooltipEvent, once the tooltip vanilla shows is complete.
-        if shown {
+        if shown && let Ok(stack) = stack.try_into_api() {
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
-                stack,
+                stack: &stack,
                 display: &display,
                 advanced,
                 creative,
@@ -2781,6 +2781,7 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::RenderTooltipPre) {
             return Some(at);
         }
+        let stack = stack.try_into_api().ok()?;
         let elements: Vec<TooltipElement> = lines
             .iter()
             .cloned()
@@ -2799,7 +2800,7 @@ impl Game<'_> {
         };
         self.native_render_tooltip_pre(mod_api::__private::RenderTooltipPreCall {
             draw: &mut draw,
-            stack,
+            stack: stack.as_ref(),
             screen_width: screen.0 as i32,
             screen_height: screen.1 as i32,
             elements: &elements,
