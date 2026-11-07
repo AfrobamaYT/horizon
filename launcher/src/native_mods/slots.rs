@@ -40,21 +40,16 @@ pub(super) fn sites<'a>(
         .inject
         .iter()
         .filter(|entry| entry.call.is_some())
-        .map(|entry| {
-            (
-                entry,
-                sites
-                    .iter()
-                    .find(|site| {
-                        super::internals::plain_path(&site.target)
-                            == super::internals::plain_path(&entry.at)
-                            && Some(&site.call) == entry.call.as_ref()
-                            && Some(&site.ctx) == entry.ctx.as_ref()
-                            && Some(site.ordinal) == entry.nth
-                    })
-                    .expect("slot route checked"),
-            )
-        })
+        .map(|entry| (entry, selected(sites, entry).expect("slot route checked")))
+}
+
+fn selected<'a>(sites: &'a [Site], entry: &Inject) -> Option<&'a Site> {
+    sites.iter().find(|site| {
+        super::internals::plain_path(&site.target) == super::internals::plain_path(&entry.at)
+            && Some(&site.call) == entry.call.as_ref()
+            && Some(&site.ctx) == entry.ctx.as_ref()
+            && Some(site.ordinal) == entry.nth
+    })
 }
 
 pub(super) fn check(catalog: &Catalog, manifest: &Manifest) -> Result<(), InjectError> {
@@ -142,10 +137,8 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         }
         decisions.push(route);
         if inject.kind == Kind::WrapIf
-            && sites(&catalog.sites, manifest)
-                .find(|(entry, _)| entry.id == inject.id)
+            && selected(&catalog.sites, inject)
                 .expect("site checked")
-                .1
                 .output
                 != "()"
         {
