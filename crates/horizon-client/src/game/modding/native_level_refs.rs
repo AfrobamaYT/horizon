@@ -60,7 +60,7 @@ impl Game<'_> {
         }?;
         let selector = match biome.strip_prefix('#') {
             Some(tag) => format!("#{}", horizon_client::command::args::normalized(tag)),
-            None => horizon_client::command::args::normalized(biome),
+            None => horizon_client::command::args::normalized(biome).into_owned(),
         };
         let allowed = |name: &str| self.biome_matches(&selector, name);
         let query = horizon_world::worldgen::generator::BiomeSearch {
@@ -1742,7 +1742,7 @@ mod tests {
 mod environment_read_tests {
     use crate::game::{Dim, native_entity_refs::tests::with_game};
     use horizon_client::chunk::Chunk;
-    use mod_api::{BiomeSearch, Host, LevelRef, NativeWorldEpoch};
+    use mod_api::{BiomeSearch, LevelRef, NativeWorldEpoch};
     use std::sync::Arc;
 
     fn paint_biome(game: &mut crate::game::Game<'_>, name: &str) {
