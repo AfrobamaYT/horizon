@@ -320,6 +320,9 @@ mod tests {
             groups: vec![Some(group)],
         };
         assert!(storage.get(handle, 1).is_ok());
+        // Disabling a mod must not retire unmarked engine-owned groups.
+        storage.retire_disabled(&std::collections::BTreeSet::from(["group-owner".into()]));
+        assert!(storage.get(handle, 1).is_ok());
         assert!(matches!(storage.get(handle, 2), Err(GroupError::Stale)));
         let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
             id: "other",
