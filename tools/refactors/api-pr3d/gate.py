@@ -9,7 +9,7 @@ EVENTS = ("HandDrawnEvent", "RenderNeedsEvent", "WorldDrawnEvent")
 
 def records(source):
     found = {}
-    for match in re.finditer(r"pub struct (\w+Event)([^{}]*)\{([^{}]*)\}", source):
+    for match in re.finditer(r"(?:#\[[^\n]*\]\n)*pub struct (\w+Event)([^{}]*)\{([^{}]*)\}", source):
         name = match.group(1)
         if name in EVENTS:
             if name in found:

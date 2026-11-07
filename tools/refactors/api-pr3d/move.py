@@ -12,6 +12,10 @@ def replacements(lib):
     return {
         "mod_api::render::": f"{lib}::render::",
         "mod_api::render as native_render": f"{lib}::render as native_render",
+        "native_render::render_needs()": "native_render::needs()",
+        "native_world_drawn": "world_drawn",
+        "native_hand_drawn": "hand_drawn",
+        "native_render_needs": "render_needs",
     }
 
 

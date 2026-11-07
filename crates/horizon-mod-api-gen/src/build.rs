@@ -106,6 +106,22 @@ pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
     Ok(modules)
 }
 
+/// Generate the native-only raw render records, without trait dispatch or subscriptions.
+pub fn generate_render(root: &Path, out_dir: &Path) -> Result<(), String> {
+    track(root)?;
+    let source = sources(root, super::FillMode::Require)?.render;
+    let mut records = String::from("use super::*;\n");
+    for (start, _) in source.match_indices("#[allow(missing_docs)]\npub struct ") {
+        let record = &source[start..];
+        let end = record.find("\n}").ok_or("raw render record has no end")? + 2;
+        records.push_str(&record[..end]);
+        records.push('\n');
+    }
+    syn::parse_file(&records).map_err(|error| error.to_string())?;
+    fs::write(out_dir.join("native_render_generated.rs"), records)
+        .map_err(|error| error.to_string())
+}
+
 /// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
