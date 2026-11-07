@@ -10121,6 +10121,10 @@ mod projectile_batch_tests {
                 assert_eq!(buffered.age, 0);
                 let buffered = buffered.id;
                 test(game, ids, joins, spawned, buffered);
+                assert_eq!(
+                    index.lock().unwrap().snapshot(&key).len(),
+                    if remove { 1 } else { 2 }
+                );
                 game.creatures.projectiles.clear();
                 assert!(index.lock().unwrap().snapshot(&key).is_empty());
                 assert!(
