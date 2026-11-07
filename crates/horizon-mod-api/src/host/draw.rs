@@ -298,11 +298,12 @@ pub trait WorldDrawContext {
     ///
     /// One batch per model. The engine uploads only the instance records on the opaque
     /// and cutout route, and bakes the same prepared geometry on the CPU when a shader
-    /// pack or another route cannot take instances. A model with a translucent face is
-    /// refused with [`InstanceError::Translucent`] and is never drawn as solid. Tint is
-    /// `0xAARRGGBB` and light is [`LightCoords`]: both stay in vanilla's space, and the
-    /// engine converts them to the frame. The view budget is 16,384 copies. On `Err`,
-    /// nothing from this call is drawn. Copies outside the frustum are omitted.
+    /// pack, a copy with an [`Overlay`], or another route cannot take instances. A model
+    /// with a translucent face is refused with [`InstanceError::Translucent`] and is never
+    /// drawn as solid. Tint is `0xAARRGGBB` and light is [`LightCoords`]: both stay in
+    /// vanilla's space, and the engine converts them to the frame. The view budget is
+    /// 16,384 copies. On `Err`, nothing from this call is drawn. Copies outside the
+    /// frustum are omitted and do not count.
     fn draw_model_instances(
         &mut self,
         model: ModelRef,
