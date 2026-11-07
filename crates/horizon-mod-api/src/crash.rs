@@ -4,11 +4,6 @@ use crate::*;
 use std::cell::Cell;
 use std::sync::Mutex;
 
-/// Host profiler service; not a mod-facing API contract.
-#[doc(hidden)]
-#[path = "profiler.rs"]
-pub mod profiler;
-
 thread_local! {
     /// The native mod hook this thread is inside, for the panic hook to name.
     static IN_NATIVE_MOD: Cell<Option<NativeModCall>> = const { Cell::new(None) };
@@ -35,7 +30,7 @@ pub struct NativeModCall {
 pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
     NativeModGuard {
         outer: IN_NATIVE_MOD.with(|c| c.replace(Some(call))),
-        _timing: profiler::enter(call),
+        _timing: crate::__private::profiler::enter(call),
     }
 }
 /// The `[mod] id` of the native mod this thread is inside a hook of, if any.
@@ -47,7 +42,7 @@ pub fn current_native_mod() -> Option<&'static str> {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeModGuard {
     outer: Option<NativeModCall>,
-    _timing: Option<profiler::Guard>,
+    _timing: Option<crate::__private::profiler::Guard>,
 }
 impl Drop for NativeModGuard {
     fn drop(&mut self) {

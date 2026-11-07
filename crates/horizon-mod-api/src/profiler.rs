@@ -1,7 +1,7 @@
 //! Host-only Level 1 timings. Totals are inclusive: nested calls also contribute to their parent.
 //! No arguments or game data are retained. Start/stop must run outside mod calls; stop drains
 //! in-flight guards. Repeated start is a no-op; repeated stop returns an empty report.
-use super::NativeModCall;
+use crate::crash::NativeModCall;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering::SeqCst};
@@ -19,6 +19,7 @@ thread_local! { static SLOT: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 
 /// One call, shared by native and wasm timing producers. Names are resolved at load time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// exhaustive: the host builds call records; mods never consume this game-side data.
 pub struct Record {
     pub mod_id: &'static str,
     pub hook: &'static str,
@@ -27,6 +28,7 @@ pub struct Record {
 }
 /// Inclusive nanoseconds; bucket 0 contains 0 and 1, bucket n contains [2^n, 2^(n+1)).
 #[derive(Debug)]
+// exhaustive: only the game's report consumer reads these counters, never mods.
 pub struct Aggregate {
     pub count: u64,
     pub total: u128,
@@ -47,6 +49,7 @@ impl Default for Aggregate {
 }
 type Key = (&'static str, &'static str, Option<&'static str>);
 #[derive(Default, Debug)]
+// exhaustive: the game builds and presents reports; no mod depends on their fields.
 pub struct Report {
     pub calls: BTreeMap<Key, Aggregate>,
     /// Capacity exhaustion is explicit, never silently presented as a complete profile.
@@ -188,13 +191,13 @@ pub fn stop() -> Report {
     }
     report
 }
-pub(super) struct Guard {
+pub(crate) struct Guard {
     pool: *const Pool,
     slot: usize,
     call: NativeModCall,
     began: u64,
 }
-pub(super) fn enter(call: NativeModCall) -> Option<Guard> {
+pub(crate) fn enter(call: NativeModCall) -> Option<Guard> {
     if !is_enabled() {
         return None;
     }
@@ -397,7 +400,7 @@ mod tests {
         if std::env::var_os("HORIZON_PROFILER_CAPACITY_CHILD").is_none() {
             assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
-                    .args(["--exact", &format!("crash::profiler::tests::{name}")])
+                    .args(["--exact", &format!("__private::profiler::tests::{name}")])
                     .env("HORIZON_PROFILER_CAPACITY_CHILD", "1")
                     .status()
                     .unwrap()
