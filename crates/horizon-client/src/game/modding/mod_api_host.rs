@@ -69,6 +69,7 @@ impl Game<'_> {
             .map(|(_, uuid)| *uuid)
             .collect();
         for uuid in gone {
+            self.forget_entity_initialization(uuid);
             self.entity_attachments.remove(&uuid);
         }
     }
@@ -85,6 +86,9 @@ impl Game<'_> {
         holder: mod_api::Holder,
         access: AttachmentAccess,
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
+        if self.client_attachment_entity_exists(holder) {
+            self.initialize_entity_on_access(holder);
+        }
         if self.native_authoritative() {
             self.world.attachment_syncs.insert(holder);
             return self.attachment_map_quiet(holder, access);
@@ -118,9 +122,12 @@ impl Game<'_> {
     ) -> Result<&mut mod_api::Attachments, mod_api::AttachmentError> {
         use mod_api::AttachmentError;
         if let mod_api::Holder::Entity(id) = holder {
-            if !self.attachment_entity_exists(id) {
+            if self.entity_initialization.active != Some(holder)
+                && !self.attachment_entity_exists(id)
+            {
                 return Err(AttachmentError::MissingHolder);
             }
+            self.initialize_entity_on_access(holder);
             attachment_compound(
                 self.persist
                     .raw
@@ -159,6 +166,17 @@ impl Game<'_> {
             return Ok(map);
         }
         if let mod_api::Holder::Player(uuid) = holder {
+            if self.entity_initialization.active != Some(holder)
+                && self.lan_acting_uuid != Some(uuid)
+                && self
+                    .lan
+                    .as_ref()
+                    .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+                    .is_none()
+            {
+                return Err(AttachmentError::MissingHolder);
+            }
+            self.initialize_entity_on_access(holder);
             if self.lan_acting_uuid == Some(uuid) {
                 if access == AttachmentAccess::Store
                     && let Some(conn) = self.lan_acting
@@ -170,7 +188,13 @@ impl Game<'_> {
             let conn = self
                 .lan
                 .as_ref()
-                .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()))
+                .and_then(|host| {
+                    if self.entity_initialization.active == Some(holder) {
+                        host.hub.guests.iter().find(|guest| guest.uuid == uuid)
+                    } else {
+                        host.hub.holder_guest(uuid, self.dim.id())
+                    }
+                })
                 .map(|guest| guest.conn)
                 .ok_or(AttachmentError::MissingHolder)?;
             if self.lan_guest_swaps.contains(&conn) {

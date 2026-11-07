@@ -45,9 +45,13 @@ mod wasm_internals;
 
 pub use isolate::LeftOut;
 
+// Settings and logs are shared by native-build tests and the toolchain HTTP fixture.
+#[cfg(test)]
+pub(crate) static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "private-source-points-v1";
+const STAGING: &str = "private-source-calls-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -557,8 +561,9 @@ pub fn internals_rustc_wrapper() -> Option<i32> {
 /// Discover used internals without installing a game or changing an instance.
 pub fn sync_internals(
     folder: &Path,
-) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, String> {
-    internals_sync::check(folder).map_err(|error| error.to_string())
+) -> Result<Vec<horizon_mod_package::internals::ListedInternal>, Failed> {
+    require_consent()?;
+    internals_sync::check(folder).map_err(|error| Failed::Other(error.to_string()))
 }
 
 pub const DEFAULT_CACHE_GIB: u64 = 30;
@@ -1936,8 +1941,11 @@ struct Built {
     left_out: Vec<LeftOut>,
 }
 
-/// Why [`pipeline`] stopped.
-enum Failed {
+/// Why a native build or internals check stopped.
+#[derive(Debug)]
+pub enum Failed {
+    /// No native-code permission has been recorded for this install.
+    NoConsent,
     /// These mods stopped it (`error` says how), while `compiling` or before: it can run again
     /// without them.
     Mods {
@@ -1956,12 +1964,28 @@ impl From<String> for Failed {
     }
 }
 
+impl std::fmt::Display for Failed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mods { error, .. } | Self::Other(error) => f.write_str(error),
+            Self::Nothing => Ok(()),
+            Self::NoConsent => f.write_str(tr("Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.")),
+        }
+    }
+}
+impl std::error::Error for Failed {}
 impl From<Failed> for String {
     fn from(failed: Failed) -> Self {
-        match failed {
-            Failed::Mods { error, .. } | Failed::Other(error) => error,
-            Failed::Nothing => String::new(),
-        }
+        failed.to_string()
+    }
+}
+
+/// Refuse before staging, fetching a prebuilt game or downloading a compiler.
+pub fn require_consent() -> Result<(), Failed> {
+    if backend::Settings::load().native_mods_allowed_at.is_some() {
+        Ok(())
+    } else {
+        Err(Failed::NoConsent)
     }
 }
 
@@ -2373,6 +2397,7 @@ fn pipeline(
             inject::POINTS,
             internals::INTERNALS,
             horizon_mod_api_gen::points::source::FILE,
+            horizon_mod_api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -2572,6 +2597,7 @@ fn isolated(
                 last = error;
             }
             Err(Failed::Nothing) => return Err(said(&skip, last)),
+            Err(Failed::NoConsent) => return Err(Failed::NoConsent.into()),
             Err(Failed::Other(error)) if error == CANCELLED => return Err(error),
             Err(Failed::Other(error)) => return Err(said(&skip, error)),
         }
@@ -2590,10 +2616,11 @@ pub fn build(
     instance: &Instance,
     profile: Profile,
     progress: impl Fn(Step),
-) -> Result<String, String> {
+) -> Result<String, Failed> {
+    require_consent()?;
     CANCEL.store(false, Ordering::Relaxed);
     if let Some(error) = backend::native_mod_architecture_error() {
-        return Err(error);
+        return Err(Failed::Other(error));
     }
     logged(|| {
         let built = isolated(
@@ -2628,6 +2655,7 @@ pub fn build(
         }
         Ok(built.version)
     })
+    .map_err(Failed::Other)
 }
 
 /// Builds `folder`'s mods as the headless engine a dedicated server runs (`horizon-engine`,
@@ -2647,7 +2675,8 @@ pub fn build_server(
     profile: Profile,
     allow_jar_downloads: bool,
     progress: impl Fn(Step),
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, Failed> {
+    require_consent()?;
     logged(|| {
         if output.symlink_metadata().is_ok() {
             return Err(trf(
@@ -2713,6 +2742,7 @@ pub fn build_server(
         let engine = output.join(Target::Server.binary());
         Ok(std::path::absolute(&engine).unwrap_or(engine))
     })
+    .map_err(Failed::Other)
 }
 
 /// Copies the built version folder `from` into `output` (outside the managed versions) as one
@@ -2911,13 +2941,12 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
-    pub(super) static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
     #[test]
     fn isolation_keeps_cancellation_exact_after_a_retry() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -2944,7 +2973,7 @@ mod tests {
 
     #[test]
     fn isolation_bounds_recompiles_and_keeps_the_failure() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -4174,7 +4203,8 @@ mod tests {
     /// and no instance is edited or version selected.
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
+        backend::Settings::load().allow_native_mods().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
         write_bundle(&folder, "hello", "fn hook() {}");
@@ -4189,6 +4219,7 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
+        let err = String::from(err);
         assert!(err.contains("already exists"), "{err}");
         assert!(fs::read_to_string(log_path()).unwrap().contains(&err));
         let managed = root().join("forbidden-export");
@@ -4201,6 +4232,7 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
+        let err = String::from(err);
         assert!(
             err.contains("outside the launcher's managed folders"),
             "{err}"
@@ -4212,6 +4244,48 @@ mod tests {
             selected_before,
             "no version is selected"
         );
+    }
+
+    #[test]
+    fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
+        use std::net::TcpListener;
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        fs::create_dir_all(backend::data_dir()).unwrap();
+        fs::write(backend::data_dir().join("settings.json"), serde_json::json!({"native_warning": true, "proxy": format!("http://{}", listener.local_addr().unwrap())}).to_string()).unwrap();
+        let folder = dir("consent-missing");
+        let output = folder.join("export");
+        let log_before = fs::read(log_path()).ok();
+        fn denied<T>(result: Result<T, Failed>) {
+            assert!(matches!(result, Err(Failed::NoConsent)));
+        }
+        let profile = Profile::Optimized;
+        let base = "uninstalled";
+        denied(build_server(base, &folder, &output, profile, false, |_| {}));
+        denied(build(
+            base,
+            &folder,
+            &instances::selected(),
+            profile,
+            |_| {},
+        ));
+        denied(sync_internals(&folder));
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "zero HTTP requests"
+        );
+        assert!(!output.exists());
+        assert_eq!(
+            fs::read(log_path()).ok(),
+            log_before,
+            "no build staging or log writes"
+        );
+        backend::Settings::load().allow_native_mods().unwrap();
+        assert!(backend::Settings::load().native_mods_allowed_at.is_some());
+        require_consent().unwrap();
+        original.save().unwrap();
     }
 
     #[test]
@@ -4233,7 +4307,8 @@ mod tests {
     /// one log file.
     #[test]
     fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
+        backend::Settings::load().allow_native_mods().unwrap();
         clear_log().unwrap();
         append_log("the last build's output").unwrap();
         clear_log().unwrap();
@@ -4254,6 +4329,7 @@ mod tests {
             |_| {},
         )
         .unwrap_err();
+        let err = String::from(err);
         assert!(err.contains("is not prepared yet"), "{err}");
         let log = fs::read_to_string(log_path()).unwrap();
         assert!(log.contains("is not prepared yet"), "{log}");
@@ -4740,7 +4816,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_build_smart_app_control_blocked_says_how_to_build() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         clear_log().unwrap();
         // cargo's output on Windows 11 25H2 with Smart App Control on (the report in #5911).
         let mut cmd = Command::new("sh");
