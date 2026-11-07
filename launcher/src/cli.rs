@@ -25,7 +25,11 @@ fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
     if value == "all" {
         Ok(ClearStorage::All)
     } else {
-        Category::from_str(value, false).map(ClearStorage::Row)
+        Category::ALL
+            .into_iter()
+            .find(|category| category.to_possible_value().unwrap().get_name() == value)
+            .map(ClearStorage::Row)
+            .ok_or_else(|| tr("Unknown").into())
     }
 }
 use std::io::{IsTerminal, Write};
@@ -773,7 +777,7 @@ enum Cmd {
     },
     /// Show disposable storage by category as JSON. Builds must be idle
     Storage {
-        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all
+        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler or all implemented rows
         #[arg(long, value_parser = parse_storage_row)]
         clear: Option<ClearStorage>,
     },
@@ -4003,6 +4007,10 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "worlds"]).is_err());
         assert!(Cli::try_parse_from(["horizon-launcher", "native-cache"]).is_err());
+        assert!(
+            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"])
+                .is_err()
+        );
         let mut settings = backend::Settings::default();
         set_setting(&mut settings, "native-cache-gib", "12").unwrap();
         let saved = serde_json::to_string(&settings).unwrap();
