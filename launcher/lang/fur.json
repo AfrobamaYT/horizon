@@ -1042,7 +1042,6 @@
   "technology": "tecnologjie",
   "the message in the server list": "il messaç inte liste dai servidôrs",
   "the port": "il puart",
-  "the prebuilt game couldn't be downloaded ({why}), so the game builds from source": "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
   "the update failed: {error}": "l'agjiornament al è falit: {error}",
   "themed": "a teme",
   "through {wrapper}": "a traviers di {wrapper}",
@@ -1123,7 +1122,6 @@
   "{online} of {max} players": "{online} di {max} zuiadôrs",
   "{path} already exists. Move it away, or build into another folder.": "{path} al esist za. Spostâlu vie, o costruîlu intune altre cjarte.",
   "{path} is not a folder to build into.": "{path} nol è une cjarte par costruî dentri.",
-  "{profile} builds the game on this computer; only Optimized uses the prebuilt game": "{profile} builds the game on this computer; only Optimized uses the prebuilt game",
   "{program} is not installed here (or not on the PATH): copy the config instead.": "{program} nol è instalât culì (o no sul PATH): invezit copiâ la configurazion.",
   "{program} said: {output}": "{program} al à dit: {output}",
   "{size} on disk": "{size} sul disc",
@@ -1196,5 +1194,14 @@
   "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.": "E_INTERNAL_SOURCE_INJECTION: internals sync checks library code and raw listeners, not source listeners, helpers or modules. Use cargo horizon-mod internals add for this mod.",
   "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.": "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.",
   "Rust toolchain archive has {actual} bytes; expected {expected}.": "Rust toolchain archive has {actual} bytes; expected {expected}.",
-  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size."
+  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size.",
+  "Needs attention": "Needs attention",
+  "The prebuilt game couldn't be downloaded ({why}). Try again.": "The prebuilt game couldn't be downloaded ({why}). Try again.",
+  "No prebuilt game for this version": "No prebuilt game for this version",
+  "1 mod requires a full game rebuild": "1 mod requires a full game rebuild",
+  "{count} mods require a full game rebuild": "{count} mods require a full game rebuild",
+  "Injects outside the slots": "Injects outside the slots",
+  "Has a build script": "Has a build script",
+  "Uses Cargo features": "Uses Cargo features",
+  "Depends on the crate {crate}": "Depends on the crate {crate}"
 }
