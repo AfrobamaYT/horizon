@@ -10800,14 +10800,17 @@ mod armor_destroy_tests {
     /// A mod that clears the entries, or removes one, leaves vanilla's wear (no panic).
     #[test]
     fn a_cleared_armor_hurt_entry_keeps_vanilla_wear() {
-        assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
-        let entries = [entry(EquipmentSlot::Head, 5.0)];
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
-        assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
-        assert_eq!(
-            answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
-            0
-        );
+        mod_api::testing::with_mods(Vec::<mod_api::ModEntry>::new().into(), || {
+            mod_api::__private::resolve_items(["minecraft:diamond_helmet"]).unwrap();
+            assert_eq!(answered_wear(&[], EquipmentSlot::Body, 3), 3);
+            let entries = [entry(EquipmentSlot::Head, 5.0)];
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Chest, 2), 2);
+            assert_eq!(answered_wear(&entries, EquipmentSlot::Head, 2), 5);
+            assert_eq!(
+                answered_wear(&[entry(EquipmentSlot::Head, -1.0)], EquipmentSlot::Head, 2),
+                0
+            );
+        });
     }
 
     /// `(int) Math.max(1.0F, damage / 4.0F)`.
