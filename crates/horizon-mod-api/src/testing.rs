@@ -177,7 +177,10 @@ impl crate::prelude::ItemsHost for FakeHost {
     }
     fn max_damage(&self, item: crate::ItemKey) -> Option<u32> {
         let id = FakeRegistries::resolved_item_id(item)?;
-        match self.registries.default_component(id, "minecraft:max_damage") {
+        match self
+            .registries
+            .default_component(id, "minecraft:max_damage")
+        {
             Some(Tag::Int(damage)) => u32::try_from(damage).ok(),
             None => Some(0),
             _ => None,
