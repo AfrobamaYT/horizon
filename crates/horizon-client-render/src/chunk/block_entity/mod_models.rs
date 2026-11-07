@@ -3,7 +3,6 @@ use horizon_core::nbt::Compound;
 #[cfg(test)]
 use horizon_core::nbt::Tag;
 use horizon_items::items::ItemStack;
-use std::sync::atomic::{AtomicU64, Ordering};
 /// A mod's block entity, read and changed through its fields
 /// (`ModBlockEntityFields`) as a struct's: `entity.nbt`. Each change goes
 /// through `DerefMut` and gives it a new `revision`, so a client tells
@@ -37,14 +36,24 @@ pub struct ModRevision {
     pub(crate) born: u64,
     pub(crate) changes: u64,
 }
-static MOD_BLOCK_ENTITIES_MADE: AtomicU64 = AtomicU64::new(0);
+
+impl ModRevision {
+    /// The unique construction identity, copied into API revision snapshots.
+    pub fn identity(self) -> u64 {
+        self.born
+    }
+    /// The number of field writes since construction.
+    pub fn changes(self) -> u64 {
+        self.changes
+    }
+}
 impl ModBlockEntity {
     pub fn new(id: String, fields: ModBlockEntityFields) -> Self {
         Self {
             id,
             fields,
             revision: ModRevision {
-                born: MOD_BLOCK_ENTITIES_MADE.fetch_add(1, Ordering::Relaxed),
+                born: horizon_mod_runtime::block_entities::new_identity(),
                 changes: 0,
             },
         }

@@ -1033,9 +1033,13 @@ impl TryIntoApi for crate::containers::ModBlockEntity {
     type Api = mod_api::ModBlockEntity;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::ModBlockEntity::new(
+        Ok(mod_api::ModBlockEntity::from_snapshot(
             self.id().to_owned(),
             (**self).try_into_api()?,
+            mod_api::containers::ModRevision::from_snapshot(
+                self.revision().identity(),
+                self.revision().changes(),
+            ),
         ))
     }
 }
@@ -1155,5 +1159,32 @@ impl super::GameLevel<'_> {
         if let Ok(added) = added.try_into_engine(self.items) {
             drops.extend(added);
         }
+    }
+}
+
+#[cfg(test)]
+mod block_entity_snapshot_tests {
+    use super::*;
+    #[test]
+    fn unchanged_snapshots_keep_revision_and_callback_writes_advance_it() {
+        let mut entity =
+            crate::containers::ModBlockEntity::new("test:machine".into(), Default::default());
+        let first = entity.try_into_api().unwrap();
+        let mut second = entity.try_into_api().unwrap();
+        assert_eq!(first.revision(), second.revision());
+        let before = second.revision();
+        second.data.push(7);
+        assert_ne!(before, second.revision());
+        let fields = (*second)
+            .try_into_engine(&Items::for_tests(Default::default()))
+            .unwrap();
+        *entity = fields;
+        let third = entity.try_into_api().unwrap();
+        assert_ne!(first.revision(), third.revision());
+        assert_eq!(third.revision(), entity.try_into_api().unwrap().revision());
+        assert_eq!(entity.id(), "test:machine");
+        assert_eq!(entity.data, [7]);
+        let other = mod_api::ModBlockEntity::new("test:other".into(), Default::default());
+        assert_ne!(other.revision(), third.revision());
     }
 }
