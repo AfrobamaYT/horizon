@@ -4,10 +4,11 @@ import argparse
 import os
 from pathlib import Path
 import select
-import socket
 import subprocess
 import tempfile
 import time
+
+import lab
 
 
 def main():
@@ -21,12 +22,10 @@ def main():
     for key in ['HORIZON_HOME', 'HORIZON_LAUNCHER_HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
                 'HORIZON_LAUNCHER_TRASH', 'HORIZON_LAUNCHER_CLIPBOARD', 'HORIZON_LAUNCHER_DESKTOP']:
         env[key] = tempfile.mkdtemp(prefix=key.lower(), dir=scratch)
-    env.update(HORIZON_LAUNCHER_NO_SELF_UPDATE='1', HORIZON_NO_AUDIO='1')
+    env = lab.game_env(env)
     sysroot = subprocess.check_output(['rustc', '--print', 'sysroot'], text=True).strip()
     env['LD_LIBRARY_PATH'] = f'{args.binary.parent}/deps:{sysroot}/lib/rustlib/x86_64-unknown-linux-gnu/lib'
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        port = sock.getsockname()[1]
+    port = lab.free_port()
     (scratch / 'eula.txt').write_text('eula=true\n')
     (scratch / 'server.properties').write_text(
         f'online-mode=false\nserver-ip=127.0.0.1\nserver-port={port}\nlevel-seed=12345\n'
