@@ -82,7 +82,7 @@ keeps the engine-computed default; `Some` preserves a styled or translatable com
 rather than flattening it to a string.
 
 The recursive tree has one serde model. `TextForm` carries its serialized form for
-finite generated wasm bindings; decoding refuses malformed trees. Component and style
+finite generated wasm bindings; encoding and decoding refuse more than 100 nested JSON containers, and decoding refuses malformed trees. Component and style
 metadata is retained through serialization rather than discarded by flattening text.
 
 ### Particle identities
