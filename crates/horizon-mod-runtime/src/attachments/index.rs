@@ -485,7 +485,6 @@ mod tests {
         assert_eq!(values(&index.snapshot(&key("b"))), [(1, 22), (2, 20)]);
         assert_eq!(values(&index.snapshot(&key("c"))), [(1, 3)]);
         let clone = current.clone();
-        drop(current);
         assert_eq!(values(&index.snapshot(&key("c"))), [(1, 3)]);
         assert!(index.unregister(&clone).into_result());
         assert!(!index.set(&clone, &key("a"), entry(9)).into_result());
@@ -562,7 +561,6 @@ mod tests {
         let binding = index.register(1, [(key("value"), entry(7))]).into_result();
         let stale = binding.clone();
         let retained = index.snapshot(&key("value"));
-        drop(binding);
         assert!(index.unload(1).into_result());
         assert!(!index.unload(1).into_result());
         assert!(index.snapshot(&key("value")).is_empty());
