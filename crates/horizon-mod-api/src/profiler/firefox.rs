@@ -1,6 +1,6 @@
 //! Raw Gecko profile format 37, from the public format declarations and marker guide:
-//! https://firefox-source-docs.mozilla.org/tools/profiler/markers-guide.html
-//! https://github.com/firefox-devtools/profiler/blob/main/docs-developer/CHANGELOG-formats.md
+//! <https://firefox-source-docs.mozilla.org/tools/profiler/markers-guide.html>
+//! <https://github.com/firefox-devtools/profiler/blob/main/docs-developer/CHANGELOG-formats.md>
 //! Aggregate snapshots are instant markers at synthetic time zero, not invocation intervals.
 //! Empty samples deliberately provide no invented call tree or execution-time shares.
 use super::Report;
