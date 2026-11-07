@@ -65,7 +65,7 @@ pub trait ItemsServerHost {
         pos: [i32; 3],
         facing: Direction,
         stack: ItemStack,
-    ) -> Option<ItemStack>;
+    ) -> Result<Option<ItemStack>, StackWriteError>;
 }
 /// The client host's methods of the `items` area, implemented by the game and reached through [`crate::ClientHost`].
 #[horizon_mod_api_macros::host_area]
@@ -193,7 +193,7 @@ pub trait ItemsBackend {
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackendMut {
     /// Side: server.
-    /// Puts as much of `stack` as slot `slot` of those `at`'s side reaches takes, as a hopper
+    /// Puts up to `amount` of `resource` into slot `slot` of those `at`'s side reaches, as a hopper
     /// would (`canPlaceItem`, the slot's limit, the same item and components), in transaction
     /// `tx`; what didn't fit.
     #[access(WorldOnly)]
@@ -201,9 +201,10 @@ pub trait ItemsBackendMut {
         &mut self,
         at: BlockSide,
         slot: usize,
-        stack: ItemStack,
+        resource: &ItemResource,
+        amount: u32,
         tx: &Transaction,
-    ) -> Option<ItemStack>;
+    ) -> Result<Option<ItemStack>, StackWriteError>;
     /// Side: server.
     /// Takes up to `max` out of slot `slot` of those `at`'s side reaches, in transaction `tx`;
     /// through a side, only what that side may take (`canTakeItemThroughFace`). What came out.
@@ -223,7 +224,7 @@ pub trait ItemsBackendMut {
     fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack>;
     /// Side: server.
     /// `ItemAccess.insert` at a player's place, an item entity's or an entity's slot: up to
-    /// `stack.count` of `stack`, into the place where it's empty or holds the same item and
+    /// `amount` of `resource`, into the place where it's empty or holds the same item and
     /// components, up to the item's stack size. The rest goes where vanilla puts an item split
     /// off it: a player's into their inventory, else dropped as `Player.drop(stack, false)` at
     /// the root commit (a creative player's hand takes anything, and gives them one if they have
@@ -232,16 +233,27 @@ pub trait ItemsBackendMut {
     /// went: 0 where `native_game_stack` reads nothing for want of the place. In transaction
     /// `tx`, which keeps each place as it was. The player's screen follows with the tick's sync.
     #[access(WorldOnly)]
-    fn game_insert(&mut self, place: &ItemPlace, stack: ItemStack, tx: &Transaction) -> u32;
+    fn game_insert(
+        &mut self,
+        place: &ItemPlace,
+        resource: &ItemResource,
+        amount: u32,
+        tx: &Transaction,
+    ) -> Result<u32, StackWriteError>;
     /// Side: server.
-    /// `ItemAccess.extract` at those places: up to `stack.count` of the item and components of
-    /// `stack`, how many came out. An item entity emptied stays, empty, until the root commit
+    /// `ItemAccess.extract` at those places: up to `amount` of `resource`, how many came out. An item entity emptied stays, empty, until the root commit
     /// removes it. A creative player's hand gives without losing any (`forInfiniteMaterials`).
     #[access(WorldOnly)]
-    fn game_extract(&mut self, place: &ItemPlace, stack: ItemStack, tx: &Transaction) -> u32;
+    fn game_extract(
+        &mut self,
+        place: &ItemPlace,
+        resource: &ItemResource,
+        amount: u32,
+        tx: &Transaction,
+    ) -> Result<u32, StackWriteError>;
     /// Side: server.
     /// Drops `stack` at the middle of the block at `pos`, as a block entity's handler gives up
     /// what it can't put back.
     #[access(WorldOnly)]
-    fn drop_at(&mut self, pos: [i32; 3], stack: ItemStack);
+    fn drop_at(&mut self, pos: [i32; 3], stack: ItemStack) -> Result<(), StackWriteError>;
 }

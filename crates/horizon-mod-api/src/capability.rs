@@ -120,13 +120,15 @@ impl ResourceHandler<ItemResource> for GameItems {
         resource: &ItemResource,
         amount: u32,
     ) -> u32 {
-        let Some(stack) = resource.to_stack(amount) else {
+        if amount == 0 {
             return 0;
-        };
+        }
         let Some(backend) = backend_mut_of(host) else {
             return 0;
         };
-        let rest = backend.container_insert(self.0, index, stack, tx);
+        let Ok(rest) = backend.container_insert(self.0, index, resource, amount, tx) else {
+            return 0;
+        };
         amount - rest.map_or(0, |rest| rest.count().min(amount))
     }
     fn extract(
