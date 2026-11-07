@@ -6,8 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod inventory;
+pub use inventory::{Report, Row};
+
 /// The five rows on the Storage page.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, clap::ValueEnum)]
+#[serde(rename_all = "kebab-case")]
 pub enum Category {
     BuildFiles,
     PrebuiltGames,
@@ -115,15 +119,18 @@ impl Storage {
             return Ok(0);
         }
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let trash = self.root.join(format!(
-            ".trash-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let trash = path
+            .parent()
+            .ok_or_else(|| Error::Unsafe(path.to_owned()))?
+            .join(format!(
+                ".trash-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
         fs::rename(path, &trash)?;
         remove(&trash)?;
         Ok(bytes)

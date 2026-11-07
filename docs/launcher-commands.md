@@ -99,15 +99,16 @@ Run a dedicated server here; type commands into its console.
 
 MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
-## `horizon-launcher native-cache`
+## `horizon-launcher storage`
 
-Show the native compilation cache's size and limit as JSON. Installed games and saves are never removed; builds must be idle.
+Show disposable storage by category as JSON. Builds must be idle. Worlds, settings, mod packages and builds any instance plays are never cleanup targets; running instances' caches are skipped.
 
-    horizon-launcher native-cache
+    horizon-launcher storage
+    horizon-launcher storage --clear build-files
 
-- `--clear`: Clear only fast/release compiler outputs. The next changed build recompiles
+- `--clear ROW`: Clear `build-files`, `prebuilt-games`, `spare-game-builds`, `rust-compiler`, `other-caches`, or `all`. Cleared compiler outputs rebuild next time; cleared downloads are fetched again. The result includes allocated bytes and freed bytes per category.
 
-MCP: `native_cache`.
+MCP: `storage`.
 
 ## `horizon-launcher native-build`
 
