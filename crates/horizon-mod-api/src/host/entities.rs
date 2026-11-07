@@ -157,7 +157,7 @@ pub trait EntitiesBackend {
     /// Side: server.
     /// `Entity.isInvulnerableTo` for a source of `damage_type`: #842's own
     /// decision, the guard every mob damage hook runs after — dead or
-    /// removed, or the `Invulnerable` flag nothing but
+    /// removed, fire immunity, or the `Invulnerable` flag nothing but
     /// `#bypasses_invulnerability` gets past. None for a stale handle or a
     /// kind with no such decision (the player's paths answer their refusals
     /// at hurt time). #924.

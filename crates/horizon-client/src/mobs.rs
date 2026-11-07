@@ -3839,11 +3839,19 @@ impl Mob {
         self.damage_with(level, amount, source, None)
     }
     /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
-    /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
+    /// past the flag. Fire-immune mobs also refuse fire, except a ghast's reflected fireball.
+    /// The guard every damage hook runs after (`LivingIncomingDamageEvent`).
     pub fn refuses_damage(&self, source: &Damage) -> bool {
         !self.alive()
             || self.removed
             || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+            || (source.is_fire() && self.kind.flags.fire_immune && !self.reflected_fireball(source))
+    }
+    /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a player's return hit.
+    fn reflected_fireball(&self, source: &Damage) -> bool {
+        &*self.kind.id == "minecraft:ghast"
+            && source.kind == DamageKind::Fireball
+            && source.attacker == Some(Who::Player)
     }
     /// `LivingEntity.hurtServer`'s partial mob adapter, with health reductions inline.
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
@@ -3892,12 +3900,7 @@ impl Mob {
         }
         // Ghast.isReflectedFireball: a fireball a player turned back is
         // no fire to it, and kills it (Ghast.hurtServer: 1000 damage).
-        let reflected = &*self.kind.id == "minecraft:ghast"
-            && source.kind == DamageKind::Fireball
-            && source.attacker == Some(Who::Player);
-        if source.is_fire() && (self.kind.flags.fire_immune) && !reflected {
-            return false;
-        }
+        let reflected = self.reflected_fireball(&source);
         if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
             return false;
         }

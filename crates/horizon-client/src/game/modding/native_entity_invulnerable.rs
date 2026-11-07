@@ -85,7 +85,7 @@ impl Game<'_> {
 
     /// `Entity.isInvulnerableTo` for a source of `damage_type`: #842's own
     /// decision, the guard every mob damage hook runs after — dead or
-    /// removed, or the `Invulnerable` flag nothing but
+    /// removed, fire immunity, or the `Invulnerable` flag nothing but
     /// `#bypasses_invulnerability` gets past. None for a stale handle or a
     /// kind with no such decision (the player's paths answer their refusals
     /// at hurt time).
@@ -201,6 +201,20 @@ mod tests {
                 Some(false)
             );
             assert_eq!(game.mobs[0].health, 10.0);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_fire_immune_query() {
+        with_game(|game| {
+            let blaze = game.res.mob_types().get("minecraft:blaze").unwrap().clone();
+            game.mobs.push(Mob::new(300001, blaze, Vec3::ZERO, 0.0));
+            let victim = game.entity(300001).unwrap();
+            assert_eq!(
+                victim.invulnerable_to_damage(game, "minecraft:in_fire"),
+                Some(true)
+            );
         });
     }
 
