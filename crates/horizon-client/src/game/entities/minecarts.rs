@@ -4,6 +4,10 @@
 //! `MinecartItem` placement, `VehicleEntity` breaking, the chest, hopper,
 //! furnace and TNT variants, saving, and `AbstractMinecartRenderer`'s old
 //! rail-following render with the display block.
+#[cfg(test)]
+#[path = "minecarts/lifetime_tests.rs"]
+mod lifetime_tests;
+
 use super::{Game, Hit, InteractTarget, Keys, entity::Entity};
 use horizon_client::actions::Action;
 use horizon_client::entity_rules::EntityRules;
