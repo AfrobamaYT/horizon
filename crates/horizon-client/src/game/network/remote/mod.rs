@@ -52,7 +52,7 @@ use std::{
 use winit::{event::MouseButton, keyboard::KeyCode};
 use {
     horizon_core::nbt::Tag,
-    horizon_mod_runtime::attachments::{Attachments, Holder},
+    horizon_mod_runtime::attachments::{Holder, ResidentAttachments},
     horizon_world::{
         level::InteractionResult,
         registry::BlockStateId,
@@ -509,7 +509,7 @@ pub(super) struct Remote {
     /// The server announced it carries mod messages.
     pub mod_net: bool,
     /// The synced attachments the server sent, by holder.
-    pub attachments: HashMap<Holder, Attachments>,
+    pub attachments: HashMap<Holder, ResidentAttachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -12095,6 +12095,8 @@ mod effect_blend_tests;
 #[cfg(test)]
 mod level_sound_tests;
 
+#[cfg(test)]
+mod attachment_query_tests;
 #[cfg(test)]
 mod tests {
     use super::super::api_values::TryIntoApi;
