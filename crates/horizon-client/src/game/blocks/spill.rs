@@ -3,18 +3,19 @@
 //! block drops (`Block.dropResources`), drawn from the level random at the
 //! moment vanilla draws them. The item entities they make are added to the
 //! world as soon as the behaviour returns, within the same tick.
+use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Game, GameLevel, Screen, dispenser::new_item_motion, storage::is_shulker_box};
 use horizon_client::{
     block_entity_item, block_entity_nbt,
     containers::{Banner, BlockEntity},
     furnace::FurnaceCooking,
     item_data,
-    items::ItemStack,
+    items::{BlockLootRoll, ItemStack},
     save,
 };
 use horizon_core::position::BlockPos;
 use horizon_core::random::RandomSource;
-use mod_api::NativeItemDrop;
+use mod_api::EntityRef;
 use std::collections::HashMap;
 use {
     horizon_core::nbt::{Compound, JavaString, Tag},
@@ -214,9 +215,18 @@ pub(super) struct Spawn {
 }
 
 /// What a broken block spawns (`GameLevel::block_dropped`).
+/// Prepared engine item entity; API snapshots exist only while a listener runs.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct BlockItemDrop {
+    pub(super) stack: ItemStack,
+    pub(super) position: [f64; 3],
+    pub(super) velocity: [f64; 3],
+    pub(super) pickup_delay: u32,
+}
+
 pub(super) struct BlockDrops {
     /// The item entities to add, as the mods left them.
-    pub(super) items: Vec<NativeItemDrop>,
+    pub(super) items: Vec<BlockItemDrop>,
     /// The experience points to award at the block's centre.
     pub(super) experience: u32,
     /// A mod canceled the break's drops: `spawnAfterBreak` doesn't run.
@@ -296,6 +306,58 @@ pub(super) fn pop_position(
         f64::from(pos[1]) + 0.5 + offset() - half_height,
         f64::from(pos[2]) + 0.5 + offset(),
     ]
+}
+
+/// `Block.popResourceFromFace`'s position and motion: an item on the clicked
+/// face, moved off that face and jittered across the other two axes.
+pub(super) fn pop_position_from_face(
+    random: &mut impl horizon_core::random::RandomSource,
+    pos: [i32; 3],
+    face: [i32; 3],
+) -> ([f64; 3], [f64; 3]) {
+    fn jitter<R: horizon_core::random::RandomSource>(random: &mut R, min: f64, max: f64) -> f64 {
+        min + random.next_double() * (max - min)
+    }
+    // EntityTypes.ITEM is 0.25 wide and 0.25 high.
+    let (half_width, half_height) = (0.125, 0.125);
+    let x = f64::from(pos[0])
+        + 0.5
+        + if face[0] == 0 {
+            jitter(random, -0.25, 0.25)
+        } else {
+            f64::from(face[0]) * (0.5 + half_width)
+        };
+    let y = f64::from(pos[1])
+        + 0.5
+        + if face[1] == 0 {
+            jitter(random, -0.25, 0.25)
+        } else {
+            f64::from(face[1]) * (0.5 + half_height)
+        }
+        - half_height;
+    let z = f64::from(pos[2])
+        + 0.5
+        + if face[2] == 0 {
+            jitter(random, -0.25, 0.25)
+        } else {
+            f64::from(face[2]) * (0.5 + half_width)
+        };
+    let dx = if face[0] == 0 {
+        jitter(random, -0.1, 0.1)
+    } else {
+        f64::from(face[0]) * 0.1
+    };
+    let dy = if face[1] == 0 {
+        jitter(random, 0.0, 0.1)
+    } else {
+        f64::from(face[1]) * 0.1 + 0.1
+    };
+    let dz = if face[2] == 0 {
+        jitter(random, -0.1, 0.1)
+    } else {
+        f64::from(face[2]) * 0.1
+    };
+    ([x, y, z], [dx, dy, dz])
 }
 
 /// The block entity at `pos` Horizon keeps as it was loaded, if any
@@ -424,20 +486,12 @@ impl GameLevel<'_> {
         }
         let dynamic = self.pending.dynamic(at);
         let tool = self.drop_tool.clone();
-        let drops = match self.items.block_loot_sequence(self.registry, state) {
-            Some(sequence) => {
-                let random = self.rand_sequences.get(&sequence, self.seed);
-                self.items
-                    .block_drops_with(self.registry, state, tool.as_ref(), &dynamic, random)
-            }
-            None => self.items.block_drops_with(
-                self.registry,
-                state,
-                tool.as_ref(),
-                &dynamic,
-                &mut self.world.random,
-            ),
+        let roll = horizon_client::items::BlockLootRoll {
+            held: tool.as_ref(),
+            dynamic: &dynamic,
+            ..Default::default()
         };
+        let drops = self.roll_block_loot(pos, state, self.drop_entity, roll);
         let dropped = self.block_dropped(pos, state, None, tool.as_ref(), drops, None);
         for item in dropped.items {
             if let Some(kept) = self.drop_into.as_mut() {
@@ -460,6 +514,40 @@ impl GameLevel<'_> {
             ];
             self.award_orbs(centre, dropped.experience);
         }
+    }
+    /// `Block.getDrops(state, level, pos, blockEntity, entity, tool)` for the block still
+    /// standing: `drop_resources_now`'s roll, with what the block entity copies into the drops,
+    /// drawn from the same random, but nothing popped, no `block_drops` event and no
+    /// experience. A scratch record keeps a break in progress at `pos` as it was.
+    pub(super) fn block_drops_of(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Vec<ItemStack> {
+        let key = (pos.x, pos.y, pos.z);
+        let at = [pos.x, pos.y, pos.z];
+        let mut copied = Pending::default();
+        if let Some(block_entity) = self.world.block_entities.get(&key) {
+            let name = self.world.block_names.get(&key).cloned();
+            copied.record(at, block_entity, &self.facts.get(state).name, name);
+        } else if let Some(tag) = saved_entity(self.world, at) {
+            copied.record_saved(at, &tag);
+        }
+        let dynamic = copied.dynamic(at);
+        let roll = horizon_client::items::BlockLootRoll {
+            held: tool,
+            dynamic: &dynamic,
+            breaker: entity.is_some(),
+            ..Default::default()
+        };
+        let mut drops = self.roll_block_loot(pos, state, entity, roll);
+        drops.retain(|stack| &*stack.item != "minecraft:air" && stack.count > 0);
+        for stack in &mut drops {
+            copied.attach(at, stack);
+        }
+        drops
     }
     /// What `Block.dropResources` does with the loot it rolled for the block
     /// `state` at `pos`: `Block.popResource` builds an item entity for each
@@ -505,10 +593,15 @@ impl GameLevel<'_> {
         )
     }
     /// Build item entities only after vanilla has finished merging stacks.
-    pub(super) fn block_drop_item(&mut self, at: [i32; 3], mut stack: ItemStack) -> NativeItemDrop {
+    pub(super) fn block_drop_item(&mut self, at: [i32; 3], mut stack: ItemStack) -> BlockItemDrop {
         self.pending.attach(at, &mut stack);
         let position = pop_position(&mut self.world.random, at);
-        NativeItemDrop::new(stack, position, new_item_motion(), 10)
+        BlockItemDrop {
+            stack,
+            position,
+            velocity: new_item_motion(),
+            pickup_delay: 10,
+        }
     }
     /// The one event/filter boundary for prepared block item entities and XP.
     /// Explosions supply their merged entities, keeping that caller's zero
@@ -526,18 +619,27 @@ impl GameLevel<'_> {
             mut experience,
             mut canceled,
         } = dropped;
-        if self.native_authoritative {
+        if self.native_authoritative
+            && mod_api::__private::listened(mod_api::HookId::BlockDrops)
+            && let (Ok(tool), Ok(mut snapshots)) = (tool.try_into_api(), items.try_into_api())
+        {
+            let mut next_experience = experience;
+            let mut next_canceled = canceled;
             self.native_block_drops(mod_api::__private::BlockDropsCall {
                 dimension: self.dimension,
                 pos,
                 state,
                 breaker,
-                tool,
-                drops: &mut items,
-                experience: &mut experience,
-                cancel: &mut canceled,
+                tool: tool.as_ref(),
+                drops: &mut snapshots,
+                experience: &mut next_experience,
+                cancel: &mut next_canceled,
             });
-            items.retain(|item| &*item.stack.item != "minecraft:air" && item.stack.count > 0);
+            if let Ok(next_items) = snapshots.try_into_engine(self.items) {
+                items = next_items;
+                experience = next_experience;
+                canceled = next_canceled;
+            }
         }
         if canceled || !self.rules.block_drops {
             items.clear();
@@ -591,7 +693,7 @@ impl GameLevel<'_> {
             )
             && let Some((lease, BlockEntity::Mod(entity))) = self.world.block_entities.take(&key)
         {
-            self.native_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
+            self.api_pre_remove_side_effects(pos, old, &entity, &mut part_drops);
             self.world
                 .block_entities
                 .put(lease, BlockEntity::Mod(entity));
@@ -824,6 +926,33 @@ impl GameLevel<'_> {
 }
 
 impl Game<'_> {
+    /// [`GameLevel::roll_block_loot`] for a roll outside a level write:
+    /// `entity` is `THIS_ENTITY`'s id. With no listener it builds no level.
+    pub(in crate::game) fn roll_block_loot(
+        &mut self,
+        pos: [i32; 3],
+        state: BlockStateId,
+        entity: Option<u32>,
+        roll: BlockLootRoll<'_>,
+    ) -> Vec<ItemStack> {
+        if mod_api::__private::listened(mod_api::HookId::EnchantedBlockLoot) {
+            let at = BlockPos::new(pos[0], pos[1], pos[2]);
+            let entity = self.loot_entity_ref(entity);
+            return self.with_level(|_, level, _| level.roll_block_loot(at, state, entity, roll));
+        }
+        world_items!(self).block_drops(
+            self.pack.assets.registry,
+            state,
+            roll,
+            &mut self.world.random,
+            Some((&mut self.rand_sequences, self.level.seed)),
+        )
+    }
+    /// The handle of `LootContextParams.THIS_ENTITY`, by its id.
+    pub(in crate::game) fn loot_entity_ref(&self, id: Option<u32>) -> Option<EntityRef> {
+        let epoch = self.native_lifecycle.epoch()?;
+        Some(EntityRef::new(epoch, id.filter(|id| *id != 0)?))
+    }
     /// Apply the shared block-drop event's item entities and experience unchanged.
     pub(super) fn spawn_block_drops(&mut self, pos: [i32; 3], dropped: BlockDrops) {
         for item in dropped.items {
@@ -889,11 +1018,9 @@ mod tests {
             _: &dyn mod_api::LevelHost,
             event: &mut mod_api::BlockDropsEvent<'_>,
         ) -> mod_api::Flow {
-            if event
-                .drops
-                .iter()
-                .any(|d| &*d.stack.item == "minecraft:dirt")
-            {
+            if event.drops.iter().any(|d| {
+                mod_api::__private::item_key_id(d.stack.item()).unwrap() == "minecraft:dirt"
+            }) {
                 return mod_api::Flow::Cancel;
             }
             event.experience += 2;

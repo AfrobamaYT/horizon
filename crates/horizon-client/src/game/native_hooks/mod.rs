@@ -20,7 +20,6 @@ use super::{
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
-use horizon_assets::item_model::StackView;
 use horizon_client::block_contact::Pending;
 use horizon_client::creative::Creative;
 use horizon_client::{
@@ -29,8 +28,7 @@ use horizon_client::{
     block_entities::Pos,
     chat::ChatSource,
     containers::{
-        BlockEntity, MOD_MENUS, ModBlockEntity, ModBlockEntityFields, ModContainer,
-        ModEnergyBuffer, ModFluidTanks,
+        BlockEntity, MOD_MENUS, ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks,
     },
     crafting::{Ingredient, recipe_result},
     extras::Corner,
@@ -52,6 +50,7 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     text::Text,
 };
+use horizon_client_core::suggestion::Suggestion;
 use horizon_core::{
     geometry::Direction,
     position::BlockPos,
@@ -59,7 +58,6 @@ use horizon_core::{
     ticks::{ScheduleResult, TickPriority},
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
-use mod_api::__private::game::IngredientTest;
 use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
@@ -75,13 +73,13 @@ use mod_api::{
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
     LogicalSide, NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags,
-    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
-    TooltipElement, UsePhase,
+    NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement,
+    UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey};
+use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
-    NativeSpawnReason, Recipe, SoundPlay, SoundRef,
+    NativeSpawnReason, SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
@@ -109,4 +107,7 @@ use {
 };
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
+pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 include!("shared.rs");
+
+use mod_api::ModBlockEntity;

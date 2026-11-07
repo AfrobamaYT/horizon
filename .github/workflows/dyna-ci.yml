@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '17 3 * * *'
   workflow_dispatch:
@@ -38,8 +38,9 @@ jobs:
 
   # Dyna's image enforces the event and repository check again in job-started.sh.
   # GitHub's external-contributor approval is the third lock.
+  # A draft pull request skips every check below (they all need this job); it runs when marked ready.
   changes:
-    if: github.event_name != 'schedule' && !inputs.prepare-output-check
+    if: github.event_name != 'schedule' && !inputs.prepare-output-check && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -257,6 +258,7 @@ jobs:
         # The internals bench seals the process-wide hook registry, so it runs alone, as its #[ignore] note says.
         run: |
           cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 --skip internals_bench
+          cargo +stable test --release -p horizon-mod-wasm --test borrowed_view -- --ignored --nocapture
           cargo +stable test --release -p horizon-mod-wasm --test bench -- --ignored --nocapture --test-threads=1 internals_bench
 
   verify:
@@ -486,6 +488,7 @@ jobs:
           cargo +stable fmt --check
           cargo +stable clippy $JOBS --all-targets --locked -- -D warnings
           cargo +stable test $JOBS --locked --lib --bins
+          cargo +stable test $JOBS --locked --test storage
   # The fork's Dyna runners have the owner's prepared vanilla data in a read-only cache.
   prepared-output-check:
     if: github.event_name == 'workflow_dispatch' && inputs.prepare-output-check && github.repository == 'arismoko/horizon'

@@ -347,3 +347,37 @@ fn window_resize_delivers_physical_and_gui_dimensions() {
     );
     assert_eq!(*heard.lock().unwrap(), [(1200, 900, 400, 300)]);
 }
+
+/// Compile-only: a server mod reaches the server's inventory and menu operations through the
+/// `&mut dyn ServerHost` its hooks get, not only through the concrete game.
+#[allow(dead_code)]
+fn server_inventory_operations_take_a_server_host(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    menu: MenuRef,
+    stack: ItemStack,
+) -> (bool, Result<Option<ItemStack>, StackWriteError>, bool) {
+    (
+        player.set_selected_slot(host, 0),
+        player.drop_stack(host, stack, false),
+        menu.close_container(host),
+    )
+}
+
+/// Compile-only: the level queries as a mod calls them, the reads on any host and the drop
+/// roll, which moves the level's random, on a server host.
+#[allow(dead_code)]
+fn level_queries_take_their_hosts(
+    read: &dyn Host,
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+    shooter: EntityRef,
+    tool: &ItemStack,
+) {
+    let _: Option<Vec<[f64; 6]>> = level.fluid_shape(read, [0, 64, 0]);
+    let _: Option<bool> = level.has_collisions(read, [0.0, 64.0, 0.0, 1.0, 65.0, 1.0]);
+    let _: Option<Vec<EntityRayHit>> =
+        level.ray_trace_entities(read, [0.0; 3], [8.0, 0.0, 0.0], 0.3, Some(shooter));
+    let _: Result<Option<Vec<ItemStack>>, StackWriteError> =
+        level.block_drops(server, [0, 64, 0], Some(tool), Some(shooter));
+}

@@ -719,7 +719,10 @@ impl Hub {
             .id("minecraft:chat_type", "minecraft:chat")
             .unwrap_or(0);
         let dimension_type = sync
-            .id("minecraft:dimension_type", &config.dimension)
+            .id(
+                "minecraft:dimension_type",
+                config.levels.dimension_type(&config.dimension),
+            )
             .unwrap_or(0);
         let clock_ids = (0..sync.dynamic.len("minecraft:world_clock") as i32).collect();
         let mut encoder = encoder;
@@ -1428,10 +1431,18 @@ impl Hub {
     }
 
     /// The levels of a server, in MinecraftServer.levelKeys order.
-    fn level_keys() -> Vec<String> {
+    fn level_keys(&self) -> Vec<String> {
         ["overworld", "the_end", "the_nether"]
             .map(|l| format!("minecraft:{l}"))
-            .to_vec()
+            .into_iter()
+            .chain(
+                self.config
+                    .levels
+                    .extra
+                    .iter()
+                    .map(|level| level.id.to_owned()),
+            )
+            .collect()
     }
 
     /// PlayerList.placeNewPlayer for a guest whose saved state is loaded.
@@ -1460,7 +1471,7 @@ impl Hub {
         g.send(&C::Login(play::Login {
             player_id: entity_id,
             hardcore: self.config.hardcore,
-            levels: Self::level_keys(),
+            levels: self.level_keys(),
             max_players: self.config.max_players as i32,
             chunk_radius: self.chunk_radius(),
             simulation_distance: self.config.simulation_distance,
@@ -4505,10 +4516,15 @@ impl Hub {
                 // bow's arrow, a trident, a spear) and a stab use the player's
                 // position and known movement now (#8423): shot after the move, an
                 // arrow left the position of the tick after the release, a tick
-                // ahead of the camera's instead of a tick behind it.
+                // ahead of the camera's instead of a tick behind it. A STAB (8) does
+                // not hold the move: held a tick, the jump the move carries
+                // (handlePlayerPositionChange's jumpFromGround) ran a tick after the
+                // Lunge's impulse, and the server took two moves in the next tick
+                // (lunge_motion, every jump phase).
                 S::PlayerAction(p) => {
+                    let stab = p.action == 8;
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
-                    held = self.move_queued(i);
+                    held = !stab && self.move_queued(i);
                 }
                 // handleUseItem uses the player's position and known movement now:
                 // a later move must not overtake a throw before the game runs it.
@@ -5223,7 +5239,10 @@ impl Hub {
         self.config.dimension = dimension.to_owned();
         self.dimension_type = self
             .sync
-            .id("minecraft:dimension_type", dimension)
+            .id(
+                "minecraft:dimension_type",
+                self.config.levels.dimension_type(dimension),
+            )
             .unwrap_or(0);
         self.encoder
             .set_dimension(self.config.levels.get(dimension));
@@ -6846,11 +6865,10 @@ mod tests {
         );
     }
 
-    /// #8423: a RELEASE_USE_ITEM shoots from the player's position and known
-    /// movement of the last move the server handled; the move the client sent
-    /// after it waits for the next tick, as vanilla handles the two in order.
-    #[test]
-    fn a_release_shoots_before_the_move_behind_it() {
+    /// Drains guest 0's inbox holding a player action (`action`) and the move
+    /// its client sent after it in the same client tick: the packets handed to
+    /// the game, and the guest's position and known movement before.
+    fn drain_action_then_move(action: i32) -> (Hub, Vec<S>, ([f64; 3], [f64; 3])) {
         let (mut hub, _rx) = hub_with_a_guest();
         let before = (hub.guests[0].position, hub.guests[0].known_movement);
         hub.guests.update(0, |guest| {
@@ -6858,7 +6876,7 @@ mod tests {
             let inbox = &mut guest.inbox;
             inbox.push_back((
                 S::PlayerAction(play::PlayerAction {
-                    action: 6,
+                    action,
                     pos: [0; 3],
                     direction: 0,
                     sequence: 0,
@@ -6893,14 +6911,23 @@ mod tests {
             border: &border,
             streaming: None,
         };
-        let events = hub.drain_packets(&mut ctx);
-        let handled: Vec<&S> = events
-            .iter()
+        let handled = hub
+            .drain_packets(&mut ctx)
+            .into_iter()
             .filter_map(|e| match e {
-                HostEvent::Packet(_, p) => Some(&**p),
+                HostEvent::Packet(_, p) => Some(*p),
                 _ => None,
             })
             .collect();
+        (hub, handled, before)
+    }
+
+    /// #8423: a RELEASE_USE_ITEM shoots from the player's position and known
+    /// movement of the last move the server handled; the move the client sent
+    /// after it waits for the next tick, as vanilla handles the two in order.
+    #[test]
+    fn a_release_shoots_before_the_move_behind_it() {
+        let (hub, handled, before) = drain_action_then_move(6);
         assert!(
             matches!(handled[..], [S::PlayerAction(_)]),
             "the game was handed {handled:?}"
@@ -6918,6 +6945,20 @@ mod tests {
             before,
             "the shot's position"
         );
+    }
+
+    /// A STAB's move runs in the same tick: held for the next one, the jump it
+    /// carries came a tick after the Lunge's impulse (lunge_motion).
+    #[test]
+    fn a_stab_keeps_the_move_behind_it_in_its_tick() {
+        let (hub, handled, before) = drain_action_then_move(8);
+        assert!(
+            matches!(handled[..], [S::PlayerAction(_)]),
+            "the game was handed {handled:?}"
+        );
+        let g = &hub.guests[0];
+        assert!(g.inbox.is_empty(), "the move waited for the next tick");
+        assert_eq!(g.position[0], before.0[0] + 0.3, "the move was not handled");
     }
 
     /// The owner's own shoulder parrots are sent when a slot changes.

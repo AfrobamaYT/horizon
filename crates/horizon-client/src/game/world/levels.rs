@@ -564,6 +564,7 @@ impl Game<'_> {
                 Dim::Overworld => "level_overworld",
                 Dim::Nether => "level_the_nether",
                 Dim::End => "level_the_end",
+                Dim::Extra(_) => "level_extra",
             });
             if let Err(e) = self.enter_level(dim) {
                 result = Err(e);
@@ -735,7 +736,7 @@ impl Game<'_> {
             .lan
             .as_ref()
             .map_or(&[][..], |h| h.hub.guests.as_slice());
-        let mut dims: Vec<Dim> = [Dim::Overworld, Dim::Nether, Dim::End]
+        let mut dims: Vec<Dim> = Dim::all()
             .into_iter()
             .filter(|d| {
                 // `/forceload`ed chunks, or a native mod's tickets.
@@ -856,7 +857,7 @@ impl Game<'_> {
     /// (`MinecraftServer.stopServer`'s `level.close()` loop), in vanilla's
     /// order of its levels: the Overworld, the Nether, the End.
     pub(super) fn native_levels_closing(&mut self) {
-        for dim in [Dim::Overworld, Dim::Nether, Dim::End] {
+        for dim in Dim::all() {
             self.native_level_closed(dim);
         }
     }
@@ -888,6 +889,38 @@ fn slowest_steps(notes: &[(f32, String)]) -> String {
         .map(|(ms, what)| format!("{what} {ms:.1}"))
         .collect();
     format!("; slowest: {}", list.join(", "))
+}
+
+impl Game<'_> {
+    /// Rebind only an already-owning transfer, before installing it in this level.
+    /// Memory still belongs to the parked source until the caller moves it.
+    pub(super) fn rebind_transferred_entity(
+        &mut self,
+        source: super::Dim,
+        id: u32,
+        entity: &mut impl horizon_mod_runtime::attachments::HasAttachmentLifetime,
+    ) {
+        let slot = entity.attachment_lifetime();
+        if !slot.is_bound() {
+            return;
+        }
+        let Some(level) = self.level(self.dim.id()) else {
+            return;
+        };
+        let Some(map) = self
+            .levels
+            .parked_mut(source)
+            .and_then(|p| p.persist.uuids.get(&id))
+            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+        else {
+            return;
+        };
+        slot.bind(
+            map,
+            self.attachment_indexes.entry(self.dim).or_default(),
+            mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        );
+    }
 }
 
 #[cfg(test)]

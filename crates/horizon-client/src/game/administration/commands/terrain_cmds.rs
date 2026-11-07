@@ -550,6 +550,7 @@ impl Game<'_> {
     /// `LootCommand.dropBlockLoot`: copy the actual block entity's components
     /// into the mine result without removing the source block or its contents.
     pub(super) fn cmd_loot(&mut self, id: &str, ctx: &Context) -> R<i32> {
+        let keep_empty = ctx.literals.iter().any(|literal| literal == "replace");
         // The drops.
         let (drops, table): (Vec<ItemStack>, Option<String>) = match id {
             "loot.loot" | "loot.fish" => {
@@ -572,16 +573,18 @@ impl Game<'_> {
                     let drops = match json["random_sequence"].as_str() {
                         Some(sequence) => {
                             let random = self.rand_sequences.get(sequence, self.level.seed);
-                            world_items!(self).inline_loot_table_with_tool(
+                            world_items!(self).inline_loot_table_for_command(
                                 &json,
                                 held.as_ref(),
                                 random,
+                                keep_empty,
                             )
                         }
-                        None => world_items!(self).inline_loot_table_with_tool(
+                        None => world_items!(self).inline_loot_table_for_command(
                             &json,
                             held.as_ref(),
                             &mut self.world.random,
+                            keep_empty,
                         ),
                     };
                     (drops, None)
@@ -597,13 +600,20 @@ impl Game<'_> {
                     let drops = match world_items!(self).loot_sequence(&table) {
                         Some(seq) => {
                             let random = self.rand_sequences.get(&seq, self.level.seed);
-                            world_items!(self).loot_table(&table, false, held.as_ref(), random)
+                            world_items!(self).loot_table_for_command(
+                                &table,
+                                false,
+                                held.as_ref(),
+                                random,
+                                keep_empty,
+                            )
                         }
-                        None => world_items!(self).loot_table(
+                        None => world_items!(self).loot_table_for_command(
                             &table,
                             false,
                             held.as_ref(),
                             &mut self.world.random,
+                            keep_empty,
                         ),
                     };
                     (drops, None)
@@ -624,23 +634,18 @@ impl Game<'_> {
                         &[&self.target_name(t).plain()],
                     ));
                 }
-                let by_player = matches!(
-                    self.command_source.map(|s| s.entity),
-                    None | Some(Some(Target::Player))
-                );
+                let source = self.command_source.map(|s| s.entity);
+                let by_player = matches!(source, None | Some(Some(Target::Player)));
                 let held = self.slot_get(&super::items::Slot::Inv(self.selected));
-                let drops = match world_items!(self).loot_sequence(&table) {
-                    Some(seq) => {
-                        let random = self.rand_sequences.get(&seq, self.level.seed);
-                        world_items!(self).entity_drops(&ty, by_player, held.as_ref(), random)
-                    }
-                    None => world_items!(self).entity_drops(
-                        &ty,
-                        by_player,
-                        held.as_ref(),
-                        &mut self.world.random,
-                    ),
-                };
+                let drops = self.roll_kill_loot(crate::game::loot_rolls::KillRoll {
+                    kind: &ty,
+                    table: &table,
+                    target: t,
+                    killer: source.unwrap_or(Some(Target::Player)),
+                    by_player,
+                    held: held.as_ref(),
+                    keep_empty,
+                });
                 (drops, Some(table))
             }
             _ => {
@@ -665,23 +670,21 @@ impl Game<'_> {
                 } else {
                     false
                 };
-                let mut drops = match world_items!(self).loot_sequence(&table) {
-                    Some(seq) => {
-                        let random = self.rand_sequences.get(&seq, self.level.seed);
-                        world_items!(self).block_drops(
-                            self.pack.assets.registry,
-                            state,
-                            tool.as_ref(),
-                            random,
-                        )
-                    }
-                    None => world_items!(self).block_drops(
-                        self.pack.assets.registry,
-                        state,
-                        tool.as_ref(),
-                        &mut self.world.random,
-                    ),
+                // LootCommand: the source's entity is `this`, if it has one.
+                let entity = match self.command_source.map(|s| s.entity) {
+                    None | Some(Some(Target::Player)) => Some(self.native_clicker().1 as u32),
+                    Some(Some(Target::Guest(conn))) => self
+                        .player_entity_id_by_connection(Some(conn))
+                        .map(|id| id as u32),
+                    Some(Some(target)) => crate::game::native_entities::target_id(target),
+                    Some(None) => None,
                 };
+                let roll = horizon_client::items::BlockLootRoll {
+                    held: tool.as_ref(),
+                    keep_empty,
+                    ..Default::default()
+                };
+                let mut drops = self.roll_block_loot(p, state, entity, roll);
                 if has_block_entity {
                     for drop in &mut drops {
                         pending.attach(p, drop);
@@ -690,7 +693,10 @@ impl Game<'_> {
                 (drops, Some(table))
             }
         };
-        let drops: Vec<ItemStack> = drops.into_iter().filter(|d| d.count > 0).collect();
+        let drops: Vec<ItemStack> = drops
+            .into_iter()
+            .filter(|d| keep_empty || d.count > 0)
+            .collect();
         // Where they go.
         let mut used: Vec<ItemStack> = Vec::new();
         let literals = &ctx.literals;
@@ -814,7 +820,7 @@ impl Game<'_> {
                         None => first.first().cloned().filter(|_| i == 0),
                     };
                     let Some(slot) = slot else { continue };
-                    let item = drops.get(i).cloned();
+                    let item = drops.get(i).filter(|drop| drop.count > 0).cloned();
                     if self.slot_set_by_command(&slot, item.clone()) {
                         used.push(item.unwrap_or(ItemStack {
                             item: "minecraft:air".into(),
@@ -838,7 +844,7 @@ impl Game<'_> {
             false,
             None,
             |h, _| {
-                let n = counts.iter().copied().find(|c| *c > 0).unwrap_or(1);
+                let n = counts.iter().copied().find(|c| *c > 0).unwrap_or(0);
                 match &table {
                     Some(t) => Text::translate(
                         "commands.drop.success.single_with_table",
@@ -1083,5 +1089,113 @@ mod loot_mine_component_tests {
             failures.is_empty(),
             "actual loot-mine component-copy failures: {failures:#?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod loot_position_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn actual_loot_replacement_retains_the_emitted_zero_slot() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+
+        game.set_allow_commands(true);
+        game.world.chunks.insert(
+            (0, 0),
+            std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+        );
+        game.block_ticks
+            .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("setblock 4 200 4 chest"));
+        let slot = |game: &mut Game<'_>, i| {
+            game.slot_get(&crate::game::commands::items::Slot::Block([4, 200, 4], i))
+        };
+        let reset = |game: &mut Game<'_>| {
+            assert!(game.run_command("item replace block 4 200 4 container.0 with diamond 3"));
+            assert!(game.run_command("item replace block 4 200 4 container.1 with emerald 4"));
+            assert!(game.run_command("item replace block 4 200 4 container.2 with gold_ingot 5"));
+            assert_eq!(
+                slot(game, 0).map(|s| (s.item.to_string(), s.count)),
+                Some(("minecraft:diamond".into(), 3))
+            );
+            assert_eq!(
+                slot(game, 1).map(|s| (s.item.to_string(), s.count)),
+                Some(("minecraft:emerald".into(), 4))
+            );
+        };
+        let table = |counts: &[i32]| {
+            serde_json::json!({"pools":counts.iter().map(|count| serde_json::json!({
+            "rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:iron_ingot",
+                "modifier":{"type":"minecraft:set_count","count":count}}]
+        })).collect::<Vec<_>>()})
+            .to_string()
+        };
+        let time = game.world.game_time;
+        reset(&mut game);
+        assert!(game.run_command(&format!(
+            "loot replace block 4 200 4 container.0 loot {}",
+            table(&[1])
+        )));
+        assert_eq!(
+            slot(&mut game, 0).map(|s| (s.item.to_string(), s.count)),
+            Some(("minecraft:iron_ingot".into(), 1))
+        );
+        reset(&mut game);
+        assert!(game.run_command(&format!(
+            "loot replace block 4 200 4 container.0 loot {}",
+            table(&[0, 1])
+        )));
+        assert!(
+            slot(&mut game, 0).is_none(),
+            "the emitted zero occupies and clears slot0"
+        );
+        assert_eq!(
+            slot(&mut game, 1).map(|s| (s.item.to_string(), s.count)),
+            Some(("minecraft:iron_ingot".into(), 1))
+        );
+        assert_eq!(slot(&mut game, 2).unwrap().count, 5);
+        reset(&mut game);
+        assert!(game.run_command(&format!(
+            "loot replace block 4 200 4 container.0 2 loot {}",
+            table(&[])
+        )));
+        assert!(slot(&mut game, 0).is_none());
+        assert!(slot(&mut game, 1).is_none());
+        assert_eq!(slot(&mut game, 2).unwrap().count, 5);
+        assert_eq!(game.world.game_time, time);
     }
 }

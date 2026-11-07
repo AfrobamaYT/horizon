@@ -5,7 +5,8 @@ use glam::{DVec3, Mat4, Vec3};
 use horizon_client::mesher::Vertex;
 use horizon_client::world_geometry::{self, ModelBatch, WorldGeometry};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, ModelRef, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, ModelRef, RenderLevelStage, WorldDrawUsage, WorldLine,
+    WorldQuad,
 };
 
 impl Game<'_> {
@@ -46,12 +47,22 @@ impl Game<'_> {
         if title {
             return;
         }
+        draw.set_model_cut(entities.len() as u32);
         let view = mod_api::WorldRenderView::new(camera, alpha as f32, self.world.game_time);
+        // RenderLevelStageEvent's stages in frame order, so each one's output follows the
+        // last's; custom geometry and the debug renderers draw with the last, AfterLevel.
+        let (last, earlier) = RenderLevelStage::ALL.split_last().expect("stages");
+        for &stage in earlier {
+            draw.begin_stage(stage);
+            self.native_render_level_stage(stage, &view, draw);
+        }
+        draw.begin_stage(*last);
         self.native_submit_custom_geometry(&view, draw);
         self.follow_debug_selection();
         for id in &self.debug_renderers {
             self.native_debug_renderer_draw(id, &view, draw);
         }
+        self.native_render_level_stage(*last, &view, draw);
         self.commit_model_instances(draw, DVec3::from(camera), entities);
     }
     /// Submit unlit ARGB world lines atomically. Invalid coordinates or widths,
@@ -104,45 +115,36 @@ impl Game<'_> {
             uploaded,
             fields.generation,
         );
-        draw.submit_model(
+        let mut staged = self.prepared_model_draws.borrow_mut();
+        let start = staged.len();
+        let mut gpu_left = if gpu {
+            self.prepared_copy_room(start as u64, instances.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let cut = draw.model_cut();
+        let camera = DVec3::from(draw.camera());
+        let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
+        let result = draw.submit_model(
             ModelBatch {
                 slot: fields.slot,
                 generation: fields.generation,
                 translucent: slot.translucent,
                 bounds: slot.bounds,
-                gpu,
             },
             instances,
             self.view_frustum.as_ref(),
-        )
-    }
-    /// Stage the copies the instance buffer can take, and bake the rest onto the entity stream.
-    pub(super) fn commit_model_instances(
-        &mut self,
-        draw: &mut WorldGeometry,
-        camera: DVec3,
-        entities: &mut Vec<Vertex>,
-    ) {
-        if draw.copy_count() == 0 {
-            return;
-        }
-        let wanted = (0..draw.copy_count())
-            .filter(|&index| draw.copy(index).gpu && draw.copy(index).overlay == 0)
-            .count();
-        let already = self.prepared_model_draws.borrow().len() as u64;
-        let mut gpu_left = self.prepared_copy_room(already, wanted).unwrap_or(0);
-        let cut = entities.len() as u32;
-        let mut staged = self.prepared_model_draws.borrow_mut();
-        for index in 0..draw.copy_count() {
-            let copy = draw.copy(index);
-            let on_gpu = copy.gpu && copy.overlay == 0 && gpu_left > 0;
-            if on_gpu {
+            |copy| {
+                if copy.overlay != 0 || gpu_left == 0 {
+                    return false;
+                }
                 gpu_left -= 1;
-                let mut instance = super::native_block_entity_draw::prepared_instance(
+                let mut instance = builder.instance(
                     world_geometry::row_major_3x4(copy.transform),
                     DVec3::from(copy.origin),
                     camera,
-                    copy.tint,
+                    super::native_block_entity_draw::prepared_tint(copy.tint),
                     copy.light,
                 );
                 instance.tint[3] = (copy.tint >> 24) as f32 / 255.0;
@@ -152,8 +154,23 @@ impl Game<'_> {
                     slot: copy.slot,
                     instance,
                 });
-                continue;
-            }
+                true
+            },
+        );
+        if result.is_err() {
+            staged.truncate(start);
+        }
+        result
+    }
+    /// Bake copies the instance route could not take onto the entity stream.
+    pub(super) fn commit_model_instances(
+        &mut self,
+        draw: &mut WorldGeometry,
+        camera: DVec3,
+        entities: &mut Vec<Vertex>,
+    ) {
+        for index in 0..draw.copy_count() {
+            let copy = draw.copy(index);
             let Some(faces) = self.standalone_geometry.faces(copy.slot) else {
                 continue;
             };
@@ -531,7 +548,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
             let model = grass(game);
-            horizon_client::gfx::cap_prepared_instance_slots(8);
+            horizon_client::gfx::cap_prepared_instance_slots(16_384);
             game.view_frustum = Some(horizon_client::gfx::test_frustum([
                 glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
                 glam::Vec4::W,
@@ -577,13 +594,18 @@ mod tests {
                     1,
                     "a refused batch must draw nothing"
                 );
-                ctx.draw_model_instances(model, &vec![near; 16_383])
+                ctx.draw_model_instances(model, &vec![near; 16_382])
                     .unwrap();
+                let staged = game.prepared_model_draws.borrow().len();
                 assert_eq!(
-                    ctx.draw_model_instances(model, &[near]),
+                    ctx.draw_model_instances(model, &[near, near]),
                     Err(InstanceError::CapacityExceeded)
                 );
+                assert_eq!(ctx.usage().instances_used, 16_383);
+                assert_eq!(game.prepared_model_draws.borrow().len(), staged);
+                ctx.draw_model_instances(model, &[near]).unwrap();
                 assert_eq!(ctx.usage().instances_used, 16_384);
+                game.prepared_model_draws.borrow_mut().clear();
                 ctx.surface.reset([0.0; 3], Mat4::IDENTITY, [0.0, 0.0]);
                 assert_eq!(
                     ctx.draw_model_instances(model, &vec![far; 16_385]),
@@ -593,6 +615,92 @@ mod tests {
                 ctx.draw_model_instances(model, &vec![far; 16_384]).unwrap();
                 assert_eq!(ctx.usage().instances_used, 0);
             }
+        });
+    }
+
+    static STAGES_ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// A line one block long at `x`, so each listener's output can be told apart.
+    fn marker(x: f64) -> mod_api::WorldLine {
+        mod_api::WorldLine::new(
+            [x, 0.0, -1.0],
+            [x + 1.0, 0.0, -1.0],
+            0xFF00_FF00,
+            1.0,
+            mod_api::WorldDepth::Tested,
+        )
+    }
+
+    /// Draws at AfterSky, AfterWeather and AfterLevel, and in `submit_custom_geometry`.
+    struct Staged;
+    #[mod_api::__subscriptions]
+    impl Hooks for Staged {
+        fn submit_custom_geometry(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut SubmitCustomGeometryEvent<'_>,
+        ) {
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(30.0)]).unwrap();
+            }
+        }
+        fn render_level_stage(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::RenderLevelStageEvent<'_>,
+        ) {
+            let x = match event.stage {
+                RenderLevelStage::AfterSky => 10.0,
+                RenderLevelStage::AfterWeather => 20.0,
+                RenderLevelStage::AfterLevel => 40.0,
+                _ => return,
+            };
+            if STAGES_ARMED.load(Ordering::Relaxed) {
+                event.draw.lines(&[marker(x)]).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn each_stage_is_asked_in_frame_order_and_its_lines_draw_there() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            mod_api::__private::install(vec![ModEntry::new("staged", Box::new(Staged))].into());
+            STAGES_ARMED.store(true, Ordering::Relaxed);
+            let mut draw = WorldGeometry::default();
+            game.fill_world_geometry(
+                false,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            STAGES_ARMED.store(false, Ordering::Relaxed);
+            let batch = draw.batch();
+            let starts: Vec<f32> = batch.lines.iter().map(|line| line[0]).collect();
+            assert_eq!(
+                starts,
+                [10.0, 20.0, 30.0, 40.0],
+                "stages in frame order, custom geometry just before AfterLevel"
+            );
+            // AfterSky holds the first line, AfterOpaqueBlocks and AfterTranslucentBlocks none,
+            // AfterWeather the second, AfterLevel the rest.
+            assert_eq!(
+                batch.stage_ends,
+                [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 2, 0]]
+            );
+            // A title view draws no world: nothing, and every stage empty.
+            game.fill_world_geometry(
+                true,
+                [0.0; 3],
+                Mat4::IDENTITY,
+                0.0,
+                &mut draw,
+                &mut Vec::new(),
+            );
+            assert!(draw.batch().is_empty());
+            assert_eq!(draw.batch().stage_ends, [[0; 4]; 4]);
         });
     }
 
@@ -609,7 +717,7 @@ mod tests {
             mod_api::__private::install(vec![ModEntry::new("batch", Box::new(FillBatch))].into());
             FILL_ARMED.store(true, Ordering::Relaxed);
             let mut draw = WorldGeometry::default();
-            let mut entities = Vec::new();
+            let mut entities = vec![<Vertex as bytemuck::Zeroable>::zeroed(); 4];
             game.fill_world_geometry(
                 false,
                 [0.0; 3],
@@ -625,7 +733,8 @@ mod tests {
                 "fill_world_geometry must commit the accepted copy"
             );
             assert_eq!(draw.usage().instances_used, 0);
-            assert!(entities.is_empty());
+            assert_eq!(entities.len(), 4);
+            assert_eq!(game.prepared_model_draws.borrow()[0].cpu_vertices, 4);
         });
     }
 }

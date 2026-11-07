@@ -520,8 +520,7 @@ impl Launcher {
         // `window.appearance()`, so both draw the same look.
         titlebar::apply_appearance(window, settings.appearance);
         let mut this = Self {
-            theme: Theme::for_appearance(settings.appearance, settings.accent, window.appearance())
-                .with_glass(settings.glass_tint(), settings.glass_blur()),
+            theme: crate::theme::from_settings(&settings, window.appearance()),
             page: Page::from_env(),
             switches: 0,
             content_scroll: Scrollbar::default(),
@@ -1318,7 +1317,7 @@ impl Launcher {
                     let last = self.native_step.take();
                     self.native_progress = None;
                     self.native_started = None;
-                    let cancelled = matches!(&result, Err(e) if e == native_mods::CANCELLED);
+                    let cancelled = matches!(&result, Err(native_mods::Failed::Other(error)) if error == native_mods::CANCELLED);
                     self.native_done = match (&result, cancelled) {
                         (Ok(_), _) => last,
                         (Err(_), true) => Some(tr(native_mods::CANCELLED).into()),
@@ -1329,7 +1328,7 @@ impl Launcher {
                     // A build attempt ended: an open panel reads the log it left.
                     self.native_log.stale = true;
                     if let (Err(e), false) = (result, cancelled) {
-                        self.native_error = Some(e);
+                        self.native_error = Some(String::from(e));
                     }
                 }
                 Msg::LauncherProgress(p) => {
@@ -3175,9 +3174,7 @@ impl Launcher {
                                 .when(latest, |d| {
                                     d.child(caps(tr("auto-update")).flex_none().text_color(t.muted))
                                 })
-                                .when(selected, |d| {
-                                    d.child(div().size(px(6.)).rounded_full().bg(t.accent))
-                                }),
+                                .when(selected, |d| d.child(div().size(px(6.)).bg(t.accent))),
                         )
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             this.pin_version((!latest).then(|| tag.clone()));
@@ -3657,14 +3654,7 @@ impl Launcher {
             .text_size(px(theme::UI.px))
             .line_height(px(21.))
             .text_color(t.ink)
-            .child(
-                div()
-                    .flex_none()
-                    .mt(px(11.))
-                    .size(px(6.))
-                    .rounded_full()
-                    .bg(t.danger),
-            )
+            .child(div().flex_none().mt(px(11.)).size(px(6.)).bg(t.danger))
             .child(body)
     }
 
@@ -3912,6 +3902,7 @@ impl Launcher {
                         Some(appearance.into_any_element()),
                         &t,
                     ))
+                    .child(self.launcher_theme_row(cx))
                     .child(self.accent_row(cx))
                     .child(self.home_background_row(cx))
                     .child(self.language_row(cx))
@@ -4006,6 +3997,11 @@ impl Launcher {
                     &t,
                 )
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Err(error) = this.settings.allow_native_mods() {
+                        this.native_error = Some(error);
+                        cx.notify();
+                        return;
+                    }
                     this.build_native();
                     cx.notify();
                 })),
@@ -5073,10 +5069,11 @@ impl Render for Launcher {
         if self.opening.is_none() && window.focused(cx).is_none() {
             window.focus(&self.root_focus, cx);
         }
-        // Dark: the new design's scene; Light keeps the dawn sky until the design has a light
-        // look.
+        // The glass look draws the new design's scene in the dark appearance; the light look and
+        // the blocky looks keep the baked sky. The sky is tiles that don't depend on the
+        // window's size, so a resize costs no rebake.
         glass::begin_build(window);
-        let sky = if t.dark {
+        let sky = if t.glass && t.dark {
             self.scene.clone().into_any_element()
         } else {
             let (sky, next) = self.sky.render(

@@ -12,6 +12,26 @@ use horizon_launcher::native_mods;
 use horizon_launcher::native_status;
 use horizon_launcher::other_launchers;
 use horizon_launcher::server_list;
+use horizon_launcher::storage::{Category, Storage};
+
+#[derive(Clone, Debug)]
+enum ClearStorage {
+    All,
+    Row(Category),
+}
+
+fn parse_storage_row(value: &str) -> Result<ClearStorage, String> {
+    use clap::ValueEnum;
+    if value == "all" {
+        Ok(ClearStorage::All)
+    } else {
+        Category::ALL
+            .into_iter()
+            .find(|category| category.to_possible_value().unwrap().get_name() == value)
+            .map(ClearStorage::Row)
+            .ok_or_else(|| tr("Unknown").into())
+    }
+}
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -588,7 +608,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// You read the mod's source (the link printed) and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
     },
@@ -603,7 +623,7 @@ enum ModsCmd {
         /// The instance (default: the selected one)
         #[arg(long)]
         instance: Option<String>,
-        /// You read the new source and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
     },
@@ -755,12 +775,11 @@ enum Cmd {
         #[arg(long)]
         accept_eula: bool,
     },
-    /// Show the native compilation cache's size and limit as JSON. Installed games and saves
-    /// are never removed; builds must be idle
-    NativeCache {
-        /// Clear only fast/release compiler outputs. The next changed build recompiles
-        #[arg(long)]
-        clear: bool,
+    /// Show disposable storage by category as JSON. Builds must be idle
+    Storage {
+        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all implemented rows
+        #[arg(long, value_parser = parse_storage_row)]
+        clear: Option<ClearStorage>,
     },
     /// Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod projects against the instance's exact
     /// Horizon source revision with the launcher's own Rust, as the version the instance then
@@ -800,7 +819,7 @@ enum Cmd {
         /// plays (a full rebuild)
         #[arg(long, conflicts_with = "version")]
         update: bool,
-        /// You read the mods' source and trust it with full access to this computer
+        /// Allow native code for this install (remembered; revoke in Settings, Storage)
         #[arg(long)]
         trust_native_code: bool,
         /// The build mode: optimized (the default: the prebuilt game when the mods allow it, else
@@ -1281,11 +1300,15 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 );
             }
         }
-        Cmd::NativeCache { clear } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&native_mods::cache_info(clear)?).unwrap()
-            );
+        Cmd::Storage { clear } => {
+            let storage = Storage::open().map_err(native_mods::cache_error)?;
+            let (row, all) = match clear {
+                Some(ClearStorage::Row(row)) => (Some(row), false),
+                Some(ClearStorage::All) => (None, true),
+                None => (None, false),
+            };
+            let report = storage.report(row, all).map_err(native_mods::cache_error)?;
+            println!("{}", serde_json::to_string_pretty(&report).unwrap());
         }
         Cmd::NativeBuild {
             sync_internals,
@@ -1298,9 +1321,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             trust_native_code,
             profile,
         } => {
-            if !trust_native_code {
-                return Err("Native mods run with full access to this computer. Read their source, then pass --trust-native-code.".into());
-            }
+            native_permission(trust_native_code)?;
             if sync_internals {
                 let entries = native_mods::sync_internals(&folder.expect("required by clap"))?;
                 println!(
@@ -1369,15 +1390,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 None => native_mods::installed_mods(&target.home)?,
             };
             let built =
-                native_mods::build(&base, &folder, &target, profile, steps).map_err(|e| match e
-                    .starts_with(native_mods::MISMATCH)
-                {
-                    true => trf(
-                        "{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's \
-                        folder to pin it to this game, then build again.",
-                        &[("error", &e), ("commit", &base)],
-                    ),
-                    false => e,
+                native_mods::build(&base, &folder, &target, profile, steps).map_err(|error| {
+                    let error = String::from(error);
+                    if error.starts_with(native_mods::MISMATCH) {
+                        trf("{error} Run `cargo horizon-mod update --horizon {commit}` in each mod's folder to pin it to this game, then build again.", &[("error", &error), ("commit", &base)])
+                    } else { error }
                 })?;
             println!(
                 "{built} built and selected for its instance ({:.0} s).",
@@ -2233,6 +2250,13 @@ fn servers(action: ServersCmd, as_json: bool) -> Result<(), String> {
 
 /// Installs the native mods of `found` (a GitHub link, resolved) into the game folder `home`: the
 /// warning and the exact source link first, and nothing downloaded without `trust`.
+fn native_permission(trust: bool) -> Result<(), String> {
+    if trust {
+        backend::Settings::load().allow_native_mods()?;
+    }
+    native_mods::require_consent().map_err(String::from)
+}
+
 fn github_native(
     home: &Path,
     java: bool,
@@ -2247,12 +2271,7 @@ fn github_native(
     println!("{}", found.label());
     println!("Source, to read: {}", found.source_url());
     eprintln!("{}", github_mods::WARNING);
-    if !trust {
-        return Err(format!(
-            "Read the source at {}, then pass --trust-native-code.",
-            found.source_url()
-        ));
-    }
+    native_permission(trust)?;
     let mods = github_mods::fetch(found)?;
     let chosen = github_mods::choose(&mods, only, all);
     let done = chosen.and_then(|chosen| {
@@ -3968,13 +3987,25 @@ mod tests {
 
     #[test]
     fn native_cache_command_and_persisted_limit() {
-        for (args, clear) in [
-            (vec!["horizon-launcher", "native-cache"], false),
-            (vec!["horizon-launcher", "native-cache", "--clear"], true),
-        ] {
-            assert!(matches!(Cli::try_parse_from(args).unwrap().command,
-                Some(Cmd::NativeCache { clear: parsed }) if parsed == clear));
-        }
+        assert!(matches!(
+            Cli::try_parse_from(["horizon-launcher", "storage"])
+                .unwrap()
+                .command,
+            Some(Cmd::Storage { clear: None })
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "all"])
+                .unwrap()
+                .command,
+            Some(Cmd::Storage {
+                clear: Some(ClearStorage::All)
+            })
+        ));
+        assert!(Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "worlds"]).is_err());
+        assert!(Cli::try_parse_from(["horizon-launcher", "native-cache"]).is_err());
+        assert!(
+            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"]).is_ok()
+        );
         let mut settings = backend::Settings::default();
         set_setting(&mut settings, "native-cache-gib", "12").unwrap();
         let saved = serde_json::to_string(&settings).unwrap();
