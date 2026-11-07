@@ -2298,4 +2298,5 @@ mod scoped_edit_tests {
 }
 
 #[cfg(test)]
+#[path = "taken_pass_tests.rs"]
 pub(in crate::game) mod taken_pass_tests;
