@@ -2795,8 +2795,7 @@ impl Game<'_> {
         let stack = stack.try_into_api().ok()?;
         let elements: Vec<TooltipElement> = lines
             .iter()
-            .cloned()
-            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), color))
+            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), *color))
             .chain(images.iter().cloned().map(TooltipElement::Image))
             .collect();
         let mut place = mod_api::TooltipPlace {
