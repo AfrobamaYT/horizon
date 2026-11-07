@@ -9,7 +9,12 @@ fn entry_uses_held_directory_after_root_path_is_redirected() {
     home.seed("cache/output");
     let precious = outside.seed("cache/precious");
     let storage = Storage::at(&home.0).unwrap();
-    let entry = Entry::fixed(&home.0, Path::new("cache"), Category::OtherCaches).unwrap();
+    let entry = Entry::fixed(
+        &Root::open(&home.0).unwrap(),
+        Path::new("cache"),
+        Category::OtherCaches,
+    )
+    .unwrap();
     let moved = home.0.with_extension("original");
     fs::rename(&home.0, &moved).unwrap();
     std::os::unix::fs::symlink(&outside.0, &home.0).unwrap();
@@ -41,7 +46,14 @@ fn hard_linked_outputs_across_entries_count_once() {
     let storage = Storage::at(&home.0).unwrap();
     let entries = ["native/source", "native/patched"]
         .into_iter()
-        .map(|path| Entry::fixed(&home.0, Path::new(path), Category::BuildFiles).unwrap())
+        .map(|path| {
+            Entry::fixed(
+                &Root::open(&home.0).unwrap(),
+                Path::new(path),
+                Category::BuildFiles,
+            )
+            .unwrap()
+        })
         .collect();
     let report = storage.apply(entries, None, false).unwrap();
     let row = report
@@ -82,7 +94,7 @@ fn referenced_jar_path_is_kept_and_unused_jar_is_removed() {
     let unused = home.seed("jars/unused.jar");
     let storage = Storage::at(&home.0).unwrap();
     let mut entries = Vec::new();
-    unused_jars(&mut entries, &home.0).unwrap();
+    unused_jars(&mut entries, &Root::open(&home.0).unwrap()).unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path, unused);
     storage
