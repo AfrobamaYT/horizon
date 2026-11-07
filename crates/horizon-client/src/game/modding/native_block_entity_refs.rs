@@ -792,7 +792,7 @@ mod tests {
             fn player_container_close(
                 &self,
                 host: &mut dyn ServerHost,
-                _event: &PlayerContainerCloseEvent<'_>,
+                _event: &mut PlayerContainerCloseEvent<'_>,
             ) {
                 let case = std::env::var("HORIZON_BE_MENU_CASE").unwrap();
                 if case.starts_with("close") {
