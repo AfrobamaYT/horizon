@@ -318,6 +318,7 @@ impl Game<'_> {
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.
             "minecraft:falling_block" => self.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 id,
@@ -499,10 +500,11 @@ impl Game<'_> {
                 if let (8, Value::Int(fuse)) = (index, value) {
                     t.fuse = *fuse;
                 }
-            } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
+            } else if let Some(i) = self.falling.iter().position(|f| f.id == id) {
                 // FallingBlockEntity.DATA_START_POS (the model's seed).
                 if let (8, Value::Pos(p)) = (index, value) {
-                    f.start_pos = BlockPos::new(p[0], p[1], p[2]);
+                    self.falling
+                        .update(i, |f| f.start_pos = BlockPos::new(p[0], p[1], p[2]));
                 }
             } else if let Some(c) = self.crystals.iter_mut().find(|c| c.id == id) {
                 // EndCrystal.DATA_BEAM_TARGET and DATA_SHOW_BOTTOM.
@@ -673,12 +675,12 @@ impl Game<'_> {
         // itself between the server's updates (every 20 ticks), then waits
         // where it lands for the server to place it and remove it.
         let mut falling = std::mem::take(&mut self.falling);
-        for f in &mut falling {
+        falling.for_each_mut(|f| {
             if let Ok(FallStep::Landed(_)) = self.fall_step(f, false, &[]) {
                 // Block.updateEntityMovementAfterFallOn, then the air drag.
                 f.velocity = Vec3::new(f.velocity.x * 0.98, 0.0, f.velocity.z * 0.98);
             }
-        }
+        });
         self.falling = falling;
         // Projectiles tick on the client too and fly on between the tracker's
         // updates (10 to 20 ticks apart); a block stops them there, and only

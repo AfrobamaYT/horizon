@@ -239,7 +239,8 @@ pub trait BlockEntityDrawContext {
     }
     /// Draws the resolved standalone model under `draw`'s pose: unturned, from
     /// the block's lower north-west corner, lit by `draw.light`. Faces with a tint
-    /// index are multiplied by 0xRRGGBB `tint` (0xFFFFFF for none), others unchanged.
+    /// index are multiplied by `tint` (`0xAARRGGBB`, the same as [`crate::WorldQuad::color`];
+    /// `0xFFFFFFFF` for none), alpha included. Faces with no tint index stay opaque.
     /// A stale generation or absent slot returns an error without appending geometry.
     fn model(&mut self, model: ModelRef, tint: u32) -> Result<(), ModelError> {
         unimplemented!("BlockEntityDrawContext::draw_model")
