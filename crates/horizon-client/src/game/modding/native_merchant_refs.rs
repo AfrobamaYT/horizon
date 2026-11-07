@@ -436,6 +436,7 @@ pub(super) mod tests {
                 villager.set_offer(game, 2, changed.try_into_api().unwrap()),
                 Ok(false)
             );
+            // Empty and unknown engine stacks are refused before an API offer exists.
             let mut bad = changed.clone();
             bad.result.count = 0;
             assert_eq!(bad.try_into_api(), Err(StackReadError::Empty));
