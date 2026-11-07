@@ -133,9 +133,14 @@ pub(super) fn stage(
                     Ok((input.parse::<syn::Signature>()?, None))
                 }
             };
-            let (signature, owner) = parse
-                .parse_str(&item.signature)
-                .map_err(|error| error.to_string())?;
+            let (signature, owner) = parse.parse_str(&item.signature).map_err(|_| {
+                InjectError::Invalid {
+                    id: inject.id.clone(),
+                    field: "at",
+                    fix: "source listeners require a function signature",
+                }
+                .to_string()
+            })?;
             let adapter = lower(
                 Entry {
                     inject,

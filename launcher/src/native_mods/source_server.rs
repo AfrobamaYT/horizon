@@ -84,7 +84,7 @@ fn run(functions: bool, private: bool) {
         returns.with = "return_value".into();
         fs::write(
             bundle.dir.join("src/lib.rs"),
-            include_str!("../../../tools/fixtures/native-slot-order/functions.rs"),
+            include_str!("../../../tools/fixtures/native-slot-order/src/functions.rs"),
         )
         .unwrap();
     }
