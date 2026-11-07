@@ -250,7 +250,7 @@ pub(super) fn collect_key_mappings<'declared>(
 }
 
 /// The native mods' entity model layers (`native_layer_definitions`), kept
-/// once at start for `native_bake_layer`.
+/// once at start for `bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -267,6 +267,15 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     let mut entries = Vec::new();
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
+}
+/// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
+/// refresh of the list (`Game::refresh_debug_renderers`).
+pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
+    let mut renderers = Vec::new();
+    if role.is_client() {
+        Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+    }
+    renderers
 }
 /// The native mods' numeric item model properties
 /// (`native_register_range_select_item_model_property`), kept once at start, before
@@ -1170,6 +1179,123 @@ mod tests {
         assert_eq!(
             death_loot_table(&zombie, true).as_deref(),
             Some("minecraft:entities/zombie")
+        );
+    }
+
+    /// A mod's declared attribute set (#845, `EntityAttributeCreationEvent`)
+    /// reaches everything a mob of the type is: the fields it spawns with,
+    /// the finalize defaults and the live attribute map's catalog row —
+    /// built from the template's, so the reads of #1469 and #1493 answer the
+    /// declared values with no second copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_entity_attributes_reach_spawn_and_the_live_map() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let declared = [
+            ("minecraft:max_health".to_string(), 55.0),
+            ("minecraft:movement_speed".to_string(), 0.4),
+        ];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let base = |catalog: &Catalog, entity: &str, name: &str| {
+            catalog.default_base(entity, catalog.id(name).unwrap())
+        };
+        // The declared values, and the template's row under them.
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:max_health"),
+            Some(55.0)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:movement_speed"),
+            Some(0.4)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:attack_damage"),
+            base(&catalog, "minecraft:zombie", "minecraft:attack_damage")
+        );
+        // The live map builds for the type and answers the declared values.
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged.clone()),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(55.0)
+        );
+        // The type's fields spawn with them: the merged row takes the type's
+        // attribute map and fields (`take_attribute_row`).
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(ghoul.health, 55.0, "the spawn's health");
+        assert_eq!(ghoul.attrs.max_health, 55.0);
+        assert_eq!(ghoul.attrs.speed, 0.4);
+        assert_eq!(
+            ghoul.kind.attributes.get("minecraft:max_health"),
+            Some(&55.0),
+            "the finalize defaults read the declared value"
+        );
+    }
+
+    /// A declared set's merged row — the template's with the declared set on
+    /// top — is the type's one record: a content row's own value (the
+    /// ghoul's 40 health) gives way to the template's, so a mob of the type
+    /// spawns with what the live attribute map answers (#845, review).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_declared_type_spawns_with_its_merged_row_not_its_content_row() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        // Only the speed is declared: the merged row keeps the template's
+        // health (a zombie's 20), not the content row's 40.
+        let declared = [("minecraft:movement_speed".to_string(), 0.4)];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        assert_eq!(ghoul.max_health, 40.0, "the content row's own value");
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(
+            ghoul.health, 20.0,
+            "the template's health through the merged row"
+        );
+        assert_eq!(ghoul.attrs.max_health, 20.0);
+        assert_eq!(ghoul.attrs.speed, 0.4, "the declared speed");
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(20.0),
+            "the live map answers the same row"
         );
     }
 

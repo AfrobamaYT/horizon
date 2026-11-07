@@ -16,10 +16,33 @@ It supports function points, listed call sites, and source-spliced helpers:
   [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) before it is compiled. The game is
   rebuilt from source.
 
-A `mod.wasm` listens at points too: its `horizon-mod.toml` lists the same point injections, with no
-`[native]` pins, and the game fills those places from the `mod.wasm` at load, with no game rebuild and no
-compiler ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Helper injections are
-native-only: a mod that needs one cannot be a wasm mod until the hook exists.
+A `mod.wasm` listens at API function slots through `[[inject]]` and crate-root functions, not the
+native trait form ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)). Its separate
+raw internals schema requires `raw`. Helper injections are native-only.
+
+## Unified native slot declarations
+
+Native internals listeners can use `[[inject]]` with a crate-root function instead of a trait method:
+
+```toml
+[[inject]]
+id = "before_tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "before_tick"
+access = "internals"
+hash = "<the function hash in internals.json>"
+```
+
+The function takes the slot's exact receiver and raw record types from the generated internals
+facade. `head`, `return` and `modify_arg` use function slots. `before_call`, `after_call`,
+`modify_call_arg`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
+`nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
+`mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
+hash or missing target is refused, not silently redirected. Points order by descending priority,
+then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
+and inject id order. API listeners, source injects, `replace`, locals and extension fields are explicitly
+refused until their corresponding implementations land. These declarations are native-only for now.
 
 ## Unified native slot declarations
 
@@ -100,7 +123,7 @@ the event, and writes take `host`.
 
 | Form | Kinds | Where | Order | Game rebuild | `mod.wasm` |
 | --- | --- | --- | --- | --- | --- |
-| `trait_method` (point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | yes |
+| `trait_method` (native point) | `HEAD`, `RETURN` | `Game` methods | dependency order | no | no |
 | `raw` (call site) | six kinds below | listed calls | priority descending, then mod id, then injection id | no | no |
 | `helper` | any | any crate | priority descending, then mod id, then injection id | yes | no |
 | Hook or Part method (no injection) | — | — | dependency order | no | yes |

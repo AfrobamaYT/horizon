@@ -1477,7 +1477,7 @@ impl Game<'_> {
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    let left = g.give(ItemStack {
+                    let left = g.add_stack_to_inventory(ItemStack {
                         item: id.as_str().into(),
                         count: size as u32,
                         damage,
@@ -1715,12 +1715,14 @@ impl Game<'_> {
                 }
             }
             Target::Boat(id) => {
-                if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                    b.position = v;
-                    b.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(b, r);
-                    }
+                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                    self.boats.update(i, |b| {
+                        b.position = v;
+                        b.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(b, r);
+                        }
+                    });
                 }
             }
             Target::Cart(id) => {

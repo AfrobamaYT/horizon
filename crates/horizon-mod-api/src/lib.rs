@@ -66,6 +66,22 @@ pub enum GameRuleError {
     Duplicate,
 }
 
+/// Why an entity type's attribute declaration was refused
+/// ([`Registrar::declare_entity_attributes`](crate::Registrar)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EntityAttributeError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// The set declares the same attribute twice.
+    DuplicateAttribute,
+    /// A base value is not finite.
+    NotFinite,
+    /// Another declaration already covers the entity type.
+    Duplicate,
+}
+
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
@@ -1084,7 +1100,7 @@ pub struct NativeScreenView<'a> {
     /// the inventory menu's). Counted, not listed.
     pub slots: usize,
     /// The pointer in GUI pixels (`Screen.mouseX`, `mouseY`, from the
-    /// window's top left), as `native_cursor` gives it: for hover highlights.
+    /// window's top left), as `cursor` gives it: for hover highlights.
     pub mouse: [f32; 2],
     /// This frame's partial tick (`getGameTimeDeltaPartialTick(false)`, 0 to
     /// 1): what the screen draws animation against.
@@ -1179,7 +1195,7 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// An item the panel shows (`native_panel_items`): its id
+/// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1198,7 +1214,7 @@ pub struct NativeStack {
 #[non_exhaustive]
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
-    /// `native_panel_items`' list.
+    /// `panel_items`' list.
     Clicked {
         /// The item's index in the panel's list.
         index: u32,

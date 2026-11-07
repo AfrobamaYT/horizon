@@ -240,12 +240,13 @@ impl Game<'_> {
         if let Some(i) = boat {
             // AbstractBoat.tick on the server for a boat its rider drives:
             // only the hurt animation and the damage wear off here.
-            let b = &mut self.boats[i];
-            b.hurt_time = (b.hurt_time - 1).max(0);
-            b.damage = (b.damage - 1.0).max(0.0);
-            // `Entity.ejectPassengers`: every player in the boat must see
-            // the request; the common boat tick clears it once nobody rides.
-            ejected = b.eject_riders;
+            ejected = self.boats.update(i, |b| {
+                b.hurt_time = (b.hurt_time - 1).max(0);
+                b.damage = (b.damage - 1.0).max(0.0);
+                // `Entity.ejectPassengers`: every player in the boat must see
+                // the request; the common boat tick clears it once nobody rides.
+                b.eject_riders
+            });
         }
         // ServerGamePacketListenerImpl.tick: the vehicle's last good position
         // is where it is now, so a move the server made (a piston, a push)
@@ -535,13 +536,14 @@ impl Game<'_> {
         let Some(i) = boat else {
             return;
         };
-        let b = &mut self.boats[i];
-        b.previous = old;
-        b.velocity = target.subtract(old);
-        b.position = target;
-        b.previous_yaw = b.yaw;
-        b.yaw = p.yaw;
-        b.on_ground = p.on_ground;
+        self.boats.update(i, |b| {
+            b.previous = old;
+            b.velocity = target.subtract(old);
+            b.position = target;
+            b.previous_yaw = b.yaw;
+            b.yaw = p.yaw;
+            b.on_ground = p.on_ground;
+        });
         let seat = self.player_boat_seat(i);
         let Some(host) = self.lan.as_mut() else {
             return;
@@ -587,9 +589,11 @@ impl Game<'_> {
         let Some(vehicle) = vehicle.filter(|&v| self.guest_controls_vehicle(conn, v)) else {
             return;
         };
-        if let Some(b) = self.boats.iter_mut().find(|b| b.id == vehicle) {
-            b.paddling = paddles;
-            b.paddle_controller = true;
+        if let Some(i) = self.boats.iter().position(|b| b.id == vehicle) {
+            self.boats.update(i, |b| {
+                b.paddling = paddles;
+                b.paddle_controller = true;
+            });
         }
     }
 }

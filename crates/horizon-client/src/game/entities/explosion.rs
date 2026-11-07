@@ -798,8 +798,10 @@ impl Game<'_> {
                         }
                     }
                     EntityHandle::Boat(_) => {
-                        if let Some(b) = self.boats.iter_mut().find(|b| b.id == entity) {
-                            b.push_from_explosion(push);
+                        if let Some(i) = self.boats.iter().position(|b| b.id == entity) {
+                            self.boats.update(i, |b| {
+                                b.push_from_explosion(push);
+                            });
                         }
                     }
                     other => with_entity_mut!(self, other, e => e.push_from_explosion(push)),

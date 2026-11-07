@@ -291,11 +291,11 @@ impl Game<'_> {
         let previous = self.camera_type;
         let mut next = previous.cycle();
         self.native_camera_type_cycle(previous, &mut next);
-        self.set_camera_type(next);
+        self.apply_camera_type(next);
     }
     /// `Options.setCameraType`, then `Minecraft.handleKeybinds`' check: the chain
     /// follows the first-person view.
-    pub(super) fn set_camera_type(&mut self, camera_type: CameraType) {
+    pub(super) fn apply_camera_type(&mut self, camera_type: CameraType) {
         self.requested_camera_type.take();
         let previous = self.camera_type;
         self.camera_type = camera_type;
@@ -309,7 +309,7 @@ impl Game<'_> {
             return false;
         };
         let changed = self.camera_type != camera_type;
-        self.set_camera_type(camera_type);
+        self.apply_camera_type(camera_type);
         changed
     }
     /// `Camera.update` (`alignWithEntity` and `getMaxZoom`): the

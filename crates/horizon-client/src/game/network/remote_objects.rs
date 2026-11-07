@@ -60,11 +60,11 @@ impl Game<'_> {
                     m.extra.leash = Some(Holder::Knot(block));
                 }
             }
-            for b in &mut self.boats {
+            self.boats.for_each_mut(|b| {
                 if b.leash == Some(Holder::Mob(id)) {
                     b.leash = Some(Holder::Knot(block));
                 }
-            }
+            });
         } else if let Some(shows) = match kind {
             "minecraft:text_display" => Some(super::text_displays::Shows::Text),
             "minecraft:block_display" => Some(super::text_displays::Shows::Block),
@@ -259,19 +259,21 @@ impl Game<'_> {
                 if let (8, Value::Id(color)) = (index, value) {
                     c.color = (*color).clamp(0, 15) as u8;
                 }
-            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                // VehicleEntity's hurt, direction and damage; the paddles and
-                // the bubble time.
-                match (index, value) {
-                    (8, Value::Int(v)) => b.hurt_time = *v,
-                    (9, Value::Int(v)) => b.hurt_dir = *v,
-                    (10, Value::Float(v)) => b.damage = *v,
-                    (11, Value::Bool(v)) => b.paddling[0] = *v,
-                    (12, Value::Bool(v)) => b.paddling[1] = *v,
-                    // AbstractBoat.DATA_ID_BUBBLE_TIME.
-                    (13, Value::Int(v)) => b.bubble_time = *v,
-                    _ => {}
-                }
+            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                self.boats.update(i, |b| {
+                    // VehicleEntity's hurt, direction and damage; the paddles and
+                    // the bubble time.
+                    match (index, value) {
+                        (8, Value::Int(v)) => b.hurt_time = *v,
+                        (9, Value::Int(v)) => b.hurt_dir = *v,
+                        (10, Value::Float(v)) => b.damage = *v,
+                        (11, Value::Bool(v)) => b.paddling[0] = *v,
+                        (12, Value::Bool(v)) => b.paddling[1] = *v,
+                        // AbstractBoat.DATA_ID_BUBBLE_TIME.
+                        (13, Value::Int(v)) => b.bubble_time = *v,
+                        _ => {}
+                    }
+                });
             } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
                 match (index, value) {
                     (8, Value::Int(v)) => c.hurt_time = *v,
@@ -337,15 +339,17 @@ impl Game<'_> {
         let id = id as u32;
         // The boat the player drives turns here (isLocalInstanceAuthoritative).
         let driven = self.riding.filter(|&id| self.controls_boat(id));
-        if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-            if Some(id) == driven {
-                return;
-            }
-            // AbstractBoat keeps a LinearInterpolationHandler: the new yaw is
-            // the target of the three-tick lerp (`tick_remote_objects`), not
-            // the boat's yaw at once.
-            let _ = yaw;
-            b.on_ground = on_ground;
+        if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+            self.boats.update(i, |b| {
+                if Some(id) == driven {
+                    return;
+                }
+                // AbstractBoat keeps a LinearInterpolationHandler: the new yaw is
+                // the target of the three-tick lerp (`tick_remote_objects`), not
+                // the boat's yaw at once.
+                let _ = yaw;
+                b.on_ground = on_ground;
+            });
         } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id)
             && let Some(yaw) = yaw
         {
@@ -415,9 +419,9 @@ impl Game<'_> {
         }
         // The boat the player drives moves here, not where the server says.
         let driven = self.riding.filter(|&id| self.controls_boat(id));
-        for b in &mut self.boats {
+        self.boats.for_each_mut(|b| {
             if Some(b.id) == driven {
-                continue;
+                return;
             }
             b.previous = b.position;
             b.previous_yaw = b.yaw;
@@ -425,7 +429,7 @@ impl Game<'_> {
             // step toward the server's with the position.
             b.yaw = turn(b.id, b.yaw);
             b.position = step(b.id, b.position);
-        }
+        });
         for a in &mut self.armor_stands {
             a.position = step(a.id, a.position);
         }

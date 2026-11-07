@@ -2719,6 +2719,7 @@ dependencies = [
  "horizon-protocol",
  "horizon-release-sign",
  "horizon-server-launch",
+ "horizon-shader-api",
  "horizon-system",
  "horizon-theme",
  "horizon-world",

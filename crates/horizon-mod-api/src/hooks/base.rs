@@ -116,20 +116,10 @@ pub trait Hooks {
     #[hook(side = "server", contract = "listen", fabric = ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"], neoforge = "ServerTickEvent.Pre, ServerTickEvent.Post")]
     fn server_tick();
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.START_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Pre"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Pre")]
     fn level_tick_pre();
     /// After a successful authoritative server level tick pass.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.END_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Post"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Post")]
     fn level_tick_post();
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
@@ -4809,4 +4799,10 @@ requires a farmer at work and `mob_griefing` enabled."#]
         target = "horizon_client_lib::motion::native_living_jump"
     )]
     fn living_jump();
+}
+
+/// Original upstream notes; the existing fork event above owns this moment.
+pub trait UpstreamNotes {
+    #[notes = r###"a dead player's respawn point: `native_player_respawn_position(player, name, dimension, pos, yaw, pitch)` is heard once per respawn before the player is placed (NeoForge's `PlayerRespawnPositionEvent`, Bukkit's `PlayerRespawnEvent.setRespawnLocation`), with their bed, anchor, forced point or the world spawn. A changed dimension or position places the player exactly there, with no bed or anchor used; yaw and pitch set their look. An unknown dimension or a non-finite value leaves that part unchanged. Bundles that use it need `"hooks": @API:player_respawn_position@`."###]
+    fn player_respawn_position();
 }

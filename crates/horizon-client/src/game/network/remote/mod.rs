@@ -3203,7 +3203,7 @@ impl Game<'_> {
         }
     }
     /// Map a menu slot to Horizon's inventory screen slot ids.
-    pub(super) fn menu_slot(menu: &str, slot: i32) -> Option<usize> {
+    pub(super) fn inventory_screen_slot(menu: &str, slot: i32) -> Option<usize> {
         let s = usize::try_from(slot).ok()?;
         // A container of `n` slots, then the inventory and the hotbar.
         let slots = |n: usize| -> Option<usize> {
@@ -3294,7 +3294,7 @@ impl Game<'_> {
     /// Find a game slot in the menu's complete, contiguous slot mapping.
     pub(super) fn menu_slot_index(menu: &str, internal: usize) -> Option<usize> {
         (0..)
-            .map_while(|slot| Self::menu_slot(menu, slot))
+            .map_while(|slot| Self::inventory_screen_slot(menu, slot))
             .position(|slot| slot == internal)
     }
     /// The workstation screen of a menu type a server opens.
@@ -3329,7 +3329,7 @@ impl Game<'_> {
         if container != 0 && menu == "inventory" {
             return;
         }
-        let Some(internal) = Self::menu_slot(&menu, slot) else {
+        let Some(internal) = Self::inventory_screen_slot(&menu, slot) else {
             return;
         };
         if internal == 200 {
@@ -3409,7 +3409,7 @@ impl Game<'_> {
         }
     }
 
-    fn handle_packet(&mut self, packet: C) -> Result<()> {
+    pub(in crate::game) fn handle_packet(&mut self, packet: C) -> Result<()> {
         self.observe_client_packet(&packet);
         match packet {
             // ClientCommonPacketListenerImpl.handlePing runs on the game
@@ -3453,7 +3453,7 @@ impl Game<'_> {
                 if let Err(e) = self.resolve_parts() {
                     log::warn!("Horizon: {e}");
                 }
-                self.native_refresh_render_visibility();
+                self.refresh_render_visibility();
                 self.test_highlights.clear();
                 self.forget_synced_recipes();
                 self.level.hardcore = p.hardcore;
@@ -3495,6 +3495,9 @@ impl Game<'_> {
                     r.reduced_debug_info = p.reduced_debug_info;
                     r.do_limited_crafting = p.limited_crafting;
                 }
+                self.refresh_debug_renderers();
+                // LocalPlayer.setReducedDebugInfo always rebuilds, also on a second login.
+                self.debug_entries.invalidate();
                 self.streaming.radius =
                     self.settings.render_distance.min(p.chunk_radius + 1).max(2);
                 // handleLogin: startWaitingForNewLevel(.., Reason.OTHER).
@@ -3512,6 +3515,8 @@ impl Game<'_> {
                 }
             }
             C::Respawn(p) => {
+                // The new LocalPlayer copies reduced debug info through its setter.
+                self.debug_entries.invalidate();
                 let old_player = self.remote.as_ref().map(|r| (r.entity_id, r.profile));
                 if let Some(r) = self.remote.as_ref() {
                     self.audio.remove_sound_entity(r.entity_id as u32);
@@ -3891,9 +3896,11 @@ impl Game<'_> {
                 };
                 if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.source as u32) {
                     m.extra.leash = holder;
-                } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == p.source as u32) {
-                    // A leashed boat or raft (AbstractBoat is Leashable).
-                    b.leash = holder;
+                } else if let Some(i) = self.boats.iter().position(|b| b.id == p.source as u32) {
+                    self.boats.update(i, |b| {
+                        // A leashed boat or raft (AbstractBoat is Leashable).
+                        b.leash = holder;
+                    });
                 }
             }
             C::MoveVehicle(p) => self.remote_move_vehicle(p.position, p.yaw),
@@ -4401,6 +4408,7 @@ impl Game<'_> {
                     && let Some(r) = self.remote.as_mut().filter(|r| r.entity_id == p.id)
                 {
                     r.reduced_debug_info = p.event == 22;
+                    self.debug_entries.invalidate();
                 }
                 // Ravager.handleEntityEvent 69: the roar's puff and push.
                 if p.event == 69 {
@@ -6405,7 +6413,7 @@ impl Game<'_> {
             .then(|| {
                 (mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
                     || mod_api::__private::listened(mod_api::HookId::PlayerTickPost))
-                .then(|| self.native_local_player())
+                .then(|| self.local_player())
                 .flatten()
             })
             .flatten();
@@ -6779,7 +6787,7 @@ impl Game<'_> {
         ];
         if self.screen == Screen::Dead
             || p.spectator
-            || self.block_in_tag("minecraft:climbable", &self.block_name(feet))
+            || self.named_block_in_tag("minecraft:climbable", &self.block_name(feet))
         {
             return Vec3::ZERO;
         }
@@ -8533,7 +8541,7 @@ impl Game<'_> {
     /// ItemStack.useOn's adventure predicate before selecting this phase.
     fn predict_map_on_banner(&self, stack: &ItemStack, hit: &super::Hit) -> bool {
         super::maps::map_id(stack).is_some()
-            && self.block_in_tag("minecraft:banners", &self.block_name(hit.pos))
+            && self.named_block_in_tag("minecraft:banners", &self.block_name(hit.pos))
     }
 
     /// `BoneMealItem.useOn` with the acting hand's `stack` on this client's
@@ -9901,7 +9909,7 @@ impl Game<'_> {
     /// ClientPacketListener.sendChat / sendCommand, signed with a chat
     /// session (game/network/remote_chat.rs). The Chat option's Hidden and System
     /// levels keep chat out and Hidden keeps the commands out (ChatAbilities).
-    pub(super) fn send_chat(&mut self, message: &str) {
+    pub(super) fn send_signed_chat_input(&mut self, message: &str) {
         let message = message.trim();
         if message.is_empty() || !self.chat_abilities().allows(message) {
             return;
@@ -9918,7 +9926,7 @@ impl Game<'_> {
     /// ChatScreen.handleChatInput fires the client event for chat, not commands.
     pub(super) fn send_chat_from_screen(&mut self, message: &str) {
         if message.starts_with('/') || !mod_api::__private::listened(mod_api::HookId::ClientChat) {
-            self.send_chat(message);
+            self.send_signed_chat_input(message);
         } else if let Some(uuid) = self.remote.as_ref().map(|r| r.profile) {
             let id = self.own_entity_id();
             let sent = chat_after_event(message, |outgoing, cancel| {
@@ -10009,7 +10017,7 @@ impl Game<'_> {
             // player's own InventoryMenu, and its CreativeInventoryListener sends each slot that
             // changed (SetCreativeModeSlot). No ContainerClick: a server holding the carried
             // stack would give it back after the Destroy Item slot cleared it (#3307).
-            self.menu_click(Some(internal), i32::from(right), input);
+            self.click_open_inventory(Some(internal), i32::from(right), input);
             return;
         }
         self.remote_menu_ops(&[(Some(internal), i32::from(right), input)]);
@@ -11822,7 +11830,7 @@ mod tests {
             );
 
             let health = "minecraft:max_health";
-            let living = game.native_living(game.native_entity(42).unwrap()).unwrap();
+            let living = game.living(game.entity(42).unwrap()).unwrap();
             // Before the server says anything, the client's own map holds the
             // type's defaults, as a vanilla client's does before its sync.
             assert_eq!(living.attribute_value(game, health), Some(20.0));
@@ -11862,7 +11870,7 @@ mod tests {
 
             // The mob's attributes are the server's business: no client state,
             // no read.
-            let mob = mod_api::LivingRef::new(game.native_entity(60).unwrap());
+            let mob = mod_api::LivingRef::new(game.entity(60).unwrap());
             assert_eq!(mob.attribute_value(game, health), None);
             assert_eq!(mob.attribute_base(game, health), None);
             assert_eq!(mob.attribute_modifiers(game, health), None);
@@ -12281,11 +12289,17 @@ mod tests {
             ("minecraft:furnace", 39, 300, 8),
             ("minecraft:brewing_stand", 41, 300, 8),
         ] {
-            assert_eq!(super::Game::menu_slot(name, 0), Some(first));
-            assert_eq!(super::Game::menu_slot(name, count - 1), Some(last));
-            assert_eq!(super::Game::menu_slot(name, count), None);
+            assert_eq!(super::Game::inventory_screen_slot(name, 0), Some(first));
+            assert_eq!(
+                super::Game::inventory_screen_slot(name, count - 1),
+                Some(last)
+            );
+            assert_eq!(super::Game::inventory_screen_slot(name, count), None);
         }
-        assert_eq!(super::Game::menu_slot("minecraft:unknown", 0), None);
+        assert_eq!(
+            super::Game::inventory_screen_slot("minecraft:unknown", 0),
+            None
+        );
     }
 
     /// A client connecting through a local pipe and through configuration, as
@@ -12383,25 +12397,25 @@ mod tests {
         with_game(|game| {
             let (mut reader, _writer) = connect_menu_test(game);
             assert!(
-                game.native_local_player()
-                    .and_then(|player| game.native_menu_ref(player))
+                game.local_player()
+                    .and_then(|player| game.player_container_menu(player))
                     .is_none()
             );
             let spawn = spawn_menu_test(game);
             let menu = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
-            assert_eq!(game.native_menu_slot_count(menu), Some(46));
-            assert_eq!(game.native_menu_slot(menu, 46), None);
-            assert_eq!(game.native_menu_slot(menu, 36), Some(None));
+            assert_eq!(game.menu_slot_count(menu), Some(46));
+            assert_eq!(game.menu_slot(menu, 46), None);
+            assert_eq!(game.menu_slot(menu, 36), Some(None));
             let stone = Some(Stack::new(game.item_id("minecraft:stone"), 3));
             game.handle_packet(C::SetPlayerInventory(play::SetPlayerInventory {
                 slot: 0,
                 item: stone.clone(),
             }))
             .unwrap();
-            assert_eq!(game.native_menu_slot(menu, 36).unwrap().unwrap().count, 3);
+            assert_eq!(game.menu_slot(menu, 36).unwrap().unwrap().count, 3);
             use mod_api::{DragKind, MenuClick, MouseButton, SwapWith};
             let pickup = |slot| MenuClick::Pickup {
                 slot: Some(slot),
@@ -12505,7 +12519,7 @@ mod tests {
                 item: stone.clone(),
             }))
             .unwrap();
-            assert_eq!(game.native_menu_carried(menu).unwrap().unwrap().count, 3);
+            assert_eq!(game.menu_carried(menu).unwrap().unwrap().count, 3);
             let crafting_id = game
                 .remote
                 .as_ref()
@@ -12523,13 +12537,13 @@ mod tests {
                 })
             };
             game.handle_packet(open()).unwrap();
-            assert_eq!(game.native_menu_slot_count(menu), None);
+            assert_eq!(game.menu_slot_count(menu), None);
             assert!(!menu.click(game, &[pickup(36)]));
             let crafting = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
-            assert_eq!(game.native_menu_slot_count(crafting), Some(46));
+            assert_eq!(game.menu_slot_count(crafting), Some(46));
             game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
                 container: 7,
                 state: 0,
@@ -12537,10 +12551,7 @@ mod tests {
                 item: stone.clone(),
             }))
             .unwrap();
-            assert_eq!(
-                game.native_menu_slot(crafting, 1).unwrap().unwrap().count,
-                3
-            );
+            assert_eq!(game.menu_slot(crafting, 1).unwrap().unwrap().count, 3);
             game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
                 container: 7,
                 state: 0,
@@ -12548,27 +12559,24 @@ mod tests {
                 item: stone,
             }))
             .unwrap();
-            assert_eq!(
-                game.native_menu_slot(crafting, 0).unwrap().unwrap().count,
-                3
-            );
+            assert_eq!(game.menu_slot(crafting, 0).unwrap().unwrap().count, 3);
             game.handle_packet(open()).unwrap();
-            assert_eq!(game.native_menu_slot_count(crafting), None);
+            assert_eq!(game.menu_slot_count(crafting), None);
             assert!(!crafting.click(game, &[pickup(1)]));
             let crafting = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
             game.handle_packet(C::Respawn(play::Respawn {
                 spawn: spawn.clone(),
                 keep: 0,
             }))
             .unwrap();
-            assert_eq!(game.native_menu_slot_count(crafting), None);
+            assert_eq!(game.menu_slot_count(crafting), None);
             assert!(!crafting.click(game, &[pickup(1)]));
             let inventory = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
             assert_ne!(inventory, menu);
             let chest_id = game
@@ -12587,10 +12595,10 @@ mod tests {
             }))
             .unwrap();
             let chest = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
-            assert_eq!(game.native_menu_slot_count(chest), Some(63));
+            assert_eq!(game.menu_slot_count(chest), Some(63));
             let stone = Some(Stack::new(game.item_id("minecraft:stone"), 4));
             game.handle_packet(C::ContainerSetSlot(play::ContainerSetSlot {
                 container: 7,
@@ -12599,8 +12607,8 @@ mod tests {
                 item: stone,
             }))
             .unwrap();
-            assert_eq!(game.native_menu_slot(chest, 2).unwrap().unwrap().count, 4);
-            assert_eq!(game.native_menu_slot(chest, 3), Some(None));
+            assert_eq!(game.menu_slot(chest, 2).unwrap().unwrap().count, 4);
+            assert_eq!(game.menu_slot(chest, 3), Some(None));
             game.handle_packet(C::SetCursorItem(play::SetCursorItem { item: None }))
                 .unwrap();
             assert!(chest.click(game, &[pickup(2)]));
@@ -12657,32 +12665,32 @@ mod tests {
                 .menu
                 .set(Some((7, "minecraft:unknown".into())));
             assert!(
-                game.native_local_player()
-                    .and_then(|player| game.native_menu_ref(player))
+                game.local_player()
+                    .and_then(|player| game.player_container_menu(player))
                     .is_none()
             );
-            assert_eq!(game.native_menu_slot_count(inventory), None);
-            assert_eq!(game.native_menu_slot_count(chest), None);
+            assert_eq!(game.menu_slot_count(inventory), None);
+            assert_eq!(game.menu_slot_count(chest), None);
             game.remote.as_mut().unwrap().menu.set(None);
             let before_replacement = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
             let mut other = spawn;
             other.dimension = "test:other_overworld".into();
             game.enter_remote_dimension(&other, true, Reason::Other);
-            assert_eq!(game.native_menu_slot_count(before_replacement), None);
+            assert_eq!(game.menu_slot_count(before_replacement), None);
             assert!(!before_replacement.click(game, &[pickup(36)]));
             let before_logout = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
             game.client_logging_out();
-            assert_eq!(game.native_menu_slot_count(before_logout), None);
+            assert_eq!(game.menu_slot_count(before_logout), None);
             assert!(!before_logout.click(game, &[pickup(36)]));
             assert!(
-                game.native_local_player()
-                    .and_then(|player| game.native_menu_ref(player))
+                game.local_player()
+                    .and_then(|player| game.player_container_menu(player))
                     .is_none()
             );
             let (client, _server) = Pipe::pair();
@@ -12693,11 +12701,11 @@ mod tests {
             remote.entity_id = 7;
             remote.profile = 42;
             let reconnected = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
-            assert_eq!(game.native_menu_slot_count(before_logout), None);
-            assert_eq!(game.native_menu_slot_count(reconnected), Some(46));
+            assert_eq!(game.menu_slot_count(before_logout), None);
+            assert_eq!(game.menu_slot_count(reconnected), Some(46));
             assert_ne!(reconnected, before_logout);
         });
     }
@@ -12728,8 +12736,8 @@ mod tests {
             };
             // The inventory menu while playing: no screen to close, no buttons.
             let inventory = game
-                .native_local_player()
-                .and_then(|player| game.native_menu_ref(player))
+                .local_player()
+                .and_then(|player| game.player_container_menu(player))
                 .unwrap();
             assert_eq!(game.screen, Screen::Playing);
             assert!(!inventory.close(game));
@@ -12750,8 +12758,8 @@ mod tests {
                     title: Tag::String("Loom".into()),
                 }))
                 .unwrap();
-                game.native_local_player()
-                    .and_then(|player| game.native_menu_ref(player))
+                game.local_player()
+                    .and_then(|player| game.player_container_menu(player))
                     .unwrap()
             };
             let menu = open(game);
@@ -12827,10 +12835,10 @@ mod tests {
             game.enter_remote_dimension(&spawn, false, Reason::Other);
             game.remote.as_mut().unwrap().logged_in = true;
 
-            let level = game.native_level("test:pocket").unwrap();
+            let level = game.level("test:pocket").unwrap();
             assert_ne!(level.dimension(), DimensionKey::OVERWORLD);
             assert_eq!(level.dimension().id(game).as_deref(), Some("test:pocket"));
-            assert!(game.native_level("minecraft:overworld").is_none());
+            assert!(game.level("minecraft:overworld").is_none());
             assert!(level.height(game).is_some());
             let overworld = LevelRef::new(level.epoch(), DimensionKey::OVERWORLD);
             assert_eq!(overworld.height(game), None);
@@ -12884,11 +12892,11 @@ mod tests {
             game.pitch = 10.0;
 
             // The local player and the level it shows.
-            let player = game.native_local_player().unwrap();
+            let player = game.local_player().unwrap();
             let me = player.entity();
-            let living = game.native_living(me).unwrap();
-            let level = game.native_level("minecraft:overworld").unwrap();
-            assert!(game.native_level("minecraft:the_nether").is_none());
+            let living = game.living(me).unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
+            assert!(game.level("minecraft:the_nether").is_none());
             assert_eq!(me.position(game), Some([1.5, 65.0, -2.5]));
             assert_eq!(me.rotation(game), Some([90.0, 10.0]));
             game.player.as_mut().unwrap().velocity = Vec3::new(0.0, -0.5, 0.25);
@@ -13017,12 +13025,12 @@ mod tests {
                 data: 0,
             }))
             .unwrap();
-            let other = game.native_entity(31).unwrap();
+            let other = game.entity(31).unwrap();
             assert_eq!(other.position(game), Some([10.0, 64.0, 12.0]));
             assert!(other.velocity(game).is_some());
             assert!(other.rotation(game).is_some());
-            assert!(game.native_living(other).is_none(), "only the local player");
-            assert!(game.native_entity(99).is_none());
+            assert!(game.living(other).is_none(), "only the local player");
+            assert!(game.entity(99).is_none());
             let untracked = EntityRef::new(me.epoch(), 99);
             assert_eq!(untracked.position(game), None);
             assert_eq!(untracked.velocity(game), None);
@@ -13108,7 +13116,7 @@ mod tests {
                 rate,
             };
             game.handle_packet(login(spawn.clone())).unwrap();
-            let end = game.native_level("minecraft:the_end").unwrap();
+            let end = game.level("minecraft:the_end").unwrap();
             let wrong_level = LevelRef::new(end.epoch(), mod_api::DimensionKey::OVERWORLD);
             assert_eq!(wrong_level.day_time(game), None);
             game.handle_packet(C::SetTime(play::SetTime {
@@ -13211,7 +13219,7 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(end.day_time(game), None);
-            let overworld = game.native_level("minecraft:overworld").unwrap();
+            let overworld = game.level("minecraft:overworld").unwrap();
             assert_eq!(overworld.day_time(game), Some(60_004));
             assert_eq!(
                 game.world.day_time, 60_004,
@@ -13229,7 +13237,7 @@ mod tests {
                 keep: 0,
             }))
             .unwrap();
-            let nether = game.native_level("minecraft:the_nether").unwrap();
+            let nether = game.level("minecraft:the_nether").unwrap();
             assert_eq!(overworld.day_time(game), None);
             assert_eq!(nether.day_time(game), Some(60_006));
             assert_eq!(game.world.day_time, 0);
@@ -13237,7 +13245,7 @@ mod tests {
             // Login starts a new listener epoch, even on the same connection.
             game.handle_packet(login(spawn.clone())).unwrap();
             assert_eq!(nether.day_time(game), None);
-            let fresh = game.native_level("minecraft:the_nether").unwrap();
+            let fresh = game.level("minecraft:the_nether").unwrap();
             assert_eq!(fresh.day_time(game), Some(0));
             game.handle_packet(C::SetTime(play::SetTime {
                 game_time: 1,
@@ -13263,7 +13271,7 @@ mod tests {
             assert_eq!(fresh.day_time(game), None);
             game.set_registries(registries);
             game.handle_packet(login(spawn)).unwrap();
-            let reconnected = game.native_level("minecraft:the_nether").unwrap();
+            let reconnected = game.level("minecraft:the_nether").unwrap();
             assert_eq!(fresh.day_time(game), None);
             assert_eq!(reconnected.day_time(game), Some(0));
         });
@@ -13422,7 +13430,7 @@ mod tests {
             remote.entity_id = 7;
             remote.profile = 42;
             game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 65.0, 0.5)).unwrap());
-            let player = game.native_local_player().unwrap();
+            let player = game.local_player().unwrap();
 
             // Survival, as the login packet left it: building allowed, no flight.
             assert_eq!(player.game_mode(game), Some(GameMode::Survival));
@@ -13576,8 +13584,7 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.yaw = 0.0;
             game.pitch = 0.0;
-            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.native_crosshair_target()
-            else {
+            let Some(NativeCrosshairTarget::Entity { entity, .. }) = game.crosshair_target() else {
                 panic!("the crosshair hits the pig in front of the player");
             };
             assert_eq!(entity, current);
@@ -13593,7 +13600,7 @@ mod tests {
 
             game.client_logging_out();
             assert!(game.native_lifecycle.epoch().is_none());
-            assert!(game.native_crosshair_target().is_none());
+            assert!(game.crosshair_target().is_none());
             game.client_logging_out();
             assert!(game.native_lifecycle.epoch().is_none());
             let (client, _server) = Pipe::pair();
@@ -13969,6 +13976,73 @@ mod tests {
         // Interaction entities honor response.
         assert!(remote_object_swings(Some(true), false));
         assert!(!remote_object_swings(Some(false), false));
+    }
+
+    /// A mod's pre-filled chat opens only over the world, with its text
+    /// typed in and nothing sent.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_open_chat_fills_the_box_only_over_the_world() {
+        use super::super::{
+            Audio, Game, Options, Progress, Screen, Settings, execution_role::ExecutionRole,
+            load_resources,
+        };
+
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = ExecutionRole::Client;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+
+        // No player: the title screen.
+        game.player = None;
+        assert!(game.open_chat("/tp ").is_err());
+        assert!(game.ui.chat_screen.is_none());
+        game.player = Some(
+            horizon_client::motion::PlayerMotion::new(
+                game.motion,
+                horizon_core::geometry::Vec3::ZERO,
+            )
+            .unwrap(),
+        );
+        game.screen = Screen::Paused;
+        assert!(game.open_chat("/tp ").is_err());
+        assert!(game.ui.chat_screen.is_none());
+        game.screen = Screen::Playing;
+        assert!(game.open_chat("/tp ").is_ok());
+        assert!(game.screen == Screen::Chat);
+        assert_eq!(game.ui.chat_screen.as_ref().unwrap().input.value, "/tp ");
+        // The chat is a screen too: a second call doesn't replace what's typed.
+        assert!(game.open_chat("hello").is_err());
+        assert_eq!(game.ui.chat_screen.as_ref().unwrap().input.value, "/tp ");
     }
 
     /// `Entity.isColliding` and the snap `ClientLevel.syncBlockState` makes: a
@@ -14840,7 +14914,7 @@ mod tests {
         let mut slots: Vec<i16> = (0..stacks.len()).map(super::creative_sync_slot).collect();
         // Each entry goes to the menu slot that holds that stack.
         for (i, &slot) in slots.iter().enumerate() {
-            let game_slot = Game::menu_slot("inventory", i32::from(slot)).unwrap();
+            let game_slot = Game::inventory_screen_slot("inventory", i32::from(slot)).unwrap();
             let expected = match game_slot {
                 0..36 => &inventory[game_slot],
                 504 => &offhand,
@@ -14875,13 +14949,13 @@ mod tests {
     #[test]
     fn every_inventory_menu_slot_is_a_game_slot_and_45_is_the_off_hand() {
         // InventoryMenu: result, 2x2 grid, armour, 27 + 9 inventory slots, then the off hand.
-        assert_eq!(Game::menu_slot("inventory", 45), Some(504));
+        assert_eq!(Game::inventory_screen_slot("inventory", 45), Some(504));
         let mut seen = std::collections::HashSet::new();
         for slot in 0..46 {
-            let internal = Game::menu_slot("inventory", slot);
+            let internal = Game::inventory_screen_slot("inventory", slot);
             assert!(internal.is_some_and(|i| seen.insert(i)), "slot {slot}");
         }
-        assert_eq!(Game::menu_slot("inventory", 46), None);
+        assert_eq!(Game::inventory_screen_slot("inventory", 46), None);
     }
 
     #[test]
@@ -15103,8 +15177,8 @@ mod player_tick_tests {
                     .add("minecraft:ender_pearl".into(), 3);
                 let diamond = ItemStack::new("minecraft:diamond", 2);
                 game.spawn_item(diamond.clone(), [0.0; 3], [0.0; 3], 0);
-                let level = game.native_level("minecraft:overworld").unwrap();
-                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                let level = game.level("minecraft:overworld").unwrap();
+                assert!(game.level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();
                 let observations = heard.lock().unwrap();
                 assert_eq!(
@@ -15149,7 +15223,7 @@ mod player_tick_tests {
                     g.health = 0.0;
                 });
                 game.spawn_item(diamond, [0.0; 3], [0.0; 3], 0);
-                assert!(game.native_level_award_experience(level, 0.0, 0.0, 0.0, 7));
+                assert!(game.level_award_experience(level, 0.0, 0.0, 0.0, 7));
                 game.tick_guests();
                 let observations = heard.lock().unwrap();
                 assert_eq!(

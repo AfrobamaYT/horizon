@@ -127,7 +127,7 @@ impl Game<'_> {
                 };
                 horizon_client::containers::display_name(custom(k), &key)
             }
-            // Opened by a mod (`native_open_menu`), never here.
+            // Opened by a mod (`open_menu`), never here.
             Slots::Native => return MenuOpen::Refused,
         };
         let Some(host) = self.lan.as_ref() else {
@@ -428,14 +428,16 @@ impl Game<'_> {
             b.position.y.floor() as i32,
             b.position.z.floor() as i32,
         );
-        crate::structure_blocks::roll_container(
-            &mut self.boats[i].items,
-            loot.as_deref(),
-            table.clone(),
-            seed,
-            pos,
-            &biome,
-        );
+        self.boats.update(i, |b| {
+            crate::structure_blocks::roll_container(
+                &mut b.items,
+                loot.as_deref(),
+                table.clone(),
+                seed,
+                pos,
+                &biome,
+            )
+        });
         self.trigger_loot_table(&table);
     }
 

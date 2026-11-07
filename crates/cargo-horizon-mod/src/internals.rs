@@ -163,10 +163,9 @@ fn sync(dir: &Path, repo: Option<&Path>) -> Result<(), String> {
             .iter()
             .map(|entry| entry.path.as_str())
             .chain(
-                wasm.points()
+                wasm.raw_injections()
                     .iter()
-                    .filter(|entry| entry.raw.is_some())
-                    .filter_map(|entry| entry.target.as_deref()),
+                    .map(|entry| entry.target.as_str()),
             )
             .collect();
         let mut contents = format!(
