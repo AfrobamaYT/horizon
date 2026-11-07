@@ -112,6 +112,17 @@ impl<T: TryIntoEngine> TryIntoEngine for Option<T> {
             .transpose()
     }
 }
+impl<T: TryIntoApi, E: Clone> TryIntoApi for Result<T, E> {
+    type Api = Result<T::Api, E>;
+    type Error = T::Error;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        match self {
+            Ok(value) => value.try_into_api().map(Ok),
+            Err(error) => Ok(Err(error.clone())),
+        }
+    }
+}
+
 impl<T: TryIntoApi> TryIntoApi for Vec<T> {
     type Api = Vec<T::Api>;
     type Error = T::Error;
@@ -371,20 +382,6 @@ impl TryIntoApi for crate::crafting::RecipeRule {
     }
 }
 
-impl<T: TryIntoApi<Error = StackReadError>> TryIntoApi for Option<T> {
-    type Api = Option<T::Api>;
-    type Error = StackReadError;
-    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        self.as_ref().map(TryIntoApi::try_into_api).transpose()
-    }
-}
-impl<T: TryIntoApi<Error = StackReadError>> TryIntoApi for Vec<T> {
-    type Api = Vec<T::Api>;
-    type Error = StackReadError;
-    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        self.iter().map(TryIntoApi::try_into_api).collect()
-    }
-}
 impl TryIntoApi for crate::crafting::Ingredient {
     type Api = mod_api::Ingredient;
     type Error = StackReadError;
@@ -567,13 +564,6 @@ pub(crate) fn stacked_on_other(
     }
 }
 
-impl<T: TryIntoEngine<Error = StackWriteError>> TryIntoEngine for Option<T> {
-    type Engine = Option<T::Engine>;
-    type Error = StackWriteError;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
-        self.as_ref().map(|s| s.try_into_engine(items)).transpose()
-    }
-}
 impl TryIntoApi for crate::stations::AnvilResult {
     type Api = mod_api::stations::AnvilResult;
     type Error = StackReadError;
