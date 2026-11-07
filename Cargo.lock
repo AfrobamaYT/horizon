@@ -2199,6 +2199,7 @@ dependencies = [
  "horizon-mod-api-gen",
  "horizon-mod-package",
  "log",
+ "serde_json",
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",
