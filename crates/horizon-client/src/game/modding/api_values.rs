@@ -363,10 +363,11 @@ impl TryIntoApi for EngineStack {
     fn try_into_api(&self) -> Result<ApiStack, Self::Error> {
         let key = mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?;
         let mut result = ApiStack::new(key, self.count).ok_or(StackReadError::Empty)?;
-        if self.damage != 0 {
+        if self.carries_component(None, "minecraft:damage") {
             result.set_damage(self.damage);
         }
-        if let Some(Tag::Compound(patch)) = horizon_items::item_data::encode_components(self) {
+        if let Some(Tag::Compound(patch)) = horizon_items::item_data::encode_extra_components(self)
+        {
             result
                 .set_components(patch)
                 .map_err(StackReadError::InvalidComponents)?;
@@ -460,13 +461,36 @@ impl TryIntoEngine for ApiStack {
                 None => Ok(default),
             }
         };
-        let maximum = effective("minecraft:max_stack_size", definition.max_stack)?;
+        let maximum = if stack.carries_component(Some(definition), "minecraft:max_stack_size") {
+            effective("minecraft:max_stack_size", definition.max_stack)?
+        } else {
+            1
+        };
         if stack.count > maximum {
             return Err(StackWriteError::CountExceeded { maximum });
         }
-        let maximum = effective("minecraft:max_damage", definition.max_damage)?;
-        if stack.damage > maximum {
+        let maximum = if stack.carries_component(Some(definition), "minecraft:max_damage") {
+            effective("minecraft:max_damage", definition.max_damage)?
+        } else {
+            0
+        };
+        let damage = self.damage_component().map_or_else(
+            || {
+                u32::try_from(stack.effective_damage(Some(definition))).map_err(|_| {
+                    StackWriteError::InvalidComponents {
+                        reason: mod_api::StackError::InvalidDamage,
+                    }
+                })
+            },
+            Ok,
+        )?;
+        if damage > maximum {
             return Err(StackWriteError::DamageExceeded { maximum });
+        }
+        if i32::try_from(damage).is_err() {
+            return Err(StackWriteError::InvalidComponents {
+                reason: mod_api::StackError::InvalidDamage,
+            });
         }
         Ok(stack)
     }
@@ -1342,6 +1366,9 @@ impl super::Game<'_> {
         pos: [i32; 3],
         entity: &mut crate::containers::ModBlockEntity,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::BlockEntityTick) {
+            return;
+        }
         let Ok(mut api) = entity.try_into_api() else {
             return;
         };
@@ -1354,6 +1381,9 @@ impl super::Game<'_> {
         entity: &crate::containers::ModBlockEntity,
         tag: &mut Option<horizon_core::nbt::Compound>,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::BlockEntityUpdateTag) {
+            return;
+        }
         if let Ok(api) = entity.try_into_api() {
             Self::native_block_entity_update_tag(pos, &api, tag);
         }
@@ -1366,6 +1396,9 @@ impl super::Game<'_> {
         entity: &crate::containers::ModBlockEntity,
         draw: &mut super::native_block_entity_draw::BlockEntityDraw,
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::BlockEntitySubmit) {
+            return;
+        }
         if let Ok(api) = entity.try_into_api() {
             self.native_block_entity_submit(pos, block, state, &api, draw);
         }
@@ -1378,6 +1411,9 @@ impl super::Game<'_> {
         entity: &crate::containers::ModBlockEntity,
         bounds: &mut [f32; 6],
     ) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::BlockEntityRenderBoundingBox) {
+            return;
+        }
         if let Ok(api) = entity.try_into_api() {
             self.native_block_entity_render_bounding_box(pos, block, state, &api, bounds);
         }
@@ -1568,6 +1604,150 @@ mod mutable_output_tests {
                 EngineStack::new("minecraft:stick", 64)
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod stack_limit_tests {
+    use super::*;
+
+    fn catalog() -> Items {
+        prepare_stack_boundary_tests();
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "horizon-api-limits-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("items.json"), r#"{
+            "minecraft:stick":{"minecraft:max_stack_size":64},
+            "minecraft:iron_sword":{"minecraft:max_stack_size":1,"minecraft:max_damage":10,"minecraft:damage":7},
+            "minecraft:diamond_sword":{"minecraft:max_stack_size":1,"minecraft:max_damage":100,"minecraft:damage":0}
+        }"#).unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items =
+            Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        items
+    }
+
+    #[test]
+    fn strict_damage_limits_include_zero_inheritance_removal_and_nbt_int_range() {
+        let mut items = catalog();
+        let key = |id| mod_api::__private::item_key(id).unwrap();
+        let plain = ApiStack::of(key("minecraft:stick"));
+        assert!(plain.try_into_engine(&items).is_ok());
+        let mut explicit = plain.clone();
+        explicit.set_damage(0);
+        let engine = explicit.try_into_engine(&items).unwrap();
+        assert!(engine.carries_component(None, "minecraft:damage"));
+        assert_eq!(
+            horizon_items::item_data::encode_components(&engine)
+                .unwrap()
+                .get("minecraft:damage"),
+            Some(&Tag::Int(0))
+        );
+        explicit.set_damage(u32::MAX);
+        assert_eq!(
+            explicit.try_into_engine(&items),
+            Err(StackWriteError::DamageExceeded { maximum: 0 })
+        );
+
+        let inherited = ApiStack::of(key("minecraft:iron_sword"));
+        let definition = items.items.get("minecraft:iron_sword").unwrap();
+        assert_eq!(
+            inherited
+                .try_into_engine(&items)
+                .unwrap()
+                .effective_damage(Some(definition)),
+            7
+        );
+        let mut lower = inherited.clone();
+        lower
+            .set_components([(JavaString::from("minecraft:max_damage"), Tag::Int(5))].into())
+            .unwrap();
+        assert_eq!(
+            lower.try_into_engine(&items),
+            Err(StackWriteError::DamageExceeded { maximum: 5 })
+        );
+        let mut removed = inherited;
+        removed
+            .set_components(
+                [(
+                    JavaString::from("!minecraft:max_damage"),
+                    Tag::Compound(Default::default()),
+                )]
+                .into(),
+            )
+            .unwrap();
+        assert_eq!(
+            removed.try_into_engine(&items),
+            Err(StackWriteError::DamageExceeded { maximum: 0 })
+        );
+        removed.clear_damage();
+        let engine = removed.try_into_engine(&items).unwrap();
+        assert_eq!(engine.max_damage(Some(definition)), 0);
+        assert_eq!(engine.effective_damage(Some(definition)), 0);
+        removed.set_damage(0);
+        assert!(removed.try_into_engine(&items).is_ok());
+
+        items
+            .items
+            .get_mut("minecraft:diamond_sword")
+            .unwrap()
+            .max_damage = u32::MAX;
+        let mut oversized = ApiStack::of(key("minecraft:diamond_sword"));
+        oversized.set_damage(u32::MAX);
+        assert_eq!(
+            oversized.try_into_engine(&items),
+            Err(StackWriteError::InvalidComponents {
+                reason: mod_api::StackError::InvalidDamage
+            })
+        );
+    }
+
+    #[test]
+    fn removed_stack_maximum_uses_the_absent_component_limit_of_one() {
+        let items = catalog();
+        let mut stack =
+            ApiStack::new(mod_api::__private::item_key("minecraft:stick").unwrap(), 2).unwrap();
+        stack
+            .set_components(
+                [(
+                    JavaString::from("!minecraft:max_stack_size"),
+                    Tag::Compound(Default::default()),
+                )]
+                .into(),
+            )
+            .unwrap();
+        assert_eq!(
+            stack.try_into_engine(&items),
+            Err(StackWriteError::CountExceeded { maximum: 1 })
+        );
+        stack.set_count(1).unwrap();
+        assert!(!stack.try_into_engine(&items).unwrap().carries_component(
+            items.items.get("minecraft:stick"),
+            "minecraft:max_stack_size"
+        ));
+    }
+
+    #[test]
+    fn damage_only_snapshots_preserve_presence_without_an_opaque_patch() {
+        catalog();
+        for damage in [0, 5] {
+            let (damage, extra) = horizon_items::item_data::decode_components(Some(
+                &Tag::compound([("minecraft:damage", Tag::Int(damage))]),
+            ));
+            let engine = EngineStack {
+                damage,
+                extra,
+                ..EngineStack::new("minecraft:iron_sword", 1)
+            };
+            let api = engine.try_into_api().unwrap();
+            assert_eq!(api.damage_component(), Some(damage));
+            assert!(api.components().is_none());
+        }
     }
 }
 
