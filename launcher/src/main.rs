@@ -255,10 +255,7 @@ struct Launcher {
     native_step: Option<String>,
     /// Where the build under way is, for the card's stages and bar.
     native_progress: Option<native_mods::Progress>,
-    /// When the running native build started, and the whole seconds last drawn (the status shows
-    /// the time it has taken).
-    native_started: Option<(Instant, u64)>,
-    /// How the last native build ended ("Built in 42 s (fast, incremental)", or "Up to date").
+    /// How the last native build ended ("Built (balanced, incremental)", or "Up to date").
     native_done: Option<String>,
     native_error: Option<String>,
     native_confirm: Option<Result<Vec<native_mods::Bundle>, String>>,
@@ -559,7 +556,6 @@ impl Launcher {
             import_error: None,
             native_step: None,
             native_progress: None,
-            native_started: None,
             native_done: None,
             native_error: None,
             native_confirm: None,
@@ -742,7 +738,6 @@ impl Launcher {
                 stage: native_mods::Stage::Compile,
                 fraction: Some(0.62),
             });
-            this.native_started = Some((Instant::now(), 0));
             this.native_for = this.selected_instance().map(|i| i.id.clone());
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
@@ -968,7 +963,6 @@ impl Launcher {
         };
         self.native_step = Some(tr("Starting the build").into());
         self.native_progress = None;
-        self.native_started = Some((Instant::now(), 0));
         self.native_done = None;
         let tx = self.tx.clone();
         std::thread::spawn(move || {
@@ -1020,13 +1014,6 @@ impl Launcher {
             }
             Some(perf::Step::Quit) => cx.quit(),
             Some(perf::Step::Wait) | None => {}
-        }
-        // The running build's clock moves on each second.
-        if let Some((started, shown)) = &mut self.native_started {
-            if started.elapsed().as_secs() != *shown {
-                *shown = started.elapsed().as_secs();
-                changed = true;
-            }
         }
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
@@ -1315,7 +1302,6 @@ impl Launcher {
                     // The last step of a build that worked says how it went.
                     let last = self.native_step.take();
                     self.native_progress = None;
-                    self.native_started = None;
                     let cancelled = matches!(&result, Err(native_mods::Failed::Other(error)) if error == native_mods::CANCELLED);
                     self.native_done = match (&result, cancelled) {
                         (Ok(_), _) => last,
@@ -3989,7 +3975,7 @@ impl Launcher {
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
             .child(trf("Mods: {mods}", &[("mods", &list)]))
-            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string());
+            .child(tr("Native builds may download Rust and other build tools. Source builds compile the game on this computer.").to_string());
         let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
         if mods.is_ok() {
             buttons = buttons.child(

@@ -9,7 +9,7 @@ It supports function points, listed call sites, and source-spliced helpers:
 - An **API point injection** names a crate-root `with` function and listens at an *injection point*. Every `Game` method is one,
   apart from the few its shape rules out ([below](#which-methods-are-points)): the prebuilt game has a slot
   at each one's head and return, which the game fills at load with the listeners of the mods that name it.
-  It changes no game source, so it builds against the prebuilt game in seconds.
+  It changes no game source, so it builds against the prebuilt game.
 - A **raw listener** (`raw`) takes the real receiver and argument types. It can listen at a function
   point, or at a [listed call site](#listed-call-sites-native-only) with `selector`. Call sites are native-only.
 - A **helper injection** (`helper`) splices your Rust into the game's source with
@@ -101,7 +101,7 @@ the event, and writes take `host`.
    and the point's record (`mod_points::<Point>Args`): the function's arguments with API types, and a
    `cancel` or `result` where the function returns `()` or an API value. It uses only `mod_api` types.
    Every `Game` method is a point on both routes: the prebuilt game was built with them all, and a source
-   build gets the same points, so a point injection always builds against the prebuilt game in seconds.
+   build gets the same points, so a point injection builds against the prebuilt game.
 3. **You truly need private internals:** check [raw listeners](#raw-listeners-and-declared-internals)
    first. A `helper` bound to `Game` is the last resort. It reads game state no
    API exposes, so it breaks when the game changes, rebuilds the game, can never run as `mod.wasm`, and should

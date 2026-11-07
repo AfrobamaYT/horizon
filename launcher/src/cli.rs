@@ -1316,11 +1316,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 );
                 return Ok(());
             }
-            let started = std::time::Instant::now();
-            let steps = |step: native_mods::Step| {
-                let secs = started.elapsed().as_secs();
-                eprintln!("[{:>2}:{:02}] {}", secs / 60, secs % 60, step.label())
-            };
+            let steps = |step: native_mods::Step| eprintln!("{}", step.label());
             if let Some(output) = server_output {
                 // Export mode: a standalone server engine in `output`. No instance is read
                 // or changed, and no launcher config is written; `folder` is required (clap).
@@ -1387,8 +1383,11 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                     } else { error }
                 })?;
             println!(
-                "{built} built and selected for its instance ({:.0} s).",
-                started.elapsed().as_secs_f64()
+                "{}",
+                trf(
+                    "{build} built and selected for its instance.",
+                    &[("build", &built)]
+                )
             );
         }
         Cmd::Remove { tag } => {

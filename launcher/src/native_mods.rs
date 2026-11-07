@@ -63,7 +63,7 @@ pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
 /// Native build modes: a visible picker starts at Balanced and remembers the instance's choice.
 /// Optimized is the daily prebuilt game's release profile (thin LTO, one codegen
-/// unit): mods that need nothing but the mod API compile against that download in seconds, and
+/// unit): mods that need nothing but the mod API compile against that download, and
 /// any other set builds the whole game from source with the same profile. `Balanced` is the
 /// workspace's `fast` (16 codegen units, incremental, thin-local LTO only), built on this computer:
 /// quicker to rebuild after a change, a game a little slower. `Developer`, for writing a mod, is
@@ -282,12 +282,12 @@ impl Plan {
                 "Incremental rebuild: {changes}",
                 &[("changes", &changes.join("; "))],
             ),
-            Self::First => tr("First build: the whole game (several minutes)").into(),
-            Self::Prebuilt => tr("Prebuilt game: only the mods compile (seconds)").into(),
+            Self::First => tr("First build: the whole game").into(),
+            Self::Prebuilt => tr("Prebuilt game: only the mods compile").into(),
         }
     }
 
-    /// The word in "Built in 42 s (balanced, incremental)".
+    /// The plan's short name in a completed build's status.
     fn kind(&self) -> &'static str {
         match self {
             Self::UpToDate => "up to date",
@@ -468,15 +468,6 @@ fn log_text(line: &str) -> Option<String> {
         .map(str::to_owned)
         .collect();
     (!kept.is_empty()).then(|| kept.join("\n"))
-}
-
-/// "1 min 5 s" style time, for the build's status.
-pub fn duration_label(secs: u64) -> String {
-    if secs >= 60 {
-        format!("{} min {} s", secs / 60, secs % 60)
-    } else {
-        format!("{secs} s")
-    }
 }
 
 /// Whether an installed version is a native-mods build.
@@ -1426,17 +1417,9 @@ impl Step {
             },
             Self::Install => tr("Installing the build").into(),
             Self::LeftOut(left) => left.label(),
-            Self::Done {
-                secs,
-                profile,
-                plan,
-            } => trf(
-                "Built in {duration} ({profile}, {plan})",
-                &[
-                    ("duration", &duration_label(*secs)),
-                    ("profile", profile.name()),
-                    ("plan", tr(plan.kind())),
-                ],
+            Self::Done { profile, plan, .. } => trf(
+                "Built ({profile}, {plan})",
+                &[("profile", profile.name()), ("plan", tr(plan.kind()))],
             ),
         }
     }
@@ -4466,10 +4449,7 @@ mod tests {
         let now = record("aaaaaaa1111", &[("zoom", "1"), ("keys", "1")]);
         assert_eq!(classify(true, None, &now), Plan::UpToDate);
         assert_eq!(classify(false, None, &now), Plan::First);
-        assert_eq!(
-            First_label(),
-            "First build: the whole game (several minutes)"
-        );
+        assert_eq!(First_label(), "First build: the whole game");
         let before = record("aaaaaaa1111", &[("zoom", "1"), ("keys", "0")]);
         assert_eq!(
             classify(false, Some(&before), &now),
@@ -4519,11 +4499,11 @@ mod tests {
         };
         assert_eq!(
             done(42, Profile::Balanced, Plan::Incremental(vec![])).label(),
-            "Built in 42 s (balanced, incremental)"
+            "Built (balanced, incremental)"
         );
         assert_eq!(
             done(125, Profile::Optimized, Plan::First).label(),
-            "Built in 2 min 5 s (optimized, first build)"
+            "Built (optimized, first build)"
         );
     }
 

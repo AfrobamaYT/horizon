@@ -96,7 +96,7 @@ fn percent(progress: Option<native_mods::Progress>) -> u32 {
 pub(super) fn mode_note(profile: Profile) -> &'static str {
     match profile {
         Profile::Optimized => tr(
-            "The fastest game. Uses the prebuilt game, so most mods are ready in seconds.",
+            "Best performance, longest build",
         ),
         Profile::Balanced => tr(
             "Builds the game on this computer. Quicker to rebuild after a change; the game runs about 13% slower.",
@@ -403,9 +403,6 @@ impl Launcher {
         let progress = self.native_progress;
         let percent = percent(progress);
         let stage = progress.map(|p| p.stage);
-        let secs = self
-            .native_started
-            .map_or(0, |(started, _)| started.elapsed().as_secs());
         let pills = div()
             .flex()
             .items_center()
@@ -493,11 +490,7 @@ impl Launcher {
                     .child(icons),
             )
             .child(bar)
-            .child(
-                text_in(13., pal.muted)
-                    .truncate()
-                    .child(format!("{step} - {}", native_mods::duration_label(secs))),
-            )
+            .child(text_in(13., pal.muted).truncate().child(step.to_owned()))
     }
 
     /// Each turned-on native mod's route; filesystem and release reads never run while drawing.
@@ -558,16 +551,6 @@ impl Launcher {
             .find(|(id, _)| id == mod_id)
             .map(|(_, r)| r)?;
         let profile = self.native_profile();
-        let last = self
-            .version_of(instance)
-            .and_then(|v| native_status::built_secs(v))
-            .map(|secs| {
-                trf(
-                    " The last build took {time}.",
-                    &[("time", &native_mods::duration_label(secs))],
-                )
-            })
-            .unwrap_or_default();
         let (glyph, color, headline, reason) = if building {
             (
                 "refresh",
@@ -596,19 +579,19 @@ impl Launcher {
                     "flash",
                     pal.accent,
                     tr("Can use the prebuilt game"),
-                    tr("Can use the prebuilt game, in seconds, if one exists for your Horizon and it serves every mod you turned on. Otherwise the whole game builds.").to_string(),
+                    tr("Can use the prebuilt game if one exists for your Horizon and it serves every enabled mod.").to_string(),
                 ),
                 Route::Game { reason } if profile == Profile::Optimized => (
                     "hammer",
                     pal.warn,
                     tr("Needs a full game build"),
-                    format!("{reason}{last}"),
+                    reason.to_string(),
                 ),
                 Route::Game { reason } => (
                     "clock",
                     pal.muted,
                     tr("Needs rebuild"),
-                    format!("{reason}{last} {}", tr("Press Build to rebuild with your changes.")),
+                    format!("{reason} {}", tr("Press Build to rebuild with your changes.")),
                 ),
             }
         };

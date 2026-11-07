@@ -158,7 +158,7 @@ python3 tools/agent_control_e2e.py         # horizon-ctl / MCP end to end
   + a Rust probe: `crates/<crate>/examples/<name>_{probe,fixture}.rs` (horizon-world 175, horizon-client 104),
   or the game binary with a fixture env var (`game/interface/dispense_fixture.rs`, `game/blocks/sculk_fixture.rs`,
   `game/administration/command_harness.rs`, `game/network/net_harness.rs`). Copy a nearby harness for a new one.
-- Developing a native mod? Use `native-build --profile developer` or pick Developer in the Mods page. Choices are
+- Developing a native mod? Use `native-build --profile developer`. Choices are
   remembered per instance; an unsaved picker starts at Balanced. Automatic prebuilt builds use Optimized.
   Developer builds the game crate unoptimized for quicker edits, not for playing
   ([docs/modding/src/how-to/native-mods.md](docs/modding/src/how-to/native-mods.md)).
