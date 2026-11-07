@@ -208,20 +208,6 @@ impl Game<'_> {
         let id = mod_api::__private::resolved_block(block)?.block;
         Some(behaviours.block_data(id).item.to_string())
     }
-
-    /// Whether `stack` is in the item tag `tag` (`minecraft:logs` or `logs`,
-    /// no `#`):
-    /// `ItemStack.is(TagKey)`, over the world's merged tags, its data packs
-    /// and content mods included. An empty stack tests `minecraft:air`, an
-    /// unknown tag is false. None on a server's client or before the world
-    /// has loaded its tags.
-    pub(super) fn item_stack_in_tag(&self, stack: &ItemStack, tag: &str) -> Option<bool> {
-        Some(super::native_world_read::stack_in_tag(
-            self.native_tag_items()?,
-            stack,
-            tag,
-        ))
-    }
 }
 
 pub(super) fn match_state_properties(

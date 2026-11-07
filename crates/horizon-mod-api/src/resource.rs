@@ -222,13 +222,14 @@ impl ItemResource {
         value: Tag,
     ) -> Result<Self, crate::StackError> {
         let mut stack = self.0.clone();
-        if host
+        let own = !host
             .item_default_component(self.item(), id.as_str())
-            .is_some_and(|default| same_value(id, &default, &value))
-        {
-            stack.remove_component_value(id.as_str(), false);
-        } else {
+            .is_some_and(|default| same_value(id, &default, &value));
+        if own || id.as_str() == "minecraft:damage" {
             stack.set_component_value(id.as_str(), value)?;
+        }
+        if !own {
+            stack.remove_component_value(id.as_str(), false);
         }
         Ok(Self(stack))
     }

@@ -2377,12 +2377,13 @@ impl Game<'_> {
             (None, None)
         };
         let (mut successful, mut canceled) = (false, false);
-        let Ok(mut snapshot) = stack.try_into_api() else {
+        let Ok(snapshot) = stack.try_into_api() else {
             return BonemealAsk {
                 crop: None,
                 check: Some(check),
             };
         };
+        let mut snapshot = Some(snapshot);
         self.native_bonemeal(mod_api::__private::BonemealCall {
             dimension: self.dim.level(),
             player,
@@ -2395,13 +2396,15 @@ impl Game<'_> {
             successful: &mut successful,
             canceled: &mut canceled,
         });
-        if let Ok(next) = snapshot.try_into_engine(self.items()) {
-            *stack = next;
-        } else {
-            return BonemealAsk {
-                crop: None,
-                check: Some(check),
-            };
+        match snapshot.try_into_engine(self.items()) {
+            Ok(Some(next)) => *stack = next,
+            Ok(None) => stack.count = 0,
+            Err(_) => {
+                return BonemealAsk {
+                    crop: None,
+                    check: Some(check),
+                };
+            }
         }
         BonemealAsk {
             crop: canceled.then_some(successful),
@@ -3751,8 +3754,6 @@ fn packet_view(
 
 #[cfg(test)]
 mod tests {
-    use mod_api::__private::game::*;
-
     #[test]
     fn client_packet_view_exposes_the_type_and_custom_payload_only() {
         use horizon_protocol::packets::{
@@ -5095,7 +5096,6 @@ mod tests {
 #[cfg(test)]
 mod item_fall_on_tests {
     use super::*;
-    use horizon_client::containers::ModBlockEntity;
     use mod_api::{
         BlockPart, FallOnEvent, Hooks, LevelRandomHost, ModEntry, Registrar, testing::with_mods,
     };
@@ -5377,7 +5377,7 @@ pub(super) mod particle_count_tests {
                     );
                 let at = game.particles.camera;
                 game.spawn_item(
-                    mod_api::ItemStack::new("minecraft:stick", 1),
+                    horizon_client::items::ItemStack::new("minecraft:stick", 1),
                     at,
                     [0.0; 3],
                     0,
@@ -5511,7 +5511,7 @@ pub(super) mod particle_count_tests {
                 game.particles.camera = [0.5, 65.5, 1.5];
                 // Ordinary (non-particle) entity geometry and an unrelated item light.
                 game.spawn_item(
-                    mod_api::ItemStack::new("minecraft:torch", 1),
+                    horizon_client::items::ItemStack::new("minecraft:torch", 1),
                     [0.5, 65.0, 4.5],
                     [0.0; 3],
                     0,
@@ -5548,7 +5548,7 @@ pub(super) mod particle_count_tests {
             );
         }
         game.spawn_item(
-            mod_api::ItemStack::new("minecraft:stick", 1),
+            horizon_client::items::ItemStack::new("minecraft:stick", 1),
             game.particles.camera,
             [0.0; 3],
             0,

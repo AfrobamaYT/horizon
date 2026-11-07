@@ -264,6 +264,9 @@ mod enchantment_conflict_tests {
 
 #[cfg(test)]
 mod item_resource_property_tests {
+    fn engine(resource: &mod_api::ItemResource, count: u32) -> horizon_items::items::ItemStack {
+        super::super::api_values::stack_value(&resource.to_stack(count).unwrap()).unwrap()
+    }
     use serde_json::Value;
     mod support {
         include!(concat!(
@@ -314,7 +317,7 @@ mod item_resource_property_tests {
                     values,
                 } = support::evaluate(game, input);
                 assert_eq!(&values, expected, "{}", input["name"]);
-                let stack = item.to_stack(1);
+                let stack = engine(&item, 1);
                 let definitions = &game.items().enchantments;
                 let props = definitions.props(&stack.item);
                 assert_eq!(
@@ -341,7 +344,7 @@ mod item_resource_property_tests {
                         definitions,
                         game.items(),
                         &stack,
-                        &material.to_stack(1)
+                        &engine(&material, 1)
                     ),
                     item.repairable(game, &material)
                 );
@@ -400,14 +403,19 @@ mod item_resource_property_tests {
         crate::game::native_entity_refs::tests::with_game_at(root.clone(), |game| {
             game.session_lock =
                 Some(horizon_client::save::SessionLock::acquire(&game.save.root).unwrap());
-            let wood = ItemResource::of(&ItemStack::new("minecraft:wooden_sword", 1));
-            let plank = ItemResource::of(&ItemStack::new("minecraft:oak_planks", 1));
+            let wood = ItemResource::of(&super::super::api_values::test_snapshot(&ItemStack::new(
+                "minecraft:wooden_sword",
+                1,
+            )));
+            let plank = ItemResource::of(&super::super::api_values::test_snapshot(
+                &ItemStack::new("minecraft:oak_planks", 1),
+            ));
             assert!(wood.repairable(game, &plank));
             assert!(horizon_client::stations::is_valid_repair_item(
                 &game.items().enchantments,
                 game.items(),
-                &wood.to_stack(1),
-                &plank.to_stack(1)
+                &engine(&wood, 1),
+                &engine(&plank, 1)
             ));
             assert!(!horizon_items::enchant::Enchantments::item_in(
                 game.items(),
@@ -415,7 +423,7 @@ mod item_resource_property_tests {
                 "minecraft:iron_ingot"
             ));
             let stack = ItemStack::new("minecraft:iron_sword", 1);
-            let resource = ItemResource::of(&stack);
+            let resource = ItemResource::of(&super::super::api_values::test_snapshot(&stack));
             let bar = resource.bar(game).unwrap();
             // The independent oracle records the equivalent effective damage as a stack patch.
             let expected: Value = include_str!(concat!(
@@ -440,18 +448,20 @@ mod item_resource_property_tests {
                 Some((bar.width, bar.color))
             );
             let damage = ComponentId::new("minecraft:damage").unwrap();
-            let zero = resource.with_component(game, &damage, Tag::Int(0));
+            let zero = resource.with_component(game, &damage, Tag::Int(0)).unwrap();
             assert_eq!(zero.component(&damage), Some(Tag::Int(0)));
-            assert_eq!(zero.to_stack(1).effective_damage(info), 0);
+            assert_eq!(engine(&zero, 1).effective_damage(info), 0);
             assert!(zero.bar(game).is_none());
             let removed = resource.without_component(game, &damage);
-            assert_eq!(removed.to_stack(1).effective_damage(info), 0);
+            assert_eq!(engine(&removed, 1).effective_damage(info), 0);
             assert!(removed.bar(game).is_none());
-            let enchanted = resource.with_component(
-                game,
-                &ComponentId::new("minecraft:enchantments").unwrap(),
-                Tag::compound([("minecraft:sharpness", Tag::Int(1))]),
-            );
+            let enchanted = resource
+                .with_component(
+                    game,
+                    &ComponentId::new("minecraft:enchantments").unwrap(),
+                    Tag::compound([("minecraft:sharpness", Tag::Int(1))]),
+                )
+                .unwrap();
             let glint = game
                 .items()
                 .enchantments
@@ -459,32 +469,35 @@ mod item_resource_property_tests {
                 .and_then(|p| p.glint);
             assert_eq!(glint, Some(false));
             assert!(!enchanted.foil(game));
-            assert!(!enchanted.to_stack(1).has_foil(glint));
+            assert!(!engine(&enchanted, 1).has_foil(glint));
             let inherited = enchanted.without_component(
                 game,
                 &ComponentId::new("minecraft:enchantment_glint_override").unwrap(),
             );
             assert!(inherited.foil(game));
-            assert!(inherited.to_stack(1).has_foil(glint));
+            assert!(engine(&inherited, 1).has_foil(glint));
 
-            let base = ItemResource::of(&ItemStack::new("horizon:consumable_fixture", 2));
+            let base = ItemResource::of(&super::super::api_values::test_snapshot(&ItemStack::new(
+                "horizon:consumable_fixture",
+                2,
+            )));
             let consumable = ComponentId::new("minecraft:consumable").unwrap();
-            let patched = base.with_component(
-                game,
-                &consumable,
-                Tag::compound([
-                    ("consume_seconds", Tag::Float(0.1_f32.to_bits())),
-                    ("has_consume_particles", Tag::Byte(0)),
-                ]),
-            );
-            let stack = patched.to_stack(2);
+            let patched = base
+                .with_component(
+                    game,
+                    &consumable,
+                    Tag::compound([
+                        ("consume_seconds", Tag::Float(0.1_f32.to_bits())),
+                        ("has_consume_particles", Tag::Byte(0)),
+                    ]),
+                )
+                .unwrap();
+            let stack = engine(&patched, 2);
             let info = game.items().get(&stack.item).unwrap().clone();
             assert_eq!(game.use_duration(&stack), 2);
             assert!(!game.mod_use(&stack));
             assert!(
-                patched
-                    .without_component(game, &consumable)
-                    .to_stack(1)
+                engine(&patched.without_component(game, &consumable), 1)
                     .consumable(Some(&info))
                     .is_none()
             );

@@ -651,11 +651,9 @@ fn stack_crossing(
         struct Stack(bool);
         impl<'ast> Visit<'ast> for Stack {
             fn visit_type_path(&mut self, path: &'ast syn::TypePath) {
-                self.0 |= path
-                    .path
-                    .segments
-                    .first()
-                    .is_none_or(|s| s.ident != "mod_api")
+                // Bare names resolve to the owned records in the emitted API module.
+                // Qualified names do not acquire that provenance from their last segment.
+                self.0 |= path.path.segments.len() == 1
                     && path.path.segments.last().is_some_and(|s| {
                         matches!(
                             s.ident.to_string().as_str(),
@@ -762,6 +760,36 @@ mod stack_crossing_tests {
             crossing.before, "dispatch(&mut __api_stack, &mut __api_power)", crossing.after
         );
         syn::parse_str::<syn::Block>(&body).unwrap();
+    }
+    #[test]
+    fn qualified_names_do_not_select_a_root_record_crossing() {
+        for ty in [
+            syn::parse_quote!(&foreign::ItemStack),
+            syn::parse_quote!(&mod_api::ItemStack),
+            syn::parse_quote!(&mut Vec<foreign::MerchantOffer>),
+        ] {
+            assert!(
+                stack_crossing(
+                    &[("value".to_owned(), &ty)],
+                    None,
+                    "AnyName",
+                    false,
+                    &Default::default()
+                )
+                .is_none()
+            );
+        }
+        let ty = syn::parse_quote!(&mut Option<ItemStack>);
+        assert!(
+            stack_crossing(
+                &[("value".to_owned(), &ty)],
+                None,
+                "AnyName",
+                false,
+                &Default::default()
+            )
+            .is_some()
+        );
     }
     #[test]
     fn plain_hook_has_no_stack_seam() {

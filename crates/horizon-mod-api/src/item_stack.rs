@@ -62,7 +62,8 @@ pub struct StackRecord {
     pub item: ItemKey,
     /// A nonzero number of items.
     pub count: u32,
-    /// Damage to the item.
+    /// Numeric override: None inherits the prototype unless the patch explicitly
+    /// removes damage; Some(0) is a present zero-damage component.
     pub damage: Option<u32>,
     /// Component patch, absent for ordinary stacks.
     pub components: Option<Box<Components>>,
@@ -251,13 +252,6 @@ impl ItemStack {
     /// Read a component with its typed descriptor.
     pub fn get<C: Component>(&self, component: &C) -> Option<C::Value> {
         if component.id() == "minecraft:damage" {
-            if self.components.as_ref().is_some_and(|patch| {
-                patch
-                    .patch
-                    .contains_key(&JavaString::from("!minecraft:damage"))
-            }) {
-                return None;
-            }
             return self
                 .damage
                 .and_then(|damage| component.decode(&unsigned_tag(damage)));
@@ -434,6 +428,8 @@ impl TryFrom<StackRecord> for ItemStack {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    include!("item_stack_damage_tests.rs");
 
     struct Number;
     impl Component for Number {

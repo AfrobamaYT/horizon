@@ -401,17 +401,15 @@ pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, Stac
 }
 
 fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
-    let patch = value
-        .components()
-        .map(|patch| Tag::Compound(patch.as_nbt().clone()));
-    let (_, mut extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    // The engine's scalar zero cannot distinguish absence from an explicit zero.
-    // Keep the latter in its existing opaque patch, rather than adding another protocol.
+    let mut patch = value.components().map(|patch| patch.as_nbt().clone());
+    // Let the existing component codec preserve explicit zero versus prototype inheritance.
     if value.damage_component() == Some(0) {
-        std::sync::Arc::make_mut(extra.get_or_insert_with(Default::default))
-            .other
-            .insert("minecraft:damage".into(), Tag::Int(0));
+        patch
+            .get_or_insert_with(Default::default)
+            .insert(JavaString::from("minecraft:damage"), Tag::Int(0));
     }
+    let patch = patch.map(Tag::Compound);
+    let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
     EngineStack {
         item,
         count: value.count(),

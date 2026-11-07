@@ -712,7 +712,8 @@ pub(super) mod tests {
                     .into_iter()
                     .collect(),
                 ),
-            );
+            )
+            .unwrap();
             assert_eq!(items.capacity(host, 39, &helmet), 1);
         });
     }

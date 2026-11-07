@@ -37,7 +37,7 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use mod_api::{EquipmentSlot, NativeItemDrop, NativeLootDrops, SoundSource};
+use mod_api::{EquipmentSlot, NativeLootDrops, SoundSource};
 use std::sync::Arc;
 
 /// `AbstractArrow.onHitEntity` when `hurtOrSimulate` returned false.
