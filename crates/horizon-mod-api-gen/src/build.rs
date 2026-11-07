@@ -44,7 +44,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             ];
             let (providers, sources) = super::capability_providers::generate(root, &included)?;
             // The resolver recurses through the API's types: give it a deep stack.
-            let wire = std::thread::scope(|scope| {
+            let generated_wire = std::thread::scope(|scope| {
                 std::thread::Builder::new()
                     .stack_size(64 << 20)
                     .spawn_scoped(scope, || super::wire::generate(root, &included))
@@ -60,7 +60,8 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("capability_providers_generated.rs", providers),
-                ("wire_generated.rs", wire),
+                ("wire_generated.rs", generated_wire.wire),
+                ("wire_guest_generated.rs", generated_wire.guest),
             ]
         }
     };
