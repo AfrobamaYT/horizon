@@ -1,6 +1,6 @@
 //! The item panel beside container screens: the items a recipe viewer mod
-//! lists (a native mod's `native_panel_items`, or WIT `interface browser`
-//! of a WebAssembly mod, docs/mods.md), drawn as the game's own item slots
+//! lists (a native mod's `panel_items`, or WIT `interface browser`
+//! of a WebAssembly mod, docs/modding/src/how-to/content-mods.md), drawn as the game's own item slots
 //! in pages right of the screen's window, with a search box under them. The
 //! mod says what the panel holds; the game pages it and tells the mod what
 //! the player clicked, typed, and which keys went down over an item
@@ -79,7 +79,7 @@ impl Panel {
     pub(super) fn shown(&self, on: impl Fn(&str) -> bool) -> Option<&Shown> {
         self.native.as_ref().filter(|s| on(s.owner.native_id()))
     }
-    /// `native_panel_items`.
+    /// `panel_items`.
     pub(super) fn show_items(&mut self, mod_id: &str, mut items: Vec<BrowserStack>) {
         items.truncate(ITEMS);
         if let Some(shown) = self.native_of(mod_id, !items.is_empty()) {
@@ -183,7 +183,10 @@ pub(super) fn inside(p: (f32, f32), [x, y, w, h]: [f32; 4]) -> bool {
 impl Game<'_> {
     fn browser_batch(&self) -> Option<HudBatch> {
         let r = self.renderer.as_ref()?;
-        Some(HudBatch::new([r.config.width, r.config.height]))
+        Some(HudBatch::new(
+            [r.config.width, r.config.height],
+            self.settings.gui_scale_inputs(),
+        ))
     }
     /// The mod showing a panel, with its items made into stacks once per
     /// change; none while no mod shows one or no container screen is up.
@@ -503,7 +506,7 @@ impl Game<'_> {
                 12.0,
                 u32::MAX,
             );
-            let label = self.translate_with_fallback("options.title", "Options");
+            let label = horizon_client::lang::get("options.title");
             horizon_client::widgets::record(&label, rect, true);
             if hovered && self.carried.is_none() {
                 self.draw_tooltip_lines(batch, &[(label, u32::MAX)], cursor.0, cursor.1);
@@ -750,7 +753,8 @@ pub(super) fn browser_stack(
 #[cfg(test)]
 mod tests {
     use super::{BrowserStack, Owner, Panel, RecipePage};
-    use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeView};
+    use crate::game::native_hooks::{NativeRecipeLayout, NativeRecipeResult, NativeRecipeView};
+    use mod_api::FluidStack;
 
     fn stack(item: &str) -> BrowserStack {
         BrowserStack {
@@ -759,13 +763,24 @@ mod tests {
             components: String::new(),
         }
     }
+    fn fluid(id: &str, amount: u32) -> FluidStack {
+        FluidStack::new(mod_api::__private::fluid_key(id).unwrap(), amount)
+    }
     fn view() -> NativeRecipeView {
+        mod_api::__private::part_tests::game_thread();
         NativeRecipeView {
             layout: NativeRecipeLayout::Grid,
             width: 5,
             height: 1,
-            slots: vec![vec![stack("minecraft:oak_log")]; 12],
-            results: vec![stack("minecraft:oak_planks")],
+            slots: vec![vec![stack("minecraft:oak_log")]; 30],
+            results: (0..6)
+                .map(|i| NativeRecipeResult {
+                    stacks: vec![stack("minecraft:oak_planks")],
+                    chance: (i == 1).then_some(250.0),
+                })
+                .collect(),
+            fluid_inputs: vec![fluid("minecraft:water", 1000); 10],
+            fluid_outputs: vec![fluid("minecraft:lava", 250)],
             note: String::new(),
             action: Some(true),
         }
@@ -795,10 +810,16 @@ mod tests {
             (page.title.as_str(), &page.tabs, page.tab),
             ("Oak Planks", &tabs, 0)
         );
-        // Cut as `set-recipes` cuts it: a 3 x 3 grid at most, 9 slots.
+        // Cut as `set-recipes` cuts it: a 3 x 3 grid at most, 27 slots.
         let r = &page.recipes[0];
-        assert_eq!((r.width, r.height, r.slots.len()), (3, 1, 9));
-        assert_eq!(r.results, [stack("minecraft:oak_planks")]);
+        assert_eq!((r.width, r.height, r.slots.len()), (3, 1, 27));
+        // At most four results, a chance kept to 0..=100, at most eight fluids.
+        let results = r.results.iter().map(|x| (x.stacks.len(), x.chance));
+        assert_eq!(
+            results.collect::<Vec<_>>(),
+            [(1, None), (1, Some(100.0)), (1, None), (1, None)]
+        );
+        assert_eq!((r.fluid_inputs.len(), r.fluid_outputs.len()), (8, 1));
 
         // Another mod clearing its own (empty) panel leaves this one.
         panel.show_items("other", Vec::new());
