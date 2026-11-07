@@ -2,8 +2,7 @@
 //! ([`ItemResource`]), and a [`ResourceHandler`] is the indexed contents of one holder, written
 //! only inside a transaction.
 use super::{
-    Capability, Compound, Host, HostTransaction, ItemStack, ServerHost, Tag, Transaction,
-    backend_of,
+    Capability, Host, HostTransaction, ItemStack, ServerHost, Tag, Transaction, backend_of,
 };
 use horizon_core::nbt::JavaString;
 use std::fmt;
@@ -89,6 +88,12 @@ impl ItemResource {
     /// This item's own value of component `id` in its patch, as saved (`minecraft:damage` on a
     /// worn sword); none where it keeps the item's default or has the component removed.
     pub fn component(&self, id: &ComponentId) -> Option<Tag> {
+        if id.as_str() == "minecraft:damage" {
+            return self
+                .0
+                .damage_component()
+                .map(crate::item_stack::unsigned_tag);
+        }
         self.0
             .components()?
             .as_nbt()
@@ -109,6 +114,11 @@ impl ItemResource {
             if patch.contains_key(&JavaString::from(format!("!{id}").as_str())) {
                 return None;
             }
+        }
+        if id == "minecraft:damage"
+            && let Some(damage) = self.0.damage_component()
+        {
+            return Some(crate::item_stack::unsigned_tag(damage));
         }
         host.item_default_component(self.item(), id)
     }
@@ -205,41 +215,34 @@ impl ItemResource {
     /// the plain item again. A stack changes where it lives by an exchange of one of it for
     /// this: `place.exchange(host, tx, &changed, 1)`, which splits it off a bigger stack, in the
     /// transaction.
-    pub fn with_component(&self, host: &dyn Host, id: &ComponentId, value: Tag) -> Self {
-        let default = host.item_default_component(self.item(), id.as_str());
-        let own = !default.is_some_and(|default| same_value(id, &default, &value));
-        self.patched(id, own.then(|| (JavaString::from(id.as_str()), value)))
+    pub fn with_component(
+        &self,
+        host: &dyn Host,
+        id: &ComponentId,
+        value: Tag,
+    ) -> Result<Self, crate::StackError> {
+        let mut stack = self.0.clone();
+        if host
+            .item_default_component(self.item(), id.as_str())
+            .is_some_and(|default| same_value(id, &default, &value))
+        {
+            stack.remove_component_value(id.as_str(), false);
+        } else {
+            stack.set_component_value(id.as_str(), value)?;
+        }
+        Ok(Self(stack))
     }
     /// This item without component `id` (`ItemResource.without`, as vanilla's
     /// `PatchedDataComponentMap.remove`): its own value dropped and, where the item has the
     /// component by default (`host.item_default_component`), a removal recorded in its patch
     /// (`"!minecraft:max_damage": {}`), saved and sent as vanilla's are.
     pub fn without_component(&self, host: &dyn Host, id: &ComponentId) -> Self {
-        let removal = host
-            .item_default_component(self.item(), id.as_str())
-            .is_some()
-            .then(|| {
-                (
-                    JavaString::from(format!("!{}", id.as_str()).as_str()),
-                    Tag::Compound(Compound::new()),
-                )
-            });
-        self.patched(id, removal)
-    }
-    /// This item with its patch's entries for `id`, a value or a removal, replaced by `entry`.
-    fn patched(&self, id: &ComponentId, entry: Option<(JavaString, Tag)>) -> Self {
-        let mut components = self
-            .0
-            .components()
-            .map(|patch| patch.as_nbt().clone())
-            .unwrap_or_default();
-        components.remove(&JavaString::from(id.as_str()));
-        components.remove(&JavaString::from(format!("!{}", id.as_str()).as_str()));
-        if let Some((key, value)) = entry {
-            components.insert(key, value);
-        }
         let mut stack = self.0.clone();
-        stack.set_components(components);
+        stack.remove_component_value(
+            id.as_str(),
+            host.item_default_component(self.item(), id.as_str())
+                .is_some(),
+        );
         Self(stack)
     }
 }

@@ -65,6 +65,17 @@ pub(in crate::game) trait TryIntoApi {
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
+/// Tests use the production snapshot conversion, never a second fixture codec.
+#[cfg(test)]
+pub(in crate::game) fn test_snapshot<T: TryIntoApi + ?Sized>(value: &T) -> T::Api
+where
+    T::Error: std::fmt::Debug,
+{
+    value
+        .try_into_api()
+        .expect("fixture snapshot has resolved item keys and a nonempty count")
+}
+
 pub(in crate::game) trait TryIntoEngine {
     type Engine;
     type Error;
@@ -75,6 +86,7 @@ pub(in crate::game) trait TryIntoEngine {
 pub(in crate::game) enum StackReadError {
     UnknownItem,
     Empty,
+    InvalidComponents(mod_api::StackError),
 }
 
 impl StackReadError {
@@ -82,6 +94,7 @@ impl StackReadError {
         match self {
             Self::UnknownItem => StackWriteError::UnknownItem,
             Self::Empty => StackWriteError::EmptyEngineStack,
+            Self::InvalidComponents(reason) => StackWriteError::InvalidComponents { reason },
         }
     }
 }
@@ -329,10 +342,13 @@ impl TryIntoApi for EngineStack {
     fn try_into_api(&self) -> Result<ApiStack, Self::Error> {
         let key = mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?;
         let mut result = ApiStack::new(key, self.count).ok_or(StackReadError::Empty)?;
-        result.set_damage(self.damage);
-        if let Some(Tag::Compound(mut patch)) = horizon_items::item_data::encode_components(self) {
-            patch.remove(&JavaString::from("minecraft:damage"));
-            result.set_components(patch);
+        if self.damage != 0 {
+            result.set_damage(self.damage);
+        }
+        if let Some(Tag::Compound(patch)) = horizon_items::item_data::encode_components(self) {
+            result
+                .set_components(patch)
+                .map_err(StackReadError::InvalidComponents)?;
         }
         Ok(result)
     }
@@ -357,14 +373,15 @@ impl TryIntoApi for horizon_assets::item_model::StackView {
                 Tag::Compound(Compound::new()),
             ),
         }));
-        let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
-        EngineStack {
-            item: self.item.as_str().into(),
-            count,
-            damage,
-            extra,
-        }
-        .try_into_api()
+        let key = mod_api::__private::item_key(&self.item).ok_or(StackReadError::UnknownItem)?;
+        let mut stack = ApiStack::new(key, count).ok_or(StackReadError::Empty)?;
+        let Tag::Compound(patch) = components else {
+            unreachable!("model patch is constructed as a compound")
+        };
+        stack
+            .set_components(patch)
+            .map_err(StackReadError::InvalidComponents)?;
+        Ok(stack)
     }
 }
 
@@ -387,7 +404,14 @@ fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
     let patch = value
         .components()
         .map(|patch| Tag::Compound(patch.as_nbt().clone()));
-    let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
+    let (_, mut extra) = horizon_items::item_data::decode_components(patch.as_ref());
+    // The engine's scalar zero cannot distinguish absence from an explicit zero.
+    // Keep the latter in its existing opaque patch, rather than adding another protocol.
+    if value.damage_component() == Some(0) {
+        std::sync::Arc::make_mut(extra.get_or_insert_with(Default::default))
+            .other
+            .insert("minecraft:damage".into(), Tag::Int(0));
+    }
     EngineStack {
         item,
         count: value.count(),
@@ -1554,11 +1578,18 @@ mod item_model_snapshot_tests {
         assert_eq!(snapshot.damage(), 7);
         let patch = snapshot.components().unwrap().as_nbt();
         assert_eq!(
-            patch.get("example:charge").unwrap().get("amount"),
+            patch
+                .get(&JavaString::from("example:charge"))
+                .unwrap()
+                .get("amount"),
             Some(&Tag::Int(4))
         );
-        assert!(patch.get("!minecraft:custom_name").is_some());
-        assert!(patch.get("bundle_selected").is_none());
+        assert!(
+            patch
+                .get(&JavaString::from("!minecraft:custom_name"))
+                .is_some()
+        );
+        assert!(patch.get(&JavaString::from("bundle_selected")).is_none());
         assert_eq!(view.bundle_selected, 3);
     }
 

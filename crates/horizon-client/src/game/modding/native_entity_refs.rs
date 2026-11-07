@@ -773,6 +773,8 @@ pub(super) mod tests {
             })
             .collect();
         mod_api::__private::part_tests::register_game_keys(ids);
+        mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
+            .expect("fixture item keys resolve against its loaded catalog");
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.

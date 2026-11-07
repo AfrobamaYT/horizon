@@ -1,4 +1,4 @@
-//! Mutable slot and cancellation contracts, separate from engine brewing rules.
+// Mutable slot and cancellation contracts, separate from engine brewing rules.
 use crate::*;
 use std::sync::{Arc, Mutex};
 

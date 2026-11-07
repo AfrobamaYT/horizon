@@ -1,4 +1,4 @@
-//! Item model callbacks carry owned values and a separate runtime selection.
+// Item model callbacks carry owned values and a separate runtime selection.
 use crate::*;
 
 struct NoClient;

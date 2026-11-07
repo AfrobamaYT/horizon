@@ -7161,8 +7161,9 @@ impl Game<'_> {
                 && mod_api::__private::parts(mod_api::HookId::UseItemOn, "use_item_on")
                     .for_hook(mod_api::HookId::UseItemOn)
                     .is_some_and(|parts| !parts.block_state(state).is_empty())
+                && let Ok(snapshot) = held.try_into_api()
             {
-                let click = self.block_click(hit, self.hand, held.as_ref());
+                let click = self.block_click(hit, self.hand, snapshot.as_ref());
                 self.native_use_item_on(state, &click, &mut block_answer);
             }
             let mut chains_sign = false;
@@ -7293,9 +7294,16 @@ impl Game<'_> {
                     (result, UseBranch::ItemOn)
                 } else if self.hand == Hand::Main {
                     let mut empty_answer = None;
-                    if !mod_api::__private::mods().is_empty() {
-                        let empty_held = self.held().cloned();
-                        let click = self.block_click(hit, self.hand, empty_held.as_ref());
+                    if mod_api::__private::has_part_hook(mod_api::HookId::UseWithoutItem)
+                        && mod_api::__private::parts(
+                            mod_api::HookId::UseWithoutItem,
+                            "use_without_item",
+                        )
+                        .for_hook(mod_api::HookId::UseWithoutItem)
+                        .is_some_and(|parts| !parts.block_state(state).is_empty())
+                        && let Ok(snapshot) = self.held().try_into_api()
+                    {
+                        let click = self.block_click(hit, self.hand, snapshot.as_ref());
                         self.native_use_without_item(state, &click, &mut empty_answer);
                     }
                     if empty_answer.is_none()
