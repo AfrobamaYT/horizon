@@ -170,6 +170,44 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_lifecycle_commands_unload_park_and_remote() {
+        use super::super::{
+            commands::Target,
+            entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle},
+        };
+        LifecycleFixture {
+            seed: |game, entries| {
+                game.falling.clear();
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:sand")
+                    .unwrap();
+                for &(id, at) in entries {
+                    assert!(game.spawn_remote_projectile(
+                        id as i32,
+                        "minecraft:falling_block",
+                        at,
+                        (0.0, 0.0),
+                        [0.0; 3],
+                        state.0 as i32
+                    ));
+                }
+            },
+            ids: |game| game.falling.iter().map(|f| f.id).collect(),
+            target: Target::Falling,
+            unloads_with_chunk: true,
+            remote: Some(RemoteLifecycle {
+                prepare: |game| game.clear_remote_projectiles(),
+                apply: |game, remove, _| game.remove_remote_projectile(remove),
+            }),
+        }
+        .run();
+    }
+
     fn bound_falling_case(
         client: bool,
         exercise: impl FnOnce(&mut Game<'_>, &Arc<Mutex<AttachmentIndex<mod_api::EntityRef>>>),
