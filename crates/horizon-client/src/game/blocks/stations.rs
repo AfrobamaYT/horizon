@@ -2699,7 +2699,13 @@ impl Game<'_> {
                 item_info,
                 |appender, stack, out| {
                     if let Ok(stack) = stack.try_into_api() {
-                        appender.append(self, &stack, &context, out);
+                        let mut added = Vec::new();
+                        appender.append(self, &stack, &context, &mut added);
+                        out.extend(
+                            added
+                                .into_iter()
+                                .map(|text| text.try_into_engine(&()).unwrap()),
+                        );
                     }
                 },
                 appenders
@@ -2785,7 +2791,7 @@ impl Game<'_> {
         let elements: Vec<TooltipElement> = lines
             .iter()
             .cloned()
-            .map(|(text, color)| TooltipElement::Text(text, color))
+            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), color))
             .chain(images.iter().cloned().map(TooltipElement::Image))
             .collect();
         let mut place = mod_api::TooltipPlace {
@@ -3027,7 +3033,7 @@ impl Game<'_> {
         }
         let mut elements: Vec<TooltipElement> = lines
             .into_iter()
-            .map(|(text, color)| TooltipElement::Text(text, color))
+            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), color))
             .chain(images.into_iter().map(TooltipElement::Image))
             .collect();
         let (mut max_width, mut cancel) = (-1, false);
@@ -3046,12 +3052,18 @@ impl Game<'_> {
         let (mut lines, mut images) = (Vec::new(), Vec::new());
         for element in elements {
             match element {
-                TooltipElement::Text(text, color) if max_width < 0 => lines.push((text, color)),
-                TooltipElement::Text(text, color) => lines.extend(
-                    font.split(&text.resolve_legacy(), max_width as f32)
-                        .into_iter()
-                        .map(|line| (line, color)),
-                ),
+                TooltipElement::Text(text, color) => {
+                    let text = text.try_into_engine(&()).unwrap();
+                    if max_width < 0 {
+                        lines.push((text, color));
+                    } else {
+                        lines.extend(
+                            font.split(&text.resolve_legacy(), max_width as f32)
+                                .into_iter()
+                                .map(|line| (line, color)),
+                        );
+                    }
+                }
                 TooltipElement::Image(image) => {
                     if let Some(size) = tooltip_component_size(Some(image.size)) {
                         images.push(TooltipImage { size, ..image });
