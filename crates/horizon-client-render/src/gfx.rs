@@ -10136,6 +10136,17 @@ impl Renderer {
                     pass.draw(0..3, 0..1);
                 }
             }
+            // The next stage of the mods' primitives to draw (`RenderLevelStage`): a stage this
+            // route does not draw its part of the world at goes with the next one it reaches.
+            let mut primitive_stage = 0;
+            // RenderLevelStageEvent.AfterSky: behind every terrain, once this pass drew the sky.
+            if world_primitives && !pack_draws_sky && !pack_draws_terrain {
+                self.world_primitives
+                    .draw_through(&mut pass, &mut primitive_stage, 0);
+                pass.set_bind_group(0, &self.group, &[]);
+                pack_frame(&mut pass);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            }
             let terrain_pass =
                 |encoder: &mut wgpu::CommandEncoder, surface: &wgpu::TextureView, clear: bool| {
                     // Its lifetime forgotten: a closure cannot tie it to `encoder`'s.
@@ -10443,6 +10454,15 @@ impl Renderer {
             if surface.is_some() {
                 drop(pass);
                 pass = plain_pass(&mut encoder);
+            }
+            // RenderLevelStageEvent.AfterOpaqueBlocks: after solid and cutout terrain, before
+            // entities.
+            if world_primitives && !pack_draws_terrain {
+                self.world_primitives
+                    .draw_through(&mut pass, &mut primitive_stage, 1);
+                pass.set_bind_group(0, &self.group, &[]);
+                pack_frame(&mut pass);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             }
             if static_entity_quads > 0 {
                 pass.set_pipeline(&self.static_entity_pipeline);
@@ -10937,6 +10957,15 @@ impl Renderer {
                     self.mark_translucent_terrain(&mut pass, None, solid_draws, translucent_draws);
                 }
             }
+            // RenderLevelStageEvent.AfterTranslucentBlocks: after translucent terrain, here or
+            // OIT's.
+            if world_primitives && !pack_draws_water && !pack_draws_terrain {
+                self.world_primitives
+                    .draw_through(&mut pass, &mut primitive_stage, 2);
+                pass.set_bind_group(0, &self.group, &[]);
+                pack_frame(&mut pass);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            }
             // LevelRenderer.executeTranslucentAfterTerrain: vanilla's
             // translucent particle layer draws after translucent terrain —
             // the quads write depth, so before it they would hide the glass
@@ -11022,6 +11051,14 @@ impl Renderer {
                     .draw(&mut pass, &self.entity_group, native_weather);
                 pass.set_bind_group(0, &self.group, &[]);
             }
+            // RenderLevelStageEvent.AfterWeather: after the rain and snow this pass drew.
+            if world_primitives && !pack_draws_weather && !oit_on {
+                self.world_primitives
+                    .draw_through(&mut pass, &mut primitive_stage, 3);
+                pass.set_bind_group(0, &self.group, &[]);
+                pack_frame(&mut pass);
+                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            }
             // LevelRenderer: the world border after translucent terrain and weather.
             if let Some(b) = frame.border.as_ref().filter(|_| !frame.title && !oit_on) {
                 pass.set_pipeline(&self.border_pipeline);
@@ -11046,9 +11083,14 @@ impl Renderer {
                 );
             }
             // Native mods' primitives: after the entities and the rest of the world, into its
-            // targets (its resolution, reversed depth and TAA), before the hand.
+            // targets (its resolution, reversed depth and TAA), before the hand
+            // (RenderLevelStageEvent.AfterLevel), with any stage not drawn yet.
             if world_primitives {
-                self.world_primitives.draw(&mut pass);
+                self.world_primitives.draw_through(
+                    &mut pass,
+                    &mut primitive_stage,
+                    world_primitives::STAGES - 1,
+                );
             }
             if hand_in_world {
                 pass.set_pipeline(&self.depth_reset);
