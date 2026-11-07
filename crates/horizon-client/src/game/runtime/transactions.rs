@@ -305,10 +305,9 @@ impl Game<'_> {
         if self.transactions.is_empty() {
             return;
         }
-        let Some((slots, _)) = self.entity_slots(id) else {
+        let Some(slots) = self.edit_entity_slots(id, |slots, _| slots.to_vec()) else {
             return;
         };
-        let slots = slots.to_vec();
         if let Some(level) = self.transactions.last_mut() {
             level.entities.entry(id).or_insert(slots);
         }
@@ -485,11 +484,11 @@ impl Game<'_> {
             self.world.set_stored(pos.0, pos.1, pos.2, state);
         }
         for (id, kept) in level.entities {
-            if let Some((slots, _)) = self.entity_slots(id) {
+            self.edit_entity_slots(id, |slots, _| {
                 for (slot, kept) in slots.iter_mut().zip(kept) {
                     *slot = kept;
                 }
-            }
+            });
         }
         for (id, len) in level.mob_lengths {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {

@@ -12,18 +12,24 @@ use horizon_client::{command_block::Mode, text::Text};
 use horizon_protocol::packets::play::{self, Serverbound as S};
 
 impl Game<'_> {
-    fn command_cart_mut(&mut self, id: u32) -> Option<&mut Minecart> {
-        self.carts
-            .iter_mut()
-            .find(|c| c.id == id && c.kind == CartKind::CommandBlock)
+    fn edit_command_cart<R>(
+        &mut self,
+        id: u32,
+        edit: impl FnOnce(&mut Minecart) -> R,
+    ) -> Option<R> {
+        let i = self
+            .carts
+            .iter()
+            .position(|c| c.id == id && c.kind == CartKind::CommandBlock)?;
+        Some(self.carts.update(i, edit))
     }
     /// `MinecartCommandBase.onUpdated`: the cart's command and last output go
     /// into its synched data (`DATA_ID_COMMAND_NAME`, `DATA_ID_LAST_OUTPUT`).
     pub(super) fn cart_command_updated(&mut self, id: u32) {
-        if let Some(c) = self.command_cart_mut(id) {
+        self.edit_command_cart(id, |c| {
             c.synced_command = c.command.command.clone();
             c.synced_output = c.command.last_output_string();
-        }
+        });
     }
     /// `BaseCommandBlock.performCommand` for the cart: false when it already
     /// ran this game tick.
@@ -33,20 +39,22 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK);
-        let Some(c) = self.command_cart_mut(id) else {
-            return false;
-        };
-        if c.command.last_execution == game_time {
-            return false;
-        }
-        if c.command.command.eq_ignore_ascii_case("Searge") {
-            c.command.last_output = Some(Text::literal("#itzlipofutzli"));
-            c.command.success_count = 1;
-            return true;
-        }
-        c.command.success_count = 0;
-        let command = c.command.command.clone();
-        if rules_work && !command.is_empty() {
+        let dimension = self.dim;
+        let Some(prepared) = self.edit_command_cart(id, |c| {
+            use std::ops::ControlFlow::{Break, Continue};
+            if c.command.last_execution == game_time {
+                return Break(false);
+            }
+            if c.command.command.eq_ignore_ascii_case("Searge") {
+                c.command.last_output = Some(Text::literal("#itzlipofutzli"));
+                c.command.success_count = 1;
+                return Break(true);
+            }
+            c.command.success_count = 0;
+            let command = c.command.command.clone();
+            if !rules_work || command.is_empty() {
+                return Continue(None);
+            }
             c.command.last_output = None;
             // MinecartCommandBase.createCommandSourceStack: the cart's
             // position and rotation at game master level.
@@ -57,37 +65,47 @@ impl Game<'_> {
                 eyes: false,
                 silent: false,
                 store: None,
-                dimension: self.dim,
-                origin_dimension: self.dim,
+                dimension,
+                origin_dimension: dimension,
                 origin_player: false,
                 level: None,
                 block: None,
                 cart: Some(id),
             };
+            Continue(Some((command, source)))
+        }) else {
+            return false;
+        };
+        let command = match prepared {
+            std::ops::ControlFlow::Break(done) => return done,
+            std::ops::ControlFlow::Continue(command) => command,
+        };
+        if let Some((command, source)) = command {
             let successes = self.run_as_game_master(&command, source);
-            if let Some(c) = self.command_cart_mut(id) {
-                c.command.success_count = successes;
-            }
+            self.edit_command_cart(id, |c| c.command.success_count = successes);
         }
-        if let Some(c) = self.command_cart_mut(id) {
+        self.edit_command_cart(id, |c| {
             c.command.last_execution = if c.command.update_last_execution {
                 game_time
             } else {
                 -1
             };
-        }
+        });
         true
     }
     /// `CloseableCommandBlockSource.sendSystemMessage` for the cart: its last
     /// output stamped with the time, then `onUpdated`. Nothing when it does
     /// not track output (`CommandSource.NULL`).
     pub(super) fn cart_command_output(&mut self, id: u32, message: Text) {
-        let Some(c) = self.command_cart_mut(id) else {
-            return;
-        };
-        if c.command.track_output {
+        let updated = self.edit_command_cart(id, |c| {
+            if !c.command.track_output {
+                return false;
+            }
             let time = chrono::Local::now().format("[%H:%M:%S] ").to_string();
             c.command.last_output = Some(Text::literal(time).append(message));
+            true
+        });
+        if updated == Some(true) {
             self.cart_command_updated(id);
         }
     }
@@ -96,8 +114,9 @@ impl Game<'_> {
     /// `command_block_output`.
     pub(super) fn cart_command_success(&mut self, id: u32, message: Text, broadcast: bool) {
         let Some(name) = self
-            .command_cart_mut(id)
-            .filter(|c| c.command.track_output)
+            .carts
+            .iter()
+            .find(|c| c.id == id && c.kind == CartKind::CommandBlock && c.command.track_output)
             .map(|c| c.command.name())
         else {
             return;
@@ -144,9 +163,7 @@ impl Game<'_> {
         let command = s.command.value().to_owned();
         let track_output = s.track_output;
         // The output button set the cart's own flag as it was pressed.
-        if let Some(c) = self.command_cart_mut(id) {
-            c.command.track_output = track_output;
-        }
+        self.edit_command_cart(id, |c| c.command.track_output = track_output);
         if self.remote.is_some() {
             self.send(S::SetCommandMinecart(play::SetCommandMinecart {
                 entity: id as i32,
@@ -156,8 +173,8 @@ impl Game<'_> {
         } else {
             self.apply_cart_command(id, command, track_output);
         }
-        if !track_output && let Some(c) = self.command_cart_mut(id) {
-            c.command.last_output = None;
+        if !track_output {
+            self.edit_command_cart(id, |c| c.command.last_output = None);
         }
     }
     /// `ServerGamePacketListenerImpl.handleSetCommandMinecart` for a guest.
@@ -182,13 +199,17 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::COMMAND_BLOCKS_WORK);
-        let Some(c) = self.command_cart_mut(id) else {
+        if self
+            .edit_command_cart(id, |c| {
+                c.command.set_command(&command);
+                c.command.track_output = track_output;
+                if !track_output {
+                    c.command.last_output = None;
+                }
+            })
+            .is_none()
+        {
             return;
-        };
-        c.command.set_command(&command);
-        c.command.track_output = track_output;
-        if !track_output {
-            c.command.last_output = None;
         }
         if enabled {
             self.cart_command_updated(id);
@@ -201,5 +222,39 @@ impl Game<'_> {
             };
             self.system_message(Text::translate(key, &[Text::literal(command)]));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn scoped_cart_commands_keep_tick_and_self_removal_rules() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.world.game_time = 10;
+            game.carts
+                .push(Minecart::new(41, CartKind::CommandBlock, Vec3::ZERO));
+            game.carts
+                .push(Minecart::new(42, CartKind::Rideable, Vec3::ZERO));
+            game.carts.update(0, |c| c.command.set_command("Searge"));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts[0].command.success_count, 1);
+            game.carts.update(0, |c| c.command.set_command(""));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts[0].command.success_count, 0);
+            assert_eq!(game.carts[0].command.last_execution, 10);
+            assert!(!game.perform_cart_command(41));
+            assert!(!game.perform_cart_command(42));
+            assert!(!game.perform_cart_command(99));
+            game.world.game_time = 11;
+            game.carts.update(0, |c| c.command.set_command("kill @s"));
+            assert!(game.perform_cart_command(41));
+            assert_eq!(game.carts.len(), 1);
+            assert_eq!(game.carts[0].id, 42);
+            assert_eq!(game.carts[0].command.success_count, 0);
+        });
     }
 }

@@ -26,7 +26,11 @@ impl Game<'_> {
     /// minecart's (the open menu's copy while one shows it, as `cart_slots`), a chest boat's, or
     /// a chested donkey's, mule's or llama's (`AbstractHorse.inventory`, `getInventoryColumns`
     /// rows of three). With where it stands, for what a split throws.
-    pub(super) fn entity_slots(&mut self, id: u32) -> Option<(&mut [Option<ItemStack>], [f64; 3])> {
+    pub(super) fn edit_entity_slots<R>(
+        &mut self,
+        id: u32,
+        edit: impl FnOnce(&mut [Option<ItemStack>], [f64; 3]) -> R,
+    ) -> Option<R> {
         let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
         let at = |p: &horizon_core::geometry::Vec3| [p.x, p.y, p.z];
         let container = |c: &super::minecarts::Minecart| {
@@ -48,16 +52,16 @@ impl Game<'_> {
                 }
                 m.extra.items.resize(size, None);
             }
-            return Some((&mut m.extra.items[..size], at(&m.position)));
+            return Some(edit(&mut m.extra.items[..size], at(&m.position)));
         };
         if self.carts.iter().any(container) {
-            return Some((self.cart_slots(id)?, position));
+            return Some(edit(self.cart_slots(id)?, position));
         }
         if let Some(super::BlockEntity::Chest(open)) = self.world.block_entities.get_mut(&key) {
-            return Some((open, position));
+            return Some(edit(open, position));
         }
-        let b = self.boats.iter_mut().find(|b| b.id == id)?;
-        Some((&mut b.items, position))
+        let i = self.boats.iter().position(|b| b.id == id)?;
+        Some(self.boats.update(i, |b| edit(&mut b.items, position)))
     }
     /// Whether this game simulates a world: a client's copy has no places to write.
     fn places_simulated(&self) -> bool {
@@ -123,8 +127,11 @@ impl Game<'_> {
                 .map(|e| e.stack.clone());
         }
         if let ItemPlace::EntitySlot { entity, slot } = place {
-            let (slots, _) = self.entity_slots(*entity)?;
-            return slots.get(*slot).cloned().flatten().filter(|s| s.count > 0);
+            return self
+                .edit_entity_slots(*entity, |slots, _| {
+                    slots.get(*slot).cloned().flatten().filter(|s| s.count > 0)
+                })
+                .flatten();
         }
         let mut stack = None;
         self.native_as_player(self.place_player(place)?, |g| {
@@ -197,22 +204,23 @@ impl Game<'_> {
         }
         if let ItemPlace::EntitySlot { entity, slot } = place {
             if !self
-                .entity_slots(*entity)
-                .is_some_and(|(slots, _)| *slot < slots.len())
+                .edit_entity_slots(*entity, |slots, _| *slot < slots.len())
+                .unwrap_or(false)
             {
                 return 0;
             }
             self.journal_entity(*entity);
-            let Some((slots, _)) = self.entity_slots(*entity) else {
-                return 0;
-            };
-            fill(&mut slots[*slot], &mut rest);
-            for (i, held) in slots.iter_mut().enumerate() {
-                if i != *slot {
-                    fill(held, &mut rest);
-                }
-            }
-            return stack.count - rest.count;
+            return self
+                .edit_entity_slots(*entity, |slots, _| {
+                    fill(&mut slots[*slot], &mut rest);
+                    for (i, held) in slots.iter_mut().enumerate() {
+                        if i != *slot {
+                            fill(held, &mut rest);
+                        }
+                    }
+                    stack.count - rest.count
+                })
+                .unwrap_or(0);
         }
         let Some(player) = self.place_player(place) else {
             return 0;
@@ -288,20 +296,22 @@ impl Game<'_> {
             return took;
         }
         if let ItemPlace::EntitySlot { entity, slot } = place {
-            let Some((slots, _)) = self.entity_slots(*entity) else {
-                return 0;
-            };
-            let took = taken(slots.get(*slot).and_then(Option::as_ref));
+            let took = self
+                .edit_entity_slots(*entity, |slots, _| {
+                    taken(slots.get(*slot).and_then(Option::as_ref))
+                })
+                .unwrap_or(0);
             if took == 0 {
                 return 0;
             }
             self.journal_entity(*entity);
-            let Some((slots, _)) = self.entity_slots(*entity) else {
-                return 0;
-            };
-            let kept = slots[*slot].as_ref().map(|held| left(held, took));
-            slots[*slot] = kept.filter(|kept| kept.count > 0);
-            return took;
+            return self
+                .edit_entity_slots(*entity, |slots, _| {
+                    let kept = slots[*slot].as_ref().map(|held| left(held, took));
+                    slots[*slot] = kept.filter(|kept| kept.count > 0);
+                    took
+                })
+                .unwrap_or(0);
         }
         let Some(player) = self.place_player(place) else {
             return 0;
@@ -1231,6 +1241,48 @@ pub(super) mod tests {
             let before = inventories(game);
             assert_eq!(trade(game, &diamonds, &emeralds), Err(()));
             assert_eq!(inventories(game), before);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn scoped_boat_slots_use_the_open_menu_and_refuse_a_removed_owner() {
+        use super::super::boats::Boat;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let mut boat = Boat::new(600, "oak".into(), Vec3::new(1.0, 65.0, 2.0), 0.0);
+            boat.chest = true;
+            boat.items.resize(27, None);
+            game.boats.push(boat);
+            assert_eq!(
+                game.edit_entity_slots(600, |slots, at| {
+                    assert_eq!(at, [1.0, 65.0, 2.0]);
+                    slots[0] = Some(ItemStack::new("minecraft:stone", 4));
+                    slots.len()
+                }),
+                Some(27)
+            );
+            let key = (i32::MAX - 15, super::super::minecarts::CART_KEY_Y, 600);
+            game.world
+                .block_entities
+                .insert(key, super::super::BlockEntity::Chest(vec![None; 27]));
+            game.edit_entity_slots(600, |slots, _| {
+                assert!(slots[0].is_none());
+                slots[0] = Some(ItemStack::new("minecraft:sand", 7));
+            });
+            assert_eq!(
+                game.boats[0].items[0],
+                Some(ItemStack::new("minecraft:stone", 4))
+            );
+            assert_eq!(
+                game.edit_entity_slots(600, |slots, _| slots[0].clone()),
+                Some(Some(ItemStack::new("minecraft:sand", 7)))
+            );
+            game.boats.remove(0);
+            assert_eq!(
+                game.edit_entity_slots(600, |_, _| panic!("stale owner reached its menu")),
+                None::<()>
+            );
         });
     }
 
