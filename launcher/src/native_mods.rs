@@ -39,7 +39,6 @@ mod picker;
 mod prebuilt;
 mod sites;
 mod slots;
-#[cfg(test)]
 mod source;
 #[cfg(all(test, target_os = "linux"))]
 mod source_server;
@@ -49,9 +48,13 @@ pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
 pub use prebuilt::{prebuilt_availability, SourceReason};
 
+// Settings and logs are shared by native-build tests and the toolchain HTTP fixture.
+#[cfg(test)]
+pub(crate) static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "embedded-inventory-packages-v1";
+const STAGING: &str = "private-source-points-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -1248,6 +1251,7 @@ pub fn version_for(
         hash.update(target.name().as_bytes());
         hash.update([0]);
     }
+    // Private rows derive from the pinned SDK and inject declarations, all salted/hashed here.
     // bundles() reads folders in path order, which with their manifests decides trait dispatch
     // order: hashed in that order, a different order is another build.
     for b in bundles {
@@ -2181,7 +2185,10 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => Ok(game),
+                Ok(game) => match prebuilt::source_refusal(&game, &projects)? {
+                    Some(reason) => Err(reason),
+                    None => Ok(game),
+                },
                 Err(reason) => Err(reason),
             },
         };
@@ -2330,7 +2337,6 @@ fn pipeline(
         }
         // Stage beside `fresh` and publish the tree and catalog only after the mods' sites
         // check, as the prebuilt route validates before it creates its output.
-        let listed = real.join("points.json");
         let pending = real.join("stage.pending");
         let catalog_dir = real.join("catalog.partial");
         let _ = fs::remove_dir_all(&pending);
@@ -2360,6 +2366,8 @@ fn pipeline(
         }
         run(pass, "Marking the game's injection points", |_| {})
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        source::stage(&pending, &catalog_dir, &ordered)
+            .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let catalog = internals::Catalog::read(&catalog_dir)
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         mods.iter()
@@ -2367,13 +2375,14 @@ fn pipeline(
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(catalog_dir.join(inject::POINTS), &listed)
-            .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        fs::rename(
-            catalog_dir.join(internals::INTERNALS),
-            real.join(internals::INTERNALS),
-        )
-        .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        for name in [
+            inject::POINTS,
+            internals::INTERNALS,
+            horizon_mod_api_gen::points::source::FILE,
+        ] {
+            fs::rename(catalog_dir.join(name), real.join(name))
+                .map_err(|error| discard(&pending, &catalog_dir, error))?;
+        }
         let _ = fs::remove_dir_all(&catalog_dir);
         if !mods.is_empty() {
             // Offline metadata resolves all targets, including packages not fetched for this host.
@@ -2913,13 +2922,12 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
-    pub(super) static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
     #[test]
     fn isolation_keeps_cancellation_exact_after_a_retry() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -2946,7 +2954,7 @@ mod tests {
 
     #[test]
     fn isolation_bounds_recompiles_and_keeps_the_failure() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -3783,6 +3791,26 @@ mod tests {
             .unwrap(),
             "the ARM64 toolchain has a separate installed build"
         );
+        let path = d.join("horizon-mod.toml");
+        let original = fs::read_to_string(&path).unwrap();
+        let declaration = "\n[[inject]]\nid='source'\nat='horizon_client::game::Game::unlisted'\nkind='head'\naccess='internals'\nwith='hook'\nhash='0000000000000000'\n";
+        fs::write(&path, format!("{original}{declaration}")).unwrap();
+        let source = key(A);
+        assert_ne!(
+            first, source,
+            "source adapters require another game artifact"
+        );
+        assert_eq!(source, key(A), "unchanged private rows reuse the artifact");
+        fs::write(
+            &path,
+            format!(
+                "{original}{}",
+                declaration.replace("id='source'", "id='changed'")
+            ),
+        )
+        .unwrap();
+        assert_ne!(source, key(A), "private point identity is part of the key");
+        fs::write(path, original).unwrap();
         assert_ne!(first, key(B));
         assert_ne!(
             first,
@@ -4156,7 +4184,7 @@ mod tests {
     /// and no instance is edited or version selected.
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         backend::Settings::load().allow_native_mods().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
@@ -4202,7 +4230,7 @@ mod tests {
     #[test]
     fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
         use std::net::TcpListener;
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let original = backend::Settings::load();
         let mut settings = backend::Settings::load();
         settings.native_mods_allowed_at = None;
@@ -4270,7 +4298,7 @@ mod tests {
     /// one log file.
     #[test]
     fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         backend::Settings::load().allow_native_mods().unwrap();
         clear_log().unwrap();
         append_log("the last build's output").unwrap();
@@ -4779,7 +4807,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_build_smart_app_control_blocked_says_how_to_build() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         clear_log().unwrap();
         // cargo's output on Windows 11 25H2 with Smart App Control on (the report in #5911).
         let mut cmd = Command::new("sh");

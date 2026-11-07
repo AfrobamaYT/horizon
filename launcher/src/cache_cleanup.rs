@@ -12,6 +12,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const LOCKS: [&str; 3] = [".cargo-lock", ".package-cache", ".package-cache-mutate"];
 
+/// Operational locks are neither disposable outputs nor user reports/jar-cache entries.
+pub(crate) fn reserved(name: &Path) -> bool {
+    LOCKS.iter().any(|lock| name == Path::new(lock)) || name == Path::new(".build.lock")
+}
+
 /// One root handle and value-only output records; no handle is retained per file or directory.
 pub struct Plan {
     directory: Dir,
@@ -71,10 +76,7 @@ impl Plan {
     }
 
     pub fn pin_file(directory: &Dir, name: &Path) -> Result<Self, Error> {
-        if name.components().count() != 1
-            || LOCKS.iter().any(|lock| name == Path::new(lock))
-            || name == Path::new(".build.lock")
-        {
+        if name.components().count() != 1 || reserved(name) {
             return Err(Error::Unsafe(name.to_owned()));
         }
         let _locks = guard(directory, Path::new(""))?;
@@ -99,8 +101,7 @@ impl Plan {
         for entry in directory.entries()? {
             let name = PathBuf::from(entry?.file_name());
             observe();
-            if LOCKS.iter().any(|lock| name == Path::new(lock)) || name == Path::new(".build.lock")
-            {
+            if reserved(&name) {
                 continue;
             }
             let meta = directory.symlink_metadata(&name)?;

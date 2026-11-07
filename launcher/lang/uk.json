@@ -192,7 +192,6 @@
   "Could not run {program}: {error}": "Could not run {program}: {error}",
   "Could not save the renewed sign-in.": "Не вдалося зберегти оновлений вхід.",
   "Could not start data move: {error}": "Не вдалося почати перенесення даних: {error}",
-  "Couldn't load patch notes. {error}": "Couldn't load patch notes. {error}",
   "Couldn't load releases. {error}": "Couldn't load releases. {error}",
   "Create": "Створити",
   "Create a desktop shortcut": "Створити ярлик на робочому столі",
@@ -447,7 +446,6 @@
   "Loading Minecraft profile…": "Завантаження профілю Minecraft…",
   "Loading build log…": "Завантаження журналу збірки…",
   "Loading filters": "Завантаження фільтрів",
-  "Loading patch notes…": "Завантаження опису змін…",
   "Loading releases…": "Завантаження випусків…",
   "Loading…": "Завантаження…",
   "Local file · {file}": "Локальний файл · {file}",
@@ -957,7 +955,6 @@
   "WebAssembly": "WebAssembly",
   "Website": "Вебсайт",
   "What an agent can do, and the commands": "What an agent can do, and the commands",
-  "What changed in each release, newest first.": "Що змінилося в кожному випуску, спочатку нові.",
   "What players see under the server's name (the MOTD).": "Що гравці бачать під назвою сервера (MOTD).",
   "What the last build printed": "What the last build printed",
   "What this change can't keep": "Що ця зміна не зможе зберегти",
@@ -1196,5 +1193,7 @@
   "{host} has no horizon-server. Install it there first, as the hosting guide says.": "{host} has no horizon-server. Install it there first, as the hosting guide says.",
   "Couldn't connect to {host}: {reason}": "Couldn't connect to {host}: {reason}",
   "Couldn't connect to {host}.": "Couldn't connect to {host}.",
-  "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}."
+  "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
+  "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.": "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.",
+  "Rust toolchain archive has {actual} bytes; expected {expected}.": "Rust toolchain archive has {actual} bytes; expected {expected}."
 }

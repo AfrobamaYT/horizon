@@ -124,11 +124,7 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        let top = Vec3::new(
-            m.position.x,
-            m.position.y + f64::from(m.height()),
-            m.position.z,
-        );
+        let top = super::mounts::on_top(m);
         let up: MobEvent = happy_ghast::goggles(false, m);
         if let Some(p) = self.player.as_mut() {
             p.position = top;
