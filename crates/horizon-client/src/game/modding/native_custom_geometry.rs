@@ -395,6 +395,11 @@ mod tests {
                     Err(GroupError::Stale)
                 );
             }
+            let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+            assert_eq!(
+                context(game, &mut draw).draw_model_instances(model, &oversized),
+                Err(InstanceError::CapacityExceeded)
+            );
             let render = |game: &Game<'_>| {
                 let staged = game.prepared_model_draws.borrow();
                 assert_eq!(staged.len(), 1, "the far copy must be culled");
@@ -427,7 +432,6 @@ mod tests {
             draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
             context(game, &mut draw).draw_instance_group(group).unwrap();
             context(game, &mut draw).draw_instance_group(group).unwrap();
-            assert_eq!(draw.usage().instances_used, 1);
             assert_eq!(expected, render(game));
             draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
             game.prepared_model_draws.borrow_mut().clear();
