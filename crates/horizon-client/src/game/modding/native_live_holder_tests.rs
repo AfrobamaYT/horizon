@@ -225,10 +225,7 @@ fn data_slot_sizing_after_creation_and_load_joins_the_existing_journal() {
                 "old identity stays stale after load"
             );
             let entity = game
-                .native_block_entity_ref(
-                    game.native_level("minecraft:overworld").unwrap(),
-                    [1, 64, 1],
-                )
+                .block_entity(game.level("minecraft:overworld").unwrap(), [1, 64, 1])
                 .unwrap();
             assert_eq!(
                 entity.data_slots(game),

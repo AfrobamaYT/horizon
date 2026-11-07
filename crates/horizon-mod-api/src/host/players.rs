@@ -300,11 +300,8 @@ pub trait PlayersBackendMut {
     /// stale or unavailable player, a displaced outer player, and a speed
     /// that is not finite.
     #[access(WorldOnly)]
-    fn player_set_abilities(
-        &mut self,
-        player: PlayerRef,
-        abilities: NativePlayerAbilities,
-    ) -> bool;
+    fn player_set_abilities(&mut self, player: PlayerRef, abilities: NativePlayerAbilities)
+    -> bool;
     /// Side: server.
     /// A fake player acts as a player does, through the game's own path for the action
     /// (`ServerGamePacketListenerImpl.handleUseItemOn` / `handleUseItem` / `handleInteract`'s

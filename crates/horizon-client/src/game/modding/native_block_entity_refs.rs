@@ -33,11 +33,7 @@ impl Game<'_> {
 
     /// Find a block entity in a loaded chunk of an open level, or on a client in
     /// the level it shows. An entity taken out for its tick cannot be read in that tick.
-    pub(super) fn block_entity(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<BlockEntityRef> {
+    pub(super) fn block_entity(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockEntityRef> {
         let world = self.native_level_read_world(level)?;
         loaded_block_entity(world, pos)?;
         let generation = world.block_entities.generation(&(pos[0], pos[1], pos[2]))?;
@@ -56,8 +52,7 @@ impl Game<'_> {
     ) -> Result<bool, BlockEntityError> {
         self.native_block_entity_target(entity)
             .ok_or(BlockEntityError::Stale)?;
-        if self.player_handle_read(player).is_none()
-            || !self.level_in_place(entity.fields().level)
+        if self.player_handle_read(player).is_none() || !self.level_in_place(entity.fields().level)
         {
             return Ok(false);
         }
@@ -82,10 +77,7 @@ impl Game<'_> {
     }
 
     /// The block entity's type (`BlockEntity.getType`).
-    pub(super) fn block_entity_kind(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<BlockEntityTypeKey> {
+    pub(super) fn block_entity_kind(&self, entity: BlockEntityRef) -> Option<BlockEntityTypeKey> {
         let (world, block_entity) = self.native_block_entity_target(entity)?;
         let [x, y, z] = entity.fields().position;
         let block = &self.pack.assets.registry.state(world.block(x, y, z))?.name;
@@ -188,10 +180,7 @@ impl Game<'_> {
 
     /// A snapshot of a mod block entity's menu data slots, on the server or in the
     /// client's copy. None for a stale/missing/vanilla entity. Item storage is separate.
-    pub(super) fn block_entity_data_slots(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<Vec<i32>> {
+    pub(super) fn block_entity_data_slots(&self, entity: BlockEntityRef) -> Option<Vec<i32>> {
         let (_, BlockEntity::Mod(block_entity)) = self.native_block_entity_target(entity)? else {
             return None;
         };
@@ -457,10 +446,7 @@ impl Game<'_> {
     /// its level, not spectators nor fake players, then the acting player for a menu
     /// their action opened, which the hub records when the action ends. None for a
     /// stale handle or a client.
-    pub(super) fn block_entity_viewers(
-        &self,
-        entity: BlockEntityRef,
-    ) -> Option<Vec<PlayerRef>> {
+    pub(super) fn block_entity_viewers(&self, entity: BlockEntityRef) -> Option<Vec<PlayerRef>> {
         if !self.is_logical_server() {
             return None;
         }

@@ -576,7 +576,7 @@ impl Game<'_> {
     /// Replace both ID views; keep the existing registry tags intact.
     pub(super) fn sync_enchantment_registries(&mut self) {
         let mut ids: Vec<String> = self
-            .enchantments()
+            .active_enchantment_definitions()
             .list
             .iter()
             .map(|entry| entry.id.to_string())
@@ -2437,7 +2437,9 @@ mod enchantment_snapshot_tests {
         game.world_tables.as_mut().unwrap().stations.enchantments = synced.clone();
         game.world_tables.as_mut().unwrap().items.enchantments = synced;
         assert!(
-            game.enchantments().get("h024:audit").is_some(),
+            game.active_enchantment_definitions()
+                .get("h024:audit")
+                .is_some(),
             "actual authority adopts the definition first"
         );
         let tags = vec!["h024:retained_tag".to_owned()];
@@ -2478,7 +2480,11 @@ mod enchantment_snapshot_tests {
         }
         game.world_tables.as_mut().unwrap().stations.enchantments = base.clone();
         game.world_tables.as_mut().unwrap().items.enchantments = base;
-        assert!(game.enchantments().get("h024:audit").is_none());
+        assert!(
+            game.active_enchantment_definitions()
+                .get("h024:audit")
+                .is_none()
+        );
         game.sync_function_registries(&stack);
         assert!(
             !game

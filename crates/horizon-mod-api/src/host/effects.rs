@@ -37,12 +37,8 @@ pub trait EffectsClientHost {
     /// Side: client.
     /// ClientLevel.addParticle: submits one local particle through the ordinary provider, camera-distance, setting and population limits. False without a loaded client world or for non-finite input. True means submitted, not necessarily visible.
     #[access(WorldOnly)]
-    fn add_particle(
-        &mut self,
-        options: &ParticleOptions,
-        at: [f64; 3],
-        velocity: [f64; 3],
-    ) -> bool;
+    fn add_particle(&mut self, options: &ParticleOptions, at: [f64; 3], velocity: [f64; 3])
+    -> bool;
     /// Every sound event the client's resources have (`SoundManager.getAvailableSounds`).
     #[access(ClientSetup)]
     fn sound_events(&self) -> Vec<Identifier>;

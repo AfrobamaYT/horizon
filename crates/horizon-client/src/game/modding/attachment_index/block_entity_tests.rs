@@ -97,10 +97,7 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
         let other = nether.lock().unwrap().snapshot(&key);
         assert_eq!(
             other[0].holder,
-            AttachmentHolder::BlockEntity(
-                game.native_block_entity_ref(nether_level, [1, 64, 1])
-                    .unwrap()
-            )
+            AttachmentHolder::BlockEntity(game.block_entity(nether_level, [1, 64, 1]).unwrap())
         );
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 2);

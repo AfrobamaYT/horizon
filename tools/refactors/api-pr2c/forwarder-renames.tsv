@@ -675,3 +675,6 @@ native_window_focused	window_focused
 native_world_dir	world_dir
 native_fluid_name	fluid_name
 native_bake_layer	bake_layer
+native_add_particle	add_particle
+native_level_collision_boxes	level_collision_boxes
+native_player_simulate_move	player_simulate_move
