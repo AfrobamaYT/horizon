@@ -1302,6 +1302,8 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = Vec::new();
         let mut mobs = self.mobs.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut dead = Vec::new();
         let mut corpses = Vec::new();
         let mut died = std::mem::take(&mut self.died);
