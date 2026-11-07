@@ -772,7 +772,7 @@ pub(super) mod tests {
                     .clone()
             })
             .collect();
-        mod_api::__private::part_tests::register_game_keys(ids);
+        crate::game::api_values::register_game_keys(ids);
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
