@@ -201,39 +201,17 @@ impl Game<'_> {
         }) {
             return;
         }
-        let rules = self.world.health_rules;
-        let helmet = self.armor[0].is_some();
-        let (Some(p), Some(id)) = (self.player.as_mut(), self.motion.health.damage.id(kind)) else {
+        let Some(id) = self.motion.health.damage.id(kind) else {
             return;
         };
-        let Ok(hit) = p.start_hurt(
-            crate::game::entity::damage_level_of!(self),
-            &self.motion.health,
-            rules,
-            id,
-            amount,
-            None,
-            false,
-            0,
-            helmet,
-        ) else {
-            return;
-        };
-        // The player and the level are released here: `hurtHelmet` wears the piece on the real
-        // host, and the armor and protection the hit reads next see what that left.
-        if let Some(damage) = hit.helmet_damage() {
-            self.hurt_helmet(id, damage);
-            self.refresh_armor_protection();
-        }
-        let Some(p) = self.player.as_mut() else {
-            return;
-        };
-        let outcome = p
-            .finish_hurt(
-                crate::game::entity::damage_level_of!(self),
-                &self.motion.health,
-                rules,
-                hit,
+        let outcome = self
+            .hurt_player_equipment(
+                id,
+                amount,
+                None,
+                false,
+                0,
+                &horizon_client::health::NO_ATTACK,
             )
             .unwrap_or_default();
         if outcome.hurt {
@@ -371,14 +349,20 @@ mod tests {
             assert_eq!(game.armor[0], Some(iron_helmet()));
             {
                 let log = log.lock().unwrap();
-                assert_eq!(log.armor, [[(EquipmentSlot::Head, 2.0)]]);
+                assert_eq!(
+                    log.armor,
+                    [
+                        vec![(EquipmentSlot::Head, 2.0)],
+                        vec![(EquipmentSlot::Head, 1.5)]
+                    ]
+                );
                 assert!(log.worn.is_empty());
                 assert_eq!(log.incoming, 1);
             }
             // 8 less the helmet's quarter is 6; 2 armor points leave 98.4% of it.
             assert!((health(game) - 14.096).abs() < 0.001, "{}", health(game));
 
-            // The hit's ordinary armor wear is a second operation, for every piece.
+            // Both equipment operations already ran; draining events cannot repeat them.
             let events = std::mem::take(&mut game.player.as_mut().unwrap().events);
             game.wear_armor(&events);
             assert_eq!(log.lock().unwrap().armor.len(), 2);
@@ -393,14 +377,14 @@ mod tests {
             start(game, log, Some(iron_helmet()));
             log.lock().unwrap().new_damage = Some(7.0);
             hit(game);
-            assert_eq!(game.armor[0].as_ref().unwrap().damage, 7);
-            assert_eq!(log.lock().unwrap().worn, [(7, true)]);
+            assert_eq!(game.armor[0].as_ref().unwrap().damage, 14);
+            assert_eq!(log.lock().unwrap().worn, [(7, true), (7, true)]);
             let after_first = health(game);
 
             // The cooldown takes the same hit whole, after `hurtHelmet` has worn the piece.
             log.lock().unwrap().new_damage = None;
             hit(game);
-            assert_eq!(game.armor[0].as_ref().unwrap().damage, 9);
+            assert_eq!(game.armor[0].as_ref().unwrap().damage, 16);
             assert_eq!(health(game), after_first);
             assert_eq!(log.lock().unwrap().incoming, 2);
         });
@@ -442,3 +426,6 @@ mod tests {
         });
     }
 }
+
+#[cfg(test)]
+mod helmet_tests;
