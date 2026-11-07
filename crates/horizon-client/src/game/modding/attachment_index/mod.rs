@@ -40,8 +40,7 @@ impl Game<'_> {
             .attachment_indexes
             .get(&self.dim)
             .ok_or(mod_api::AttachmentRowError::StaleHolder)?;
-        let result = token.validate(&index.lock().unwrap());
-        result
+        token.validate(&index.lock().unwrap())
     }
 
     /// Publish saved contents only when an authoritative entity owns their lifetime.
