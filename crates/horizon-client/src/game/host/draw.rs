@@ -183,4 +183,12 @@ impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
     fn usage(&self) -> WorldDrawUsage {
         self.game.native_world_draw_usage(&*self.surface)
     }
+    fn draw_model_instances(
+        &mut self,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
+        self.game
+            .native_world_draw_model_instances(&mut *self.surface, model, instances)
+    }
 }

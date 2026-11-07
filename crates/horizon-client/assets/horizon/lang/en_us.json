@@ -885,5 +885,9 @@
   "Installed": "Installed",
   "An OptiFine or Iris shader pack.": "An OptiFine or Iris shader pack.",
   "Press to use it.": "Press to use it.",
-  "A Horizon shader pack.": "A Horizon shader pack."
+  "A Horizon shader pack.": "A Horizon shader pack.",
+  "horizon.recipe_transfer.missing": "Missing Items",
+  "horizon.recipe_transfer.no_room": "Inventory full",
+  "horizon.recipe_transfer.unavailable": "Recipe does not fit this menu",
+  "horizon.recipe_transfer.unsupported": "Server requires a known recipe"
 }

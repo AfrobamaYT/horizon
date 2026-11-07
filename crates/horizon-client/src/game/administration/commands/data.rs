@@ -151,8 +151,9 @@ impl Game<'_> {
             }
             Target::Boat(id) => {
                 let uuid = self.uuid_for(id);
-                let b = self.boats.iter().find(|b| b.id == id)?;
-                entity_nbt::boat_to_nbt(
+                let i = self.boats.iter().position(|b| b.id == id)?;
+                let b = &self.boats[i];
+                let mut tag = entity_nbt::boat_to_nbt(
                     &b.entity_type(),
                     b.position,
                     b.velocity,
@@ -160,7 +161,10 @@ impl Game<'_> {
                     uuid,
                     self.persist.raw.get(&id),
                     b.chest.then_some(&b.items[..]),
-                )
+                );
+                // AbstractBoat.addAdditionalSaveData: the live or pending leash.
+                self.write_boat_leash(&mut tag, i);
+                tag
             }
             Target::Cart(id) => {
                 let uuid = self.uuid_for(id);
@@ -526,7 +530,9 @@ impl Game<'_> {
                     self.state_from_nbt(t).is_some()
                 });
                 self.roll_cart_loot(&mut cart, &tag);
-                self.carts[i] = cart;
+                if !self.store_cart_back(i, cart) {
+                    return Err(stale());
+                }
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
             _ => return Err(stale()),
@@ -586,17 +592,31 @@ impl Game<'_> {
             Target::Rocket(id) | Target::Trident(id) => {
                 Some(self.persist.raw.entry(id).or_insert_with(empty))
             }
-            Target::Falling(id) => {
-                let uuid = self.uuid_for(id);
-                let f = self.falling.iter_mut().find(|f| f.id == id)?;
-                Some(&mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1)
-            }
             _ => None,
         }
     }
     /// Writes `t`'s `Tags`; false when its kind keeps no saved compound to
     /// write them to.
     pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) -> bool {
+        if let Target::Falling(id) = t {
+            let uuid = self.uuid_for(id);
+            let Some(i) = self.falling.iter().position(|f| f.id == id) else {
+                return false;
+            };
+            self.falling.update(i, |f| {
+                let raw = &mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1;
+                set_key(
+                    raw,
+                    "Tags",
+                    Tag::List(
+                        tags.iter()
+                            .map(|s| Tag::String(s.as_str().into()))
+                            .collect(),
+                    ),
+                );
+            });
+            return true;
+        }
         let Some(raw) = self.raw_mut(t) else {
             return false;
         };

@@ -1025,9 +1025,10 @@ impl Game<'_> {
         let mut stand_x = 0.0;
         let mut stand_z = 0.0;
         for (j, shove) in applied {
-            let cart = &mut self.carts[j];
-            cart.velocity.x += shove.cart_x;
-            cart.velocity.z += shove.cart_z;
+            self.carts.update(j, |cart| {
+                cart.velocity.x += shove.cart_x;
+                cart.velocity.z += shove.cart_z;
+            });
             stand_x += shove.stand_x;
             stand_z += shove.stand_z;
         }

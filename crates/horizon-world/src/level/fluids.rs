@@ -555,13 +555,12 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             && direction == Direction::Down
             && b.is_water_fluid(self.fluid_at(pos).kind())
         {
-            if b.instance_of(state, Class::Liquid) {
-                if let Some(state) =
+            if b.instance_of(state, Class::Liquid)
+                && let Some(state) =
                     self.level
                         .fluid_place_block(pos, from, b.default_of(b.named.stone))
-                {
-                    self.set_block_and_update(pos, state);
-                }
+            {
+                self.set_block_and_update(pos, state);
             }
             self.level_event(1501, pos, 0);
             return;

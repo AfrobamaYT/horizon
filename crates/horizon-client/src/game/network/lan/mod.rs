@@ -1934,14 +1934,14 @@ impl Game<'_> {
                 return;
             };
             let raw = host.hub.guests[i].saved.clone();
+            let entity = host.hub.guests[i].entity_id as u32;
             let Some(id) = self.restore_saved_vehicle(uuid, raw.as_ref()) else {
                 continue;
             };
+            let order = self.boarding_order(id, entity, true);
             let Some(host) = self.lan.as_mut() else {
                 return;
             };
-            host.hub.seat_order += 1;
-            let order = host.hub.seat_order;
             host.hub.guests.update(i, |g| {
                 if let Some(horizon_core::nbt::Tag::Compound(p)) = &mut g.saved {
                     p.remove(&"RootVehicle".into());
@@ -3080,11 +3080,16 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let guests: Vec<(u32, i32)> = host
+                let mut guests: Vec<(i64, u32, i32)> = host
                     .hub
                     .guests
                     .iter()
-                    .filter_map(|g| Some((g.vehicle?, g.entity_id)))
+                    .filter_map(|g| Some((g.vehicle_order, g.vehicle?, g.entity_id)))
+                    .collect();
+                guests.sort_by_key(|&(order, ..)| order);
+                let guests: Vec<(u32, i32)> = guests
+                    .into_iter()
+                    .map(|(_, vehicle, id)| (vehicle, id))
                     .collect();
                 let mut riding = std::mem::take(&mut host.hub.riding);
                 self.lan_riding(&guests, &mut riding);
@@ -3127,9 +3132,7 @@ impl Game<'_> {
                 states.clear();
                 // Nobody can receive past movement. A returning viewer pairs
                 // from the cart's current position/rotation, as AddEntity does.
-                for cart in &mut self.carts {
-                    cart.lerp_steps.clear();
-                }
+                self.carts.for_each_mut(|cart| cart.lerp_steps.clear());
             }
             // Persist is swapped per level, so parked dimensions retain their marks.
             self.spend_forced_meta();
@@ -3137,9 +3140,9 @@ impl Game<'_> {
             for m in &mut self.mobs {
                 m.needs_sync = false;
             }
-            for p in &mut self.creatures.projectiles {
-                p.needs_sync = false;
-            }
+            self.creatures
+                .projectiles
+                .for_each_mut(|p| p.needs_sync = false);
             for d in &mut self.dropped {
                 d.needs_sync = false;
             }

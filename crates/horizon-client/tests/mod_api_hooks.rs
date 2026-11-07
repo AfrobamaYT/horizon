@@ -54,16 +54,12 @@ mod sidebar {
 
 #[test]
 fn client_packet_hands_a_mod_the_type_and_custom_payload() {
+    use mod_api::testing::FakeHost;
     use mod_api::{
-        ClientPacket, ClientPacketEvent, ClientPayload, Host, Identifier, dispatch_client_packet,
+        ClientPacket, ClientPacketEvent, ClientPayload, Identifier, dispatch_client_packet,
     };
     use std::sync::Mutex;
     static HEARD: Mutex<Vec<(String, Vec<u8>)>> = Mutex::new(Vec::new());
-    struct TestHost;
-    impl Host for TestHost {}
-    mod_api::impl_host_areas!(TestHost);
-    impl ClientHost for TestHost {}
-    mod_api::impl_client_host_areas!(TestHost);
     // A plugin-channel listener using only the mod API's plain data.
     #[derive(Default)]
     struct Channels;
@@ -80,12 +76,12 @@ fn client_packet_hands_a_mod_the_type_and_custom_payload() {
     }
     mod_api::testing::with_mods(vec![ModEntry::new("channels", hooks())].into(), || {
         dispatch_client_packet(
-            &mut TestHost,
+            &mut FakeHost::new(),
             &ClientPacket::new(Identifier::parse("minecraft:ping").unwrap(), None),
         );
         let payload = ClientPayload::new("voicechat:secret".into(), vec![1, 2, 3]);
         dispatch_client_packet(
-            &mut TestHost,
+            &mut FakeHost::new(),
             &ClientPacket::new(
                 Identifier::parse("minecraft:custom_payload").unwrap(),
                 Some(payload),

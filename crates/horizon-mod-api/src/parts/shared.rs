@@ -992,30 +992,6 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    /// A test host's whole state, kept on each transaction it opens and put back on an abort, as
-    /// the game's journal keeps its storages.
-    pub(crate) trait Journal: Clone {
-        fn kept(&mut self) -> &mut Vec<Self>;
-    }
-    #[cfg(test)]
-    pub(crate) fn open<J: Journal>(host: &mut J) {
-        let mut now = host.clone();
-        now.kept().clear();
-        host.kept().push(now);
-    }
-    #[cfg(test)]
-    pub(crate) fn close<J: Journal>(host: &mut J, commit: bool) {
-        let Some(was) = host.kept().pop() else {
-            return;
-        };
-        if !commit {
-            let kept = std::mem::take(host.kept());
-            *host = was;
-            *host.kept() = kept;
-        }
-    }
-
-    #[cfg(test)]
     /// State 1 is a `test:gauge`, state 2 a `test:other`.
     pub(crate) struct Level;
     #[cfg(test)]
@@ -1079,34 +1055,6 @@ pub mod tests {
         mark_game_thread();
         mods
     }
-
-    #[cfg(test)]
-    /// Block entities of one type, or vanilla ones (none).
-    pub(crate) struct TypeOf(pub(crate) Option<&'static str>);
-    #[cfg(test)]
-    impl mod_api::prelude::BlockEntitiesBackend for TypeOf {
-        fn block_entity_kind(&self, _: BlockEntityRef) -> Option<BlockEntityTypeKey> {
-            self.0.map(type_key)
-        }
-    }
-    #[cfg(test)]
-    impl Backend for TypeOf {}
-    #[cfg(test)]
-    mod_api::impl_backend_areas!(TypeOf, except(block_entities));
-    #[cfg(test)]
-    impl mod_api::prelude::BlockEntitiesHost for TypeOf {
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(crate::__private::game::block_entity_ref(level, position, 1))
-        }
-    }
-    #[cfg(test)]
-    impl Host for TypeOf {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_host_areas!(TypeOf, except(block_entities));
 
     /// How a mod tank misanswers: an extract takes and answers 100 mB more than asked
     /// (`GivesMore`), or an insert answers 100 mB more than went in (`TakesMore`).

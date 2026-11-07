@@ -349,8 +349,6 @@ pub struct Hub {
     /// The active world session rule definitions.
     pub rule_registry: Arc<crate::gamerules::RuleRegistry>,
     pub ticks: u64,
-    /// The next `Guest.vehicle_order`: a rider that boards later sits behind.
-    pub seat_order: u64,
     /// `Level.soundSeedGenerator`: a fresh `nextLong` per `playSound`.
     pub(super) sound_seeds: Mutex<LegacyRandom>,
     pub(super) sound_order: Mutex<super::sound_order::SoundOrder>,
@@ -735,7 +733,6 @@ impl Hub {
             sync,
             rule_registry: crate::gamerules::rule_registry(),
             ticks: 0,
-            seat_order: 0,
             sound_seeds: Mutex::new(LegacyRandom::new(crate::sound_engine::unique_seed())),
             sound_order: Mutex::default(),
             immediate_respawn: false,
@@ -1489,6 +1486,12 @@ impl Hub {
         // for, to a Horizon client only.
         if g.brand == "horizon" {
             send_recipe_content(g);
+            g.send(&C::CustomPayload(
+                horizon_protocol::packets::configuration::CustomPayload {
+                    channel: super::recipes::TRANSFER_CHANNEL.into(),
+                    data: Vec::new(),
+                },
+            ));
         }
         // PlayerList.sendPlayerPermissionLevel, then the recipe book.
         self.send_permission_level(i);
