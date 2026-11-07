@@ -424,12 +424,7 @@ impl Enchantments {
     /// Whether `item` matches an id / `#tag` list.
     pub fn item_in(items: &Items, specs: &[String], item: &str) -> bool {
         specs.iter().any(|spec| {
-            crate::properties::item_matches(spec, item, |tag| {
-                items
-                    .item_tags
-                    .get(tag)
-                    .is_some_and(|members| members.contains(item))
-            })
+            crate::properties::item_matches(spec, item, |tag| items.item_in_tag(tag, item))
         })
     }
     /// `Enchantment.canEnchant` / `isSupportedItem`.

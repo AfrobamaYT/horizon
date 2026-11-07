@@ -357,14 +357,30 @@ mod item_resource_property_tests {
         });
     }
     /// Changed defaults and a patched mod consumable exercise the real game consumers.
-    #[cfg(unix)]
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn item_resource_changed_defaults_and_consumption() {
         use horizon_client::items::ItemStack;
         use mod_api::{ComponentId, ItemResource, Tag};
         use serde_json::json;
-        use std::{fs, os::unix::fs::symlink};
+        use std::{fs, path::Path};
+        fn link_fixture_source(source: &Path, target: &Path) {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(source, target).unwrap();
+            #[cfg(not(unix))]
+            {
+                // Windows file hard links need no symlink privilege. Copy across volumes.
+                if source.is_dir() {
+                    fs::create_dir(target).unwrap();
+                    for entry in fs::read_dir(source).unwrap() {
+                        let entry = entry.unwrap();
+                        link_fixture_source(&entry.path(), &target.join(entry.file_name()));
+                    }
+                } else if fs::hard_link(source, target).is_err() {
+                    fs::copy(source, target).unwrap();
+                }
+            }
+        }
         let resources = std::path::PathBuf::from(std::env::var("HORIZON_TEST_RESOURCES").unwrap());
         // A private default report goes through the owning resource load and all its metadata
         // readers, exactly as a registration-time change does. Shared resources stay read-only.
@@ -374,7 +390,7 @@ mod item_resource_property_tests {
         for entry in fs::read_dir(&resources).unwrap() {
             let entry = entry.unwrap();
             if entry.file_name() != "items.json" {
-                symlink(entry.path(), root.join(entry.file_name())).unwrap();
+                link_fixture_source(&entry.path(), &root.join(entry.file_name()));
             }
         }
         let mut defaults: Value =
@@ -382,12 +398,29 @@ mod item_resource_property_tests {
         defaults["minecraft:iron_sword"]["minecraft:damage"] = json!(75);
         defaults["minecraft:iron_sword"]["minecraft:enchantment_glint_override"] = json!(false);
         defaults["horizon:consumable_fixture"] = defaults["minecraft:stick"].clone();
+        defaults["minecraft:wooden_sword"]["minecraft:repairable"] = json!({"items":"#planks"});
         fs::write(
             root.join("items.json"),
             serde_json::to_vec(&defaults).unwrap(),
         )
         .unwrap();
         crate::game::native_entity_refs::tests::with_game_at(root.clone(), |game| {
+            game.session_lock =
+                Some(horizon_client::save::SessionLock::acquire(&game.save.root).unwrap());
+            let wood = ItemResource::of(&ItemStack::new("minecraft:wooden_sword", 1));
+            let plank = ItemResource::of(&ItemStack::new("minecraft:oak_planks", 1));
+            assert!(wood.repairable(game, &plank));
+            assert!(horizon_client::stations::is_valid_repair_item(
+                &game.items().enchantments,
+                game.items(),
+                &wood.to_stack(1),
+                &plank.to_stack(1)
+            ));
+            assert!(!horizon_items::enchant::Enchantments::item_in(
+                game.items(),
+                &["#planks".into()],
+                "minecraft:iron_ingot"
+            ));
             let stack = ItemStack::new("minecraft:iron_sword", 1);
             let resource = ItemResource::of(&stack);
             let bar = resource.bar(game).unwrap();
@@ -477,6 +510,7 @@ mod item_resource_property_tests {
                 1,
                 "completion must consume the patched mod item"
             );
+            game.session_lock = None;
         });
         fs::remove_dir_all(root).unwrap();
     }
