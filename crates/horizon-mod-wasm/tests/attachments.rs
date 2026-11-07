@@ -100,6 +100,7 @@ fn chat(hooks: &dyn Hooks, host: &mut Server, text: &str) -> String {
             raw_text: text,
             message: &mut message,
             replies: &mut Vec::new(),
+            cancelled: false,
         },
     );
     message.plain()
