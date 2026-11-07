@@ -363,7 +363,8 @@ pub(super) fn surface<'a>(
         }
         for (module, via, function) in &members {
             let name = function.sig.ident.to_string();
-            if hidden(&function.attrs) || name.ends_with("subscribed") {
+            let subscription = SUBSCRIBED.iter().any(|(o, n)| o == owner && *n == name);
+            if hidden(&function.attrs) && !subscription {
                 continue;
             }
             if not_on_wasm(&function.attrs) {
