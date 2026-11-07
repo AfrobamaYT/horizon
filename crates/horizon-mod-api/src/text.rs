@@ -231,23 +231,170 @@ pub struct TextForm {
     /// Serialized owned tree, including component metadata and unresolved keys.
     pub tree: String,
 }
-impl From<&Text> for TextForm {
-    fn from(value: &Text) -> Self {
-        Self {
-            tree: serde_json::to_string(value).expect("owned text contains serializable data"),
+/// Maximum nested JSON containers in a text form, below serde_json's recursion limit.
+pub const MAX_TEXT_FORM_DEPTH: usize = 100;
+
+/// A text form was too deeply nested or could not be serialized or parsed.
+#[derive(Debug)]
+pub enum TextFormError {
+    /// The form exceeds [`MAX_TEXT_FORM_DEPTH`] nested containers.
+    TooDeep,
+    /// The tree is not a valid serialized text component.
+    Invalid(serde_json::Error),
+}
+impl std::fmt::Display for TextFormError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooDeep => write!(f, "text form exceeds maximum depth"),
+            Self::Invalid(error) => error.fmt(f),
         }
     }
 }
+impl std::error::Error for TextFormError {}
+
+// The same streaming scanner protects serialization before serde descends further and
+// deserialization before serde's recursion limit. Brackets inside strings do not count.
+#[derive(Default)]
+struct DepthWriter {
+    bytes: Vec<u8>,
+    depth: usize,
+    quoted: bool,
+    escaped: bool,
+    too_deep: bool,
+}
+impl std::io::Write for DepthWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        for &byte in bytes {
+            if self.quoted {
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.quoted = false;
+                }
+            } else {
+                match byte {
+                    b'"' => self.quoted = true,
+                    b'{' | b'[' => {
+                        self.depth += 1;
+                        if self.depth > MAX_TEXT_FORM_DEPTH {
+                            self.too_deep = true;
+                            return Err(std::io::Error::other("text form too deep"));
+                        }
+                    }
+                    b'}' | b']' => self.depth = self.depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl TryFrom<&Text> for TextForm {
+    type Error = TextFormError;
+    fn try_from(value: &Text) -> Result<Self, Self::Error> {
+        let mut writer = DepthWriter::default();
+        if let Err(error) = serde_json::to_writer(&mut writer, value) {
+            return Err(if writer.too_deep {
+                TextFormError::TooDeep
+            } else {
+                TextFormError::Invalid(error)
+            });
+        }
+        // serde_json always writes UTF-8.
+        Ok(Self {
+            tree: String::from_utf8(writer.bytes).expect("JSON is UTF-8"),
+        })
+    }
+}
 impl TryFrom<TextForm> for Text {
-    type Error = serde_json::Error;
+    type Error = TextFormError;
     fn try_from(value: TextForm) -> Result<Self, Self::Error> {
-        serde_json::from_str(&value.tree)
+        use std::io::Write;
+        let mut writer = DepthWriter::default();
+        writer
+            .write_all(value.tree.as_bytes())
+            .map_err(|_| TextFormError::TooDeep)?;
+        serde_json::from_str(&value.tree).map_err(TextFormError::Invalid)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn form_bounds_depth_and_preserves_hover_and_insertion() {
+        let mut text = Text::literal("root").with_style(TextStyle {
+            hover: Some(TextHover::Text(Box::new(Text::literal("hover")))),
+            insertion: Some("insert".into()),
+            ..Default::default()
+        });
+        let round_trip = Text::try_from(TextForm::try_from(&text).unwrap()).unwrap();
+        assert_eq!(round_trip.style.hover, text.style.hover);
+        assert_eq!(round_trip.style.insertion, text.style.insertion);
+        // Metadata allows exercising the exact JSON-container limit independently of
+        // the several containers used to represent each Text node.
+        let mut nested = serde_json::json!(0);
+        for _ in 0..MAX_TEXT_FORM_DEPTH - 2 {
+            nested = serde_json::json!([nested]);
+        }
+        text.metadata.insert("nested".into(), nested);
+        let form = TextForm::try_from(&text).unwrap();
+        assert!(Text::try_from(form).is_ok());
+        let nested = text.metadata.remove("nested").unwrap();
+        text.metadata
+            .insert("nested".into(), serde_json::json!([nested]));
+        assert!(matches!(
+            TextForm::try_from(&text),
+            Err(TextFormError::TooDeep)
+        ));
+
+        let mut deep = Text::literal("end");
+        for _ in 0..100_000 {
+            deep = Text::literal("node").append(deep);
+        }
+        assert!(matches!(
+            TextForm::try_from(&deep),
+            Err(TextFormError::TooDeep)
+        ));
+        // Dropping a deeply recursive value is not part of conversion.
+        std::mem::forget(deep);
+    }
+    #[test]
+    fn via_accepts_infallible_and_fallible_forms() {
+        #[horizon_mod_api_macros::wasm(via = String)]
+        struct Infallible;
+        impl From<&Infallible> for String {
+            fn from(_: &Infallible) -> Self {
+                String::new()
+            }
+        }
+        impl TryFrom<String> for Infallible {
+            type Error = ();
+            fn try_from(_: String) -> Result<Self, Self::Error> {
+                Ok(Self)
+            }
+        }
+        #[horizon_mod_api_macros::wasm(via = TextForm)]
+        struct Fallible(Text);
+        impl TryFrom<&Fallible> for TextForm {
+            type Error = TextFormError;
+            fn try_from(value: &Fallible) -> Result<Self, Self::Error> {
+                Self::try_from(&value.0)
+            }
+        }
+        impl TryFrom<TextForm> for Fallible {
+            type Error = TextFormError;
+            fn try_from(value: TextForm) -> Result<Self, Self::Error> {
+                Text::try_from(value).map(Self)
+            }
+        }
+    }
     #[test]
     fn form_retains_translation_children_and_explicit_style_overrides() {
         let text = Text::translate(
@@ -262,7 +409,7 @@ mod tests {
             bold: Some(false),
             ..Default::default()
         }));
-        let decoded = Text::try_from(TextForm::from(&text)).unwrap();
+        let decoded = Text::try_from(TextForm::try_from(&text).unwrap()).unwrap();
         assert_eq!(decoded, text);
         assert!(
             matches!(&decoded.content, TextContent::Translatable { key, .. } if key == "chat.type.text")
@@ -304,7 +451,10 @@ mod tests {
                         matches!(&captured.as_ref().unwrap().content, TextContent::Translatable { key, .. } if key == "test.head")
                     ),
                 }
-                assert_eq!(Text::try_from(TextForm::from(&text)).unwrap(), text);
+                assert_eq!(
+                    Text::try_from(TextForm::try_from(&text).unwrap()).unwrap(),
+                    text
+                );
             }
         }
     }
@@ -314,7 +464,7 @@ mod tests {
         value["metadata"]["future_component"] = serde_json::json!({"version": 7});
         value["style"]["metadata"]["future_style"] = serde_json::json!([1, 2]);
         let text: Text = serde_json::from_value(value.clone()).unwrap();
-        let decoded = Text::try_from(TextForm::from(&text)).unwrap();
+        let decoded = Text::try_from(TextForm::try_from(&text).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         assert!(
             Text::try_from(TextForm {
