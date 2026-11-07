@@ -1321,7 +1321,7 @@ impl Game<'_> {
         self.build_registries();
         self.ui.registries.permission = 0;
         self.ui.chat.clear();
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.title = None;
         self.dim = Dim::Overworld;
         self.clear_lod();
@@ -1340,7 +1340,7 @@ impl Game<'_> {
             session,
             brand: "horizon-studio".into(),
             recipe_transfer: false,
-            features: Default::default(),
+            features: ["minecraft:vanilla".to_string()].into(),
             quiet_commands: false,
             mod_net: false,
             attachments: HashMap::new(),

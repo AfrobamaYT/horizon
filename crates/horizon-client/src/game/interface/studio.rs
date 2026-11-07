@@ -636,7 +636,7 @@ impl Game<'_> {
         self.studio_replay = Some(driver);
         self.camera_type = horizon_client::camera::CameraType::FirstPerson;
         self.title = None;
-        self.screen = Screen::Playing;
+        self.set_screen(Screen::Playing);
         self.capture(false);
         self.dragging = false;
         // Apply timestamp-zero login, player pose, and chunk packets before the first rendered

@@ -252,6 +252,8 @@ fn wind_burst_filter_preserves_order_and_context() {
     use mod_api::{Host, ServerHost, WindBurstEvent, dispatch_wind_burst};
     struct TestHost;
     impl Host for TestHost {}
+    mod_api::impl_host_areas!(TestHost);
+    mod_api::impl_server_host_areas!(TestHost);
     impl ServerHost for TestHost {}
     struct Claims;
     #[mod_api::__subscriptions]
