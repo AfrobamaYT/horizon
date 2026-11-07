@@ -199,6 +199,12 @@ fn block_metadata_table()
     mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)
 }
 impl super::Game<'_> {
+    pub(in crate::game) fn block_metadata_name(
+        &self,
+        block: mod_api::BlockKey,
+    ) -> Result<&str, mod_api::BlockStateError> {
+        mod_api::BlockMetadata::name(block_metadata_table()?, block)
+    }
     pub(in crate::game) fn block_metadata_property(
         &self,
         state: mod_api::BlockStateRecord,

@@ -61,6 +61,8 @@ impl From<horizon_mod_runtime::block_definitions::StateError> for BlockStateErro
 /// Native and generated WebAssembly forwards invoke the same immutable table implementation.
 #[doc(hidden)]
 pub trait BlockMetadata {
+    /// Borrow the canonical block name from this context's retained registry.
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError>;
     /// Borrow a property's serialized value; a missing property returns None.
     fn property(
         &self,
@@ -89,6 +91,9 @@ mod tests {
     impl Backend for MetadataHost {}
     crate::impl_backend_areas!(MetadataHost, except(block_states));
     impl crate::prelude::BlockStatesBackend for MetadataHost {
+        fn block_metadata_name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+            self.0.name(block)
+        }
         fn block_metadata_property(
             &self,
             state: BlockStateRecord,
@@ -140,6 +145,15 @@ mod tests {
         let host = MetadataHost(crate::__private::block_definitions().unwrap());
         let metadata = host.block_states();
         let block = crate::__private::block_key("probe:lamp").unwrap();
+        assert_eq!(metadata.name(block), Ok("probe:lamp"));
+        assert_eq!(
+            metadata.name(BlockKey(999)),
+            Err(BlockStateError::UnknownBlock)
+        );
+        assert_eq!(
+            Empty.block_states().name(block),
+            Err(BlockStateError::Unavailable)
+        );
         let off = metadata.of(block, &[]).unwrap();
         assert_eq!(off.state, 0);
         let on = metadata.with(off, "lit", "true").unwrap();
@@ -186,6 +200,13 @@ mod tests {
 }
 
 impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+        self.names
+            .entries
+            .get(block.0 as usize)
+            .map(|entry| entry.id.as_str())
+            .ok_or(BlockStateError::UnknownBlock)
+    }
     fn property(
         &self,
         state: BlockStateRecord,

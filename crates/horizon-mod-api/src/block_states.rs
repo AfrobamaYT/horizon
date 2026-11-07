@@ -74,6 +74,11 @@ impl<H: Host + ?Sized> HostBlockStates for H {
 }
 
 impl BlockMetadata for BlockStates<'_> {
+    fn name(&self, block: BlockKey) -> Result<&str, BlockStateError> {
+        self.backend
+            .ok_or(BlockStateError::Unavailable)?
+            .block_metadata_name(block)
+    }
     fn property(
         &self,
         state: BlockStateRecord,
