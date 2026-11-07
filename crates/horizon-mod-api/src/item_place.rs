@@ -560,7 +560,7 @@ impl ItemPlace {
                 host,
                 |index| {
                     provided
-                        .then(|| table.item_provider(key.name, &stack.item, index))
+                        .then(|| table.item_provider(key.name, stack.item(), index))
                         .flatten()
                 },
                 super::ItemProviderOf::get::<T>,

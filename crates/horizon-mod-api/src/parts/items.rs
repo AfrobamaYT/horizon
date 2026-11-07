@@ -2406,7 +2406,7 @@ pub trait ItemsCapabilityProviders {
     fn item_provider(
         &self,
         name: &str,
-        item: &str,
+        item: crate::ItemKey,
         index: &mut u32,
     ) -> Option<(ItemProviderOf, &'static str, bool)>;
 
@@ -2418,9 +2418,10 @@ impl ItemsCapabilityProviders for InstalledProviders {
     fn item_provider(
         &self,
         name: &str,
-        item: &str,
+        item: crate::ItemKey,
         index: &mut u32,
     ) -> Option<(ItemProviderOf, &'static str, bool)> {
+        let item = crate::registry_keys::item_id(item)?;
         next(&installed()?.keys.item_capabilities, name, item, index)
     }
 
