@@ -423,10 +423,10 @@ mod tests {
             }],
         };
         fn native() {}
-        unsafe fn erased(_: usize, receiver: *mut (), record: *mut ()) {
-            let factor = match mod_api::crash::current_native_mod() {
-                Some("fixture_wasm") => 10,
-                Some("fixture_wasm_other") => 100,
+        unsafe fn erased(_: usize, index: u32, receiver: *mut (), record: *mut ()) {
+            let factor = match (mod_api::crash::current_native_mod(), index) {
+                (Some("fixture_wasm"), 7) => 10,
+                (Some("fixture_wasm_other"), 3) => 100,
                 id => panic!("wrong erased listener identity: {id:?}"),
             };
             // SAFETY: only the fixture slot below calls this callback, with its live record.
@@ -460,26 +460,33 @@ mod tests {
                 native as *const (),
             ))
             .unwrap();
-            register(&SlotListener::erased("fixture_wasm", point, erased)).unwrap();
+            register(&SlotListener::indexed("fixture_wasm", point, erased, 7)).unwrap();
             register(&SlotListener::new(
                 "fixture_middle",
                 point,
                 native as *const (),
             ))
             .unwrap();
-            register(&SlotListener::erased("fixture_wasm_other", point, erased)).unwrap();
+            register(&SlotListener::indexed(
+                "fixture_wasm_other",
+                point,
+                erased,
+                3,
+            ))
+            .unwrap();
         }
         mod_points::__private::seal();
         let mut value: i64 = 1;
         mod_points::__private::fire_raw(point, "fixture", &mut |kind| {
             match kind {
                 mod_points::__private::RawKind::Typed(_) => value += 1,
-                mod_points::__private::RawKind::Indexed(..) => unreachable!(),
-                mod_points::__private::RawKind::Erased(callback) => {
+                mod_points::__private::RawKind::Erased(..) => unreachable!(),
+                mod_points::__private::RawKind::Indexed(callback, index) => {
                     // SAFETY: this synthetic slot's record is the live i64 its table names.
                     unsafe {
                         callback(
                             point as usize,
+                            index,
                             std::ptr::null_mut(),
                             (&raw mut value).cast(),
                         )
@@ -495,12 +502,13 @@ mod tests {
         value = 1;
         mod_points::__private::fire_raw(point, "fixture", &mut |kind| match kind {
             mod_points::__private::RawKind::Typed(_) => value += 1,
-            mod_points::__private::RawKind::Indexed(..) => unreachable!(),
-            mod_points::__private::RawKind::Erased(callback) => {
+            mod_points::__private::RawKind::Erased(..) => unreachable!(),
+            mod_points::__private::RawKind::Indexed(callback, index) => {
                 // SAFETY: the same synthetic slot's exclusively borrowed i64 record.
                 unsafe {
                     callback(
                         point as usize,
+                        index,
                         std::ptr::null_mut(),
                         (&raw mut value).cast(),
                     )
