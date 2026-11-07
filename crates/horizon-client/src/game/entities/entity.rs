@@ -617,7 +617,7 @@ impl Game<'_> {
             let state = self.world.block(pos.x, pos.y, pos.z);
             let position = item.position;
             let mut discarded = false;
-            if mod_api::__private::listened(mod_api::HookId::ItemAfterVerticalCollision)
+            if mod_api::__private::has_part_hook(mod_api::HookId::ItemAfterVerticalCollision)
                 && let Ok(snapshot) = item.stack.try_into_api()
             {
                 let mut stack = Some(snapshot);
