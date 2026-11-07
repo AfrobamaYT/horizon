@@ -134,6 +134,15 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn falling_client_tick_commits_state_without_detaching_its_owner() {
         bound_falling_case(true, |game, _| {
+            game.remote_projectile_data(
+                71,
+                &[(
+                    8,
+                    10,
+                    horizon_protocol::entity_data::Value::Pos([8, 90, -4]),
+                )],
+            );
+            assert_eq!(game.falling[0].start_pos, BlockPos::new(8, 90, -4));
             for age in 1..=3 {
                 let previous = game.falling[0].position;
                 game.tick_remote_projectiles(|_, at| at);
@@ -268,7 +277,9 @@ mod tests {
             assert!(original.same_registration(&current));
             assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
             assert_eq!(VALUE.get(&mut values, Holder::Entity(id)), Ok(10));
-            game.falling.clear();
+            // Exercise the production clear before any fixture cleanup can mask it.
+            game.clear_remote_projectiles();
+            assert!(game.falling.is_empty());
             assert!(index.lock().unwrap().snapshot(&key).is_empty());
             assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
         };
