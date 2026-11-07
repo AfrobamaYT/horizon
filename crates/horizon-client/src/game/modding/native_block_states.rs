@@ -149,10 +149,9 @@ impl Game<'_> {
         self.pack.assets.registry.state(state)?;
         Some(self.res.facts().get(state).block_entity)
     }
-    /// The states of `block` (`StateDefinition.getPossibleStates`), as the consecutive ids the
-    /// registry numbers them with. None for an unknown block.
+    /// The immutable local ordinals of `block`, independent of current world ID order.
     pub(super) fn block_states_of(&self, block: BlockKey) -> Option<BlockStateRange> {
-        Some(mod_api::__private::resolved_block(block)?.states)
+        mod_api::__private::block_state_range(block).ok()
     }
 
     /// The properties of a resolved block, copied for the mod as plain data.
@@ -545,7 +544,7 @@ mod tests {
             let default = registry.default_state(id)?;
             Some(ResolvedBlock {
                 default,
-                states: BlockStateRange::new(default, 1),
+                states: horizon_world::registry::BlockStateRange::new(default, 1),
                 block: horizon_world::level::states::BlockId(0),
             })
         })
@@ -617,15 +616,22 @@ mod facts_tests {
                 ))
                 .unwrap();
             assert_eq!(range.len(), 80);
-            assert!(range.contains(stairs));
-            assert!(range.iter().all(
-                |s| game.pack.assets.registry.state(s).unwrap().name == "minecraft:oak_stairs"
-            ));
+            use crate::game::api_values::TryIntoApi;
+            assert!(range.contains(stairs.try_into_api().unwrap()));
+            let key = mod_api::__private::part_tests::block_key("minecraft:oak_stairs");
+            assert!(range.iter().all(|state| state.block() == key));
+            assert_eq!(
+                range
+                    .iter()
+                    .map(mod_api::BlockState::ordinal)
+                    .collect::<Vec<_>>(),
+                (0..80).collect::<Vec<u16>>()
+            );
             assert_eq!(
                 facts
                     .states_of(mod_api::__private::part_tests::block_key("minecraft:stone"))
                     .map(|r| (r.first(), r.len())),
-                Some((stone, 1))
+                Some((stone.try_into_api().unwrap(), 1))
             );
             // Unknown state ids: None.
 

@@ -157,6 +157,18 @@ mod tests {
         assert_eq!(value.property(&metadata, "lit"), Ok(Some("false")));
         assert_eq!(changed.property(&metadata, "lit"), Ok(Some("true")));
         assert_eq!(changed.ordinal(), 1);
+        let states = crate::__private::block_state_range(block).unwrap();
+        assert_eq!(
+            states
+                .iter()
+                .map(|state| state.property(&metadata, "lit").unwrap().unwrap())
+                .collect::<Vec<_>>(),
+            ["false", "true"]
+        );
+        assert_eq!(
+            crate::__private::block_state_range(BlockKey(999)),
+            Err(BlockStateError::UnknownBlock)
+        );
         assert_eq!(
             changed.with(&metadata, "lit", "invalid"),
             Err(BlockStateError::InvalidValue(0))
