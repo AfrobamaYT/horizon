@@ -1059,6 +1059,7 @@ fn prepare_stack_boundary_tests() {
     mod_api::__private::install_parts(&[]).unwrap();
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
+        "minecraft:stick",
         "minecraft:diamond_sword",
         "minecraft:netherite_chestplate",
         "minecraft:diamond_chestplate",
@@ -1330,5 +1331,59 @@ mod block_entity_snapshot_tests {
             Err(BlockEntitySnapshotError::InvalidRevision)
         );
         assert_eq!(entity.data, [7, 8, 9]);
+    }
+}
+
+#[cfg(test)]
+mod mutable_output_tests {
+    use super::*;
+
+    #[test]
+    fn array_outputs_are_admitted_only_after_every_stack_passes_resident_limits() {
+        prepare_stack_boundary_tests();
+        let root =
+            std::env::temp_dir().join(format!("horizon-api-array-output-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:stick":{"minecraft:max_stack_size":64}}"#,
+        )
+        .unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let items =
+            Items::catalog(&root, &horizon_world::loot::PackOverlay::NONE, &defaults).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        let key = mod_api::__private::item_key("minecraft:stick").unwrap();
+        let mut api = [
+            ApiStack::new(key, 8).unwrap(),
+            ApiStack::new(key, 65).unwrap(),
+        ];
+        let mut output = [
+            EngineStack::new("minecraft:stick", 3),
+            EngineStack::new("minecraft:stick", 4),
+        ];
+        let before = output.clone();
+        let converted = api.try_into_engine(&items);
+        assert_eq!(
+            converted,
+            Err(StackWriteError::CountExceeded { maximum: 64 })
+        );
+        if let Ok(validated) = converted {
+            output = validated;
+        }
+        assert_eq!(
+            output, before,
+            "a legal first element must not be applied before a rejected second element"
+        );
+
+        api[1].set_count(64).unwrap();
+        output = api.try_into_engine(&items).unwrap();
+        assert_eq!(
+            output,
+            [
+                EngineStack::new("minecraft:stick", 8),
+                EngineStack::new("minecraft:stick", 64)
+            ]
+        );
     }
 }
