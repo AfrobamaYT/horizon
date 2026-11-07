@@ -2993,7 +2993,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. `consumed` is the stack captured before consumption, including
+    /// more attempts. `consumer` names the living actor through its handle.
+    /// `consumed` is the stack captured before consumption, including
     /// its count and components; it is not reread from the hand after listener writes.
     /// The player's state is swapped in
     /// (`host.players().acting_player()`). Foxes are not heard. Diverges from upstream: renamed from

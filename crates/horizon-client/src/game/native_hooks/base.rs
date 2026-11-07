@@ -1889,14 +1889,13 @@ impl Game<'_> {
     /// (`native_acting_player`). Foxes are not heard.
     pub(in crate::game) fn native_item_consumption_teleport(
         &mut self,
-        player: u128,
-        name: &str,
+        consumer: mod_api::LivingRef,
         consumed: &ItemStack,
         from: [f64; 3],
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        self.fire_item_consumption_teleport(player, name, consumed, from, target, cancel);
+        self.fire_item_consumption_teleport(consumer, consumed, from, target, cancel);
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside

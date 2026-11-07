@@ -5951,10 +5951,7 @@ impl Game<'_> {
                 // EntityTeleportEvent.EnderPearl: a server player's pearl.
                 if p.owner == Some(Who::Player)
                     && let Some(from) = self.player.as_ref().map(|pl| pl.position)
-                    && let Some(owner) = self
-                        .lan_acting_uuid
-                        .and_then(|uuid| self.player(uuid))
-                        .map(|player| player.entity())
+                    && let Some(owner) = self.native_acting_player().map(|player| player.entity())
                 {
                     let mut target = [to.x, to.y, to.z];
                     self.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
@@ -11301,6 +11298,7 @@ mod mob_pearl_hook_tests {
                 game.player = Some(PlayerMotion::new(game.motion, from).unwrap());
                 game.lan_acting_uuid = Some(7);
                 game.lan_acting_name = Some("PearlTest".into());
+                game.lan_acting_permission = Some(4);
                 game.lan_acting_entity = Some(2);
                 game.ui.difficulty = 0;
                 let pearl = Projectile::new(

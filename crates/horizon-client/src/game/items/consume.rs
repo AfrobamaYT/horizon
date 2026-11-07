@@ -397,17 +397,14 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
         Ok(self.at())
     }
     fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, Infallible> {
-        // EntityTeleportEvent.ItemConsumption: only a server's player is heard.
-        let (Some(uuid), Some(name)) = (self.0.lan_acting_uuid, self.0.lan_acting_name.clone())
-        else {
+        let Some(player) = self.0.native_acting_player() else {
             return Ok(true);
         };
         let from = self.at();
         let mut to = [target.x, target.y, target.z];
         let mut cancel = false;
         self.0.native_item_consumption_teleport(
-            uuid,
-            &name,
+            mod_api::LivingRef::new(player.entity()),
             self.1,
             [from.x, from.y, from.z],
             &mut to,
@@ -486,9 +483,13 @@ mod teleport_hook_tests {
     impl Hooks for ConsumptionProbe {
         fn item_consumption_teleport(
             &self,
-            _: &mut dyn ServerHost,
+            host: &mut dyn ServerHost,
             event: &mut ItemConsumptionTeleportEvent<'_>,
         ) -> Flow {
+            assert_eq!(
+                event.consumer.entity(),
+                host.players().acting_player().unwrap().entity()
+            );
             self.0.lock().unwrap().push(event.consumed.clone());
             Flow::Cancel
         }
@@ -509,6 +510,8 @@ mod teleport_hook_tests {
                 game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
                 game.lan_acting_uuid = Some(7);
                 game.lan_acting_name = Some("ConsumedStackTest".into());
+                game.lan_acting_entity = Some(2);
+                game.lan_acting_permission = Some(4);
                 game.creative = false;
                 let mut consumed = ItemStack::new("minecraft:chorus_fruit", 7);
                 consumed.damage = 3;
