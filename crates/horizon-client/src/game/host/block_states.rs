@@ -137,4 +137,22 @@ impl BlockStatesBackend for Game<'_> {
         );
         self.native_block_state_matches(state, block, constraints)
     }
+    fn fluid_state_definition(&self, fluid: FluidKey) -> Option<FluidDefinition> {
+        mod_api::__private::check_access(
+            "fluid_state_definition",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_fluid_state_definition(fluid)
+    }
+    fn fluid_state_validate(
+        &self,
+        fluid: FluidKey,
+        constraints: &[StateConstraint],
+    ) -> Result<(), FluidStateError> {
+        mod_api::__private::check_access(
+            "fluid_state_validate",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_fluid_state_validate(fluid, constraints)
+    }
 }

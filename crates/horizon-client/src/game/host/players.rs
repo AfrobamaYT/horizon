@@ -229,6 +229,13 @@ impl PlayersBackend for Game<'_> {
         );
         self.native_player_discovered_recipes(player)
     }
+    fn player_client_brand(&self, player: PlayerRef) -> Option<String> {
+        mod_api::__private::check_access(
+            "player_client_brand",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_player_client_brand(player)
+    }
 }
 impl PlayersClientBackend for Game<'_> {
     fn player_block_breaking(&self, player: PlayerRef) -> Option<BlockBreakingState> {
