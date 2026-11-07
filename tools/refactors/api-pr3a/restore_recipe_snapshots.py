@@ -8,6 +8,7 @@ client=root/'crates/horizon-client/src'
 s=(api/'recipe_rule.rs').read_text().replace('use crate::{Ingredient, ItemStack, Tag};','use super::{Ingredient, ItemStack};\nuse horizon_core::nbt::Tag;')
 c=(api/'crafting.rs').read_text()
 s+='\n'+c[c.index('/// A recipe in force'):c.index('/// What a crafting grid makes')].replace('pub struct Recipe {','pub struct RecipeSnapshot {').replace('impl Recipe {','impl RecipeSnapshot {')
+s=s.replace('#[non_exhaustive]\n', '')
 s='use std::sync::Arc;\nuse serde_json::Value;\n'+s.replace('//! Typed rules for recipes whose result is not a fixed crafting stack.','// Engine-owned recipe snapshots.')
 (client/'crafting/snapshots.rs').write_text(s)
 for p in ['crafting.rs','stations.rs']:
