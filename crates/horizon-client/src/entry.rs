@@ -260,12 +260,25 @@ pub(crate) fn install_client_hooks() {
         },
         has_mods: || !mod_api::__private::mods().is_empty(),
         player_name_format: |context, username, displayname| {
+            use game::api_values::{TryIntoApi, TryIntoEngine};
+            if !mod_api::__private::listened(mod_api::HookId::PlayerNameFormat) {
+                return;
+            }
             let context = mod_api::OwningLoop::new(context);
-            mod_api::dispatch_player_name_format(&context, username, displayname);
+            let username = username.try_into_api().unwrap();
+            let mut converted = displayname.try_into_api().unwrap();
+            mod_api::dispatch_player_name_format(&context, &username, &mut converted);
+            *displayname = converted.try_into_engine(&()).unwrap();
         },
         player_tab_list_name_format: |context, player, name, display_name| {
+            use game::api_values::{TryIntoApi, TryIntoEngine};
+            if !mod_api::__private::listened(mod_api::HookId::PlayerTabListNameFormat) {
+                return;
+            }
             let context = mod_api::OwningLoop::new(context);
-            mod_api::dispatch_player_tab_list_name_format(&context, player, name, display_name);
+            let mut converted = display_name.try_into_api().unwrap();
+            mod_api::dispatch_player_tab_list_name_format(&context, player, name, &mut converted);
+            *display_name = converted.try_into_engine(&()).unwrap();
         },
         living_drown: |context, entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
             let context = mod_api::OwningLoop::new(context);

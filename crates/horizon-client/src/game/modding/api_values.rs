@@ -76,7 +76,7 @@ macro_rules! write_answers {
 write_answers!(bool, u32, ());
 
 /// Convert an engine value into an owned API value after resolving registry identities.
-pub(in crate::game) trait TryIntoApi {
+pub(crate) trait TryIntoApi {
     type Api;
     type Error;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error>;
@@ -94,7 +94,7 @@ where
 }
 
 /// Validate a mod value against the game's registry before admitting it to engine state.
-pub(in crate::game) trait TryIntoEngine<Context: ?Sized = Items> {
+pub(crate) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
     fn try_into_engine(&self, context: &Context) -> Result<Self::Engine, Self::Error>;

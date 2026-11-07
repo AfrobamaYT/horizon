@@ -158,8 +158,9 @@ impl BlockEntityDrawContext for GameBlockEntityDrawContext<'_, '_> {
         self.game.native_draw_model(&mut *self.surface, model, tint)
     }
     fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
+        let text = text.try_into_engine(&()).unwrap();
         self.game
-            .native_draw_text(&mut *self.surface, text, at, color, glowing, outline)
+            .native_draw_text(&mut *self.surface, &text, at, color, glowing, outline)
     }
     fn text_width(&self, text: &str) -> f32 {
         self.game.native_draw_text_width(&*self.surface, text)
