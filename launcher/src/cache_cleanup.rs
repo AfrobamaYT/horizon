@@ -55,6 +55,8 @@ fn guard(directory: &Dir, relative: &Path) -> Result<Vec<Locked>, Error> {
 }
 
 impl Plan {
+    /// Launcher Cargo output roots must be named target; existing locks anywhere are honored.
+    /// Arbitrary late-created locks in other same-user directories are outside this contract.
     pub fn pin(directory: &Dir) -> Result<Self, Error> {
         Self::pin_observed(directory, &|| {})
     }
@@ -118,6 +120,7 @@ impl Plan {
     }
 
     /// Trash into the caller's held root on the same volume; preserve lock inode ancestry.
+    /// Busy/errors can leave a partially cleared tree; no freed-byte count is returned on error.
     pub fn clear(self, trash: &Dir) -> Result<(), Error> {
         self.clear_observed(trash, &|_| {}, &|| {})
     }
