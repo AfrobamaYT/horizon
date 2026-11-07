@@ -19,7 +19,6 @@ pub use {
     },
     horizon_world::{
         level::BlockId,
-        loot::{LootStack, NativeLootContext},
         registry::BlockStateId,
     },
 };
