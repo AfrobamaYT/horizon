@@ -189,6 +189,11 @@ pub fn rewrite(
                         return Err(Cause::Identity(Refusal::Lost).into());
                     }
                 };
+                if private && declaration.selector != path {
+                    return Err(
+                        Cause::Signature("source requests require the canonical callee").into(),
+                    );
+                }
                 let expr = calls[index];
                 let Resolved {
                     callee,
