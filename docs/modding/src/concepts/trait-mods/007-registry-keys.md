@@ -69,6 +69,18 @@ client-core types for these values. Completion edits are copied back after subsc
 listeners run; no listener means no snapshot allocation. Package metadata is copied once
 at startup, retaining declared namespaces and dependencies.
 
+### Owned component trees
+
+The `text` module defines owned component data: literal and translatable contents,
+style overrides, ordered children, selector and NBT sources, inline objects, and click
+and hover actions. Translation keys and argument components stay unresolved until the
+game displays them. `None` style fields inherit; `Some(false)` overrides an inherited
+decoration. Arbitrary profile and component-patch JSON remains data, never engine state.
+
+The recursive tree has one serde model. `TextForm` carries its serialized form for
+finite generated wasm bindings; decoding refuses malformed trees. Component and style
+metadata is retained through serialization rather than discarded by flattening text.
+
 ### Item values and tag names
 
 Every item has an `ItemKey`, including vanilla items no mod requested during registration.
