@@ -22,6 +22,15 @@ struct Vec3(f64, f64, f64);
 impl Vec3 { fn new(x: f64, y: f64, z: f64) -> Self { Self(x,y,z) } }
 #[derive(Default)]
 struct Entity { id: u32, velocity: Vec3 }
+// The standalone probe needs the scoped list operation used by cart motion.
+trait EditEntity {
+    fn update<R>(&mut self, i: usize, edit: impl FnOnce(&mut Entity) -> R) -> R;
+}
+impl EditEntity for Vec<Entity> {
+    fn update<R>(&mut self, i: usize, edit: impl FnOnce(&mut Entity) -> R) -> R {
+        edit(&mut self[i])
+    }
+}
 #[derive(Default)]
 struct Remote { pending_items: HashMap<i32, ((), Vec3)> }
 #[derive(Default)]
