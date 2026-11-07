@@ -1749,6 +1749,7 @@ dependencies = [
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-points",
+ "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-mod-wasm",
  "horizon-narrator",
@@ -1892,6 +1893,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-macros",
  "horizon-mod-package",
+ "horizon-mod-render",
  "horizon-mod-runtime",
  "horizon-narrator",
  "horizon-optifine",
@@ -2024,7 +2026,6 @@ dependencies = [
  "wasmparser 0.261.0",
  "wasmtime",
  "wat",
- "wgpu",
  "wit-bindgen 0.46.0",
  "wit-component 0.261.0",
  "wit-parser 0.261.0",
@@ -2138,6 +2139,18 @@ dependencies = [
  "horizon-mod-api-macros",
  "wasmtime",
  "wit-bindgen 0.46.0",
+]
+
+[[package]]
+name = "horizon-mod-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "horizon-mod-api",
+ "horizon-mod-api-gen",
+ "horizon-mod-points",
+ "wgpu",
 ]
 
 [[package]]
