@@ -43,12 +43,12 @@ fn clears_only_fixed_cache_and_sweeps_detached_tree() {
     let storage = Storage::at(&home.0).unwrap();
     assert!(storage.bytes(BuildCache::Source).unwrap() > 0);
     assert!(storage.clear(BuildCache::Source).unwrap() > 0);
-    assert!(!home.0.join("native/source").exists());
+    assert!(!home.0.join("native/source/revision/lib.rs").exists());
     assert!(home.0.join("settings.json").exists());
     assert!(home.0.join("worlds/keep/level.dat").exists());
     home.seed(".trash-interrupted/file");
     storage.sweep().unwrap();
-    assert!(!home.0.join(".trash-interrupted").exists());
+    assert!(!home.0.join(".trash-interrupted/file").exists());
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn read_only_file_can_be_removed() {
     fs::set_permissions(file, permissions).unwrap();
     let storage = Storage::at(&home.0).unwrap();
     storage.clear(BuildCache::Tools).unwrap();
-    assert!(!home.0.join("native/tools").exists());
+    assert!(!home.0.join("native/tools/tool").exists());
 }
 
 #[cfg(windows)]
@@ -119,6 +119,7 @@ fn root_replacement_cannot_redirect_sweep() {
     fs::rename(&home.0, &moved).unwrap();
     std::os::unix::fs::symlink(&outside.0, &home.0).unwrap();
     assert!(storage.sweep().is_err());
+    assert!(storage.clear(BuildCache::Source).is_err());
     assert!(outside.0.join(".trash-precious/world").exists());
     fs::remove_file(&home.0).unwrap();
     fs::rename(moved, &home.0).unwrap();
@@ -126,25 +127,39 @@ fn root_replacement_cannot_redirect_sweep() {
 
 #[test]
 fn child_cargo_locks_prevent_clear_and_survive_idle_cleanup() {
-    for (cache, directory) in [
-        (BuildCache::InternalsSync, "native/internals-sync/rev"),
-        (BuildCache::Tools, "native/tools/rev"),
+    for cache in [
+        BuildCache::Stage,
+        BuildCache::PendingStage,
+        BuildCache::NewStage,
+        BuildCache::Patched,
+        BuildCache::Source,
+        BuildCache::Tools,
+        BuildCache::PrebuiltOutput,
+        BuildCache::InternalsSync,
+        BuildCache::Prebuilt,
+        BuildCache::ServerBuilds,
+        BuildCache::Rust,
+        BuildCache::Cargo,
+        BuildCache::Scratch,
     ] {
-        let home = Home::new();
-        let lock_path = home.seed(&format!("{directory}/target/debug/.cargo-lock"));
-        let output = home.seed(&format!("{directory}/target/debug/output"));
-        let held = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&lock_path)
-            .unwrap();
-        held.lock().unwrap();
-        let storage = Storage::at(&home.0).unwrap();
-        assert!(matches!(storage.clear(cache), Err(Error::Busy)));
-        assert!(output.exists());
-        held.unlock().unwrap();
-        storage.clear(cache).unwrap();
-        assert!(!output.exists());
-        assert!(lock_path.exists());
+        for depth in ["", "target", "rev/target/debug"] {
+            let directory = format!("{}/{depth}", cache.relative());
+            let home = Home::new();
+            let lock_path = home.seed(&format!("{directory}/target/debug/.cargo-lock"));
+            let output = home.seed(&format!("{directory}/target/debug/output"));
+            let held = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&lock_path)
+                .unwrap();
+            held.lock().unwrap();
+            let storage = Storage::at(&home.0).unwrap();
+            assert!(matches!(storage.clear(cache), Err(Error::Busy)));
+            assert!(output.exists());
+            held.unlock().unwrap();
+            storage.clear(cache).unwrap();
+            assert!(!output.exists());
+            assert!(lock_path.exists());
+        }
     }
 }
