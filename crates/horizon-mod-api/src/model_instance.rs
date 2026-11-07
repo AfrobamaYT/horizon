@@ -115,8 +115,12 @@ pub enum InstanceError {
     Translucent,
 }
 
-/// Persistent copies of one resolved model, retired on reload, world close or destroy.
+/// Persistent copies of one resolved model, retired on reload, world close, mod disable or destroy.
 /// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
+/// Retired handles never become valid again, even when their storage slot is reused.
+/// Native and wasm mods use the same storage, ownership and drawing rules.
+/// Static groups cache CPU conversion; all visible GPU-routed copies still upload every frame.
+/// Frequent group pose changes rebuild the live cache and can cost more than transient copies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the engine creates handles
 #[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
@@ -130,6 +134,9 @@ impl InstanceGroupRef {
         Ok(Self(generation, slot))
     }
     /// Atomically overwrite a range, extending length up to reserved capacity.
+    /// Newly exposed unwritten slots are identity, white, full-bright copies at world origin.
+    /// Invalid coordinates/light or an out-of-capacity range change nothing; a retired or
+    /// foreign handle returns [`GroupError::Stale`] before inspecting the range or values.
     /// That range and any newly exposed gap are converted again. Visible copies still
     /// enter the shared per-view GPU upload on every frame.
     pub fn write(
@@ -141,6 +148,8 @@ impl InstanceGroupRef {
         host.instance_group_write(self, first, instances)
     }
     /// Atomically change the drawn length. Unwritten slots contain identity, full-bright copies.
+    /// Zero draws nothing and does not release capacity. Shrinking preserves hidden copies;
+    /// growing exposes them again. A length above capacity returns [`GroupError::OutOfRange`].
     /// Growth converts the newly exposed range using the current group pose.
     pub fn set_len(self, host: &dyn crate::ClientHost, len: u32) -> Result<(), GroupError> {
         host.instance_group_set_len(self, len)
@@ -157,7 +166,9 @@ impl InstanceGroupRef {
     ) -> Result<(), GroupError> {
         host.instance_group_set_transform(self, transform)
     }
-    /// Retire this handle and release its reserved copies.
+    /// Retire this handle and release its reserved copies and CPU caches immediately.
+    /// Already accepted copies remain in the current view. Later operations, including another
+    /// destroy, return [`GroupError::Stale`]; a new group cannot revive this handle.
     pub fn destroy(self, host: &dyn crate::ClientHost) -> Result<(), GroupError> {
         host.instance_group_destroy(self)
     }
@@ -167,7 +178,8 @@ impl InstanceGroupRef {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum GroupError {
-    /// The group belongs to another mod, was destroyed, or its world/resources retired.
+    /// The group belongs to another mod, was destroyed, its owner was disabled,
+    /// or its world/resources retired. Re-enabling or slot reuse cannot revive it.
     Stale,
     /// The model could not be resolved.
     Model(crate::ModelError),

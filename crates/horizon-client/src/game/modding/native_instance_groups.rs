@@ -67,6 +67,16 @@ impl InstanceGroupStorage {
     pub(super) fn clear(&mut self) {
         self.groups.clear();
     }
+    pub(super) fn retire_disabled(&mut self, disabled: &std::collections::BTreeSet<String>) {
+        for slot in &mut self.groups {
+            if slot
+                .as_ref()
+                .is_some_and(|g| g.owner.is_some_and(|id| disabled.contains(id)))
+            {
+                *slot = None;
+            }
+        }
+    }
     fn get(
         &mut self,
         handle: InstanceGroupRef,
@@ -309,6 +319,9 @@ mod tests {
             next: 1,
             groups: vec![Some(group)],
         };
+        assert!(storage.get(handle, 1).is_ok());
+        // Disabling a mod must not retire unmarked engine-owned groups.
+        storage.retire_disabled(&std::collections::BTreeSet::from(["group-owner".into()]));
         assert!(storage.get(handle, 1).is_ok());
         assert!(matches!(storage.get(handle, 2), Err(GroupError::Stale)));
         let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
