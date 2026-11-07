@@ -43,7 +43,9 @@ impl mod_api::prelude::EntitiesHost for World {
 }
 impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-        Some(mod_api::__private::game::block_entity_ref(level, position))
+        Some(mod_api::__private::game::block_entity_ref(
+            level, position, 1,
+        ))
     }
 }
 impl Host for World {
