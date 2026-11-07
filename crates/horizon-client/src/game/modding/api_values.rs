@@ -3477,3 +3477,8 @@ pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::R
     )
     .expect("validated at registration")
 }
+
+#[path = "api_values/damage.rs"]
+pub(in crate::game) mod damage;
+#[path = "api_values/item_properties.rs"]
+mod item_properties;

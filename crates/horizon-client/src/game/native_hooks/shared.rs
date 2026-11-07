@@ -1366,15 +1366,19 @@ pub(super) fn incoming_damage(
     let Ok(weapon) = attack.weapon_of(source.direct).try_into_api() else {
         return false;
     };
+    let mut snapshot = (*container).try_into_api().expect("scalar damage snapshot");
     HitLevel(level).native_living_incoming_damage(mod_api::__private::LivingIncomingDamageCall {
         entity,
         kind,
         source: &source,
         victim: &victim,
         weapon: weapon.as_ref(),
-        container,
+        container: &mut snapshot,
         canceled: &mut canceled,
     });
+    *container = snapshot
+        .try_into_engine(&())
+        .expect("scalar damage snapshot");
     canceled
 }
 
@@ -1388,7 +1392,11 @@ pub(super) fn damage_pre(
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting, level.attack());
-    HitLevel(level).native_living_damage_pre(entity, kind, &source, container);
+    let mut snapshot = (*container).try_into_api().expect("scalar damage snapshot");
+    HitLevel(level).native_living_damage_pre(entity, kind, &source, &mut snapshot);
+    *container = snapshot
+        .try_into_engine(&())
+        .expect("scalar damage snapshot");
 }
 
 /// `native_living_damage_post` for the damage code.
@@ -1401,7 +1409,8 @@ pub(super) fn damage_post(
         return;
     }
     let (entity, kind, source) = hurt_server_args(hurting, level.attack());
-    HitLevel(level).native_living_damage_post(entity, kind, &source, container);
+    let snapshot = (*container).try_into_api().expect("scalar damage snapshot");
+    HitLevel(level).native_living_damage_post(entity, kind, &source, &snapshot);
 }
 
 /// `native_living_shield_block` for the damage code. Its one

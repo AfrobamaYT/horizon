@@ -20,6 +20,35 @@ impl std::fmt::Display for NativeComponentError {
 impl std::error::Error for NativeComponentError {}
 
 impl Game<'_> {
+    /// Metadata backing ItemResource::damageable through the gameplay property path.
+    pub(in crate::game) fn item_resource_damageable(&self, stack: &ItemStack) -> bool {
+        horizon_client::stations::is_damageable(self.items(), stack)
+    }
+    /// Metadata backing ItemResource::foil through the gameplay property path.
+    pub(in crate::game) fn item_resource_foil(&self, stack: &ItemStack) -> bool {
+        stack.has_foil(
+            self.items()
+                .enchantments
+                .props(&stack.item)
+                .and_then(|p| p.glint),
+        )
+    }
+    /// Metadata backing ItemResource::repairable through the gameplay property path.
+    pub(in crate::game) fn item_resource_repairable(
+        &self,
+        stack: &ItemStack,
+        material: mod_api::ItemKey,
+    ) -> bool {
+        let Some(id) = mod_api::__private::item_key_id(material) else {
+            return false;
+        };
+        horizon_client::stations::is_valid_repair_item(
+            &self.items().enchantments,
+            self.items(),
+            stack,
+            &ItemStack::new(id, 1),
+        )
+    }
     /// Item `item`'s default value of component `component`, in its prototype
     /// (`Item.components().get`): `minecraft:max_damage` on an iron sword is `250`, data
     /// packs' and native mods' changes included. Read from the item report's JSON, so a
@@ -139,6 +168,8 @@ impl Game<'_> {
             .as_ref()
             .and_then(horizon_items::properties::component_int)?;
         horizon_items::properties::damage_bar(damage, max_damage)
+            .try_into_api()
+            .unwrap()
     }
     /// Whether enchantments `a` and `b` may share an item (`Enchantment.areCompatible`), by the
     /// world's enchantment definitions. API @API:item_components@.
