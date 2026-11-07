@@ -114,6 +114,7 @@ mod tests {
                 text.replace("self.step(2)", "self.step(3)"),
                 "E_INJECT_LOST",
             ),
+            (text.replace("self.step(2)", "0"), "E_INJECT_LOST"),
             (
                 text.replace("self.step(2)", "self.step(2); self.step(2)"),
                 "E_INJECT_LOST",
