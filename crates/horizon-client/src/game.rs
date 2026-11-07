@@ -3278,7 +3278,7 @@ struct Game<'a> {
     /// `HORIZON_TICK_SCRIPT`'s scenario (game/world/tick_script.rs).
     tick_script: tick_script::TickScript,
     /// The overworld's last `sky_darken` and its inputs (time, rain, thunder).
-    sky_darken_memo: std::cell::Cell<Option<((i64, u32, u32), i32)>>,
+    sky_darken_memo: std::cell::Cell<Option<((Dim, i64, u32, u32), i32)>>,
     /// The last water plane `water_plane` found, kept while none is in reach.
     water_plane_memo: std::cell::Cell<Option<f32>>,
     /// The camera's block and the second `water_plane` last scanned at.
@@ -13016,30 +13016,20 @@ impl Game<'_> {
     }
 
     fn sky_darken(&self) -> i32 {
-        if self.dim == Dim::Nether {
-            return 11;
-        }
-        if self.dim == Dim::End {
-            let sky = self
-                .res
-                .end_environment()
-                .sample(self.world.day_time, None, None);
-            return (15.0 - 15.0 * sky.sky_light_level).round() as i32;
-        }
         let (rain, thunder) = self.weather_levels(1.0);
-        // Sampled once per (time, weather): every mob asks each tick.
-        let key = (self.world.day_time, rain.to_bits(), thunder.to_bits());
+        // Sampled once per (dimension, time, weather): every mob asks each tick.
+        let key = (
+            self.dim,
+            self.world.day_time,
+            rain.to_bits(),
+            thunder.to_bits(),
+        );
         if let Some((k, darken)) = self.sky_darken_memo.get()
             && k == key
         {
             return darken;
         }
-        let darken = horizon_client::environment::sky_darken(
-            self.res.environment(),
-            self.world.day_time,
-            rain,
-            thunder,
-        );
+        let darken = self.sky_darken_in(&self.world, self.dim);
         self.sky_darken_memo.set(Some((key, darken)));
         darken
     }
