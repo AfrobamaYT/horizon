@@ -275,10 +275,10 @@ fn cow(host: &mut BenchHost) {
     );
 }
 fn main() {
-    assert!(
-        !cfg!(debug_assertions),
-        "run with --profile fast or --release"
-    );
+    if cfg!(debug_assertions) {
+        eprintln!("run with --profile fast or --release");
+        std::process::exit(2);
+    }
     println!(
         "10,000 holders, production index/maps and dyn Host facade; profile={}",
         if cfg!(debug_assertions) {
