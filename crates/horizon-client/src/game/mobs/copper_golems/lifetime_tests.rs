@@ -1,4 +1,5 @@
 use super::*;
+use horizon_core::geometry::Vec3;
 use horizon_mod_runtime::attachments::{
     AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
 };
