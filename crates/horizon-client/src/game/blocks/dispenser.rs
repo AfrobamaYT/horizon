@@ -2321,6 +2321,54 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn bucket_ambient_extraction_keeps_the_bound_mob_owner() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
+        };
+        use std::sync::{Arc, Mutex};
+        static VALUE: AttachmentType<i32> = AttachmentType {
+            namespace: "test",
+            name: "ambient_lifetime",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let kind = game.res.mob_types().get("minecraft:cod").unwrap().clone();
+            for id in [70, 71, 72] {
+                game.mobs
+                    .push(Mob::new(id, kind.clone(), Vec3::new(0.5, 70.0, 0.5), 0.0));
+            }
+            let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 71);
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let mut values = Attachments::default();
+            VALUE.set(&mut values, Holder::Entity(71), 10).unwrap();
+            let original = game.mobs.update(1, |mob| {
+                mob.attachment_lifetime().bind(&mut values, &index, holder);
+                mob.attachment_lifetime().registration().unwrap()
+            });
+            let key = ("test".into(), "ambient_lifetime".into());
+            let before = index.lock().unwrap().snapshot(&key);
+            game.mob_placed(71).unwrap();
+            assert!(game.mobs[1].extra.from_bucket);
+            assert_eq!(
+                game.mobs.iter().map(|m| m.id).collect::<Vec<_>>(),
+                [70, 71, 72]
+            );
+            let current = game
+                .mobs
+                .update(1, |m| m.attachment_lifetime().registration().unwrap());
+            assert!(original.same_registration(&current));
+            assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            game.mobs.remove(1);
+            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn dispenser_stack_damage_preserves_break_remainder() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let mut shears = ItemStack::new("minecraft:shears", 2);
