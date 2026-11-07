@@ -3151,14 +3151,16 @@ impl Game<'_> {
             if r.cart_lerps.contains_key(&id) {
                 // A minecart on NewMinecartBehavior keeps Entity's NO_OP
                 // InterpolationHandler: a teleport puts it there at once.
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-                    if path.is_some() {
-                        c.position = at;
-                    }
-                    if let Some((yaw, pitch)) = rotation {
-                        c.yaw = yaw;
-                        c.pitch = pitch;
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+                    self.carts.update(i, |c| {
+                        if path.is_some() {
+                            c.position = at;
+                        }
+                        if let Some((yaw, pitch)) = rotation {
+                            c.yaw = yaw;
+                            c.pitch = pitch;
+                        }
+                    });
                 }
             } else {
                 // AbstractInterpolationHandler.interpolateTo: without a
@@ -6010,8 +6012,8 @@ impl Game<'_> {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-            c.velocity = v;
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+            self.carts.update(i, |c| c.velocity = v);
         } else if let Some(p) = self
             .creatures
             .projectiles

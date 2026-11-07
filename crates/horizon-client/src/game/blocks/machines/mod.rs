@@ -1435,8 +1435,8 @@ impl Game<'_> {
         id: u32,
         f: impl FnOnce(&mut Self, &View) -> R,
     ) -> Option<R> {
-        let mut items = if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-            std::mem::take(&mut c.items)
+        let mut items = if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+            self.carts.update(i, |c| std::mem::take(&mut c.items))
         } else {
             let i = self.boats.iter().position(|b| b.id == id)?;
             self.boats.update(i, |b| std::mem::take(&mut b.items))
@@ -1445,8 +1445,8 @@ impl Game<'_> {
         let (view, open) = self.lend_items(key, &mut items);
         let result = f(self, &view);
         self.reclaim_items(key, open, &mut items);
-        if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-            c.items = items;
+        if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+            self.carts.update(i, |c| c.items = items);
         } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
             self.boats.update(i, |b| b.items = items);
         }

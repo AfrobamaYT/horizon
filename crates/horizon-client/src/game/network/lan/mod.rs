@@ -3127,9 +3127,7 @@ impl Game<'_> {
                 states.clear();
                 // Nobody can receive past movement. A returning viewer pairs
                 // from the cart's current position/rotation, as AddEntity does.
-                for cart in &mut self.carts {
-                    cart.lerp_steps.clear();
-                }
+                self.carts.for_each_mut(|cart| cart.lerp_steps.clear());
             }
             // Persist is swapped per level, so parked dimensions retain their marks.
             self.spend_forced_meta();
