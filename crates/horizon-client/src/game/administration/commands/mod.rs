@@ -78,6 +78,9 @@ pub(super) enum Target {
     Spawner(u32),
     /// A simulated lingering, creeper or dragon area-effect cloud.
     Cloud(u32),
+    /// A cast fishing hook (`minecraft:fishing_bobber`), which lives with the
+    /// player who cast it. Only a mod's handle names one.
+    Hook(u32),
 }
 /// `Entity.setXRot`: wrap before clamping the pitch.
 pub(super) fn entity_pitch(pitch: f32) -> f32 {
@@ -185,7 +188,8 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Rocket(id)
     | Target::Trident(id)
     | Target::Spawner(id)
-    | Target::Cloud(id)) = t
+    | Target::Cloud(id)
+    | Target::Hook(id)) = t
     else {
         return None;
     };
@@ -610,6 +614,10 @@ impl Game<'_> {
                 .find(|r| r.id == id)
                 .map(|r| [r.position.x, r.position.y, r.position.z]),
             Target::Cloud(id) => self.breath_clouds.iter().find(|c| c.id == id).map(|c| c.at),
+            Target::Hook(id) => self.fishing_hook_by_id(id).map(|(h, _)| {
+                let p = h.position;
+                [p.x, p.y, p.z]
+            }),
             Target::Trident(id) => self
                 .tridents
                 .iter()
@@ -674,6 +682,7 @@ impl Game<'_> {
             Target::Fangs(_) => "minecraft:evoker_fangs".into(),
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
             Target::Cloud(_) => "minecraft:area_effect_cloud".into(),
+            Target::Hook(_) => "minecraft:fishing_bobber".into(),
         }
     }
     /// The name of the player the game acts for: a guest's own while their
@@ -959,6 +968,10 @@ impl Game<'_> {
                 .filter(|c| c.id != 0)
                 .map(|c| Target::Cloud(c.id)),
         );
+        // `isRemoved` from a mod's call on, though the sweep has not taken it out.
+        if !self.persist.removals.is_empty() {
+            candidates.retain(|t| !self.persist.removals.contains(t));
+        }
         candidates
     }
     /// The loaded levels, in the order the server holds them: the
@@ -1005,6 +1018,10 @@ impl Game<'_> {
     /// `ServerLevel.getEntity`: whether the level in place still holds the
     /// entity a target names. Discard removes mobs from lookup immediately.
     fn level_holds(&self, t: Target) -> bool {
+        // Removed by a mod and waiting for the sweep: `isRemoved` from the call on.
+        if self.persist.removals.contains(&t) {
+            return false;
+        }
         match t {
             // A player is in no level of its own.
             Target::Player | Target::Guest(_) => true,
@@ -1027,6 +1044,7 @@ impl Game<'_> {
             Target::Trident(id) => self.tridents.iter().any(|t| t.id == id),
             Target::Spawner(id) => self.ominous_spawners.iter().any(|s| s.id == id),
             Target::Cloud(id) => self.breath_clouds.iter().any(|c| c.id == id),
+            Target::Hook(id) => self.fishing_hook_by_id(id).is_some(),
         }
     }
     /// Run `f` with the level that holds the entity a target names in place
@@ -1832,8 +1850,8 @@ impl Game<'_> {
                     });
                 }
             }
-            // Wall-mounted entities do not move.
-            Target::Frame(_) | Target::Painting(_) => {}
+            // Wall-mounted entities do not move; a hook follows its own tick.
+            Target::Frame(_) | Target::Painting(_) | Target::Hook(_) => {}
         }
         // Entity.teleportSameDimension: the riders go with their vehicle at
         // once, by the offset it took and the turn it was given.
@@ -2494,6 +2512,7 @@ impl Game<'_> {
             Target::Trident(id) => self.tridents.retain(|t| t.id != id),
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
             Target::Cloud(id) => self.breath_clouds.retain(|c| c.id != id),
+            Target::Hook(id) => self.remove_fishing_hook(id),
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
         self.orbs.retain(|o| o.age < u32::MAX / 2);
@@ -2864,8 +2883,17 @@ impl Game<'_> {
     /// destroy event, the block's drops without a tool or breaker, then its
     /// fluid's block, the block entity spilling its contents on the way.
     pub(super) fn destroy_block_dropping(&mut self, pos: [i32; 3]) -> R<()> {
+        self.destroy_block_by(pos, None)
+    }
+    /// `Level.destroyBlock(pos, true, entity)`: [`Self::destroy_block_dropping`]
+    /// with `entity` as the loot's `LootContextParams.THIS_ENTITY`.
+    pub(super) fn destroy_block_by(&mut self, pos: [i32; 3], entity: Option<u32>) -> R<()> {
         let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
-        self.with_level(|b, level, ticks| b.destroy_block(level, ticks, at, true));
+        let entity = self.loot_entity_ref(entity);
+        self.with_level(|b, level, ticks| {
+            level.drop_entity = entity;
+            b.destroy_block(level, ticks, at, true)
+        });
         self.process_level_events()
             .map_err(|e| CommandError::new(Text::literal(e.to_string())))
     }
@@ -3630,6 +3658,30 @@ impl Game<'_> {
         self.feedback(Text::translate(key, &args));
         Ok(targets.len() as i32)
     }
+    /// `LevelData.setRespawnData(RespawnData.of(..))`: the world's spawn (level.dat `spawn`)
+    /// moves to `pos`, its yaw wrapped and its pitch clamped, and `spawn_change` fires.
+    pub(in crate::game) fn set_world_spawn(
+        &mut self,
+        pos: [i32; 3],
+        [yaw, pitch]: [f32; 2],
+    ) -> [f32; 2] {
+        let rot = [wrap_degrees(yaw), pitch.clamp(-90.0, 90.0)];
+        let old = self.level.world_spawn.replace(pos);
+        self.level.world_spawn_angle = rot;
+        self.native_spawn_change(pos, rot);
+        // A player whose fallback is the world spawn (no spawnpoint of its
+        // own; a bed or an anchor that is gone falls back to it) respawns at
+        // the new one.
+        let floor = |s: Vec3| [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32];
+        if self.spawn.map(floor) == old {
+            self.spawn = Some(Vec3::new(
+                f64::from(pos[0]) + 0.5,
+                f64::from(pos[1]),
+                f64::from(pos[2]) + 0.5,
+            ));
+        }
+        rot
+    }
     fn cmd_setworldspawn(&mut self, ctx: &Context) -> R<i32> {
         let pos = if ctx.get("pos").is_some() {
             self.block_pos_arg(ctx, "pos")?
@@ -3645,27 +3697,13 @@ impl Game<'_> {
             Some(Arg::Coords(c)) => c.rotation(self.source_rotation()),
             _ => [0.0, 0.0],
         };
-        // LevelData.setRespawnData: the world's spawn (level.dat `spawn`).
-        let old = self.level.world_spawn.replace(pos);
-        self.level.world_spawn_angle = rot;
-        self.native_spawn_change(pos, rot);
-        // A player whose fallback is the world spawn (no spawnpoint of its
-        // own; a bed or an anchor that is gone falls back to it) respawns at
-        // the new one.
-        let floor = |s: Vec3| [s.x.floor() as i32, s.y.floor() as i32, s.z.floor() as i32];
-        if self.spawn.map(floor) == old {
-            self.spawn = Some(Vec3::new(
-                f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]),
-                f64::from(pos[2]) + 0.5,
-            ));
-        }
+        let [yaw, pitch] = self.set_world_spawn(pos, rot);
         let args = [
             Text::literal(pos[0].to_string()),
             Text::literal(pos[1].to_string()),
             Text::literal(pos[2].to_string()),
-            Text::literal(java_float(f64::from(rot[0]))),
-            Text::literal(java_float(f64::from(rot[1]))),
+            Text::literal(java_float(f64::from(yaw))),
+            Text::literal(java_float(f64::from(pitch))),
             Text::literal(self.dim.id()),
         ];
         self.feedback(Text::translate("commands.setworldspawn.success", &args));
@@ -5115,6 +5153,35 @@ mod query_feedback_tests {
 
 #[cfg(test)]
 mod forced_respawn_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn setworldspawn_reports_normalized_rotation() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion, text::Text};
+        use horizon_core::geometry::Vec3;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(5.5, 64.0, 5.5)).unwrap());
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.chat_capture = Some(Vec::new());
+
+            assert!(game.run_command("setworldspawn 5 64 5 270 120"));
+            assert_eq!(game.level.world_spawn_angle, [-90.0, 90.0]);
+            let expected = Text::translate(
+                "commands.setworldspawn.success",
+                &["5", "64", "5", "-90.0", "90.0", "minecraft:overworld"].map(Text::literal),
+            );
+            let lines = game.chat_capture.take().unwrap();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].plain(), expected.plain());
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn overworld_spawnpoint_is_validated_at_both_player_blocks() {

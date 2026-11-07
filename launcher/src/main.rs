@@ -255,10 +255,7 @@ struct Launcher {
     native_step: Option<String>,
     /// Where the build under way is, for the card's stages and bar.
     native_progress: Option<native_mods::Progress>,
-    /// When the running native build started, and the whole seconds last drawn (the status shows
-    /// the time it has taken).
-    native_started: Option<(Instant, u64)>,
-    /// How the last native build ended ("Built in 42 s (fast, incremental)", or "Up to date").
+    /// How the last native build ended ("Built (balanced, incremental)", or "Up to date").
     native_done: Option<String>,
     native_error: Option<String>,
     native_confirm: Option<Result<Vec<native_mods::Bundle>, String>>,
@@ -559,7 +556,6 @@ impl Launcher {
             import_error: None,
             native_step: None,
             native_progress: None,
-            native_started: None,
             native_done: None,
             native_error: None,
             native_confirm: None,
@@ -742,7 +738,6 @@ impl Launcher {
                 stage: native_mods::Stage::Compile,
                 fraction: Some(0.62),
             });
-            this.native_started = Some((Instant::now(), 0));
             this.native_for = this.selected_instance().map(|i| i.id.clone());
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
@@ -968,12 +963,10 @@ impl Launcher {
         };
         self.native_step = Some(tr("Starting the build").into());
         self.native_progress = None;
-        self.native_started = Some((Instant::now(), 0));
         self.native_done = None;
-        let profile = native_mods::Profile::chosen(&self.settings);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = native_mods::build(&base, &folder, &instance, profile, |step| {
+            let result = native_mods::build(&base, &folder, &instance, None, |step| {
                 let _ = tx.send(Msg::NativeProgress(step.label(), step.progress()));
             });
             let _ = tx.send(Msg::Native(result));
@@ -1021,13 +1014,6 @@ impl Launcher {
             }
             Some(perf::Step::Quit) => cx.quit(),
             Some(perf::Step::Wait) | None => {}
-        }
-        // The running build's clock moves on each second.
-        if let Some((started, shown)) = &mut self.native_started {
-            if started.elapsed().as_secs() != *shown {
-                *shown = started.elapsed().as_secs();
-                changed = true;
-            }
         }
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
@@ -1316,8 +1302,7 @@ impl Launcher {
                     // The last step of a build that worked says how it went.
                     let last = self.native_step.take();
                     self.native_progress = None;
-                    self.native_started = None;
-                    let cancelled = matches!(&result, Err(e) if e == native_mods::CANCELLED);
+                    let cancelled = matches!(&result, Err(native_mods::Failed::Other(error)) if error == native_mods::CANCELLED);
                     self.native_done = match (&result, cancelled) {
                         (Ok(_), _) => last,
                         (Err(_), true) => Some(tr(native_mods::CANCELLED).into()),
@@ -1328,7 +1313,7 @@ impl Launcher {
                     // A build attempt ended: an open panel reads the log it left.
                     self.native_log.stale = true;
                     if let (Err(e), false) = (result, cancelled) {
-                        self.native_error = Some(e);
+                        self.native_error = Some(String::from(e));
                     }
                 }
                 Msg::LauncherProgress(p) => {
@@ -1910,6 +1895,10 @@ impl Launcher {
 
     fn begin_sign_in(&mut self, target: Option<account::Account>) {
         self.cancel_sign_in();
+        // The code page offers a private window: find the default browser meanwhile.
+        std::thread::spawn(|| {
+            horizon_launcher::private_window::detected();
+        });
         self.sign_in = Some(match &target {
             Some(account) => SignIn::start_for(account.clone()),
             None => SignIn::start(),
@@ -3986,7 +3975,7 @@ impl Launcher {
             .child(div().text_color(t.danger).child(tr("These mods will run with full access to your computer").to_string()))
             .child(tr("They can read, change or delete your files, and use your accounts and network, like any program you run. Build them only if you trust their authors: the Mods page names them.").to_string())
             .child(trf("Mods: {mods}", &[("mods", &list)]))
-            .child(tr("The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.").to_string());
+            .child(tr("Native builds may download Rust and other build tools. Source builds compile the game on this computer.").to_string());
         let mut buttons = div().flex().gap(px(8.)).mt(px(4.));
         if mods.is_ok() {
             buttons = buttons.child(
@@ -3997,6 +3986,11 @@ impl Launcher {
                     &t,
                 )
                 .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    if let Err(error) = this.settings.allow_native_mods() {
+                        this.native_error = Some(error);
+                        cx.notify();
+                        return;
+                    }
                     this.build_native();
                     cx.notify();
                 })),
@@ -4381,7 +4375,22 @@ impl Launcher {
                         .font_family(theme::MONO)
                         .text_color(t.ink)
                         .child(code.user_code.clone()),
-                ),
+                )
+                .when(!microsoft::has_private_window(), |col| {
+                    col.child(tr("Open this link in a private window to pick another account."))
+                })
+                .child({
+                    let uri = code.verification_uri.clone();
+                    div().flex().child(
+                        button(
+                            "sign-in-other",
+                            "Use a different Microsoft account",
+                            Kind::Ghost,
+                            &t,
+                        )
+                        .on_click(move |_, _, cx| microsoft::use_different_account(&uri, cx)),
+                    )
+                }),
             Some(SignInState::Done(Ok(a))) => {
                 div().child(trf("Signed in as {name}.", &[("name", &a.name)]))
             }
@@ -4417,6 +4426,23 @@ impl Launcher {
             None
         } else if let Some(SignInState::Code(code)) = &self.sign_in_state {
             let (uri, user_code) = (code.verification_uri.clone(), code.user_code.clone());
+            let (private_uri, link_uri) = (uri.clone(), uri.clone());
+            // A private window picks the account; without one the link is for the player to carry over.
+            let private = if microsoft::has_private_window() {
+                button(
+                    "sign-in-private",
+                    "Open in private window",
+                    Kind::Secondary,
+                    &t,
+                )
+                .on_click(move |_, _, cx| microsoft::open_private(&private_uri, cx))
+            } else {
+                button("sign-in-copy-link", "Copy link", Kind::Secondary, &t).on_click(
+                    move |_, _, cx| {
+                        copy_to_clipboard(cx, gpui::ClipboardItem::new_string(link_uri.clone()))
+                    },
+                )
+            };
             Some(
                 div()
                     .flex()
@@ -4431,6 +4457,7 @@ impl Launcher {
                             },
                         ),
                     )
+                    .child(private)
                     .child(
                         button("sign-in-open", "Open link", Kind::Secondary, &t)
                             .on_click(move |_, _, cx| cx.open_url(&uri)),

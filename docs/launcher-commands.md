@@ -121,8 +121,8 @@ Native mods (docs/modding/src/how-to/native-mods.md): compile flat Rust mod proj
 - `--allow-jar-downloads`: Allow exact-hash jar downloads into the local cache for the server export; jar bytes are never included in the exported folder
 - `--instance`: The instance whose installed native mods to build, and which then plays the build (default: the selected one)
 - `--update`: Move to the newest installed release or Nightly instead of the Horizon the instance plays (a full rebuild)
-- `--trust-native-code`: You read the mods' source and trust it with full access to this computer
-- `--profile` (optimized, balanced, developer): The build mode: optimized (the default: the prebuilt game when the mods allow it, else the game built with the release profile), balanced (built here, quicker to rebuild) or developer (quickest to rebuild a mod, slow game). Default: the native-profile setting
+- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
+- `--profile` (optimized, balanced, developer): This instance's build mode: optimized, balanced or developer. Remembers an explicit choice for this instance; otherwise uses its saved choice, starting at Balanced. Without a picker reason or explicit choice, installed mods use the prebuilt route
 
 MCP: none: the player's switch.
 
@@ -239,11 +239,11 @@ MCP: `account_skin`.
 
 ## `horizon-launcher settings`
 
-Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit in GiB, default 30; 0 disables automatic cleanup), native-profile optimized|balanced|developer (the build mode native mods use: optimized uses the prebuilt game when it can, balanced builds here and rebuilds quicker, developer rebuilds a mod quickest for a slow game).
+Show the launcher's settings, or set one (the Settings page): selected-version TAG, game-architecture auto|x64|arm64, minecraft-dir PATH, server-dir PATH ("default" resets a folder), install-new-versions on|off, prune-old-versions on|off (delete old versions after an install, keeping the selected one, the ones instances use and the newest few), keep-versions N (how many of the newest to keep; "default" is 2), opening-animation on|off, proxy http://host:port|socks5://host:port ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent violet|blue|teal|green|amber|red|pink|#rrggbb|DEGREES (a named accent, any colour, or any hue), background PATH (a picture behind Home; "default" shows Horizon's landscape), native-cache-gib N (combined native compilation cache limit in GiB, default 30; 0 disables automatic cleanup).
 
     horizon-launcher settings [KEY] [VALUE]
 
-- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, native-profile, native-cache-gib)
+- `KEY` (selected-version, minecraft-dir, server-dir, install-new-versions, prune-old-versions, keep-versions, opening-animation, game-architecture, proxy, while-playing, language, accent, background, native-cache-gib)
 - `VALUE`: The new value (with KEY)
 
 MCP: `settings`.
@@ -849,7 +849,7 @@ Install a native mod from a GitHub link (docs/modding/src/how-to/native-mods.md,
 - `--mod`: The mod to install when the link holds several
 - `--all`: Install every mod the link holds
 - `--instance`: The instance (default: the selected one)
-- `--trust-native-code`: You read the mod's source (the link printed) and trust it with full access to this computer
+- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
 
 MCP: none: the player's switch.
 
@@ -862,7 +862,7 @@ Look for newer versions of the native mods installed from GitHub (the latest rel
 - `ID`: One mod (default: all of them)
 - `--check`: Only say what is newer
 - `--instance`: The instance (default: the selected one)
-- `--trust-native-code`: You read the new source and trust it with full access to this computer
+- `--trust-native-code`: Allow native code for this install (remembered; revoke in Settings, Storage)
 
 MCP: none: the player's switch.
 

@@ -342,10 +342,18 @@ mod nested_spawn_tests {
                 (0, 0),
                 std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
             );
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
             let mut taken = JoinList::default();
-            taken.push(shot(71));
+            for id in [71, 73, 74] {
+                taken.push(shot(id));
+            }
+            let _ = taken.remove(1);
+            let mut expected: Vec<_> = taken.iter().map(|p| (p.id, p.join)).collect();
             game.creatures.projectiles.push(shot(72));
             let join = game.creatures.projectiles[0].join;
+            expected.push((72, join));
             game.native_settle_impacts(
                 &mut taken,
                 &mut JoinList::default(),
@@ -354,9 +362,12 @@ mod nested_spawn_tests {
                 &mut Vec::new(),
                 &mut Vec::new(),
             );
-            assert_eq!(taken.iter().map(|p| p.id).collect::<Vec<_>>(), [71, 72]);
-            assert_eq!(taken[1].age, 0);
-            assert_eq!(taken[1].join, join);
+            assert_eq!(
+                taken.iter().map(|p| (p.id, p.join)).collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(taken[2].age, 0);
+            assert_eq!(taken[2].join, join);
             game.creatures
                 .projectiles
                 .restore(taken, horizon_client::join_seq::RestoreOrder::SpawnsFirst);

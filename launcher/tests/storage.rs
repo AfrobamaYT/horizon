@@ -12,12 +12,9 @@ impl Home {
         fs::write(&path, contents).unwrap();
         path
     }
-    fn run(&self, row: Option<&str>) -> std::process::Output {
+    fn run(&self, args: &[&str]) -> std::process::Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_horizon-launcher"));
-        command.arg("storage");
-        if let Some(row) = row {
-            command.args(["--clear", row]);
-        }
+        command.args(args);
         command
             .current_dir(self.0.path())
             .env("HORIZON_HOME", self.0.path().join("game"))
@@ -50,10 +47,32 @@ impl Home {
         command.output().unwrap()
     }
     fn clear(&self, row: &str) -> serde_json::Value {
-        let output = self.run(Some(row));
+        let output = self.run(&["storage", "--clear", row]);
         assert!(output.status.success(), "{output:?}");
         serde_json::from_slice(&output.stdout).unwrap()
     }
+}
+
+#[test]
+fn trust_native_code_flag_persists_install_consent() {
+    let home = Home::new();
+    let output = home.run(&[
+        "native-build",
+        "--trust-native-code",
+        "--sync-internals",
+        "missing-project",
+    ]);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("not a native mod project"),
+        "{output:?}"
+    );
+    let settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.0.path().join("launcher/settings.json")).unwrap())
+            .unwrap();
+    assert!(settings["native_mods_allowed_at"]
+        .as_u64()
+        .is_some_and(|at| at > 0));
 }
 
 #[test]
@@ -249,7 +268,7 @@ fn symlink_named_instance_is_refused_without_touching_its_outside_target() {
         home.0.path().join("game/instances/linked"),
     )
     .unwrap();
-    let output = home.run(Some("other-caches"));
+    let output = home.run(&["storage", "--clear", "other-caches"]);
     assert_eq!(
         fs::read(precious).unwrap(),
         b"outside cache",
@@ -277,7 +296,7 @@ fn hundreds_of_reports_and_jars_fit_the_descriptor_budget_and_clear_repeatedly()
             .unwrap();
         home.file(&format!("game/jars/{index}.jar"), b"unused jar");
     }
-    let report = home.run(None);
+    let report = home.run(&["storage"]);
     assert!(
         report.status.success(),
         "read-only report exceeded 256 FDs: {report:?}"

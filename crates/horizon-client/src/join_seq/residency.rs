@@ -80,6 +80,7 @@ pub struct Event {
 struct Pending {
     events: Mutex<Vec<Event>>,
     ready: AtomicBool,
+    retired: AtomicBool,
 }
 
 /// Shared only by the owners of one game instance and its parked dimensions.
@@ -90,6 +91,9 @@ impl Journal {
     /// Record an operation at the storage boundary, in mutation order.
     pub fn push(&self, event: Event) {
         let mut events = self.0.events.lock().unwrap();
+        if self.0.retired.load(Ordering::Relaxed) {
+            return;
+        }
         debug_assert!(events.len() < 1_000_000, "entity journal was not drained");
         events.push(event);
         self.0.ready.store(true, Ordering::Release);
@@ -108,8 +112,22 @@ impl Journal {
         self.0.ready.store(false, Ordering::Release);
     }
 
-    /// Forget queued operations when the owning game resets its table/epoch.
-    /// Existing storage bindings continue using this sink after the reset.
+    /// Retire this epoch and all of its producer clones, discarding its queue.
+    /// The fresh sink is the new epoch identity; old producers cannot append to
+    /// either queue. Rebind live owners to fresh clones after a table reset.
+    pub fn reset_epoch(&mut self) {
+        let next = Self::default();
+        {
+            let mut events = self.0.events.lock().unwrap();
+            self.0.retired.store(true, Ordering::Relaxed);
+            *events = Vec::new();
+            self.0.ready.store(false, Ordering::Release);
+        }
+        *self = next;
+    }
+
+    /// Forget queued operations without retiring connected producers.
+    /// This is a queue clear, not a table/epoch reset barrier.
     pub fn clear(&self) {
         let mut events = self.0.events.lock().unwrap();
         events.clear();
@@ -218,6 +236,137 @@ mod tests {
         parked.push(new);
         journal.drain_into(&mut scratch);
         assert_eq!(scratch, [new]);
+    }
+
+    fn assert_idle_drain_does_not_wait_for_the_pending_mutex(journal: Journal) {
+        use std::{sync::mpsc, time::Duration};
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let holder = journal.clone();
+        let holder = std::thread::spawn(move || {
+            let _guard = holder.0.events.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        });
+        locked_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        let drainer = std::thread::spawn(move || {
+            let mut scratch = Vec::new();
+            journal.drain_into(&mut scratch);
+            done_tx.send(scratch).unwrap();
+        });
+        let result = done_rx.recv_timeout(Duration::from_secs(2));
+        // Release and join before asserting, including on the timeout path.
+        release_tx.send(()).unwrap();
+        holder.join().unwrap();
+        drainer.join().unwrap();
+        assert!(result.is_ok(), "idle drain blocked on the pending mutex");
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn idle_drain_after_consuming_a_batch_does_not_lock() {
+        let journal = Journal::default();
+        journal.push(event(DimensionKey::OVERWORLD, Kind::Mob, Change::Lifted));
+        let mut scratch = Vec::new();
+        journal.drain_into(&mut scratch);
+        assert_eq!(scratch.len(), 1);
+        scratch.clear();
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(journal);
+    }
+
+    #[test]
+    fn idle_drain_after_clear_does_not_lock() {
+        let journal = Journal::default();
+        journal.push(event(DimensionKey::OVERWORLD, Kind::Mob, Change::Lifted));
+        journal.clear();
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(journal);
+    }
+
+    #[test]
+    fn fresh_idle_drain_does_not_lock() {
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(Journal::default());
+    }
+
+    #[test]
+    fn epoch_reset_discards_pending_and_rejects_a_late_parked_producer() {
+        let mut journal = Journal::default();
+        let stale = journal.clone();
+        let old = event(DimensionKey::NETHER, Kind::Mob, Change::Lifted);
+        stale.push(old);
+        journal.reset_epoch();
+        assert!(!Arc::ptr_eq(&journal.0, &stale.0));
+        assert!(stale.0.events.lock().unwrap().is_empty());
+        assert_idle_drain_does_not_wait_for_the_pending_mutex(stale.clone());
+        // The old server/dimension resumes only after the reset has completed.
+        std::thread::spawn({
+            let stale = stale.clone();
+            move || {
+                for _ in 0..1000 {
+                    stale.push(old);
+                }
+            }
+        })
+        .join()
+        .unwrap();
+        let mut scratch = Vec::new();
+        stale.drain_into(&mut scratch);
+        assert!(
+            scratch.is_empty(),
+            "stale producers must not accumulate events"
+        );
+        journal.drain_into(&mut scratch);
+        assert!(
+            scratch.is_empty(),
+            "reset leaked a previous epoch into the table"
+        );
+        let fresh = journal.clone();
+        let new = event(DimensionKey::END, Kind::Dragon, Change::Restored);
+        fresh.push(new);
+        journal.drain_into(&mut scratch);
+        assert_eq!(scratch, [new]);
+    }
+
+    #[test]
+    fn retirement_is_rechecked_after_a_blocked_push_takes_the_mutex() {
+        use std::{sync::mpsc, time::Duration};
+        let stale = Journal::default();
+        let guard = stale.0.events.lock().unwrap();
+        let pusher = stale.clone();
+        let (started_tx, started_rx) = mpsc::channel();
+        let pusher = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            pusher.push(event(DimensionKey::NETHER, Kind::Mob, Change::Lifted));
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Give an incorrect pre-lock load time to observe retired=false.
+        // Correct code cannot read retirement until this guard is released.
+        std::thread::sleep(Duration::from_millis(100));
+        stale.0.retired.store(true, Ordering::Relaxed);
+        drop(guard);
+        pusher.join().unwrap();
+        assert!(stale.0.events.lock().unwrap().is_empty());
+        assert!(!stale.0.ready.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn repeated_epoch_resets_never_reactivate_an_older_producer() {
+        let mut journal = Journal::default();
+        let first = journal.clone();
+        journal.reset_epoch();
+        let second = journal.clone();
+        journal.reset_epoch();
+        let value = event(DimensionKey::OVERWORLD, Kind::Other, Change::Restored);
+        first.push(value);
+        second.push(value);
+        let mut scratch = Vec::new();
+        for retired in [first, second] {
+            retired.drain_into(&mut scratch);
+            assert!(scratch.is_empty());
+        }
+        journal.push(value);
+        journal.drain_into(&mut scratch);
+        assert_eq!(scratch, [value]);
     }
 
     #[test]

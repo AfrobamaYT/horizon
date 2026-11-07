@@ -544,12 +544,16 @@ impl Game<'_> {
         let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
         let server = self.serving.is_some() || self.options.dedicated.is_some();
         // A config edited while the server is paused (empty) still reloads.
+        // The parts outside every level get spans of their own, so that a slow
+        // tick's line and `horizon-report` say when a mod's tick hook took it.
         if server {
+            let _span = horizon_client::spans::guard("mod_configs_poll");
             self.native_configs_poll();
         }
         if let Some(running) = running
             && server
         {
+            let _span = horizon_client::spans::guard("mods_server_tick_start");
             self.native_lifecycle_server_tick_start(running);
         }
         let observe_level =
@@ -626,13 +630,20 @@ impl Game<'_> {
             self.native_lifecycle.cancel_server_tick();
         }
         result?;
-        if let Err(error) = self.close_idle_levels() {
+        let closed = {
+            let _span = horizon_client::spans::guard("close_idle_levels");
+            self.close_idle_levels()
+        };
+        if let Err(error) = closed {
             self.native_lifecycle.cancel_server_tick();
             return Err(error);
         }
         // `ServerTickEnd`: an errored tick or an idle-close failure (at
         // the `?` above) never reaches this site.
-        self.native_lifecycle_server_tick_end(paused);
+        {
+            let _span = horizon_client::spans::guard("mods_server_tick_end");
+            self.native_lifecycle_server_tick_end(paused);
+        }
         Ok(())
     }
 
@@ -889,6 +900,38 @@ fn slowest_steps(notes: &[(f32, String)]) -> String {
         .map(|(ms, what)| format!("{what} {ms:.1}"))
         .collect();
     format!("; slowest: {}", list.join(", "))
+}
+
+impl Game<'_> {
+    /// Rebind only an already-owning transfer, before installing it in this level.
+    /// Memory still belongs to the parked source until the caller moves it.
+    pub(super) fn rebind_transferred_entity(
+        &mut self,
+        source: super::Dim,
+        id: u32,
+        entity: &mut impl horizon_mod_runtime::attachments::HasAttachmentLifetime,
+    ) {
+        let slot = entity.attachment_lifetime();
+        if !slot.is_bound() {
+            return;
+        }
+        let Some(level) = self.level(self.dim.id()) else {
+            return;
+        };
+        let Some(map) = self
+            .levels
+            .parked_mut(source)
+            .and_then(|p| p.persist.uuids.get(&id))
+            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+        else {
+            return;
+        };
+        slot.bind(
+            map,
+            self.attachment_indexes.entry(self.dim).or_default(),
+            mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        );
+    }
 }
 
 #[cfg(test)]
