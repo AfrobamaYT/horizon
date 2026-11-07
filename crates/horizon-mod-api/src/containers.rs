@@ -36,6 +36,18 @@ pub struct ModRevision {
 }
 
 impl ModRevision {
+    // hidden: the game verifies callback snapshots still name their engine entity
+    #[doc(hidden)]
+    pub fn identity(self) -> u64 {
+        self.born
+    }
+
+    // hidden: game write-back retains the callback's revision, not a new single write
+    #[doc(hidden)]
+    pub fn changes(self) -> u64 {
+        self.changes
+    }
+
     // hidden: copy the engine's revision data at the game boundary
     #[doc(hidden)]
     pub fn from_snapshot(born: u64, changes: u64) -> Self {

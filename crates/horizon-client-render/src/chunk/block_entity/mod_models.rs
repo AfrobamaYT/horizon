@@ -48,6 +48,13 @@ impl ModRevision {
     }
 }
 impl ModBlockEntity {
+    /// Apply a validated callback snapshot in place, keeping this entity's identity.
+    /// The game passes the snapshot's original write count, including no-op writes.
+    pub fn apply_snapshot(&mut self, fields: ModBlockEntityFields, changes: u64) {
+        self.fields = fields;
+        self.revision.changes = changes;
+    }
+
     pub fn new(id: String, fields: ModBlockEntityFields) -> Self {
         Self {
             id,
