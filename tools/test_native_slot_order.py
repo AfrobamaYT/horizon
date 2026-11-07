@@ -18,6 +18,7 @@ def main():
     parser.add_argument('--scratch', required=True, type=Path)
     parser.add_argument('--functions', action='store_true')
     parser.add_argument('--calls', action='store_true')
+    parser.add_argument('--wrapping', action='store_true')
     args = parser.parse_args()
     scratch = Path(tempfile.mkdtemp(prefix='slot-order-', dir=args.scratch))
     env = os.environ.copy()
@@ -78,6 +79,9 @@ def main():
         expected = ['SLOT ORDER HEAD', 'SLOT ORDER CALL BEFORE rate=1',
                     'SLOT ORDER CALL AFTER value=300', 'SLOT ORDER CALL VALUE: 300 -> 319',
                     'SLOT ORDER HIGH ticks_until_autosave=319', 'SLOT ORDER LOW APPLIED ticks_until_autosave=319']
+    if args.wrapping:
+        expected.insert(expected.index('SLOT ORDER CALL VALUE: 300 -> 319') + 1,
+                        'SLOT ORDER CALL WRAP: 300 -> 319')
     positions = [text.index(marker) for marker in expected]
     assert positions == sorted(positions), text[-4000:]
     print('PASS:', '; '.join(expected), '; exit 0', scratch)
