@@ -205,8 +205,7 @@ impl Game<'_> {
     /// projectiles. One a mod removed in its hook stays removed.
     pub(super) fn native_settle_impacts(
         &mut self,
-        projectiles: &mut JoinList<Projectile, false>,
-        removed: &mut JoinList<Projectile, false>,
+        projectiles: &mut JoinList<Projectile>,
         listed: &[bool],
         impacts: Vec<Impact>,
         hits: &mut Vec<(Projectile, Hit)>,
@@ -226,12 +225,7 @@ impl Game<'_> {
             drop_hits[impact.hit_slot] = true;
             drop_events[impact.events.clone()].fill(true);
             let present = projectiles.iter().position(|q| q.id == impact.before.id);
-            if self
-                .persist
-                .removals
-                .contains(&super::commands::Target::Projectile(impact.before.id))
-                || present.is_none() && listed[impact.index]
-            {
+            if present.is_none() && listed[impact.index] {
                 continue;
             }
             let mut before = impact.before;
@@ -241,21 +235,11 @@ impl Game<'_> {
             let (p, keep, events) = self.native_projectile_through(before);
             flown.extend(events);
             match (present, keep) {
-                (Some(i), true) => {
-                    projectiles.store_back(i, p);
-                }
+                (Some(i), true) => projectiles[i] = p,
                 (Some(i), false) => {
                     projectiles.remove(i);
                 }
-                (None, true) => {
-                    let i = removed
-                        .iter()
-                        .position(|q| q.id == p.id)
-                        .expect("unlisted impact owner");
-                    let mut owner = removed.remove(i);
-                    horizon_client::join_seq::store_back(&mut owner, p);
-                    projectiles.push(owner);
-                }
+                (None, true) => projectiles.push(p),
                 (None, false) => {}
             }
         }
