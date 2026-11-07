@@ -795,8 +795,8 @@ impl Game<'_> {
                 match handle {
                     EntityHandle::Item(_) | EntityHandle::Orb(_) if destroyed => {}
                     EntityHandle::Cart(_) => {
-                        if let Some(c) = self.carts.iter_mut().find(|c| c.id == entity) {
-                            c.push_from_explosion(push);
+                        if let Some(i) = self.carts.iter().position(|c| c.id == entity) {
+                            self.carts.update(i, |c| c.push_from_explosion(push));
                         }
                     }
                     EntityHandle::Boat(_) => {

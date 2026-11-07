@@ -48,17 +48,29 @@ The items host area owns metadata reads such as `max_stack_size(ItemKey)` and
 maximum never turns into a fabricated limit of 64.
 
 The game validates effective count and durability limits, including component overrides, when
-accepting a resident write. It refuses invalid values with typed errors rather than clamping
-them. A transfer request is different: `ItemResource` plus a separate amount can request or
+accepting a resident write. An effective `max_stack_size` must be in `1..=99`, and the
+presence of `max_damage` forbids a stack limit above one, even when the current count is one.
+Removing `max_stack_size` uses the absent limit of one. Invalid values produce typed errors,
+not clamped values. A transfer request is different: `ItemResource` plus a separate amount can request or
 return more than one resident stack's capacity. The resident writes it produces still have to
 pass validation.
 
 Game inventory, menus, trades and models keep their engine-owned representations. Native
 hooks and host methods exchange owned API snapshots. The game converts only after a listener
-guard, and stages every mutable result before committing any output. Invalid hook edits retain
-the original engine values. Consuming mutable events such as `bonemeal` and
+guard, and stages every mutable result before committing any captured output. Invalid hook
+edits retain those captured engine values. Consuming mutable events such as `bonemeal` and
 `item_after_vertical_collision` lend `Option<ItemStack>` so a listener can consume the value by
 setting `None`.
+
+The `item_stacked_on_other` bridge commits its clicked slot, cursor and cancellation flags as
+one unit, including the menu's slot-operation queues and map-id reservations. The block-entity
+tick, menu-button and menu-quick-move bridges validate their captured snapshot outputs together
+before applying them. These are output guarantees, not whole-world transactions: independent
+`ServerHost` storage writes, commands, messages and other effects are not rolled back on a
+refused output. Carrier-form callbacks such as `bonemeal` and `item_after_vertical_collision`
+also retain their captured stack outputs on refusal but do not journal independent host writes.
+[The storage-journal follow-up](https://github.com/arismoko/horizon/issues/1770) covers that gap.
+Restricted in-write `LevelHost` callbacks keep their existing write and random-draw order.
 
 Item-model callbacks receive the owned stack and a separate `bundle_selected` number (`-1`
 means none). Runtime selection is not a persistent component. Drawing receives the API-owned

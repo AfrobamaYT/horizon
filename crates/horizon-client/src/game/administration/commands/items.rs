@@ -435,7 +435,9 @@ impl Game<'_> {
                 .get(*i)
                 .cloned(),
             Slot::Frame(id) => self.item_frames.iter().find(|f| f.id == *id)?.item.clone(),
-            Slot::Cart(id, i) => self.cart_slots(*id)?.get(*i).cloned().flatten(),
+            Slot::Cart(id, i) => self
+                .edit_cart_slots(*id, |slots| slots.get(*i).cloned().flatten())
+                .flatten(),
             Slot::Block(p, i) => self
                 .world
                 .block_entities
@@ -687,13 +689,15 @@ impl Game<'_> {
                 }
                 None => false,
             },
-            Slot::Cart(id, i) => match self.cart_slots(*id).and_then(|c| c.get_mut(*i)) {
-                Some(slot) => {
-                    *slot = stack;
-                    true
-                }
-                None => false,
-            },
+            Slot::Cart(id, i) => self
+                .edit_cart_slots(*id, |slots| match slots.get_mut(*i) {
+                    Some(slot) => {
+                        *slot = stack;
+                        true
+                    }
+                    None => false,
+                })
+                .unwrap_or(false),
             Slot::Block(p, i) => self.block_slot_set(*p, *i, stack),
         }
     }

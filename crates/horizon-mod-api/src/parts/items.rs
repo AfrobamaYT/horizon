@@ -133,6 +133,80 @@ impl dyn Registrar + '_ {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
+    use crate::testing::{FakeContainer, FakeHost, FakeJournal, FakePlayer};
+
+    #[cfg(test)]
+    /// The slots of the chest at `pos`.
+    pub(crate) fn chest(host: &mut FakeHost, pos: [i32; 3]) -> &mut FakeContainer {
+        host.level.block_entity(pos).items.as_mut().unwrap()
+    }
+
+    #[cfg(test)]
+    /// Two three-slot game chests, `FROM`, holding `from`, and an empty `INTO`.
+    pub(crate) fn two_chests(from: [Option<ItemStack>; 3]) -> FakeHost {
+        let mut host = FakeHost::new();
+        host.level.block_entity(FROM).items = Some(FakeContainer {
+            slots: from.into(),
+            limit: 64,
+        });
+        host.level.block_entity(INTO).with_items(3);
+        host
+    }
+    #[cfg(test)]
+    /// Player 1's items, counted with what they hold, and with what was given to them.
+    pub(crate) fn held_items(host: &FakeHost) -> u32 {
+        let player = player_of(host);
+        items(player.slots.values().chain(&player.given).cloned())
+    }
+
+    #[cfg(test)]
+    /// Puts `stack` in player 1's main hand.
+    pub(crate) fn set_hand(host: &mut FakeHost, stack: ItemStack) {
+        player_mut(host).slots.insert(5, stack);
+    }
+    #[cfg(test)]
+    /// What player 1 of a [`player_world`] holds in their main hand.
+    pub(crate) fn main_hand(host: &FakeHost) -> Option<ItemStack> {
+        player_of(host).main_hand().cloned()
+    }
+    #[cfg(test)]
+    /// Player 1 of a [`player_world`], to change.
+    pub(crate) fn player_mut(host: &mut FakeHost) -> &mut FakePlayer {
+        host.players.get_mut(1).unwrap()
+    }
+    #[cfg(test)]
+    /// Player 1 of a [`player_world`].
+    pub(crate) fn player_of(host: &FakeHost) -> &FakePlayer {
+        host.players.get(1).unwrap()
+    }
+    #[cfg(test)]
+    /// Player 1, whose main hand is hotbar slot 5, holding `main_hand`; entity 2 a pig, 3 a mod's
+    /// robot and 4 a player in another level. An iron helmet stacks to one and goes on the head.
+    pub(crate) fn player_world(main_hand: Option<ItemStack>) -> FakeHost {
+        let mut host = FakeHost::new();
+        let player = host.join(1, 1);
+        player.selected_slot = 5;
+        player.slots.extend(main_hand.map(|stack| (5, stack)));
+        host.level.entity(2, "minecraft:pig");
+        host.level.entity(3, "test:robot");
+        let nether = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
+        host.players.join(4, 4, nether);
+        let head = [("slot".into(), Tag::String("head".into()))];
+        host.registries
+            .item_component(
+                "minecraft:iron_helmet",
+                "minecraft:max_stack_size",
+                Tag::Int(1),
+            )
+            .item_component(
+                "minecraft:iron_helmet",
+                "minecraft:equippable",
+                Tag::Compound(head.into_iter().collect()),
+            );
+        host
+    }
+
     use super::*;
     use crate::parts::tests::*;
     use crate::*;
@@ -323,109 +397,9 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    /// A pipe at (0, 64, 0), and a one-slot vanilla chest east of it, answered by the game.
-    #[derive(Clone, Default)]
-    pub(crate) struct PipeWorld {
-        pub(crate) chest: Option<ItemStack>,
-        pub(crate) kept: Vec<Self>,
-    }
-    #[cfg(test)]
     pub(crate) const PIPE: [i32; 3] = [0, 64, 0];
     #[cfg(test)]
     pub(crate) const CHEST: [i32; 3] = [1, 64, 0];
-    #[cfg(test)]
-    impl Journal for PipeWorld {
-        fn kept(&mut self) -> &mut Vec<Self> {
-            &mut self.kept
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::LevelsBackend for PipeWorld {
-        fn level_in_place(&self, level: LevelRef) -> bool {
-            level == here()
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::BlockEntitiesBackend for PipeWorld {
-        fn block_entity_kind(
-            &self,
-            BlockEntityRef { position: pos, .. }: BlockEntityRef,
-        ) -> Option<BlockEntityTypeKey> {
-            (pos == PIPE).then(|| type_key("test:pipe"))
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackend for PipeWorld {
-        fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
-            (pos == CHEST).then_some(1)
-        }
-        fn container_stack(
-            &self,
-            BlockSide { pos, .. }: BlockSide,
-            slot: usize,
-        ) -> Option<ItemStack> {
-            self.chest.clone().filter(|_| pos == CHEST && slot == 0)
-        }
-    }
-    #[cfg(test)]
-    impl Backend for PipeWorld {}
-    #[cfg(test)]
-    mod_api::impl_backend_areas!(PipeWorld, except(block_entities, items, levels));
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackendMut for PipeWorld {
-        fn container_insert(
-            &mut self,
-            BlockSide { pos, .. }: BlockSide,
-            slot: usize,
-            resource: &ItemResource,
-            amount: u32,
-            _: &Transaction,
-        ) -> Result<Option<ItemStack>, crate::StackWriteError> {
-            let Some(stack) = resource.to_stack(amount) else {
-                return Ok(None);
-            };
-            if pos != CHEST || slot != 0 || self.chest.is_some() {
-                return Ok(Some(stack));
-            }
-            self.chest = Some(stack);
-            Ok(None)
-        }
-    }
-    #[cfg(test)]
-    impl BackendMut for PipeWorld {}
-    #[cfg(test)]
-    mod_api::impl_backend_mut_areas!(PipeWorld, except(items));
-    #[cfg(test)]
-    impl mod_api::prelude::BlockEntitiesHost for PipeWorld {
-        fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-            Some(crate::__private::game::block_entity_ref(level, position, 1))
-        }
-    }
-    #[cfg(test)]
-    impl Host for PipeWorld {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_host_areas!(PipeWorld, except(block_entities));
-    #[cfg(test)]
-    impl mod_api::prelude::ModStateServerHost for PipeWorld {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
-    }
-    #[cfg(test)]
-    impl ServerHost for PipeWorld {
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_server_host_areas!(PipeWorld, except(mod_state));
 
     pub(crate) fn stick() -> ItemStack {
         stack("minecraft:stick", 1, 0)
@@ -694,212 +668,10 @@ pub mod tests {
         }
     }
 
-    #[cfg(test)]
-    /// Player 1's hands and slots, and what was given to them: an item split off their hand.
-    #[derive(Clone, Default)]
-    pub(crate) struct Player {
-        pub(crate) main_hand: Option<ItemStack>,
-        pub(crate) slots: HashMap<i32, ItemStack>,
-        pub(crate) given: Vec<ItemStack>,
-        pub(crate) kept: Vec<Self>,
-    }
     pub(crate) const HAND: ItemPlace = ItemPlace::PlayerHand {
         player: 1,
         hand: Hand::Main,
     };
-    #[cfg(test)]
-    impl Journal for Player {
-        fn kept(&mut self) -> &mut Vec<Self> {
-            &mut self.kept
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::LevelsBackend for Player {
-        fn level_in_place(&self, level: LevelRef) -> bool {
-            level == here()
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::EntitiesBackend for Player {
-        // Entity 1 is the player, 2 a pig, 3 a mod's robot, 4 a player in another level.
-        fn entity_kind(&self, entity: EntityRef) -> Option<String> {
-            let kind = [
-                "minecraft:player",
-                "minecraft:pig",
-                "test:robot",
-                "minecraft:player",
-            ];
-            kind.get(entity.id().checked_sub(1)? as usize)
-                .map(|&kind| kind.into())
-        }
-        fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
-            Some(match entity.id() {
-                4 => LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER),
-                _ => here(),
-            })
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackend for Player {
-        fn entity_container_size(&self, _: u32) -> Option<usize> {
-            None
-        }
-        fn entity_automation_size(&self, _: u32) -> Option<usize> {
-            None
-        }
-        fn item_container_slots(&self, _: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
-            None
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::PlayersBackend for Player {
-        // The player holds hotbar slot 5.
-        fn player_selected_slot(&self, _: PlayerRef) -> Option<usize> {
-            Some(5)
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::PlayersClientBackend for Player {}
-    #[cfg(test)]
-    impl Backend for Player {}
-    #[cfg(test)]
-    mod_api::impl_backend_areas!(Player, except(entities, items, levels, players));
-    #[cfg(test)]
-    impl mod_api::prelude::EntitiesBackendMut for Player {
-        fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
-            Some(u128::from(entity.id()))
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackendMut for Player {
-        fn game_stack(&mut self, place: &ItemPlace) -> Option<ItemStack> {
-            match place {
-                ItemPlace::PlayerHand { player: 1, .. } => self.main_hand.clone(),
-                ItemPlace::PlayerSlot { player: 1, slot } => self.slots.get(slot).cloned(),
-                _ => None,
-            }
-        }
-        fn game_insert(
-            &mut self,
-            place: &ItemPlace,
-            resource: &ItemResource,
-            amount: u32,
-            _: &Transaction,
-        ) -> Result<u32, crate::StackWriteError> {
-            let Some(stack) = resource.to_stack(amount) else {
-                return Ok(0);
-            };
-            if !self.is_place(place) {
-                return Ok(0);
-            }
-            let count = stack.count();
-            let rest = match self.game_stack(place) {
-                None => {
-                    self.put(place, Some(stack));
-                    None
-                }
-                Some(mut held) if held.is_stackable_with(&stack) => {
-                    let put = (64 - held.count()).min(count);
-                    held.grow(put).unwrap();
-                    self.put(place, Some(held));
-                    stack.shrink(put)
-                }
-                Some(_) => Some(stack),
-            };
-            self.given.extend(rest);
-            Ok(count)
-        }
-        fn game_extract(
-            &mut self,
-            place: &ItemPlace,
-            resource: &ItemResource,
-            amount: u32,
-            _: &Transaction,
-        ) -> Result<u32, crate::StackWriteError> {
-            let Some(held) = self.game_stack(place) else {
-                return Ok(0);
-            };
-            if !resource.matches(&held) {
-                return Ok(0);
-            }
-            let took = held.count().min(amount);
-            self.put(place, held.shrink(took));
-            Ok(took)
-        }
-    }
-    #[cfg(test)]
-    impl BackendMut for Player {}
-    #[cfg(test)]
-    mod_api::impl_backend_mut_areas!(Player, except(entities, items));
-    #[cfg(test)]
-    impl mod_api::prelude::PlayersHost for Player {
-        fn player(&self, uuid: u128) -> Option<PlayerRef> {
-            let entity = EntityRef::new(NativeWorldEpoch::new(1), u32::try_from(uuid).ok()?);
-            Some(PlayerRef { entity, uuid })
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsHost for Player {
-        fn item_default_component(&self, item: ItemKey, component: &str) -> Option<Tag> {
-            let helmet = item == fixture_item_key("minecraft:iron_helmet");
-            match component {
-                "minecraft:max_stack_size" => Some(Tag::Int(if helmet { 1 } else { 64 })),
-                "minecraft:equippable" if helmet => Some(Tag::Compound(
-                    [("slot".into(), Tag::String("head".into()))]
-                        .into_iter()
-                        .collect(),
-                )),
-                _ => None,
-            }
-        }
-    }
-    #[cfg(test)]
-    impl Host for Player {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_host_areas!(Player, except(items, players));
-    #[cfg(test)]
-    impl mod_api::prelude::ModStateServerHost for Player {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
-    }
-    #[cfg(test)]
-    impl ServerHost for Player {
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_server_host_areas!(Player, except(mod_state));
-    #[cfg(test)]
-    impl Player {
-        #[cfg(test)]
-        fn is_place(&self, place: &ItemPlace) -> bool {
-            matches!(
-                place,
-                ItemPlace::PlayerHand { player: 1, .. } | ItemPlace::PlayerSlot { player: 1, .. }
-            )
-        }
-        #[cfg(test)]
-        fn put(&mut self, place: &ItemPlace, stack: Option<ItemStack>) {
-            match place {
-                ItemPlace::PlayerHand { .. } => self.main_hand = stack,
-                ItemPlace::PlayerSlot { slot, .. } => {
-                    self.slots.remove(slot);
-                    self.slots.extend(stack.map(|stack| (*slot, stack)));
-                }
-                _ => {}
-            }
-        }
-    }
-
     /// A mod robot's three empty slots.
     pub(crate) struct Cargo;
     impl ResourceHandler<ItemResource> for Cargo {
@@ -943,15 +715,10 @@ pub mod tests {
         game_thread();
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
         let helmet = || stack("minecraft:iron_helmet", 1, 0);
-        let mut player = Player {
-            slots: [
-                (3, stack("minecraft:stick", 10, 0)),
-                (5, stack("minecraft:stick", 60, 0)),
-            ]
-            .into_iter()
-            .collect(),
-            ..Player::default()
-        };
+        let mut player = player_world(Some(stack("minecraft:stick", 60, 0)));
+        player_mut(&mut player)
+            .slots
+            .insert(3, stack("minecraft:stick", 10, 0));
         let host: &mut dyn ServerHost = &mut player;
         let items = entity(1).capability(host, &ENTITY_ITEMS, ()).unwrap();
         assert_eq!(items.owner(), "the game");
@@ -976,9 +743,9 @@ pub mod tests {
         assert_eq!(insert(host, 3, &sticks, 60), 54);
         assert_eq!(insert(host, 38, &sticks, 1), 0);
         assert_eq!(insert(host, 39, &helmet_, 1), 1);
-        assert_eq!(player.slots[&3].count(), 64);
-        assert_eq!(player.slots[&103], helmet());
-        assert!(player.given.is_empty());
+        assert_eq!(player_of(&player).slots[&3].count(), 64);
+        assert_eq!(player_of(&player).slots[&103], helmet());
+        assert!(player_of(&player).given.is_empty());
         // Without an index, as `Inventory.add`: the selected slot's sticks first, then an
         // empty slot.
         let host: &mut dyn ServerHost = &mut player;
@@ -987,14 +754,20 @@ pub mod tests {
             Err::<(), ()>(())
         });
         assert!(aborted.is_err());
-        assert_eq!(player.slots[&5], stack("minecraft:stick", 60, 0));
+        assert_eq!(
+            player_of(&player).slots[&5],
+            stack("minecraft:stick", 60, 0)
+        );
         let host: &mut dyn ServerHost = &mut player;
         let went =
             host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 10)));
         assert_eq!(went, Ok(10));
-        assert_eq!(player.slots[&5], stack("minecraft:stick", 64, 0));
-        assert_eq!(player.slots[&0], stack("minecraft:stick", 6, 0));
-        assert!(player.given.is_empty());
+        assert_eq!(
+            player_of(&player).slots[&5],
+            stack("minecraft:stick", 64, 0)
+        );
+        assert_eq!(player_of(&player).slots[&0], stack("minecraft:stick", 6, 0));
+        assert!(player_of(&player).given.is_empty());
     }
 
     #[test]
@@ -1003,7 +776,7 @@ pub mod tests {
         install_parts(&[]).unwrap();
         game_thread();
         let entity = |id| EntityRef::new(NativeWorldEpoch::new(1), id);
-        let mut player = Player::default();
+        let mut player = player_world(None);
         let host: &mut dyn ServerHost = &mut player;
         // A pig has no items; a mod's robot has its provider's; a player in a parked level
         // is asked nothing.
@@ -1025,28 +798,19 @@ pub mod tests {
             .sum()
     }
     #[cfg(test)]
-    impl Player {
-        #[cfg(test)]
-        fn items(&self) -> u32 {
-            let held = self.main_hand.iter().chain(self.slots.values());
-            items(held.chain(&self.given).cloned())
-        }
-    }
-
-    #[cfg(test)]
     /// Three shelf slots at (2, 64, 0), answered by the game's handler, else by
     /// `ItemOverstates`. A slot takes up to `limit` of one item, the `output` slot none, and
     /// gives at most one item per extract, unless `whole_extract`; with `one_per_insert`, it
     /// takes at most one per insert.
     #[derive(Clone)]
     pub(crate) struct Shelf {
-        pub(crate) slots: [Option<ItemStack>; 3],
-        pub(crate) limit: u32,
-        pub(crate) output: Option<usize>,
-        pub(crate) one_per_insert: bool,
-        pub(crate) whole_extract: bool,
-        pub(crate) overstates: bool,
-        pub(crate) kept: Vec<Self>,
+        slots: [Option<ItemStack>; 3],
+        limit: u32,
+        output: Option<usize>,
+        one_per_insert: bool,
+        whole_extract: bool,
+        overstates: bool,
+        journal: FakeJournal<[Option<ItemStack>; 3]>,
     }
     #[cfg(test)]
     pub(crate) fn shelf(slots: [Option<ItemStack>; 3]) -> Shelf {
@@ -1057,7 +821,7 @@ pub mod tests {
             one_per_insert: false,
             whole_extract: false,
             overstates: false,
-            kept: Vec::new(),
+            journal: FakeJournal::default(),
         }
     }
     pub(crate) const SHELF: [i32; 3] = [2, 64, 0];
@@ -1068,12 +832,6 @@ pub mod tests {
             pos: SHELF,
             side: None,
             slot,
-        }
-    }
-    #[cfg(test)]
-    impl Journal for Shelf {
-        fn kept(&mut self) -> &mut Vec<Self> {
-            &mut self.kept
         }
     }
     #[cfg(test)]
@@ -1188,15 +946,6 @@ pub mod tests {
     #[cfg(test)]
     mod_api::impl_host_areas!(Shelf, except(block_entities, items));
     #[cfg(test)]
-    impl mod_api::prelude::ModStateServerHost for Shelf {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
-    }
-    #[cfg(test)]
     impl ServerHost for Shelf {
         fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
             Some(BackendMutRef::of(self))
@@ -1204,6 +953,18 @@ pub mod tests {
     }
     #[cfg(test)]
     mod_api::impl_server_host_areas!(Shelf, except(mod_state));
+    #[cfg(test)]
+    impl crate::prelude::ModStateServerHost for Shelf {
+        fn transaction_open(&mut self, _: TransactionSeal) {
+            self.journal.open(self.slots.clone());
+        }
+        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
+            if let Some(slots) = self.journal.close(commit) {
+                self.slots = slots;
+            }
+        }
+    }
+
     #[cfg(test)]
     impl Shelf {
         #[cfg(test)]
@@ -1272,10 +1033,7 @@ pub mod tests {
     pub(crate) fn an_item_handler_writes_its_stack_back_where_it_lives_splitting_one_off() {
         install_parts(&[]).unwrap();
         game_thread();
-        let mut player = Player {
-            main_hand: Some(stack("test:pouch", 2, 0)),
-            ..Player::default()
-        };
+        let mut player = player_world(Some(stack("test:pouch", 2, 0)));
         // Aborted, nothing changes.
         let host: &mut dyn ServerHost = &mut player;
         let pouch = HAND.capability(host, &ITEM_ITEMS).unwrap();
@@ -1283,16 +1041,16 @@ pub mod tests {
         let aborted: Result<(), u32> =
             host.transaction(|host, tx| Err(pouch.insert(host, tx, 0, &sticks, 3)));
         assert_eq!(aborted, Err(3));
-        assert_eq!(player.main_hand, Some(stack("test:pouch", 2, 0)));
-        assert!(player.given.is_empty());
+        assert_eq!(main_hand(&player), Some(stack("test:pouch", 2, 0)));
+        assert!(player_of(&player).given.is_empty());
         // One of the two pouches is filled: it leaves the hand for the player, the other stays.
         let host: &mut dyn ServerHost = &mut player;
         assert_eq!(fill(host, &HAND, stick(), 3), 3);
-        assert_eq!(player.main_hand, Some(stack("test:pouch", 1, 0)));
-        assert_eq!(player.given, [stack("test:pouch", 1, 3)]);
-        assert_eq!(player.items(), 2 + 3);
+        assert_eq!(main_hand(&player), Some(stack("test:pouch", 1, 0)));
+        assert_eq!(player_of(&player).given, [stack("test:pouch", 1, 3)]);
+        assert_eq!(held_items(&player), 2 + 3);
         // An item with no part and no game slots has no answer.
-        player.main_hand = Some(stack("minecraft:stone", 1, 0));
+        set_hand(&mut player, stack("minecraft:stone", 1, 0));
         let host: &mut dyn ServerHost = &mut player;
         assert!(HAND.capability(host, &ITEM_ITEMS).is_none());
     }
@@ -1344,20 +1102,19 @@ pub mod tests {
         install_parts(&[]).unwrap();
         game_thread();
         let slot = ItemPlace::PlayerSlot { player: 1, slot: 9 };
-        let mut player = Player {
-            main_hand: Some(stack("test:cell", 2, 600)),
-            ..Player::default()
-        };
-        player.slots.insert(9, stack("test:cell", 1, 900));
+        let mut player = player_world(Some(stack("test:cell", 2, 600)));
+        player_mut(&mut player)
+            .slots
+            .insert(9, stack("test:cell", 1, 900));
         let host: &mut dyn ServerHost = &mut player;
         let hand = HAND.capability(host, &ITEM_ENERGY).unwrap();
         let other = slot.capability(host, &ITEM_ENERGY).unwrap();
         // The other cell has room for 100: one of the two in the hand gives that and splits off.
         let moved = host.transaction(|host, tx| move_energy(host, &hand, &other, 400, tx));
         assert_eq!(moved, Ok(100));
-        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
-        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
-        assert_eq!(player.given, [stack("test:cell", 1, 500)]);
+        assert_eq!(player_of(&player).slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(main_hand(&player), Some(stack("test:cell", 1, 600)));
+        assert_eq!(player_of(&player).given, [stack("test:cell", 1, 500)]);
         // Aborted, a move leaves both as they were.
         let host: &mut dyn ServerHost = &mut player;
         let aborted = host.transaction(|host, tx| {
@@ -1365,10 +1122,10 @@ pub mod tests {
             Err::<(), _>(moved)
         });
         assert_eq!(aborted, Err(Ok(400)));
-        assert_eq!(player.slots[&9], stack("test:cell", 1, 1000));
-        assert_eq!(player.main_hand, Some(stack("test:cell", 1, 600)));
+        assert_eq!(player_of(&player).slots[&9], stack("test:cell", 1, 1000));
+        assert_eq!(main_hand(&player), Some(stack("test:cell", 1, 600)));
         // An item no mod answers for has no energy.
-        player.main_hand = Some(stick());
+        set_hand(&mut player, stick());
         let host: &mut dyn ServerHost = &mut player;
         assert!(HAND.capability(host, &ITEM_ENERGY).is_none());
     }
@@ -1377,11 +1134,10 @@ pub mod tests {
     pub(crate) fn a_stack_inside_an_item_and_a_mods_place_are_reached_through_their_handlers() {
         install_parts(&[]).unwrap();
         game_thread();
-        let mut player = Player {
-            main_hand: Some(stack("test:bag", 1, 1)),
-            ..Player::default()
-        };
-        player.slots.insert(20 + 4, stack("test:pouch", 1, 2));
+        let mut player = player_world(Some(stack("test:bag", 1, 1)));
+        player_mut(&mut player)
+            .slots
+            .insert(20 + 4, stack("test:pouch", 1, 2));
         let host: &mut dyn ServerHost = &mut player;
         // The empty pouch in the bag in the hand takes 3 sticks: the pouch is rewritten in the
         // bag, and the bag in the hand.
@@ -1428,155 +1184,9 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    /// Two three-slot game chests, `FROM` and `INTO`; `INTO`'s slots hold up to `limit` each.
-    #[derive(Clone)]
-    pub(crate) struct TwoChests {
-        pub(crate) from: [Option<ItemStack>; 3],
-        pub(crate) into: [Option<ItemStack>; 3],
-        pub(crate) limit: u32,
-        pub(crate) kept: Vec<Self>,
-    }
-    #[cfg(test)]
     pub(crate) const FROM: [i32; 3] = [3, 64, 0];
     #[cfg(test)]
     pub(crate) const INTO: [i32; 3] = [4, 64, 0];
-    #[cfg(test)]
-    impl TwoChests {
-        #[cfg(test)]
-        fn slots(&mut self, pos: [i32; 3]) -> Option<(&mut [Option<ItemStack>; 3], u32)> {
-            match pos {
-                FROM => Some((&mut self.from, 64)),
-                INTO => Some((&mut self.into, self.limit)),
-                _ => None,
-            }
-        }
-        #[cfg(test)]
-        fn count(slots: &[Option<ItemStack>; 3], item: &str) -> u32 {
-            slots
-                .iter()
-                .flatten()
-                .filter(|s| s.item() == fixture_item_key(item))
-                .map(|s| s.count())
-                .sum()
-        }
-    }
-    #[cfg(test)]
-    impl Journal for TwoChests {
-        fn kept(&mut self) -> &mut Vec<Self> {
-            &mut self.kept
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::LevelsBackend for TwoChests {
-        fn level_in_place(&self, level: LevelRef) -> bool {
-            level == here()
-        }
-    }
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackend for TwoChests {
-        fn container_size(&self, BlockSide { pos, .. }: BlockSide) -> Option<usize> {
-            [FROM, INTO].contains(&pos).then_some(3)
-        }
-        fn container_stack(
-            &self,
-            BlockSide { pos, .. }: BlockSide,
-            slot: usize,
-        ) -> Option<ItemStack> {
-            match pos {
-                FROM => self.from.get(slot)?.clone(),
-                INTO => self.into.get(slot)?.clone(),
-                _ => None,
-            }
-        }
-        fn container_capacity(&self, _: BlockSide, _: usize, _: &ItemStack) -> u32 {
-            self.limit
-        }
-    }
-    #[cfg(test)]
-    impl Backend for TwoChests {}
-    #[cfg(test)]
-    mod_api::impl_backend_areas!(TwoChests, except(items, levels));
-    #[cfg(test)]
-    impl mod_api::prelude::ItemsBackendMut for TwoChests {
-        fn container_insert(
-            &mut self,
-            BlockSide { pos, .. }: BlockSide,
-            slot: usize,
-            resource: &ItemResource,
-            amount: u32,
-            _: &Transaction,
-        ) -> Result<Option<ItemStack>, crate::StackWriteError> {
-            let Some(stack) = resource.to_stack(amount) else {
-                return Ok(None);
-            };
-            let Some((slots, limit)) = self.slots(pos) else {
-                return Ok(Some(stack));
-            };
-            let held = slots[slot].clone();
-            let room = match &held {
-                None => limit,
-                Some(held) if held.is_stackable_with(&stack) => limit - held.count(),
-                Some(_) => 0,
-            };
-            let put = room.min(stack.count());
-            if put > 0 {
-                let mut inserted = stack.clone();
-                inserted
-                    .set_count(held.map_or(0, |h| h.count()) + put)
-                    .unwrap();
-                slots[slot] = Some(inserted);
-            }
-            Ok(stack.shrink(put))
-        }
-        fn container_extract(
-            &mut self,
-            BlockSide { pos, .. }: BlockSide,
-            slot: usize,
-            max: u32,
-            _: &Transaction,
-        ) -> Option<ItemStack> {
-            let (slots, _) = self.slots(pos)?;
-            let split = slots[slot].take()?.split(max);
-            slots[slot] = split.remainder;
-            split.taken
-        }
-    }
-    #[cfg(test)]
-    impl BackendMut for TwoChests {}
-    #[cfg(test)]
-    mod_api::impl_backend_mut_areas!(TwoChests, except(items));
-    #[cfg(test)]
-    impl mod_api::prelude::BlockEntitiesHost for TwoChests {
-        fn block_entity(&self, _: LevelRef, _: [i32; 3]) -> Option<BlockEntityRef> {
-            None
-        }
-    }
-    #[cfg(test)]
-    impl Host for TwoChests {
-        fn backend(&self) -> Option<BackendRef<'_>> {
-            Some(BackendRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_host_areas!(TwoChests, except(block_entities));
-    #[cfg(test)]
-    impl mod_api::prelude::ModStateServerHost for TwoChests {
-        fn transaction_open(&mut self, _: TransactionSeal) {
-            open(self);
-        }
-        fn transaction_close(&mut self, _: TransactionSeal, commit: bool) {
-            close(self, commit);
-        }
-    }
-    #[cfg(test)]
-    impl ServerHost for TwoChests {
-        fn backend_mut(&mut self) -> Option<BackendMutRef<'_>> {
-            Some(BackendMutRef::of(self))
-        }
-    }
-    #[cfg(test)]
-    mod_api::impl_server_host_areas!(TwoChests, except(mod_state));
-
     #[cfg(test)]
     /// A target that answers one more than it was given, and keeps nothing.
     pub(crate) struct TakesMore;
@@ -1623,14 +1233,9 @@ pub mod tests {
         game_thread();
         let sticks = |n| Some(stack("minecraft:stick", n, 0));
         let apples = Some(stack("minecraft:apple", 3, 0));
-        let mut world = TwoChests {
-            from: [sticks(5), apples, sticks(4)],
-            into: [None, None, None],
-            limit: 64,
-            kept: Vec::new(),
-        };
+        let mut world = two_chests([sticks(5), apples, sticks(4)]);
         let only_sticks = |r: &ItemResource| r.item() == fixture_item_key("minecraft:stick");
-        let moved = |world: &mut TwoChests, max| {
+        let moved = |world: &mut FakeHost, max| {
             let host: &mut dyn ServerHost = world;
             let from = here().capability(host, &ITEMS, FROM, None).unwrap();
             let to = here().capability(host, &ITEMS, INTO, None).unwrap();
@@ -1639,31 +1244,26 @@ pub mod tests {
         };
         // Up to 7 sticks: all of the first slot's, two of the third's; the apples stay.
         assert_eq!(moved(&mut world, 7), 7);
-        assert_eq!(TwoChests::count(&world.from, "minecraft:stick"), 2);
-        assert_eq!(TwoChests::count(&world.into, "minecraft:stick"), 7);
-        assert_eq!(TwoChests::count(&world.from, "minecraft:apple"), 3);
+        assert_eq!(chest(&mut world, FROM).count("minecraft:stick"), 2);
+        assert_eq!(chest(&mut world, INTO).count("minecraft:stick"), 7);
+        assert_eq!(chest(&mut world, FROM).count("minecraft:apple"), 3);
         // A target with room for one more of the two (its other slots hold apples): that one
         // moves, the other stays put.
-        world.limit = 8;
-        world.into[1] = Some(stack("minecraft:apple", 1, 0));
-        world.into[2] = Some(stack("minecraft:apple", 1, 0));
+        chest(&mut world, INTO).limit = 8;
+        chest(&mut world, INTO).slots[1] = Some(stack("minecraft:apple", 1, 0));
+        chest(&mut world, INTO).slots[2] = Some(stack("minecraft:apple", 1, 0));
         assert_eq!(moved(&mut world, 64), 1);
-        assert_eq!(TwoChests::count(&world.from, "minecraft:stick"), 1);
-        assert_eq!(TwoChests::count(&world.into, "minecraft:stick"), 8);
+        assert_eq!(chest(&mut world, FROM).count("minecraft:stick"), 1);
+        assert_eq!(chest(&mut world, INTO).count("minecraft:stick"), 8);
         assert_eq!(moved(&mut world, 64), 0);
-        assert_eq!(TwoChests::count(&world.from, "minecraft:stick"), 1);
+        assert_eq!(chest(&mut world, FROM).count("minecraft:stick"), 1);
     }
 
     #[test]
     pub(crate) fn a_move_into_a_handler_answering_more_than_it_was_given_is_undone() {
         install_parts(&[]).unwrap();
         game_thread();
-        let mut world = TwoChests {
-            from: [Some(stack("minecraft:stick", 5, 0)), None, None],
-            into: [None, None, None],
-            limit: 64,
-            kept: Vec::new(),
-        };
+        let mut world = two_chests([Some(stack("minecraft:stick", 5, 0)), None, None]);
         let host: &mut dyn ServerHost = &mut world;
         let from = here().capability(host, &ITEMS, FROM, None).unwrap();
         let liar: Capability<dyn ResourceHandler<ItemResource>> = Capability {
@@ -1674,7 +1274,10 @@ pub mod tests {
             host.transaction(|host, tx| move_resources(host, &from, &liar, |_| true, 64, tx));
         let owner = "doubler".to_owned();
         assert_eq!(moved, Err(Overanswered { owner }));
-        assert_eq!(world.from[0], Some(stack("minecraft:stick", 5, 0)));
+        assert_eq!(
+            chest(&mut world, FROM).slots[0],
+            Some(stack("minecraft:stick", 5, 0))
+        );
         assert!(crate::item_place::warned_about("doubler"));
     }
 
@@ -1774,26 +1377,23 @@ pub mod tests {
 
     #[test]
     pub(crate) fn a_component_set_keeps_a_change_its_codec_reads_and_raw_nbt_keeps_its_types() {
-        install_parts(&[]).unwrap();
-        /// A stick's report: `custom_data` `{x: 1}`, a huge `max_damage` and a mod's `test:long`.
-        struct Report;
-        impl mod_api::prelude::ItemsHost for Report {
-            fn item_default_component(&self, _: ItemKey, id: &str) -> Option<Tag> {
-                let x = || Tag::Compound([("x".into(), Tag::Int(1))].into_iter().collect());
-                match id {
-                    "minecraft:custom_data" => Some(x()),
-                    "minecraft:max_damage" | "test:long" => Some(Tag::Long(1 << 53)),
-                    _ => None,
-                }
-            }
-        }
-        impl Host for Report {}
-        mod_api::impl_host_areas!(Report, except(items));
+        // A stick's report: `custom_data` `{x: 1}`, a huge `max_damage` and a mod's `test:long`.
+        let mut report = FakeHost::new();
+        let one = Tag::Compound([("x".into(), Tag::Int(1))].into_iter().collect());
+        report
+            .registries
+            .item_component("minecraft:stick", "minecraft:custom_data", one)
+            .item_component(
+                "minecraft:stick",
+                "minecraft:max_damage",
+                Tag::Long(1 << 53),
+            )
+            .item_component("minecraft:stick", "test:long", Tag::Long(1 << 53));
         let stick = ItemResource::of(&stick());
         let set = |id, value: Tag| {
             let id = ComponentId::new(id).unwrap();
             stick
-                .with_component(&Report, &id, value)
+                .with_component(&report, &id, value)
                 .unwrap()
                 .component(&id)
         };
@@ -1886,10 +1486,14 @@ pub mod tests {
 
         // Two pouches in a charm slot, which can't split: nothing changes. So with a bag in
         // that slot holding the pouch filled.
-        let mut player = Player::default();
-        player.slots.insert(20 + 1, stack("test:pouch", 2, 0));
-        player.slots.insert(20 + 2, stack("test:bag", 2, 1));
-        let before = player.items();
+        let mut player = player_world(None);
+        player_mut(&mut player)
+            .slots
+            .insert(20 + 1, stack("test:pouch", 2, 0));
+        player_mut(&mut player)
+            .slots
+            .insert(20 + 2, stack("test:bag", 2, 1));
+        let before = held_items(&player);
         for charm in [
             ItemPlace::Mod {
                 provider: "test:charms",
@@ -1905,9 +1509,9 @@ pub mod tests {
         ] {
             assert_eq!(fill(&mut player, &charm, stick(), 3), 0);
         }
-        assert_eq!(player.items(), before);
-        assert_eq!(player.slots[&21], stack("test:pouch", 2, 0));
-        assert_eq!(player.slots[&22], stack("test:bag", 2, 1));
+        assert_eq!(held_items(&player), before);
+        assert_eq!(player_of(&player).slots[&21], stack("test:pouch", 2, 0));
+        assert_eq!(player_of(&player).slots[&22], stack("test:bag", 2, 1));
     }
 
     #[test]
@@ -1970,11 +1574,8 @@ pub mod tests {
         install_parts(&[]).unwrap();
         game_thread();
         // Two bags in the hand, each holding an empty pouch.
-        let mut player = Player {
-            main_hand: Some(stack("test:bag", 2, 1)),
-            ..Player::default()
-        };
-        let before = player.items();
+        let mut player = player_world(Some(stack("test:bag", 2, 1)));
+        let before = held_items(&player);
         let in_bag = ItemPlace::Nested {
             parent: Box::new(HAND),
             slot: 0,
@@ -1982,9 +1583,9 @@ pub mod tests {
         assert_eq!(fill(&mut player, &in_bag, stick(), 3), 3);
         // One bag leaves the hand holding the filled pouch; the other stays as it was, and no
         // pouch is loose.
-        assert_eq!(player.main_hand, Some(stack("test:bag", 1, 1)));
-        assert_eq!(player.given, [stack("test:bag", 1, 4)]);
-        assert_eq!(player.items(), before + 3);
+        assert_eq!(main_hand(&player), Some(stack("test:bag", 1, 1)));
+        assert_eq!(player_of(&player).given, [stack("test:bag", 1, 4)]);
+        assert_eq!(held_items(&player), before + 3);
     }
 
     #[test]
@@ -1993,10 +1594,7 @@ pub mod tests {
         game_thread();
         // The pouch in the bag in the hand is filled in a transaction that then aborts: the
         // bag and its pouch are as they were, and nothing was given.
-        let mut player = Player {
-            main_hand: Some(stack("test:bag", 2, 1)),
-            ..Player::default()
-        };
+        let mut player = player_world(Some(stack("test:bag", 2, 1)));
         let in_bag = ItemPlace::Nested {
             parent: Box::new(HAND),
             slot: 0,
@@ -2007,8 +1605,8 @@ pub mod tests {
         let aborted: Result<(), u32> =
             host.transaction(|host, tx| Err(pouch.insert(host, tx, 0, &sticks, 3)));
         assert_eq!(aborted, Err(3));
-        assert_eq!(player.main_hand, Some(stack("test:bag", 2, 1)));
-        assert!(player.given.is_empty());
+        assert_eq!(main_hand(&player), Some(stack("test:bag", 2, 1)));
+        assert!(player_of(&player).given.is_empty());
     }
 
     #[test]
@@ -2018,10 +1616,7 @@ pub mod tests {
         // A case of one diamond and one stick in the hand: its stick is taken and two put in;
         // on the way it tries emptying its diamond slot in a transaction it aborts. The
         // diamond stays, and no item is made or lost.
-        let mut player = Player {
-            main_hand: Some(stack("test:case", 1, 101)),
-            ..Player::default()
-        };
+        let mut player = player_world(Some(stack("test:case", 1, 101)));
         let sticks = ItemPlace::Nested {
             parent: Box::new(HAND),
             slot: 1,
@@ -2034,8 +1629,8 @@ pub mod tests {
             Ok::<_, ()>(())
         })
         .unwrap();
-        assert_eq!(player.main_hand, Some(stack("test:case", 1, 102)));
-        assert!(player.given.is_empty());
+        assert_eq!(main_hand(&player), Some(stack("test:case", 1, 102)));
+        assert!(player_of(&player).given.is_empty());
     }
 
     pub(crate) mod deep_places {
@@ -2133,10 +1728,7 @@ pub mod tests {
             };
             for abort_depth in 0..3 {
                 let initial = stack("test:outer", 1, 2);
-                let mut player = Player {
-                    main_hand: Some(initial.clone()),
-                    ..Player::default()
-                };
+                let mut player = player_world(Some(initial.clone()));
                 let host: &mut dyn ServerHost = &mut player;
                 let r = ItemResource::of(&stick());
                 let result = host.transaction(|host, _| {
@@ -2163,13 +1755,13 @@ pub mod tests {
                     }
                 });
                 assert_eq!(result.is_err(), abort_depth == 0);
-                assert_eq!(player.main_hand, Some(initial), "depth {abort_depth}");
-                assert!(player.given.is_empty());
+                assert_eq!(main_hand(&player), Some(initial), "depth {abort_depth}");
+                assert!(player_of(&player).given.is_empty());
                 // Committed, the outer bag is rewritten whole.
                 let host: &mut dyn ServerHost = &mut player;
                 assert_eq!(fill(host, &in_bag, stick(), 3), 3);
-                assert_eq!(player.main_hand, Some(stack("test:outer", 1, 5)));
-                assert!(player.given.is_empty());
+                assert_eq!(main_hand(&player), Some(stack("test:outer", 1, 5)));
+                assert!(player_of(&player).given.is_empty());
             }
         }
 
@@ -2184,13 +1776,10 @@ pub mod tests {
                 parent: Box::new(in_outer),
                 slot: 0,
             };
-            let mut player = Player {
-                main_hand: Some(stack("test:outer", 2, 2)),
-                ..Player::default()
-            };
+            let mut player = player_world(Some(stack("test:outer", 2, 2)));
             assert_eq!(fill(&mut player, &in_bag, stick(), 3), 3);
-            assert_eq!(player.main_hand, Some(stack("test:outer", 1, 2)));
-            assert_eq!(player.given, [stack("test:outer", 1, 5)]);
+            assert_eq!(main_hand(&player), Some(stack("test:outer", 1, 2)));
+            assert_eq!(player_of(&player).given, [stack("test:outer", 1, 5)]);
         }
 
         #[test]
@@ -2217,10 +1806,7 @@ pub mod tests {
         #[test]
         fn a_mod_place_answering_more_than_it_was_asked_has_its_write_undone() {
             game_thread();
-            let mut p = Player {
-                main_hand: Some(stack("minecraft:stick", 2, 0)),
-                ..Player::default()
-            };
+            let mut p = player_world(Some(stack("minecraft:stick", 2, 0)));
             let at = ItemPlace::Mod {
                 provider: "test:lying-place",
                 key: 0,
@@ -2234,7 +1820,7 @@ pub mod tests {
                 Ok::<_, ()>(())
             })
             .unwrap();
-            assert!(p.given.is_empty());
+            assert!(player_of(&p).given.is_empty());
             assert!(crate::item_place::warned_about("doubler"));
         }
     }
@@ -2264,7 +1850,7 @@ pub mod tests {
     pub(crate) fn disabled_place_providers_refuse_reads_and_writes_and_resume() {
         install_parts(&[]).unwrap();
         game_thread();
-        let mut player = Player::default();
+        let mut player = player_world(None);
         let charm = ItemPlace::Mod {
             provider: "test:charms",
             key: 4,
@@ -2288,7 +1874,7 @@ pub mod tests {
             Ok(0)
         );
         assert_eq!(
-            player.slots[&24].count(),
+            player_of(&player).slots[&24].count(),
             3,
             "disabled writes leave the place unchanged"
         );
