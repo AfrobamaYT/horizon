@@ -38,7 +38,7 @@ const CARRIED: &[&str] = &[
 
 #[test]
 fn every_point_of_the_game_crosses_to_a_wasm_mod() {
-    for (name, shape) in NAMES.iter().zip(SHAPES) {
+    for (name, shape) in NAMES.iter().zip(SHAPES.iter()) {
         // Raw-only returns have no API record; their values use the raw thunks instead.
         if shape.is_empty() {
             assert!(
