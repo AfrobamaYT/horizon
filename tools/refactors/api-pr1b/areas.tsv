@@ -720,3 +720,4 @@ local_sounds	sound_fade	effects
 local_sounds	sound_events	effects
 local_sounds	audio_devices	effects
 local_sounds	audio_device	effects
+base	player_client_brand	players
