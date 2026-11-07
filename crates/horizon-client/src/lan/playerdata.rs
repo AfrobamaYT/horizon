@@ -12,7 +12,7 @@ use std::{
 };
 use {
     horizon_core::nbt::Tag,
-    horizon_world::attachments::{ATTACHMENTS_KEY, attachment_compound},
+    horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound},
 };
 
 /// `PlayerDataStorage`'s player directory (`players/data`), created on first use
@@ -171,7 +171,7 @@ pub fn apply(guest: &mut Guest, level: &Level) {
             .as_ref()
             .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
     ) {
-        Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
+        Ok(Some(data)) => horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
         _ => Default::default(),
     };
     guest.attachments.replace_contents(attachments);
@@ -835,7 +835,7 @@ mod tests {
 
     #[test]
     fn player_attachments_survive_playerdata_and_respawn() {
-        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        use horizon_mod_runtime::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
         let keep = AttachmentType {
             namespace: "test",
             name: "keep",
@@ -854,7 +854,7 @@ mod tests {
         let mut original = guest();
         keep.set(
             &mut original.attachments,
-            horizon_world::attachments::Holder::Level,
+            horizon_mod_runtime::attachments::Holder::Level,
             31,
         )
         .unwrap();
@@ -862,7 +862,7 @@ mod tests {
         let mut loaded = guest();
         loaded.uuid = original.uuid;
         let index = std::sync::Arc::new(std::sync::Mutex::new(
-            horizon_world::attachments::index::AttachmentIndex::default(),
+            horizon_mod_runtime::attachments::index::AttachmentIndex::default(),
         ));
         let binding = loaded.attachments.bind_index(&index, loaded.uuid);
         assert!(load(&mut loaded, &dir));
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(
             keep.get(
                 &mut loaded.attachments,
-                horizon_world::attachments::Holder::Level
+                horizon_mod_runtime::attachments::Holder::Level
             ),
             Ok(31)
         );

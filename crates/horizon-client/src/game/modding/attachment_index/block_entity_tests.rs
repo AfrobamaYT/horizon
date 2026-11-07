@@ -2,7 +2,9 @@ use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use horizon_client::{chunk::Chunk, containers::BlockEntity};
 use horizon_core::nbt::Tag;
-use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType, Attachments};
+use horizon_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+};
 use mod_api::HostTransaction;
 
 static VALUE: AttachmentType<i32> = AttachmentType {

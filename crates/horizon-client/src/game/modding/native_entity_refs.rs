@@ -2185,7 +2185,7 @@ pub(super) mod tests {
             .unwrap();
             assert!(game.native_player_remove_fake(replacement));
             let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
-            let attachment = horizon_world::attachments::AttachmentType {
+            let attachment = horizon_mod_runtime::attachments::AttachmentType {
                 namespace: "test",
                 name: "identity",
                 default: || 0i32,
@@ -2193,14 +2193,14 @@ pub(super) mod tests {
                 copy_on_death: false,
                 sync: false,
             };
-            let holder = horizon_world::attachments::Holder::Player(2345);
+            let holder = horizon_mod_runtime::attachments::Holder::Player(2345);
             game.options.dedicated = Some(Vec::new());
-            let real_holder = horizon_world::attachments::Holder::Player(1);
+            let real_holder = horizon_mod_runtime::attachments::Holder::Player(1);
             attachment
                 .set(
                     game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     17,
                 )
                 .unwrap();
@@ -2208,7 +2208,7 @@ pub(super) mod tests {
                 .set(
                     game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     3,
                 )
                 .unwrap();
@@ -2223,7 +2223,7 @@ pub(super) mod tests {
                 .set(
                     game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     8,
                 )
                 .unwrap();
@@ -2232,7 +2232,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8
@@ -2249,7 +2249,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8
@@ -2312,7 +2312,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 3
@@ -2323,7 +2323,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 17
@@ -2334,7 +2334,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8

@@ -2,6 +2,7 @@
 exclude = ["launcher", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-core",
+    "crates/horizon-mod-runtime",
     "docs/modding/examples",
     "crates/horizon-dualsense",
     "crates/horizon-narrator",
