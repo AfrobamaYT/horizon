@@ -80,6 +80,21 @@ macro_rules! impl_joined {
 /// let mut list = JoinList::<u32, false>::default();
 /// list[0] = 1;
 /// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_mut(0);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.iter_mut();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_disjoint_mut([0, 1]);
+/// ```
 /// An entity put in without a join number gets the next one; a numbered entity
 /// keeps its number when taken out and put back. Mutable element access is for
 /// entity state; identity changes and whole-entity replacement remain audited
@@ -116,6 +131,67 @@ macro_rules! impl_joined {
 /// ```
 #[derive(Clone, Debug)]
 pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
+
+/// A singleton resident owner with explicit membership operations.
+/// State borrows remain audited: callers must not replace the whole entity or
+/// change its identity through [`Self::as_mut`]. No mutable `Option` escapes.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner = Some(1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// let _: &mut Option<u32> = &mut owner;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner.take();
+/// ```
+pub struct ResidentSlot<T>(Option<T>);
+
+impl<T> Default for ResidentSlot<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> ResidentSlot<T> {
+    /// Install only into an empty owner, returning a refused entity unchanged.
+    pub fn install(&mut self, entity: T) -> Result<(), T> {
+        if self.0.is_some() {
+            return Err(entity);
+        }
+        self.replace(entity);
+        Ok(())
+    }
+    /// Explicitly retire any previous owner and install its replacement.
+    pub fn replace(&mut self, entity: T) {
+        self.0 = Some(entity);
+    }
+    /// Move the owner out without dropping it.
+    pub fn extract(&mut self) -> Option<T> {
+        self.0.take()
+    }
+    /// Physically discard the owner, if present.
+    pub fn discard(&mut self) {
+        drop(self.extract());
+    }
+    /// Borrow entity state; identity and whole-value replacement stay audited.
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        self.0.as_mut()
+    }
+}
+
+impl<T> Deref for ResidentSlot<T> {
+    type Target = Option<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Non-joining entity storage using the same structural boundary as [`JoinList`].
 /// No mutable vector, slice, element reference or iterator escapes. State edits
@@ -160,6 +236,10 @@ impl<T> ResidentList<T> {
     pub fn push(&mut self, entity: T) {
         self.0.0.push(entity);
     }
+    /// Append a batch after any owners already in this storage.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
     }
@@ -189,6 +269,12 @@ impl<T> ResidentList<T> {
     pub fn restore(&mut self, mut taken: Self) {
         taken.0.append(&mut self.0);
         *self = taken;
+    }
+}
+
+impl<T> FromIterator<T> for ResidentList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        Self(JoinList(entities.into_iter().collect()))
     }
 }
 
@@ -223,6 +309,11 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
+    }
+    /// Extract selected owners in list order, compacting survivors in place.
+    /// The predicate cannot replace an entity or change its identity.
+    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> impl Iterator<Item = T> {
+        self.0.extract_if(.., move |entity| take(entity))
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.0.swap_remove(index)
@@ -302,7 +393,7 @@ impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, fal
         let join = entity.join_seq();
         let Some(index) = Some(index)
             .filter(|&i| self.0.get(i).is_some_and(|old| old.join_seq() == join))
-            .or_else(|| self.0.iter().position(|old| old.join_seq() == join))
+            .or_else(|| self.locate(join))
         else {
             return false;
         };
@@ -363,6 +454,16 @@ impl<T> IndexMut<usize> for JoinList<T> {
 }
 
 impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
+    /// Find a resident by its stable join number, or return `None` while absent.
+    /// Usually lists are in join order: search them in logarithmic time. Lists
+    /// restored out of order, and missing joins, fall back to a linear walk.
+    pub fn locate(&self, join: JoinSeq) -> Option<usize> {
+        match self.0.binary_search_by_key(&join, Joined::join_seq) {
+            Ok(i) => Some(i),
+            Err(_) => self.0.iter().position(|entity| entity.join_seq() == join),
+        }
+    }
+
     fn number(entity: &mut T) {
         if !entity.join_seq().is_joined() {
             entity.set_join_seq(JoinSeq::next());
@@ -461,6 +562,150 @@ mod tests {
 
     fn snapshot(list: &JoinList<Entity>) -> Vec<(u32, JoinSeq)> {
         list.iter().map(|e| (e.value, e.join)).collect()
+    }
+
+    #[test]
+    fn locate_finds_ordered_reordered_and_temporarily_absent_owners() {
+        let mut list = JoinList::<Entity>::default();
+        assert_eq!(list.locate(JoinSeq::UNJOINED), None);
+        list.extend((0..5).map(entity));
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        for (i, &join) in joins.iter().enumerate() {
+            assert_eq!(list.locate(join), Some(i));
+        }
+        list.swap(0, 4);
+        list.swap(1, 3);
+        for (i, owner) in list.iter().enumerate() {
+            assert_eq!(list.locate(owner.join), Some(i));
+        }
+        let taken = list.remove(2);
+        assert_eq!(list.locate(taken.join), None);
+        let join = taken.join;
+        list.insert(2, taken);
+        assert_eq!(list.locate(join), Some(2));
+        let mut taken = std::mem::take(&mut list);
+        assert_eq!(list.locate(join), None);
+        list.push(entity(99));
+        list.append(&mut taken);
+        assert_eq!(list.locate(join), Some(3));
+    }
+
+    #[test]
+    fn locate_keeps_binary_hit_selection_for_duplicate_joins() {
+        let mut list: JoinList<_> = (0..16).map(entity).collect();
+        let duplicate = list[13].clone();
+        list[14] = duplicate;
+        // Preserve the old helper's binary hit, not the linear first match.
+        assert_eq!(list.locate(list[13].join), Some(14));
+    }
+
+    #[test]
+    fn store_back_uses_its_supplied_slot_without_searching() {
+        use horizon_mod_runtime::attachments::{AttachmentLifetime, HasAttachmentLifetime};
+        use std::cell::Cell;
+        #[derive(Clone, Default)]
+        struct Counted {
+            join: JoinSeq,
+            reads: Cell<usize>,
+            lifetime: AttachmentLifetime,
+        }
+        impl Joined for Counted {
+            fn join_seq(&self) -> JoinSeq {
+                self.reads.set(self.reads.get() + 1);
+                self.join
+            }
+            fn set_join_seq(&mut self, join: JoinSeq) {
+                self.join = join;
+            }
+        }
+        impl HasAttachmentLifetime for Counted {
+            fn attachment_lifetime(&mut self) -> &mut AttachmentLifetime {
+                &mut self.lifetime
+            }
+        }
+        let mut list: JoinList<_, false> = (0..16).map(|_| Counted::default()).collect();
+        for owner in &list {
+            owner.reads.set(0);
+        }
+        let clone = list[7].clone();
+        assert!(list.store_back(7, clone));
+        // The clone's key is read once. The direct candidate is checked once;
+        // replacement stores the clone's count, and no peers are consulted.
+        assert_eq!(list[7].reads.get(), 1);
+        assert!(
+            list.iter()
+                .enumerate()
+                .all(|(i, owner)| i == 7 || owner.reads.get() == 0)
+        );
+    }
+
+    #[derive(Clone)]
+    struct Bound {
+        join: JoinSeq,
+        lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
+    }
+    crate::impl_joined!(Bound);
+    impl horizon_mod_runtime::attachments::HasAttachmentLifetime for Bound {
+        fn attachment_lifetime(
+            &mut self,
+        ) -> &mut horizon_mod_runtime::attachments::AttachmentLifetime {
+            &mut self.lifetime
+        }
+    }
+
+    #[test]
+    fn store_back_preserves_join_and_registration_after_reordering() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentLifetime, Attachments, index::AttachmentIndex,
+        };
+        use std::sync::{Arc, Mutex};
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        let lifetime = AttachmentLifetime::new(map.bind_index(&index, 1u32));
+        let registration = lifetime.registration().unwrap();
+        let mut list = JoinList::<_, false>::default();
+        list.push(Bound {
+            join: JoinSeq::UNJOINED,
+            lifetime,
+        });
+        list.push(Bound {
+            join: JoinSeq::UNJOINED,
+            lifetime: AttachmentLifetime::default(),
+        });
+        let join = list[0].join;
+        let other = list[1].join;
+        assert_ne!(join, other);
+        let tick_clone = list[0].clone();
+        list.swap(0, 1);
+        assert!(list.store_back(0, tick_clone));
+        assert_eq!(list.locate(join), Some(1));
+        assert_eq!(list[0].join, other);
+        assert!(registration.same_registration(&list[1].lifetime.registration().unwrap()));
+        let mut gone = list.remove(1).clone();
+        assert_eq!(list.locate(join), None);
+        assert!(!list.store_back(0, gone.clone()));
+        gone.join = JoinSeq::UNJOINED;
+        list.push(gone);
+        assert_ne!(list[1].join, join);
+        assert_eq!(list.locate(join), None);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "entity edit overwrote its registration")]
+    fn bound_update_rejects_whole_entity_overwrite() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentLifetime, Attachments, index::AttachmentIndex,
+        };
+        use std::sync::{Arc, Mutex};
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let mut map = Attachments::default();
+        let mut list = JoinList::<_, false>::default();
+        list.push(Bound {
+            join: JoinSeq::UNJOINED,
+            lifetime: AttachmentLifetime::new(map.bind_index(&index, 1u32)),
+        });
+        list.update(0, |owner| *owner = owner.clone());
     }
 
     #[test]
@@ -618,6 +863,17 @@ mod resident_tests {
         assert_eq!(list.remove(1), 30);
         assert_eq!(list.drain(..1).collect::<Vec<_>>(), [10]);
         assert_eq!(&*list, &[4]);
+    }
+
+    #[test]
+    fn resident_append_preserves_spawn_buffer_before_survivors() {
+        let mut list: ResidentList<_> = [1, 2].into_iter().collect();
+        let mut taken = list.take();
+        list.push(3);
+        taken.retain(|&id| id != 1);
+        list.append(&mut taken);
+        assert_eq!(&*list, &[3, 2]);
+        assert!(taken.is_empty());
     }
 
     #[test]

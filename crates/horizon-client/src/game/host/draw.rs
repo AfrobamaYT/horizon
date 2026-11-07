@@ -74,6 +74,14 @@ impl DrawContext for GameDrawContext<'_, '_> {
         self.game
             .native_gui_draw_item_with(&mut *self.surface, &stack, at, text)
     }
+    fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+        self.game
+            .native_widget_button(&mut *self.surface, rect, label, active, highlighted)
+    }
+    fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
+        self.game
+            .native_widget_text_field(&mut *self.surface, field)
+    }
 }
 /// [`BlockEntityDrawContext`] on the game's `crate::game::native_block_entity_draw::BlockEntityDraw`.
 pub(crate) struct GameBlockEntityDrawContext<'a, 'g> {
@@ -182,5 +190,13 @@ impl WorldDrawContext for GameWorldDrawContext<'_, '_> {
     }
     fn usage(&self) -> WorldDrawUsage {
         self.game.native_world_draw_usage(&*self.surface)
+    }
+    fn draw_model_instances(
+        &mut self,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
+        self.game
+            .native_world_draw_model_instances(&mut *self.surface, model, instances)
     }
 }
