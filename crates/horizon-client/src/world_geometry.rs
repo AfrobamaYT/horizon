@@ -494,6 +494,13 @@ mod tests {
             translucent: false,
             bounds: [[0.0; 3], [1.0; 3]],
         };
+        let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+        assert_eq!(
+            draw.submit_model(batch, &oversized, None::<&NearX>, |_| panic!(
+                "oversized batch staged"
+            )),
+            Err(InstanceError::CapacityExceeded)
+        );
         let kept = draw.usage();
         let mut bad = ModelInstance::at([1.0, 0.0, 0.0], 0xFF11_2233);
         bad.light.block = 16;
