@@ -625,6 +625,7 @@ mod api {
         #[derive(Clone, Copy)]
         pub struct Hand;
     }
+    pub use hud_layout::GuiDraw;
     pub mod hud_layout {
         pub struct HealthInputs;
         pub struct GuiDraw;
