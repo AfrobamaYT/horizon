@@ -311,13 +311,7 @@ pub trait CameraDrawContext {
     /// `misc/underwater`), with `uv` the texture coordinates of each corner in sprite units (0 to
     /// 1 is the sprite once; beyond that it repeats), every texel multiplied by `argb`. False,
     /// with nothing drawn, when there is no such sprite or a coordinate is not finite.
-    fn sprite(
-        &mut self,
-        name: &str,
-        corners: [[f32; 3]; 4],
-        uv: [[f32; 2]; 4],
-        argb: u32,
-    ) -> bool {
+    fn sprite(&mut self, name: &str, corners: [[f32; 3]; 4], uv: [[f32; 2]; 4], argb: u32) -> bool {
         unimplemented!("CameraDrawContext::sprite")
     }
 }
