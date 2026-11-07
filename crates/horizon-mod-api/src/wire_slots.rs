@@ -153,3 +153,13 @@ mod tests {
         }
     }
 }
+
+impl crate::wire::Wire for Id {
+    const MIN: usize = 8;
+    fn put(&self, out: &mut crate::wire::Writer) {
+        out.put(&self.0);
+    }
+    fn take(input: &mut crate::wire::Reader<'_>) -> Result<Self, crate::wire::WireError> {
+        input.take().map(Self)
+    }
+}
