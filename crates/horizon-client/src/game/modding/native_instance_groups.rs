@@ -3,6 +3,9 @@ use super::Game;
 use mod_api::__private::game::Fields;
 use mod_api::{GroupError, InstanceGroupRef, InstanceGroups, ModelInstance, ModelRef};
 
+use glam::{DVec3, Mat4};
+use horizon_client::{gfx::PreparedModelInstance, world_geometry::row_major_3x4};
+
 const MOD_CAPACITY: usize = 65_536;
 
 struct Group {
@@ -11,6 +14,42 @@ struct Group {
     model: ModelRef,
     copies: Vec<ModelInstance>,
     len: usize,
+    transform: Mat4,
+    composed: Vec<ModelInstance>,
+    records: Vec<PreparedModelInstance>,
+    #[cfg(test)]
+    converted_bytes: usize,
+}
+
+impl Group {
+    fn rewrite(&mut self, range: std::ops::Range<usize>) {
+        let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
+        for i in range {
+            let copy = self.copies[i];
+            let local = self.transform * row_major_3x4(copy.transform);
+            let m = local.to_cols_array_2d();
+            self.composed[i] = ModelInstance {
+                transform: [
+                    m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1],
+                    m[0][2], m[1][2], m[2][2], m[3][2],
+                ],
+                ..copy
+            };
+            let mut record = builder.instance(
+                local,
+                DVec3::ZERO,
+                DVec3::ZERO,
+                super::native_block_entity_draw::prepared_tint(copy.tint),
+                horizon_client::world_geometry::pack_light(copy.light),
+            );
+            record.tint[3] = (copy.tint >> 24) as f32 / 255.0;
+            self.records[i] = record;
+            #[cfg(test)]
+            {
+                self.converted_bytes += std::mem::size_of::<PreparedModelInstance>();
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -19,6 +58,14 @@ pub(super) struct InstanceGroupStorage {
     groups: Vec<Option<Group>>,
 }
 impl InstanceGroupStorage {
+    #[cfg(test)]
+    pub(super) fn converted_bytes(&self) -> usize {
+        self.groups
+            .iter()
+            .flatten()
+            .map(|g| g.converted_bytes)
+            .sum()
+    }
     pub(super) fn clear(&mut self) {
         self.groups.clear();
     }
@@ -70,13 +117,28 @@ impl InstanceGroups for Game<'_> {
             .next
             .checked_add(1)
             .expect("instance group epoch exhausted");
-        let group = Group {
+        let mut group = Group {
             generation: storage.next,
             owner,
             model,
             copies: vec![ModelInstance::at([0.0; 3], 0xFFFF_FFFF); capacity as usize],
             len: 0,
+            transform: Mat4::IDENTITY,
+            composed: vec![ModelInstance::at([0.0; 3], 0xFFFF_FFFF); capacity as usize],
+            records: vec![
+                PreparedModelInstance::new(
+                    Mat4::IDENTITY,
+                    DVec3::ZERO,
+                    DVec3::ZERO,
+                    [1.0; 4],
+                    0
+                );
+                capacity as usize
+            ],
+            #[cfg(test)]
+            converted_bytes: 0,
         };
+        group.rewrite(0..capacity as usize);
         let index = storage
             .groups
             .iter()
@@ -107,7 +169,22 @@ impl Game<'_> {
             .ok_or(GroupError::OutOfRange)?;
         horizon_client::world_geometry::validate_instances(copies)?;
         group.copies[first as usize..end].copy_from_slice(copies);
+        group.rewrite(first as usize..end);
         group.len = group.len.max(end);
+        Ok(())
+    }
+    pub(super) fn instance_group_set_transform(
+        &self,
+        handle: InstanceGroupRef,
+        transform: [f32; 12],
+    ) -> Result<(), GroupError> {
+        let mut storage = self.instance_groups.borrow_mut();
+        let group = storage.get(handle, self.standalone_geometry.generation())?;
+        if transform.iter().any(|v| !v.is_finite()) {
+            return Err(GroupError::NonFinite);
+        }
+        group.transform = row_major_3x4(transform);
+        group.rewrite(0..group.copies.len());
         Ok(())
     }
     pub(super) fn instance_group_set_len(
@@ -145,7 +222,12 @@ impl Game<'_> {
         if !draw.group_room() {
             return Err(GroupError::CapacityExceeded);
         }
-        self.draw_validated_model_instances(draw, group.model, &group.copies[..group.len])?;
+        self.draw_cached_model_instances(
+            draw,
+            group.model,
+            &group.composed[..group.len],
+            Some(&group.records[..group.len]),
+        )?;
         draw.mark_group(handle);
         Ok(())
     }

@@ -109,6 +109,15 @@ impl Game<'_> {
         model: ModelRef,
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
+        self.draw_cached_model_instances(draw, model, instances, None)
+    }
+    pub(super) fn draw_cached_model_instances(
+        &self,
+        draw: &mut WorldGeometry,
+        model: ModelRef,
+        instances: &[ModelInstance],
+        cached: Option<&[horizon_client::gfx::PreparedModelInstance]>,
+    ) -> Result<(), InstanceError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
         if fields.generation != self.standalone_geometry.generation() {
@@ -151,18 +160,27 @@ impl Game<'_> {
             },
             instances,
             self.view_frustum.as_ref(),
-            |copy| {
+            |index, copy| {
                 if copy.overlay != 0 || gpu_left == 0 {
                     return false;
                 }
                 gpu_left -= 1;
-                let mut instance = builder.instance(
-                    world_geometry::row_major_3x4(copy.transform),
-                    DVec3::from(copy.origin),
-                    camera,
-                    super::native_block_entity_draw::prepared_tint(copy.tint),
-                    copy.light,
-                );
+                let mut instance = if let Some(records) = cached {
+                    let mut record = records[index];
+                    let delta = (DVec3::from(copy.origin) - camera).as_vec3();
+                    for axis in 0..3 {
+                        record.model[3][axis] += delta[axis];
+                    }
+                    record
+                } else {
+                    builder.instance(
+                        world_geometry::row_major_3x4(copy.transform),
+                        DVec3::from(copy.origin),
+                        camera,
+                        super::native_block_entity_draw::prepared_tint(copy.tint),
+                        copy.light,
+                    )
+                };
                 instance.tint[3] = (copy.tint >> 24) as f32 / 255.0;
                 staged.push(horizon_client::gfx::PreparedModelDraw {
                     cpu_vertices: cut,
@@ -389,6 +407,10 @@ mod tests {
                 });
                 assert_eq!(group.write(game, 0, &[near]), Err(GroupError::Stale));
                 assert_eq!(group.set_len(game, 0), Err(GroupError::Stale));
+                assert_eq!(
+                    group.set_group_transform(game, [f32::NAN; 12]),
+                    Err(GroupError::Stale)
+                );
                 assert_eq!(group.destroy(game), Err(GroupError::Stale));
                 assert_eq!(
                     context(game, &mut draw).draw_instance_group(group),
@@ -437,6 +459,58 @@ mod tests {
             game.prepared_model_draws.borrow_mut().clear();
             context(game, &mut draw).draw_instance_group(group).unwrap();
             assert_eq!(expected, render(game));
+            let bytes = || game.instance_groups.borrow().converted_bytes();
+            let stride = std::mem::size_of::<horizon_client::gfx::PreparedModelInstance>();
+            let before = bytes();
+            // An unchanged frame stages all visible records, but converts none.
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(bytes(), before);
+            assert_eq!(game.prepared_model_draws.borrow().len() * stride, stride);
+            assert_eq!(expected, render(game));
+            group.write(game, 1, &[near]).unwrap();
+            assert_eq!(bytes() - before, stride);
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(expected, render(game));
+            assert_eq!(game.prepared_model_draws.borrow().len() * stride, stride);
+            let pose = [
+                0.5, 0.0, 0.0, 0.125, 0.0, 0.5, 0.0, 0.25, 0.0, 0.0, 0.5, 0.0,
+            ];
+            group.set_group_transform(game, pose).unwrap();
+            assert_eq!(bytes() - before, 9 * stride); // one copy, then eight reserved copies
+            let mut precomposed = near;
+            precomposed.transform = pose;
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw)
+                .draw_model_instances(model, &[precomposed])
+                .unwrap();
+            let transformed = render(game);
+            assert_ne!(expected, transformed);
+            let count = bytes();
+            assert_eq!(
+                group.set_group_transform(game, [f32::INFINITY; 12]),
+                Err(GroupError::NonFinite)
+            );
+            assert_eq!(bytes(), count);
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(transformed, render(game));
+            assert_eq!(game.prepared_model_draws.borrow().len() * stride, stride);
+            let mut outside = pose;
+            outside[3] = 40.0;
+            group.set_group_transform(game, outside).unwrap();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert!(
+                game.prepared_model_draws.borrow().is_empty(),
+                "cull group-transformed bounds"
+            );
             let sibling = game.create_group(model, 16_384).unwrap();
             let third = game.create_group(model, 16_384).unwrap();
             let fourth = game.create_group(model, 16_384).unwrap();
@@ -450,6 +524,10 @@ mod tests {
             }
             group.destroy(game).unwrap();
             assert_eq!(group.set_len(game, 1), Err(GroupError::Stale));
+            assert_eq!(
+                group.set_group_transform(game, pose),
+                Err(GroupError::Stale)
+            );
             assert_eq!(
                 context(game, &mut draw).draw_instance_group(group),
                 Err(GroupError::Stale)
