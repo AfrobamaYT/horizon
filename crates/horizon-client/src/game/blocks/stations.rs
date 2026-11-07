@@ -3517,7 +3517,10 @@ mod tests {
                 _: &dyn ClientHost,
                 event: &mut RenderTooltipGatherComponentsEvent<'_>,
             ) -> mod_api::Flow {
-                assert_eq!(event.stack.item.as_ref(), "minecraft:stick");
+                assert_eq!(
+                    mod_api::__private::item_key_id(event.stack.item()).unwrap(),
+                    "minecraft:stick"
+                );
                 assert_eq!((event.screen_width, event.screen_height), (320, 240));
                 assert_eq!(event.max_width, -1);
                 match MODE.load(Ordering::Relaxed) {
@@ -3763,7 +3766,11 @@ mod cycling_tests {
                     }
                     2 => {
                         event.draw.gui_draw_item_with(
-                            &ItemStack::new("minecraft:diamond", 5),
+                            &mod_api::ItemStack::new(
+                                mod_api::__private::item_key("minecraft:diamond").unwrap(),
+                                5,
+                            )
+                            .unwrap(),
                             [16.0, 32.0],
                             Some("7"),
                         );
