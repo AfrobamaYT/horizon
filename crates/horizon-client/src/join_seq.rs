@@ -1184,6 +1184,30 @@ mod tests {
     }
 
     #[test]
+    fn journal_same_owner_transfer_between_games_updates_both_sinks() {
+        use residency::Change::{Install, Remove};
+        let (mut source, old_journal) = journal_list();
+        let keys: Vec<_> = source.iter().map(key).collect();
+        changes(&old_journal);
+        let new_journal = residency::Journal::default();
+        let mut target = JoinList::default();
+        target.bind_residency(&new_journal, journal_owner(), |e: &Entity| {
+            (e.value, e.join)
+        });
+        target.append(&mut source);
+        assert!(source.is_empty());
+        assert_eq!(target.iter().map(key).collect::<Vec<_>>(), keys);
+        assert_eq!(
+            changes(&old_journal),
+            keys.iter().copied().map(Remove).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            changes(&new_journal),
+            keys.into_iter().map(Install).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn journal_batch_transfer_changes_dimension_without_changing_identity() {
         use residency::{
             Change::{Install, Remove},
@@ -1194,7 +1218,7 @@ mod tests {
         changes(&journal);
         let destination = Owner {
             dimension: mod_api::DimensionKey::NETHER,
-            kind: Kind::Mob,
+            kind: Kind::Other,
         };
         let mut target = JoinList::default();
         target.bind_residency(&journal, destination, |e: &Entity| (e.value, e.join));
