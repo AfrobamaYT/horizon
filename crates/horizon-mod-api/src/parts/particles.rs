@@ -45,6 +45,7 @@ mod tests {
         install_parts(
             &[ModEntry::new("keys", Box::new(Keys(keys.clone())))],
             &crate::parts::tests::rule_schema(),
+            |_| false,
         )
         .unwrap();
         let keys = keys.lock().unwrap();

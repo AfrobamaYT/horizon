@@ -106,7 +106,6 @@ impl<C: ?Sized> TryIntoEngine<C> for api::LootStack {
             .names
             .iter()
             .map(|(id, name)| {
-                mod_api::text::TextForm::try_from(name).map_err(|_| LootValueError::InvalidName)?;
                 let name: horizon_client::text::Text = name
                     .try_into_engine(&())
                     .map_err(|_| LootValueError::InvalidName)?;
