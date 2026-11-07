@@ -562,6 +562,8 @@ mod tests {
     #[test]
     fn hanging_entities_block_overlapping_other_types() {
         let p = Painting {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
             id: 1,
             pos: [0, 0, 0],
             facing: 0,
@@ -571,6 +573,8 @@ mod tests {
             check_interval: 0,
         };
         let mut f = ItemFrame {
+            attachment_lifetime: Default::default(),
+            join: Default::default(),
             id: 2,
             pos: [0, 0, 0],
             facing: 3,

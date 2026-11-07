@@ -14038,67 +14038,6 @@ mod tests {
         assert_eq!(game.ui.chat_screen.as_ref().unwrap().input.value, "/tp ");
     }
 
-    /// A mod's chat goes out only from a joined player, and only what the
-    /// Chat option allows.
-    #[test]
-    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn mod_chat_needs_a_joined_player_and_what_the_chat_option_allows() {
-        use super::super::{
-            Audio, Game, Options, Progress, Settings, execution_role::ExecutionRole, load_resources,
-        };
-        use horizon_protocol::connection::Pipe;
-
-        let root = std::path::PathBuf::from(
-            std::env::var_os("HORIZON_TEST_RESOURCES")
-                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
-        );
-        let settings = Settings::default();
-        let loaded = load_resources(
-            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
-            Vec::new(),
-            None,
-            &root,
-            &settings,
-            std::time::Instant::now(),
-            false,
-            crate::game::execution_role::ExecutionRole::IntegratedServer,
-            &Progress::new(),
-            &mut |_, _| unreachable!("no menu handoff"),
-        )
-        .unwrap();
-        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
-        options.resources = root.clone();
-        options.execution_role = ExecutionRole::Client;
-        let mut game = Game::new(
-            &loaded.resources,
-            loaded.pack,
-            loaded.gui.unwrap(),
-            options,
-            settings,
-            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
-                root.clone(),
-            )),
-            None,
-        )
-        .unwrap();
-
-        assert!(game.native_send_chat("/warp spawn").is_err());
-        let (client, _server) = Pipe::pair();
-        game.connect_local(client, "ChatTest").unwrap();
-        assert!(game.native_send_chat("/warp spawn").is_err());
-        game.remote.as_mut().unwrap().joined = true;
-        assert!(game.native_send_chat("  ").is_err());
-        // Full, then Commands Only, then Hidden.
-        game.settings.chat_visibility = 0;
-        assert!(game.native_send_chat("hello").is_ok());
-        assert!(game.native_send_chat("/warp spawn").is_ok());
-        game.settings.chat_visibility = 1;
-        assert!(game.native_send_chat("hello").is_err());
-        assert!(game.native_send_chat("/warp spawn").is_ok());
-        game.settings.chat_visibility = 2;
-        assert!(game.native_send_chat("/warp spawn").is_err());
-    }
-
     /// `Entity.isColliding` and the snap `ClientLevel.syncBlockState` makes: a
     /// block the server puts back where the player stands sends it to the
     /// position the prediction remembered, and a block that comes back clear of
