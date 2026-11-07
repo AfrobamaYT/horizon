@@ -75,6 +75,7 @@ pub mod game_mode_switcher;
 pub mod game_rules_screen;
 pub mod gizmos;
 pub mod gossip;
+pub mod gui_layers;
 pub mod health;
 pub mod hotbar;
 pub mod hunger;

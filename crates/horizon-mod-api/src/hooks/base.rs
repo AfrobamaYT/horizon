@@ -2371,9 +2371,9 @@ pub trait Hooks {
     /// lines. The camera overlays and the debug screen are not layers here:
     /// they are not drawn in this pass. Draw with `native_fill`, `native_text`
     /// and the sprite helpers; `draw.size()` is the GUI
-    /// size. Together with `native_gui_layer_post` this is NeoForge's
-    /// `RegisterGuiLayersEvent`: a mod keeps its own list of what it draws
-    /// above or below which layer.
+    /// size. A layer a mod registered (`register_gui_layers`) fires this
+    /// and `gui_layer_post` too, with its own id, in its place among
+    /// these.
     #[hook(
         side = "client",
         contract = "cancel",
