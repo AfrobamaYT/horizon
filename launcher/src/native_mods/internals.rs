@@ -148,10 +148,17 @@ impl Catalog {
                 record_name: Some(point.record_export),
             });
         }
+        let mut sites = listed.sites;
+        for site in horizon_mod_api_gen::sites::source::read(dir)? {
+            if sites.iter().any(|public| public.name == site.name) {
+                return Err(format!("E_SOURCE_COLLISION: {}", site.name));
+            }
+            sites.push(site.into());
+        }
         Ok(Self {
             internals: internals::read(&path)?,
             points,
-            sites: listed.sites,
+            sites,
             discovery: false,
         })
     }

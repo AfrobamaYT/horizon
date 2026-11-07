@@ -64,7 +64,6 @@ pub(in crate::game) trait TryIntoApi {
     fn try_into_api(&self) -> Result<Self::Api, Self::Error>;
 }
 
-/// Validate a mod value against the game's registry before admitting it to engine state.
 /// Tests use the production snapshot conversion, never a second fixture codec.
 #[cfg(test)]
 pub(in crate::game) fn test_snapshot<T: TryIntoApi + ?Sized>(value: &T) -> T::Api
@@ -76,10 +75,11 @@ where
         .expect("fixture snapshot has resolved item keys and a nonempty count")
 }
 
-pub(in crate::game) trait TryIntoEngine {
+/// Validate a mod value against the game's registry before admitting it to engine state.
+pub(in crate::game) trait TryIntoEngine<Context: ?Sized = Items> {
     type Engine;
     type Error;
-    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error>;
+    fn try_into_engine(&self, context: &Context) -> Result<Self::Engine, Self::Error>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1286,7 +1286,7 @@ mod enchantment_boundary_tests {
 #[cfg(test)]
 fn prepare_stack_boundary_tests() {
     install_stack_hooks();
-    mod_api::__private::install_parts(&[]).unwrap();
+    install_parts(&[]).unwrap();
     mod_api::__private::resolve_items([
         "minecraft:iron_sword",
         "minecraft:stick",
@@ -2054,4 +2054,231 @@ mod item_model_snapshot_tests {
             Err(StackReadError::UnknownItem)
         );
     }
+}
+
+impl TryIntoApi for horizon_mod_package::Side {
+    type Api = mod_api::Side;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(match self {
+            Self::Client => mod_api::Side::Client,
+            Self::Both => mod_api::Side::Both,
+        })
+    }
+}
+
+fn package_snapshot(
+    manifest: &horizon_mod_package::Manifest,
+    kind: mod_api::PackageKind,
+) -> mod_api::PackageInfo {
+    mod_api::PackageInfo::new(
+        manifest.id.clone(),
+        manifest.version.clone(),
+        kind,
+        manifest.side.try_into_api().unwrap(),
+        std::iter::once(&manifest.id)
+            .chain(&manifest.namespaces)
+            .cloned()
+            .collect(),
+        manifest.dependencies.keys().cloned().collect(),
+    )
+}
+impl TryIntoApi for horizon_mod_package::Manifest {
+    type Api = mod_api::PackageInfo;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(package_snapshot(
+            self,
+            if self.wasm.is_some() {
+                mod_api::PackageKind::Code
+            } else {
+                mod_api::PackageKind::Content
+            },
+        ))
+    }
+}
+impl TryIntoApi for horizon_mod_package::packages::AdjacentManifest {
+    type Api = mod_api::PackageInfo;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(package_snapshot(&self.manifest, mod_api::PackageKind::Code))
+    }
+}
+
+pub(in crate::game) fn install_packages(
+    native: &[horizon_mod_package::packages::AdjacentManifest],
+    content: &[horizon_mod_package::selection::SelectedPackage],
+) {
+    let native: Vec<_> = native.iter().map(|p| p.try_into_api().unwrap()).collect();
+    let content: Vec<_> = content
+        .iter()
+        .map(|p| p.package.manifest.try_into_api().unwrap())
+        .collect();
+    mod_api::__private::install_packages(&native, &content);
+}
+
+#[cfg(test)]
+mod package_snapshot_tests {
+    use super::*;
+    #[test]
+    fn package_metadata_keeps_declared_side_and_namespace_order() {
+        for (side, expected) in [
+            ("client", mod_api::Side::Client),
+            ("both", mod_api::Side::Both),
+        ] {
+            let manifest = horizon_mod_package::Manifest::parse(&format!(
+                "id='test'\nname='Test'\nversion='1'\napi='0.2'\nside='{side}'\ncapabilities=['registries']\n"
+            )).unwrap();
+            let snapshot = manifest.try_into_api().unwrap();
+            assert_eq!(snapshot.side(), expected);
+            assert_eq!(snapshot.namespaces().collect::<Vec<_>>(), ["test"]);
+            assert_eq!(snapshot.kind(), mod_api::PackageKind::Content);
+        }
+    }
+}
+
+impl TryIntoApi for horizon_client_core::suggestion::Suggestion {
+    type Api = mod_api::Suggestion;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        let mut value = mod_api::Suggestion::new(self.range, self.text.clone());
+        value.tooltip.clone_from(&self.tooltip);
+        value.int_value = self.int_value;
+        Ok(value)
+    }
+}
+impl TryIntoEngine for mod_api::Suggestion {
+    type Engine = horizon_client_core::suggestion::Suggestion;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, _: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            range: self.range,
+            text: self.text.clone(),
+            tooltip: self.tooltip.clone(),
+            int_value: self.int_value,
+        })
+    }
+}
+#[cfg(test)]
+mod completion_snapshot_tests {
+    use super::*;
+    #[test]
+    fn completion_round_trip_keeps_range_tooltip_and_numeric_order() {
+        let source = horizon_client_core::suggestion::Suggestion {
+            range: (4, 7),
+            text: "42".into(),
+            tooltip: Some("count".into()),
+            int_value: Some(42),
+        };
+        let mut api = source.try_into_api().unwrap();
+        api.text = "43".into();
+        api.int_value = Some(43);
+        let engine = api
+            .try_into_engine(&Items::for_tests(Default::default()))
+            .unwrap();
+        assert_eq!(engine.range, (4, 7));
+        assert_eq!(engine.tooltip.as_deref(), Some("count"));
+        assert_eq!(engine.int_value, Some(43));
+        assert_eq!(engine.apply("foo 123 bar"), "foo 43 bar");
+        assert_eq!(source.text, "42");
+    }
+}
+
+// Registration declarations do not need a live item registry.
+impl TryIntoEngine<()> for mod_api::BlockEntityTypeDecl {
+    type Engine = horizon_mod_package::content::BlockEntityType;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            id: self.id.clone(),
+            blocks: self.blocks.clone(),
+        })
+    }
+}
+pub(in crate::game) fn block_entity_declarations()
+-> Vec<horizon_mod_package::content::BlockEntityType> {
+    mod_api::__private::block_entity_types()
+        .iter()
+        .map(|decl| decl.try_into_engine(&()).unwrap())
+        .collect()
+}
+
+impl TryIntoEngine<()> for mod_api::GameRuleDecl {
+    type Engine = horizon_client_core::gamerules::Rule;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            name: self.name.clone(),
+            category: self.category.clone(),
+            default: horizon_client_core::gamerules::Value::Bool(self.default),
+            min: 0,
+            max: 0,
+        })
+    }
+}
+
+#[cfg(test)]
+mod declaration_snapshot_tests {
+    use super::*;
+    #[test]
+    fn declarations_keep_supported_blocks_and_rule_positions() {
+        static KEY: std::sync::OnceLock<mod_api::BoolGameRuleKey> = std::sync::OnceLock::new();
+        // Use registration, the owner of declaration validation.
+        struct Mod;
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Mod {
+            fn register(&self, r: &mut dyn mod_api::Registrar, _: &mod_api::RegistrationContext) {
+                r.declare_block_entity_type(
+                    "machine",
+                    vec!["test:second".into(), "test:first".into()],
+                );
+                r.game_rule_category("machines").unwrap();
+                KEY.set(r.game_rule_bool("active", "test:machines", true).unwrap())
+                    .unwrap();
+            }
+        }
+        install_parts(&[mod_api::ModEntry::new("test", Box::new(Mod))]).unwrap();
+        let declarations = block_entity_declarations();
+        assert_eq!(declarations[0].id, "test:machine");
+        assert_eq!(declarations[0].blocks, ["test:second", "test:first"]);
+        let registry = game_rule_registry();
+        let key = *KEY.get().unwrap();
+        assert_eq!(
+            mod_api::__private::game_rule_bool_slot(key),
+            registry.position("test:active")
+        );
+        assert_eq!(
+            registry.rule("test:active").unwrap().default,
+            horizon_client_core::gamerules::Value::Bool(true)
+        );
+    }
+}
+
+fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T) -> T {
+    let registry = horizon_client_core::gamerules::rule_registry();
+    f(&mod_api::__private::RuleSchema {
+        category: &|id| registry.categories().iter().any(|category| category == id),
+        position: &|id| registry.position(id),
+        rule_count: u32::try_from(registry.available_rules(true).count())
+            .expect("vanilla rule count fits u32"),
+    })
+}
+pub(in crate::game) fn install_parts(mods: &[mod_api::ModEntry]) -> Result<(), Vec<String>> {
+    with_rule_schema(|schema| mod_api::__private::install_parts(mods, schema))
+}
+#[cfg(test)]
+pub(in crate::game) fn register_game_keys(ids: impl IntoIterator<Item = String>) {
+    with_rule_schema(|schema| mod_api::__private::part_tests::register_game_keys(ids, schema));
+}
+
+pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
+    let rules: Vec<_> = mod_api::__private::game_rules()
+        .iter()
+        .map(|rule| rule.try_into_engine(&()).unwrap())
+        .collect();
+    horizon_client_core::gamerules::RuleRegistry::with_bool_rules(
+        mod_api::__private::game_rule_categories(),
+        &rules,
+    )
+    .expect("validated at registration")
 }
