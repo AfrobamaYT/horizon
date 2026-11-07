@@ -195,7 +195,7 @@ impl<T> JoinList<T> {
 }
 
 impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, false> {
-    /// Edit state without allowing the owning registration to be overwritten.
+    /// Audited state edit; debug assertions detect a changed bound registration.
     pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
         checked_edit(&mut self.0[index], edit)
     }
@@ -205,8 +205,19 @@ impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, fal
         }
     }
     /// Store a tick clone without dropping the owner's lifetime slot.
-    pub fn store_back(&mut self, index: usize, entity: T) {
+    pub fn store_back(&mut self, index: usize, entity: T) -> bool
+    where
+        T: Joined,
+    {
+        let join = entity.join_seq();
+        let Some(index) = Some(index)
+            .filter(|&i| self.0.get(i).is_some_and(|old| old.join_seq() == join))
+            .or_else(|| self.0.iter().position(|old| old.join_seq() == join))
+        else {
+            return false;
+        };
         store_back(&mut self.0[index], entity);
+        true
     }
 }
 
