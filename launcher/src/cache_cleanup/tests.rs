@@ -30,58 +30,42 @@ impl Drop for Home {
 }
 
 #[test]
-fn late_cargo_cannot_lock_an_existing_profile_and_new_profiles_survive() {
+fn late_cargo_is_refused_before_removal_and_can_start_after_completion() {
     let home = Home::new();
     let output = home.file("target/debug/output");
     let directory = home.dir();
     let plan = Plan::pin(&directory).unwrap();
-    // The reviewer's late-start callback window: after pin/enumeration and before deletion.
-    let profile_lock = fs::OpenOptions::new()
+    let held = fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(home.0.join("target/debug/.cargo-lock"))
         .unwrap();
-    assert!(matches!(
-        profile_lock.try_lock(),
-        Err(fs::TryLockError::WouldBlock)
-    ));
-    let target_lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(home.0.join("target/.cargo-lock"))
-        .unwrap();
-    assert!(matches!(
-        target_lock.try_lock(),
-        Err(fs::TryLockError::WouldBlock)
-    ));
+    held.lock().unwrap();
+    fs::write(&output, b"late Cargo output").unwrap();
+    assert!(matches!(plan.clear(&directory), Err(Error::Busy)));
+    assert_eq!(fs::read(&output).unwrap(), b"late Cargo output");
+    held.unlock().unwrap();
+    let plan = Plan::pin(&directory).unwrap();
     let late = home.file("target/new-profile/new-output");
-    let lock = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(home.0.join("target/new-profile/.cargo-lock"))
-        .unwrap();
-    lock.lock().unwrap();
-    plan.clear(&directory).unwrap();
+    plan.clear_observed(&directory, &|_| {}, &|| {
+        if !output.exists() {
+            assert!(matches!(held.try_lock(), Err(fs::TryLockError::WouldBlock)));
+            assert!(fs::read_dir(&home.0).unwrap().any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".trash-")));
+        }
+    })
+    .unwrap();
     assert!(!output.exists());
     assert!(late.exists());
-    assert!(home.0.join("target/debug/.cargo-lock").exists());
-    assert!(profile_lock.try_lock().is_ok());
-    profile_lock.unlock().unwrap();
-}
-
-#[test]
-fn rewritten_snapshot_is_retained() {
-    let home = Home::new();
-    let output = home.file("target/debug/output");
-    let directory = home.dir();
-    let plan = Plan::pin(&directory).unwrap();
-    fs::write(&output, b"rewritten after snapshot; must survive").unwrap();
-    plan.clear(&directory).unwrap();
+    held.try_lock().unwrap();
+    fs::write(&output, b"started after completed removal").unwrap();
+    held.unlock().unwrap();
     assert_eq!(
         fs::read(output).unwrap(),
-        b"rewritten after snapshot; must survive"
+        b"started after completed removal"
     );
 }
 
@@ -99,7 +83,7 @@ fn swapped_directory_and_file_links_never_delete_external_data() {
     std::os::unix::fs::symlink(&outside.0, home.0.join("cache")).unwrap();
     fs::remove_file(&selected).unwrap();
     std::os::unix::fs::symlink(&precious, &selected).unwrap();
-    plan.clear(&directory).unwrap();
+    assert!(plan.clear(&directory).is_err());
     assert_eq!(fs::read(precious).unwrap(), b"old compiler output");
     assert!(selected
         .symlink_metadata()
@@ -154,7 +138,7 @@ fn pin_file_clears_only_one_file_and_refuses_lock_or_nested_names() {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn flat_cache_fits_a_small_descriptor_limit() {
     if std::env::var_os("HORIZON_CLEANUP_FD_CHILD").is_none() {
@@ -164,6 +148,7 @@ fn flat_cache_fits_a_small_descriptor_limit() {
             .args([
                 "--exact",
                 "cache_cleanup::tests::flat_cache_fits_a_small_descriptor_limit",
+                "--nocapture",
             ])
             .env("HORIZON_CLEANUP_FD_CHILD", "1");
         // Only the isolated child gets the lowered limit, never another test's process.
@@ -180,6 +165,7 @@ fn flat_cache_fits_a_small_descriptor_limit() {
             });
         }
         let output = child.output().unwrap();
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
         assert!(
             output.status.success(),
             "{}{}",
@@ -190,11 +176,80 @@ fn flat_cache_fits_a_small_descriptor_limit() {
     }
     let home = Home::new();
     for index in 0..5000 {
-        home.file(&format!("output-{index}"));
+        home.file(&format!("target/profile-{index}/output"));
     }
+    let mut deep = PathBuf::new();
+    for _ in 0..220 {
+        deep.push("d");
+    }
+    home.file(deep.join("output").to_str().unwrap());
+    let directory = home.dir();
+    let peak = std::cell::Cell::new(0);
+    let observe = || {
+        let descriptors = fs::read_dir("/proc/self/fd").unwrap().count();
+        peak.set(peak.get().max(descriptors));
+    };
+    let plan = Plan::pin_observed(&directory, &observe).unwrap();
+    assert_eq!(plan.outputs.len(), 5001);
+    plan.clear_observed(&directory, &|_| {}, &observe).unwrap();
+    assert!(
+        peak.get() <= 3 * 220 + 64,
+        "peak descriptors: {}",
+        peak.get()
+    );
+    eprintln!(
+        "Observed peak: {} descriptors for 5,000 sibling profiles and depth 220",
+        peak.get()
+    );
+    assert!(!home.0.join("target/profile-4999/output").exists());
+    assert!(!home.0.join(deep).join("output").exists());
+}
+
+#[test]
+fn root_lock_is_held_before_enumeration() {
+    let home = Home::new();
+    home.file("output");
+    let observed = std::cell::Cell::new(false);
+    Plan::pin_observed(&home.dir(), &|| {
+        let actor = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(home.0.join(".cargo-lock"))
+            .unwrap();
+        assert!(matches!(
+            actor.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        observed.set(true);
+    })
+    .unwrap();
+    assert!(observed.get());
+}
+
+#[cfg(unix)]
+#[test]
+fn linked_lock_is_not_followed_even_when_its_target_is_inside_the_root() {
+    let home = Home::new();
+    let kept = home.file("kept");
+    std::os::unix::fs::symlink(&kept, home.0.join(".cargo-lock")).unwrap();
+    assert!(Plan::pin(&home.dir()).is_err());
+    assert_eq!(fs::read(kept).unwrap(), b"old compiler output");
+}
+
+#[test]
+fn replacing_the_root_path_does_not_redirect_plan_or_trash() {
+    let home = Home::new();
+    home.file("output");
     let directory = home.dir();
     let plan = Plan::pin(&directory).unwrap();
-    assert_eq!(plan.outputs.len(), 5000);
+    let moved = home.0.with_extension("held");
+    fs::rename(&home.0, &moved).unwrap();
+    let precious = home.file("output");
     plan.clear(&directory).unwrap();
-    assert!(!home.0.join("output-4999").exists());
+    assert_eq!(fs::read(precious).unwrap(), b"old compiler output");
+    assert!(!moved.join("output").exists());
+    fs::remove_dir_all(&home.0).unwrap();
+    fs::rename(moved, &home.0).unwrap();
 }
