@@ -11,9 +11,7 @@ use horizon_mod_package::manifest::{
 use mod_api::__private::wasm_host::{CallHost, Exports, LoadError};
 use mod_points::__private::wire::{Forward, HostKind, PointHost, Record, Value};
 use mod_points::PointId;
-#[cfg(test)]
-use mod_points::places::NAMES;
-use mod_points::places::{IDS, SHAPES, TARGETS};
+use mod_points::places::{IDS, NAMES, SHAPES, TARGETS};
 use std::collections::BTreeMap;
 
 type Subscribed = wasmtime::component::TypedFunc<(), (Vec<(String, String)>,)>;

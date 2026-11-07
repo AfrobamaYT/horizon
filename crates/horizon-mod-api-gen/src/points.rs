@@ -1253,7 +1253,7 @@ mod tests {
             api.contains("fn tick_return")
                 && !api.contains("fn slot_return")
                 && api.contains("SlotReturn")
-                && api.contains("fn game_remote_other_send (& self , args"),
+                && api.contains("fn game_remote_other_send (args"),
             "{api}"
         );
         assert_eq!(
