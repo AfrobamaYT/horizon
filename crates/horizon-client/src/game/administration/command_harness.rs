@@ -720,7 +720,7 @@ impl Game<'_> {
                         let conn = g.lan.as_ref().and_then(|h| h.hub.guests.iter()
                             .find(|p| p.uuid == owner && p.placed).map(|p| p.conn))
                             .ok_or("craft fixture: no connected owner")?;
-                        let result = (|| -> Result<Value> {
+                        (|| -> Result<Value> {
                             let host = g.lan.as_ref().ok_or("no hub")?;
                             let (window, revision, _, _) = host.play.get(&conn)
                                 .and_then(|p| p.crafting.table.as_ref())
@@ -763,8 +763,7 @@ impl Game<'_> {
                                 .collect();
                             Ok(json!({"window": window, "kind": "minecraft:crafting",
                                 "slots": slots, "carried": stack(guest.carried.as_ref()).unwrap_or_else(|| json!([]))}))
-                        })();
-                        result
+                        })()
                     })?;
                     if op["op"] == "craft_menu_state" {
                         let record = json!({"cmd": format!("#craft_menu {}", op["label"].as_str().unwrap_or("")),
