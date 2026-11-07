@@ -453,7 +453,11 @@ impl Sourced {
     fn append(self, base: &mut Text, other: Text) {
         match self.0 {
             true => base.push(other),
-            false => base.spans.extend(other.spans),
+            false => {
+                let mut other = other;
+                base.spans.append(&mut other.spans);
+                crate::text::discard_text(other);
+            }
         }
     }
     fn styled(self, mut text: Text, style: &Style) -> Text {
@@ -542,7 +546,7 @@ fn build(
                 }
             }
             Work::Content(value, hover, mut style, overridden) => {
-                let mode = Sourced(sourced.0 && !hover);
+                let mode = Sourced(sourced.0 || hover);
                 if let Value::Array(a) = value
                     && let Some(first) = a.first()
                     && let Some((text, own_style)) = done.get(&(first as *const Value))
@@ -577,7 +581,7 @@ fn build(
                 let Value::Object(o) = value else {
                     unreachable!()
                 };
-                let mode = Sourced(sourced.0 && !hover);
+                let mode = Sourced(sourced.0 || hover);
                 if let Some(Value::Array(a)) = o.get("extra") {
                     for v in a {
                         let extra = done
@@ -640,7 +644,7 @@ fn build_node<'a>(
             } else if let Some(object) = inline_object_with_fallback(
                 o,
                 o.get("object").and_then(Value::as_str),
-                o.get("fallback").map(|v| child(v).plain()),
+                o.get("fallback").map(|v| plain_component(child(v))),
             ) {
                 let mut text = Text::literal("\u{fffc}");
                 text.spans[0].style.inline_object = Some(object);
@@ -656,7 +660,11 @@ fn build_node<'a>(
                     .and_then(Value::as_array)
                     .map(|a| a.iter().map(|x| child(x)).collect())
                     .unwrap_or_default();
-                sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args)
+                let text = sourced.translate(key, o.get("fallback").and_then(Value::as_str), &args);
+                for arg in args {
+                    crate::text::discard_text(arg);
+                }
+                text
             } else if let Some(sel) = o.get("selector").and_then(Value::as_str) {
                 resolve(sel)
             } else if let Some(key) = o.get("keybind").and_then(Value::as_str) {
@@ -670,6 +678,12 @@ fn build_node<'a>(
     }
 }
 
+fn plain_component(text: Text) -> String {
+    let plain = text.plain();
+    crate::text::discard_text(text);
+    plain
+}
+
 /// Decode inline object fields, including the engine's profile and atlas defaults.
 pub fn inline_object(
     object: &serde_json::Map<String, Value>,
@@ -679,7 +693,7 @@ pub fn inline_object(
     let kind = object.get("object").and_then(Value::as_str);
     let fallback = object
         .get("fallback")
-        .map(|value| to_text_with(value, resolve, contents).plain());
+        .map(|value| plain_component(to_text_with(value, resolve, contents)));
     inline_object_with_fallback(object, kind, fallback)
 }
 
@@ -757,6 +771,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mixed_recursive_temporaries_are_released_on_256_kib() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                for hover_text in [false, true] {
+                    for argument in [false, true] {
+                        let mut child = serde_json::json!({"text":"leaf"});
+                        for _ in 1..511 {
+                            let mut event = serde_json::Map::new();
+                            event.insert(
+                                "action".into(),
+                                if hover_text {
+                                    "show_text"
+                                } else {
+                                    "show_entity"
+                                }
+                                .into(),
+                            );
+                            event.insert("id".into(), "minecraft:pig".into());
+                            event.insert("uuid".into(), serde_json::json!([0, 0, 0, 1]));
+                            event.insert(if hover_text { "value" } else { "name" }.into(), child);
+                            let mut fields = serde_json::Map::new();
+                            fields.insert("text".into(), "parent".into());
+                            fields.insert("hover_event".into(), Value::Object(event));
+                            child = Value::Object(fields);
+                        }
+                        let mut fields = serde_json::Map::new();
+                        if argument {
+                            fields.insert("translate".into(), "test:missing".into());
+                            fields.insert("fallback".into(), "unused".into());
+                            fields.insert("with".into(), Value::Array(vec![child]));
+                        } else {
+                            fields.insert("object".into(), "atlas".into());
+                            fields.insert("sprite".into(), "test:icon".into());
+                            fields.insert("fallback".into(), child);
+                        }
+                        let output = spans_of(Value::Object(fields));
+                        assert_eq!(output.plain(), if argument { "unused" } else { "parent" });
+                        std::mem::forget(output);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn iterative_builder_preserves_lazy_content_and_callback_order() {
         let value = serde_json::json!({"id":"parent", "text":"visible", "with":[{"id":"unused", "selector":"unused"}], "extra":[{"id":"extra", "selector":"@a"}]});
         let calls = std::cell::RefCell::new(Vec::new());
@@ -795,6 +857,12 @@ mod tests {
             },
         );
         assert_eq!(text.spans[0].style.hover.as_ref().unwrap().plain(), "@p");
+        let value = serde_json::json!({"text":"visible", "hover_event":{"action":"show_text", "value":{"translate":"test:hover"}}});
+        let text = to_text(&value, &mut |_| panic!("hover resolver escaped"));
+        assert_eq!(
+            text.spans[0].style.hover.as_ref().unwrap().component()["translate"],
+            "test:hover"
+        );
         let text = Text::from(serde_json::json!([[{"text":"", "color":"red"}], "tail"]));
         assert_eq!(text.plain(), "tail");
         assert_eq!(text.spans[0].style.color, None);

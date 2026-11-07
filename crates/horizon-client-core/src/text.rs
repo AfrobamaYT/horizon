@@ -157,34 +157,51 @@ impl Style {
 }
 // A builder may produce no spans for a styled empty component. Release its
 // unretained hover data explicitly rather than recursively dropping a deep chain.
-pub(crate) fn discard_style(mut style: Style) {
-    let mut pending = Vec::new();
-    loop {
-        if let Some(hover) = style.hover.take()
-            && let Ok(text) = std::sync::Arc::try_unwrap(hover)
-        {
-            if let Some(source) = text.source
-                && let Ok(source) = std::sync::Arc::try_unwrap(source)
-            {
-                crate::component::discard_component(source);
+pub(crate) fn discard_style(style: Style) {
+    discard(Discard::Style(style));
+}
+pub(crate) fn discard_text(text: Text) {
+    discard(Discard::Text(text));
+}
+enum Discard {
+    Style(Style),
+    Text(Text),
+}
+fn discard(root: Discard) {
+    let mut pending = vec![root];
+    while let Some(value) = pending.pop() {
+        match value {
+            Discard::Text(text) => {
+                if let Some(source) = text.source
+                    && let Ok(source) = std::sync::Arc::try_unwrap(source)
+                {
+                    crate::component::discard_component(source);
+                }
+                pending.extend(
+                    text.spans
+                        .into_iter()
+                        .map(|span| Discard::Style(span.style)),
+                );
             }
-            pending.extend(text.spans.into_iter().map(|span| span.style));
-        }
-        for value in [style.hover_item.take(), style.hover_entity.take()]
-            .into_iter()
-            .flatten()
-        {
-            if let Ok(value) = std::sync::Arc::try_unwrap(value) {
-                crate::component::discard_component(value);
+            Discard::Style(mut style) => {
+                if let Some(hover) = style.hover.take()
+                    && let Ok(text) = std::sync::Arc::try_unwrap(hover)
+                {
+                    pending.push(Discard::Text(text));
+                }
+                for value in [style.hover_item.take(), style.hover_entity.take()]
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Ok(value) = std::sync::Arc::try_unwrap(value) {
+                        crate::component::discard_component(value);
+                    }
+                }
+                if let Some(InlineObject::Player { profile, .. }) = style.inline_object.take() {
+                    crate::component::discard_component(profile);
+                }
             }
         }
-        if let Some(InlineObject::Player { profile, .. }) = style.inline_object.take() {
-            crate::component::discard_component(profile);
-        }
-        let Some(next) = pending.pop() else {
-            break;
-        };
-        style = next;
     }
 }
 
@@ -313,7 +330,7 @@ impl Text {
     /// MutableComponent.append: `other` becomes a sibling. A styled text is
     /// wrapped first, as its style doesn't reach what is appended here.
     pub fn push(&mut self, other: impl Into<Text>) {
-        let other = other.into();
+        let mut other = other.into();
         let sibling = other.component();
         let mut root = if self.spans.is_empty() && self.source.is_none() {
             json!({ "text": "" })
@@ -333,8 +350,17 @@ impl Text {
                 }
             }
         }
-        self.source = Some(root.into());
-        self.spans.extend(other.spans);
+        self.replace_component(root);
+        self.spans.append(&mut other.spans);
+        discard_text(other);
+    }
+    fn replace_component(&mut self, component: Value) {
+        let old = self.source.replace(component.into());
+        if let Some(old) = old
+            && let Ok(old) = std::sync::Arc::try_unwrap(old)
+        {
+            crate::component::discard_component(old);
+        }
     }
     /// Apply `style` underneath every span (MutableComponent.withStyle on a parent).
     pub fn with_style(mut self, style: &Style) -> Self {
@@ -347,7 +373,7 @@ impl Text {
                 o.entry(k).or_insert(v);
             }
         }
-        self.source = Some(c.into());
+        self.replace_component(c);
         self
     }
     /// The `Component` as vanilla's JSON (ComponentSerialization): the one
@@ -430,13 +456,13 @@ impl Text {
                 o.entry(k).or_insert(v);
             }
         }
-        self.source = Some(c.into());
+        self.replace_component(c);
         self
     }
     /// The same spans, sent to vanilla as `component` (a shape the spans'
     /// own JSON would not take, such as a styled root with siblings).
     pub fn with_component(mut self, component: Value) -> Self {
-        self.source = Some(component.into());
+        self.replace_component(component);
         self
     }
     pub fn with_color(self, color: u32) -> Self {
