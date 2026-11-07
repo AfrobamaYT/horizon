@@ -199,6 +199,12 @@ pub(super) fn enter(call: NativeModCall) -> Option<Guard> {
         return None;
     }
     let epoch = EPOCH.load(SeqCst);
+    #[cfg(test)]
+    tests::PAUSE.with(|p| {
+        if let Some(pause) = p.take() {
+            pause();
+        }
+    });
     ACTIVE.fetch_add(1, SeqCst);
     if !ENABLED.load(SeqCst) || EPOCH.load(SeqCst) != epoch {
         ACTIVE.fetch_sub(1, SeqCst);
@@ -254,7 +260,11 @@ mod tests {
     use super::*;
     use crate::crash::enter_native_mod;
     static SERIAL: Mutex<()> = Mutex::new(());
-    thread_local! { static TIME: Cell<u64> = const { Cell::new(0) }; }
+    type Pause = Box<dyn FnOnce()>;
+    thread_local! {
+        static TIME: Cell<u64> = const { Cell::new(0) };
+        pub(super) static PAUSE: std::cell::RefCell<Option<Pause>> = const { std::cell::RefCell::new(None) };
+    }
     pub(super) static CLOCK_READS: AtomicUsize = AtomicUsize::new(0);
     fn tick() -> u64 {
         TIME.with(|t| {
@@ -352,43 +362,73 @@ mod tests {
         assert!(report.dropped >= 1);
     }
     #[test]
-    fn profiler_entry_races_stop_and_restart() {
+    fn profiler_stale_epoch_is_rejected() {
         let _serial = SERIAL.lock().unwrap();
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
-        let accepted = std::sync::Arc::new(AtomicUsize::new(0));
-        let workers: Vec<_> = (0..2)
-            .map(|_| {
-                let (barrier, accepted) = (barrier.clone(), accepted.clone());
-                std::thread::spawn(move || {
-                    for _ in 0..8 {
-                        barrier.wait();
-                        for _ in 0..100 {
-                            let guard = enter(call("race", "entry", None));
-                            if guard.is_some() {
-                                accepted.fetch_add(1, SeqCst);
-                            }
-                            drop(guard);
-                        }
-                        barrier.wait();
-                    }
-                })
+        assert!(start_with_clock(tick));
+        let (entered, ready) = std::sync::mpsc::channel();
+        let (release, exit) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            drop(enter(call("epoch", "warm", None)));
+            PAUSE.with(|p| {
+                *p.borrow_mut() = Some(Box::new(move || {
+                    entered.send(()).unwrap();
+                    exit.recv().unwrap();
+                }))
+            });
+            let stale = enter(call("epoch", "stale", None));
+            let rejected = stale.is_none();
+            drop(stale);
+            drop(enter(call("epoch", "fresh", None)));
+            rejected
+        });
+        ready.recv().unwrap();
+        stop();
+        assert!(start_with_clock(tick));
+        release.send(()).unwrap();
+        let rejected = worker.join().unwrap();
+        let report = stop();
+        assert!(rejected, "stale snapshot attached to the restarted session");
+        assert!(!report.calls.contains_key(&("epoch", "stale", None)));
+        assert_eq!(report.calls[&("epoch", "fresh", None)].count, 1);
+    }
+    // Run capacity checks alone: unrelated crate tests also enter native guards and
+    // would otherwise consume some of the finite thread slots being measured.
+    fn capacity(threads: usize, calls: usize, name: &str) {
+        if std::env::var_os("HORIZON_PROFILER_CAPACITY_CHILD").is_none() {
+            assert!(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", &format!("crash::profiler::tests::{name}")])
+                    .env("HORIZON_PROFILER_CAPACITY_CHILD", "1")
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            return;
+        }
+        assert!(start_with_clock(tick));
+        for _ in 0..threads {
+            std::thread::spawn(move || {
+                for _ in 0..calls {
+                    drop(enter(call("capacity", "thread", None)));
+                }
             })
-            .collect();
-        let mut recorded = 0;
-        for _ in 0..8 {
-            assert!(start_with_clock(tick));
-            barrier.wait();
-            let report = stop();
-            recorded += report
-                .calls
-                .get(&("race", "entry", None))
-                .map_or(0, |a| a.count);
-            barrier.wait();
+            .join()
+            .unwrap();
         }
-        for worker in workers {
-            worker.join().unwrap();
-        }
-        assert_eq!(recorded, accepted.load(SeqCst) as u64);
+        let report = stop();
+        assert_eq!(
+            report.calls[&("capacity", "thread", None)].count,
+            (threads.min(THREADS) * calls) as u64
+        );
+        assert_eq!(report.dropped, threads.saturating_sub(THREADS) * calls);
+    }
+    #[test]
+    fn profiler_two_full_threads() {
+        capacity(2, CALLS, "profiler_two_full_threads");
+    }
+    #[test]
+    fn profiler_thread_exhaustion() {
+        capacity(THREADS + 1, 1, "profiler_thread_exhaustion");
     }
     #[test]
     fn profiler_histogram_and_summary() {
