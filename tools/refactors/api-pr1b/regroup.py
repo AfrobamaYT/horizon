@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Regroup host declarations, game forwarders and callers using areas.tsv.
+"""Regroup host declarations, game forwarders and callers using an areas table.
 
-Run from any directory. Unknown methods fail before any write; add a table row or
-pass --assign method=area (repeatable). The operation is idempotent, including on
+The table (old area, method, new area; tab separated) is not kept in the tree, so no
+host-method PR ever edits a shared list: new host methods are written straight into
+their area file under `host/`. A branch still on the old per-helper layout replays the
+merged regroup with the table from the merge: `git show 5f67d7ad57:tools/refactors/api-pr1b/areas.tsv > /tmp/areas.tsv`,
+then `regroup.py --table /tmp/areas.tsv`.
+
+Run from any directory. Unknown methods fail before any write; pass
+--assign method=area (repeatable) for a method the table does not list. The operation is idempotent, including on
 branches which contain both curated files and newly added old-style area files.
 Only trait scaffolding, imports, paths and double macros change; method text moves
 unchanged. Rustfmt is run on the changed Rust files.
@@ -48,9 +54,9 @@ def items(body):
         yield method[1], text.strip('\n') + '\n'
 
 
-def read_table():
+def read_table(path):
     table = {}
-    for line in Path(__file__).with_name('areas.tsv').read_text().splitlines():
+    for line in Path(path).read_text().splitlines():
         old, method, new = line.split('\t')
         key = (old, method)
         if key in table:
@@ -105,7 +111,7 @@ def area_sources(directory, table, assignments):
         if path.stem in ('draw', 'services'):
             tails[path.stem] = re.sub(r'\A(?://![^\n]*\n|#![^\n]*\n|use [^\n]*\n)*', '', leftover)
     if missing:
-        raise ValueError('unassigned methods (add areas.tsv rows or --assign name=area):\n  ' + '\n  '.join(missing))
+        raise ValueError('unassigned methods (--assign name=area):\n  ' + '\n  '.join(missing))
     output = {}
     for dest in sorted({a for a, t in grouped} | tails.keys()):
         sections = []
@@ -226,10 +232,11 @@ def rewrite_references(text, old_names, mapping):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--table', required=True, metavar='AREAS.TSV')
     parser.add_argument('--assign', action='append', default=[], metavar='NAME=AREA')
     args = parser.parse_args()
     assignments = dict(value.split('=', 1) for value in args.assign)
-    table = read_table()
+    table = read_table(args.table)
     output, old_names, mapping = area_sources(API, table, assignments)
     forwards, _, _ = area_sources(GAME, table, assignments)
     output.update(forwards)
