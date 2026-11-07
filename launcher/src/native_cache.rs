@@ -28,7 +28,7 @@ pub(crate) struct Cache {
 /// A held lock that is released before its file closes. A child process spawned at that moment
 /// (Cargo, git) holds a copy of the descriptor until its exec, and closing ours alone would leave
 /// the lock taken through that copy: the next lease or cleanup would read Busy.
-struct Locked(File);
+pub(crate) struct Locked(File);
 
 impl Drop for Locked {
     fn drop(&mut self) {
@@ -75,6 +75,10 @@ fn lock(path: &Path) -> Result<Locked, Error> {
         .create(true)
         .truncate(false)
         .open(path)?;
+    locked(file)
+}
+
+pub(crate) fn locked(file: File) -> Result<Locked, Error> {
     file.try_lock().map_err(|error| match error {
         fs::TryLockError::WouldBlock => Error::Busy,
         fs::TryLockError::Error(error) => Error::Io(error),
