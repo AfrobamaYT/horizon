@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn metadata_service_reads_edits_and_refuses_invalid_transport() {
-        crate::install_parts(&[]).unwrap();
+        crate::parts::tests::install_parts_fixture(&[]).unwrap();
         let states = [
             std::collections::BTreeMap::from([("lit".into(), "false".into())]),
             std::collections::BTreeMap::from([("lit".into(), "true".into())]),

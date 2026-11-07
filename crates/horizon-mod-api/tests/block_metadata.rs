@@ -32,7 +32,15 @@ unsafe impl GlobalAlloc for Allocator {
 }
 #[test]
 fn metadata_resource_worker_reads_allocate_nothing() {
-    mod_api::__private::install_parts(&[]).unwrap();
+    mod_api::__private::install_parts(
+        &[],
+        &mod_api::__private::RuleSchema {
+            category: &|_| false,
+            position: &|_| None,
+            rule_count: 0,
+        },
+    )
+    .unwrap();
     let properties = std::collections::BTreeMap::from([("lit".into(), "false".into())]);
     mod_api::__private::resolve_block_keys(["probe:lamp"], |_| {
         horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
