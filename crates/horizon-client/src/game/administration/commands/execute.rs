@@ -637,10 +637,7 @@ impl Game<'_> {
                 let Some(Arg::Resource(dim)) = c.get("dimension") else {
                     return Ok(vec![s]);
                 };
-                if !matches!(
-                    dim.as_str(),
-                    "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
-                ) {
+                if !Dim::exists(dim) {
                     return Err(err("argument.dimension.invalid", &[dim]));
                 }
                 let dimension = Dim::from_id(dim);
@@ -1189,7 +1186,7 @@ impl Game<'_> {
         )
     }
     /// A biome id or `#tag` matched against a biome name.
-    pub(super) fn biome_matches(&self, wanted: &str, biome: &str) -> bool {
+    pub(in crate::game) fn biome_matches(&self, wanted: &str, biome: &str) -> bool {
         match wanted.strip_prefix('#') {
             Some(tag) => self.biome_tag_has(tag, biome),
             None => wanted == biome,

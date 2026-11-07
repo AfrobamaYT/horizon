@@ -527,9 +527,9 @@ impl Game<'_> {
                 self.boats.update(i, |b| {
                     b.velocity = pulled(b.velocity);
                 });
-            } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
+            } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
                 // `AbstractMinecart` is pickable, so `pullEntity` moves it too.
-                c.velocity = pulled(c.velocity);
+                self.carts.update(i, |c| c.velocity = pulled(c.velocity));
             } else if self.creatures.hook_targets.iter().any(|t| t.id == id) {
                 // A player: the hub moves them when the tick ends.
                 self.creatures
