@@ -1,4 +1,7 @@
 //! Typed host attachment snapshot queries.
+#[cfg(test)]
+#[path = "attachment_queries/tests.rs"]
+mod tests;
 use crate::*;
 use horizon_mod_runtime::attachments as runtime;
 
