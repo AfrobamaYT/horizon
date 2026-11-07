@@ -8,6 +8,7 @@ use crate::BlockState;
 /// Once the entity batch has ticked, writes apply in request order only if the block
 /// still matches the original landed state. That guard is checked once for the batch,
 /// not between writes (a preceding write may itself change the block).
+// exhaustive: the closed serialized write vocabulary and case order are a link contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LandingWrite {
     /// `Level.setBlockAndUpdate(pos, state)`, notifying neighbors and clients.
