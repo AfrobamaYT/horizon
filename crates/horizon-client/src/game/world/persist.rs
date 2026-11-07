@@ -1059,6 +1059,7 @@ impl Game<'_> {
             .flatten();
         let rotation = entity_nbt::rotation(tag);
         Some(super::commands::OtherEntity {
+            join: Default::default(),
             id,
             kind: kind.to_owned(),
             position,

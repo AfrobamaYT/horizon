@@ -1714,6 +1714,7 @@ impl Game<'_> {
             );
         let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
+            join: Default::default(),
             id,
             at: [at.x, at.y, at.z],
             radius: real("Radius", 3.0).clamp(0.0, 32.0),
@@ -1875,6 +1876,7 @@ impl Game<'_> {
     ) {
         let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
+            join: Default::default(),
             id,
             at,
             radius: 2.5,
@@ -2272,6 +2274,7 @@ impl Game<'_> {
                 let at = mob.unwrap_or(at);
                 let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
+                    join: Default::default(),
                     id,
                     at: [at.x, at.y, at.z],
                     radius: 3.0,
@@ -2676,6 +2679,7 @@ mod tests {
             let potion = game.load_potion_cloud(&tag).unwrap();
             for (age, duration) in [(20, 1), (0, 40)] {
                 game.breath_clouds.push(super::super::dragon::Breath {
+                    join: Default::default(),
                     id: 0,
                     at: [0.0, 80.0, 0.0],
                     radius: 3.0,
@@ -2988,6 +2992,7 @@ mod tests {
     fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         let mut clouds = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 1,
             at: [1.0, 64.0, 0.0],
             radius: 5.0,
@@ -3012,6 +3017,7 @@ mod tests {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         // Non-dragon cloud (`from_dragon: false`).
         let mut non_dragon = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 1,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -3028,6 +3034,7 @@ mod tests {
 
         // Lingering potion cloud (`potion: Some(...)`).
         let mut lingering = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 2,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -3056,6 +3063,7 @@ mod tests {
         // Its last tick before the wait-shifted end still holds breath
         // (`tickCount - waitTime < duration`).
         let mut last = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -3072,6 +3080,7 @@ mod tests {
 
         // Expired cloud (`tickCount - waitTime >= duration`).
         let mut expired = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -3089,6 +3098,7 @@ mod tests {
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
         // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
         let mut far = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 4,
             at: [10.0, 64.0, 0.0],
             radius: 1.0,
@@ -3107,6 +3117,7 @@ mod tests {
         // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
         let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
         let mut ground_cloud = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 5,
             at: [0.0, 64.0, 0.0],
             radius: 1.0,

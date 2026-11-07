@@ -263,6 +263,7 @@ impl Game<'_> {
                 // the raw compound alone does not contain generated clouds.
                 let mut tag = self.other_to_nbt(
                     &super::OtherEntity {
+                        join: Default::default(),
                         id,
                         kind: "minecraft:area_effect_cloud".into(),
                         item_transformation: None,
@@ -1405,6 +1406,7 @@ mod tests {
             game.persist.raw.insert(12, Tag::Compound(raw));
             game.persist.uuids.insert(12, [1, 2, 3, 4]);
             game.others.push(super::super::OtherEntity {
+                join: Default::default(),
                 item_transformation: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),

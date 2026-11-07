@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(super) struct Fangs {
+    pub(in crate::game) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [f64; 3],
     pub yaw: f32,
@@ -51,6 +52,7 @@ impl Game<'_> {
             self.fangs.model = self.entity_models.evoker_fangs.clone();
         }
         self.fangs.list.push(Fangs {
+            join: Default::default(),
             id,
             pos: at,
             yaw,
@@ -463,3 +465,5 @@ mod tests {
         ));
     }
 }
+
+horizon_client::impl_joined!(Fangs);
