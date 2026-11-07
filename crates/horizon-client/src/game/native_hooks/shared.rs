@@ -5185,7 +5185,7 @@ mod item_fall_on_tests {
                 event.distance,
                 event.damage,
             ));
-            event.request(LandingWrite::DestroyBlock { drop: false });
+            event.request(mod_api::LandingWrite::DestroyBlock { drop: false });
         }
     }
     struct Mod(Lands);
