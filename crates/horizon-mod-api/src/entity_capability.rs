@@ -246,16 +246,7 @@ impl ResourceHandler<ItemResource> for LivingEquipment {
         match Self::armour(slot) {
             // `Mob.canEquip`: only what its `equippable` names for this kind,
             // one of it (`ArmorSlot.getMaxStackSize`).
-            Some(slot)
-                if !equips(
-                    host,
-                    resource,
-                    slot,
-                    &kind_of(host, self.entity),
-                ) =>
-                {
-                    0
-                }
+            Some(slot) if !equips(host, resource, slot, &kind_of(host, self.entity)) => 0,
             Some(_) => max_stack(host, resource).min(1),
             None => max_stack(host, resource),
         }
