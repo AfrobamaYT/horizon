@@ -876,9 +876,3 @@ mod tests {
         });
     }
 }
-
-/// (temporary: `shm-resources` provides the real one)
-#[doc(hidden)]
-pub fn install_guest_packages(packages: Vec<PackageInfo>) {
-    let _ = PACKAGES.set(packages.into());
-}

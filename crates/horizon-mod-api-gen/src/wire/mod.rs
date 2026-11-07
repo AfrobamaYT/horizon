@@ -545,10 +545,19 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
     with_providers.push(("capability_providers_generated.rs", providers.as_str()));
     let surface = surface(root, &with_providers)?;
     let mut wire = emit::types(&surface.types);
-    let mut guest = calls::guest(&surface.types, &surface.methods, &surface.dropped, &surface.parts);
+    let mut guest = calls::guest(
+        &surface.types,
+        &surface.methods,
+        &surface.dropped,
+        &surface.parts,
+    );
     guest.push_str(&calls::hook_names(&surface.hooks));
     guest.push_str(&calls::dispatch(&surface.types, &surface.methods).0);
-    let _ = writeln!(wire, "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};", layout(&surface));
+    let _ = writeln!(
+        wire,
+        "#[doc(hidden)]\npub const WIRE_LAYOUT: u64 = {:#x};",
+        layout(&surface)
+    );
     Ok(Generated { wire, guest })
 }
 
@@ -664,9 +673,24 @@ mod tests {
                         .or_default() += 1;
                 }
                 println!("classes {classes:?}");
-                let code = super::calls::guest(&surface.types, &surface.methods, &surface.dropped, &surface.parts);
+                let code = super::calls::guest(
+                    &surface.types,
+                    &surface.methods,
+                    &surface.dropped,
+                    &surface.parts,
+                );
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
-                for m in super::calls::imports(&surface.methods) { if !super::calls::plain_pub(m) { println!("nonplain {}::{} ({:?}) -> {:?}", m.owner, m.name, m.params.iter().map(|p| &p.1).collect::<Vec<_>>(), m.ret); } }
+                for m in super::calls::imports(&surface.methods) {
+                    if !super::calls::plain_pub(m) {
+                        println!(
+                            "nonplain {}::{} ({:?}) -> {:?}",
+                            m.owner,
+                            m.name,
+                            m.params.iter().map(|p| &p.1).collect::<Vec<_>>(),
+                            m.ret
+                        );
+                    }
+                }
                 let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
                 std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
                 println!(

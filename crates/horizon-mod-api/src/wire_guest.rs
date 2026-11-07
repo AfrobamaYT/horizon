@@ -124,8 +124,13 @@ mod transport {
         // SAFETY: the game writes at most `cap` bytes at `out`'s spare capacity, which it owns;
         // a longer answer is kept by the game and copied by `host_reply` into the grown buffer.
         unsafe {
-            let len = host(id, input.as_ptr(), input.len() as u32, out.as_mut_ptr(), cap as u32)
-                as usize;
+            let len = host(
+                id,
+                input.as_ptr(),
+                input.len() as u32,
+                out.as_mut_ptr(),
+                cap as u32,
+            ) as usize;
             if len > cap {
                 out.reserve(len);
                 host_reply(out.as_mut_ptr());
