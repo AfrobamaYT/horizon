@@ -2296,3 +2296,6 @@ mod scoped_edit_tests {
         assert_eq!(lists.boats[1].velocity.x, 7.0);
     }
 }
+
+#[cfg(test)]
+pub(in crate::game) mod taken_pass_tests;
