@@ -186,3 +186,7 @@ impl Ingredient {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "custom_data_tests.rs"]
+mod custom_data_tests;

@@ -410,57 +410,6 @@ mod content_tests {
 
     use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 
-    fn assert_custom_tags(data: &horizon_core::nbt::Compound) {
-        use horizon_core::nbt::Tag;
-        assert_eq!(data.get(&"integer".into()), Some(&Tag::Int(32768)));
-        assert_eq!(data.get(&"long".into()), Some(&Tag::Long(2147483648)));
-        assert_eq!(
-            data.get(&"list".into()),
-            Some(&Tag::List(vec![Tag::Byte(1), Tag::Short(128)]))
-        );
-        assert_eq!(
-            data.get(&"nested".into()),
-            Some(&Tag::compound([("enabled", Tag::Byte(1))]))
-        );
-    }
-
-    struct TypedIngredient;
-    #[mod_api::__subscriptions]
-    impl mod_api::Hooks for TypedIngredient {
-        fn ingredient(
-            &self,
-            _: &dyn mod_api::DataLoadContext,
-            event: &mut mod_api::IngredientEvent<'_>,
-        ) {
-            assert_custom_tags(event.data);
-            event.items.push("minecraft:emerald".into());
-        }
-    }
-
-    #[test]
-    fn custom_ingredient_tags_reach_hook_and_matching_record() {
-        let items = horizon_client::items::Items::for_tests(Default::default());
-        mod_api::testing::with_mods(
-            vec![mod_api::ModEntry::new("typed", Box::new(TypedIngredient))].into(),
-            || {
-                let context = load(DataLoadOrigin::ServerDataLoad);
-                let mut source = json!({"type": "typed:ingredient", "integer": 32768, "long": 2147483648i64,
-                "list": [1, 128], "nested": {"enabled": true}});
-                horizon_client::crafting::Ingredient::resolve(&mut source, &context);
-                let parsed = horizon_client::crafting::Ingredient::parse(&source, &items).unwrap();
-                let (_, data) = parsed.custom.unwrap();
-                assert_custom_tags(&data);
-                assert!(!data.contains_key(&"horizon:resolved_items".into()));
-
-                // Refusal leaves the kind unanswered just as an unknown kind does;
-                // no hook call should see the malformed metadata.
-                source["nested"]["invalid"] = Value::Null;
-                horizon_client::crafting::Ingredient::resolve(&mut source, &context);
-                assert!(horizon_client::crafting::Ingredient::parse(&source, &items).is_none());
-            },
-        );
-    }
-
     struct AspectListener(std::sync::Arc<std::sync::Mutex<Vec<(DataLoadOrigin, String)>>>);
     #[mod_api::__subscriptions]
     impl mod_api::Hooks for AspectListener {

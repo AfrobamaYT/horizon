@@ -331,13 +331,26 @@ pub struct IngredientNode {
     /// Shape and its child indices, in matching order.
     pub children: Option<(Shape, Vec<u64>)>,
 }
-/// A flat ingredient form was empty, cyclic, shared, orphaned or out of order.
+/// Ingredient node-depth budget, from serde_json's default recursion budget
+/// of 128 on the former JSON boundary. Counts ingredient nodes, not the extra
+/// object/tuple/list wrappers in that former wire encoding.
+const MAX_INGREDIENT_DEPTH: u16 = 128;
+
+/// A flat ingredient form could not be reconstructed safely.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct IngredientFormError;
+pub enum IngredientFormError {
+    /// Empty, cyclic, shared, orphaned, invalid-index or out-of-order nodes.
+    Malformed,
+    /// More than 128 ingredient nodes on a root-to-leaf path.
+    TooDeep,
+}
 impl std::fmt::Display for IngredientFormError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("invalid ingredient tree")
+        f.write_str(match self {
+            Self::Malformed => "invalid ingredient tree",
+            Self::TooDeep => "ingredient tree exceeds depth 128",
+        })
     }
 }
 impl std::error::Error for IngredientFormError {}
@@ -367,27 +380,46 @@ impl From<&Ingredient> for IngredientForm {
 impl TryFrom<IngredientForm> for Ingredient {
     type Error = IngredientFormError;
     fn try_from(form: IngredientForm) -> Result<Self, Self::Error> {
+        // Validate the entire flat graph before constructing any recursive
+        // value, so refusing malformed or deep input cannot recursively drop
+        // a partially built tree either.
+        if form.nodes.is_empty() {
+            return Err(IngredientFormError::Malformed);
+        }
+        let mut depths = vec![0u16; form.nodes.len()];
+        depths[0] = 1;
+        for (index, node) in form.nodes.iter().enumerate() {
+            if depths[index] == 0 {
+                return Err(IngredientFormError::Malformed);
+            }
+            if let Some((_, children)) = &node.children {
+                for &child in children {
+                    let child =
+                        usize::try_from(child).map_err(|_| IngredientFormError::Malformed)?;
+                    if child <= index || child >= depths.len() || depths[child] != 0 {
+                        return Err(IngredientFormError::Malformed);
+                    }
+                    let depth = depths[index] + 1;
+                    if depth > MAX_INGREDIENT_DEPTH {
+                        return Err(IngredientFormError::TooDeep);
+                    }
+                    depths[child] = depth;
+                }
+            }
+        }
         let mut built: Vec<Option<Self>> = vec![None; form.nodes.len()];
         for (index, node) in form.nodes.into_iter().enumerate().rev() {
-            let children = node
-                .children
-                .map(|(shape, indices)| {
-                    let children = indices
-                        .into_iter()
-                        .map(|child| {
-                            let child = usize::try_from(child).map_err(|_| IngredientFormError)?;
-                            if child <= index {
-                                return Err(IngredientFormError);
-                            }
-                            built
-                                .get_mut(child)
-                                .and_then(Option::take)
-                                .ok_or(IngredientFormError)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok((shape, children))
-                })
-                .transpose()?;
+            let children = node.children.map(|(shape, indices)| {
+                let children = indices
+                    .into_iter()
+                    .map(|child| {
+                        built[child as usize]
+                            .take()
+                            .expect("validated unique child")
+                    })
+                    .collect();
+                (shape, children)
+            });
             built[index] = Some(Self {
                 items: node.items,
                 order: node.order,
@@ -395,13 +427,7 @@ impl TryFrom<IngredientForm> for Ingredient {
                 children,
             });
         }
-        let root = built
-            .first_mut()
-            .and_then(Option::take)
-            .ok_or(IngredientFormError)?;
-        if built.iter().any(Option::is_some) {
-            return Err(IngredientFormError);
-        }
+        let root = built[0].take().expect("validated root");
         Ok(root)
     }
 }
