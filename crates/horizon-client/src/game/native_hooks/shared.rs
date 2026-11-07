@@ -1300,21 +1300,22 @@ impl Game<'_> {
         }
     }
 
-    /// Apply one write a landing asked for, at the block the entity landed on.
+    /// Apply one already-validated engine write, at the block the entity landed on.
+    /// The original-state guard runs once before the ordered batch, not between writes.
     fn apply_landing_write(
         &mut self,
         level: mod_api::LevelRef,
         pos: BlockPos,
-        write: LandingWrite,
+        write: horizon_world::level::LandingWrite,
     ) {
         let at = [pos.x, pos.y, pos.z];
         match write {
             // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
-            LandingWrite::SetBlock(state) => {
+            horizon_world::level::LandingWrite::SetBlock(state) => {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
                 self.level_set_block(level, at, state, flags);
             }
-            LandingWrite::DestroyBlock { drop } => {
+            horizon_world::level::LandingWrite::DestroyBlock { drop } => {
                 self.level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
