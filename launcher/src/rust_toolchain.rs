@@ -927,7 +927,8 @@ mod tests {
 
     #[test]
     fn archive_download_checks_pinned_length_as_well_as_hash() {
-        use std::{io::Read, net::TcpListener};
+        use std::{io::BufRead, net::TcpListener};
+        let _guard = crate::native_mods::TEST_STATE.lock().unwrap();
         let directory =
             std::env::temp_dir().join(format!("horizon-rust-length-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
@@ -937,8 +938,14 @@ mod tests {
             let url = format!("http://{}/archive", listener.local_addr().unwrap());
             let server = std::thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
-                let mut request = [0; 2048];
-                stream.read(&mut request).unwrap();
+                let mut request = String::new();
+                let mut reader = std::io::BufReader::new(&mut stream);
+                while reader.read_line(&mut request).unwrap() != 0 {
+                    if request.ends_with("\r\n\r\n") {
+                        break;
+                    }
+                }
+                drop(reader);
                 stream
                     .write_all(
                         b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nrust",

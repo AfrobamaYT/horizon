@@ -46,6 +46,10 @@ mod wasm_internals;
 
 pub use isolate::LeftOut;
 
+// Settings and logs are shared by native-build tests and the toolchain HTTP fixture.
+#[cfg(test)]
+pub(crate) static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
 const STAGING: &str = "embedded-inventory-packages-v1";
@@ -2931,13 +2935,12 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
-    pub(super) static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     use super::*;
 
     #[test]
     fn isolation_keeps_cancellation_exact_after_a_retry() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -2964,7 +2967,7 @@ mod tests {
 
     #[test]
     fn isolation_bounds_recompiles_and_keeps_the_failure() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let mut attempts = 0;
         let result = isolated(
             |skip| {
@@ -4174,7 +4177,7 @@ mod tests {
     /// and no instance is edited or version selected.
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         backend::Settings::load().allow_native_mods().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
@@ -4220,7 +4223,7 @@ mod tests {
     #[test]
     fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
         use std::net::TcpListener;
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         let original = backend::Settings::load();
         let mut settings = backend::Settings::load();
         settings.native_mods_allowed_at = None;
@@ -4288,7 +4291,7 @@ mod tests {
     /// one log file.
     #[test]
     fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         backend::Settings::load().allow_native_mods().unwrap();
         clear_log().unwrap();
         append_log("the last build's output").unwrap();
@@ -4797,7 +4800,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_build_smart_app_control_blocked_says_how_to_build() {
-        let _guard = LOG_TEST.lock().unwrap();
+        let _guard = TEST_STATE.lock().unwrap();
         clear_log().unwrap();
         // cargo's output on Windows 11 25H2 with Smart App Control on (the report in #5911).
         let mut cmd = Command::new("sh");
