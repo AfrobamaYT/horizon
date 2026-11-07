@@ -611,7 +611,7 @@ impl Game<'_> {
         self.falling.for_each_mut(|f| {
             super::entity::assign_stored_id(next, &mut f.id, Some(&f.attachment_lifetime));
         });
-        self.creatures.projectiles.iter_mut().for_each(|p| {
+        self.creatures.projectiles.for_each_mut(|p| {
             super::entity::assign_stored_id(next, &mut p.id, Some(&p.attachment_lifetime));
         });
         self.tridents.iter_mut().for_each(|t| {
@@ -1175,7 +1175,7 @@ mod tests {
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.summon_with_nbt("minecraft:ender_dragon", [1.0, 70.0, 1.0], "{}")
                 .unwrap();
-            let mut dragon = game.dragon.take().unwrap();
+            let mut dragon = game.dragon.extract().unwrap();
             dragon.id = 0;
             assert!(game.dragon.install(dragon).is_ok());
             for _ in 0..2 {
