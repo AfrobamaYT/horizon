@@ -684,3 +684,6 @@ mod content_tests {
         assert_eq!(last.last.map(|t| t.len()), Some(5000));
     }
 }
+
+/// Horizon recipe viewer transfer channel.
+pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";

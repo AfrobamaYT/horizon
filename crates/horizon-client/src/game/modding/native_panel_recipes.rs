@@ -648,6 +648,22 @@ impl Game<'_> {
                 }
             }
         }
+        if let Some((key, fallback)) = self.panel.transfer_warning {
+            let warning = horizon_client::lang::get(key).unwrap_or_else(|| fallback.into());
+            let lines = [(
+                horizon_client::text::Text::literal(warning.clone()).resolve_legacy(),
+                rgba(255, 100, 100, 255),
+            )];
+            let (x, y, w, h) = Self::tooltip_geometry(
+                &self.gui.atlas,
+                &lines,
+                cursor,
+                (batch.width, batch.height),
+                [0.0; 2],
+            );
+            horizon_client::widgets::record(&warning, [x, y, w, h], false);
+            self.draw_tooltip_lines(batch, &lines, cursor.0, cursor.1);
+        }
     }
 
     /// A fluid's well, no clicks: its slot, the sprite or colour in it and
