@@ -6141,3 +6141,6 @@ include!(concat!(env!("OUT_DIR"), "/mod_api_exports_root.rs"));
 
 #[cfg(test)]
 mod brewing_dispatch_tests;
+
+#[cfg(test)]
+mod item_model_dispatch_tests;
