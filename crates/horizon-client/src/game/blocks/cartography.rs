@@ -16,6 +16,7 @@ use std::{
 
 /// The level's maps as a menu sees them (`ContainerLevelAccess`): the
 /// states of the maps the click can reach, and the copies it makes.
+#[derive(Clone)]
 pub(super) struct LevelMaps {
     states: RefCell<HashMap<i32, (bool, u8)>>,
     next_id: Cell<i32>,
@@ -24,6 +25,16 @@ pub(super) struct LevelMaps {
 }
 
 impl Maps for LevelMaps {
+    fn with_staged(&self, edit: &mut dyn FnMut(&dyn Maps) -> bool) -> bool {
+        let staged = self.clone();
+        if !edit(&staged) {
+            return false;
+        }
+        self.states.replace(staged.states.into_inner());
+        self.next_id.set(staged.next_id.get());
+        self.made.replace(staged.made.into_inner());
+        true
+    }
     fn state(&self, id: i32) -> Option<(bool, u8)> {
         self.states.borrow().get(&id).copied()
     }

@@ -466,6 +466,12 @@ impl TryIntoEngine for ApiStack {
         } else {
             1
         };
+        if !horizon_world::item_template::durability_allows_stack_size(
+            stack.carries_component(Some(definition), "minecraft:max_damage"),
+            i64::from(maximum),
+        ) {
+            return Err(StackWriteError::StackableDamageable);
+        }
         if stack.count > maximum {
             return Err(StackWriteError::CountExceeded { maximum });
         }
@@ -772,39 +778,53 @@ pub(crate) fn install_stack_hooks() {
     });
 }
 
-struct ApiSlot<'a>(&'a mut dyn crate::menu::SlotView);
+struct ApiSlot<'a> {
+    engine: &'a mut dyn crate::menu::SlotView,
+    invalid: bool,
+}
 impl mod_api::menu::SlotView for ApiSlot<'_> {
     fn item(&self) -> Option<ApiStack> {
-        self.0.item().and_then(|s| s.try_into_api().ok())
+        self.engine.item().and_then(|s| s.try_into_api().ok())
     }
     fn may_place(&self, stack: &ApiStack) -> bool {
         stack
-            .try_into_engine(self.0.items())
-            .is_ok_and(|s| self.0.may_place(&s))
+            .try_into_engine(self.engine.items())
+            .is_ok_and(|s| self.engine.may_place(&s))
     }
     fn may_pickup(&self) -> bool {
-        self.0.may_pickup()
+        self.engine.may_pickup()
     }
     fn allow_modification(&self) -> bool {
-        self.0.allow_modification()
+        self.engine.allow_modification()
     }
     fn safe_insert(&mut self, stack: Option<ApiStack>, count: u32) -> Option<ApiStack> {
         let value = match stack
             .as_ref()
-            .map(|s| s.try_into_engine(self.0.items()))
+            .map(|s| s.try_into_engine(self.engine.items()))
             .transpose()
         {
             Ok(s) => s,
-            Err(_) => return stack,
+            Err(_) => {
+                self.invalid = true;
+                return stack;
+            }
         };
-        self.0
-            .safe_insert(value, count)
-            .and_then(|s| s.try_into_api().ok())
+        match self.engine.safe_insert(value, count).try_into_api() {
+            Ok(value) => value,
+            Err(_) => {
+                self.invalid = true;
+                None
+            }
+        }
     }
     fn safe_take(&mut self, count: u32, max: u32) -> Option<ApiStack> {
-        self.0
-            .safe_take(count, max)
-            .and_then(|s| s.try_into_api().ok())
+        match self.engine.safe_take(count, max).try_into_api() {
+            Ok(value) => value,
+            Err(_) => {
+                self.invalid = true;
+                None
+            }
+        }
     }
 }
 /// Adapt a synchronous slot event; engine slot rules still own every write.
@@ -837,26 +857,57 @@ pub(crate) fn stacked_on_other(
     let Ok(mut carried) = event.carried.0.try_into_api() else {
         return;
     };
-    let mut slot = ApiSlot(event.clicked);
-    let mut api = mod_api::menu::StackedOnOther {
-        player: event.player,
-        player_entity_id: event.player_entity_id,
-        slot: event.slot,
-        container: event.container,
-        container_slot: event.container_slot,
-        primary: event.primary,
-        carried: mod_api::menu::CarriedAccess(&mut carried),
-        clicked: &mut slot,
-        cancellation_result: event.cancellation_result,
+    let mut candidate_canceled = *canceled;
+    let mut cancellation_result = event.cancellation_result;
+    let mut admitted = None;
+    let mut run = |clicked: &mut dyn crate::menu::SlotView| {
+        let mut slot = ApiSlot {
+            engine: clicked,
+            invalid: false,
+        };
+        let mut api = mod_api::menu::StackedOnOther {
+            player: event.player,
+            player_entity_id: event.player_entity_id,
+            slot: event.slot,
+            container: event.container,
+            container_slot: event.container_slot,
+            primary: event.primary,
+            carried: mod_api::menu::CarriedAccess(&mut carried),
+            clicked: &mut slot,
+            cancellation_result,
+        };
+        mod_api::dispatch_item_stacked_on_other(
+            &mod_api::OwningLoop::new(context),
+            &mut api,
+            &mut candidate_canceled,
+        );
+        cancellation_result = api.cancellation_result;
+        if slot.invalid {
+            return false;
+        }
+        let Ok(slot_value) = slot.engine.item().try_into_api() else {
+            return false;
+        };
+        if slot_value.try_into_engine(slot.engine.items()).is_err() {
+            return false;
+        }
+        match carried
+            .as_ref()
+            .map(|stack| stack.try_into_engine(slot.engine.items()))
+            .transpose()
+        {
+            Ok(value) => {
+                admitted = Some(value);
+                true
+            }
+            Err(_) => false,
+        }
     };
-    mod_api::dispatch_item_stacked_on_other(&mod_api::OwningLoop::new(context), &mut api, canceled);
-    event.cancellation_result = api.cancellation_result;
-    if let Ok(value) = carried
-        .as_ref()
-        .map(|s| s.try_into_engine(slot.0.items()))
-        .transpose()
-    {
-        *event.carried.0 = value;
+    let accepted = event.clicked.with_staged(&mut run);
+    if accepted {
+        *event.carried.0 = admitted.expect("an accepted cursor");
+        event.cancellation_result = cancellation_result;
+        *canceled = candidate_canceled;
     }
 }
 
@@ -1509,6 +1560,10 @@ impl super::GameLevel<'_> {
 }
 
 #[cfg(test)]
+#[path = "api_values/stacked_slot_tests.rs"]
+mod stacked_slot_tests;
+
+#[cfg(test)]
 mod block_entity_snapshot_tests {
     use super::*;
     #[test]
@@ -1611,7 +1666,7 @@ mod mutable_output_tests {
 mod stack_limit_tests {
     use super::*;
 
-    fn catalog() -> Items {
+    pub(super) fn catalog() -> Items {
         prepare_stack_boundary_tests();
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -1705,6 +1760,51 @@ mod stack_limit_tests {
                 reason: mod_api::StackError::InvalidDamage
             })
         );
+    }
+
+    #[test]
+    fn durability_and_stackability_are_mutually_exclusive() {
+        let items = catalog();
+        let mut stick = ApiStack::of(mod_api::__private::item_key("minecraft:stick").unwrap());
+        stick
+            .set_components([(JavaString::from("minecraft:max_damage"), Tag::Int(10))].into())
+            .unwrap();
+        assert_eq!(
+            stick.try_into_engine(&items),
+            Err(StackWriteError::StackableDamageable)
+        );
+        let mut sword = ApiStack::of(mod_api::__private::item_key("minecraft:iron_sword").unwrap());
+        sword
+            .set_components([(JavaString::from("minecraft:max_stack_size"), Tag::Int(2))].into())
+            .unwrap();
+        assert_eq!(
+            sword.try_into_engine(&items),
+            Err(StackWriteError::StackableDamageable)
+        );
+        stick
+            .set_components(
+                [
+                    (JavaString::from("minecraft:max_damage"), Tag::Int(10)),
+                    (JavaString::from("minecraft:max_stack_size"), Tag::Int(1)),
+                ]
+                .into(),
+            )
+            .unwrap();
+        assert!(stick.try_into_engine(&items).is_ok());
+        sword
+            .set_components(
+                [
+                    (JavaString::from("minecraft:max_stack_size"), Tag::Int(2)),
+                    (
+                        JavaString::from("!minecraft:max_damage"),
+                        Tag::Compound(Default::default()),
+                    ),
+                ]
+                .into(),
+            )
+            .unwrap();
+        sword.clear_damage();
+        assert!(sword.try_into_engine(&items).is_ok());
     }
 
     #[test]

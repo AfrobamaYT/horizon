@@ -82,6 +82,7 @@ impl KnownRecipes for &[&str] {
 }
 
 /// What a menu needs to know about items and recipes.
+#[derive(Clone, Copy)]
 pub struct Env<'a> {
     /// UUID of the player operating this menu, when a player is available.
     pub player: Option<u128>,
@@ -114,6 +115,8 @@ pub struct Env<'a> {
 
 /// The maps of the level a menu is in.
 pub trait Maps {
+    /// Stage derived maps and id reservations with a menu edit.
+    fn with_staged(&self, edit: &mut dyn FnMut(&dyn Maps) -> bool) -> bool;
     /// `MapItem.getSavedData`: whether map `id` is locked, and its scale;
     /// None when the level has no such map.
     fn state(&self, id: i32) -> Option<(bool, u8)>;
@@ -314,6 +317,37 @@ struct MenuSlotView<'a, 'e> {
 }
 
 impl SlotView for MenuSlotView<'_, '_> {
+    fn with_staged(&mut self, edit: &mut dyn FnMut(&mut dyn SlotView) -> bool) -> bool {
+        let mut menu = self.menu.clone();
+        let mut run = |maps: Option<&dyn Maps>, maker: Option<&dyn crate::merchant::MapMaker>| {
+            let trade = self.env.trade.map(|trade| crate::merchant::TradeEnv {
+                maps: maker,
+                ..*trade
+            });
+            let env = Env {
+                maps,
+                trade: trade.as_ref(),
+                ..*self.env
+            };
+            edit(&mut MenuSlotView {
+                menu: &mut menu,
+                env: &env,
+                slot: self.slot,
+            })
+        };
+        let mut with_maps = |maker: Option<&dyn crate::merchant::MapMaker>| match self.env.maps {
+            Some(maps) => maps.with_staged(&mut |maps| run(Some(maps), maker)),
+            None => run(None, maker),
+        };
+        let accepted = match self.env.trade.and_then(|trade| trade.maps) {
+            Some(maker) => maker.with_staged(&mut |maker| with_maps(Some(maker))),
+            None => with_maps(None),
+        };
+        if accepted {
+            *self.menu = menu;
+        }
+        accepted
+    }
     fn items(&self) -> &crate::items::Items {
         self.env.items
     }
@@ -390,6 +424,7 @@ const RESULT: usize = 3;
 const CONTAINER_MAX: u32 = 99;
 const OFFHAND: usize = 40;
 
+#[derive(Clone)]
 pub struct Menu {
     kind: Kind,
     registry_id: Option<Box<str>>,

@@ -121,6 +121,8 @@ pub enum StackWriteError {
         /// The record-level normalization refusal.
         reason: StackError,
     },
+    /// A stack carries both maximum durability and a stack limit above one.
+    StackableDamageable,
 }
 
 impl crate::NoBackend for StackWriteError {
