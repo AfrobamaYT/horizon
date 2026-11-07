@@ -6525,16 +6525,16 @@ impl Game<'_> {
             .ui
             .rules
             .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS);
-        let mut f = self.falling.remove(i);
+        let mut f = self.falling.extract(self.falling[i].join).unwrap();
         let original = f.clone();
         match self.fall_step(&mut f, entity_drops, entities) {
-            Ok(FallStep::Falling) => self.falling.insert(i.min(self.falling.len()), f),
+            Ok(FallStep::Falling) => self.falling.put_back(i.min(self.falling.len()), f),
             Ok(FallStep::Gone) => {}
             Ok(FallStep::Dropped(at)) => self.drop_falling_block(f.state, at),
             Ok(FallStep::Landed(pos)) => self.finish_falling_block(f, pos),
             Err(error) => {
                 horizon_client::join_seq::store_back(&mut f, original);
-                self.falling.insert(i.min(self.falling.len()), f);
+                self.falling.put_back(i.min(self.falling.len()), f);
                 return Err(error);
             }
         }

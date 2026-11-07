@@ -488,6 +488,18 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
         }
     }
 
+    /// Temporarily lift one numbered owner without treating it as a retirement.
+    pub fn extract(&mut self, join: JoinSeq) -> Option<T> {
+        let index = self.locate(join)?;
+        Some(self.0.remove(index))
+    }
+
+    /// Return an extracted owner at its former position, preserving its number.
+    /// If other mutations shortened the list, restore it at the end instead.
+    pub fn put_back(&mut self, index: usize, entity: T) {
+        self.0.insert(index.min(self.0.len()), entity);
+    }
+
     fn number(entity: &mut T) {
         if !entity.join_seq().is_joined() {
             entity.set_join_seq(JoinSeq::next());
@@ -883,6 +895,38 @@ mod resident_tests {
     crate::impl_joined!(Numbered);
 
     use std::{cell::Cell, rc::Rc};
+
+    #[test]
+    fn extraction_keeps_identity_and_restores_the_original_position() {
+        let mut list: super::JoinList<_> = (1..=3).map(Numbered::new).collect();
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        assert!(list.extract(JoinSeq::UNJOINED).is_none());
+        let mut owner = list.extract(joins[1]).unwrap();
+        assert_eq!(owner.value, 2);
+        assert_eq!(list.locate(joins[1]), None);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 3]);
+        owner.value = 20;
+        list.put_back(1, owner);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 20, 3]);
+        for (index, join) in joins.into_iter().enumerate() {
+            assert_eq!(list.locate(join), Some(index));
+        }
+    }
+
+    #[test]
+    fn put_back_clamps_a_position_invalidated_by_other_removals() {
+        let mut list: super::JoinList<_> = (1..=3).map(Numbered::new).collect();
+        let join = list[2].join;
+        let owner = list.extract(join).unwrap();
+        list.remove(0);
+        list.put_back(2, owner);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(list.locate(join), Some(1));
+        let owner = list.extract(join).unwrap();
+        list.clear();
+        list.put_back(usize::MAX, owner);
+        assert_eq!(list.locate(join), Some(0));
+    }
 
     #[test]
     fn resident_lookup_tracks_numbered_owners_across_membership_changes() {

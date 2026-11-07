@@ -982,13 +982,13 @@ impl Game<'_> {
         let Some(i) = self.mobs.iter().position(|m| m.id == id) else {
             return Ok(());
         };
-        let mut m = self.mobs.remove(i);
+        let mut m = self.mobs.extract(self.mobs[i].join).unwrap();
         let mut events = Vec::new();
         {
             let w = self.mob_world_base(&[]);
             horizon_client::mobs::ai::ambient_sound(&mut m, &w, &mut events);
         }
-        self.mobs.insert(i, m);
+        self.mobs.put_back(i, m);
         self.handle_mob_events(events)
     }
     /// A mob a bucket emptied: `setFromBucket` keeps it, then it calls out.
