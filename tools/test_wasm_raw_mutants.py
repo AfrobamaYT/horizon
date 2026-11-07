@@ -16,6 +16,7 @@ MUTANTS = [
         ("    if let Some((&id, _)) = expected.first_key_value() {", "    expected.clear();\n    if let Some((&id, _)) = expected.first_key_value() {"),
     ]),
     ("missing", [('exports.func(&interface, "fire")', 'exports.func(&interface, "fallback")')]),
+    ("missing-id", [("    if let Some((&id, _)) = expected.first_key_value() {\n        return Err(Refusal::UnfilledPoint { point: id.into() });\n    }\n", "")]),
     ("priority", [(".ordered(listener.priority, name)", "")]),
 ]
 

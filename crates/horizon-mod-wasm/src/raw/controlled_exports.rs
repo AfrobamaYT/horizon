@@ -267,6 +267,7 @@ fn controlled_load_and_registration() {
         ("unknown", vec![("b", "wire")], false),
         ("duplicate", vec![("a", "wire"), ("a", "wire")], false),
         ("missing", vec![("a", "wire")], true),
+        ("missing-id", vec![], false),
     ];
     let filter = std::env::var("HORIZON_CONTROLLED_RAW_CASE").ok();
     for (case, names, missing) in cases {
@@ -288,6 +289,7 @@ fn controlled_load_and_registration() {
                 "wire" => matches!(why, Refusal::ChangedInternal { .. }),
                 "unknown" | "duplicate" => matches!(why, Refusal::UndeclaredPoint { .. }),
                 "missing" => matches!(why, Refusal::UnfilledPoint { .. }),
+                "missing-id" => matches!(&why, Refusal::UnfilledPoint { point } if point == "a"),
                 _ => unreachable!(),
             },
             "{case}: {why:?}"
