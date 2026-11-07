@@ -163,8 +163,10 @@ impl Game<'_> {
                 .as_ref()
                 .is_some_and(|r| r.level_player(id).is_some())
         });
-        if let Some(boat) = self.boats.iter_mut().find(|b| b.id == vehicle_id) {
-            boat.paddle_controller = player_controls;
+        if let Some(i) = self.boats.iter().position(|b| b.id == vehicle_id) {
+            self.boats.update(i, |boat| {
+                boat.paddle_controller = player_controls;
+            });
         }
 
         for m in &mut self.mobs {
@@ -448,18 +450,20 @@ impl Game<'_> {
             m.velocity = Vec3::ZERO;
             return;
         }
-        let Some(b) = self
+        let Some(i) = self
             .riding
             .filter(|&id| self.controls_boat(id))
-            .and_then(|id| self.boats.iter_mut().find(|b| b.id == id))
+            .and_then(|id| self.boats.iter().position(|b| b.id == id))
         else {
             return;
         };
-        b.previous = at;
-        b.position = at;
-        b.yaw = yaw;
-        b.previous_yaw = yaw;
-        b.velocity = Vec3::ZERO;
+        self.boats.update(i, |b| {
+            b.previous = at;
+            b.position = at;
+            b.yaw = yaw;
+            b.previous_yaw = yaw;
+            b.velocity = Vec3::ZERO;
+        });
     }
 
     /// `AbstractBoat.handleEntityEvent`: 71 and 72, a bubble column dragging
@@ -486,8 +490,8 @@ impl Game<'_> {
             if !driven {
                 // `AbstractBoat.tick`: the non-authoritative copy carries no
                 // cached motion into the next time this player drives it.
-                self.boats[i].velocity = Vec3::ZERO;
-                self.boats[i].delta_rotation = 0.0;
+                self.boats.update(i, |b| b.velocity = Vec3::ZERO);
+                self.boats.update(i, |b| b.delta_rotation = 0.0);
                 self.refresh_boat_status(i);
             }
             let touches = self.boat_bubble_columns(i);
@@ -502,13 +506,11 @@ impl Game<'_> {
                     }
                 }
             }
-            self.boats[i].tick_bubble_wobble();
+            self.boats.update(i, super::boats::Boat::tick_bubble_wobble);
             if !driven {
-                Self::tick_boat_paddles(
-                    &mut self.boats[i],
-                    &mut self.audio,
-                    &mut self.world.random,
-                );
+                self.boats.update(i, |b| {
+                    Self::tick_boat_paddles(b, &mut self.audio, &mut self.world.random)
+                });
             }
         }
     }

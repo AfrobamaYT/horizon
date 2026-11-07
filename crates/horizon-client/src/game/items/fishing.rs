@@ -522,8 +522,10 @@ impl Game<'_> {
                 t.velocity = pulled(t.velocity);
             } else if let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) {
                 a.velocity = pulled(a.velocity);
-            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                b.velocity = pulled(b.velocity);
+            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                self.boats.update(i, |b| {
+                    b.velocity = pulled(b.velocity);
+                });
             } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
                 // `AbstractMinecart` is pickable, so `pullEntity` moves it too.
                 c.velocity = pulled(c.velocity);
