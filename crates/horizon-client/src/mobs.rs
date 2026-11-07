@@ -5872,6 +5872,20 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn absorption_refills_on_equal_and_weaker_adds() {
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 1, false, true);
+        m.absorption = 0.0;
+        assert!(!m.add_effect_with("absorption", 100, 1, false, true));
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 0.0;
+        m.add_effect("minecraft:absorption", 50, 0);
+        assert_eq!(m.absorption, 4.0);
+        assert_eq!(m.extra.effects[0].amplifier, 1);
+        assert_eq!(m.extra.effects[0].duration, 200);
+    }
+
+    #[test]
     fn absorption_downgrade_keeps_spent_hearts() {
         // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
         // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
