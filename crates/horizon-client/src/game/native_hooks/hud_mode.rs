@@ -13,3 +13,55 @@ impl Game<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mod_api::{ClientHost, ClientTickPreEvent, Hooks, HudMode, ModEntry, testing::with_mods};
+
+    struct ThreeState;
+    #[mod_api::__subscriptions]
+    impl Hooks for ThreeState {
+        fn client_tick_pre(&self, host: &mut dyn ClientHost, _: &mut ClientTickPreEvent<'_>) {
+            host.set_hud_mode(match host.hud_mode() {
+                HudMode::AllVisible => HudMode::NoHud,
+                HudMode::NoHud => HudMode::AllHidden,
+                _ => HudMode::AllVisible,
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn hud_mode_game_bridge_respects_client_and_guest_guards() {
+        let mods: mod_api::Mods = vec![ModEntry::new("three-state", Box::new(ThreeState))].into();
+        with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                for role in [
+                    ExecutionRole::IntegratedServer,
+                    ExecutionRole::DedicatedServer,
+                ] {
+                    game.options.execution_role = role;
+                    game.set_hud_mode(HudMode::NoHud);
+                    assert_eq!(game.hud_mode(), HudMode::AllVisible);
+                }
+                game.options.execution_role = ExecutionRole::Client;
+                for mode in [HudMode::NoHud, HudMode::AllHidden, HudMode::AllVisible] {
+                    game.fire_client_tick_pre();
+                    assert_eq!(game.hud_mode(), mode);
+                }
+                game.lan_acting = Some(17);
+                game.fire_client_tick_pre();
+                assert_eq!(game.hud_mode(), HudMode::AllVisible);
+                game.lan_acting = None;
+                game.fire_client_tick_pre();
+                assert_eq!(game.hud_mode(), HudMode::NoHud);
+                assert!(game.ui.hands_drawn(false, false, true, true, false));
+                game.toggle_hide_gui();
+                assert_eq!(game.hud_mode(), HudMode::AllVisible);
+                game.toggle_hide_gui();
+                assert_eq!(game.hud_mode(), HudMode::AllHidden);
+            });
+        });
+    }
+}
