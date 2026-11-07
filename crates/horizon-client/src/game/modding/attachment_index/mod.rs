@@ -20,6 +20,30 @@ mod painting_tests;
 mod player_tests;
 
 impl Game<'_> {
+    pub(in crate::game) fn attachment_query(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> mod_api::AttachmentBatch {
+        let Some(index) = self.attachment_indexes.get(&self.dim) else {
+            return horizon_mod_runtime::attachments::AttachmentBatch::empty().into();
+        };
+        let rows = index.lock().unwrap().snapshot_named(namespace, name);
+        horizon_mod_runtime::attachments::AttachmentBatch::new(rows).into()
+    }
+
+    pub(in crate::game) fn attachment_validate_write(
+        &self,
+        token: mod_api::AttachmentWriteToken,
+    ) -> Result<(), mod_api::AttachmentRowError> {
+        let index = self
+            .attachment_indexes
+            .get(&self.dim)
+            .ok_or(mod_api::AttachmentRowError::StaleHolder)?;
+        let result = token.validate(&index.lock().unwrap());
+        result
+    }
+
     /// Publish saved contents only when an authoritative entity owns their lifetime.
     pub(super) fn bind_saved_entity_attachments(&mut self, id: u32, slot: &mut AttachmentLifetime) {
         if !self.native_authoritative() {
