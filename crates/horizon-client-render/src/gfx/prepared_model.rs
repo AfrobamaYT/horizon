@@ -433,6 +433,27 @@ pub fn cap_prepared_instance_slots(slots: u64) {
     SLOT_CAP.store(slots, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// `u64::MAX` means the test has not named an uploaded generation.
+#[cfg(feature = "test-support")]
+static UPLOADED_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Pretend prepared geometry for `generation` is resident. `None` clears it.
+#[cfg(feature = "test-support")]
+pub fn set_test_prepared_generation(generation: Option<u64>) {
+    UPLOADED_GENERATION.store(
+        generation.unwrap_or(u64::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The generation `set_test_prepared_generation` published, if any.
+#[cfg(feature = "test-support")]
+pub fn test_prepared_generation() -> Option<u64> {
+    let generation = UPLOADED_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+    (generation != u64::MAX).then_some(generation)
+}
+
 pub fn prepared_instance_room_for(already: u64, incoming: usize, max_buffer: u64) -> usize {
     let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
     let device = max_instance_slots(stride, max_buffer);

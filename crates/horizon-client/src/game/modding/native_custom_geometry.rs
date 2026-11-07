@@ -92,12 +92,16 @@ impl Game<'_> {
             .standalone_geometry
             .instance_slot(fields.slot)
             .ok_or(InstanceError::Model(mod_api::ModelError::UnknownModel))?;
+        let uploaded = self
+            .renderer
+            .as_ref()
+            .and_then(|renderer| renderer.prepared_generation());
+        #[cfg(test)]
+        let uploaded = uploaded.or_else(horizon_client::gfx::test_prepared_generation);
         let gpu = super::native_block_entity_draw::prepared_route(
             self.pack_ids.is_some(),
             !self.native_shaders.picked.is_empty(),
-            self.renderer
-                .as_ref()
-                .and_then(|renderer| renderer.prepared_generation()),
+            uploaded,
             fields.generation,
         );
         draw.submit_model(
@@ -177,9 +181,12 @@ impl Game<'_> {
 }
 #[cfg(test)]
 mod tests {
+    use super::super::host::draw::GameWorldDrawContext;
     use super::*;
     use glam::{DVec3, Mat4, Quat, Vec3};
-    use mod_api::{Identifier, LightCoords, ModelInstance, Overlay};
+    use mod_api::{
+        Identifier, InstanceError, LightCoords, ModelInstance, Overlay, WorldDrawContext,
+    };
 
     fn rows(local: Mat4) -> [f32; 12] {
         let column = local.to_cols_array_2d();
@@ -199,33 +206,84 @@ mod tests {
         ]
     }
 
+    fn context<'a, 'g>(
+        game: &'a Game<'g>,
+        draw: &'a mut WorldGeometry,
+    ) -> GameWorldDrawContext<'a, 'g> {
+        GameWorldDrawContext {
+            game,
+            surface: draw,
+        }
+    }
+
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            horizon_client::gfx::cap_prepared_instance_slots(u64::MAX);
+            horizon_client::gfx::set_test_prepared_generation(None);
+        }
+    }
+
+    fn first_colour(pixels: &[u8]) -> [u8; 4] {
+        pixels
+            .chunks_exact(4)
+            .find(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
+            .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
+            .unwrap_or([0; 4])
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn draw_model_instances_matches_cpu_pixels() {
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
             let model = game
                 .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
                 .unwrap();
+            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            horizon_client::gfx::cap_prepared_instance_slots(8);
             let local = Mat4::from_scale(Vec3::splat(1.0));
             let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
             let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
-            let instance = ModelInstance::new(
+            let lit = ModelInstance::new(
                 origin.to_array(),
                 rows(local),
                 0xFF80_C040,
                 LightCoords::new(3, 15).unwrap(),
                 Overlay::NONE,
             );
+            let hurt = ModelInstance::new(
+                origin.to_array(),
+                rows(local),
+                0xFFFF_FFFF,
+                LightCoords::FULL_BRIGHT,
+                Overlay::new(0, true).unwrap(),
+            );
             let mut draw = WorldGeometry::default();
             draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
-            game.native_world_draw_model_instances(&mut draw, model, &[instance])
+            context(game, &mut draw)
+                .draw_model_instances(model, &[lit, hurt])
                 .unwrap();
-            let copy = draw.copy(0);
             let mut entities = Vec::new();
             game.commit_model_instances(&mut draw, camera, &mut entities);
-            assert!(!entities.is_empty(), "the public call drew nothing");
+            let staged = game.prepared_model_draws.borrow();
+            assert_eq!(staged.len(), 1, "the lit copy was not instanced");
+            assert_eq!(
+                staged[0].cpu_vertices, 0,
+                "cpu overlay vertices must follow the cut"
+            );
+            let instance = staged[0].instance;
+            let slot = staged[0].slot;
+            let uploaded = staged[0].generation;
+            drop(staged);
+            assert!(!entities.is_empty(), "the overlay copy was not baked");
+            assert!(
+                entities.iter().all(|vertex| vertex.layer == 1),
+                "overlay copies must follow the instanced prefix"
+            );
             let atlas = &game.gui.atlas;
             let pixels = atlas.pixels().to_vec();
             let view = Mat4::from_scale_rotation_translation(
@@ -233,8 +291,32 @@ mod tests {
                 Quat::IDENTITY,
                 Vec3::new(-0.55, -0.85, 0.5),
             );
+            let faces = game
+                .standalone_geometry
+                .faces(slot)
+                .expect("prepared faces");
+            let mut cpu_vertices = Vec::new();
+            super::super::minecarts::emit_model_faces(
+                faces
+                    .iter()
+                    .copied()
+                    .map(|face| (face, world_geometry::pack_light(lit.light))),
+                world_geometry::row_major_3x4(lit.transform),
+                true,
+                |index| (index >= 0).then_some(lit.tint & 0xFF_FFFF),
+                &mut cpu_vertices,
+            );
+            let shift = (origin - camera).as_vec3();
+            let alpha = lit.tint >> 24;
+            for vertex in &mut cpu_vertices {
+                vertex.pos = (Vec3::from(vertex.pos) + shift).to_array();
+                if alpha != 255 {
+                    let scaled = (vertex.color >> 24) * alpha / 255;
+                    vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
+                }
+            }
             let cpu = horizon_client::gfx::entity_pixel_test::render(
-                &entities,
+                &cpu_vertices,
                 [atlas.width, atlas.height],
                 &pixels,
                 view,
@@ -246,18 +328,10 @@ mod tests {
                 horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
                     vertices: &vertices,
                     ranges,
-                    uploaded: copy.generation,
-                    requested: copy.generation,
-                    slot: copy.slot,
-                    instances: std::slice::from_ref(
-                        &super::super::native_block_entity_draw::prepared_instance(
-                            world_geometry::row_major_3x4(copy.transform),
-                            origin,
-                            camera,
-                            copy.tint,
-                            copy.light,
-                        ),
-                    ),
+                    uploaded,
+                    requested: uploaded,
+                    slot,
+                    instances: std::slice::from_ref(&instance),
                     per_copy: false,
                     hdr: false,
                     atlas_size: [atlas.width, atlas.height],
@@ -269,20 +343,65 @@ mod tests {
             let worst = cpu
                 .iter()
                 .zip(gpu.iter())
-                .map(|(cpu, gpu)| cpu.abs_diff(*gpu))
+                .map(|(left, right)| left.abs_diff(*right))
                 .max()
                 .unwrap_or(0);
-            assert!(
-                worst <= 2,
-                "public instance and cpu pixels differed by {worst}"
-            );
-            assert!(
-                cpu.as_chunks::<4>()
-                    .0
-                    .iter()
-                    .any(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0),
-                "the model drew no colour"
-            );
+            let cpu_px = first_colour(&cpu);
+            let gpu_px = first_colour(&gpu);
+            eprintln!("worst {worst} cpu {cpu_px:?} gpu {gpu_px:?}");
+            assert!(worst <= 2, "instanced and cpu pixels differed by {worst}");
+            assert!(cpu_px != [0; 4], "the model drew no colour");
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn draw_model_instances_refuses_offscreen_and_over_budget() {
+        let _fixture =
+            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let model = game
+                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+                .unwrap();
+            game.view_frustum = Some(horizon_client::gfx::test_frustum([
+                glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+            ]));
+            let mut draw = WorldGeometry::default();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0, 0.0]);
+            let near = ModelInstance::at([1.0, 0.0, 0.0], 0xFFFF_FFFF);
+            let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
+            {
+                let mut ctx = context(game, &mut draw);
+                ctx.draw_model_instances(model, &[far, near]).unwrap();
+                assert_eq!(
+                    ctx.usage().instances_used,
+                    1,
+                    "an offscreen copy must not count"
+                );
+                let mut bad = near;
+                bad.light.block = 16;
+                assert_eq!(
+                    ctx.draw_model_instances(model, &[near, bad]),
+                    Err(InstanceError::InvalidLight)
+                );
+                assert_eq!(
+                    ctx.usage().instances_used,
+                    1,
+                    "a refused batch must draw nothing"
+                );
+                ctx.draw_model_instances(model, &vec![near; 16_383])
+                    .unwrap();
+                assert_eq!(
+                    ctx.draw_model_instances(model, &[near]),
+                    Err(InstanceError::CapacityExceeded)
+                );
+                assert_eq!(ctx.usage().instances_used, 16_384);
+            }
         });
     }
 }
