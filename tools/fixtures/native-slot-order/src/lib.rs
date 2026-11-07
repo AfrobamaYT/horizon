@@ -11,27 +11,22 @@ pub fn head(_: &mut Game<'_>, _: &mut __OnTickRateChangedRaw<'_>) {
 }
 pub fn high(game: &mut Game<'_>) {
     HIGH.store(true, Ordering::SeqCst);
-    eprintln!(
-        "SLOT ORDER HIGH ticks_until_autosave={}",
-        game.ticks_until_autosave
-    );
+    let value = game.ticks_until_autosave;
+    eprintln!("SLOT ORDER HIGH ticks_until_autosave={value}");
 }
 pub fn low(game: &mut Game<'_>) {
     assert!(HIGH.swap(false, Ordering::SeqCst), "priority order");
     assert_eq!(game.ticks_until_autosave, 319);
-    eprintln!(
-        "SLOT ORDER LOW APPLIED ticks_until_autosave={}",
-        game.ticks_until_autosave
-    );
+    eprintln!("SLOT ORDER LOW APPLIED ticks_until_autosave=319");
 }
 pub fn value(_: (), value: i64) -> i64 {
     eprintln!("SLOT ORDER MODIFY_VALUE: {value} -> {}", value + 7);
     value + 7
 }
-pub fn wrap<'g>(
+pub fn wrap<'g, A>(
     r: &Game<'g>,
-    args: &mut __Sce2200363285b5c4Args,
-    original: &mut dyn FnMut(&Game<'g>, &mut __Sce2200363285b5c4Args) -> i64,
+    args: &mut A,
+    original: &mut dyn FnMut(&Game<'g>, &mut A) -> i64,
 ) -> i64 {
     let value = original(r, args);
     eprintln!("SLOT ORDER WRAP_CALL: {value} -> {}", value + 11);
