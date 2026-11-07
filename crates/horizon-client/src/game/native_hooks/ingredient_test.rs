@@ -31,7 +31,7 @@ impl Game<'_> {
         for name in candidates {
             let (name, _) = self.items().items.get_key_value(name).ok_or(UnknownItem)?;
             let key = mod_api::__private::item_key(name).ok_or(UnknownItem)?;
-            let stack = ItemStack::new(name.clone(), 1);
+            let stack = ItemStack::new(name, 1);
             if ingredient.test_in(&self.loop_context, &stack) {
                 accepted.push(key);
             }
