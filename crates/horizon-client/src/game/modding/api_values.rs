@@ -1697,6 +1697,7 @@ mod declaration_snapshot_tests {
     use super::*;
     #[test]
     fn declarations_keep_supported_blocks_and_rule_positions() {
+        static KEY: std::sync::OnceLock<mod_api::BoolGameRuleKey> = std::sync::OnceLock::new();
         // Use registration, the owner of declaration validation.
         struct Mod;
         #[mod_api::__subscriptions]
@@ -1707,7 +1708,8 @@ mod declaration_snapshot_tests {
                     vec!["test:second".into(), "test:first".into()],
                 );
                 r.game_rule_category("machines").unwrap();
-                r.game_rule_bool("active", "test:machines", true).unwrap();
+                KEY.set(r.game_rule_bool("active", "test:machines", true).unwrap())
+                    .unwrap();
             }
         }
         install_parts(&[mod_api::ModEntry::new("test", Box::new(Mod))]).unwrap();
@@ -1715,7 +1717,7 @@ mod declaration_snapshot_tests {
         assert_eq!(declarations[0].id, "test:machine");
         assert_eq!(declarations[0].blocks, ["test:second", "test:first"]);
         let registry = game_rule_registry();
-        let key = mod_api::BoolGameRuleKey::from_slot(0).unwrap();
+        let key = *KEY.get().unwrap();
         assert_eq!(
             mod_api::__private::game_rule_bool_slot(key),
             registry.position("test:active")
