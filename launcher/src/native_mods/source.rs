@@ -1,7 +1,8 @@
 //! Checked native source adapter inputs. Production staging is wired in U5b.
 use horizon_mod_package::manifest::inject::{
-    route, Access, Entry, Inject, InjectError, Kind, NoSlotReason, Place, Route,
+    route, Access, Entry, Inject, InjectError, Kind, NoSlotReason, Place, Route, SlotKind, Target,
 };
+use horizon_mod_package::Manifest;
 use point_shape::{raw_able, shape};
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -86,7 +87,7 @@ fn lower(
 fn checked_routes_and_identities_do_not_alias() {
     let make = |owner: &str, id: &str, at: &str, kind: &str, slots| {
         let manifest = declaration(owner, id, at, kind);
-        lower_entry(&manifest, slots, "fn target(value: i32) -> i32").unwrap()
+        adapt(&manifest, slots, "fn target(value: i32) -> i32").unwrap()
     };
     let original = make("one", "ab", "game::c", "head", vec![]).unwrap();
     assert_eq!(original.inject.with, "callback");
@@ -96,68 +97,52 @@ fn checked_routes_and_identities_do_not_alias() {
         ("one", "a", "bgame::c", "head"),
         ("one", "ab", "game::c", "return"),
     ] {
-        assert_ne!(
-            original.identity,
-            make(owner, id, at, kind, vec![]).unwrap().identity
-        );
+        let other = make(owner, id, at, kind, vec![]).unwrap();
+        assert_ne!(original.identity, other.identity);
     }
-    assert!(make(
-        "one",
-        "ab",
-        "game::c",
-        "head",
-        vec![horizon_mod_package::manifest::inject::SlotKind::Head]
-    )
-    .is_none());
+    assert!(make("one", "ab", "game::c", "head", vec![SlotKind::Head]).is_none());
     let mut manifest = declaration("one", "ab", "game::c", "head");
     manifest.inject[0].hash = "changed".into();
     assert!(matches!(
-        lower_entry(&manifest, vec![], "fn target()"),
+        adapt(&manifest, vec![], "fn target()"),
         Err(InjectError::Changed { .. })
     ));
     manifest.inject[0].hash = "fingerprint".into();
-    manifest.inject[0].access = Access::Api;
-    assert!(matches!(
-        lower_entry(&manifest, vec![], "fn target()"),
-        Err(InjectError::Invalid {
-            field: "access",
-            ..
-        })
-    ));
-    manifest.inject[0].access = Access::Internals;
-    manifest.inject[0].kind = Kind::ModifyArg;
-    assert!(matches!(
-        lower_entry(&manifest, vec![], "fn target()"),
-        Err(InjectError::Invalid { field: "kind", .. })
-    ));
+    for (access, kind, field) in [
+        (Access::Api, Kind::Head, "access"),
+        (Access::Internals, Kind::ModifyArg, "kind"),
+    ] {
+        manifest.inject[0].access = access;
+        manifest.inject[0].kind = kind;
+        let error = adapt(&manifest, vec![], "fn target()").err();
+        assert!(
+            matches!(error, Some(InjectError::Invalid { field: actual, .. }) if actual == field)
+        );
+    }
 }
 
-fn declaration(owner: &str, id: &str, at: &str, kind: &str) -> horizon_mod_package::Manifest {
-    horizon_mod_package::Manifest::parse(&format!(
+fn declaration(owner: &str, id: &str, at: &str, kind: &str) -> Manifest {
+    Manifest::parse(&format!(
         "id='{owner}'\nname='Source fixture'\nversion='0.1.0'\napi='0.2'\ncapabilities=['registries']\n[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n[[inject]]\nid='{id}'\nat='{at}'\nkind='{kind}'\nwith='callback'\naccess='internals'\nhash='fingerprint'\n", "0".repeat(40), "0".repeat(40)
     )).unwrap()
 }
 
-fn lower_entry(
-    manifest: &horizon_mod_package::Manifest,
-    slots: Vec<horizon_mod_package::manifest::inject::SlotKind>,
-    signature: &str,
-) -> Result<Option<Adapter>, InjectError> {
+fn adapt(m: &Manifest, slots: Vec<SlotKind>, sig: &str) -> Result<Option<Adapter>, InjectError> {
     lower(
         Entry {
-            inject: &manifest.inject[0],
-            target: horizon_mod_package::manifest::inject::Target::Native,
-            mod_id: &manifest.id,
+            inject: &m.inject[0],
+            target: Target::Native,
+            mod_id: &m.id,
             resolved_call: None,
         },
         &[Place {
-            at: manifest.inject[0].at.clone(),
+            at: m.inject[0].at.clone(),
             hash: "fingerprint".into(),
             slots,
             calls: vec![],
             native_only: false,
         }],
-        &syn::parse_str(signature).unwrap(),
+        &syn::parse_str(sig).unwrap(),
         Some(&syn::parse_quote!(Game)),
     )
 }
@@ -169,7 +154,7 @@ fn source_adapter_inputs_compile_and_write_back() {
         ("head", "fn target(&mut self, value: i32)", "i32", "*args.value += 2; *args.cancel = true;", "let mut cancel = false; for _ in 0..2 { let mut args = RECORD { value: &mut value, cancel: &mut cancel }; call(&mut game, &mut args); } assert!(cancel);", "assert_eq!(value, 7);"),
         ("return", "fn target(&mut self, value: i32) -> i32", "", "*args += 5;", "for _ in 0..2 { call(&mut game, &mut value); }", "assert_eq!(value, 13);"),
     ] {
-        let adapter = lower_entry(&declaration("one", "test", "game::target", kind), vec![], signature).unwrap().unwrap();
+        let adapter = adapt(&declaration("one", "test", "game::target", kind), vec![], signature).unwrap().unwrap();
         assert_eq!(adapter.kind, kind.to_uppercase());
         let record = format!("__{}Raw", point_shape::camel(&adapter.identity));
         let alias = adapter.listener;
@@ -190,5 +175,20 @@ fn source_adapter_inputs_compile_and_write_back() {
         let status = std::process::Command::new("rustc").args(["--edition", "2024"]).arg(&input).arg("-o").arg(&output).status().unwrap();
         assert!(status.success(), "{code}");
         assert!(std::process::Command::new(&output).status().unwrap().success());
+    }
+}
+
+#[test]
+fn generic_source_signatures_are_refused() {
+    for signature in [
+        "fn target<T>(value: T)",
+        "fn target(value: impl Copy)",
+        "fn target<const N: usize>()",
+    ] {
+        let manifest = declaration("one", "generic", "game::target", "head");
+        assert!(matches!(
+            adapt(&manifest, vec![], signature),
+            Err(InjectError::Invalid { field: "at", .. })
+        ));
     }
 }
