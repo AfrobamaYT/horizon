@@ -1085,7 +1085,7 @@ pub struct NativeScreenView<'a> {
     /// menu type the client does not know.
     pub menu: Option<&'a str>,
     /// The title the server gave the open menu, if it has one: the component
-    /// itself, not a copy (`.plain()` it to draw, `chars()` for the styles).
+    /// itself, borrowed as an owned API component tree.
     /// None when the server gave none, on a screen the client opened, and
     /// while playing.
     pub title: Option<&'a Text>,
