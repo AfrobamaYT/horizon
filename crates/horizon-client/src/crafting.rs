@@ -2403,14 +2403,16 @@ mod tests {
         let stations = crate::stations::StationRecipes::from_sources(&root, &items, &sources);
         let cuts = &recipes.by_type["minecraft:stonecutting"];
         assert_eq!(cuts.len(), 1);
-        let Some(crate::crafting::RecipeRule::Stonecutting { input, result }) = &cuts[0].rule else {
+        let Some(crate::crafting::RecipeRule::Stonecutting { input, result }) = &cuts[0].rule
+        else {
             panic!("missing stonecutting rule")
         };
         assert_eq!(input.order, ["minecraft:stone"]);
         assert_eq!(result.count, 2);
         assert_eq!(stations.stonecutting[0].result, *result);
         let smith = &recipes.by_type["minecraft:smithing_transform"][0];
-        let Some(crate::crafting::RecipeRule::SmithingTransform { base, result, .. }) = &smith.rule else {
+        let Some(crate::crafting::RecipeRule::SmithingTransform { base, result, .. }) = &smith.rule
+        else {
             panic!("missing smithing rule")
         };
         assert_eq!(base.order, ["minecraft:stone"]);

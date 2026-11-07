@@ -39,7 +39,6 @@ pub struct StackedOnOther<'a> {
 /// its level `cost` and `material_cost`, the units of `right` used (0 or
 /// more than it holds: all of it), each starting at vanilla's.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
 pub struct AnvilUpdate {
     pub left: ItemStack,
     pub right: Option<ItemStack>,
@@ -57,7 +56,6 @@ pub struct AnvilUpdate {
 /// `AnvilUpdateEvent.VanillaResult`: the output, level cost and material
 /// cost `createResult` made.
 #[derive(Clone, Debug, PartialEq)]
-#[non_exhaustive]
 pub struct AnvilVanilla {
     pub output: Option<ItemStack>,
     pub xp_cost: i32,

@@ -558,3 +558,99 @@ impl TryIntoApi for crate::menu::AnvilUpdate {
         Ok(result)
     }
 }
+
+impl TryIntoEngine for mod_api::menu::AnvilUpdate {
+    type Engine = crate::menu::AnvilUpdate;
+    type Error = StackWriteError;
+    fn try_into_engine(&self, items: &Items) -> Result<Self::Engine, Self::Error> {
+        Ok(crate::menu::AnvilUpdate {
+            left: self.left.try_into_engine(items)?,
+            right: self.right.try_into_engine(items)?,
+            name: self.name.clone(),
+            vanilla: crate::menu::AnvilVanilla {
+                output: self.vanilla.output.try_into_engine(items)?,
+                xp_cost: self.vanilla.xp_cost,
+                material_cost: self.vanilla.material_cost,
+            },
+            output: self.output.try_into_engine(items)?,
+            xp_cost: self.xp_cost,
+            material_cost: self.material_cost,
+        })
+    }
+}
+impl super::Game<'_> {
+    pub(in crate::game) fn api_anvil_update(
+        &mut self,
+        player: u128,
+        entity: i32,
+        pos: [i32; 3],
+        value: &mut crate::menu::AnvilUpdate,
+        cancel: &mut bool,
+    ) {
+        let Ok(mut api) = value.try_into_api() else {
+            return;
+        };
+        self.native_anvil_update(player, entity, pos, &mut api, cancel);
+        match api.try_into_engine(self.items()) {
+            Ok(result) => *value = result,
+            Err(_) => *cancel = true,
+        }
+    }
+    pub(in crate::game) fn api_grindstone_place(
+        &mut self,
+        player: u128,
+        entity: i32,
+        pos: [i32; 3],
+        value: &mut crate::menu::GrindstonePlace,
+        cancel: &mut bool,
+    ) {
+        let Ok(mut api) = value.try_into_api() else {
+            return;
+        };
+        self.native_grindstone_place(player, entity, pos, &mut api, cancel);
+        match api.try_into_engine(self.items()) {
+            Ok(result) => *value = result,
+            Err(_) => *cancel = true,
+        }
+    }
+    pub(in crate::game) fn api_grindstone_take(
+        &mut self,
+        player: u128,
+        entity: i32,
+        pos: [i32; 3],
+        value: &mut crate::menu::GrindstoneTake,
+        cancel: &mut bool,
+    ) {
+        let Ok(mut api) = value.try_into_api() else {
+            return;
+        };
+        self.native_grindstone_take(player, entity, pos, &mut api, cancel);
+        match api.try_into_engine(self.items()) {
+            Ok(result) => *value = result,
+            Err(_) => *cancel = true,
+        }
+    }
+    pub(in crate::game) fn api_anvil_craft_pre(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        value: &crate::menu::AnvilCraft,
+        cancel: &mut bool,
+    ) {
+        if let Ok(api) = value.try_into_api() {
+            self.native_anvil_craft_pre(player, name, pos, &api, cancel);
+        }
+    }
+    pub(in crate::game) fn api_anvil_craft_post(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        value: &crate::menu::AnvilCraft,
+    ) {
+        if let Ok(api) = value.try_into_api() {
+            self.native_anvil_craft_post(player, name, pos, &api);
+        }
+    }
+}

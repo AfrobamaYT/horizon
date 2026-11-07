@@ -120,6 +120,7 @@ pub fn dedup_keep_order(items: &mut Vec<String>) {
 /// its hook left at load, a fluid one none, which fails the file. An empty
 /// result is no ingredient, as an empty list or an unloaded tag is.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 pub struct WalkedIngredient {
     /// The ids it accepts, however the source shape named them.
     pub set: HashSet<String>,
@@ -133,6 +134,7 @@ pub struct WalkedIngredient {
 }
 /// The wrapper's answer for a kind outside the standard shapes: the ids it
 /// matches, taken out of its JSON, or none to fail the file.
+#[doc(hidden)]
 pub type CustomIds<'a> = &'a dyn Fn(&mut serde_json::Map<String, Value>) -> Option<Vec<String>>;
 impl WalkedIngredient {
     /// The walk of `v`: the shapes' flat lists in the sources' order, their
@@ -145,6 +147,7 @@ impl WalkedIngredient {
         Self::walk_resolved(v, tags, custom, &|id| Some(id.to_owned()))
     }
 
+    #[doc(hidden)]
     pub fn walk_resolved(
         v: &Value,
         tags: &std::collections::HashMap<String, Vec<String>>,
@@ -308,75 +311,6 @@ impl Ingredient {
             order: items,
             custom: None,
             children: None,
-        }
-    }
-    /// Asks the `ingredient` hook once for each mod kind in `v`, nested ones
-    /// included, and leaves each answer with its occurrence for `parse`: the
-    /// one place the hook is called, so every table that reads the recipes
-    /// shares the same answers. A file's own answer is dropped first, so data
-    /// cannot forge one. `true`: `v` changed.
-    // hidden: the load's half of the ingredient hook, not part of the mod surface
-    #[doc(hidden)]
-    pub fn resolve(v: &mut Value, context: &LoadContext) -> bool {
-        match v {
-            Value::Array(entries) => entries
-                .iter_mut()
-                .fold(false, |changed, e| Self::resolve(e, context) | changed),
-            Value::Object(o) => {
-                let mut changed = o.remove(RESOLVED_ITEMS).is_some();
-                let kind = ingredient_kind(o).map(str::to_owned);
-                match kind.as_deref() {
-                    Some("neoforge:compound" | "neoforge:intersection") => {
-                        for key in ["children", "ingredients"] {
-                            if let Some(children) = o.get_mut(key) {
-                                changed |= Self::resolve(children, context);
-                            }
-                        }
-                    }
-                    Some("neoforge:difference") => {
-                        for key in ["base", "subtracted"] {
-                            if let Some(part) = o.get_mut(key) {
-                                changed |= Self::resolve(part, context);
-                            }
-                        }
-                    }
-                    Some(k) if is_custom(k) => {
-                        let mut list = Vec::new();
-                        native_ingredient(context, k, o, &mut list);
-                        dedup_keep_order(&mut list);
-                        o.insert(RESOLVED_ITEMS.to_owned(), list.into());
-                        changed = true;
-                    }
-                    Some(_) => {}
-                    // A brewing slot's item predicate wraps its ingredient.
-                    None => {
-                        if let Some(item) = o.get_mut("item") {
-                            changed |= Self::resolve(item, context);
-                        }
-                    }
-                }
-                changed
-            }
-            _ => false,
-        }
-    }
-    /// Drops every answer `resolve` left anywhere in `v`: what a load sends
-    /// or shows is the files' own JSON. `true`: `v` changed.
-    // hidden: the load's half of the ingredient hook, not part of the mod surface
-    #[doc(hidden)]
-    pub fn forget_answers(v: &mut Value) -> bool {
-        match v {
-            Value::Array(entries) => entries
-                .iter_mut()
-                .fold(false, |changed, e| Self::forget_answers(e) | changed),
-            Value::Object(o) => {
-                let mut changed = o.remove(RESOLVED_ITEMS).is_some();
-                for part in o.values_mut() {
-                    changed |= Self::forget_answers(part);
-                }
-                changed
-            }
-            _ => false,
         }
     }
     pub fn parse(v: &Value, items: &Items) -> Option<Self> {

@@ -25,6 +25,7 @@ fn tooltip_position(
     (x, y)
 }
 
+use super::api_values::{TryIntoApi, TryIntoEngine};
 use super::{Game, Screen};
 use horizon_client::{
     block_entity_item, brewing,
@@ -720,7 +721,7 @@ impl Game<'_> {
                 s.anvil = answer.clone();
             }
             _ => {
-                let mut update = mod_api::menu::AnvilUpdate::new(
+                let mut update = crate::menu::AnvilUpdate::new(
                     left,
                     s.inputs[1].clone(),
                     Some(name.clone()),
@@ -728,7 +729,7 @@ impl Game<'_> {
                 );
                 let mut cancel = false;
                 let (player, entity_id) = (self.own_uuid(), self.own_entity_id());
-                self.native_anvil_update(player, entity_id, s.pos, &mut update, &mut cancel);
+                self.api_anvil_update(player, entity_id, s.pos, &mut update, &mut cancel);
                 update.answer(cancel, &mut s.anvil);
                 s.anvil_answer = Some((s.inputs.clone(), name, s.anvil.clone()));
             }
@@ -2937,9 +2938,11 @@ impl Game<'_> {
         let mut component = None;
         self.native_tooltip_component(stack, &mut component);
         let images: Vec<TooltipImage> = tooltip_component_size(component)
-            .map(|size| TooltipImage {
-                stack: stack.clone(),
-                size,
+            .and_then(|size| {
+                Some(TooltipImage {
+                    stack: stack.try_into_api().ok()?,
+                    size,
+                })
             })
             .into_iter()
             .collect();
@@ -2980,7 +2983,9 @@ impl Game<'_> {
         }
         let mut at = y + text_h + bundle_extra + 2.0;
         for image in &images {
-            self.native_tooltip_component_draw(&image.stack, batch, [x, at], image.size);
+            if let Ok(stack) = image.stack.try_into_engine(self.items()) {
+                self.native_tooltip_component_draw(&stack, batch, [x, at], image.size);
+            }
             at += image.size[1] + 2.0;
         }
     }

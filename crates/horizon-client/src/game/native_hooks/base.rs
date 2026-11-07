@@ -5073,7 +5073,10 @@ impl Game<'_> {
     /// single-player window included, sees vanilla's and the content mods' recipes,
     /// not the world's data packs', unless a mod had the server send it the type
     /// (`native_datapack_sync`).
-    pub(in crate::game) fn recipes_of_type(&self, kind: &str) -> Arc<[Recipe]> {
+    pub(in crate::game) fn recipes_of_type(
+        &self,
+        kind: &str,
+    ) -> Arc<[crate::crafting::RecipeSnapshot]> {
         if self.outside_world() {
             return Default::default();
         }
