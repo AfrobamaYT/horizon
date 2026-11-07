@@ -1246,6 +1246,48 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs prepared resources"]
+    fn scoped_boat_slots_use_the_open_menu_and_refuse_a_removed_owner() {
+        use super::super::boats::Boat;
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let mut boat = Boat::new(600, "oak".into(), Vec3::new(1.0, 65.0, 2.0), 0.0);
+            boat.chest = true;
+            boat.items.resize(27, None);
+            game.boats.push(boat);
+            assert_eq!(
+                game.edit_entity_slots(600, |slots, at| {
+                    assert_eq!(at, [1.0, 65.0, 2.0]);
+                    slots[0] = Some(ItemStack::new("minecraft:stone", 4));
+                    slots.len()
+                }),
+                Some(27)
+            );
+            let key = (i32::MAX - 15, super::super::minecarts::CART_KEY_Y, 600);
+            game.world
+                .block_entities
+                .insert(key, super::super::BlockEntity::Chest(vec![None; 27]));
+            game.edit_entity_slots(600, |slots, _| {
+                assert!(slots[0].is_none());
+                slots[0] = Some(ItemStack::new("minecraft:sand", 7));
+            });
+            assert_eq!(
+                game.boats[0].items[0],
+                Some(ItemStack::new("minecraft:stone", 4))
+            );
+            assert_eq!(
+                game.edit_entity_slots(600, |slots, _| slots[0].clone()),
+                Some(Some(ItemStack::new("minecraft:sand", 7)))
+            );
+            game.boats.remove(0);
+            assert_eq!(
+                game.edit_entity_slots(600, |_, _| panic!("stale owner reached its menu")),
+                None::<()>
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn a_chest_minecarts_items_are_its_slots() {
         use super::super::minecarts::{CartKind, Minecart};
         with_game(|game| {
