@@ -149,6 +149,8 @@ pub(crate) struct Installed {
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
+    pub(crate) dimensions: Vec<crate::dimension::DimensionInfo>,
+    pub(crate) chunk_generators: Vec<crate::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) hook_bits: Vec<bool>,
     pub(crate) tag_hook_bits: Vec<bool>,
 }
@@ -523,6 +525,8 @@ pub struct PartRegistrar {
     pub(crate) effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     pub(crate) controllers: Vec<ControllerInfo>,
     pub(crate) structure_types: Vec<crate::structure_type::StructureTypeInfo>,
+    pub(crate) dimensions: Vec<crate::dimension::DimensionInfo>,
+    pub(crate) chunk_generators: Vec<crate::chunk_generator::ChunkGeneratorInfo>,
     pub(crate) refused: Vec<String>,
 }
 
@@ -542,6 +546,8 @@ impl PartRegistrar {
             effects: OnceLock::new(),
             controllers: Vec::new(),
             structure_types: Vec::new(),
+            dimensions: Vec::new(),
+            chunk_generators: Vec::new(),
             refused: Vec::new(),
         }
     }
@@ -634,6 +640,7 @@ pub(crate) fn register_all(mods: &[ModEntry]) -> PartRegistrar {
         hooks.register(&mut registrar, &context);
     }
     registrar.expand_block_entity_parts();
+    registrar.refuse_unknown_dimension_generators();
     registrar
 }
 
@@ -693,6 +700,8 @@ pub(crate) fn install_registrar(mut registrar: PartRegistrar) -> Result<(), Vec<
         resolved_items: OnceLock::new(),
         controllers: registrar.controllers,
         structure_types: registrar.structure_types,
+        dimensions: registrar.dimensions,
+        chunk_generators: registrar.chunk_generators,
         hook_bits: Vec::new(),
         tag_hook_bits: vec![false; HOOK_COUNT],
     };

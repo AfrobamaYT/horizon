@@ -4,13 +4,14 @@
 //! frames, armour stands). This binds the resolver's host services
 //! (`ItemEnv`) and the special renderers' registries to the game.
 use super::api_values::TryIntoApi;
-use super::{Dim, Game};
+use super::{Dim, Game, entity_culling::EntityCullDecision};
 use horizon_assets::item_model::{
     Components, DisplayContext, GlobalPos, ItemEnv, LevelState, OwnerState, StackView,
 };
 use horizon_client::{
     block_entity_render::{diffuse_lights, vertex_light},
     cit::{Hand as CitHand, Kind as CitKind},
+    graphics::EntityCullingMode,
     hud::{HudBatch, Rect},
     item_render::{self, ItemRenderState, SpecialHost, WorldSink},
     items::ItemStack,
@@ -292,11 +293,7 @@ impl Game<'_> {
     /// The client level as item models read it: worked out once a frame (a
     /// screen of items read the same level, its sky sampled once).
     pub(super) fn item_level(&self) -> LevelState {
-        let dimension = match self.dim {
-            Dim::Overworld => "minecraft:overworld",
-            Dim::Nether => "minecraft:the_nether",
-            Dim::End => "minecraft:the_end",
-        };
+        let dimension = self.dim.id();
         let key = (
             self.frames,
             self.world.game_time,
@@ -706,7 +703,7 @@ impl Game<'_> {
                 continue;
             }
             let age = item.age as f32 + partial;
-            let (lo, _) = state.bounding_box();
+            let (lo, hi) = state.bounding_box();
             let min_offset_y = -lo.y + 0.0625;
             let bob = (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1;
             let spin = item_render::item_spin(age, item.bob_offset);
@@ -738,16 +735,21 @@ impl Game<'_> {
             };
             let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
                 + i64::from(item.stack.damage);
-            let copies = item_render::cluster_poses(
-                &state,
+            let copies = item_render::cluster_poses_with_depth(
                 pose,
                 item_render::rendered_amount(item.stack.count),
                 seed,
+                hi.z - lo.z,
             );
             // Use the same animated, spun, clustered transforms as the draw.
             // ItemEntity's collision box is only 0.25 blocks and cannot prove
             // that this larger rendered model stays behind an occluder.
             let culling = entity.then(|| {
+                // The posed envelope walks every model point in every copy;
+                // with culling off the decision is `Bypass` whatever it holds.
+                if self.settings.horizon.entity_culling == EntityCullingMode::Off {
+                    return EntityCullDecision::Bypass;
+                }
                 state
                     .posed_bounds(&copies)
                     .map(|(lo, hi)| {
