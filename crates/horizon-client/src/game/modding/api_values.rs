@@ -771,7 +771,7 @@ impl TryIntoApi for crate::crafting::FireworkShapeIngredient {
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         Ok(mod_api::FireworkShapeIngredient::new(
-            self.shape,
+            self.shape.try_into_api().unwrap(),
             self.ingredient.try_into_api()?,
         ))
     }
@@ -3477,3 +3477,6 @@ pub(in crate::game) fn game_rule_registry() -> horizon_client_core::gamerules::R
     )
     .expect("validated at registration")
 }
+
+#[path = "api_values/small_values.rs"]
+mod small_values;

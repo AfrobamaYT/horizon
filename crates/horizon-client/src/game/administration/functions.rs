@@ -185,7 +185,11 @@ impl Game<'_> {
             &self.options.resources,
             &horizon_client::logging::game_home().join("jars"),
         )
-        .map_err(ReloadStageError::OriginalJars)?;
+        .map_err(|error| {
+            ReloadStageError::OriginalJars(
+                crate::game::api_values::TryIntoApi::try_into_api(&error).unwrap(),
+            )
+        })?;
         let next_root = self
             .stage_enabled_inventory()
             .map_err(|error| ReloadStageError::DataSource(error.to_string()))?;

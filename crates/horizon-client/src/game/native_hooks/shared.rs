@@ -3479,7 +3479,11 @@ impl Game<'_> {
                     label: k.label.clone(),
                     key: k.key.clone(),
                     modifiers: k.modifiers.bits,
-                    context: k.context,
+                    context: crate::game::api_values::TryIntoEngine::try_into_engine(
+                        &k.context,
+                        &(),
+                    )
+                    .unwrap(),
                     category: k.category.clone(),
                 })
                 .collect();
