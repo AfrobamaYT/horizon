@@ -401,7 +401,7 @@ impl Game<'_> {
                 12.0,
                 u32::MAX,
             );
-            let label = self.translate("options.title", "Options");
+            let label = horizon_client::lang::get("options.title");
             horizon_client::widgets::record(&label, rect, true);
             if hovered && self.carried.is_none() {
                 self.draw_tooltip_lines(batch, &[(label, u32::MAX)], cursor.0, cursor.1);
