@@ -351,6 +351,16 @@ pub trait PlayersBackend {
         )
     }
     /// Side: both.
+    /// The recipes in the player's recipe book (`ServerRecipeBook.recipes`), as qualified ids in
+    /// order (`minecraft:oak_planks`). None for a player it can't reach.
+    fn player_discovered_recipes(&self, player: PlayerRef) -> Option<Vec<String>> {
+        crate::phase::unprovided(
+            "Backend::player_discovered_recipes",
+            "player_discovered_recipes",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
     /// The brand the player's client announced when it connected (`ServerPlayer.clientBrand`),
     /// empty when it sent none. Displaced connected players keep theirs; an acting player with
     /// no known connection has an empty one. None for a stale or unavailable player.
@@ -612,8 +622,8 @@ pub trait PlayersBackendMut {
     ///
     /// `test` is lent to this call only. A failed test stops further testing
     /// and reports `Test`; earlier matching criteria may already be granted.
-    /// Wasm's generated resource route exists, but a callback into the group
-    /// currently firing the trigger is refused by the runtime's reentry guard.
+    /// Wasm predicates run synchronously, including callbacks into the group
+    /// firing the trigger, within that call's remaining execution and memory limits.
     fn player_trigger_criterion(
         &mut self,
         player: PlayerRef,

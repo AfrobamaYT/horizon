@@ -1,90 +1,19 @@
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Declare a game rule category in the calling mod's namespace. Invalid,
-    /// foreign or duplicate IDs refuse mod loading even if the error is ignored.
-    /// Categories appear in the host's game rules screen; remote clients do not
-    /// receive them in this version.
-    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError>;
-    /// Declare a boolean game rule in this mod's namespace. Category references are
-    /// resolved after all mods register; an unknown category refuses installation then.
-    fn game_rule_bool(
-        &mut self,
-        id: &str,
-        category: &str,
-        default: bool,
-    ) -> Result<super::BoolGameRuleKey, super::GameRuleError>;
-}
+use super::*;
 
 impl PartRegistrar {
-    fn game_rule_id(&self, id: &str) -> Result<String, super::GameRuleError> {
+    pub(crate) fn game_rule_id(&self, id: &str) -> Result<String, crate::GameRuleError> {
         let id = if id.contains(':') {
             id.to_owned()
         } else {
             format!("{}:{id}", self.mod_id)
         };
         if !horizon_mod_package::content::namespaced_id(&id) {
-            return Err(super::GameRuleError::InvalidId);
+            return Err(crate::GameRuleError::InvalidId);
         }
         if id.split_once(':').unwrap().0 != self.mod_id {
-            return Err(super::GameRuleError::ForeignNamespace);
+            return Err(crate::GameRuleError::ForeignNamespace);
         }
         Ok(id)
-    }
-}
-
-impl Registrar for PartRegistrar {
-    fn game_rule_category(&mut self, id: &str) -> Result<(), super::GameRuleError> {
-        let result = (|| {
-            let id = self.game_rule_id(id)?;
-            if self.game_rule_categories.contains(&id) {
-                return Err(super::GameRuleError::Duplicate);
-            }
-            self.game_rule_categories.push(id);
-            Ok(())
-        })();
-        if let Err(error) = &result {
-            self.refused
-                .push(format!("mod {} category {id:?}: {error:?}", self.mod_id));
-        }
-        result
-    }
-
-    fn game_rule_bool(
-        &mut self,
-        id: &str,
-        category: &str,
-        default: bool,
-    ) -> Result<super::BoolGameRuleKey, super::GameRuleError> {
-        let result = (|| {
-            let id = self.game_rule_id(id)?;
-            if self.game_rules.iter().any(|r| r.name == id) {
-                return Err(super::GameRuleError::Duplicate);
-            }
-            let slot = self
-                .registry_keys
-                .borrow_mut()
-                .game_rules
-                .request(self.mod_id, &id)
-                .map_err(|_| super::GameRuleError::InvalidId)?;
-            self.game_rules.push(horizon_client_core::gamerules::Rule {
-                name: id,
-                category: category.into(),
-                default: horizon_client_core::gamerules::Value::Bool(default),
-                min: 0,
-                max: 0,
-            });
-            Ok(super::BoolGameRuleKey(slot))
-        })();
-        if let Err(error) = &result {
-            self.refused
-                .push(format!("mod {} rule {id:?}: {error:?}", self.mod_id));
-        }
-        result
     }
 }
 
@@ -104,14 +33,18 @@ pub fn game_rule_registry() -> horizon_client_core::gamerules::RuleRegistry {
 /// Dense position for a validated rule key.
 // hidden: the game resolves load-owned keys to dense positions.
 #[doc(hidden)]
-pub fn game_rule_bool_slot(key: super::BoolGameRuleKey) -> Option<u32> {
+pub fn game_rule_bool_slot(key: crate::BoolGameRuleKey) -> Option<u32> {
     installed()?.game_rule_slots.get(key.0 as usize).copied()
 }
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
+    use super::*;
+    #[cfg(test)]
+    use crate::*;
     #[test]
-    fn cross_mod_categories_resolve_after_all_registration() {
+    pub(crate) fn cross_mod_categories_resolve_after_all_registration() {
         use super::Registrar;
         struct Rule;
         #[mod_api::__subscriptions]
@@ -135,7 +68,7 @@ pub mod tests {
         assert!(super::game_rule_registry().rule("first:active").is_some());
     }
     #[test]
-    fn unknown_category_reports_rule_category_and_owner_without_installing() {
+    pub(crate) fn unknown_category_reports_rule_category_and_owner_without_installing() {
         use super::Registrar;
         struct Rule;
         #[mod_api::__subscriptions]
@@ -162,7 +95,7 @@ pub mod tests {
     }
 
     #[test]
-    fn bool_rule_declarations_validate_slots_and_fail_atomically() {
+    pub(crate) fn bool_rule_declarations_validate_slots_and_fail_atomically() {
         use super::Registrar;
         let mut refused = super::PartRegistrar::new("example");
         refused
@@ -197,7 +130,7 @@ pub mod tests {
     }
 
     #[test]
-    fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
+    pub(crate) fn category_registration_refuses_ignored_errors_and_installs_snapshot() {
         use super::Registrar;
         let mut foreign = super::PartRegistrar::new("example");
         assert_eq!(

@@ -182,7 +182,7 @@ class PrReadyTests(unittest.TestCase):
                      "crates/horizon-mod-api-gen/dispatch-tests/src/lib.rs",
                      "crates/horizon-mod-api-macros/src/lib.rs",
                      "crates/horizon-mod-api/src/lib.rs",
-                     "crates/horizon-mod-api/src/part_table.rs",
+                     "crates/horizon-mod-api/src/parts/mod.rs",
                      "crates/horizon-mod-api/src/hooks/block.rs"]:
             with self.subTest(path=path):
                 by_name = suite_steps(path)

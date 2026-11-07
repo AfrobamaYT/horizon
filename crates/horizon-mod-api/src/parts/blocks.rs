@@ -1,3 +1,4 @@
+use super::*;
 /// Whether a part listens to the block hook `hook` (named `name`) for `state`: one table
 /// lookup, and only once some part listens at all.
 pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> bool {
@@ -20,29 +21,9 @@ impl HookParts {
     }
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Request a block by canonical registry id. All mods' declarations are checked at load.
-    fn block_key(&mut self, id: &str) -> super::BlockKey;
-    /// Attach `part`, of kind `kind` (its type's name), to block `block`.
-    fn attach_block_part(
-        &mut self,
-        block: super::BlockKey,
-        kind: &'static str,
-        part: Arc<dyn BlockPart>,
-    );
-    /// Attach `part`, of kind `kind`, to every block in tag `tag`.
-    fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>);
-}
-
 impl dyn Registrar + '_ {
     /// Attach `part` to block `block` (`mymod:shaft`, `minecraft:oak_log`).
-    pub fn block_part<P: BlockPart>(&mut self, block: super::BlockKey, part: P) {
+    pub fn block_part<P: BlockPart>(&mut self, block: crate::BlockKey, part: P) {
         self.attach_block_part(block, type_name::<P>(), Arc::new(part));
     }
     /// Attach `part` to every block in tag `tag` (`minecraft:logs`, without `#`), as each game's
@@ -52,55 +33,16 @@ impl dyn Registrar + '_ {
     }
 }
 
-impl Registrar for PartRegistrar {
-    fn block_key(&mut self, id: &str) -> super::BlockKey {
-        match self
-            .registry_keys
-            .borrow_mut()
-            .blocks
-            .request(self.mod_id, id)
-        {
-            Ok(slot) => super::BlockKey(slot),
-            Err(error) => {
-                self.refused.push(error);
-                super::BlockKey(u32::MAX)
-            }
-        }
-    }
-
-    fn attach_block_part(
-        &mut self,
-        block: super::BlockKey,
-        kind: &'static str,
-        part: Arc<dyn BlockPart>,
-    ) {
-        let id = self
-            .registry_keys
-            .borrow()
-            .blocks
-            .id(block.0)
-            .map(str::to_owned);
-        let Some(id) = id else {
-            self.refused.push(format!(
-                "mod {}: invalid block key slot {}",
-                self.mod_id, block.0
-            ));
-            return;
-        };
-        self.attach(|p| &mut p.blocks, kind, &id, part);
-    }
-
-    fn attach_block_part_tag(&mut self, tag: &str, kind: &'static str, part: Arc<dyn BlockPart>) {
-        let part = self.tagged(kind, tag, part);
-        self.tags.blocks.extend(part);
-    }
-}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    use super::*;
+    #[cfg(test)]
+    use crate::parts::tests::*;
+    use crate::*;
 
     /// A comparator reading of 5 more than it was.
-    struct Gauge;
+    pub(crate) struct Gauge;
     #[mod_api::horizon_part]
     impl BlockPart for Gauge {
         #[cfg_attr(test, inline)]
@@ -112,7 +54,7 @@ pub mod tests {
     }
 
     #[test]
-    fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
+    pub(crate) fn registry_keys_resolve_reused_parts_and_rebind_without_changing_identity() {
         use crate::registry_keys::{ResolvedBlock, block, block_id, resolve_blocks};
         use horizon_world::level::states::BlockId;
         struct Keys(Arc<std::sync::Mutex<Vec<BlockKey>>>);
@@ -138,7 +80,7 @@ pub mod tests {
             Box::new(Keys(requested.clone())),
         )]
         .into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
         let keys = requested.lock().unwrap().clone();
@@ -175,9 +117,9 @@ pub mod tests {
         assert_eq!(block(keys[0]).unwrap().default, BlockStateId(0));
         let key = keys[0];
         // Declarations are load-owned, but a mapping belongs to its resolving thread.
-        let installed = super::TEST_PARTS.get();
+        let installed_parts = super::TEST_PARTS.get();
         std::thread::spawn(move || {
-            super::TEST_PARTS.set(installed);
+            super::TEST_PARTS.set(installed_parts);
             assert_eq!(BlockKey::from_slot(key.0), Ok(key));
             assert_eq!(block_id(key), Some("minecraft:stone"));
             assert!(block(key).is_none());
@@ -202,7 +144,7 @@ pub mod tests {
     }
 
     /// Connects redstone wire to its block from any side.
-    struct Connector;
+    pub(crate) struct Connector;
     #[mod_api::horizon_part]
     impl BlockPart for Connector {
         fn should_redstone_wire_connect_to(
@@ -220,7 +162,7 @@ pub mod tests {
 
     /// Makes a fence, wall or pane flip vanilla's answer toward the east and refuse every other
     /// side.
-    struct ConnectionRule;
+    pub(crate) struct ConnectionRule;
     #[mod_api::horizon_part]
     impl BlockPart for ConnectionRule {
         fn connects_to(&self, _: &dyn LevelHost, event: &mut ConnectsToEvent) {
@@ -229,7 +171,7 @@ pub mod tests {
     }
 
     /// A comparator reading of 100 more, for the blocks in tag `test:gauged`.
-    struct TagGauge;
+    pub(crate) struct TagGauge;
     #[mod_api::horizon_part]
     impl BlockPart for TagGauge {
         fn analog_output(&self, _: &dyn LevelHost, event: &mut AnalogOutputEvent) {
@@ -258,9 +200,8 @@ pub mod tests {
                 r.block_part(block_key, Signal);
             }
         }
-        let mods: super::super::Mods =
-            vec![ModEntry::new("signal_test", Box::new(SignalMod))].into();
-        super::super::install(mods.clone());
+        let mods: crate::Mods = vec![ModEntry::new("signal_test", Box::new(SignalMod))].into();
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -286,9 +227,9 @@ pub mod tests {
                 r.block_part(block_key, WeakPower);
             }
         }
-        let mods: super::super::Mods =
+        let mods: crate::Mods =
             vec![ModEntry::new("weak_power_test", Box::new(WeakPowerMod))].into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -327,8 +268,8 @@ pub mod tests {
                 );
             }
         }
-        let mods: super::super::Mods = vec![ModEntry::new("path_test", Box::new(PathMod))].into();
-        super::super::install(mods.clone());
+        let mods: crate::Mods = vec![ModEntry::new("path_test", Box::new(PathMod))].into();
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -355,9 +296,8 @@ pub mod tests {
                 r.block_part(block_key, Leaver);
             }
         }
-        let mods: super::super::Mods =
-            vec![ModEntry::new("leaver_test", Box::new(LeaverMod))].into();
-        super::super::install(mods.clone());
+        let mods: crate::Mods = vec![ModEntry::new("leaver_test", Box::new(LeaverMod))].into();
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -379,9 +319,9 @@ pub mod tests {
                 }
             }
         }
-        let mods: super::super::Mods =
+        let mods: crate::Mods =
             vec![ModEntry::new("connection_test", Box::new(ConnectionMod))].into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -446,9 +386,9 @@ pub mod tests {
                 r.block_part(block_key, Reader(block_key));
             }
         }
-        let mods: super::super::Mods =
+        let mods: crate::Mods =
             vec![ModEntry::new("signal_reader_test", Box::new(ReaderMod))].into();
-        super::super::install(mods.clone());
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
@@ -463,16 +403,15 @@ pub mod tests {
                 r.block_part(block_key, Connector);
             }
         }
-        let mods: super::super::Mods =
-            vec![ModEntry::new("redstone_test", Box::new(RedstoneMod))].into();
-        super::super::install(mods.clone());
+        let mods: crate::Mods = vec![ModEntry::new("redstone_test", Box::new(RedstoneMod))].into();
+        crate::install(mods.clone());
         install_parts(&mods).unwrap();
         mark_game_thread();
     }
 
     #[cfg(test)]
     /// The comparator reading of state `state`, from 1.
-    fn read(state: u32) -> i32 {
+    pub(crate) fn read(state: u32) -> i32 {
         let mut output = 1;
         dispatch_analog_output(
             &Level,
@@ -487,7 +426,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// Resolve this thread's parts with tag `test:gauged` holding `members`.
-    fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
+    pub(crate) fn resolve(members: &[&str]) -> Result<(), super::ResolvePartsError> {
         let tags = HashMap::from([(
             "test:gauged".to_owned(),
             members.iter().map(|m| m.to_string()).collect(),
@@ -511,14 +450,14 @@ pub mod tests {
     }
 
     #[test]
-    fn tagged_dispatch_requires_its_own_world_table() {
+    pub(crate) fn tagged_dispatch_requires_its_own_world_table() {
         game_thread();
         resolve(&["test:gauge"]).unwrap();
-        let installed = super::TEST_PARTS.get();
+        let installed_parts = super::TEST_PARTS.get();
         let failure = std::thread::Builder::new()
             .name("part-worker".into())
             .spawn(move || {
-                super::TEST_PARTS.set(installed);
+                super::TEST_PARTS.set(installed_parts);
                 assert!(super::try_parts(HookId::ShouldCheckWeakPower, "other").is_ok());
                 let error = super::try_parts(HookId::AnalogOutput, "analog_output")
                     .err()
@@ -543,7 +482,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_block_part_answers_for_its_block_only() {
+    pub(crate) fn a_block_part_answers_for_its_block_only() {
         game_thread();
         // No world is open, so no state has its parts yet: nothing answers.
         assert_eq!(read(1), 1);
@@ -554,7 +493,7 @@ pub mod tests {
     }
 
     #[test]
-    fn scoped_dispatch_looks_up_only_subscribed_hooks_and_parts() {
+    pub(crate) fn scoped_dispatch_looks_up_only_subscribed_hooks_and_parts() {
         game_thread();
         resolve(&[]).unwrap();
         let parts = super::parts(HookId::AnalogOutput, "test");
@@ -582,7 +521,7 @@ pub mod tests {
     }
 
     #[test]
-    fn redstone_connection_is_scoped_to_the_attached_block() {
+    pub(crate) fn redstone_connection_is_scoped_to_the_attached_block() {
         game_thread();
         resolve(&[]).unwrap();
         for (state, expected) in [(3, true), (2, false)] {
@@ -600,7 +539,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_connection_is_answered_only_by_the_blocks_own_part_with_its_kind() {
+    pub(crate) fn a_connection_is_answered_only_by_the_blocks_own_part_with_its_kind() {
         game_thread();
         resolve(&[]).unwrap();
         for kind in [
@@ -632,7 +571,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_state_without_parts_is_answered_by_nothing() {
+    pub(crate) fn a_state_without_parts_is_answered_by_nothing() {
         game_thread();
         resolve(&[]).unwrap();
         // Out of range, and in range but a block no part is attached to.
@@ -656,13 +595,13 @@ pub mod tests {
     }
 
     #[test]
-    fn each_game_answers_from_its_own_tags_and_reload_drops_what_left() {
+    pub(crate) fn each_game_answers_from_its_own_tags_and_reload_drops_what_left() {
         let mods = game_thread();
         // Both games resolve before either reads, so one shared table would fail one of them.
         let resolved = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
             let client = scope.spawn(|| {
-                super::super::install(mods.clone());
+                crate::install(mods.clone());
                 install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:other"]).unwrap();
@@ -670,7 +609,7 @@ pub mod tests {
                 (read(1), read(2))
             });
             let server = scope.spawn(|| {
-                super::super::install(mods.clone());
+                crate::install(mods.clone());
                 install_parts(&mods).unwrap();
                 mark_game_thread();
                 resolve(&["test:gauge"]).unwrap();
@@ -687,7 +626,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_key_the_game_lacks_fails_naming_the_mod() {
+    pub(crate) fn a_key_the_game_lacks_fails_naming_the_mod() {
         game_thread();
         let refused = resolve_parts(
             &HashMap::new(),
@@ -709,7 +648,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_tag_giving_a_part_twice_keeps_the_earlier_mod() {
+    pub(crate) fn a_tag_giving_a_part_twice_keeps_the_earlier_mod() {
         let part = |mod_index| Attached::<dyn BlockPart> {
             mod_id: ["earlier", "later"][mod_index],
             mod_index,
@@ -733,7 +672,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
+    pub(crate) fn a_mods_tag_part_registered_first_runs_before_its_key_part() {
         let mut r = super::PartRegistrar::new("registrar-test");
         (&mut r as &mut dyn Registrar).block_part_tag("test:gauged", TagGauge);
         let block_key = (&mut r as &mut dyn Registrar).block_key("test:gauge");
@@ -751,7 +690,7 @@ pub mod tests {
     }
 
     #[test]
-    fn the_same_part_twice_on_one_block_is_refused() {
+    pub(crate) fn the_same_part_twice_on_one_block_is_refused() {
         struct Other;
         #[mod_api::horizon_part]
         impl BlockPart for Other {}

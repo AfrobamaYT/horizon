@@ -1,41 +1,19 @@
+use super::*;
 pub(crate) fn resolved_effects() -> &'static OnceLock<horizon_mod_runtime::registry_keys::Effects> {
     static EMPTY: OnceLock<horizon_mod_runtime::registry_keys::Effects> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.effects)
 }
 
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Request an effect by canonical registry id. All mods' declarations are checked at load.
-    fn effect_key(&mut self, id: &str) -> super::EffectKey;
-}
-
-impl Registrar for PartRegistrar {
-    fn effect_key(&mut self, id: &str) -> super::EffectKey {
-        match self
-            .registry_keys
-            .borrow_mut()
-            .effects
-            .request(self.mod_id, id)
-        {
-            Ok(slot) => super::EffectKey(slot),
-            Err(error) => {
-                self.refused.push(error);
-                super::EffectKey(u32::MAX)
-            }
-        }
-    }
-}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
+    use super::*;
+    #[cfg(test)]
+    use crate::*;
 
     #[test]
-    fn registry_keys_resolve_effects_declared_later_and_generated_name_reads() {
+    pub(crate) fn registry_keys_resolve_effects_declared_later_and_generated_name_reads() {
         struct Keys(Arc<std::sync::Mutex<Vec<EffectKey>>>);
         #[mod_api::__subscriptions]
         impl Hooks for Keys {

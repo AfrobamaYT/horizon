@@ -87,7 +87,7 @@ fn generated_flat_shadows_match_full_wit_world() {
     let mut linker = Linker::<State>::new(&engine);
     glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(&mut linker, |s| s)
         .unwrap();
-    glue::add_flat_lists(&mut linker).unwrap();
+    glue::add_store_imports(&mut linker).unwrap();
     linker.instantiate_pre(&component).unwrap();
 }
 
@@ -139,7 +139,7 @@ fn generated_flat_output_reuses_transport() {
     for route in 0..3 {
         let control = route != 2;
         let mut linker = Linker::<State>::new(&engine);
-        glue::add_flat_lists(&mut linker).unwrap();
+        glue::add_store_imports(&mut linker).unwrap();
         if route == 1 {
             linker.allow_shadowing(true);
             glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(
@@ -268,7 +268,7 @@ fn generated_draw_list_reuses_transport() {
     for route in 0..3 {
         let control = route == 0;
         let mut linker = Linker::<State>::new(&engine);
-        glue::add_flat_lists(&mut linker).unwrap();
+        glue::add_store_imports(&mut linker).unwrap();
         if route == 1 {
             linker.allow_shadowing(true);
             glue::Mod::add_to_linker::<State, wasmtime::component::HasSelf<State>>(
