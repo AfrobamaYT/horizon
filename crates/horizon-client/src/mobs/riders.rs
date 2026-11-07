@@ -450,14 +450,9 @@ pub fn resume_after_consumption(
     was_on_fire: bool,
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
-    tick_with(
-        mobs,
-        index,
-        w,
-        level,
-        events,
-        |m, w, level, events| super::ai::resume_after_consumption(m, w, level, was_on_fire, events),
-    )
+    tick_with(mobs, index, w, level, events, |m, w, level, events| {
+        super::ai::resume_after_consumption(m, w, level, was_on_fire, events)
+    })
 }
 
 fn tick_with<R>(
