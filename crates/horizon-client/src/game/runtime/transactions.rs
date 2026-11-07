@@ -517,8 +517,7 @@ impl Game<'_> {
         for (id, kept) in equipment {
             match kept {
                 KeptEquipment::Mob(stacks) => {
-                    let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed)
-                    else {
+                    let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id && !m.removed) else {
                         continue;
                     };
                     for (slot, stack) in stacks.into_iter().enumerate() {

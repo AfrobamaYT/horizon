@@ -2025,10 +2025,8 @@ impl ItemsCapabilityProviders for InstalledProviders {
         next(&installed()?.keys.item_capabilities, name, item, index)
     }
 
-
     fn place_provider(&self, name: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)> {
         let part = installed()?.keys.place_providers.get(name)?;
         crate::mod_index_on(part.mod_index).then(|| (part.provider.clone(), part.mod_id))
-
     }
 }

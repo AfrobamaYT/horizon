@@ -119,7 +119,7 @@ impl Game<'_> {
         }
         (self.mobs.iter().any(|m| m.id == entity && !m.removed)
             || self.armor_stands.iter().any(|a| a.id == entity))
-            .then_some(7)
+        .then_some(7)
     }
     /// `EntityType.is(TagKey)`: whether `entity_type` (`minecraft:player`) is in the entity
     /// type tag `tag` (`minecraft:cannot_be_pushed_onto_boats`).
@@ -656,13 +656,12 @@ pub(super) mod tests {
             .get("minecraft:zombie")
             .unwrap()
             .clone();
-        game.mobs
-            .push(horizon_client::mobs::Mob::new(
-                30,
-                kind,
-                horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
-                0.0,
-            ));
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            30,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            0.0,
+        ));
         30
     }
 
@@ -697,17 +696,23 @@ pub(super) mod tests {
             // An aborted transaction puts the equipment back.
             let _ = host.transaction(|host, tx| {
                 assert_eq!(items.insert(host, tx, 4, &chestplate, 1), 1);
-                assert_eq!(items.amount(host, 4), 1, "the transaction sees its own write");
+                assert_eq!(
+                    items.amount(host, 4),
+                    1,
+                    "the transaction sees its own write"
+                );
                 Err::<(), ()>(())
             });
             assert_eq!(items.amount(host, 4), 0, "the abort put it back");
 
             // A committed one wears it and hands it back out.
             let _ = host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sword, 1)));
-            let _ = host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1)));
+            let _ =
+                host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1)));
             assert_eq!(items.amount(host, 0), 1);
             assert_eq!(items.amount(host, 4), 1);
-            let _ = host.transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 4, &chestplate, 1)));
+            let _ = host
+                .transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 4, &chestplate, 1)));
             assert_eq!(items.amount(host, 4), 0);
             assert_eq!(items.amount(host, 0), 1);
 
@@ -730,13 +735,16 @@ pub(super) mod tests {
         use mod_api::EquipmentSlot;
         with_game(|game| {
             zombie(game);
-            game.mobs
-                .push(horizon_client::mobs::Mob::new(
-                    31,
-                    game.res.mob_types().get("minecraft:zombie").unwrap().clone(),
-                    horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5),
-                    0.0,
-                ));
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                31,
+                game.res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone(),
+                horizon_core::geometry::Vec3::new(2.5, 64.0, 0.5),
+                0.0,
+            ));
             let host: &mut dyn ServerHost = game;
             let chest = ItemStack::new("minecraft:diamond_chestplate", 1);
             // Through the handler, committed.
@@ -768,7 +776,10 @@ pub(super) mod tests {
                 living.attribute_value(host, "minecraft:armor")
             };
             assert_eq!(read(game, 30), read(game, 31));
-            assert!(read(game, 30).unwrap_or(0.0) >= 8.0, "diamond chestplate armour");
+            assert!(
+                read(game, 30).unwrap_or(0.0) >= 8.0,
+                "diamond chestplate armour"
+            );
         });
     }
 
@@ -1958,13 +1969,10 @@ pub(super) mod tests {
         use horizon_core::geometry::Vec3;
         use mod_api::EquipmentSlot;
         with_game(|game| {
-            game.armor_stands
-                .push(ArmorStand::new(40, Vec3::ZERO, 0.0));
-            game.armor_stands
-                .push(ArmorStand::new(41, Vec3::ZERO, 0.0));
-            let stand_slot = |game: &super::Game<'_>, id: usize| {
-                game.armor_stands[id].equipment.get(4).cloned()
-            };
+            game.armor_stands.push(ArmorStand::new(40, Vec3::ZERO, 0.0));
+            game.armor_stands.push(ArmorStand::new(41, Vec3::ZERO, 0.0));
+            let stand_slot =
+                |game: &super::Game<'_>, id: usize| game.armor_stands[id].equipment.get(4).cloned();
             let chestplate = ItemResource::of(&ItemStack::new("minecraft:diamond_chestplate", 1));
             let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1));
 
@@ -2011,9 +2019,8 @@ pub(super) mod tests {
                     .unwrap()
                     .capability(host, &ENTITY_ITEMS, ())
                     .unwrap();
-                let _ = host.transaction(|host, tx| {
-                    Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1))
-                });
+                let _ = host
+                    .transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 4, &chestplate, 1)));
             }
             let through_setter = game.living(game.entity(41).unwrap()).unwrap();
             assert!(game.living_set_equipment(
