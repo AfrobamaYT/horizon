@@ -3998,6 +3998,7 @@ mod tests {
             &render,
             &facts,
             crate::models::load_visibility(&root, assets.registry)?,
+            None,
         )?);
         let context = Arc::new(WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
@@ -5319,6 +5320,7 @@ mod tests {
             &render,
             &facts,
             crate::models::load_visibility(&root, assets.registry)?,
+            None,
         )?);
         let context = Arc::new(WorkerContext {
             light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),

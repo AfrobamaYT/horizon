@@ -1826,8 +1826,9 @@ or transactions. Declarations still go on each event or registrar.
   (`ItemModelResolver.updateForTopItem` and `ItemStackRenderState.submit`, in the model's `display` transform; with `owner_yaw`, the block
   entity is the item's owner, as a shelf is, so a compass on it points from there). The client's copy of a block entity has
   no item slots: send the stacks you draw in `native_block_entity_update_tag` and read them from `entity.nbt`.
-  `native_block_state_property(state, key)` reads the block's
-  `facing` from the hook's `state` without a world lookup.
+  `BlockState::property(metadata, "facing")` reads an owned state's property without a world lookup.
+  Host callbacks supply `host.block_states()` as metadata; tint workers receive their explicit
+  immutable metadata resource and never need a game host.
 
 - The world's clock for client mods: `native_clock()` is the shown world's game time and time of day in ticks (`i64`; the day time counts on past 24000), none on the title screen.
 

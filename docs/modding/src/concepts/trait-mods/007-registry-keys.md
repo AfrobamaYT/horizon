@@ -27,6 +27,20 @@ Metadata contexts are read-only and borrow the same table on the host and on wor
 Wire transport records are internal, not saved block values. Persist canonical identifiers
 and property strings rather than slots or state ordinals.
 
+`BlockState` is a small owned value with private fields, not a tint-specific snapshot or an
+engine numeric ID. `state.block()` reads its `BlockKey`; `state.ordinal()` reads its local
+ordinal. Property operations take explicit metadata: retain `let metadata = host.block_states()`
+and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing", "east")`.
+`BlockState::of(&metadata, key, constraints)` starts from the published default and applies the
+supplied `StateConstraint`s. Changes return a new value and never mutate the original.
+Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
+
+Tint callbacks receive the same immutable metadata resource explicitly, without a `Host`.
+The game prepares their owned state array before constructing mesh tables; renderer workers
+only copy those values and invoke metadata reads. When world numeric state IDs are reordered,
+the game resolves each state's property combination against the published definition, so
+local ordinals retain their meaning across reloads.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.

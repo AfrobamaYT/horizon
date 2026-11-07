@@ -1,5 +1,5 @@
 //! Worker reads cross the actual API metadata adapter without TLS table lookup or allocation.
-use mod_api::{BlockMetadata, BlockStateRecord};
+use mod_api::{BlockMetadata, BlockState};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 thread_local! { static COUNT: Cell<Option<usize>> = const { Cell::new(None) }; }
@@ -49,17 +49,22 @@ fn metadata_resource_worker_reads_allocate_nothing() {
     .unwrap();
     let metadata: &'static (dyn BlockMetadata + Send + Sync) =
         mod_api::__private::block_definitions().unwrap();
-    let state = BlockStateRecord::new(mod_api::__private::block_key("probe:lamp").unwrap(), 0);
+    let state = BlockState::of(
+        metadata,
+        mod_api::__private::block_key("probe:lamp").unwrap(),
+        &[],
+    )
+    .unwrap();
     std::thread::spawn(move || {
         COUNT.set(Some(0));
         for _ in 0..1_000 {
-            assert_eq!(metadata.property(state, "lit"), Ok(Some("false")));
-            assert_eq!(metadata.property(state, "missing"), Ok(None));
+            assert_eq!(state.property(metadata, "lit"), Ok(Some("false")));
+            assert_eq!(state.property(metadata, "missing"), Ok(None));
         }
         let count = COUNT.replace(None).unwrap();
         assert_eq!(count, 0);
     })
     .join()
     .unwrap();
-    assert_eq!(metadata.property(state, "lit"), Ok(Some("false")));
+    assert_eq!(state.property(metadata, "lit"), Ok(Some("false")));
 }

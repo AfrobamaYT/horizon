@@ -119,6 +119,81 @@ impl ItemBoundary for super::native_hooks::HitLevel<'_> {
     }
 }
 
+impl TryIntoApi for horizon_world::chunk::BlockState {
+    type Api = mod_api::BlockState;
+    type Error = mod_api::BlockStateError;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        let block = mod_api::__private::block_key(&self.name)
+            .ok_or(mod_api::BlockStateError::UnknownBlock)?;
+        let properties: Vec<_> = self
+            .properties
+            .iter()
+            .map(|(name, value)| mod_api::StateConstraint::new(name.clone(), value.clone()))
+            .collect();
+        mod_api::BlockState::of(block_metadata_table()?, block, &properties)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn block_values_keep_frozen_ordinals_when_world_state_ids_reorder() {
+    use horizon_world::registry::{BlockRegistry, BlockStateId};
+    mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+    let first = r#"{"defaults":{"minecraft:air":0,"minecraft:stairs":2},"states":[["air",true,false,"","minecraft:air"],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north"}}],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east"}}]]}"#;
+    let first = BlockRegistry::from_facts_json(first.as_bytes()).unwrap();
+    resolve_block_definitions(&first).unwrap();
+    let reordered = r#"{"defaults":{"minecraft:air":0,"minecraft:stairs":1},"states":[["air",true,false,"","minecraft:air"],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east"}}],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north"}}]]}"#;
+    let reordered = BlockRegistry::from_facts_json(reordered.as_bytes()).unwrap();
+    resolve_block_definitions(&reordered).unwrap();
+    let east = reordered
+        .state(BlockStateId(1))
+        .unwrap()
+        .try_into_api()
+        .unwrap();
+    let north = reordered
+        .state(BlockStateId(2))
+        .unwrap()
+        .try_into_api()
+        .unwrap();
+    let metadata = block_metadata_table().unwrap();
+    assert_eq!(east.ordinal(), 1);
+    assert_eq!(north.ordinal(), 0);
+    assert_eq!(east.property(metadata, "facing"), Ok(Some("east")));
+    assert_eq!(north.property(metadata, "facing"), Ok(Some("north")));
+    let mut invalid = reordered.state(BlockStateId(1)).unwrap().clone();
+    invalid.properties.insert("facing".into(), "south".into());
+    assert_eq!(
+        invalid.try_into_api(),
+        Err(mod_api::BlockStateError::InvalidValue(0))
+    );
+    invalid.name = "missing:block".into();
+    assert_eq!(
+        invalid.try_into_api(),
+        Err(mod_api::BlockStateError::UnknownBlock)
+    );
+}
+
+/// Prepare callback data before mesh construction; workers never convert engine records.
+pub(in crate::game) fn mod_tint_values(
+    registry: &horizon_world::registry::BlockRegistry,
+) -> Result<Option<crate::mesher::ModTintValues>, String> {
+    if !crate::mesher::has_custom_block_tint_sources() {
+        return Ok(None);
+    }
+    let metadata =
+        block_metadata_table().map_err(|error| format!("block tint metadata: {error:?}"))?;
+    let states = (0..registry.len())
+        .map(|index| {
+            registry
+                .state(horizon_world::registry::BlockStateId(index as u32))
+                .expect("registry index is in bounds")
+                .try_into_api()
+        })
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("block tint state: {error:?}"))?;
+    Ok(Some(crate::mesher::ModTintValues { states, metadata }))
+}
+
 fn block_metadata_table()
 -> Result<&'static horizon_mod_runtime::block_definitions::Blocks, mod_api::BlockStateError> {
     mod_api::__private::block_definitions().ok_or(mod_api::BlockStateError::Unavailable)

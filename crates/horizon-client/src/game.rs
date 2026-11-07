@@ -2291,7 +2291,13 @@ impl PackResources {
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
         api_values::resolve_block_definitions(assets.registry)?;
-        let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
+        let tables = Arc::new(MeshTables::new(
+            &assets,
+            &render,
+            facts,
+            visibility,
+            api_values::mod_tint_values(assets.registry)?,
+        )?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
             render.model_library.clone(),
@@ -23342,7 +23348,13 @@ fn load_resources(
     }
     api_values::resolve_block_definitions(assets.registry)?;
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
-        MeshTables::new(&assets, &render, &facts, visibility)
+        MeshTables::new(
+            &assets,
+            &render,
+            &facts,
+            visibility,
+            api_values::mod_tint_values(assets.registry)?,
+        )
     })?);
     let pack_step = startup::step("pack.assemble");
     let mut pack = PackResources::assemble(
