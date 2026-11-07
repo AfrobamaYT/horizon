@@ -115,12 +115,13 @@ impl Game<'_> {
         let (who, _, guest) = fields;
         match backing {
             Backing::List(i) => {
-                let p = &mut self.creatures.projectiles[i];
-                (p.owner, p.owner_uuid, p.guest) = fields;
-                // `AbstractArrow.setOwner(Entity)`: a player's arrow may be picked up.
-                if let Some(a) = &mut p.arrow {
-                    a.set_owner(who);
-                }
+                self.creatures.projectiles.update(i, |p| {
+                    (p.owner, p.owner_uuid, p.guest) = fields;
+                    // `AbstractArrow.setOwner(Entity)`: a player's arrow may be picked up.
+                    if let Some(a) = &mut p.arrow {
+                        a.set_owner(who);
+                    }
+                });
             }
             Backing::Trident(i) => {
                 if who != Some(Who::Player) {
@@ -202,9 +203,10 @@ impl Game<'_> {
         match backing {
             // `deflect` takes the `EntityReference` overload of `setOwner`: an
             // arrow's pickup does not change, unlike `set_owner`.
-            Backing::List(i) => {
-                self.creatures.projectiles[i].deflect(turn, power, owner, by_attack)
-            }
+            Backing::List(i) => self
+                .creatures
+                .projectiles
+                .update(i, |p| p.deflect(turn, power, owner, by_attack)),
             Backing::Trident(i) => {
                 if owner.0 != Some(Who::Player) {
                     return false;
@@ -249,16 +251,18 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let Some(arrow) = self.creatures.projectiles[index].arrow.as_mut() else {
-            return false;
-        };
-        arrow.pickup = match pickup {
-            NativeArrowPickup::Disallowed => Pickup::Disallowed,
-            NativeArrowPickup::Allowed => Pickup::Allowed,
-            NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
-            _ => unreachable!("NativeArrowPickup: unhandled variant"),
-        };
-        true
+        self.creatures.projectiles.update(index, |p| {
+            let Some(arrow) = p.arrow.as_mut() else {
+                return false;
+            };
+            arrow.pickup = match pickup {
+                NativeArrowPickup::Disallowed => Pickup::Disallowed,
+                NativeArrowPickup::Allowed => Pickup::Allowed,
+                NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
+                _ => unreachable!("NativeArrowPickup: unhandled variant"),
+            };
+            true
+        })
     }
 
     fn native_arrow_index(&self, projectile: ProjectileRef) -> Result<usize, PierceLevelError> {
@@ -294,11 +298,9 @@ impl Game<'_> {
         level: i8,
     ) -> Result<(), PierceLevelError> {
         let index = self.native_arrow_index(projectile)?;
-        self.creatures.projectiles[index]
-            .arrow
-            .as_mut()
-            .unwrap()
-            .pierce = level as u8;
+        self.creatures
+            .projectiles
+            .update(index, |p| p.arrow.as_mut().unwrap().pierce = level as u8);
         Ok(())
     }
 
@@ -320,15 +322,16 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let ProjectileKind::Arrow { base_damage, .. } = &mut self.creatures.projectiles[index].kind
-        else {
-            return false;
-        };
-        if !damage.is_finite() {
-            return false;
-        }
-        *base_damage = damage;
-        true
+        self.creatures.projectiles.update(index, |p| {
+            let ProjectileKind::Arrow { base_damage, .. } = &mut p.kind else {
+                return false;
+            };
+            if !damage.is_finite() {
+                return false;
+            }
+            *base_damage = damage;
+            true
+        })
     }
 
     /// `AbstractArrow.isCritArrow`, for an arrow.
@@ -347,12 +350,13 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let p = &mut self.creatures.projectiles[index];
-        if !matches!(p.kind, ProjectileKind::Arrow { .. }) {
-            return false;
-        }
-        p.set_critical(critical);
-        true
+        self.creatures.projectiles.update(index, |p| {
+            if !matches!(p.kind, ProjectileKind::Arrow { .. }) {
+                return false;
+            }
+            p.set_critical(critical);
+            true
+        })
     }
 }
 
@@ -635,7 +639,9 @@ mod tests {
                 .unwrap();
             let random = game.creatures.projectiles[0].random.0.clone().next_float();
             for left in 1..=5 {
-                game.creatures.projectiles[0].no_deflect_ticks = left;
+                game.creatures
+                    .projectiles
+                    .update(0, |p| p.no_deflect_ticks = left);
                 assert!(!charge.deflect(
                     game,
                     NativeDeflection::Reverse,
@@ -649,7 +655,9 @@ mod tests {
                 assert_eq!(p.owner, Some(Who::Mob(99)));
                 assert_eq!(p.random.0.clone().next_float(), random);
             }
-            game.creatures.projectiles[0].no_deflect_ticks = 0;
+            game.creatures
+                .projectiles
+                .update(0, |p| p.no_deflect_ticks = 0);
 
             // REVERSE of a non-arrow takes one float from its own random, not the level's.
             let level = game.world.random.clone().next_float();
@@ -754,7 +762,9 @@ mod tests {
                 Vec3::new(0.0, 1.0, 0.0)
             );
             assert_eq!(game.creatures.projectiles[i].owner, Some(Who::Mob(99)));
-            game.creatures.projectiles[i].no_deflect_ticks = 0;
+            game.creatures
+                .projectiles
+                .update(i, |p| p.no_deflect_ticks = 0);
             game.attack_ticks = 50;
             assert!(game.deflect(i));
             assert_eq!(game.attack_ticks, 0);
