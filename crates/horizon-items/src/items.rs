@@ -550,7 +550,7 @@ pub(crate) fn load_tag_lists(
     kind: &str,
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let loaded =
         |id: &str| id == "minecraft" || inventory.server_ids().any(|enabled| enabled == id);
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
@@ -2553,7 +2553,7 @@ mod tests {
 
     #[test]
     fn tag_conditions_use_enabled_server_ids_before_each_replace_and_reload() {
-        use horizon_mods::{Side, enabled::EnabledMods};
+        use horizon_mod_package::{Side, enabled::EnabledMods};
         let root = std::env::temp_dir().join(format!(
             "horizon-conditional-tags-{}-{}",
             std::process::id(),
@@ -2618,7 +2618,7 @@ mod tests {
         ] {
             let inventory = EnabledMods::new(side.map(|side| ("code_only".into(), side)));
             fs::write(
-                root.join(horizon_mods::enabled::MARKER),
+                root.join(horizon_mod_package::enabled::MARKER),
                 serde_json::to_vec(&inventory).unwrap(),
             )
             .unwrap();

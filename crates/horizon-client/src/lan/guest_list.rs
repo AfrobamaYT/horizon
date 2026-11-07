@@ -20,10 +20,12 @@ impl GuestList {
     /// not scan the collection or rebuild its indexes.
     pub fn update<T>(&mut self, index: usize, update: impl FnOnce(&mut Guest) -> T) -> T {
         let before = index_fields(&self.rows[index]);
+        let registration = self.rows[index].attachments.registration();
         let edit = Edit {
             list: self,
             index,
             before,
+            registration,
         };
         update(&mut edit.list.rows[index])
     }
@@ -61,6 +63,7 @@ impl GuestList {
                 entity_id: g.entity_id,
                 spectator: g.spectator(),
                 permission: g.permission,
+                horizon: g.is_horizon(),
                 moved: take_moved && std::mem::take(&mut g.moved),
                 position: g.position,
                 view_distance: g.view_distance,
@@ -86,6 +89,15 @@ impl GuestList {
     pub fn saved_data_mut(&mut self, conn: u32) -> Option<&mut Option<horizon_core::nbt::Tag>> {
         let index = self.connection_index(conn)?;
         Some(&mut self.rows[index].saved)
+    }
+
+    /// Borrow a player's canonical attachments without exposing identity fields.
+    pub fn attachments_mut(
+        &mut self,
+        conn: u32,
+    ) -> Option<&mut horizon_world::attachments::ResidentAttachments> {
+        let index = self.connection_index(conn)?;
+        Some(&mut self.rows[index].attachments)
     }
 
     /// Borrow only the stored menu items at this collection index.
@@ -173,9 +185,16 @@ impl GuestList {
             self.push(guest);
         }
     }
-    pub fn remove(&mut self, index: usize) -> Guest {
+    /// Move a still-resident record out while saving it; its binding travels with it.
+    pub fn take_for_save(&mut self, index: usize) -> Guest {
         let guest = self.rows.remove(index);
         self.reindex();
+        guest
+    }
+
+    pub fn remove(&mut self, index: usize) -> Guest {
+        let mut guest = self.take_for_save(index);
+        guest.attachments.retire();
         guest
     }
     pub fn retain(&mut self, keep: impl FnMut(&Guest) -> bool) {
@@ -189,11 +208,15 @@ impl GuestList {
         self.reindex();
     }
     pub fn replace(&mut self, index: usize, guest: Guest) -> Guest {
-        let old = std::mem::replace(&mut self.rows[index], guest);
+        let mut old = std::mem::replace(&mut self.rows[index], guest);
         self.reindex();
+        old.attachments.retire();
         old
     }
     pub fn clear(&mut self) {
+        for guest in &mut self.rows {
+            guest.attachments.retire();
+        }
         self.rows.clear();
         self.simulation.clear();
         self.connections.clear();
@@ -216,6 +239,11 @@ impl GuestList {
                 .entry((guest.uuid, guest.entity_id as u32))
                 .or_insert(index);
         }
+    }
+}
+impl Drop for GuestList {
+    fn drop(&mut self) {
+        self.clear();
     }
 }
 impl Deref for GuestList {
@@ -243,6 +271,7 @@ struct Edit<'a> {
     list: &'a mut GuestList,
     index: usize,
     before: (u32, u128, i32, bool),
+    registration: Option<horizon_world::attachments::AttachmentRegistration>,
 }
 fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
     (
@@ -254,6 +283,14 @@ fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
 }
 impl Drop for Edit<'_> {
     fn drop(&mut self) {
+        if let Some(old) = &self.registration
+            && !self.list.rows[self.index]
+                .attachments
+                .registration()
+                .is_some_and(|current| old.same_registration(&current))
+        {
+            old.unregister();
+        }
         if index_fields(&self.list.rows[self.index]) != self.before {
             self.list.reindex();
         }
@@ -292,6 +329,136 @@ mod tests {
             );
         }
     }
+    const VALUE: horizon_world::attachments::AttachmentType<i32> =
+        horizon_world::attachments::AttachmentType {
+            namespace: "guest_test",
+            name: "value",
+            default: || 0,
+            codec: None,
+            copy_on_death: false,
+            sync: false,
+        };
+
+    #[test]
+    fn canonical_attachment_retirement_does_not_wait_for_removed_records_or_clones() {
+        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use std::sync::{Arc, Mutex};
+
+        for action in ["remove", "replace", "retain", "clear", "drop", "update"] {
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let key = ("guest_test".into(), "value".into());
+            let mut player = guest(1);
+            VALUE
+                .set(&mut player.attachments, Holder::Level, 7)
+                .unwrap();
+            player.attachments.bind_index(&index, player.uuid);
+            let mut saved = player.attachments.clone();
+            let before = index.lock().unwrap().snapshot(&key);
+            let mut list = GuestList::default();
+            list.push(player);
+            drop(saved.clone());
+            assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            let mut removed = match action {
+                "remove" => Some(list.remove(0)),
+                "replace" => Some(list.replace(0, guest(2))),
+                "retain" => {
+                    list.retain(|_| false);
+                    None
+                }
+                "clear" => {
+                    list.clear();
+                    None
+                }
+                "drop" => {
+                    drop(std::mem::take(&mut list));
+                    None
+                }
+                "update" => {
+                    list.update(0, |g| *g = guest(2));
+                    None
+                }
+                _ => unreachable!(),
+            };
+            if let Some(player) = &mut removed {
+                VALUE
+                    .set(&mut player.attachments, Holder::Level, 9)
+                    .unwrap();
+            }
+            assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&7));
+            assert_eq!(VALUE.get_existing(&mut saved, Holder::Level), Ok(Some(7)));
+        }
+    }
+
+    #[test]
+    fn displaced_updates_retire_retained_owners() {
+        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use std::sync::{Arc, Mutex};
+
+        for action in ["replace", "swap", "capture", "connection", "unwind"] {
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let key = ("guest_test".into(), "value".into());
+            let mut player = guest(1);
+            VALUE
+                .set(&mut player.attachments, Holder::Level, 7)
+                .unwrap();
+            player.attachments.bind_index(&index, player.uuid);
+            let mut list = GuestList::default();
+            list.push(player);
+            let mut retained = guest(2);
+            match action {
+                "replace" => retained = list.update(0, |g| std::mem::replace(g, guest(2))),
+                "swap" => list.update(0, |g| std::mem::swap(g, &mut retained)),
+                "capture" => list.update_all(|g| retained = std::mem::replace(g, guest(2))),
+                "connection" => {
+                    retained = list
+                        .update_connection(1, |g| std::mem::replace(g, guest(2)))
+                        .unwrap()
+                }
+                "unwind" => {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        list.update(0, |g| {
+                            std::mem::swap(g, &mut retained);
+                            panic!("fixture")
+                        })
+                    }));
+                }
+                _ => unreachable!(),
+            }
+            assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
+            VALUE
+                .set(&mut retained.attachments, Holder::Level, 9)
+                .unwrap();
+            assert!(index.lock().unwrap().snapshot(&key).is_empty(), "{action}");
+        }
+    }
+
+    #[test]
+    fn a_save_take_moves_canonical_binding_and_destruction_retires_it() {
+        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use std::sync::{Arc, Mutex};
+
+        let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+        let key = ("guest_test".into(), "value".into());
+        let mut player = guest(1);
+        VALUE
+            .set(&mut player.attachments, Holder::Level, 7)
+            .unwrap();
+        let binding = player.attachments.bind_index(&index, player.uuid);
+        let mut list = GuestList::default();
+        list.push(player);
+        let player = list.take_for_save(0);
+        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+        list.insert(0, player);
+        assert!(binding.unregister(), "the move did not replace the binding");
+        list.attachments_mut(1).unwrap().bind_index(&index, 101);
+        let mut borrowed = std::mem::take(&mut **list.attachments_mut(1).unwrap());
+        let player = list.take_for_save(0);
+        drop(player);
+        VALUE.set(&mut borrowed, Holder::Level, 9).unwrap();
+        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+    }
+
     #[test]
     fn connectionless_actors_do_not_expand_the_material_body_index() {
         let mut list = GuestList::default();

@@ -1,7 +1,7 @@
 # Mod files
 
-A `.hmod` is one mod: content, native code, or both. `horizon_mods::Package` reads the shared manifest and
-validates the package; `horizon_mods::Content` reads its resources, and `horizon_mods::index::native::Bundle`
+A `.hmod` is one mod: content, native code, or both. `horizon_mod_package::Package` reads the shared manifest and
+validates the package; `horizon_mod_package::Content` reads its resources, and `horizon_mod_package::index::native::Bundle`
 reads its code. Content is preview, native code experimental ([data-formats.md](../../../api/data-formats.md)).
 
 ## The zip

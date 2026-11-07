@@ -454,9 +454,6 @@ impl<'t> Frame<'t> {
         refused
     }
 
-    /// Calls the declared function `function` on `receiver` with `args`, after applying the
-    /// call's writes. A reference it returns is a new root, valid until the next call. Answers
-    /// what it returned, and the writes that couldn't apply.
     /// Trusted signature arity, checked before guest argument payloads are copied.
     pub(crate) fn argument_count(&self, function: u32) -> Result<usize, Refusal> {
         self.table
@@ -466,6 +463,9 @@ impl<'t> Frame<'t> {
             .ok_or_else(|| gone("no such function"))
     }
 
+    /// Calls the declared function `function` on `receiver` with `args`, after applying the
+    /// call's writes. A reference it returns is a new root, valid until the next call. Answers
+    /// what it returned, and the writes that couldn't apply.
     pub fn call(
         &mut self,
         function: u32,

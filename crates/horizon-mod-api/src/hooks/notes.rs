@@ -1182,10 +1182,34 @@ It's the same record the `play_sound` hook edits, and it goes through the same m
 vanilla's (`minecraft:entity.generic.explode`) or the mod's own: a content mod's `assets/<id>/sounds.json` and
 `assets/<id>/sounds/*.ogg` load with the rest of its assets. A client half that hears from its server half (mod
 messages) where something happened can time the sound to the distance, such as a blast heard when its shock wave reaches
-the player: `after = distance / speed`. It answers false on a server and for a value out of range (an event id that
+the player: `after = distance / speed`. It answers `None` on a server and for a value out of range (an event id that
 isn't namespaced, a position or volume that isn't finite, a negative volume, pitch or repeat gap, `after` past 1200);
 an event the resources lack plays nothing. Diverges from upstream: horizon-rust/horizon's `native_play_local_sound` takes
 `(sound, at, volume, pitch, delay)`.
+
+Otherwise it answers a `SoundRef`, a handle on this one play, never reused. Its methods take the `&dyn ClientHost`, so
+any client hook can call them. Like the play, the writes are queued for the next audio update, while the answers are
+computed at the call:
+- `sound.state(host)` is `Some(SoundState)`: `Waiting` (queued, waiting out `after`, or between a looping sound's
+  repeats), `Playing` (`SoundEngine.isActive`) or `Stopped`. It is `None` on a server.
+- `sound.stop(host)` stops it for good: a waiting sound never starts and a looping one never repeats. A stop asked
+  since the last update already reads `Stopped`.
+- `sound.fade(host, volume, ticks)` moves its volume to `volume` (at or above 0) in equal steps over the next `ticks`
+  unpaused ticks it plays, or at once for 0. A fade to 0 stops it when the fade ends, as `LoopSoundInstance.fadeOut`
+  does. A `SoundPlay` at volume 0 faded up fades in, and a later fade replaces one in progress. While the game is
+  paused the fade waits, as vanilla's tickable sounds do (`SoundEngine.tick(paused)`): an interface or music sound
+  keeps playing at the volume it had (`pauseAllExcept(MUSIC, UI)`), and any other sound pauses with the game.
+
+`stop` and `fade` answer false, changing nothing, once the sound is over. Once it ends, is stopped or faded out, or is
+cleared (leaving or changing levels stops every sound), the handle reads `Stopped` and its writes do nothing. It stays
+valid across a change of output device, which reopens the output on the same mixer and keeps the sounds playing.
+Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while it plays (stop it before
+starting another in its place), or nothing can stop it until the player leaves the level.
+
+`ClientHost::sound_events()` lists every sound event the client's resources have (`SoundManager.getAvailableSounds`).
+`audio_devices()` lists the output devices by name (`SoundEngine.getAvailableSoundDevices`), and `audio_device()` names
+the one the options ask for, empty for the system's default. Both lists are built anew at each call, and listing the
+devices probes each one: ask from setup or a settings screen, not every frame.
 
 ### Falling blocks
 
@@ -1763,7 +1787,7 @@ or transactions. Declarations still go on each event or registrar.
 - Client sounds: `ClientHost::play_local_sound(sound, after)` plays a `SoundPlay`, vanilla's event or the mod's own
   from its `assets/<id>/sounds.json`, for this player only: an interface sound (`SoundPlay::ui`) or one at a place
   (`SoundPlay::at`), now or up to a minute later, so a client mod can click its own buttons or time a blast's sound
-  to its shock wave.
+  to its shock wave. Its `SoundRef` answers whether it plays, and stops or fades it.
 
 - Values for a mod's own shader pack: `native_shader_params(partial, params)` asks each frame for eight `vec4`s that
   every stage of a Horizon shader pack reads as `frame.mods`, so a mod can tell the pack it bundles where and when
@@ -2221,7 +2245,7 @@ registration path.
 
 - A player's or mob's breathing, on the single player server thread and on a dedicated server: `native_living_breathe(context, entity, kind, can_breathe, consume, refill)` every tick for a player and for a mob with the generic air logic (NeoForge's `LivingBreatheEvent`, vanilla's `LivingEntity.baseTick`), with Horizon's answers as the defaults: set `can_breathe` and how much air `consume` takes or `refill` gives (up to 300); at -20 the entity is set to 0 air and takes 2 drowning damage. It is a free function in `horizon_client::breathing`, so it answers and cannot call helpers. Axolotls and `WaterAnimal`s keep their own air logic.
 
-- Blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(context, blocks)` and `native_items(context, items)`, asked once at start on every side, take `horizon_mods::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out.
+- Blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(context, blocks)` and `native_items(context, items)`, asked once at start on every side, take `horizon_mod_package::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out.
 
 - Entities ticking, through `native_entity_tick_pre` (NeoForge's `EntityTickEvent.Pre`) and `native_entity_tick_post` (`EntityTickEvent.Post`), with the entity's id and type (`minecraft:zombie`, `minecraft:item`) and the level. Set `canceled` in the Pre and the entity doesn't tick this tick (and its Post isn't told). Told for the mobs, item entities, minecarts and boats that tick in an entity-ticking chunk, on the single player server thread and on a dedicated server; not for a player's own boat or minecart, projectiles, orbs, primed TNT, falling blocks or armor stands. Check `kind`. Mobs and items hear every Pre before the family's first tick and every Post after its last; minecarts and boats hear theirs around each one's tick. A mod that hooks them also hooks `native_entity_tick_listened(listened)` and sets `*listened = true`: otherwise no entity's tick is told. It runs each tick for every ticking entity, so keep it cheap.
 
