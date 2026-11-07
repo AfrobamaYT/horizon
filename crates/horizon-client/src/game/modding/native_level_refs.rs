@@ -1048,6 +1048,10 @@ mod tests {
 
             // Ticks run only in the level in place, at a loaded position inside its height.
             let height = level.height(game).unwrap();
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
             assert!(level.block_tick(game, [0, height.0, 0]));
             assert!(level.block_random_tick(game, [0, height.0, 0]));
             assert!(
