@@ -41,6 +41,11 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
 }
 
 impl Game<'_> {
+    /// The border of a resident server level, through the handle's lifetime check.
+    pub(super) fn native_level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
+        self.native_level_world(level)?;
+        Some(self.border.bounds())
+    }
     /// The world a handle names now, or None for a stale or foreign one.
     pub(super) fn native_level_world(&self, level: LevelRef) -> Option<&World> {
         if !self.is_logical_server() || self.native_lifecycle.epoch() != Some(level.epoch()) {
@@ -767,6 +772,24 @@ mod tests {
                 None,
                 "not opened yet"
             );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn world_border_reads_refuse_stale_and_unopened_levels() {
+        with_game(|game| {
+            let level = game.level("minecraft:overworld").unwrap();
+            game.border.set_center([12.0, -8.0]);
+            game.border.set_size(40.0);
+            assert_eq!(level.world_border(game), Some([-8.0, -28.0, 32.0, 12.0]));
+            let stale_epoch = NativeWorldEpoch::new(level.epoch().get() + 1);
+            let stale = LevelRef::new(stale_epoch, level.dimension());
+            assert_eq!(stale.world_border(game), None);
+            let unopened = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
+            assert_eq!(unopened.world_border(game), None);
+            game.border.set_center([0.0, 0.0]);
+            assert_eq!(level.world_border(game), Some([-20.0, -20.0, 20.0, 20.0]));
         });
     }
 

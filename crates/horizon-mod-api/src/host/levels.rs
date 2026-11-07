@@ -24,6 +24,17 @@ pub trait LevelsHost {
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
 #[doc(hidden)]
 pub trait LevelsBackend {
+    /// Side: server.
+    /// The level's world border as [min_x, min_z, max_x, max_z], using the
+    /// previous size while it moves. Horizon currently shares one border
+    /// across its dimensions. None for a stale handle or a closed level.
+    fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
+        crate::phase::unprovided(
+            "Backend::level_world_border",
+            "level_world_border",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
     /// Side: both.
     /// The name of a dimension's key.
     fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {

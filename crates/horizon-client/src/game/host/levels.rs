@@ -12,6 +12,13 @@ impl LevelsHost for Game<'_> {
     }
 }
 impl LevelsBackend for Game<'_> {
+    fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
+        mod_api::__private::check_access(
+            "level_world_border",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_level_world_border(level)
+    }
     fn dimension_key_id(&self, key: DimensionKey) -> Option<String> {
         mod_api::__private::check_access(
             "dimension_key_id",
