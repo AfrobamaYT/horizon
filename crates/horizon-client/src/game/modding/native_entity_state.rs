@@ -625,7 +625,7 @@ mod tests {
 
             game.carts
                 .push(Minecart::new(44, CartKind::Rideable, Vec3::ZERO));
-            game.carts[0].tick_count = 5;
+            game.carts.update(0, |c| c.tick_count = 5);
             let cart = game.entity(44).unwrap();
             assert_eq!(cart.tick_count(game), Some(5));
 
