@@ -568,10 +568,10 @@ fn thrown_kind(stack: &ItemStack) -> &'static str {
 /// within the player's box grown by 2, and shrink its radius by 0.5.
 pub(super) fn collect_dragon_breath(
     player_box: Aabb,
-    clouds: &mut [super::dragon::Breath],
+    clouds: &mut horizon_client::join_seq::ResidentList<super::dragon::Breath>,
 ) -> bool {
     let search_box = player_box.inflate(Vec3::new(2.0, 2.0, 2.0));
-    if let Some(c) = clouds.iter_mut().find(|c| {
+    if let Some(i) = clouds.iter().position(|c| {
         if !c.from_dragon || c.potion.is_some() || super::dragon::breath_expired(c.age, c.duration)
         {
             return false;
@@ -583,7 +583,7 @@ pub(super) fn collect_dragon_breath(
         );
         search_box.intersects(cloud_box)
     }) {
-        c.radius = (c.radius - 0.5).max(0.0);
+        clouds.update(i, |c| c.radius = (c.radius - 0.5).max(0.0));
         true
     } else {
         false
@@ -1692,7 +1692,7 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = std::mem::take(&mut self.breath_clouds);
+        let mut clouds = self.breath_clouds.take();
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
         self.breath_clouds.append(&mut clouds);
     }
@@ -2791,7 +2791,7 @@ mod tests {
     #[test]
     fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
-        let mut clouds = vec![super::super::dragon::Breath {
+        let mut clouds = [super::super::dragon::Breath {
             id: 1,
             at: [1.0, 64.0, 0.0],
             radius: 5.0,
@@ -2800,7 +2800,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut clouds));
         assert_eq!(clouds[0].radius, 4.5);
         assert!(collect_dragon_breath(player_box, &mut clouds));
@@ -2813,7 +2815,7 @@ mod tests {
     fn glass_bottle_ignores_non_dragon_or_expired_or_out_of_range_clouds() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         // Non-dragon cloud (`from_dragon: false`).
-        let mut non_dragon = vec![super::super::dragon::Breath {
+        let mut non_dragon = [super::super::dragon::Breath {
             id: 1,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2822,12 +2824,14 @@ mod tests {
             from_dragon: false,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut non_dragon));
         assert_eq!(non_dragon[0].radius, 3.0);
 
         // Lingering potion cloud (`potion: Some(...)`).
-        let mut lingering = vec![super::super::dragon::Breath {
+        let mut lingering = [super::super::dragon::Breath {
             id: 2,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2847,13 +2851,15 @@ mod tests {
                 owner: None,
                 guest: None,
             }),
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut lingering));
         assert_eq!(lingering[0].radius, 3.0);
 
         // Its last tick before the wait-shifted end still holds breath
         // (`tickCount - waitTime < duration`).
-        let mut last = vec![super::super::dragon::Breath {
+        let mut last = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2862,12 +2868,14 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut last));
         assert_eq!(last[0].radius, 4.5);
 
         // Expired cloud (`tickCount - waitTime >= duration`).
-        let mut expired = vec![super::super::dragon::Breath {
+        let mut expired = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2876,13 +2884,15 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut expired));
         assert_eq!(expired[0].radius, 5.0);
 
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
         // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
-        let mut far = vec![super::super::dragon::Breath {
+        let mut far = [super::super::dragon::Breath {
             id: 4,
             at: [10.0, 64.0, 0.0],
             radius: 1.0,
@@ -2891,14 +2901,16 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut far));
         assert_eq!(far[0].radius, 1.0);
 
         // Out of vertical reach: cloud at Y=64.0 (Y bounds [64.0, 64.5]),
         // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
         let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
-        let mut ground_cloud = vec![super::super::dragon::Breath {
+        let mut ground_cloud = [super::super::dragon::Breath {
             id: 5,
             at: [0.0, 64.0, 0.0],
             radius: 1.0,
@@ -2907,7 +2919,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
         assert_eq!(ground_cloud[0].radius, 1.0);
     }

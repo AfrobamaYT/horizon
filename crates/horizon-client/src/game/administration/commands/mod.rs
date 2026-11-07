@@ -1807,13 +1807,17 @@ impl Game<'_> {
                 }
             }
             Target::Spawner(id) => {
-                if let Some(s) = self.ominous_spawners.iter_mut().find(|s| s.id == id) {
-                    s.position = [v.x, v.y, v.z];
+                if let Some(i) = self.ominous_spawners.iter().position(|e| e.id == id) {
+                    self.ominous_spawners.update(i, |s| {
+                        s.position = [v.x, v.y, v.z];
+                    });
                 }
             }
             Target::Cloud(id) => {
-                if let Some(c) = self.breath_clouds.iter_mut().find(|c| c.id == id) {
-                    c.at = pos;
+                if let Some(i) = self.breath_clouds.iter().position(|e| e.id == id) {
+                    self.breath_clouds.update(i, |c| {
+                        c.at = pos;
+                    });
                 }
             }
             // Wall-mounted entities do not move.

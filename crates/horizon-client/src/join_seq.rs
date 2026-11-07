@@ -160,6 +160,10 @@ impl<T> ResidentList<T> {
     pub fn push(&mut self, entity: T) {
         self.0.0.push(entity);
     }
+    /// Append a batch after any owners already in this storage.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
     }
@@ -189,6 +193,12 @@ impl<T> ResidentList<T> {
     pub fn restore(&mut self, mut taken: Self) {
         taken.0.append(&mut self.0);
         *self = taken;
+    }
+}
+
+impl<T> FromIterator<T> for ResidentList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        Self(JoinList(entities.into_iter().collect()))
     }
 }
 
