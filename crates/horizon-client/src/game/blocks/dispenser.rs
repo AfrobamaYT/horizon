@@ -504,7 +504,7 @@ impl Game<'_> {
     /// answer's event and smoke once. A client, another dimension or an unloaded
     /// chunk keeps the input stack unchanged.
     #[allow(dead_code)]
-    pub(super) fn native_dispense_default(
+    pub(super) fn dispense_default(
         &mut self,
         dimension: &str,
         pos: [i32; 3],
@@ -523,7 +523,7 @@ impl Game<'_> {
         self.default_execute((pos[0], pos[1], pos[2]), facing, stack)
     }
     /// `new DefaultDispenseItemBehavior().dispense(..)` including its events.
-    pub(super) fn dispense_default(
+    pub(super) fn dispense_default_in_level(
         &mut self,
         pos: Pos,
         facing: Direction,
@@ -1210,7 +1210,7 @@ impl Game<'_> {
         let Some((wood, chest)) =
             super::boats::any_boat_wood(&stack.item).map(|(w, c)| (w.to_owned(), c))
         else {
-            return (self.dispense_default(pos, facing, stack), CLICK);
+            return (self.dispense_default_in_level(pos, facing, stack), CLICK);
         };
         let front = offset(pos, facing);
         let s = step(facing);
@@ -1228,10 +1228,10 @@ impl Game<'_> {
         } else if self.res.facts().is_air(self.block_at(front)) && self.water_at(below) {
             0.0
         } else {
-            return (self.dispense_default(pos, facing, stack), CLICK);
+            return (self.dispense_default_in_level(pos, facing, stack), CLICK);
         };
         if !self.boat_models.has(&wood, chest) {
-            return (self.dispense_default(pos, facing, stack), CLICK);
+            return (self.dispense_default_in_level(pos, facing, stack), CLICK);
         }
         self.next_entity += 1;
         let mut boat = super::boats::Boat::new(
@@ -1257,7 +1257,7 @@ impl Game<'_> {
     /// `MinecartDispenseItemBehavior`.
     fn dispense_minecart(&mut self, pos: Pos, facing: Direction, stack: ItemStack) -> Dispensed {
         let Some(kind) = super::minecarts::CartKind::from_id(&stack.item) else {
-            return (self.dispense_default(pos, facing, stack), CLICK);
+            return (self.dispense_default_in_level(pos, facing, stack), CLICK);
         };
         let s = step(facing);
         let c = Self::center(pos);
@@ -1271,11 +1271,11 @@ impl Game<'_> {
             if rail.shape.is_slope() { 0.6 } else { 0.1 }
         } else {
             if !self.res.facts().is_air(self.block_at(front)) {
-                return (self.dispense_default(pos, facing, stack), CLICK);
+                return (self.dispense_default_in_level(pos, facing, stack), CLICK);
             }
             let below = (front.0, front.1 - 1, front.2);
             let Some(rail) = self.rail(below.0, below.1, below.2) else {
-                return (self.dispense_default(pos, facing, stack), CLICK);
+                return (self.dispense_default_in_level(pos, facing, stack), CLICK);
             };
             if facing != Direction::Down && rail.shape.is_slope() {
                 -0.4
@@ -1320,7 +1320,7 @@ impl Game<'_> {
         });
         self.process_level_events()?;
         if emptied.is_none() {
-            return Ok((self.dispense_default(pos, facing, stack), CLICK));
+            return Ok((self.dispense_default_in_level(pos, facing, stack), CLICK));
         }
         if self.dim == super::Dim::Nether
             && matches!(
@@ -2266,7 +2266,7 @@ impl Game<'_> {
         if !water || !self.in_block_tag("minecraft:convertible_to_mud", &name) {
             // The inner default behaviour dispenses, then the potion's own
             // events play on top.
-            return Ok((self.dispense_default(pos, facing, stack), CLICK));
+            return Ok((self.dispense_default_in_level(pos, facing, stack), CLICK));
         }
         // The server picks the splash positions with the level random.
         for _ in 0..5 {

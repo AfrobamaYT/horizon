@@ -29,7 +29,7 @@ fn set_key(tag: &mut Tag, key: &str, value: Tag) {
     }
 }
 /// `EntityType.loadEntityRecursive` snaps every entity of the stack,
-/// passengers included, to the position (`/summon`, `native_summon`).
+/// passengers included, to the position (`/summon`, `summon`).
 pub(in crate::game) fn place_summoned(tag: &mut Tag, pos: [f64; 3]) {
     let p = pos.map(|v| Tag::Double(v.to_bits()));
     set_key(tag, "Pos", Tag::List(p.to_vec()));
@@ -63,7 +63,7 @@ impl Game<'_> {
 
     /// `NbtPredicate.getEntityTagToCompare`: the entity as saved. An entity
     /// in another level is read in the level that holds it.
-    pub(in crate::game) fn entity_nbt(&mut self, t: Target) -> Option<Tag> {
+    pub(in crate::game) fn command_target_nbt(&mut self, t: Target) -> Option<Tag> {
         self.in_target_level(t, |g| g.entity_nbt_in_level(t))
             .flatten()
     }
@@ -104,7 +104,7 @@ impl Game<'_> {
         Some(match t {
             Target::Guest(_) => {
                 return self
-                    .for_player(t, |g| g.entity_nbt(Target::Player))
+                    .for_player(t, |g| g.command_target_nbt(Target::Player))
                     .flatten();
             }
             Target::Player => return self.player_nbt(),
@@ -693,7 +693,7 @@ impl Game<'_> {
             // EntityDataAccessor.getData: Entity.saveWithoutId.
             DataRef::Entity(t) => {
                 let mut tag = self
-                    .entity_nbt(*t)
+                    .command_target_nbt(*t)
                     .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
                 if let Tag::Compound(c) = &mut tag {
                     c.remove(&"id".into());
@@ -1827,7 +1827,7 @@ mod arrow_owner_tests {
                 } else {
                     game.persist.raw.remove(&id);
                 }
-                let saved = game.entity_nbt(Target::Projectile(id)).unwrap();
+                let saved = game.command_target_nbt(Target::Projectile(id)).unwrap();
                 assert_eq!(saved.get("Owner"), expected.as_ref());
                 assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
                 if let Some(raw) = &raw {
