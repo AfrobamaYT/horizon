@@ -1275,7 +1275,7 @@ mod tests {
             let rod = place(1)
                 .stack(host)
                 .map(|s| mod_api::__private::item_key_id(s.item()).unwrap());
-            assert_eq!(rod.as_deref(), Some("minecraft:blaze_rod"), "{kind}");
+            assert_eq!(rod, Some("minecraft:blaze_rod"), "{kind}");
         }
 
         // An item entity: emptied in an aborted transaction, it's back whole; one of four
