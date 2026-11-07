@@ -193,13 +193,23 @@ pub(crate) fn unprovided(method: &'static str, operation: &'static str, access: 
 /// A refused mod call panics so a listener cannot ignore a Result and continue.
 #[inline]
 pub fn check_access(operation: &str, access: LoadAccess) {
+    assert!(
+        access_allowed(operation, access),
+        "mod API {operation} is unavailable during {:?}",
+        current_phase()
+    );
+}
+
+/// Whether an operation is available in this thread's current load phase.
+#[inline]
+pub fn access_allowed(operation: &str, access: LoadAccess) -> bool {
     let phase = current_phase();
     if phase == ModPhase::World {
-        return;
+        return true;
     }
     let metadata = access == LoadAccess::Metadata;
     let settings = operation == "setting";
-    let allowed = match phase {
+    match phase {
         ModPhase::World => true,
         ModPhase::Setup => {
             settings
@@ -212,11 +222,7 @@ pub fn check_access(operation: &str, access: LoadAccess) {
         ModPhase::Config => settings || operation == "config_files",
         ModPhase::Reloading => settings || metadata || access == LoadAccess::PublishedResources,
         ModPhase::Packages | ModPhase::Registration => false,
-    };
-    assert!(
-        allowed,
-        "mod API {operation} is unavailable during {phase:?}"
-    );
+    }
 }
 
 /// Whether a package contains compiled code or content alone.

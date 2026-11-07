@@ -1874,6 +1874,39 @@ impl MobRef {
     }
 }
 
+/// A mob the game has made but not yet added to a level (`finalize_spawn`'s mob), lent to one
+/// hook call. It is not an [`EntityRef`]: the mob is in no level yet, so no entity lookup finds
+/// it. Reads take `&dyn Host` (`mob.kind(host)`); the [`UnspawnedMobEdits`] handed out with it
+/// makes the edits. Every read and edit after the hook returns, or with another lend's handle,
+/// is refused with [`UnspawnedMobError::Expired`], so a copy kept past the call changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct UnspawnedMobRef {
+    epoch: NativeWorldEpoch,
+    lend: u64,
+}
+
+impl UnspawnedMobRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, lend: u64) -> Self {
+        Self { epoch, lend }
+    }
+    /// The open of the world the handle belongs to.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+    /// Which of that world's lends it names.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn lend(self) -> u64 {
+        self.lend
+    }
+}
+
 /// The player, or mobs of the given species: the class filter of a
 /// [`NativeGoal::NearestTarget`] and of a [`NativeGoal::AvoidEntity`]. The
 /// species ids are namespaced (`minecraft:zombie`); a bare id reads as
@@ -3003,6 +3036,19 @@ pub struct NativeClipHit {
     pub inside: bool,
     /// Whether the hit is the world border.
     pub world_border: bool,
+}
+
+/// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
+/// `ProjectileUtil.getEntityHitResult` tests for each candidate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct EntityRayHit {
+    /// The entity hit, a handle of the level the ray ran in.
+    pub entity: EntityRef,
+    /// Where the ray enters the entity's box, grown by the ray's margin, in blocks.
+    pub location: [f64; 3],
+    /// How far `location` is from the ray's start, in blocks.
+    pub distance: f64,
 }
 
 /// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
