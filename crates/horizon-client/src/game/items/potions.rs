@@ -2516,6 +2516,9 @@ fn client_tick_effects(effects: &mut PlayerEffects, darkness: &mut (f32, f32)) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::sculk::darkness_blend_added;
+    use super::*;
+    use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn residency_cloud_load_expiry_bottling_and_late_ids() {
@@ -2562,15 +2565,11 @@ mod tests {
                 Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
                 &mut game.breath_clouds
             ));
-            assert!(game.breath_clouds[0].radius > 2.5 && game.breath_clouds[0].radius < 2.6);
+            assert_eq!(game.breath_clouds[0].radius, 2.5);
             game.breath_clouds.clear();
             assert!(game.breath_clouds.is_empty());
         });
     }
-
-    use super::super::sculk::darkness_blend_added;
-    use super::*;
-    use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
 
     fn effect_test_mod() {
         use mod_api::{self, *};
