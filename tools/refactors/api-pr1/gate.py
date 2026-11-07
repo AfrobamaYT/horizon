@@ -4,9 +4,10 @@
 Two comparisons between a base commit and this checkout, both built from scratch:
 
 1. `mod-api.wit` byte for byte except the name-resolved sets affected by host regrouping:
-   host-import function lines, whole type blocks, and host/types use-list items. The sets compare
-   exactly; every other byte (including hooks and the world) stays ordered. Hook IDs and dispatch
-   are additionally compared as byte-identical generated Rust.
+   host/Registrar import function lines, whole type blocks, host/Registrar/types use-list items,
+   with exact membership checks. Enum cases retain their order: Wasmtime component typechecking
+   requires the same case order. Every other byte (including hooks and the world) stays ordered.
+   Hook IDs and dispatch are additionally compared as byte-identical generated Rust.
 2. The host manifest (`host-manifest`): one line per host method with its owner trait, signature,
    receiver mutability, rustdoc and hidden flag. The base's generated host is read as it is; this
    checkout's is the generated unions plus the area files, with each area trait counted under the union
@@ -23,7 +24,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from wit_order import compare_wit
+from wit_order import HOST_IMPORTS, compare_wit
+
+# Registrar is another name-resolved import interface. Hooks remain byte-ordered.
+HOST_IMPORTS.add('registrar')
 
 
 def build(directory, target, tool=False):
@@ -89,4 +93,5 @@ def main():
     print(f"gate passed against {base[:12]}: identical WIT after name-set ordering and {len(new.splitlines())} identical host methods")
 
 
-main()
+if __name__ == '__main__':
+    main()
