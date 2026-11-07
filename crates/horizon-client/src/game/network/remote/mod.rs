@@ -11797,8 +11797,8 @@ mod tests {
                     .unwrap()
                     .shared_menu_title_snapshot()
                     .unwrap();
-                let view = game.test_screen_change_view();
-                assert!(std::ptr::eq(view.title.unwrap(), shared.as_ref()));
+                let observed = game.test_observed_title().unwrap();
+                assert!(Arc::ptr_eq(&observed, &shared));
                 shared
             };
             open(game, chest, "first");

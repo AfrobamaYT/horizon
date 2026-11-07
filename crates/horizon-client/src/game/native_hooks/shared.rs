@@ -235,8 +235,9 @@ impl Game<'_> {
         })
     }
     #[cfg(test)]
-    pub(super) fn test_screen_change_view(&self) -> NativeScreenView<'_> {
-        self.screen_change_view(self.screen)
+    pub(super) fn test_observed_title(&self) -> Option<std::sync::Arc<mod_api::Text>> {
+        self.observe_view(self.screen_change_view(self.screen))
+            .title
     }
     /// A mod's own screen cannot open now: over the title screen, a book, a
     /// sign editor, a dialog or a prompt, with no player or a
@@ -298,10 +299,14 @@ impl Game<'_> {
     /// What `observe_screen` compares with the last frame's.
     fn observed_now(&self) -> Option<ObservedScreen> {
         // Only the title's screens and the overlays show over `Screen::Playing`.
-        let overlay = self.screen == Screen::Playing;
-        self.observed_screen_view().map(|view| ObservedScreen {
+        self.observed_screen_view()
+            .map(|view| self.observe_view(view))
+    }
+
+    fn observe_view(&self, view: NativeScreenView<'_>) -> ObservedScreen {
+        ObservedScreen {
             id: view.id,
-            overlay,
+            overlay: self.screen == Screen::Playing,
             menu: view.menu.map(str::to_owned),
             title: view
                 .title
@@ -310,7 +315,7 @@ impl Game<'_> {
             slots: view.slots,
             mouse: view.mouse,
             partial_tick: view.partial_tick,
-        })
+        }
     }
 
     /// Opens the title screen `Title::set_mode` asked for, as
