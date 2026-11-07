@@ -209,13 +209,13 @@ impl Game<'_> {
                 Some(&f.attachment_lifetime),
             );
         });
-        for p in &mut self.creatures.projectiles {
+        self.creatures.projectiles.for_each_mut(|p| {
             super::entity::assign_stored_id(
                 &mut self.next_entity,
                 &mut p.id,
                 Some(&p.attachment_lifetime),
             );
-        }
+        });
         for t in &mut self.tridents {
             super::entity::assign_stored_id(&mut self.next_entity, &mut t.id, None);
         }
@@ -250,7 +250,7 @@ impl Game<'_> {
         for (i, f) in self.item_frames.iter().enumerate() {
             offer(Slot::Apart(Apart::Frame(i)), f.id, f.join);
         }
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             offer(Slot::Apart(Apart::Dragon), d.id, d.join);
         }
         best
@@ -310,7 +310,7 @@ impl Game<'_> {
             Slot::Apart(Apart::Cushion(i)) => drop(self.cushions.remove(i)),
             Slot::Apart(Apart::Painting(i)) => drop(self.paintings.remove(i)),
             Slot::Apart(Apart::Frame(i)) => drop(self.item_frames.remove(i)),
-            Slot::Apart(Apart::Dragon) => self.dragon = None,
+            Slot::Apart(Apart::Dragon) => self.dragon.discard(),
         }
     }
     /// Entities that were moved, not added (a portal's arrival keeps being
@@ -373,7 +373,7 @@ impl Game<'_> {
         self.cushions.iter().for_each(|c| seen(c.id));
         self.paintings.iter().for_each(|p| seen(p.id));
         self.item_frames.iter().for_each(|f| seen(f.id));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             seen(d.id);
         }
         while let Some(i) = self.persist.live.iter().position(|l| !l.2) {
@@ -743,7 +743,7 @@ mod tests {
                 let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
                 dragon.id = base + 8;
                 dragon.join = horizon_client::join_seq::JoinSeq::next();
-                game.dragon = Some(dragon);
+                game.dragon.replace(dragon);
                 game.next_entity = base + 8;
                 game.native_joins_flush(true, 0);
                 game.native_joins_flush(true, 0);

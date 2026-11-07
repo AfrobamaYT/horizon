@@ -123,7 +123,18 @@ impl LifecycleFixture {
 
     /// Observe each seeded or transformed storage before checking its order.
     /// Slot-bearing adapters bind new owners and compare remembered registrations here.
-    pub fn run_with(self, mut observe: impl FnMut(&mut Game<'_>)) {
+    pub fn run_with(self, observe: impl FnMut(&mut Game<'_>)) {
+        self.walk(false, observe);
+    }
+
+    /// A singleton tests selected and unselected chunks in separate passes.
+    /// Remote singleton behavior is checked by its storage-specific fixture.
+    pub fn run_singleton(self) {
+        assert!(self.remote.is_none());
+        self.walk(true, |_| {});
+    }
+
+    fn walk(self, singleton: bool, mut observe: impl FnMut(&mut Game<'_>)) {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut ids = |game: &mut Game<'_>| {
                 observe(game);
@@ -135,36 +146,60 @@ impl LifecycleFixture {
                 std::thread::current().id()
             )));
             game.world_root = root.0.clone();
-            (self.seed)(
-                game,
-                &[
-                    (101, [1.0, 80.0, 1.0]),
-                    (102, [17.0, 80.0, 1.0]),
-                    (103, [33.0, 80.0, 1.0]),
-                    (104, [2.0, 80.0, 1.0]),
-                ],
-            );
-            assert_eq!(ids(game), [101, 102, 103, 104]);
-            game.kill_target((self.target)(102));
-            assert_eq!(ids(game), [101, 103, 104], "command removal");
-            game.entity_chunks(&[(0, 0)].into_iter().collect(), true);
-            let active = if self.unloads_with_chunk {
+            let active = if singleton || self.unloads_with_chunk {
                 vec![103]
             } else {
                 vec![101, 103, 104]
             };
-            assert_eq!(ids(game), active, "selected versus unselected chunk unload");
+            if singleton {
+                (self.seed)(game, &[(101, [1.0, 80.0, 1.0])]);
+                game.kill_target((self.target)(101));
+                assert!(ids(game).is_empty(), "singleton command removal");
+                (self.seed)(game, &[(103, [33.0, 80.0, 1.0])]);
+                game.entity_chunks(&[(0, 0)].into_iter().collect(), true);
+                assert_eq!(ids(game), [103], "unselected singleton chunk");
+                (self.seed)(game, &[(101, [1.0, 80.0, 1.0])]);
+                game.entity_chunks(&[(0, 0)].into_iter().collect(), true);
+                assert_eq!(
+                    ids(game),
+                    if self.unloads_with_chunk {
+                        vec![]
+                    } else {
+                        vec![101]
+                    },
+                    "selected singleton chunk"
+                );
+                (self.seed)(game, &[(103, [33.0, 80.0, 1.0])]);
+            } else {
+                (self.seed)(
+                    game,
+                    &[
+                        (101, [1.0, 80.0, 1.0]),
+                        (102, [17.0, 80.0, 1.0]),
+                        (103, [33.0, 80.0, 1.0]),
+                        (104, [2.0, 80.0, 1.0]),
+                    ],
+                );
+                assert_eq!(ids(game), [101, 102, 103, 104]);
+                game.kill_target((self.target)(102));
+                assert_eq!(ids(game), [101, 103, 104], "command removal");
+                game.entity_chunks(&[(0, 0)].into_iter().collect(), true);
+                assert_eq!(ids(game), active, "selected versus unselected chunk unload");
+            }
             game.enter_level(crate::game::Dim::Nether).unwrap();
             assert!(
                 ids(game).is_empty(),
                 "new dimension inherited the active owners"
             );
-            (self.seed)(game, &[(201, [1.0, 80.0, 1.0]), (202, [33.0, 80.0, 1.0])]);
-            assert_eq!(ids(game), [201, 202]);
+            let parked = &[(201, [1.0, 80.0, 1.0]), (202, [33.0, 80.0, 1.0])]
+                [..if singleton { 1 } else { 2 }];
+            let parked_ids = if singleton { vec![201] } else { vec![201, 202] };
+            (self.seed)(game, parked);
+            assert_eq!(ids(game), parked_ids);
             game.enter_level(crate::game::Dim::Overworld).unwrap();
             assert_eq!(ids(game), active, "active owner restore");
             game.enter_level(crate::game::Dim::Nether).unwrap();
-            assert_eq!(ids(game), [201, 202], "parked owner restore");
+            assert_eq!(ids(game), parked_ids, "parked owner restore");
             game.enter_level(crate::game::Dim::Overworld).unwrap();
             assert_eq!(ids(game), active, "second active restore");
             if let Some(remote) = self.remote {

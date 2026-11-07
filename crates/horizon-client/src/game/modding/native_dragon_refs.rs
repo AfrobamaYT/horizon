@@ -136,7 +136,7 @@ mod tests {
     fn dragon_in(game: &mut Game<'_>) -> (EntityRef, DragonRef) {
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 15;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
         let entity = game.entity(15).unwrap();
         (entity, game.dragon(entity).unwrap())
     }
@@ -287,7 +287,7 @@ mod tests {
             assert!(!stale.set_phase(game, NativeDragonPhase::Landing));
             assert_eq!(stale.phase(game), None);
             assert_eq!(stale.alive_crystals(game), None);
-            game.dragon = None;
+            game.dragon.discard();
             assert_eq!(dragon.phase(game), None);
             assert!(!dragon.set_phase(game, NativeDragonPhase::Landing));
         });

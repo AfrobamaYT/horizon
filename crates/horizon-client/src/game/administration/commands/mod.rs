@@ -944,7 +944,7 @@ impl Game<'_> {
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
         candidates.extend(self.crystals.iter().map(|c| Target::Crystal(c.id)));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             candidates.push(Target::Dragon(d.id));
         }
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
@@ -1694,12 +1694,14 @@ impl Game<'_> {
                 }
             }
             Target::Projectile(id) => {
-                if let Some(a) = self.creatures.projectiles.iter_mut().find(|a| a.id == id) {
-                    a.position = v;
-                    a.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(a, r);
-                    }
+                if let Some(i) = self.creatures.projectiles.iter().position(|a| a.id == id) {
+                    self.creatures.projectiles.update(i, |a| {
+                        a.position = v;
+                        a.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(a, r);
+                        }
+                    });
                 }
             }
             Target::Stand(id) => {
