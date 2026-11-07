@@ -105,9 +105,10 @@ Inline player and atlas objects use `Option<Box<Text>>` for their fallback: `Non
 keeps the engine-computed default; `Some` preserves a styled or translatable component
 rather than flattening it to a string.
 
-The recursive tree has one serde model. `TextForm` carries its serialized form for
-finite generated wasm bindings; encoding and decoding refuse more than 100 nested JSON containers, and decoding refuses malformed trees. Component and style
-metadata is retained through serialization rather than discarded by flattening text.
+`TextForm` crosses the generated wasm boundary as a flat node table. Conversion
+is iterative, refuses component depth above 512 and rejects malformed tables. Each
+node's JSON metadata is still limited to 100 nested containers; a separate Value
+boundary is planned. Component and style metadata remain intact.
 `Text::new(content)` constructs any content kind without exposing an engine value.
 The content, NBT-source, object, click and hover enums are exhaustive protocol enums;
 new cases change the link contract, just as enum-case order does. Mod matches should

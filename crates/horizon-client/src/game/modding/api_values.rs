@@ -3542,6 +3542,18 @@ impl TryIntoApi for horizon_client_core::gamerules::Value {
     }
 }
 
+#[test]
+fn game_rule_int_snapshot_preserves_full_range() {
+    for value in [i32::MIN, -1, 0, 256, i32::MAX] {
+        assert_eq!(
+            horizon_client_core::gamerules::Value::Int(value)
+                .try_into_api()
+                .unwrap(),
+            mod_api::GameRuleValue::Int(value)
+        );
+    }
+}
+
 fn with_rule_schema<T>(f: impl FnOnce(&mod_api::__private::RuleSchema<'_>) -> T) -> T {
     let registry = horizon_client_core::gamerules::rule_registry();
     f(&mod_api::__private::RuleSchema {
