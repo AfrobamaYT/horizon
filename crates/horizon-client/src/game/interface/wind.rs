@@ -182,12 +182,18 @@ impl Game<'_> {
                     from: Some([p.previous.x, p.previous.y, p.previous.z]),
                     attacker_species: owner_breeze.then_some(Species::Breeze),
                 };
+                let mut hurt = false;
                 if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                     // Breeze.isInvulnerableTo: its own kind's charges.
                     if owner_breeze && m.species() == Species::Breeze {
                         return;
                     }
-                    m.damage(
+                    // Refused before the hurt, so the kill is not credited
+                    // either; the burst of `wind_charge_hit` still goes off.
+                    if horizon_client::mobs::wither::armor_refuses(m, &p.kind) {
+                        return;
+                    }
+                    hurt = m.damage(
                         crate::game::entity::damage_level_of!(self, scoped),
                         1.0,
                         source,
@@ -195,6 +201,10 @@ impl Game<'_> {
                 }
                 if p.owner == Some(Who::Player) {
                     self.remember_mob_player_credit(id);
+                }
+                if hurt {
+                    let charge = "minecraft:wind_charge";
+                    self.shot_post_attack(p, who, charge, charge);
                 }
             }
         }

@@ -80,6 +80,21 @@ macro_rules! impl_joined {
 /// let mut list = JoinList::<u32, false>::default();
 /// list[0] = 1;
 /// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_mut(0);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.iter_mut();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_disjoint_mut([0, 1]);
+/// ```
 /// An entity put in without a join number gets the next one; a numbered entity
 /// keeps its number when taken out and put back. Mutable element access is for
 /// entity state; identity changes and whole-entity replacement remain audited
@@ -116,6 +131,67 @@ macro_rules! impl_joined {
 /// ```
 #[derive(Clone, Debug)]
 pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
+
+/// A singleton resident owner with explicit membership operations.
+/// State borrows remain audited: callers must not replace the whole entity or
+/// change its identity through [`Self::as_mut`]. No mutable `Option` escapes.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner = Some(1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// let _: &mut Option<u32> = &mut owner;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner.take();
+/// ```
+pub struct ResidentSlot<T>(Option<T>);
+
+impl<T> Default for ResidentSlot<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> ResidentSlot<T> {
+    /// Install only into an empty owner, returning a refused entity unchanged.
+    pub fn install(&mut self, entity: T) -> Result<(), T> {
+        if self.0.is_some() {
+            return Err(entity);
+        }
+        self.replace(entity);
+        Ok(())
+    }
+    /// Explicitly retire any previous owner and install its replacement.
+    pub fn replace(&mut self, entity: T) {
+        self.0 = Some(entity);
+    }
+    /// Move the owner out without dropping it.
+    pub fn extract(&mut self) -> Option<T> {
+        self.0.take()
+    }
+    /// Physically discard the owner, if present.
+    pub fn discard(&mut self) {
+        drop(self.extract());
+    }
+    /// Borrow entity state; identity and whole-value replacement stay audited.
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        self.0.as_mut()
+    }
+}
+
+impl<T> Deref for ResidentSlot<T> {
+    type Target = Option<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Non-joining entity storage using the same structural boundary as [`JoinList`].
 /// No mutable vector, slice, element reference or iterator escapes. State edits
@@ -160,6 +236,10 @@ impl<T> ResidentList<T> {
     pub fn push(&mut self, entity: T) {
         self.0.0.push(entity);
     }
+    /// Append a batch after any owners already in this storage.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
     }
@@ -189,6 +269,12 @@ impl<T> ResidentList<T> {
     pub fn restore(&mut self, mut taken: Self) {
         taken.0.append(&mut self.0);
         *self = taken;
+    }
+}
+
+impl<T> FromIterator<T> for ResidentList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        Self(JoinList(entities.into_iter().collect()))
     }
 }
 
@@ -223,6 +309,11 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
     }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
+    }
+    /// Extract selected owners in list order, compacting survivors in place.
+    /// The predicate cannot replace an entity or change its identity.
+    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> impl Iterator<Item = T> {
+        self.0.extract_if(.., move |entity| take(entity))
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.0.swap_remove(index)
@@ -618,6 +709,17 @@ mod resident_tests {
         assert_eq!(list.remove(1), 30);
         assert_eq!(list.drain(..1).collect::<Vec<_>>(), [10]);
         assert_eq!(&*list, &[4]);
+    }
+
+    #[test]
+    fn resident_append_preserves_spawn_buffer_before_survivors() {
+        let mut list: ResidentList<_> = [1, 2].into_iter().collect();
+        let mut taken = list.take();
+        list.push(3);
+        taken.retain(|&id| id != 1);
+        list.append(&mut taken);
+        assert_eq!(&*list, &[3, 2]);
+        assert!(taken.is_empty());
     }
 
     #[test]

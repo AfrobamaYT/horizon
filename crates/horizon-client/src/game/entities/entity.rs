@@ -678,6 +678,15 @@ macro_rules! entity_lists {
 pub(crate) use entity_lists;
 
 macro_rules! direct_entity_edit {
+    (Projectile) => {
+        false
+    };
+    (Cart) => {
+        false
+    };
+    (Falling) => {
+        false
+    };
     (Boat) => {
         false
     };

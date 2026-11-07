@@ -133,7 +133,7 @@ fn shulker_bullet_trail_at(at: Vec3, random: &mut impl RandomSource) -> [f64; 3]
 /// the item the guest draws the fireball as, through `Fireball.setItem`;
 /// a kind that is no `Fireball` has none.
 pub(super) fn remote_projectile_item(
-    projectiles: &mut horizon_client::join_seq::JoinList<Projectile>,
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: u32,
     stack: ItemStack,
 ) {
@@ -149,7 +149,7 @@ pub(super) fn remote_projectile_item(
 /// projectile (`AbstractHurtingProjectile`) accelerates by, found by id;
 /// anything else is ignored.
 pub(super) fn remote_projectile_power(
-    projectiles: &mut horizon_client::join_seq::JoinList<Projectile>,
+    projectiles: &mut horizon_client::join_seq::JoinList<Projectile, false>,
     id: i32,
     power: f64,
 ) {
@@ -320,6 +320,7 @@ impl Game<'_> {
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.
             "minecraft:falling_block" => self.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 id,
@@ -501,10 +502,11 @@ impl Game<'_> {
                 if let (8, Value::Int(fuse)) = (index, value) {
                     t.fuse = *fuse;
                 }
-            } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
+            } else if let Some(i) = self.falling.iter().position(|f| f.id == id) {
                 // FallingBlockEntity.DATA_START_POS (the model's seed).
                 if let (8, Value::Pos(p)) = (index, value) {
-                    f.start_pos = BlockPos::new(p[0], p[1], p[2]);
+                    self.falling
+                        .update(i, |f| f.start_pos = BlockPos::new(p[0], p[1], p[2]));
                 }
             } else if let Some(c) = self.crystals.iter_mut().find(|c| c.id == id) {
                 // EndCrystal.DATA_BEAM_TARGET and DATA_SHOW_BOTTOM.
@@ -679,12 +681,12 @@ impl Game<'_> {
         // itself between the server's updates (every 20 ticks), then waits
         // where it lands for the server to place it and remove it.
         let mut falling = std::mem::take(&mut self.falling);
-        for f in &mut falling {
-            if let Ok(FallStep::Landed(_)) = self.fall_step(f, false) {
+        falling.for_each_mut(|f| {
+            if let Ok(FallStep::Landed(_)) = self.fall_step(f, false, &[]) {
                 // Block.updateEntityMovementAfterFallOn, then the air drag.
                 f.velocity = Vec3::new(f.velocity.x * 0.98, 0.0, f.velocity.z * 0.98);
             }
-        }
+        });
         self.falling = falling;
         // Projectiles tick on the client too and fly on between the tracker's
         // updates (10 to 20 ticks apart); a block stops them there, and only
@@ -848,7 +850,7 @@ impl Game<'_> {
         self.rockets.clear();
         self.crystals.clear();
         // The dragon a server sent goes with its crystals.
-        self.dragon = None;
+        self.dragon.discard();
         self.potions.clear_thrown();
         self.potions.clouds.clear();
         self.dragon_fireballs.clear();
@@ -997,7 +999,7 @@ mod tests {
     fn a_power_packet_gives_a_fireball_the_power_its_next_tick_uses() {
         // ClientPacketListener.handleProjectilePowerPacket: the fireball with
         // id 12 gets the power the server sends bundled with its motion.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> =
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> =
             [tracked(ProjectileKind::LargeFireball { power: 1 }, 12)]
                 .into_iter()
                 .collect();
@@ -1012,7 +1014,7 @@ mod tests {
     fn a_power_packet_ignores_an_arrow_an_unknown_id_and_a_thrown_item() {
         // Vanilla's instanceof AbstractHurtingProjectile: an arrow and a
         // thrown egg are none, and no entity is id 99.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> = [
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(
                 ProjectileKind::Arrow {
                     base_damage: 2.0,
@@ -1040,7 +1042,7 @@ mod tests {
         // `ClientPacketListener.handleSetEntityData` of
         // Fireball.DATA_ITEM_STACK: the item `Fireball.getItem` returns, which
         // is the fire charge the default was until the server says otherwise.
-        let mut list: horizon_client::join_seq::JoinList<Projectile> = [
+        let mut list: horizon_client::join_seq::JoinList<Projectile, false> = [
             tracked(ProjectileKind::LargeFireball { power: 1 }, 12),
             tracked(ProjectileKind::SmallFireball, 13),
             tracked(ProjectileKind::Snowball, 14),

@@ -1452,6 +1452,7 @@ impl Game<'_> {
         let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
+        e.show_icon = p.flags & 4 != 0;
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
@@ -3126,8 +3127,8 @@ impl Game<'_> {
                 d.on_ground = on_ground;
                 return;
             }
-            if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-                f.position = at;
+            if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+                self.falling.update(i, |f| f.position = at);
                 return;
             }
             if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
@@ -3154,14 +3155,16 @@ impl Game<'_> {
             if r.cart_lerps.contains_key(&id) {
                 // A minecart on NewMinecartBehavior keeps Entity's NO_OP
                 // InterpolationHandler: a teleport puts it there at once.
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-                    if path.is_some() {
-                        c.position = at;
-                    }
-                    if let Some((yaw, pitch)) = rotation {
-                        c.yaw = yaw;
-                        c.pitch = pitch;
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+                    self.carts.update(i, |c| {
+                        if path.is_some() {
+                            c.position = at;
+                        }
+                        if let Some((yaw, pitch)) = rotation {
+                            c.yaw = yaw;
+                            c.pitch = pitch;
+                        }
+                    });
                 }
             } else {
                 // AbstractInterpolationHandler.interpolateTo: without a
@@ -6007,14 +6010,14 @@ impl Game<'_> {
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
             d.velocity = v;
-        } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-            f.velocity = v;
+        } else if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+            self.falling.update(i, |f| f.velocity = v);
         } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-            c.velocity = v;
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+            self.carts.update(i, |c| c.velocity = v);
         } else if let Some(i) = self
             .creatures
             .projectiles
@@ -8091,12 +8094,11 @@ impl Game<'_> {
             // Minecart.interact resets the passenger's easing baseline on
             // a successful boarding click, not on SetPassengers (commands
             // can mount a player without this interaction).
-            if let Some(c) = self
-                .carts
-                .iter_mut()
-                .find(|c| c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable)
-            {
-                c.player_rotation_offset = c.rotation_offset;
+            if let Some(i) = self.carts.iter().position(|c| {
+                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable
+            }) {
+                self.carts
+                    .update(i, |c| c.player_rotation_offset = c.rotation_offset);
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {
