@@ -33,7 +33,7 @@ impl Game<'_> {
         if kind.is_some_and(|kind| self.carts[index].kind != kind) {
             return false;
         }
-        edit(&mut self.carts[index]);
+        self.carts.update(index, edit);
         true
     }
 
@@ -359,9 +359,9 @@ mod tests {
             // Max speed: old behaviour, water, furnace, then the experiment's rule.
             assert_eq!(rideable.max_speed(game), Some(0.4));
             assert_eq!(furnace.max_speed(game), Some(0.2));
-            game.carts[2].in_water = true;
+            game.carts.update(2, |c| c.in_water = true);
             assert_eq!(furnace.max_speed(game), Some(0.2 * 0.75));
-            game.carts[2].in_water = false;
+            game.carts.update(2, |c| c.in_water = false);
             let mut features = game.level.enabled_features.to_vec();
             features.push("minecraft:minecart_improvements".into());
             game.level.enabled_features = features.into();
@@ -369,11 +369,11 @@ mod tests {
                 horizon_client::gamerules::GameRules::with_features(&game.level.enabled_features);
             assert_eq!(rideable.max_speed(game), Some(8.0 / 20.0));
             assert_eq!(furnace.max_speed(game), Some(8.0 / 20.0 * 0.5));
-            game.carts[0].in_water = true;
+            game.carts.update(0, |c| c.in_water = true);
             assert_eq!(rideable.max_speed(game), Some(8.0 / 20.0 * 0.5));
 
             assert_eq!(rideable.is_on_rails(game), Some(false));
-            game.carts[0].on_rails = true;
+            game.carts.update(0, |c| c.on_rails = true);
             assert_eq!(rideable.is_on_rails(game), Some(true));
 
             assert!(rideable.set_flipped(game, true));
@@ -427,7 +427,7 @@ mod tests {
                 "tnt_explodes",
                 horizon_client::gamerules::Value::Bool(false),
             );
-            game.carts[3].fuse = -1;
+            game.carts.update(3, |c| c.fuse = -1);
             assert!(!tnt.prime_fuse(game));
             assert_eq!(tnt.fuse(game), Some(-1));
 
@@ -465,7 +465,7 @@ mod tests {
             // for clients (`onUpdated`), and the cart then runs the new command.
             let command = carts[5];
             assert_eq!(command.command(game).as_deref(), Some(""));
-            game.carts[5].command.success_count = 3;
+            game.carts.update(5, |c| c.command.success_count = 3);
             assert!(command.set_command(game, "gamerule mob_griefing false"));
             assert_eq!(
                 command.command(game).as_deref(),
