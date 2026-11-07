@@ -205,6 +205,9 @@ fn host(
         .checked_add(len as usize)
         .ok_or_else(|| wasmtime::Error::msg("input range overflow"))?;
     let depth = caller.data().depth;
+    if depth == 0 {
+        return Err(wasmtime::Error::msg("host import outside a call"));
+    }
     let mut input = std::mem::take(&mut caller.data_mut().imports[depth]);
     input.clear();
     input.extend_from_slice(
@@ -226,6 +229,9 @@ fn host(
     let result = if id == mod_api::wire::HOST_RELEASE {
         let mut reader = Reader::new(&input);
         let id = reader.take::<Id>()?;
+        if !reader.rest().is_empty() {
+            return Err(WireError::Trailing.into());
+        }
         unsafe { &mut *cx }
             .held
             .remove(id)
@@ -253,6 +259,9 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
         .memory
         .ok_or_else(|| wasmtime::Error::msg("no group memory"))?;
     let depth = state.depth;
+    if depth == 0 {
+        return Err(wasmtime::Error::msg("host reply outside a call"));
+    }
     let reply = std::mem::take(&mut caller.data_mut().replies[depth]);
     let result = memory.write(&mut caller, ptr as usize, reply.bytes());
     caller.data_mut().replies[depth] = reply;

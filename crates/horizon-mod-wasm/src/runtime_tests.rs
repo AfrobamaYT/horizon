@@ -60,6 +60,15 @@ fn trap_and_deadline_stop_the_group() {
     assert!(module.running.poisoned.load(Ordering::Relaxed));
 }
 #[test]
+fn invalid_import_input_is_a_trap_not_a_host_panic() {
+    let module = module(
+        "i32.const -1 i32.const -1 i32.const 16 i32.const 0 i32.const 0 call $host drop i64.const 0",
+    );
+    assert_eq!(call(&module), None);
+    assert!(module.running.poisoned.load(Ordering::Relaxed));
+}
+
+#[test]
 fn layout_mismatch_is_a_mods_page_refusal() {
     let engine = engine().unwrap();
     let bytes = guest(mod_api::wire::LAYOUT ^ 1, "i64.const 0");
@@ -161,8 +170,10 @@ fn import_reply_retry_survives_a_nested_callback() {
 }
 
 #[test]
-fn memory_growth_limit_traps_and_poison_is_shared_by_members() {
+fn memory_growth_limit_traps_and_poison_is_shared_by_proxies() {
     let module = module("i32.const 4096 memory.grow drop i64.const 0");
+    let other = module.clone();
     assert_eq!(call(&module), None);
-    assert!(module.running.poisoned.load(Ordering::Relaxed));
+    assert!(other.running.poisoned.load(Ordering::Relaxed));
+    assert_eq!(call(&other), None);
 }
