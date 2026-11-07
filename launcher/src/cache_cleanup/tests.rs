@@ -96,7 +96,8 @@ fn swapped_directory_and_file_links_never_delete_external_data() {
 fn existing_profile_lock_refuses_pin_before_any_deletion() {
     let home = Home::new();
     let output = home.file("target/debug/output");
-    let lock = home.file("target/debug/.cargo-lock");
+    Plan::pin(&home.dir()).unwrap();
+    let lock = home.0.join("target/debug/.cargo-lock");
     let held = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -233,7 +234,7 @@ fn root_lock_is_held_before_enumeration() {
 fn linked_lock_is_not_followed_even_when_its_target_is_inside_the_root() {
     let home = Home::new();
     let kept = home.file("kept");
-    std::os::unix::fs::symlink(&kept, home.0.join(".cargo-lock")).unwrap();
+    std::os::unix::fs::symlink("kept", home.0.join(".cargo-lock")).unwrap();
     assert!(Plan::pin(&home.dir()).is_err());
     assert_eq!(fs::read(kept).unwrap(), b"old compiler output");
 }
@@ -252,4 +253,28 @@ fn replacing_the_root_path_does_not_redirect_plan_or_trash() {
     assert!(!moved.join("output").exists());
     fs::remove_dir_all(&home.0).unwrap();
     fs::rename(moved, &home.0).unwrap();
+}
+
+#[test]
+fn package_cache_leases_refuse_pinning_and_late_clear() {
+    for name in &LOCKS[1..] {
+        let home = Home::new();
+        let output = home.file("cache/output");
+        let lock = home.file(name);
+        let owner = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(lock)
+            .unwrap();
+        owner.lock().unwrap();
+        assert!(matches!(Plan::pin(&home.dir()), Err(Error::Busy)));
+        assert!(output.exists());
+        owner.unlock().unwrap();
+        let plan = Plan::pin(&home.dir()).unwrap();
+        owner.lock().unwrap();
+        fs::write(&output, b"package-cache owner").unwrap();
+        assert!(matches!(plan.clear(&home.dir()), Err(Error::Busy)));
+        assert_eq!(fs::read(output).unwrap(), b"package-cache owner");
+        owner.unlock().unwrap();
+    }
 }
