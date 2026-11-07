@@ -2,7 +2,7 @@
 use super::*;
 
 /// Launcher-owned staging input and the resulting private row metadata.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Point {
     pub name: String,
@@ -45,15 +45,29 @@ pub fn build_input(root: &Path) -> Result<Vec<Point>, String> {
 /// Mark checked source targets after normal point staging, retaining their lexical type scope.
 pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
     let below = below_points(root)?;
-    let mut names = game_points(root)?
-        .into_iter()
-        .flat_map(|point| {
-            [
-                point_shape::camel(&point.name),
-                format!("{}Return", point_shape::camel(&point.name)),
-            ]
+    let marked = |function: &Found<'_>| {
+        function.attrs.iter().any(|attr| {
+            attr.path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "point")
         })
-        .collect::<std::collections::BTreeSet<_>>();
+    };
+    let (scanned, list) = scan(root)?;
+    let mut names = std::collections::BTreeSet::new();
+    for (_, function) in all_points(&scanned, &list)? {
+        if !marked(&function) {
+            return Err(format!(
+                "E_SOURCE_ORDER: {}: stage ordinary points first",
+                function.target()
+            ));
+        }
+        let shape = function.shape()?;
+        names.extend([
+            shape.variant().to_string(),
+            shape.return_variant().to_string(),
+        ]);
+    }
     for point in points.iter() {
         for name in [
             point_shape::camel(&point.name),
@@ -108,12 +122,7 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                 if matched {
                     return Err(format!("E_INJECT_LOST: {} is ambiguous", point.target));
                 }
-                if function.attrs.iter().any(|attr| {
-                    attr.path()
-                        .segments
-                        .last()
-                        .is_some_and(|segment| segment.ident == "point")
-                }) {
+                if marked(&function) {
                     return Err(format!(
                         "{}: source carries a hand-written #[point]",
                         point.target
@@ -141,7 +150,7 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                 out.insert_str(end, &format!("\n{}\n", point.items));
                 out.insert_str(at, &attribute);
                 fs::write(&file.path, out).map_err(|error| error.to_string())?;
-                point.module = file.module.clone();
+                point.module = function.module.clone();
                 point.record_export = format!("__{}Raw", point_shape::camel(&function.name()));
                 matched = true;
             }
@@ -206,32 +215,48 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     };
+    const GAME: &str = "crates/horizon-client/src/game.rs";
     fs::create_dir_all(root.join("crates/horizon-mod-api-gen/slots")).unwrap();
     put(
         "crates/horizon-mod-points/Cargo.toml",
         "[package]\nname='horizon-mod-points'\n",
     );
     put(
-        "crates/horizon-client/src/game.rs",
-        "pub struct Game; impl Game { fn listed(&mut self) {} #[inline(always)] fn hidden(&mut self, value: i32) -> i32 { value } }",
+        GAME,
+        "pub struct Game; impl Game { fn listed(&mut self) {} } mod nested { use super::Game; impl Game { #[inline(always)] fn hidden(&mut self, value: i32) -> i32 { value } } }",
     );
-    super::stage(&root).unwrap();
-    let before = game_points(&root)
-        .unwrap()
-        .into_iter()
-        .map(|point| point.name)
-        .collect::<Vec<_>>();
     let sig = syn::parse_quote!(fn hidden(&mut self, value: i32) -> i32);
     let shape = point_shape::shape(quote!(raw, name = "source123"), &sig).unwrap();
     let mut private = vec![Point {
         name: "source123".into(),
-        target: "horizon_client::game::Game::hidden".into(),
+        target: "horizon_client::game::nested::Game::hidden".into(),
         items: shape
             .raw_items(&sig, Some(&syn::parse_quote!(Game)), None)
             .to_string(),
         module: String::new(),
         record_export: String::new(),
     }];
+    assert!(
+        stage(&root, &mut private)
+            .unwrap_err()
+            .contains("E_SOURCE_ORDER")
+    );
+    super::stage(&root).unwrap();
+    let before = serde_json::to_value(game_points(&root).unwrap()).unwrap();
+    let staged = fs::read_to_string(root.join(GAME)).unwrap();
+    put(
+        GAME,
+        &staged.replace(
+            "#[inline(always)]",
+            "#[horizon_mod_api_macros::point(raw)] #[inline(always)]",
+        ),
+    );
+    assert!(
+        stage(&root, &mut private)
+            .unwrap_err()
+            .contains("source carries a hand-written")
+    );
+    put(GAME, &staged);
     let mut collision = private.clone();
     collision[0].name = "listed".into();
     assert!(
@@ -239,8 +264,6 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
             .unwrap_err()
             .contains("E_SOURCE_COLLISION: Listed")
     );
-    stage(&root, &mut private).unwrap();
-    assert_eq!(private[0].record_export, "__HiddenRaw");
     let mut cycle = private.clone();
     cycle[0].target = "horizon_mod_points::blocked".into();
     assert!(
@@ -248,18 +271,50 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
             .unwrap_err()
             .contains("E_SOURCE_DEPENDENCY: horizon_mod_points::blocked")
     );
-    let after = game_points(&root)
-        .unwrap()
-        .into_iter()
-        .map(|point| point.name)
-        .collect::<Vec<_>>();
-    assert_eq!(before, after);
-    assert_eq!(read(&root).unwrap()[0].name, "source123");
-    let ids = records(&[], &private);
-    assert!(ids.contains("Source123Return"));
-    syn::parse_file(&ids).unwrap();
+    let mut expected = private[0].clone();
+    expected.module = "horizon_client::game::nested".into();
+    expected.record_export = "__HiddenRaw".into();
+    stage(&root, &mut private).unwrap();
+    assert_eq!(private, [expected.clone()]);
+    assert_eq!(read(&root).unwrap(), [expected]);
+    let public = game_points(&root).unwrap();
+    assert_eq!(before, serde_json::to_value(&public).unwrap());
+    let parsed = syn::parse_file(&records(&public, &private)).unwrap();
+    // Compile the actual enum and wire tables together, without unrelated API dispatch bodies.
+    let ids = parsed
+        .items
+        .iter()
+        .filter(|item| match item {
+            Item::Enum(item) => item.ident == "PointId",
+            Item::Const(item) => item.ident == "POINT_COUNT",
+            Item::Mod(item) => item.ident == "places",
+            _ => false,
+        })
+        .map(ToTokens::to_token_stream)
+        .collect::<proc_macro2::TokenStream>();
     let file = root.join("ids.rs");
-    fs::write(&file, format!("pub struct Game; {} pub use __Source123Raw as {}; {ids}\nfn main() {{ assert_eq!(POINT_COUNT, 2); assert_eq!(places::NAMES, [\"source123\", \"source123_return\"]); assert_eq!(places::SHAPES, [\"\", \"\"]); assert_eq!(places::IDS[1], PointId::Source123Return); }}", private[0].items, private[0].record_export)).unwrap();
+    fs::write(
+        &file,
+        format!(
+            r#"
+pub struct Game;
+mod nested {{ use super::Game; {} }}
+pub use nested::__Source123Raw as {};
+{ids}
+fn main() {{
+    assert_eq!(POINT_COUNT, 4);
+    assert_eq!(PointId::Listed as usize, 0);
+    assert_eq!(PointId::Source123 as usize, 2);
+    assert_eq!(places::NAMES, ["listed", "listed_return", "source123", "source123_return"]);
+    assert_eq!(&places::SHAPES[2..], ["", ""]);
+    assert_eq!(&places::TARGETS[2..], ["horizon_client::game::nested::Game::hidden"; 2]);
+    for (index, id) in places::IDS.iter().enumerate() {{ assert_eq!(*id as usize, index); }}
+}}
+"#,
+            private[0].items, private[0].record_export
+        ),
+    )
+    .unwrap();
     let binary = root.join(format!("ids{}", std::env::consts::EXE_SUFFIX));
     let output = std::process::Command::new("rustc")
         .args(["--edition=2024", "--cfg", "feature=\"wasm-host\""])
@@ -278,10 +333,6 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
             .status()
             .unwrap()
             .success()
-    );
-    put(
-        "crates/horizon-client/src/game.rs",
-        "pub struct Game; impl Game { #[horizon_mod_api_macros::point(raw)] fn listed(&mut self) {} }",
     );
     assert!(super::stage(&root).unwrap_err().contains("already has"));
     fs::remove_dir_all(root).unwrap();
