@@ -633,7 +633,32 @@ impl Game<'_> {
                 let Some(index) = self.mobs.iter().position(|m| m.id == *id) else {
                     return false;
                 };
-                mob_slot(key).is_some_and(|slot| self.mobs[index].set_equipment_stack(slot, stack))
+                let Some(slot) = mob_slot(key) else {
+                    return false;
+                };
+                let m = &self.mobs[index];
+                let old = m.equipment_stacks()[slot].clone();
+                let first_tick = m.first_tick;
+                let at = [m.position.x, m.position.y, m.position.z];
+                let same = match (&old, &stack) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_item_same_components(b),
+                    _ => false,
+                };
+                let equippable = stack.as_ref().is_some_and(|s| {
+                    let data = s.data();
+                    !data.is_some_and(|d| d.other("!minecraft:equippable").is_some())
+                        && (data.is_some_and(|d| d.other("minecraft:equippable").is_some())
+                            || self
+                                .items()
+                                .get(&s.item)
+                                .is_some_and(|i| i.equip_slot.is_some()))
+                });
+                let changed = self.mobs[index].set_equipment_stack(slot, stack);
+                if changed && !first_tick && !same && self.remote.is_none() {
+                    self.mob_equip_event(*id, at, equippable);
+                }
+                changed
             }
             Slot::Stand(id, i) => {
                 // LivingEntity.onEquipItem: all stand slots emit; the new
@@ -1787,13 +1812,14 @@ mod mob_equipment_stack_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1811,7 +1837,9 @@ mod mob_equipment_stack_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -1865,7 +1893,7 @@ mod mob_equipment_stack_tests {
                 "item replace entity {uuid} weapon.offhand with stick[custom_data={{audit:7}}] 3"
             )));
             let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
-            assert_eq!(mob.extra.off_hand.as_deref(), Some("minecraft:stick"));
+            assert_eq!(mob.extra.off_hand_id(), Some("minecraft:stick"));
             let adopted = finalize::item_stack(mob, finalize::OFFHAND).unwrap();
             assert_eq!(
                 adopted.count, 3,
@@ -1919,7 +1947,8 @@ mod mob_equipment_stack_tests {
             assert!(game.run_command("setblock 4 200 4 chest"));
             assert!(game.run_command(&format!("item replace entity {uuid} armor.head with iron_helmet[damage=3,custom_data={{audit:8}}]")));
             let mob = game.mobs.iter().find(|m| m.id == id).unwrap();
-            let adopted = mob.extra.armor[0].as_ref().unwrap();
+            let stacks = mob.equipment_stacks();
+            let adopted = stacks[5].as_ref().unwrap();
             assert_eq!(
                 adopted.damage, 3,
                 "existing armor state already adopts the full stack"

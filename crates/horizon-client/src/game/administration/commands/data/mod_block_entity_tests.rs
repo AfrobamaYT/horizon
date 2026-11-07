@@ -8,7 +8,7 @@ use horizon_client::{
     mod_content::{ContentMod, build},
     world::World,
 };
-use horizon_mods::content::{Block, Content};
+use horizon_mod_package::content::{Block, Content};
 use std::{path::PathBuf, sync::Arc};
 
 const KEY: (i32, i32, i32) = (2, 64, 2);
@@ -67,22 +67,26 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
         .unwrap();
     build(
         &base,
+        &base,
         &[ContentMod {
             id: "fixture".into(),
             content,
+            jars: Vec::new(),
         }],
         &root,
+        &horizon_mod_package::enabled::EnabledMods::default(),
     )
     .unwrap();
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &base,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        crate::game::execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -96,7 +100,9 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -126,7 +132,7 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
     );
     changed(&game, before);
     let loaded = entity(&game);
-    assert_eq!(loaded.id, ENTITY);
+    assert_eq!(loaded.id(), ENTITY);
     assert_eq!(loaded.data.as_ptr(), transient_allocation);
     assert_eq!(loaded.nbt.get(&"fuel".into()), Some(&Tag::Int(41)));
     assert_eq!(
@@ -187,7 +193,7 @@ fn actual_data_commands_preserve_same_mod_entity_runtime_state() {
     );
     assert_ne!(entity(&game).revision(), before);
     assert!(entity(&game).data.is_empty());
-    assert_eq!(entity(&game).id, "fixture:replacement");
+    assert_eq!(entity(&game).id(), "fixture:replacement");
     assert_eq!(entity(&game).nbt.get(&"fuel".into()), Some(&Tag::Int(12)));
     assert_eq!(game.world.block(POS[0], POS[1], POS[2]), state);
 

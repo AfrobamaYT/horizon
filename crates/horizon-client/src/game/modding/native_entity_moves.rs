@@ -284,6 +284,7 @@ mod tests {
             let stand = game.entity(13).unwrap();
             assert!(!stand.set_rotation(game, 30.0, 10.0));
             game.others.push(super::super::commands::OtherEntity {
+                item_transformation: None,
                 id: 14,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,
@@ -332,5 +333,44 @@ mod tests {
         assert!(!super::in_bounds([30_000_000.0, 64.0, 0.0]));
         assert!(!super::in_bounds([0.0, 20_000_001.0, 0.0]));
         assert!(!super::in_bounds([f64::NAN, 64.0, 0.0]));
+    }
+    /// Independent vanilla outcomes for spawn bounds and the yaw-to-direction conversion.
+    #[test]
+    fn move_boundaries_match_vanilla() {
+        use serde_json::Value;
+        let cases = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/native_entity_moves.jsonl"
+        ));
+        let expected = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/native_entity_moves_expected.jsonl"
+        ));
+        let rows = |text: &str| {
+            text.lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let (cases, expected) = (rows(cases), rows(expected));
+        assert_eq!(cases.len(), expected.len());
+        assert!(cases.len() >= 20);
+        for (input, expected) in cases.iter().zip(&expected) {
+            assert_eq!(input["name"], expected["name"]);
+            let pos = std::array::from_fn(|i| input["pos"][i].as_f64().unwrap());
+            let yaw = input["yaw"].as_f64().unwrap() as f32;
+            assert_eq!(
+                super::super::native_mobs::spawnable(pos),
+                expected["spawnable"].as_bool().unwrap(),
+                "{}",
+                input["name"]
+            );
+            assert_eq!(
+                super::facing(yaw),
+                expected["direction"].as_str().unwrap(),
+                "{}",
+                input["name"]
+            );
+        }
     }
 }

@@ -262,7 +262,7 @@ fn transformation_tag(
     right_rotation: [f32; 4],
 ) -> Tag {
     let floats = |v: &[f32]| Tag::List(v.iter().map(|x| Tag::Float(x.to_bits())).collect());
-    let mut t = Compound::new();
+    let mut t = horizon_core::nbt::Compound::new();
     t.insert("translation".into(), floats(&translation));
     t.insert("left_rotation".into(), floats(&left_rotation));
     t.insert("scale".into(), floats(&scale));
@@ -3066,13 +3066,14 @@ mod item_display_saved_transform_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -3090,7 +3091,9 @@ mod item_display_saved_transform_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -3151,7 +3154,7 @@ mod item_display_saved_transform_tests {
         assert_eq!(o.position, Vec3::new(6.5, 200.0, 6.5));
         assert_eq!([o.yaw, o.pitch], [12.5, -20.0]);
         let id = o.id;
-        let saved = game.entity_nbt(Target::Other(id)).unwrap();
+        let saved = game.command_target_nbt(Target::Other(id)).unwrap();
         let stack = horizon_client::save::item_from_nbt(saved.get("item").unwrap()).unwrap();
         assert_eq!(&*stack.item, "minecraft:diamond");
         assert_eq!(stack.count, 2);
@@ -3175,10 +3178,10 @@ mod item_display_saved_transform_tests {
             let clock = game.world.game_time;
             let id = summon(game, 1, None);
             let identity = expected([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]);
-            let tag = game.entity_nbt(Target::Other(id)).unwrap();
+            let tag = game.command_target_nbt(Target::Other(id)).unwrap();
             assert_eq!(tag.get("transformation"), Some(&identity));
             let raw = game.persist.raw.remove(&id).unwrap();
-            let fresh = game.entity_nbt(Target::Other(id)).unwrap();
+            let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
             assert_eq!(fresh.get("transformation"), Some(&identity));
             assert_eq!(fresh.get("UUID"), tag.get("UUID"));
             assert_eq!(fresh.get("Pos"), tag.get("Pos"));
@@ -3211,10 +3214,10 @@ mod item_display_saved_transform_tests {
                 ),
             ] {
                 let id = summon(game, n, Some(text));
-                let before = game.entity_nbt(Target::Other(id)).unwrap();
+                let before = game.command_target_nbt(Target::Other(id)).unwrap();
                 assert_eq!(before.get("transformation"), Some(&want));
                 let raw = game.persist.raw.remove(&id).unwrap();
-                let fresh = game.entity_nbt(Target::Other(id)).unwrap();
+                let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
                 assert_eq!(
                     fresh.get("transformation"),
                     Some(&want),
@@ -3228,21 +3231,23 @@ mod item_display_saved_transform_tests {
     #[test]
     #[ignore = "prepared resources; actual native setter, stale raw and no-raw writer"]
     fn existing_native_item_display_setter_carries_only_transform_state() {
-        use crate::game::native_entities::NativeDisplay;
+        use mod_api::NativeTransformation;
         with_game(|game| {
             // Same actual server-context setup as existing native machine/contact fixtures.
             game.options.dedicated = Some(Vec::new());
             let id = summon(game, 4, None);
             let uuid = game.persist.uuid_of(id);
             let clock = game.world.game_time;
-            let update = NativeDisplay {
+            let update = NativeTransformation {
                 translation: [9.0, 8.0, 7.0],
                 scale: [2.0; 3],
-                interpolation: 13,
-                teleport: 5,
-                ..NativeDisplay::default()
+                ..NativeTransformation::IDENTITY
             };
-            assert!(game.native_set_display("minecraft:overworld", id, &update));
+            let display = game.display(game.entity(id).unwrap()).unwrap();
+            assert!(game.display_set_transformation(display, update));
+            assert!(game.display_set_interpolation_duration(display, 13));
+            assert!(game.display_set_teleport_duration(display, 5));
+            assert!(game.display_set_start_interpolation(display, 0));
             let raw = game.persist.raw.get_mut(&id).unwrap();
             assert_eq!(raw.get("interpolation_duration"), Some(&Tag::Int(13)));
             assert_eq!(raw.get("teleport_duration"), Some(&Tag::Int(5)));
@@ -3256,13 +3261,13 @@ mod item_display_saved_transform_tests {
             );
             let want = expected([9.0, 8.0, 7.0], [0.0, 0.0, 0.0, 1.0], [2.0; 3]);
             assert_eq!(
-                game.entity_nbt(Target::Other(id))
+                game.command_target_nbt(Target::Other(id))
                     .unwrap()
                     .get("transformation"),
                 Some(&want)
             );
             let raw = game.persist.raw.remove(&id).unwrap();
-            let fresh = game.entity_nbt(Target::Other(id)).unwrap();
+            let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
             assert_eq!(fresh.get("transformation"), Some(&want));
             for key in [
                 "interpolation_duration",
@@ -3272,15 +3277,15 @@ mod item_display_saved_transform_tests {
                 assert!(fresh.get(key).is_none());
             }
             game.persist.raw.insert(id, raw);
-            let invalid = NativeDisplay {
+            let invalid = NativeTransformation {
                 left_rotation: [0.0; 4],
                 ..update
             };
             let before = game.persist.raw.get(&id).unwrap().clone();
-            assert!(!game.native_set_display("minecraft:overworld", id, &invalid));
+            assert!(!game.display_set_transformation(display, invalid));
             assert_eq!(game.persist.raw.get(&id), Some(&before));
             assert_eq!(
-                game.entity_nbt(Target::Other(id))
+                game.command_target_nbt(Target::Other(id))
                     .unwrap()
                     .get("transformation"),
                 Some(&want)
@@ -3314,14 +3319,14 @@ mod item_display_saved_transform_tests {
                     .unwrap()
                     .clone();
                 assert_eq!(
-                    game.entity_nbt(Target::Other(id))
+                    game.command_target_nbt(Target::Other(id))
                         .unwrap()
                         .get("transformation"),
                     Some(&before)
                 );
                 let raw = game.persist.raw.remove(&id).unwrap();
                 assert!(
-                    game.entity_nbt(Target::Other(id))
+                    game.command_target_nbt(Target::Other(id))
                         .unwrap()
                         .get("transformation")
                         .is_none()
@@ -3343,7 +3348,7 @@ mod item_display_saved_transform_tests {
                     .unwrap()
                     .id;
                 assert!(
-                    game.entity_nbt(Target::Other(id))
+                    game.command_target_nbt(Target::Other(id))
                         .unwrap()
                         .get("transformation")
                         .is_none()

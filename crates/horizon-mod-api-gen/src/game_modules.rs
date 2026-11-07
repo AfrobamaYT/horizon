@@ -70,19 +70,16 @@ pub(crate) fn declarations(game: &Path) -> Result<String, String> {
                 ""
             };
             let absolute = file.canonicalize().map_err(|e| e.to_string())?;
-            let name = if name == "friends_off" {
+            let declaration_name = if name == "friends_off" {
                 "friends".to_owned()
             } else {
-                name
+                name.clone()
             };
             let declaration = format!(
-                "{cfg}#[path = {:?}]\n{visibility} mod {name};\n",
+                "{cfg}#[path = {:?}]\n{visibility} mod {declaration_name};\n",
                 absolute.to_string_lossy()
             );
-            if modules
-                .insert(file.to_string_lossy().into_owned(), declaration)
-                .is_some()
-            {
+            if modules.insert(name.clone(), declaration).is_some() {
                 return Err(format!("duplicate game module {name}"));
             }
         }

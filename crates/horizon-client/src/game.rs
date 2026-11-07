@@ -4538,7 +4538,11 @@ impl Game<'_> {
         self.pending.attach(pos, &mut stack);
         let (p, v) = spill::pop_position_from_face(&mut self.world.random, pos, face);
         // The private overload checks the gamerule after the offsets are drawn.
-        if !self.ui.rules.bool("block_drops") {
+        if !self
+            .ui
+            .rules
+            .bool_at(horizon_client::gamerules::vanilla::BLOCK_DROPS)
+        {
             return;
         }
         self.spawn_item(stack, p, v, 10);

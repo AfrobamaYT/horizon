@@ -816,7 +816,7 @@ impl Game<'_> {
                     self.load_block_name(key, &new, &tag);
                     if let (Some(BlockEntity::Mod(current)), BlockEntity::Mod(loaded)) =
                         (self.world.block_entities.get_mut(&key), &mut new)
-                        && current.id == loaded.id
+                        && current.id() == loaded.id()
                     {
                         // BlockDataAccessor.setData loads the existing entity.
                         // Replace its saved fields, preserving runtime data and
@@ -1405,6 +1405,7 @@ mod tests {
             game.persist.raw.insert(12, Tag::Compound(raw));
             game.persist.uuids.insert(12, [1, 2, 3, 4]);
             game.others.push(super::super::OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:block_display".into(),
                 position: Vec3::new(0.5, 64.0, 0.5),
@@ -1899,13 +1900,14 @@ mod modern_literal_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -1919,7 +1921,9 @@ mod modern_literal_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -1969,9 +1973,7 @@ mod modern_literal_tests {
                 } else {
                     ["data modify storage ", &target, " v set value ", modern].concat()
                 };
-                let dispatcher = horizon_client::command::vanilla::game_dispatcher_with_features(
-                    &game.level.enabled_features,
-                );
+                let dispatcher = horizon_client::command::vanilla::game_dispatcher();
                 assert!(
                     dispatcher
                         .parse(&command, &game.ui.registries)

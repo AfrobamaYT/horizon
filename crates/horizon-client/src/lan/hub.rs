@@ -6862,7 +6862,7 @@ mod tests {
             let inbox = &mut guest.inbox;
             inbox.push_back((
                 S::PlayerAction(play::PlayerAction {
-                    action: 6,
+                    action,
                     pos: [0; 3],
                     direction: 0,
                     sequence: 0,

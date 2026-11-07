@@ -28,7 +28,7 @@ use crate::powder_snow::particle_velocity as powder_snow_particle_velocity;
 
 /// The inside-block effects of fire and lava (`InsideBlockEffectType`
 /// FIRE_IGNITE and LAVA_IGNITE): ignite, then hurt.
-fn block_contact_damage(m: &mut Mob, w: &MobWorld, level: &mut DamageLevel<'_>, fire: f32) {
+fn block_contact_damage(m: &mut Mob, _w: &MobWorld, level: &mut DamageLevel<'_>, fire: f32) {
     if fire > 0.0 && !m.kind.flags.fire_immune {
         let multiplier = m.burning_time();
         m.fire_ticks = crate::motion::environment::ignite_contact(
@@ -5811,7 +5811,12 @@ mod breathing_effect_tests {
                                     mob.add_effect(effect, 100, 0);
                                 }
                             }
-                            base_tick(&mut mob, world, &mut Vec::new());
+                            base_tick(
+                                &mut mob,
+                                world,
+                                &mut crate::health::TestLevel::new(0).level(),
+                                &mut Vec::new(),
+                            );
                             assert_eq!(
                                 mob.fluids.eye_in_water,
                                 scene != 0,

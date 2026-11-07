@@ -7234,9 +7234,6 @@ impl Game<'_> {
             let pos = self.mobs[index].position;
             self.mob_equip_event(id, [pos.x, pos.y, pos.z], equip);
         }
-        if let Some((at, height)) = shear_puff {
-            self.mooshroom_shear_puff(at, height);
-        }
         let mut drops: Vec<ItemStack> = drops
             .into_iter()
             .map(|(item, count)| ItemStack::new(&item, count))
@@ -9281,13 +9278,14 @@ mod tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -9301,7 +9299,9 @@ mod tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -9334,6 +9334,10 @@ mod tests {
             collision_binding: game.collision,
             resources: game.motion,
             health: &game.health_resources,
+            tag_items: Some(game.res.items()),
+            loop_context: &game.loop_context,
+            damage_hooks: &horizon_client::health::DamageHooks::NONE,
+            block_registries: Some(&game.ui.registries),
         }
         .cause_mount_fall(10.0, 1.0)
         .unwrap();

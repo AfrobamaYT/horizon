@@ -287,13 +287,13 @@ impl Game<'_> {
         let m = &mut self.mobs[index];
         let id = m.id;
         let pos = m.position;
-        let saddle_off = m.extra.saddled && saddle.is_none();
+        let saddle_off = m.extra.saddled() && saddle.is_none();
         let body_off = body
             .as_ref()
-            .is_some_and(|b| b.is_none() && m.extra.body.is_some());
+            .is_some_and(|b| b.is_none() && m.extra.body_id().is_some());
         let body_on = body
             .as_ref()
-            .is_some_and(|b| b.is_some() && m.extra.body.is_none());
+            .is_some_and(|b| b.is_some() && m.extra.body_id().is_none());
         m.set_saddle(saddle);
         if let Some(body) = body {
             m.extra.set_body_stack(body);

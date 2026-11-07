@@ -576,6 +576,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:text_display".into(),
                 position: Vec3::ZERO,

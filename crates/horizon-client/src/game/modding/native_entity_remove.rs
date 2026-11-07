@@ -228,6 +228,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:text_display".into(),
                 position: Vec3::new(1.0, 70.0, 1.0),
@@ -394,6 +395,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,

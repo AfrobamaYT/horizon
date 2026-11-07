@@ -2809,13 +2809,14 @@ mod shriek_capture_tests {
         );
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -2829,7 +2830,9 @@ mod shriek_capture_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -2864,6 +2867,7 @@ mod shriek_capture_tests {
         game.audio
             .play_on(4, before, Some([1.5, 200.0, 4.5]), 1.0, 1.0);
         game.level_events.push(LevelEvent::LevelEvent {
+            source: None,
             id: 3007,
             pos: BlockPos::new(4, 200, 4),
             data: 0,
@@ -2881,6 +2885,7 @@ mod shriek_capture_tests {
             "dry random continuation"
         );
         game.level_events.push(LevelEvent::LevelEvent {
+            source: None,
             id: 3007,
             pos: BlockPos::new(7, 200, 4),
             data: 0,
