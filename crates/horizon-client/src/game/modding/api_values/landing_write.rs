@@ -64,6 +64,10 @@ mod tests {
         ];
         assert_eq!(requested.try_into_engine(&()).unwrap(), expected);
         assert_eq!(expected.try_into_api().unwrap(), requested);
+        assert_eq!(
+            EngineWrite::SetBlock(BlockStateId(u32::MAX)).try_into_api(),
+            Err(BlockStateError::UnknownState)
+        );
         for (invalid, error) in [
             (
                 mod_api::BlockStateRecord::new(bad_key, 0).into(),
