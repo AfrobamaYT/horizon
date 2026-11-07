@@ -95,18 +95,12 @@ impl Game<'_> {
         }
     }
     /// `ItemStack.getUseDuration`, behind ItemResource's read; gameplay owns the Part call.
-    pub(in crate::game) fn native_item_resource_use_duration(
-        &self,
-        stack: &ItemStack,
-    ) -> Option<i32> {
+    pub(in crate::game) fn item_resource_use_duration(&self, stack: &ItemStack) -> Option<i32> {
         self.items().get(&stack.item)?;
         Some(self.use_duration(stack))
     }
     /// `ItemStack.isBarVisible`, `getBarWidth`, `getBarColor`, before client-only hooks.
-    pub(in crate::game) fn native_item_resource_bar(
-        &self,
-        stack: &ItemStack,
-    ) -> Option<mod_api::ItemBar> {
+    pub(in crate::game) fn item_resource_bar(&self, stack: &ItemStack) -> Option<mod_api::ItemBar> {
         let resource = mod_api::ItemResource::of(stack);
         let component = |id| {
             resource.value(
