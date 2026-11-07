@@ -23,8 +23,7 @@ mod render_tooltip_texture_tests {
     use super::ItemStack;
     use horizon_client::hud::{HudBatch, Rect};
     use mod_api::{
-        ClientHost, Hooks, Identifier, ModEntry, RenderTooltipTextureEvent,
-        testing::with_mods,
+        ClientHost, Hooks, Identifier, ModEntry, RenderTooltipTextureEvent, testing::with_mods,
     };
 
     /// Gives a stick's tooltip the `lobby:gold` style and a text tooltip a red background.
@@ -81,7 +80,9 @@ mod render_tooltip_texture_tests {
         let stone = ItemStack::new("minecraft:stone", 1);
         let mut unheard = Vec::new();
         crate::game::native_entity_refs::tests::with_game(|game| {
-            unheard = [None, Some(&stick)].map(|stack| drawn(game, stack)).to_vec();
+            unheard = [None, Some(&stick)]
+                .map(|stack| drawn(game, stack))
+                .to_vec();
         });
         // The solid fills: the background's three, the two borders' and their gradient sides.
         assert_eq!(unheard[0].len(), 7 * 6);
@@ -100,8 +101,10 @@ mod render_tooltip_texture_tests {
                     }
                     let quads = drawn(game, Some(&stick));
                     assert_ne!(quads, unheard[1]);
-                    assert!(quads.iter().all(|&(uv, color)| color == u32::MAX
-                        && rects.iter().any(|&r| in_sprite(uv, r))));
+                    assert!(
+                        quads.iter().all(|&(uv, color)| color == u32::MAX
+                            && rects.iter().any(|&r| in_sprite(uv, r)))
+                    );
                     for rect in rects {
                         assert!(quads.iter().any(|&(uv, _)| in_sprite(uv, rect)));
                     }
