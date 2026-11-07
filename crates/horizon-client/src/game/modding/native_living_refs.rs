@@ -14,7 +14,7 @@ use horizon_client::items::ItemStack;
 use horizon_client::mobs::Mob;
 use horizon_world::attributes::{Modifier, Operation};
 use mod_api::first_person::Hand;
-use mod_api::{
+use mod_api::{Direction, 
     AttributeModifier, AttributeOperation, EntityRef, EquipmentSlot, Identifier, LivingRef,
     ModifierLifetime,
 };
@@ -426,18 +426,18 @@ impl Game<'_> {
     }
 
     /// `Entity.canUsePortal`: the decision the game's own portal trip runs —
-    /// a player's (alive, nobody's passenger, not asleep: the gates
-    /// `client_inside_nether_portal` and the guest trip check), a mob's walk
-    /// gate (`mob_can_use_portal`, #1275's read: not a boss that never
-    /// travels, not a creaking bound to its heart, riding nothing, carrying
-    /// no one this side holds back). None for a stale handle, an armor stand
-    /// or the dragon: the portal walk carries neither as its own traveller.
+    /// a player's (alive, nobody's passenger, not asleep: the engine's own
+    /// `player_can_use_portal`, the one gate the client's portal entry, the
+    /// guest trip and this read answer), a mob's walk gate
+    /// (`mob_can_use_portal`, #1275's read: not a boss that never travels,
+    /// not a creaking bound to its heart, riding nothing, carrying no one
+    /// this side holds back). None for a stale handle, an armor stand or the
+    /// dragon: the portal walk carries neither as its own traveller.
     pub(super) fn native_living_can_use_portal(&self, living: LivingRef) -> Option<bool> {
         match self.native_living_read_target(living)? {
-            Target::Player => {
-                let p = self.player.as_ref()?;
-                Some(!p.health.dead_or_dying() && self.riding.is_none() && !p.sleeping)
-            }
+            // The engine's own gate, the one the client's portal entry runs
+            // (`player_can_use_portal`, #943).
+            Target::Player => Some(self.player_can_use_portal()),
             Target::Guest(conn) => {
                 let g = self.command_guest(conn)?;
                 let p = g.motion.as_deref()?;
@@ -512,29 +512,26 @@ impl Game<'_> {
         }
     }
 
-    /// The bed's facing of a sleeper, as the engine keeps it: a villager's
-    /// (or wandering trader's) saved sleep pose, the bed block's own `facing`
-    /// for a player or a guest. None for a stale handle, a kind that keeps
-    /// no bed, and anyone not asleep.
-    pub(super) fn native_living_bed_orientation(&self, living: LivingRef) -> Option<&'static str> {
-        match self.native_living_read_target(living)? {
-            Target::Mob(id) => {
-                let m = self.mobs.iter().find(|m| m.id == id && !m.removed)?;
-                horizon_client::mobs::villager::sleeping(m)
-                    .then(|| facing_name(m.extra.ints[1]))
-                    .flatten()
-            }
-            Target::Player | Target::Guest(_) => {
-                let p = self.native_living_sleeping_pos(living)?;
-                let w = self.mob_world_base(&[]);
-                match w.prop(p[0], p[1], p[2], "facing") {
-                    Some("north") => Some("north"),
-                    Some("south") => Some("south"),
-                    Some("west") => Some("west"),
-                    Some("east") => Some("east"),
-                    _ => None,
-                }
-            }
+    /// The bed a sleeper lies in, as its block faces
+    /// (`LivingEntity.getBedOrientation` over `BedBlock.getBedOrientation`):
+    /// the block at the sleeping position, its `facing` where that block is
+    /// one of `#minecraft:beds`. None where the sleeper keeps no position,
+    /// the block is not a bed, or the handle is stale.
+    pub(super) fn native_living_bed_orientation(
+        &self,
+        living: LivingRef,
+    ) -> Option<Direction> {
+        let pos = self.native_living_sleeping_pos(living)?;
+        let w = self.mob_world_base(&[]);
+        let name = w.block_name(pos[0], pos[1], pos[2]);
+        if !w.has_tag("minecraft:beds", name) {
+            return None;
+        }
+        match w.prop(pos[0], pos[1], pos[2], "facing") {
+            Some("north") => Some(Direction::North),
+            Some("south") => Some(Direction::South),
+            Some("west") => Some(Direction::West),
+            Some("east") => Some(Direction::East),
             _ => None,
         }
     }
@@ -1156,17 +1153,6 @@ impl Game<'_> {
         let item = self.just_spawned_item()?;
         item.thrower = thrower;
         Some(item.id)
-    }
-}
-
-/// A bed facing code (`villager::bed_facing_code`) as its name.
-fn facing_name(code: i32) -> Option<&'static str> {
-    match code {
-        1 => Some("north"),
-        2 => Some("south"),
-        3 => Some("west"),
-        4 => Some("east"),
-        _ => None,
     }
 }
 
@@ -2600,7 +2586,6 @@ mod tests {
                 assert_eq!(player.can_freeze(host), Some(false));
             }
 
-            // A squid breathes water; a stale handle answers nothing.
             let squid = game
                 .res
                 .mob_types()
@@ -2609,9 +2594,21 @@ mod tests {
                 .clone();
             game.mobs.push(Mob::new(33, squid, Vec3::new(7.5, 64.0, 0.5), 0.0));
             let squid = game.native_living(game.native_entity(33).unwrap()).unwrap();
+            let golem_kind = game
+                .res
+                .mob_types()
+                .get("minecraft:copper_golem")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(34, golem_kind, Vec3::new(9.5, 64.0, 0.5), 0.0));
+            let golem = game.native_living(game.native_entity(34).unwrap()).unwrap();
             {
                 let host: &dyn Host = game;
+                // A squid and a copper golem (#can_breathe_under_water)
+                // breathe water.
                 assert_eq!(squid.can_breathe_underwater(host), Some(true));
+                assert_eq!(golem.can_breathe_underwater(host), Some(true));
             }
             game.mobs.clear();
             {
@@ -2624,14 +2621,41 @@ mod tests {
         });
     }
 
-    /// A sleeper's bed orientation, as the engine keeps it (#943).
+    /// A sleeper's bed orientation is the bed block's own facing (#943):
+    /// the block at the sleeping position, where it is one of `#minecraft:beds`.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_sleepers_bed_orientation() {
         use horizon_client::mobs::Mob;
         use horizon_core::geometry::Vec3;
-        use mod_api::Host;
+        use mod_api::{Direction, Host};
         super::super::native_entity_refs::tests::with_game(|game| {
+            // A floor with a red bed on it, facing north.
+            for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
+                let mut chunk = horizon_client::chunk::Chunk::empty(x, z);
+                chunk.lit = true;
+                game.world.chunks.insert((x, z), std::sync::Arc::new(chunk));
+            }
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            for x in -8..8 {
+                for z in -8..8 {
+                    game.world.set(x, 63, z, stone).unwrap();
+                }
+            }
+            let bed = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:red_bed")
+                .unwrap();
+            game.world.set(2, 63, 2, bed).unwrap();
+            game.world.set(3, 63, 2, bed).unwrap();
+
             let villager = game
                 .res
                 .mob_types()
@@ -2642,15 +2666,28 @@ mod tests {
                 .push(Mob::new(30, villager, Vec3::new(0.5, 64.0, 0.5), 0.0));
             let sleeper = game.native_living(game.native_entity(30).unwrap()).unwrap();
             let host: &dyn Host = game;
-            // Awake: no bed.
+            // Awake: no sleeping position, no bed.
             assert_eq!(sleeper.bed_orientation(host), None);
-            // `start_sleeping` keeps the bed's facing: a bed facing south.
-            game.mobs[0].extra.ints[1] = 2;
-            let host: &dyn Host = game;
-            assert_eq!(sleeper.bed_orientation(host), Some("south"));
+            // Asleep in the bed: the block's own facing, the engine's own
+            // sleeping position naming the bed.
             game.mobs[0].extra.ints[1] = 1;
+            horizon_client::mobs::villager::ext_mut(&mut game.mobs[0]).sleeping_pos = Some([2, 63, 2]);
             let host: &dyn Host = game;
-            assert_eq!(sleeper.bed_orientation(host), Some("north"));
+            assert_eq!(sleeper.bed_orientation(host), Some(Direction::North));
+            // A sleeping position that is not a bed answers none.
+            horizon_client::mobs::villager::ext_mut(&mut game.mobs[0]).sleeping_pos = Some([0, 63, 0]);
+            let host: &dyn Host = game;
+            assert_eq!(sleeper.bed_orientation(host), None);
+            // A player asleep in the same bed answers the same facing.
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap(),
+            );
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            game.sleeping = Some([2, 63, 2]);
+            let player = game.native_living(game.native_entity(20).unwrap()).unwrap();
+            let host: &dyn Host = game;
+            assert_eq!(player.bed_orientation(host), Some(Direction::North));
             game.mobs.clear();
             let host: &dyn Host = game;
             assert_eq!(sleeper.bed_orientation(host), None);
