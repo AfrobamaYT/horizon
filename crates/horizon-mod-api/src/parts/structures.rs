@@ -55,7 +55,8 @@ pub mod tests {
                 r.register_structure_type("tower", Tower);
             }
         }
-        install_parts(&[ModEntry::new("test", Box::new(Valid))]).unwrap();
+        crate::parts::tests::install_parts_fixture(&[ModEntry::new("test", Box::new(Valid))])
+            .unwrap();
         let types = crate::__private::installed_structure_types();
         assert!(types.contains_key("test:tower"));
         assert_eq!(types.len(), 1);
@@ -70,7 +71,11 @@ pub mod tests {
                 r.register_structure_type("", Tower);
             }
         }
-        let errors = install_parts(&[ModEntry::new("test", Box::new(Invalid))]).unwrap_err();
+        let errors = install_parts(
+            &[ModEntry::new("test", Box::new(Invalid))],
+            &crate::parts::tests::rule_schema(),
+        )
+        .unwrap_err();
         assert_eq!(errors.len(), 3);
         assert!(errors[0].contains("test registered structure type test:tower twice"));
         assert!(errors[1].contains("namespace"));

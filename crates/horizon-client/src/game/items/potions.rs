@@ -858,7 +858,12 @@ impl Game<'_> {
     pub(super) fn arrow_post_hurt_effects(&mut self, p: &Projectile, who: Who) {
         let from_item = p.arrow.as_ref().map(|a| &a.pickup_item);
         let mut effects: Vec<(&'static str, i32, i32)> = match from_item {
-            Some(s) if &*s.item == "minecraft:spectral_arrow" => vec![("glowing", 200, 0)],
+            // SpectralArrow.doPostHurtEffects: Glowing for the arrow's own
+            // (saved) Duration.
+            Some(s) if &*s.item == "minecraft:spectral_arrow" => {
+                let ticks = p.arrow.as_ref().map_or(200, |a| a.spectral_duration);
+                vec![("glowing", ticks, 0)]
+            }
             Some(s) => {
                 let scale = s.potion_duration_scale();
                 brewing::contents_effects(s)
@@ -1405,7 +1410,15 @@ impl Game<'_> {
         {
             let _ = p.set_health(0.0, true);
         }
-        // EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
+        self.refresh_armor_protection();
+        let mut status = self.potions.effects.status();
+        if let Some(p) = self.player.as_mut() {
+            status.protection = std::mem::take(&mut p.status.protection);
+            p.status = status;
+        }
+    }
+    /// EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
+    pub(in crate::game) fn refresh_armor_protection(&mut self) {
         let armor: Vec<Option<ItemStack>> = self.armor.to_vec();
         if !self
             .potions
@@ -1446,11 +1459,6 @@ impl Game<'_> {
             if let Some(p) = self.player.as_mut() {
                 p.status.protection = table;
             }
-        }
-        let mut status = self.potions.effects.status();
-        if let Some(p) = self.player.as_mut() {
-            status.protection = std::mem::take(&mut p.status.protection);
-            p.status = status;
         }
     }
     /// The players a thrown potion can hit (`Projectile.canHitEntity`): the
@@ -1714,6 +1722,7 @@ impl Game<'_> {
             );
         let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
+            join: Default::default(),
             id,
             at: [at.x, at.y, at.z],
             radius: real("Radius", 3.0).clamp(0.0, 32.0),
@@ -1753,11 +1762,12 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
     }
     /// `AreaEffectCloud.serverTick`: configured lifetime/radius changes and
     /// five-tick doses, with each victim's configured reapplication delay.
@@ -1875,6 +1885,7 @@ impl Game<'_> {
     ) {
         let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
+            join: Default::default(),
             id,
             at,
             radius: 2.5,
@@ -2272,6 +2283,7 @@ impl Game<'_> {
                 let at = mob.unwrap_or(at);
                 let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
+                    join: Default::default(),
                     id,
                     at: [at.x, at.y, at.z],
                     radius: 3.0,
@@ -2676,6 +2688,7 @@ mod tests {
             let potion = game.load_potion_cloud(&tag).unwrap();
             for (age, duration) in [(20, 1), (0, 40)] {
                 game.breath_clouds.push(super::super::dragon::Breath {
+                    join: Default::default(),
                     id: 0,
                     at: [0.0, 80.0, 0.0],
                     radius: 3.0,
@@ -2988,6 +3001,7 @@ mod tests {
     fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         let mut clouds = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 1,
             at: [1.0, 64.0, 0.0],
             radius: 5.0,
@@ -3012,6 +3026,7 @@ mod tests {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         // Non-dragon cloud (`from_dragon: false`).
         let mut non_dragon = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 1,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -3028,6 +3043,7 @@ mod tests {
 
         // Lingering potion cloud (`potion: Some(...)`).
         let mut lingering = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 2,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -3056,6 +3072,7 @@ mod tests {
         // Its last tick before the wait-shifted end still holds breath
         // (`tickCount - waitTime < duration`).
         let mut last = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -3072,6 +3089,7 @@ mod tests {
 
         // Expired cloud (`tickCount - waitTime >= duration`).
         let mut expired = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -3089,6 +3107,7 @@ mod tests {
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
         // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
         let mut far = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 4,
             at: [10.0, 64.0, 0.0],
             radius: 1.0,
@@ -3107,6 +3126,7 @@ mod tests {
         // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
         let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
         let mut ground_cloud = [super::super::dragon::Breath {
+            join: Default::default(),
             id: 5,
             at: [0.0, 64.0, 0.0],
             radius: 1.0,

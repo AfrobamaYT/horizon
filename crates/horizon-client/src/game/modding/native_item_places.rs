@@ -172,9 +172,14 @@ impl Game<'_> {
     pub(super) fn game_insert(
         &mut self,
         place: &ItemPlace,
-        stack: ItemStack,
+        resource: &ItemStack,
+        amount: u32,
         tx: &Transaction,
     ) -> u32 {
+        let stack = ItemStack {
+            count: amount,
+            ..resource.clone()
+        };
         let _ = tx;
         if !self.places_simulated() || stack.count == 0 {
             return 0;
@@ -297,9 +302,14 @@ impl Game<'_> {
     pub(super) fn game_extract(
         &mut self,
         place: &ItemPlace,
-        stack: ItemStack,
+        resource: &ItemStack,
+        amount: u32,
         tx: &Transaction,
     ) -> u32 {
+        let stack = ItemStack {
+            count: amount,
+            ..resource.clone()
+        };
         let _ = tx;
         if !self.places_simulated() {
             return 0;
@@ -440,6 +450,7 @@ impl Game<'_> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::super::BlockEntity;
+    use super::super::api_values::TryIntoApi;
     use super::super::native_entity_refs::tests::with_game;
     use horizon_client::{
         items::ItemStack,
@@ -576,7 +587,11 @@ pub(super) mod tests {
             assert_eq!(block(game, a), cauldron(game, 3));
             assert_eq!(
                 filled.stack(game),
-                Some(ItemStack::new("minecraft:bucket", 1))
+                Some(
+                    ItemStack::new("minecraft:bucket", 1)
+                        .try_into_api()
+                        .unwrap()
+                )
             );
             // Lava doesn't go into a water cauldron, and the lava bucket stays full.
             assert_eq!(moved(game, a, &slot(5), false), Ok(0));
@@ -601,7 +616,11 @@ pub(super) mod tests {
                 player: 123,
                 slot: 0,
             };
-            let water = ItemResource::of(&ItemStack::new("minecraft:water_bucket", 1));
+            let water = ItemResource::of(
+                &ItemStack::new("minecraft:water_bucket", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
 
             // Aborted, the guest's inventory is as it was, and the host's was never touched.
             let host: &mut dyn ServerHost = game;
@@ -641,7 +660,11 @@ pub(super) mod tests {
                 .unwrap()
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
-            let pumpkin = ItemResource::of(&ItemStack::new("minecraft:carved_pumpkin", 1));
+            let pumpkin = ItemResource::of(
+                &ItemStack::new("minecraft:carved_pumpkin", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 39, &pumpkin, 64)));
             assert_eq!(wrote, Ok(1));
@@ -798,7 +821,8 @@ pub(super) mod tests {
                 .unwrap()
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
-            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let sticks =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             assert_eq!(
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert_any(host, tx, &sticks, 4))),
                 Ok(4)
@@ -832,7 +856,8 @@ pub(super) mod tests {
             let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             game.persist.removals.push(Target::Cart(500));
             assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
-            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let sticks =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let host: &mut dyn ServerHost = game;
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
@@ -859,7 +884,7 @@ pub(super) mod tests {
                 .unwrap()
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
-            let helmet = ItemResource::of(&helmet);
+            let helmet = ItemResource::of(&helmet.try_into_api().unwrap());
             assert_eq!(items.amount(host, 39), 1);
             let take = |host: &mut dyn ServerHost| {
                 host.transaction(|host, tx| Ok::<_, ()>(items.extract(host, tx, 39, &helmet, 1)))
@@ -893,22 +918,27 @@ pub(super) mod tests {
                 .unwrap()
                 .capability(host, &ENTITY_ITEMS, ())
                 .unwrap();
-            let helmet = ItemResource::of(&ItemStack::new("minecraft:iron_helmet", 1))
-                .with_component(
-                    host,
-                    &ComponentId::new("minecraft:equippable").unwrap(),
-                    Tag::Compound(
-                        [
-                            ("slot".into(), Tag::String("head".into())),
-                            (
-                                "allowed_entities".into(),
-                                Tag::String("#minecraft:cannot_be_pushed_onto_boats".into()),
-                            ),
-                        ]
-                        .into_iter()
-                        .collect(),
-                    ),
-                );
+            let helmet = ItemResource::of(
+                &ItemStack::new("minecraft:iron_helmet", 1)
+                    .try_into_api()
+                    .unwrap(),
+            )
+            .with_component(
+                host,
+                &ComponentId::new("minecraft:equippable").unwrap(),
+                Tag::Compound(
+                    [
+                        ("slot".into(), Tag::String("head".into())),
+                        (
+                            "allowed_entities".into(),
+                            Tag::String("#minecraft:cannot_be_pushed_onto_boats".into()),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            )
+            .unwrap();
             assert_eq!(items.capacity(host, 39, &helmet), 1);
         });
     }
@@ -931,7 +961,8 @@ pub(super) mod tests {
             game.native_lifecycle.world_close_final();
             assert!(entity.capability(game, &ENTITY_ITEMS, ()).is_none());
             let host: &mut dyn ServerHost = game;
-            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let sticks =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let wrote =
                 host.transaction(|host, tx| Ok::<_, ()>(items.insert(host, tx, 0, &sticks, 1)));
             assert_eq!(wrote, Ok(0));
@@ -953,7 +984,7 @@ pub(super) mod tests {
         amount: i32,
         commit: bool,
     ) -> u32 {
-        let resource = ItemResource::of(&ItemStack::new(item, 1));
+        let resource = ItemResource::of(&ItemStack::new(item, 1).try_into_api().unwrap());
         let host: &mut dyn ServerHost = game;
         let mut moved = 0;
         let _ = host.transaction(|host, tx| {
@@ -1015,7 +1046,11 @@ pub(super) mod tests {
             };
             let before = held(game);
             let host: &mut dyn ServerHost = game;
-            let emerald = ItemResource::of(&ItemStack::new("minecraft:emerald", 1));
+            let emerald = ItemResource::of(
+                &ItemStack::new("minecraft:emerald", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
             let moved = |host: &mut dyn ServerHost, commit: bool| {
                 host.transaction(|host, tx| {
                     let took = menu.cursor().extract(host, tx, &emerald, 9);
@@ -1083,7 +1118,8 @@ pub(super) mod tests {
                 ItemPlace::MenuSlot { menu, slot: 0 },
                 ItemPlace::MenuSlot { menu, slot: 62 },
             );
-            let stick = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let stick =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             for place in [&first, &hotbar] {
                 assert_eq!(write(game, place, "minecraft:stick", 1, true), 0);
                 assert_eq!(write(game, place, "minecraft:stick", -1, true), 0);
@@ -1138,7 +1174,11 @@ pub(super) mod tests {
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
             let menu = menu_of(game);
             let grid = ItemPlace::MenuSlot { menu, slot: 1 };
-            let log = ItemResource::of(&ItemStack::new("minecraft:oak_log", 1));
+            let log = ItemResource::of(
+                &ItemStack::new("minecraft:oak_log", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
             let result = |game: &super::Game<'_>| {
                 game.lan.as_ref().unwrap().hub.guests[0]
                     .craft_result
@@ -1242,7 +1282,9 @@ pub(super) mod tests {
             // `FurnaceResultSlot.mayPlace` is false.
             assert_eq!(write(game, &result, "minecraft:iron_ingot", 1, true), 0);
             let host: &mut dyn ServerHost = game;
-            let bucket = ItemStack::new("minecraft:bucket", 1);
+            let bucket = ItemStack::new("minecraft:bucket", 1)
+                .try_into_api()
+                .unwrap();
             assert_eq!(menu.slot_holds(host, 1, &bucket), Some(1));
             assert_eq!(menu.slot_holds(host, 2, &bucket), Some(0));
             // The hotbar's last slot is plain; past it there is no slot.
@@ -1286,7 +1328,11 @@ pub(super) mod tests {
                 ItemPlace::MenuSlot { menu, slot: 1 },
                 ItemPlace::MenuSlot { menu, slot: 2 },
             );
-            let log = ItemResource::of(&ItemStack::new("minecraft:oak_log", 1));
+            let log = ItemResource::of(
+                &ItemStack::new("minecraft:oak_log", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
             let host: &mut dyn ServerHost = game;
             let committed = host.transaction(|host, tx| {
                 assert_eq!(grid.insert(host, tx, &log, 1), 1);
@@ -1332,7 +1378,8 @@ pub(super) mod tests {
             let entity = host.entity(20).unwrap();
             let items = entity.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 41);
-            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let sticks =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let aborted = host.transaction(|host, tx| {
                 assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
                 Err::<(), ()>(())
@@ -1374,7 +1421,7 @@ pub(super) mod tests {
         host.transaction(|host, tx| {
             for (from, to, offer) in [(&seller, &buyer, a), (&buyer, &seller, b)] {
                 for (index, stack) in offer {
-                    let offered = ItemResource::of(stack);
+                    let offered = ItemResource::of(&stack.try_into_api().unwrap());
                     let still = from.resource(host, *index).as_ref() == Some(&offered)
                         && from.amount(host, *index) == stack.count;
                     if !still
@@ -1528,7 +1575,8 @@ pub(super) mod tests {
             assert_eq!(cart.kind(host).as_deref(), Some("minecraft:chest_minecart"));
             let items = cart.capability(host, &ENTITY_ITEMS, ()).unwrap();
             assert_eq!(items.size(host), 27);
-            let sticks = ItemResource::of(&ItemStack::new("minecraft:stick", 1));
+            let sticks =
+                ItemResource::of(&ItemStack::new("minecraft:stick", 1).try_into_api().unwrap());
             let aborted = host.transaction(|host, tx| {
                 assert_eq!(items.insert_any(host, tx, &sticks, 70), 70);
                 Err::<(), ()>(())
@@ -1620,7 +1668,7 @@ pub(super) mod tests {
         fn resource(&self, _: &mut dyn ServerHost, _: usize) -> Option<ItemResource> {
             let held = self.held.lock().unwrap();
             held.as_ref()
-                .map(|(item, _)| ItemResource::of(&ItemStack::new(item, 1)))
+                .map(|(item, _)| ItemResource::of(&ItemStack::new(item, 1).try_into_api().unwrap()))
         }
         fn amount(&self, _: &mut dyn ServerHost, _: usize) -> u32 {
             self.held.lock().unwrap().as_ref().map_or(0, |(_, n)| *n)
@@ -1636,7 +1684,9 @@ pub(super) mod tests {
             resource: &ItemResource,
             amount: u32,
         ) -> u32 {
-            let item = resource.to_stack(1).item.to_string();
+            let item = mod_api::__private::item_key_id(resource.as_stack().item())
+                .unwrap()
+                .to_string();
             let mut held = self.held.lock().unwrap();
             match held.as_mut() {
                 Some((have, n)) if *have == item => {
@@ -1660,7 +1710,9 @@ pub(super) mod tests {
             resource: &ItemResource,
             amount: u32,
         ) -> u32 {
-            let item = resource.to_stack(1).item.to_string();
+            let item = mod_api::__private::item_key_id(resource.as_stack().item())
+                .unwrap()
+                .to_string();
             let mut held = self.held.lock().unwrap();
             let Some((_, n)) = held.as_mut().filter(|(have, _)| *have == item) else {
                 return 0;
@@ -1689,7 +1741,7 @@ pub(super) mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("pigs", Box::new(Pigs(bin.clone())))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || with_game(test));
     }
 
@@ -1936,7 +1988,7 @@ pub(super) mod tests {
             }
         }
         let mods: Mods = vec![ModEntry::new("energy", Box::new(Energy))].into();
-        mod_api::__private::install_parts(&mods).unwrap();
+        crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
             assert!(!has_entity_providers(&ENTITY_AUTOMATION));
             with_game(|game| {

@@ -245,6 +245,7 @@ mod tests {
             others: &[],
             dragon: None,
             leash_boats: &[],
+            who_lookup: None,
             others_grid: None,
             others_index: None,
             others_villagers: None,

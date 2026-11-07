@@ -355,7 +355,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     if rules.spawn_mobs
                         && rules.spawn_monsters
                         && difficulty != 0
-                        && self.level.dimension() == horizon_core::dimension::Dimension::Overworld
+                        && self.level.dimension_type().nether_portal_spawns_piglin
                         && self.rand_int(2000) < difficulty
                     {
                         self.emit(LevelEvent::BlockEvent {
@@ -644,10 +644,10 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             self.remove_block(pos, false);
         }
         let below_state = self.below_state(pos);
-        let infiniburn = match self.level.dimension() {
-            horizon_core::dimension::Dimension::Overworld => &b.tags.infiniburn_overworld,
-            horizon_core::dimension::Dimension::Nether => &b.tags.infiniburn_nether,
-            horizon_core::dimension::Dimension::End => &b.tags.infiniburn_end,
+        let infiniburn = match self.level.dimension_type().infiniburn.as_str() {
+            "#minecraft:infiniburn_nether" => &b.tags.infiniburn_nether,
+            "#minecraft:infiniburn_end" => &b.tags.infiniburn_end,
+            _ => &b.tags.infiniburn_overworld,
         };
         let infini = b.in_set(below_state, infiniburn);
         let age = b.table.int(state, p.age);
@@ -786,7 +786,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             true
         };
         if self.rand_int(3) == 0 || fewer(self, pos, 4) {
-            let brightness = if self.level.dimension() == horizon_core::dimension::Dimension::End {
+            let brightness = if self.level.level_key() == super::LevelKey::END {
                 self.level.block_light(pos)
             } else {
                 self.max_local_raw_brightness(pos)
@@ -1969,6 +1969,19 @@ impl Behaviours {
         struck: BlockPos,
     ) {
         self.sim(level, ticks).lightning_clear_copper(struck);
+    }
+    /// `ServerLevel.tickBlock` for the block at `pos` now, as a due tick from the queue runs it:
+    /// the level's say first (a mod block's part), else `BlockState.tick`. The queue is not
+    /// read or changed.
+    pub fn due_block_tick<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+    ) {
+        let mut sim = self.sim(level, ticks);
+        let state = sim.state(pos);
+        sim.tick_due_block(state, pos);
     }
     /// Run one scheduled block tick at `pos` immediately (no queue check).
     pub fn scheduled_block_tick<L: LevelAccess + ?Sized>(

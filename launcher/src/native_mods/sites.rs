@@ -11,11 +11,33 @@ pub(super) struct Site {
     pub name: String,
     pub target: String,
     pub selector: String,
+    pub call: String,
+    pub ctx: String,
     pub ordinal: usize,
+    #[serde(default)]
+    pub private: bool,
     pub hash: String,
     pub listener: String,
     pub record: String,
     pub output: String,
+}
+
+impl From<horizon_mod_api_gen::sites::Site> for Site {
+    fn from(site: horizon_mod_api_gen::sites::Site) -> Self {
+        Self {
+            name: site.name,
+            target: site.target,
+            selector: site.selector,
+            call: site.call,
+            ctx: site.ctx,
+            ordinal: site.ordinal,
+            hash: site.hash,
+            listener: site.listener,
+            record: site.record,
+            output: site.output,
+            private: true,
+        }
+    }
 }
 
 pub(super) fn of(manifest: &Manifest) -> impl Iterator<Item = &Injection> {
@@ -34,7 +56,8 @@ pub(super) fn find<'a>(sites: &'a [Site], injection: &Injection) -> Option<&'a S
         .expect("site selector")
         .replace(' ', "");
     sites.iter().find(|site| {
-        site.target == target
+        !site.private
+            && site.target == target
             && site.selector == selector
             && site.ordinal == injection.ordinal.unwrap_or(0)
     })
@@ -76,7 +99,11 @@ pub(super) fn check<'a>(
 
 impl Site {
     pub(super) fn constructor(&self) -> String {
-        self.name.to_ascii_lowercase()
+        self.export().to_ascii_lowercase()
+    }
+
+    fn export(&self) -> String {
+        horizon_mod_api_gen::sites::source::facade_name(&self.target, &self.call, self.ordinal)
     }
 
     pub(super) fn facade(
@@ -96,11 +123,14 @@ impl Site {
             .listener
             .strip_suffix("Listener")
             .expect("listener suffix");
+        let export = self.export();
         for suffix in ["Listener", "Receiver", "Output"] {
-            exports.insert(format!("    pub use {prefix}{suffix};\n"));
+            exports.insert(format!(
+                "    pub use {prefix}{suffix} as __{export}{suffix};\n"
+            ));
         }
-        exports.insert(format!("    pub use {};\n", self.record));
-        let listener = self.listener.rsplit("::").next().expect("listener name");
+        exports.insert(format!("    pub use {} as __{export}Args;\n", self.record));
+        let listener = format!("__{export}Listener");
         constructors.insert(format!("    /// Registers this site's exact typed wrap listener.\n    pub const fn {}(id: &'static str, priority: i32, injection: &'static str, f: {listener}) -> mod_points::__private::SlotListener {{\n        // SAFETY: the function's exact type is checked before erasure.\n        unsafe {{ mod_points::__private::SlotListener::site(id, mod_points::SiteId::{}, priority, injection, f as *const ()) }}\n    }}\n", self.constructor(), self.name));
     }
 

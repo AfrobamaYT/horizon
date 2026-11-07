@@ -477,18 +477,42 @@ impl Drop for Session {
 /// An address of the form `friend:K7QM-3XPD` joins a friend's world through
 /// its invite code (horizon-friends): the session goes through a tunnel the
 /// client reaches on a loopback port, so everything after is a plain join.
+#[cfg(feature = "friends")]
 pub const FRIEND: &str = horizon_friends::ADDRESS_PREFIX;
+/// Without the `friends` feature such an address is refused (`join_friend`).
+#[cfg(not(feature = "friends"))]
+pub const FRIEND: &str = "friend:";
+
+/// Whether `code` is an invite code; with `full`, only a full one (a short
+/// relay code could also be a host name).
+#[cfg(feature = "friends")]
+pub fn is_invite(code: &str, full: bool) -> bool {
+    use horizon_friends::invite::{Parsed, parse};
+    match parse(code) {
+        Some(Parsed::Long(_)) => true,
+        Some(Parsed::Short(_)) => !full,
+        None => false,
+    }
+}
+/// Without the `friends` feature nothing is one.
+#[cfg(not(feature = "friends"))]
+pub fn is_invite(_code: &str, _full: bool) -> bool {
+    false
+}
 
 /// An address as players and logs see it: a friend's invite code stays
 /// out of it (its secret is in there).
 pub fn shown_address(address: &str) -> String {
     match address.strip_prefix(FRIEND) {
+        #[cfg(feature = "friends")]
         Some(code) => match horizon_friends::invite::parse(code) {
             Some(horizon_friends::invite::Parsed::Short(c)) => {
                 format!("Friend's world ({}-****)", c.nameplate)
             }
             _ => "Friend's world".to_owned(),
         },
+        #[cfg(not(feature = "friends"))]
+        Some(_) => "Friend's world".to_owned(),
         None => address.to_owned(),
     }
 }
@@ -499,7 +523,14 @@ pub fn friends_relay_setting() -> Option<String> {
     let dir = std::env::current_dir().ok()?;
     crate::ui_theme::preference(&dir, "friendsRelay")
         .filter(|r| !r.is_empty())
-        .or_else(horizon_friends::relay_url)
+        .or_else(relay_from_env)
+}
+#[cfg(feature = "friends")]
+use horizon_friends::relay_url as relay_from_env;
+/// `HORIZON_RELAY_URL` is the friends feature's: none without it.
+#[cfg(not(feature = "friends"))]
+fn relay_from_env() -> Option<String> {
+    None
 }
 /// Remember the relay typed on Join a friend (empty forgets it).
 pub fn save_friends_relay(relay: &str) {
@@ -510,6 +541,7 @@ pub fn save_friends_relay(relay: &str) {
 
 /// Reach the friend's world from the code (directly, or through a relay)
 /// and open the tunnel: the loopback address to connect to.
+#[cfg(feature = "friends")]
 fn join_friend(code: &str, lang: &Language, send: &Sender<Event>) -> Result<(String, u16), Reason> {
     use horizon_friends::{
         PathMode,
@@ -536,6 +568,16 @@ fn join_friend(code: &str, lang: &Language, send: &Sender<Event>) -> Result<(Str
         .serve_loopback()
         .map_err(|e| Reason::plain(e.to_string()))?;
     Ok(("127.0.0.1".to_owned(), port))
+}
+
+/// A build without Play with Friends: the address is refused, never retried.
+#[cfg(not(feature = "friends"))]
+fn join_friend(code: &str, lang: &Language, _: &Sender<Event>) -> Result<(String, u16), Reason> {
+    Err(Reason::keyed_arg(
+        "horizon.multiplayer.invalid_address",
+        lang,
+        &shown_address(&format!("{FRIEND}{code}")),
+    ))
 }
 
 fn status(send: &Sender<Event>, text: &str) {
@@ -1093,15 +1135,6 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
-            // The server names its mods; the answer is ours, and the server judges.
-            cfg::Clientbound::CustomPayload(p)
-                if p.channel == horizon_protocol::mod_list::CHANNEL =>
-            {
-                reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
-                    channel: horizon_protocol::mod_list::CHANNEL.into(),
-                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::local()),
-                }))?;
-            }
             cfg::Clientbound::CustomPayload(p) => {
                 // Horizon servers use the client brand to negotiate their extensions.
                 // Announce those only after the server identifies itself as Horizon.
@@ -1117,6 +1150,14 @@ fn configure(
                     reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
                         channel: "minecraft:brand".into(),
                         data: w.data,
+                    }))?;
+                    // Announce before replying to known packs, even when the
+                    // server has no mods. Never disclose this to vanilla servers.
+                    reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                        channel: horizon_protocol::mod_list::CHANNEL.into(),
+                        data: horizon_protocol::mod_list::encode(
+                            &horizon_protocol::mod_list::local(),
+                        ),
                     }))?;
                 }
                 receive_brand(&p, send);
@@ -1446,6 +1487,98 @@ mod tests {
         std::fs::write(root.join("items.json"), "{}").unwrap();
         let data = crate::test_resources::item_data(&root, DataLoadOrigin::ClientPreload).unwrap();
         (root, data)
+    }
+
+    #[test]
+    fn configuration_keeps_mod_lists_private_until_the_server_identifies_as_horizon() {
+        for server_brand in ["vanilla", "horizon"] {
+            let (root, data) = empty_item_data(&format!("mod-list-{server_brand}"));
+            let (client, server) = horizon_protocol::connection::Pipe::pair();
+            let (mut reader, writer) = Connection::local(client).split();
+            reader
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let thread = std::thread::spawn(move || {
+                let (send, _events) = channel();
+                configure(
+                    &mut reader,
+                    &Mutex::new(Some(writer)),
+                    &AtomicBool::new(true),
+                    &Language::new(),
+                    &send,
+                    &Cookies::default(),
+                    &data,
+                )
+            });
+            let mut server = Connection::local(server);
+            server
+                .reader
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            // A payload alone must not solicit private identities.
+            server
+                .send(
+                    &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: horizon_protocol::mod_list::CHANNEL.into(),
+                        data: horizon_protocol::mod_list::encode(&[]),
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            server
+                .send(&cfg::Clientbound::Ping(cfg::Ping { id: 17 }).encode())
+                .unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::Pong(cfg::Ping { id: 17 }),
+                "an unidentified server received a mod announcement"
+            );
+            let mut brand = horizon_protocol::buf::Writer::new();
+            brand.string(server_brand);
+            server
+                .send(
+                    &cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                        channel: "minecraft:brand".into(),
+                        data: brand.data,
+                    })
+                    .encode(),
+                )
+                .unwrap();
+            server
+                .send(
+                    &cfg::Clientbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
+                        .encode(),
+                )
+                .unwrap();
+            let mut declared_mods = false;
+            loop {
+                let (id, body) = server.recv().unwrap();
+                match cfg::Serverbound::decode(id, &body).unwrap() {
+                    cfg::Serverbound::CustomPayload(p)
+                        if p.channel == horizon_protocol::mod_list::CHANNEL =>
+                    {
+                        declared_mods = true;
+                    }
+                    cfg::Serverbound::SelectKnownPacks(_) => break,
+                    _ => {}
+                }
+            }
+            assert_eq!(declared_mods, server_brand == "horizon");
+            server
+                .send(&cfg::Clientbound::FinishConfiguration(Empty).encode())
+                .unwrap();
+            let (id, body) = server.recv().unwrap();
+            assert_eq!(
+                cfg::Serverbound::decode(id, &body).unwrap(),
+                cfg::Serverbound::FinishConfiguration(Empty)
+            );
+            thread
+                .join()
+                .unwrap()
+                .unwrap_or_else(|reason| panic!("configuration failed: {}", reason.text));
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     fn pack(namespace: &str, id: &str, version: &str) -> cfg::KnownPack {
@@ -1793,13 +1926,18 @@ mod tests {
                     })
                 );
             }
-            // The response to the pack query proves any brand reply precedes it.
-            // Non-Horizon servers must receive no additional brand announcement.
-            let (id, body) = server.recv().unwrap();
-            assert_eq!(
-                cfg::Serverbound::decode(id, &body).unwrap(),
-                cfg::Serverbound::SelectKnownPacks(cfg::SelectKnownPacks { packs: vec![] })
-            );
+            // Wait for the pack reply without pinning unrelated extension payloads.
+            // The negotiated brand must not be announced a second time.
+            loop {
+                let (id, body) = server.recv().unwrap();
+                match cfg::Serverbound::decode(id, &body).unwrap() {
+                    cfg::Serverbound::SelectKnownPacks(_) => break,
+                    cfg::Serverbound::CustomPayload(p) => {
+                        assert_ne!(p.channel, "minecraft:brand");
+                    }
+                    packet => panic!("unexpected configuration reply: {packet:?}"),
+                }
+            }
             drop(server);
             drop(session);
         }

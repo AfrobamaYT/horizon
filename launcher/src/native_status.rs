@@ -158,19 +158,13 @@ pub fn bundles_on(home: &Path) -> Vec<horizon_mod_package::index::native::Bundle
         .collect()
 }
 
-/// Paths declared by a native package, in manifest order.
+/// Paths declared by a code package, in manifest order.
 pub fn declared_internals(manifest: &horizon_mod_package::Manifest) -> Vec<String> {
     manifest
-        .native
-        .as_ref()
-        .map(|native| {
-            native
-                .internals
-                .iter()
-                .map(|entry| entry.path.clone())
-                .collect()
-        })
-        .unwrap_or_default()
+        .internals
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect()
 }
 
 /// A native file not tracked by the registry/browser, including GitHub installs.
@@ -331,6 +325,23 @@ mod tests {
 
     fn d(id: &str, version: &str, digest: &str) -> Mod {
         (id.into(), version.into(), Some(digest.into()))
+    }
+
+    #[test]
+    fn declared_paths_use_the_common_owner_for_both_code_targets() {
+        let header = "id='owner'\nname='Owner'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\ninternals=[{path='Game',hash='game'},{path='Game::world',kind='field',hash='world'}]\n";
+        for target in [
+            format!(
+                "[native]\ngame='26.3'\nhorizon='{}'\nmixins='{}'\n",
+                "a".repeat(40),
+                "b".repeat(40)
+            ),
+            format!("[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n", "0".repeat(128)),
+        ] {
+            let manifest =
+                horizon_mod_package::Manifest::parse(&format!("{header}{target}")).unwrap();
+            assert_eq!(declared_internals(&manifest), ["Game", "Game::world"]);
+        }
     }
 
     #[test]

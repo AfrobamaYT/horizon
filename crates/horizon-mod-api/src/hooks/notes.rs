@@ -538,7 +538,7 @@ place; `native_server_tick` does not define one, so name the dimension and expec
   is, and kept when its chunk unloads. Nothing is spawned outside `/summon`'s bounds, in a chunk that isn't loaded, or a monster on peaceful.
 - `native_mob(dimension, id)` and `native_mobs(dimension)` read the living mobs: id, dimension, kind, position, yaw, health and maximum health.
 - A mob's health is set with `living.set_health(host, health)` on its `LivingRef`.
-- `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot. `EntityRef::discard` removes an entity without death or loot.
+- `native_kill_mob(dimension, id)` kills as `/kill` does, with its loot. `EntityRef::discard` removes an entity without death or loot: from the call on selectors and handles no longer find it, its passengers are off and `entity_leave_level` has fired, in the same hook.
 - While the game ticks its mobs they are out of the level: from a hook inside that tick, a spawned mob joins after the tick, and the others
   read as gone.
 
@@ -580,6 +580,12 @@ Changing loot a mod didn't make, as NeoForge's `LootTableLoadEvent` and global l
   NeoForge's `GetEquipmentDropChanceEvent`. Change the chance a dying mob rolls for the item `stack` in `slot`; `original_chance`
   is the recorded chance before enchantments and `preserved` says the slot drops without a player kill. Each slot is asked at its
   own point of `Mob.dropCustomDeathLoot`, just before its roll, and the roll is drawn whatever the chance is.
+- **`native_enchanted_entity_loot(entity, source, attacker, enchantment, level)`**:
+  NeoForge's `EnchantedEntityLootEvent`. Change the level an entity's loot table uses of `enchantment`, in the middle of the roll:
+  `EnchantedCountIncreaseFunction` and `LootItemRandomChanceWithEnchantedBonusCondition` ask each time they are evaluated, on a death and on
+  `/loot ... kill`, whose `source` is `minecraft:magic` and whose `attacker` is the command's source. `entity` and `attacker` are live handles;
+  `attacker` is None without one and may not be living, and `level` then starts at 0, otherwise at the living attacker's level. It is unsigned, so
+  the negative levels `setEnchantmentLevel` throws on can't be written, and above 1024 it counts as 1024, so a mod's value can't size a loop. Without a listener the roll asks nothing, and its random's order is vanilla's.
 
 ### A mod block entity's data on its item
 
@@ -785,13 +791,17 @@ handle, an entity the client doesn't track and a level it doesn't show:
   at 0 after a blended addition and interpolate to their post-countdown target each client tick (1 while active, 0 once
   expired). An unblended addition starts at its target immediately; a replacement packet preserves the old blend.
   Partial ticks are not clamped. A missing effect reads 0. The client keeps no other entity's effects, so they read `None`.
+- `host.fishing_hook(entity)` gives a `FishingHookRef` for a cast hook (`FishingHook`); `hook.entity()` goes back.
+  `player_owner(host)` is the player who cast it, `hooked_in(host)` what it holds (None when nothing, or when that is
+  gone) and `open_water(host)` is `isOpenWaterFishing`. `item_fished` names a hook by id, and `LevelRef::entities_in`
+  finds them. Discarding one takes it out. It is not a `ProjectileRef`, and selectors do not find it yet.
 - `host.projectile(entity)` gives a `ProjectileRef` for a projectile in the level's projectile list (arrows, a mob's
   trident, thrown items, fireballs, wind charges, skulls, shulker bullets, mods' thrown types), a trident a player
   threw or a firework rocket; `projectile.entity()` goes back. A player's trident and a rocket have an owner and a
   deflection only: `pickup`, `base_damage` and `critical` read None and their setters return false, and a player's
   trident always has a player owner (`set_owner` or `deflect` with none or a mob returns false). `owner(host)` resolves the owner to a current `EntityRef` (None when gone
-  or in another level) and `set_owner(host, owner)` takes a player or mob (`Projectile.setOwner`; false for another
-  kind). `deflect(host, deflection, by, new_owner, by_attack, power)` is `Projectile.deflect`: `NativeDeflection::Reverse`
+  or in another level) and `set_owner(host, owner)` takes any entity but a fishing hook (`Projectile.setOwner`). An owner that is neither a
+  player nor a mob is kept by its UUID: `owner` resolves it and a save keeps it, but a hit credits no one for it. `deflect(host, deflection, by, new_owner, by_attack, power)` is `Projectile.deflect`: `NativeDeflection::Reverse`
   draws one float for the turn from the projectile's own random (`Entity.random`, never the level's), `AimDeflect`
   and `MomentumDeflect` use the look or the known speed (last tick's move, `Entity.getKnownSpeed`) of `by` and do
   nothing without it; the new owner is set and a fireball's or wind charge's acceleration power becomes 0.1 by an
@@ -1303,11 +1313,12 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 ### Render hook points
 
-`crates/horizon-mod-api/src/render.rs`: the renderer's own hook points, free functions rather than
-`Game` methods, which a bundle targets as `mod_api::render::native_<name>`. They run on the
-render thread with the frame's wgpu objects; what a mod draws there shows in that frame.
+`crates/horizon-mod-render/src/render.rs`: native-only, unstable raw frame places, outside `mod_api`.
+Use `[[inject]]` with `access = "internals"`, `kind = "head"` and a checked listener signature at
+`horizon_mod_render::render::<name>`. They run on the render thread with the frame's wgpu objects;
+what a mod draws there shows in that frame. Draw contexts remain the API-typed drawing route.
 
-- `native_world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
+- `world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
@@ -1315,14 +1326,14 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   called on the title screen's panorama. `motion` says which mob, player or dropped item each run of the entity quads
   is, by its entity id, so a mod can match an entity's vertices with last frame's (a motion blur's own motion
   vectors); `spans` only name the type.
-- `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
-  entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
+- `hand_drawn(hand)`: the first-person hand and held item are drawn, after `world_drawn` and before
+  entity outlines, post effects, screen effects and the HUD, on every frame `world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
   quads (empty when no hand drew: third person, F1, a shader pack's own hand), the hand's clip matrix (its own field
   of view and the view bob, no jitter), the camera, the entity atlas and the quad index buffer. The hand's depth isn't
   kept: draw its quads into a depth of your own. A motion blur can match the hand's quads with last frame's for the
   swing, attack, equip and bob motion, and blur the picture with the hand in it.
-- `native_render_needs(needs)`: set `entity_spans` to have the entity geometry split into runs by entity without a
+- `render_needs(needs)`: set `entity_spans` to have the entity geometry split into runs by entity without a
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
   several mods can ask. It's asked as each frame is built, so keep it cheap.
@@ -1629,8 +1640,8 @@ one, where vanilla gives the `by` one.
   the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
   player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
 
-- [the renderer's hook points](#render-hook-points): `native_world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
-  `native_render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
+- [the renderer's hook points](#render-hook-points): `world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
+  `render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.
 
 - [entities](#entities) for server mods: `native_summon(dimension, kind, pos, nbt)` spawns any entity from its compound
   as `/summon` does.

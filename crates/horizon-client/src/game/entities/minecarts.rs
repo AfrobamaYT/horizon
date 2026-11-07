@@ -1540,7 +1540,9 @@ impl Game<'_> {
         // fell unprimed blows rails up like any blast.
         self.combat.rail_proof_blast = c.fuse >= 0;
         self.combat.explosion_in_water = self.bounds_in_water(c.bounds());
+        self.combat.explosion_direct = Some(c.id);
         let _ = self.with_hive_emptying_blast(|g| g.server_explode(at, power, interaction, false));
+        self.combat.explosion_direct = None;
         self.combat.explosion_in_water = false;
         self.combat.rail_proof_blast = false;
     }
@@ -2473,17 +2475,26 @@ impl Game<'_> {
                 ];
                 self.native_vehicle_destroy(self.carts[i].kind.id(), at);
             }
-            let mut c = self.carts.remove(i);
-            if c.kind == CartKind::Tnt && (fire || speed >= f64::from(0.01f32)) {
+            let mut c = if tnt_prime {
+                self.carts.extract(self.carts[i].join).unwrap()
+            } else {
+                self.carts.remove(i)
+            };
+            if tnt_prime {
                 // MinecartTNT.destroy: prime instead of breaking.
                 if c.fuse < 0 {
                     self.prime_cart(&mut c);
                     let r = &mut self.world.random;
                     c.fuse = r.next_int_bound(20).unwrap_or(0) + r.next_int_bound(20).unwrap_or(0);
                 }
-                self.carts.insert(i, c);
+                self.carts.put_back(i, c);
             } else {
                 let at = [c.position.x, c.position.y, c.position.z];
+                // VehicleEntity.destroy: `kill` (the cart's own ENTITY_DIE),
+                // then the drops; a creative hit only discards it.
+                if !creative {
+                    self.entity_killed_event(at, false);
+                }
                 if self
                     .ui
                     .rules

@@ -1446,7 +1446,9 @@ impl Game<'_> {
                 Vec3::new(x - 1.0, y, z - 1.0),
                 Vec3::new(x + 1.0, y + 2.0, z + 1.0),
             ));
+            self.combat.explosion_direct = Some(c.id);
             let _ = self.server_explode(at, 6.0, interaction, false);
+            self.combat.explosion_direct = None;
             self.combat.explosion_in_water = false;
             self.fight.blast_by = None;
         }
@@ -2398,6 +2400,7 @@ impl Game<'_> {
                     }
                     let id = self.take_entity_id();
                     self.breath_clouds.push(Breath {
+                        join: Default::default(),
                         id,
                         at: [x, y.floor() + 1.0, z],
                         radius: 5.0,
@@ -3086,6 +3089,7 @@ impl Game<'_> {
                 let feet = [next.x, next.y - 0.5, next.z];
                 let at = fireball_cloud_origin(feet, &snap_targets);
                 self.breath_clouds.push(Breath {
+                    join: Default::default(),
                     id,
                     at,
                     radius: 3.0,
@@ -3156,7 +3160,7 @@ impl Game<'_> {
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {
@@ -3210,7 +3214,8 @@ impl Game<'_> {
             }
             true
         });
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
         for (who, amount) in harmed {
             self.as_fight_player(who, |g| {
                 g.dragon_hurts_player("minecraft:indirect_magic", amount);
@@ -3432,6 +3437,7 @@ fn breath_puffs(
     }
 }
 pub(super) struct Breath {
+    pub(in crate::game) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id once a server's players track it (0 until then).
     pub(super) id: u32,
     pub(super) at: [f64; 3],
@@ -3444,6 +3450,9 @@ pub(super) struct Breath {
     /// A lingering potion's cloud (`ThrownLingeringPotion`): what it applies.
     pub(super) potion: Option<super::potions::PotionCloud>,
 }
+
+horizon_client::impl_joined!(Breath, Dragon);
+
 impl Breath {
     /// `AreaEffectCloud.isWaiting`: before its wait time (20 ticks, 10 for a
     /// lingering potion's).
