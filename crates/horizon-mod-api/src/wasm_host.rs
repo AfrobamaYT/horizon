@@ -1139,12 +1139,8 @@ mod glue {
     #[test]
     fn refused_menu_button_output_keeps_all_host_state() {
         let mut entity = crate::ModBlockEntity::new("test:counter".into(), Default::default());
-        let stone = crate::ItemStack {
-            item: "minecraft:stone".into(),
-            count: 1,
-            damage: 0,
-            extra: None,
-        };
+        let key = crate::parts::tests::fixture_item_key("minecraft:stone");
+        let stone = crate::ItemStack::new(key, 1).unwrap();
         entity.items.push(Some(stone.clone()));
         let revision = entity.revision();
         let context = crate::menu::MenuButtonContext {
@@ -1161,9 +1157,11 @@ mod glue {
         };
         let mut wire = block_entity_view(&event.entity).unwrap();
         wire.entity.fields.data = vec![17];
+        let mut malformed = wire.entity.fields.items[0].clone().unwrap();
+        malformed.count = 0;
         let output = horizon::mod_api::types::MenuButtonEventOut {
             entity: Some(wire),
-            carried: Some(Some(vec![])),
+            carried: Some(Some(malformed)),
         };
         assert!(write_menu_button_event(&mut event, output).is_err());
         assert!(event.entity.data.is_empty());
@@ -1202,12 +1200,8 @@ mod glue {
     fn refused_menu_quick_move_output_keeps_all_host_state() {
         let mut entity = crate::ModBlockEntity::new("test:counter".into(), Default::default());
         let revision = entity.revision();
-        let mut stack = crate::ItemStack {
-            item: "minecraft:stone".into(),
-            count: 1,
-            damage: 0,
-            extra: None,
-        };
+        let key = crate::parts::tests::fixture_item_key("minecraft:stone");
+        let mut stack = crate::ItemStack::new(key, 1).unwrap();
         let original = stack.clone();
         let mut event = crate::MenuQuickMoveEvent {
             pos: [0; 3],
@@ -1223,7 +1217,12 @@ mod glue {
             entity: Some(wire),
             container_slots: Some(4),
             slot: Some(1),
-            stack: Some(vec![]),
+            stack: Some(horizon::mod_api::types::StackRecord {
+                item: key.0,
+                count: 0,
+                damage: None,
+                components: None,
+            }),
         };
         assert!(write_menu_quick_move_event(&mut event, output).is_err());
         assert_eq!(event.pos, [0; 3]);
