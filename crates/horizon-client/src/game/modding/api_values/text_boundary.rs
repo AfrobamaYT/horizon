@@ -205,6 +205,31 @@ fn captured_hover<'a>(
     }
 }
 
+/// A span's hover as a mod reads it (`GuiGraphicsExtractor.componentHoverEffect`'s style): the
+/// same capture as a component's `hover_event`, from the style's text, item or entity hover.
+pub(in crate::game) fn style_hover(
+    style: &horizon_client_core::text::Style,
+) -> Option<mod_api::text::TextHover> {
+    use serde_json::{Map, Value};
+    let event: Map<String, Value> = if let Some(text) = &style.hover {
+        Map::from_iter([
+            ("action".to_owned(), Value::from("show_text")),
+            ("value".to_owned(), text.component_view().into_owned()),
+        ])
+    } else if let Some(Value::Object(item)) = style.hover_item.as_deref() {
+        let mut event = item.clone();
+        event.insert("action".into(), "show_item".into());
+        event
+    } else if let Some(Value::Object(entity)) = style.hover_entity.as_deref() {
+        let mut event = entity.clone();
+        event.insert("action".into(), "show_entity".into());
+        event
+    } else {
+        return None;
+    };
+    captured_hover(&event, &mut |value| captured_text(value))
+}
+
 fn captured_text_style<'a>(
     fields: &'a serde_json::Map<String, serde_json::Value>,
     capture: &mut dyn FnMut(&'a serde_json::Value) -> mod_api::text::Text,
@@ -702,6 +727,26 @@ mod text_capture_tests {
                 json!({"action":"show_entity", "id":"minecraft:pig", "uuid":"11223344-5566-7788-99aa-bbccddeeff00", "name":{"translate":"test.name"}, "test:trace":true})
             );
         }
+    }
+
+    /// A span's style hands a mod the same hover a whole component's `hover_event` does: each
+    /// kind from the drawn span (`componentHoverEffect`'s style), and nothing without a hover.
+    #[test]
+    fn a_span_style_hover_matches_the_component_capture() {
+        for hover in [
+            json!({"action":"show_text", "value":{"text":"hi", "bold":true}}),
+            json!({"action":"show_item", "id":"minecraft:stick", "count":3, "components":{"minecraft:rarity":"epic"}}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":[0,1,0,2], "name":"Babe"}),
+            json!({"action":"show_entity", "id":"minecraft:pig", "uuid":"11223344-5566-7788-99aa-bbccddeeff00"}),
+        ] {
+            let source = json!({"text":"x", "hover_event":hover});
+            let engine = EngineText::from(source);
+            let expected = engine.try_into_api().unwrap().style.hover;
+            assert!(expected.is_some());
+            assert_eq!(super::style_hover(&engine.spans[0].style), expected);
+        }
+        let plain = EngineText::from(json!({"text":"x"}));
+        assert_eq!(super::style_hover(&plain.spans[0].style), None);
     }
 
     #[test]
