@@ -2288,6 +2288,7 @@ impl PackResources {
         item_data: &horizon_world::item_defaults::ItemData,
     ) -> Result<Self> {
         let visibility = models::load_visibility(root.prepared(), assets.registry)?;
+        api_values::resolve_block_definitions(assets.registry)?;
         let tables = Arc::new(MeshTables::new(&assets, &render, facts, visibility)?);
         let item_renderer = horizon_client::item_render::ItemRenderer::load_with_library(
             root,
@@ -23289,6 +23290,7 @@ fn load_resources(
             &additional_data,
         );
     }
+    api_values::resolve_block_definitions(assets.registry)?;
     let tables = Arc::new(startup::time("pack.mesh_tables", || {
         MeshTables::new(&assets, &render, &facts, visibility)
     })?);
@@ -23535,14 +23537,6 @@ fn load_world_rest(
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
     let load_items = || -> Result<_> {
-        mod_api::__private::resolve_block_keys((0..registry.len()).map(|index| {
-            registry
-                .state(BlockStateId(index as u32))
-                .expect("registry index is in bounds")
-                .name
-                .as_str()
-        }))
-        .map_err(|errors| errors.join("\n"))?;
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
