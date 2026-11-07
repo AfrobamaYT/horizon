@@ -891,6 +891,38 @@ fn slowest_steps(notes: &[(f32, String)]) -> String {
     format!("; slowest: {}", list.join(", "))
 }
 
+impl Game<'_> {
+    /// Rebind only an already-owning transfer, before installing it in this level.
+    /// Memory still belongs to the parked source until the caller moves it.
+    pub(super) fn rebind_transferred_entity(
+        &mut self,
+        source: super::Dim,
+        id: u32,
+        entity: &mut impl horizon_mod_runtime::attachments::HasAttachmentLifetime,
+    ) {
+        let slot = entity.attachment_lifetime();
+        if !slot.is_bound() {
+            return;
+        }
+        let Some(level) = self.level(self.dim.id()) else {
+            return;
+        };
+        let Some(map) = self
+            .levels
+            .parked_mut(source)
+            .and_then(|p| p.persist.uuids.get(&id))
+            .and_then(|uuid| self.entity_attachments.get_mut(uuid))
+        else {
+            return;
+        };
+        slot.bind(
+            map,
+            self.attachment_indexes.entry(self.dim).or_default(),
+            mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

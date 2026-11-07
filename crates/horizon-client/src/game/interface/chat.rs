@@ -196,6 +196,8 @@ pub struct UiState {
     pub difficulty: u8,
     /// F1: hide the HUD.
     pub hide_gui: bool,
+    /// Native HUD mode: keep hands visible while the HUD is hidden.
+    pub show_hand_when_hidden: bool,
     /// Death message key set by the cause of death (e.g. /kill).
     pub death_cause: Option<String>,
     /// Path of an F2 screenshot waiting for its frame.
@@ -215,6 +217,46 @@ pub struct UiState {
 }
 
 impl UiState {
+    pub fn hud_mode(&self) -> mod_api::HudMode {
+        use mod_api::HudMode;
+        match (self.hide_gui, self.show_hand_when_hidden) {
+            (false, _) => HudMode::AllVisible,
+            (true, true) => HudMode::NoHud,
+            (true, false) => HudMode::AllHidden,
+        }
+    }
+
+    pub fn set_hud_mode(&mut self, mode: mod_api::HudMode) {
+        use mod_api::HudMode;
+        self.hide_gui = mode != HudMode::AllVisible;
+        self.show_hand_when_hidden = mode == HudMode::NoHud;
+    }
+
+    pub fn hand_hidden(&self) -> bool {
+        self.hide_gui && !self.show_hand_when_hidden
+    }
+
+    /// The effective first-person hand gate, before per-hand mod cancellation.
+    pub fn hands_drawn(
+        &self,
+        spectator: bool,
+        sleeping: bool,
+        first_person: bool,
+        alive: bool,
+        dead_screen: bool,
+    ) -> bool {
+        !spectator && !self.hand_hidden() && !sleeping && first_person && alive && !dead_screen
+    }
+
+    fn toggle_hide_gui(&mut self) {
+        use mod_api::HudMode;
+        self.set_hud_mode(if self.hide_gui {
+            HudMode::AllVisible
+        } else {
+            HudMode::AllHidden
+        });
+    }
+
     /// The state a window starts with: the chat remembers the commands kept
     /// in the game folder (`ChatComponent`'s constructor).
     pub fn new() -> Self {
@@ -223,6 +265,57 @@ impl UiState {
             ui.chat.load_history(&dir);
         }
         ui
+    }
+}
+
+#[cfg(test)]
+mod hud_mode_tests {
+    use super::UiState;
+    use mod_api::HudMode;
+
+    #[test]
+    fn hud_modes_drive_the_effective_hud_and_hand_gate() {
+        let mut ui = UiState::default();
+        for (mode, hidden, hand) in [
+            (HudMode::AllVisible, false, true),
+            (HudMode::NoHud, true, true),
+            (HudMode::AllHidden, true, false),
+        ] {
+            ui.set_hud_mode(mode);
+            assert_eq!(ui.hud_mode(), mode);
+            // This is the same flag that every HUD gate and API 410 read.
+            assert_eq!(ui.hide_gui, hidden);
+            assert_eq!(ui.hands_drawn(false, false, true, true, false), hand);
+            // No mode can bypass the other first-person hand restrictions.
+            assert!(!ui.hands_drawn(true, false, true, true, false));
+            assert!(!ui.hands_drawn(false, true, true, true, false));
+            assert!(!ui.hands_drawn(false, false, false, true, false));
+            assert!(!ui.hands_drawn(false, false, true, false, false));
+            assert!(!ui.hands_drawn(false, false, true, true, true));
+        }
+    }
+
+    #[test]
+    fn vanilla_f1_remains_two_state_and_clears_the_hand_override() {
+        let mut ui = UiState::default();
+        assert_eq!(ui.hud_mode(), HudMode::AllVisible);
+        ui.toggle_hide_gui();
+        assert_eq!(ui.hud_mode(), HudMode::AllHidden);
+        assert!(ui.hand_hidden());
+        ui.toggle_hide_gui();
+        assert_eq!(ui.hud_mode(), HudMode::AllVisible);
+        ui.set_hud_mode(HudMode::NoHud);
+        ui.toggle_hide_gui();
+        assert_eq!(ui.hud_mode(), HudMode::AllVisible);
+        ui.toggle_hide_gui();
+        assert_eq!(ui.hud_mode(), HudMode::AllHidden);
+        // Existing hidden state also hides hands without a separate setting.
+        let ui = UiState {
+            hide_gui: true,
+            ..Default::default()
+        };
+        assert_eq!(ui.hud_mode(), HudMode::AllHidden);
+        assert!(ui.hand_hidden());
     }
 }
 
@@ -1752,7 +1845,7 @@ impl Game<'_> {
     }
     /// F1 hides the HUD (see `hud`); the screenshot key still works.
     pub(super) fn toggle_hide_gui(&mut self) {
-        self.ui.hide_gui = !self.ui.hide_gui;
+        self.ui.toggle_hide_gui();
     }
     /// F2: ScreenShot.grab into `screenshots/` with vanilla's file name.
     pub(super) fn take_screenshot(&mut self) {
