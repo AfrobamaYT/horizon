@@ -31,7 +31,7 @@ fn main() {
         .ancestors()
         .find(|root| root.join("crates/horizon-mod-api-gen").is_dir())
         .expect("fixture in a Horizon checkout");
-    for path in horizon_mod_api_gen::points::tracked(&root).unwrap() {
+    for path in horizon_mod_api_gen::points::tracked(root).unwrap() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     let code = guest_exports(root, &entries).unwrap();

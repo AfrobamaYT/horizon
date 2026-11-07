@@ -76,11 +76,12 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         return Ok(None);
     }
     let table = crate::INTERNALS.get().copied().unwrap_or(&Table::EMPTY);
-    for path in wasm.internals().iter().map(|i| i.path.as_str()).chain(
-        wasm.raw_injections()
-            .iter()
-            .filter_map(|i| i.target.as_deref()),
-    ) {
+    for path in wasm
+        .internals()
+        .iter()
+        .map(|i| i.path.as_str())
+        .chain(wasm.raw_injections().iter().map(|i| i.target.as_str()))
+    {
         if table.native_only.contains(&path) {
             return Err(Refusal::missing_internal(table, &manifest.id, path));
         }
@@ -123,7 +124,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
     }
     let declared: Arc<[Resolved]> = resolved.into();
 
-    let injections: Vec<_> = wasm.raw_injections().iter().collect();
+    let injections = wasm.raw_injections();
     if injections.is_empty() {
         return Ok(None);
     }
@@ -138,10 +139,7 @@ pub(crate) fn listen(manifest: &Manifest, exports: &Exports) -> Result<Option<Li
         })?;
     let mut expected = Vec::new();
     for injection in injections {
-        let target = injection
-            .target
-            .as_deref()
-            .expect("a raw injection has a target");
+        let target = injection.target.as_str();
         let place = crate::points::target_place(target, injection.kind)?;
         expected.push(place);
     }

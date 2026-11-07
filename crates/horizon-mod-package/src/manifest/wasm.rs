@@ -13,12 +13,27 @@ pub struct Wasm {
     toolchain: String,
     linked: std::collections::BTreeMap<String, String>,
     built_with: Option<String>,
-    /// Legacy raw declarations, retained until the source-injection tier is removed.
+    /// Raw declarations using the call-scoped internals view; API functions use `Manifest::inject`.
     #[serde(skip)]
-    pub(crate) raw_injections: Vec<super::Injection>,
+    pub(crate) raw_injections: Vec<RawInjection>,
     /// The same fingerprinted internals declaration used by a native mod.
     #[serde(skip)]
     pub(crate) internals: Vec<super::Internal>,
+}
+
+/// A function-slot listener through the call-scoped wasm internals view.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct RawInjection {
+    /// Unique declaration id within this mod.
+    pub id: String,
+    /// Fingerprinted function named by the internals catalog.
+    pub target: String,
+    /// A head or return point.
+    pub kind: super::InjectionKind,
+    /// Crate-root listener function exported by the internals adapter.
+    pub raw: String,
 }
 
 #[derive(Deserialize)]
@@ -119,8 +134,8 @@ impl std::fmt::Display for WasmError {
 impl std::error::Error for WasmError {}
 
 impl Wasm {
-    /// Legacy raw declarations using the call-scoped internals view.
-    pub fn raw_injections(&self) -> &[super::Injection] {
+    /// Raw internals point declarations; API functions are declared in `Manifest::inject`.
+    pub fn raw_injections(&self) -> &[RawInjection] {
         &self.raw_injections
     }
 

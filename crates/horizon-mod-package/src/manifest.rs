@@ -9,7 +9,7 @@ pub use jar::{
     JarConflict, JarInputsError, JarRef, JarRequirement, MissingJar, collect_jar_requirements,
     missing_jars,
 };
-pub use wasm::{MAX_WASM, Wasm, WasmError, export_prefix, sha512_of};
+pub use wasm::{MAX_WASM, RawInjection, Wasm, WasmError, export_prefix, sha512_of};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -264,6 +264,12 @@ pub(super) fn valid_mod_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+fn rust_ident(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && !name.as_bytes()[0].is_ascii_digit()
+}
+
 /// One injection's own rules: a hook or a target, and a source helper or raw
 /// function that listens at a point as only a point's listener can.
 fn check_injection(injection: &Injection) -> Result<(), String> {
@@ -275,12 +281,7 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     }
     match (&injection.helper, &injection.raw) {
         (Some(helper), None) if plain_path(helper) && source_file(helper) => {}
-        (None, Some(method))
-            if !method.is_empty()
-                && method
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                && !method.as_bytes()[0].is_ascii_digit() => {}
+        (None, Some(method)) if rust_ident(method) => {}
         _ => {
             return Err(format!(
                 "{MANIFEST}: injection needs exactly one source helper or raw"
@@ -337,12 +338,12 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     Ok(())
 }
 
-/// A wasm mod's internals and point listeners, without native build pins or source modules.
+/// A wasm mod's declared internals and raw listeners; API listeners use `Manifest::inject`.
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WasmNative {
     #[serde(default)]
-    injection: Vec<Injection>,
+    injection: Vec<RawInjection>,
     #[serde(default)]
     internals: Vec<Internal>,
 }
@@ -369,7 +370,7 @@ impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut table: toml::Table =
             toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        // Wasm keeps the native declaration syntax, not its pins or source modules.
+        // Raw internals share native spelling, not native build pins or source modules.
         let declarations = if table.contains_key("wasm") {
             table
                 .remove("native")
@@ -390,17 +391,16 @@ impl Manifest {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate injection id"));
                 }
-                if injection.raw.is_none()
-                    || injection.target.is_none()
-                    || injection.selector.is_some()
+                if injection.target.is_empty()
+                    || !rust_ident(&injection.raw)
+                    || !matches!(injection.kind, InjectionKind::Head | InjectionKind::Return)
                 {
                     return Err(format!(
-                        "{MANIFEST}: injection {}: a wasm mod listens at points (a raw listener at a point's target); a mod that changes game code is a native mod",
+                        "{MANIFEST}: injection {}: raw internals listeners require a target, crate-root function and HEAD or RETURN",
                         injection.id
                     ));
                 }
-                check_injection(injection)?;
-                if injection.raw.is_some() && declarations.internals.is_empty() {
+                if declarations.internals.is_empty() {
                     return Err(format!(
                         "{MANIFEST}: a wasm raw listener needs declared internals"
                     ));
@@ -447,13 +447,7 @@ impl Manifest {
                 if !plain_path(&module.file) {
                     return Err(format!("{MANIFEST}: module file must be a plain path"));
                 }
-                let name_ok = !module.name.is_empty()
-                    && module
-                        .name
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                    && !module.name.as_bytes()[0].is_ascii_digit();
-                if !name_ok {
+                if !rust_ident(&module.name) {
                     return Err(format!("{MANIFEST}: module name must be an identifier"));
                 }
                 if !plain_path(&module.source) || !source_file(&module.source) {
@@ -1440,6 +1434,43 @@ capabilities = ["registries"]
     }
 
     #[test]
+    fn wasm_non_raw_declarations_fail_schema_even_with_unified_injects() {
+        use sha2::{Digest, Sha512};
+        use std::io::Write;
+        let module = b"\0asm\x01\0\0\0";
+        let base = format!(
+            "{EXAMPLE}[wasm]\nsha512='{:x}'\ntoolchain='1.99.1'\n",
+            Sha512::digest(module)
+        );
+        let foreign = "[[native.injection]]\nid='non_raw'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/count.rs'\n";
+        let missing_raw = foreign.replace("helper='src/count.rs'\n", "");
+        assert!(
+            Manifest::parse(&format!("{base}{missing_raw}"))
+                .unwrap_err()
+                .contains("missing field `raw`")
+        );
+        for unified in [
+            "",
+            "[[inject]]\nid='new'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n",
+        ] {
+            assert!(Manifest::parse(&format!("{base}{unified}")).is_ok());
+            // Build an input archive directly: the public writer rightly refuses its manifest.
+            let text = format!("{base}{foreign}{unified}");
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            for (name, bytes) in [(MANIFEST, text.as_bytes()), (WASM, module.as_slice())] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(bytes).unwrap();
+            }
+            let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
+            let error = Package::read_zip(&mut archive)
+                .err()
+                .expect("non-raw wasm declaration refused");
+            assert!(error.contains("unknown field"), "{error}");
+        }
+    }
+
+    #[test]
     fn a_wasm_raw_listener_uses_the_native_internal_declaration_without_native_code() {
         let wasm = format!(
             "{}\n[wasm]\nsha512 = '{}'\ntoolchain = '1.99.1'\n",
@@ -1452,10 +1483,7 @@ capabilities = ["registries"]
         assert!(parsed.native.is_none());
         let declarations = parsed.wasm.unwrap();
         assert_eq!(declarations.internals()[0].hash, "world-hash");
-        assert_eq!(
-            declarations.raw_injections()[0].raw.as_deref(),
-            Some("fell")
-        );
+        assert_eq!(declarations.raw_injections()[0].raw, "fell");
         for wrong in [
             "internals=[{path='',hash='h'}]",
             "internals=[{path='Game',hash=''}]",

@@ -82,8 +82,9 @@ back when it returns. Internals use the view below. Source mixins require a nati
 
 For internals that the typed API does not yet cover, add `horizon-mod-internals` (library name
 `mod_internals`) to the mod's Cargo dependencies. Declare each internal with
-`cargo horizon-mod internals add <path>` and use the legacy `raw = "<function>"` declaration
-for its injection until unified internals routing lands. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
+`cargo horizon-mod internals add <path>` and use `raw = "<function>"` for its internals declaration.
+Its raw-only schema accepts `id`, `target`, `kind` (`HEAD` or `RETURN`) and `raw`; API functions
+are declared only through `[[inject]]`. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
 `internals.json` and generates `mod_internals::view` for exactly those declarations and the
 types they reach. The generated code stays in Cargo's build directory. Opaque types and
 functions that cannot cross the sandbox are refused at build, naming the declaration.
