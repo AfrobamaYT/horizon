@@ -95,6 +95,12 @@ pub trait ItemsClientHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackend {
+    /// Side: both. ItemResource's effective use duration, including its Part.
+    #[access(WorldOnly)]
+    fn item_resource_use_duration(&self, stack: &ItemStack) -> Option<i32>;
+    /// Side: both. The effective vanilla bar, before client drawing hooks.
+    #[access(WorldOnly)]
+    fn item_resource_bar(&self, stack: &ItemStack) -> Option<ItemBar>;
     /// Side: server.
     /// How many slots of the block entity at `at` its side reaches (none: every slot), by its
     /// `WorldlyContainer` rules: a furnace's top reaches its input only. None where no block

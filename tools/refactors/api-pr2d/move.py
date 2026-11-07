@@ -1,16 +1,30 @@
 #!/usr/bin/env python3
-"""Lossless syn-span move of the two central Parts interfaces and implementations."""
+"""Lossless syn-span move of the two central Parts interfaces and implementations.
+
+Run this script as `move.py BASE_SHA` from a clean checkout of BASE_SHA.
+Build part-table-layout in the script's checkout first. Only the scripted API
+moves are applied; the generator, tests and guide are hand-written changes.
+"""
+import argparse
 import json
 import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_ROOT = Path(__file__).resolve().parents[3]
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('base', help='exact starting commit of the clean target checkout')
+args = parser.parse_args()
+ROOT = Path(subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip())
+head, base = subprocess.check_output(['git', 'rev-parse', 'HEAD', args.base], cwd=ROOT, text=True).splitlines()
+if head != base or subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=ROOT, text=True):
+    parser.error('run from a clean checkout of the specified base')
 DIRECTORY = ROOT / 'crates/horizon-mod-api/src/parts'
 path = DIRECTORY / 'mod.rs'
 source = path.read_text()
 lines = source.splitlines(keepends=True)
-layout = json.loads(subprocess.check_output([ROOT / 'target/debug/part-table-layout'], input=source, text=True))
+layout = json.loads(subprocess.check_output([SCRIPT_ROOT / 'target/debug/part-table-layout'], input=source, text=True))
+changed = {path}
 
 def kind(name):
     if 'block_entity' in name:
@@ -69,6 +83,7 @@ for (group, owner), methods in traits.items():
     trait = ''.join(s.title() for s in group.split('_')) + owner
     target = 'PartRegistrar' if owner == 'Registrar' else 'InstalledProviders'
     p = DIRECTORY / f'{group}.rs'
+    changed.add(p)
     header = f'/// {owner} operations for {group.replace("_", " ")}.\n'
     if owner == 'CapabilityProviders':
         header += '// hidden: per-kind lookup implementation, exposed for generated provider bindings\n#[doc(hidden)]\n'
@@ -79,8 +94,13 @@ for (group, owner), methods in traits.items():
 # become unused when the declaring methods move to this file.
 p = DIRECTORY / 'game_rules.rs'
 text = p.read_text()
-assert text.count('        use super::Registrar;\n') == 2
-p.write_text(text.replace('        use super::Registrar;\n', ''))
+for name in ('bool_rule_declarations_validate_slots_and_fail_atomically',
+             'category_registration_refuses_ignored_errors_and_installs_snapshot'):
+    header = f'    pub(crate) fn {name}() {{\n'
+    old = header + '        use super::Registrar;\n'
+    assert text.count(old) == 1, name
+    text = text.replace(old, header)
+p.write_text(text)
 
 # Documentation links must name the declaring trait; Rustdoc does not resolve
 # a supertrait's method as Union::method. Object method calls stay unchanged.
@@ -99,8 +119,12 @@ for file, replacements in {
     },
 }.items():
     p = ROOT / file
+    changed.add(p)
     text = p.read_text()
     for old, new in replacements.items():
         assert text.count(old) == 1, (file, old)
         text = text.replace(old, new)
     p.write_text(text)
+
+subprocess.run(['rustfmt', '--edition', '2024', '--config', 'skip_children=true',
+                *map(str, sorted(changed))], check=True)

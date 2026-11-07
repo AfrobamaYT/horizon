@@ -2851,7 +2851,8 @@ impl Game<'_> {
         let (x, y) = tooltip_position((x, y), (width, height), (w, h));
         (x, y, w, h)
     }
-    /// The box and its frame sprites.
+    /// The box around a tooltip's contents at `x`, `y`, `w` × `h`: solid fills, or the
+    /// background and frame sprites of the tooltip style a mod names.
     pub(super) fn tooltip_box(
         &self,
         batch: &mut HudBatch,
@@ -2863,7 +2864,22 @@ impl Game<'_> {
     ) {
         let (mut background, mut border_top, mut border_bottom) =
             (0xf0100010, 0x505000ff, 0x5028007f);
-        self.native_tooltip_color(stack, &mut background, &mut border_top, &mut border_bottom);
+        let mut texture = None;
+        self.native_render_tooltip_texture(
+            stack,
+            &mut texture,
+            &mut background,
+            &mut border_top,
+            &mut border_bottom,
+        );
+        if let Some(style) = &texture {
+            let [background, frame] =
+                horizon_client::ui::tooltip_style_sprites(style.namespace(), style.path());
+            let sprites = [background.as_str(), frame.as_str()];
+            if horizon_client::ui::tooltip_sprites(batch, &self.gui.atlas, sprites, [x, y, w, h]) {
+                return;
+            }
+        }
         let convert = |color: u32| {
             let [a, r, g, b] = color.to_be_bytes();
             rgba(r, g, b, a)

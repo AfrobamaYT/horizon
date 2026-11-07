@@ -1,4 +1,4 @@
-"""The Parts gate relaxes only name-resolved imports and their result-error enum cases."""
+"""The Parts gate relaxes name-resolved declarations, never enum case order."""
 import contextlib
 import importlib.util
 import io
@@ -31,13 +31,16 @@ interface hooks {
 class PartsGateTests(unittest.TestCase):
     def compare(self, other):
         with contextlib.redirect_stdout(io.StringIO()):
-            return gate.compare_api_wit(WIT, other)
+            return gate.compare_wit(WIT, other)
 
-    def test_registrar_methods_and_result_cases_are_name_resolved(self):
+    def test_registrar_methods_are_name_resolved(self):
         self.assertTrue(self.compare(WIT.replace(
             '  first: func() -> result<_, registration-error>;\n  second: func(id: u32);',
             '  second: func(id: u32);\n  first: func() -> result<_, registration-error>;'
-        ).replace('invalid, duplicate', 'duplicate, invalid')))
+        )))
+
+    def test_result_error_cases_remain_byte_ordered(self):
+        self.assertFalse(self.compare(WIT.replace('invalid, duplicate', 'duplicate, invalid')))
 
     def test_case_addition_removal_or_duplication_is_not_a_move(self):
         for cases in ('invalid, other', 'invalid', 'invalid, duplicate, invalid'):

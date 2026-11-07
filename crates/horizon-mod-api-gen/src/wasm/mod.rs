@@ -48,6 +48,8 @@ pub(super) const IMPORTS: &[&str] = &[
     "ServerReloadListeners",
     "ClientReloadListeners",
     "PackFinders",
+    "BlockTintSources",
+    "BlockAndTintGetter",
     "ServerReloadResources",
     "CriterionContext",
 ];
@@ -112,6 +114,7 @@ const EXPORTS: &[&str] = &[
     "MenuPart",
     "ServerReloadListener",
     "ClientReloadListener",
+    "BlockTintSource",
     "PlaceProvider",
     "TooltipAppender",
     "CriterionTest",
@@ -141,9 +144,10 @@ const LOAD_CONTEXTS: &[&str] = &[
     "ClientReloadContext",
 ];
 
-/// The traits the game calls on its worldgen worker threads: a mod's structure types and
-/// their pieces, which keep no mutable state and get no `Host`.
-const WORLDGEN: &[&str] = &["StructureType", "StructurePiece"];
+/// The traits the game calls on its worker threads: a mod's structure types and their pieces on
+/// the worldgen workers, its block tint sources on the meshing workers. They keep no mutable
+/// state and get no `Host`.
+const WORKERS: &[&str] = &["StructureType", "StructurePiece", "BlockTintSource"];
 
 /// Predicates that may synchronously borrow the store lent by their triggering import.
 pub(super) const CALLBACKS: &[&str] = &["CriterionTest"];
@@ -153,8 +157,8 @@ pub(super) fn call_class(types: &ty::Types<'_>, method: &Method) -> &'static str
     if CALLBACKS.contains(&method.owner) {
         return "super::Call::Callback";
     }
-    if WORLDGEN.contains(&method.owner) {
-        "super::Call::Worldgen"
+    if WORKERS.contains(&method.owner) {
+        "super::Call::Worker"
     } else if loads(types, method) {
         "super::Call::Load"
     } else {

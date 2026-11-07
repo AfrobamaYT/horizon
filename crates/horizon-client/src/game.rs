@@ -3044,7 +3044,7 @@ struct Game<'a> {
     /// `Cushion` decoration entities (game/entities/cushions.rs).
     cushions: horizon_client::join_seq::JoinList<horizon_client::entities::Cushion>,
     /// Entities of types Horizon does not simulate.
-    others: Vec<commands::OtherEntity>,
+    others: horizon_client::join_seq::ResidentList<commands::OtherEntity>,
     armor_stand_assets: armor_stands::ArmorStandAssets,
     /// `WaypointStyleManager`.
     waypoint_styles: horizon_client::locator_bar::WaypointStyles,
@@ -4237,6 +4237,7 @@ impl Game<'_> {
                 world_biomes!(self),
                 self.streaming.biome_zoom,
                 self.streaming.biome_blend,
+                self.streaming.nether_shading,
             )
             .unwrap_or(0xFFFFFF);
         Some((sprite, tint))
@@ -7802,17 +7803,17 @@ impl Game<'_> {
         let Some(stack) = self.held().cloned() else {
             return false;
         };
-        if info.consumable.is_none()
-            || (info.food.is_some()
-                && (self.player.is_none() || !self.can_eat(&stack, info.can_always_eat)))
+        let Some(consumable) = stack.consumable(Some(info)) else {
+            return false;
+        };
+        if info.food.is_some()
+            && (self.player.is_none() || !self.can_eat(&stack, info.can_always_eat))
         {
             return false;
         }
         // as Consumable.startConsuming does, no time is eaten at once, without a use
         // (the server's eating reaches a client through the inventory).
-        if let Some(consumable) = info.consumable.as_ref()
-            && item_use::consumes_at_once(consumable.ticks())
-        {
+        if item_use::consumes_at_once(consumable.ticks()) {
             if self.remote.is_none() {
                 // the cooldown of ItemStack.use's applyAfterUseComponentSideEffects.
                 self.apply_use_cooldown(&stack);
@@ -8067,7 +8068,7 @@ impl Game<'_> {
             self.tick_mod_use(slot, ticks, &stack);
             return;
         }
-        let Some(consumable) = info.consumable.as_ref() else {
+        let Some(consumable) = stack.consumable(Some(&info)) else {
             self.using = None;
             return;
         };
@@ -9462,7 +9463,7 @@ impl Game<'_> {
         let info = self.items().get(&stack.item);
         // ItemStack.isBarVisible: isDamaged, which an unbreakable stack never is.
         let max_damage = if horizon_client::stations::is_damageable(self.items(), stack) {
-            info.map_or(0, |info| info.max_damage as i32)
+            stack.max_damage(info)
         } else {
             0
         };
@@ -9470,9 +9471,12 @@ impl Game<'_> {
             horizon_client::cooldowns::group(stack, info.and_then(|i| i.use_cooldown.as_ref()));
         let partial = self.clock.fraction() as f32;
         // BundleItem overrides the bar with its fullness.
-        let mut bar = horizon_client::bundle::Contents::of(self.items(), stack)
-            .map(|c| c.bar())
-            .unwrap_or_else(|| hud_overlays::damage_bar(stack.damage as i32, max_damage));
+        let mut bar = if info.is_some_and(|item| item.bundle) {
+            horizon_client::bundle::Contents::of(self.items(), stack)
+                .and_then(|contents| contents.bar())
+        } else {
+            hud_overlays::damage_bar(stack.effective_damage(info), max_damage)
+        };
         // Client-only: a mod may replace or hide the bar vanilla just chose.
         self.native_item_bar(stack, &mut bar);
         let decorations = hud_overlays::ItemDecorations {
@@ -21431,7 +21435,7 @@ impl<'a> Game<'a> {
             glow_map_frame_model: prepared.glow_map_frame_model,
             armor_stands: Default::default(),
             cushions: Default::default(),
-            others: Vec::new(),
+            others: Default::default(),
             armor_stand_assets: prepared.armor_stand_assets,
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
@@ -24542,6 +24546,7 @@ pub fn run_with(
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::register_item_tint_sources(options.execution_role);
+    mods::register_block_tint_sources(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

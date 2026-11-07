@@ -5,9 +5,9 @@ Two comparisons between a base commit and this checkout, both built from scratch
 
 1. `mod-api.wit` byte for byte except the name-resolved sets affected by host regrouping:
    host/Registrar import function lines, whole type blocks, host/Registrar/types use-list items,
-   and the cases of Registrar result-error enums (not persisted values). The sets compare
-   exactly; every other byte (including hooks and the world) stays ordered. Hook IDs and dispatch
-   are additionally compared as byte-identical generated Rust.
+   with exact membership checks. Enum cases retain their order: Wasmtime component typechecking
+   requires the same case order. Every other byte (including hooks and the world) stays ordered.
+   Hook IDs and dispatch are additionally compared as byte-identical generated Rust.
 2. The host manifest (`host-manifest`): one line per host method with its owner trait, signature,
    receiver mutability, rustdoc and hidden flag. The base's generated host is read as it is; this
    checkout's is the generated unions plus the area files, with each area trait counted under the union
@@ -20,8 +20,6 @@ Each resolved BASE_COMMIT gets its own worktree and target folder under SCRATCH_
 import filecmp
 import json
 import os
-import re
-from collections import Counter
 import subprocess
 import sys
 from pathlib import Path
@@ -30,37 +28,6 @@ from wit_order import HOST_IMPORTS, compare_wit
 
 # Registrar is another name-resolved import interface. Hooks remain byte-ordered.
 HOST_IMPORTS.add('registrar')
-
-
-def registrar_results(text):
-    """Normalize only enum cases used as Registrar result errors, not stored values."""
-    registrar = re.search(r'^interface registrar \{\n(.*?)^\}\n', text, re.M | re.S)
-    errors = set(re.findall(r'-> result<[^;\n]+, ([\w%-]+)>;', registrar[1])) if registrar else set()
-    groups = {}
-
-    def types(match):
-        def enum(item):
-            if item['name'] not in errors:
-                return item[0]
-            cases = item['cases'].split(', ')
-            groups[item['name']] = cases
-            return item['head'] + ', '.join(sorted(cases)) + item['tail']
-        body = re.sub(r'(?P<head>^  enum (?P<name>[\w%-]+) \{ )(?P<cases>[^{}\n]+)(?P<tail> \}\n)', enum, match['body'], flags=re.M)
-        return match['head'] + body + match['tail']
-
-    normalized = re.sub(r'(?P<head>^interface types \{\n)(?P<body>.*?)(?P<tail>^\}\n)', types, text, flags=re.M | re.S)
-    return normalized, groups
-
-
-def compare_api_wit(old, new):
-    before, old_cases = registrar_results(old)
-    after, new_cases = registrar_results(new)
-    if {name: Counter(cases) for name, cases in old_cases.items()} != {name: Counter(cases) for name, cases in new_cases.items()}:
-        print('gate failed: Registrar result-enum case sets differ')
-        return False
-    moved = sum(a != b for name in old_cases for a, b in zip(old_cases[name], new_cases[name]))
-    print(f'Registrar result-enum case sets identical: {moved} case positions moved; enums {sorted(old_cases)}')
-    return compare_wit(before, after)
 
 
 def build(directory, target, tool=False):
@@ -100,7 +67,7 @@ def main():
     new_out = build(root, target, tool=True)
     tool = target / "debug/host-manifest"
     failed = False
-    if not compare_api_wit((old_out / "mod-api.wit").read_text(), (new_out / "mod-api.wit").read_text()):
+    if not compare_wit((old_out / "mod-api.wit").read_text(), (new_out / "mod-api.wit").read_text()):
         subprocess.run(["diff", str(old_out / "mod-api.wit"), str(new_out / "mod-api.wit")])
         failed = True
     for name in ("mod_api_generated.rs", "native_render_generated.rs"):
