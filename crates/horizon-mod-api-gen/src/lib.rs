@@ -523,18 +523,30 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     let dispatch::HookSources {
         traits,
         dispatch,
-        render_traits,
-        render_dispatch,
         part_traits,
         fills,
         fire,
         hook_ids,
         hook_constants,
         hook_count,
+        ..
+    } = dispatch::emit(
+        root,
+        catalog
+            .hooks
+            .iter()
+            .filter(|hook| !dispatch::is_render(hook)),
+        &methods,
+        &catalog.draw_contexts,
+    )?;
+    let dispatch::HookSources {
+        render_traits,
+        render_dispatch,
         render_hook_ids,
         render_hook_constants,
         render_hook_count,
-    } = dispatch::emit(root, &catalog.hooks, &methods, &catalog.draw_contexts)?;
+        ..
+    } = dispatch::render(root, &catalog)?;
     if catalog.hooks.is_empty() {
         return Err(catalog::CatalogError::NoHooks.into());
     }

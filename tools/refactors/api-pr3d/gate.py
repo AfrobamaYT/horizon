@@ -8,8 +8,19 @@ EVENTS = ("HandDrawnEvent", "RenderNeedsEvent", "WorldDrawnEvent")
 
 
 def records(source):
+    # This byte gate supports only the generator's contiguous, single-line attributes.
+    # Refuse other Rust layouts rather than silently dropping an attribute from the proof.
+    for start in re.finditer(r"#\s*\[", source):
+        attribute = re.match(r"#\[[^\n]*\][ \t]*\n", source[start.start():])
+        if attribute is None:
+            if re.match(r"#\[doc\(hidden\)\] (?:pub )?fn\b", source[start.start():]):
+                continue  # The old generator also annotates dispatch functions inline.
+            raise ValueError("unsupported attribute layout in raw record source")
+        following = source[start.start() + attribute.end():].lstrip()
+        if following.startswith(("//", "/*")):
+            raise ValueError("comment-separated attributes are unsupported")
     found = {}
-    for match in re.finditer(r"(?:#\[[^\n]*\]\n)*pub struct (\w+Event)([^{}]*)\{([^{}]*)\}", source):
+    for match in re.finditer(r"(?:#\[[^\n]*\][ \t]*\n[ \t\n]*)*pub struct (\w+Event)([^{}]*)\{([^{}]*)\}", source):
         name = match.group(1)
         if name in EVENTS:
             if name in found:
