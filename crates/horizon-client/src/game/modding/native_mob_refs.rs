@@ -1005,7 +1005,7 @@ mod tests {
 
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.mob(game.entity(15).unwrap()).unwrap();
             assert_eq!(dragon.requires_custom_persistence(game), None);
             assert!(!dragon.set_baby(game, true));
@@ -1265,7 +1265,7 @@ mod tests {
             game.armor_stands.push(ArmorStand::new(14, Vec3::ZERO, 0.0));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             assert!(
                 game.mob(game.entity(15).unwrap()).is_some(),
                 "the dragon is a Mob"
@@ -1507,7 +1507,7 @@ mod tests {
             game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let entity = game.entity(12).unwrap();
             let mob = game.mob(entity).unwrap();
             assert_eq!(game.mob_left_handed(mob), Some(false));

@@ -3116,7 +3116,7 @@ struct Game<'a> {
     maps: maps::Maps,
     /// The ender dragon fight (game/mobs/dragon.rs).
     fight: dragon::Fight,
-    dragon: Option<dragon::Dragon>,
+    dragon: horizon_client::join_seq::ResidentSlot<dragon::Dragon>,
     crystals: horizon_client::join_seq::JoinList<dragon::Crystal>,
     dragon_fireballs: Vec<dragon::DragonFireball>,
     breath_clouds: horizon_client::join_seq::ResidentList<dragon::Breath>,
@@ -14240,7 +14240,7 @@ impl Game<'_> {
         self.item_frames.clear();
         self.paintings.clear();
         self.others.clear();
-        self.dragon = None;
+        self.dragon.discard();
         self.crystals.clear();
         self.dragon_fireballs.clear();
         self.breath_clouds.clear();
@@ -21579,7 +21579,7 @@ impl<'a> Game<'a> {
             bolts: Vec::new(),
             maps: maps::Maps::default(),
             fight: dragon::Fight::default(),
-            dragon: None,
+            dragon: Default::default(),
             crystals: Default::default(),
             dragon_fireballs: Vec::new(),
             breath_clouds: Default::default(),
