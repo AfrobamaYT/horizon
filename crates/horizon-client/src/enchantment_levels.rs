@@ -40,7 +40,7 @@ pub fn get_enchantment_level(
         }
     }
     let mut enchantments = mod_api::__private::game::item_enchantments(entries);
-    mod_api::enchantments::native_get_enchantment_level(stack, target.as_ref(), &mut enchantments);
+    crate::native_stack_hooks::enchantments(stack, target.as_ref(), &mut enchantments);
     let (mut entries, changed) = mod_api::__private::game::item_enchantments_entries(enchantments);
     let levels = changed.then(|| {
         kept.extend(entries.iter().map(|(id, level)| (text(own, id), *level)));

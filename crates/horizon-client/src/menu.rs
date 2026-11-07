@@ -17,10 +17,11 @@ use crate::{
 #[cfg(test)]
 use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs};
 use horizon_world::native_load_context::{LoopContext, LoopSide};
-use mod_api::__private::game::IngredientTest;
-pub use mod_api::menu::{
+pub use mod_api::menu::{LogicalSide, MenuButtonContext};
+mod models;
+pub use models::{
     AnvilCraft, AnvilUpdate, AnvilVanilla, CarriedAccess, GrindstonePlace, GrindstoneTake,
-    LogicalSide, MenuButtonContext, SlotView, StackedOnOther,
+    SlotView, StackedOnOther,
 };
 use std::sync::Arc;
 
@@ -313,6 +314,10 @@ struct MenuSlotView<'a, 'e> {
 }
 
 impl SlotView for MenuSlotView<'_, '_> {
+    fn items(&self) -> &crate::items::Items {
+        self.env.items
+    }
+
     fn item(&self) -> Option<ItemStack> {
         self.menu.slot(self.slot).cloned()
     }
