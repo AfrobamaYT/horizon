@@ -3294,6 +3294,14 @@ struct Game<'a> {
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
     remote: Option<remote::Remote>,
+    /// Active packet replay session (game/studio.rs).
+    pub(super) studio_replay: Option<horizon_client::studio::ReplayDriver>,
+    /// Camera perspective to restore after leaving replay playback.
+    studio_replay_previous_camera_type: Option<horizon_client::camera::CameraType>,
+    /// Replay opened from the title screen owns the synthetic remote session.
+    studio_replay_standalone: bool,
+    last_replay_tick: Option<Instant>,
+    pub(super) studio_virtual_tick_ms: f32,
     /// This world is open to the network (game/network/lan/mod.rs).
     lan: Option<lan::LanHost>,
     /// Single player's server thread, which `remote` is connected to.
@@ -3531,11 +3539,18 @@ struct Game<'a> {
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
 }
+/// The open world's dimensions past vanilla's three. One per process, as a window
+/// and its server thread name the same dimensions.
+static EXTRA_DIMS: std::sync::RwLock<Vec<mod_api::DimensionKey>> =
+    std::sync::RwLock::new(Vec::new());
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Dim {
     Overworld,
     Nether,
     End,
+    /// A dimension past vanilla's three, from a data pack or a mod.
+    Extra(mod_api::DimensionKey),
 }
 impl Dim {
     /// The level as block behaviour and the mods name it.
@@ -3544,6 +3559,7 @@ impl Dim {
             Self::Overworld => LevelDimension::Overworld,
             Self::Nether => LevelDimension::Nether,
             Self::End => LevelDimension::End,
+            Self::Extra(_) => LevelDimension::Overworld,
         }
     }
     fn id(self) -> &'static str {
@@ -3551,14 +3567,47 @@ impl Dim {
             Self::Overworld => "minecraft:overworld",
             Self::Nether => "minecraft:the_nether",
             Self::End => "minecraft:the_end",
+            Self::Extra(key) => {
+                mod_api::__private::dimension_id(key).expect("the game's table made the key")
+            }
         }
     }
     fn from_id(id: &str) -> Self {
         match id {
             "minecraft:the_nether" => Self::Nether,
             "minecraft:the_end" => Self::End,
-            _ => Self::Overworld,
+            _ => Self::extra(id).unwrap_or(Self::Overworld),
         }
+    }
+    /// The open world's dimension `id` past vanilla's three.
+    fn extra(id: &str) -> Option<Self> {
+        let extra = EXTRA_DIMS.read().unwrap();
+        let key = extra
+            .iter()
+            .find(|key| mod_api::__private::dimension_id(**key) == Some(id))?;
+        Some(Self::Extra(*key))
+    }
+    fn is_vanilla(id: &str) -> bool {
+        matches!(
+            id,
+            "minecraft:overworld" | "minecraft:the_nether" | "minecraft:the_end"
+        )
+    }
+    /// Whether the open world has the dimension `id`.
+    fn exists(id: &str) -> bool {
+        Self::is_vanilla(id) || Self::extra(id).is_some()
+    }
+    /// The open world's dimensions, in the order its server ticks them.
+    fn all() -> Vec<Self> {
+        let extra = EXTRA_DIMS.read().unwrap();
+        [Self::Overworld, Self::Nether, Self::End]
+            .into_iter()
+            .chain(extra.iter().copied().map(Self::Extra))
+            .collect()
+    }
+    /// The dimensions past vanilla's three of the world being opened.
+    fn set_extra<'a>(ids: impl Iterator<Item = &'a str>) {
+        *EXTRA_DIMS.write().unwrap() = ids.map(mod_api::__private::dimension_key).collect();
     }
     /// The dimension as mods' level handles name it.
     fn key(self) -> mod_api::DimensionKey {
@@ -3566,6 +3615,7 @@ impl Dim {
             Self::Overworld => mod_api::DimensionKey::OVERWORLD,
             Self::Nether => mod_api::DimensionKey::NETHER,
             Self::End => mod_api::DimensionKey::END,
+            Self::Extra(key) => key,
         }
     }
     /// The level's shape in a world of vanilla's dimension types.
@@ -3575,6 +3625,7 @@ impl Dim {
             Self::Overworld => LevelShape::OVERWORLD,
             Self::Nether => LevelShape::NETHER,
             Self::End => LevelShape::END,
+            Self::Extra(_) => LevelShape::OVERWORLD,
         }
     }
 }
@@ -9694,7 +9745,7 @@ impl Game<'_> {
             self.native_render_gui_pre(&mut gui_canceled);
         }
         // RenderGuiEvent.Pre: a mod's cancel hides the HUD as F1 does.
-        let show_hud = !self.ui.hide_gui && !gui_canceled;
+        let show_hud = !self.ui.hide_gui && !gui_canceled && self.studio_replay.is_none();
         if show_hud {
             self.draw_spyglass(&mut batch);
             // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
@@ -9925,14 +9976,13 @@ impl Game<'_> {
             batch.text(atlas, text, (w - tw) / 2.0, h - 59.0, u32::MAX, true);
         }
         // The chat screen draws the focused chat itself; F1 hides the rest.
-        if show_hud && self.screen != Screen::Chat {
+        if self.screen == Screen::Chat {
+            self.draw_chat(&mut batch);
+        } else if show_hud {
             self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
             self.gui_layer("minecraft:tab_list", &mut batch, |g, batch| {
                 g.draw_tab_list(batch);
             });
-        } else {
-            self.draw_chat(&mut batch);
-            self.draw_tab_list(&mut batch);
         }
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
@@ -12114,6 +12164,7 @@ impl Game<'_> {
         &mut self,
         camera: glam::DVec3,
         alpha: f64,
+        billboard_frustum: Option<horizon_client::gfx::Frustum>,
         mut out: Vec<Vertex>,
     ) -> (
         Vec<Vertex>,
@@ -12144,13 +12195,11 @@ impl Game<'_> {
         } else {
             self.yaw
         };
-        // Packs may move vertices or draw from another camera; TAA jitters the
-        // projection beyond this unjittered frustum. Keep their original geometry path.
-        let fire_view = self.view_frustum.as_ref().filter(|_| {
-            self.pack_ids.is_none()
-                && self.native_shaders.picked.is_empty()
-                && !self.settings.horizon.taa
-        });
+        // Packs may move vertices or draw from another camera. The guarded
+        // billboard frustum covers TAA's jitter without changing model culling.
+        let fire_view = billboard_frustum
+            .as_ref()
+            .filter(|_| self.pack_ids.is_none() && self.native_shaders.picked.is_empty());
         let fire_visible = |position, width, height| {
             fire_view.is_none_or(|view| {
                 horizon_client::fire_render::in_view(view, camera, position, width, height)
@@ -12285,7 +12334,12 @@ impl Game<'_> {
         // In first person only a shader pack's shadow pass draws the player.
         self.mark_player(out.len(), !self.own_body_in_view());
         let player_start = out.len();
-        self.player_model_geometry(camera, self.clock.camera_fraction(), &mut out);
+        let player_alpha = if self.studio_replay.is_some() {
+            (self.studio_virtual_tick_ms as f64 / 50.0).clamp(0.0, 1.0)
+        } else {
+            self.clock.camera_fraction()
+        };
+        self.player_model_geometry(camera, player_alpha, &mut out);
         // A native pack has no per-entity draws to hide it with: its shadow pass alone gets
         // the first-person model.
         if self.pack_ids.is_none() && !self.own_body_in_view() {
@@ -12320,7 +12374,7 @@ impl Game<'_> {
             let ambient = match self.dim {
                 Dim::Nether => 0.1,
                 Dim::End => 0.25,
-                Dim::Overworld => 0.0,
+                Dim::Overworld | Dim::Extra(_) => 0.0,
             };
             let darken = self.sky_darken();
             let a = alpha;
@@ -14152,6 +14206,13 @@ impl Game<'_> {
         Ok(())
     }
     fn close_world(&mut self) -> Result<()> {
+        // Pause-menu and death-screen exits use the normal world-close action.
+        // A standalone replay owns a synthetic remote session, so it must go
+        // through replay cleanup instead of being treated like a server.
+        if self.studio_replay.is_some() {
+            self.close_studio_replay();
+            return Ok(());
+        }
         // A recording cannot cross into another world, and a replay feeding the
         // title screen is nonsense.
         self.repro_world_closed();
@@ -15794,6 +15855,7 @@ impl Game<'_> {
             || self.ui.hide_gui
             || self.sleeping.is_some()
             || !self.camera_type.is_first_person()
+            || self.studio_replay.is_some()
             || self
                 .player
                 .as_ref()
@@ -17952,6 +18014,13 @@ impl Game<'_> {
             .renderer
             .as_ref()
             .map(|r| r.camera_frustum(fov_degrees, yaw, pitch, bob * spin, depth_far));
+        let billboard_frustum = if self.settings.horizon.taa {
+            self.renderer.as_ref().map(|r| {
+                r.camera_frustum_with_jitter(fov_degrees, yaw, pitch, bob * spin, depth_far)
+            })
+        } else {
+            self.view_frustum
+        };
         // Keep the buffer local while builders need mutable access to the game.
         let mut entities = std::mem::take(&mut self.entity_vertices);
         entities.clear();
@@ -17972,7 +18041,7 @@ impl Game<'_> {
         if !title {
             let (built, static_sections, visible_static_sections, static_stats) =
                 spans::time("entity_geometry", || {
-                    self.entity_geometry(camera, alpha, entities)
+                    self.entity_geometry(camera, alpha, billboard_frustum, entities)
                 });
             entities = built;
             static_block_entities = static_sections;
@@ -18146,6 +18215,7 @@ impl Game<'_> {
                 .sprites
                 .get("environment/end_sky")
                 .map(|r| [r.u0, r.v0, r.u1, r.v1]),
+            boss_world_fog: self.boss_overlay.should_create_world_fog(),
             environment_fog: (self.dim == Dim::Nether).then_some((sky.fog_start, sky.fog_end)),
             cave_culling,
             water_fog,
@@ -18473,6 +18543,10 @@ impl Game<'_> {
             KeyCode::Escape => match self.screen {
                 Screen::Options => self.options_key(KeyCode::Escape, None)?,
                 Screen::Playing => {
+                    if self.studio_replay.is_some() && self.captured {
+                        self.capture(false);
+                        return Ok(());
+                    }
                     self.pause_focus = None;
                     self.set_screen(Screen::Paused);
                     self.pause_menu = true;
@@ -18583,7 +18657,9 @@ impl Game<'_> {
             // key.toggleGui is a KeyMapping: it clicks only with no screen open.
             KeyCode::F1 if self.screen == Screen::Playing => self.toggle_hide_gui(),
             KeyCode::F11 => self.toggle_fullscreen(),
-            KeyCode::F5 if self.screen == Screen::Playing => self.cycle_camera(),
+            KeyCode::F5 if self.screen == Screen::Playing && self.studio_replay.is_none() => {
+                self.cycle_camera()
+            }
             KeyCode::KeyE
                 if self.screen == Screen::Creative && self.creative_screen.tab().search => {}
             KeyCode::KeyE => match self.screen {
@@ -19047,6 +19123,9 @@ impl Game<'_> {
     fn update_world(&mut self) {
         if let Err(e) = horizon_client::spans::time("poll_remote", || self.poll_remote()) {
             log::warn!("Horizon: {e}");
+        }
+        if let Err(e) = self.advance_studio_replay() {
+            log::warn!("Horizon Studio replay: {e}");
         }
         // The renderer laid translucent quads out again (a shader pack's flat terrain came
         // or went) and dropped every section and far tile: meshed again, as for a new one.
@@ -21696,6 +21775,11 @@ impl<'a> Game<'a> {
             entity_attachments: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,
+            studio_replay: None,
+            studio_replay_previous_camera_type: None,
+            studio_replay_standalone: false,
+            last_replay_tick: None,
+            studio_virtual_tick_ms: 0.0,
             lan: None,
             integrated: None,
             level_shapes: Default::default(),
@@ -21960,6 +22044,7 @@ enum PendingWorldEntry {
         /// A transfer's carried-over server cookies (`TransferState`).
         cookies: Option<horizon_client::net::Cookies>,
     },
+    StudioReplay(std::path::PathBuf),
 }
 
 struct WorldRestLoader {
@@ -22042,6 +22127,12 @@ impl Game<'_> {
                 lan,
             }) => {
                 self.connect_server_with_options(&address, &name, cookies, lan)?;
+            }
+            Some(PendingWorldEntry::StudioReplay(path)) => {
+                let path_str = path.to_string_lossy().to_string();
+                if let Err(e) = self.open_studio_replay(&path_str) {
+                    log::warn!("Horizon Studio: could not open {path_str}: {e}");
+                }
             }
             None => {}
         }
@@ -23722,6 +23813,7 @@ fn loading_frame(hud: &HudBatch) -> Frame<'_> {
         skybox: false,
         end_sky: false,
         end_sky_sprite: None,
+        boss_world_fog: false,
         environment_fog: None,
         water_fog: [0.0; 3],
         fog: None,
@@ -24661,6 +24753,22 @@ pub fn run_with(
     .is_err()
     {
         log::warn!("Mod structure types already installed; keeping the first table");
+    }
+    // The levels they registered, below the data packs of every world opened.
+    if horizon_world::worldgen::overrides::install_mod_dimensions(
+        mod_api::__private::installed_dimensions(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod dimensions already installed; keeping the first table");
+    }
+    // Their chunk generators, which those levels' and the packs' stems name.
+    if horizon_world::worldgen::mod_generators::install_mod_chunk_generators(
+        mod_api::__private::installed_chunk_generators(),
+    )
+    .is_err()
+    {
+        log::warn!("Mod chunk generators already installed; keeping the first table");
     }
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models(options.execution_role);
