@@ -158,17 +158,21 @@ fn start_with_clock(clock: fn() -> u64) -> bool {
     ENABLED.store(true, SeqCst);
     true
 }
-static SUMMARY: Mutex<String> = Mutex::new(String::new());
-/// Stop outside any profiled guard, retaining the text report for the command.
+static REPORT: Mutex<Option<Report>> = Mutex::new(None);
+/// Stop outside any profiled guard, retaining the report privately for the command.
 pub fn stop() {
-    let mut text = SUMMARY.lock().unwrap_or_else(|e| e.into_inner());
+    let mut report = REPORT.lock().unwrap_or_else(|e| e.into_inner());
     if is_enabled() {
-        *text = stop_report().summary();
+        *report = Some(stop_report());
     }
 }
 /// The last stopped session's text report, or an empty string before the first stop.
 pub fn summary() -> String {
-    SUMMARY.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    REPORT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map_or_else(String::new, Report::summary)
 }
 /// Disable, drain active calls, and merge every thread. Call outside any profiled guard.
 pub(crate) fn stop_report() -> Report {
