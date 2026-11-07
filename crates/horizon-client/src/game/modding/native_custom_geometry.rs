@@ -299,6 +299,15 @@ mod tests {
         (worst, first_colour(&cpu), first_colour(&gpu))
     }
 
+    fn grass(game: &Game<'_>) -> ModelRef {
+        let model = game
+            .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
+            .unwrap();
+        let generation = mod_api::__private::game::Fields::fields(&model).generation;
+        horizon_client::gfx::set_test_prepared_generation(Some(generation));
+        model
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn draw_model_instances_matches_cpu_pixels() {
@@ -306,11 +315,7 @@ mod tests {
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
-            let model = game
-                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
-                .unwrap();
-            let generation = mod_api::__private::game::Fields::fields(&model).generation;
-            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(8);
             let local = Mat4::from_scale_rotation_translation(
                 Vec3::new(0.85, 1.15, 0.7),
@@ -326,6 +331,13 @@ mod tests {
                 LightCoords::new(3, 15).unwrap(),
                 Overlay::NONE,
             );
+            let other = ModelInstance::new(
+                origin.to_array(),
+                rows(local),
+                0xFFFF_FFFF,
+                LightCoords::new(15, 3).unwrap(),
+                Overlay::NONE,
+            );
             let hurt = ModelInstance::new(
                 origin.to_array(),
                 rows(local),
@@ -336,12 +348,14 @@ mod tests {
             let mut draw = WorldGeometry::default();
             draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
             context(game, &mut draw)
-                .draw_model_instances(model, &[lit, hurt])
+                .draw_model_instances(model, &[lit, other, hurt])
                 .unwrap();
             let mut entities = Vec::new();
             game.commit_model_instances(&mut draw, camera, &mut entities);
             let staged = game.prepared_model_draws.borrow();
-            assert_eq!(staged.len(), 1, "the lit copy was not instanced");
+            assert_eq!(staged.len(), 2, "the lit copies were not instanced");
+            assert_eq!(staged[0].instance.light, 0x30F0);
+            assert_eq!(staged[1].instance.light, 0xF030);
             assert_eq!(
                 staged[0].cpu_vertices, 0,
                 "cpu overlay vertices must follow the cut"
@@ -399,10 +413,7 @@ mod tests {
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
-            let model = game
-                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
-                .unwrap();
-            let generation = mod_api::__private::game::Fields::fields(&model).generation;
+            let model = grass(game);
             let local = Mat4::from_scale(Vec3::splat(1.0));
             let origin = DVec3::new(8_000_000.5, 70.0, -4_000_000.25);
             let camera = DVec3::new(8_000_000.0, 70.2, -4_000_000.0);
@@ -418,7 +429,6 @@ mod tests {
                 Quat::IDENTITY,
                 Vec3::new(-0.55, -0.85, 0.5),
             );
-            horizon_client::gfx::set_test_prepared_generation(Some(generation));
             horizon_client::gfx::cap_prepared_instance_slots(8);
             let mut draw = WorldGeometry::default();
             draw.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
@@ -463,11 +473,7 @@ mod tests {
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
-            let model = game
-                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
-                .unwrap();
-            let generation = mod_api::__private::game::Fields::fields(&model).generation;
-            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(1);
             let camera = DVec3::new(8_000_000.0, 70.0, -4_000_000.0);
             let copy = |x: f64| {
@@ -530,11 +536,7 @@ mod tests {
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
-            let model = game
-                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
-                .unwrap();
-            let generation = mod_api::__private::game::Fields::fields(&model).generation;
-            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(8);
             game.view_frustum = Some(horizon_client::gfx::test_frustum([
                 glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
@@ -607,11 +609,7 @@ mod tests {
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
-            let model = game
-                .native_model(&Identifier::parse("minecraft:block/grass_block").unwrap())
-                .unwrap();
-            let generation = mod_api::__private::game::Fields::fields(&model).generation;
-            horizon_client::gfx::set_test_prepared_generation(Some(generation));
+            let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(8);
             *FILL_MODEL.lock().unwrap() = Some(model);
             mod_api::__private::install(vec![ModEntry::new("batch", Box::new(FillBatch))].into());
