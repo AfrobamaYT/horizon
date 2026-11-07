@@ -7,7 +7,9 @@ use crate::*;
 /// whether what it kept of it (`BlockEntityDraw::keep`) is still right
 /// without comparing the whole entity, and no write can skip that. Its type
 /// identity is fixed at construction and is not part of the mutable fields.
+/// Returned guest snapshots apply only changed mutable fields through the same revision path.
 // exhaustive: its fields are private, so mods cannot build or destructure it
+#[horizon_mod_api_macros::wasm(via = ModBlockEntitySnapshot, writeback = apply_snapshot)]
 pub struct ModBlockEntity {
     pub(crate) id: String,
     pub(crate) fields: ModBlockEntityFields,
@@ -33,6 +35,38 @@ pub struct ModBlockEntityFields {
 pub struct ModRevision {
     pub(crate) born: u64,
     pub(crate) changes: u64,
+}
+/// An entity's transport form; identity and revision are read-only on writeback.
+pub(crate) struct ModBlockEntitySnapshot {
+    pub(crate) id: String,
+    pub(crate) fields: ModBlockEntityFields,
+    pub(crate) revision: ModRevision,
+}
+impl From<&ModBlockEntity> for ModBlockEntitySnapshot {
+    fn from(entity: &ModBlockEntity) -> Self {
+        Self {
+            id: entity.id.clone(),
+            fields: entity.fields.clone(),
+            revision: entity.revision,
+        }
+    }
+}
+impl From<ModBlockEntitySnapshot> for ModBlockEntity {
+    fn from(snapshot: ModBlockEntitySnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            fields: snapshot.fields,
+            revision: snapshot.revision,
+        }
+    }
+}
+impl ModBlockEntity {
+    /// Apply returned mutable state through the native revision path, never its identity.
+    pub(crate) fn apply_snapshot(&mut self, snapshot: ModBlockEntitySnapshot) {
+        if self.fields != snapshot.fields {
+            *std::ops::DerefMut::deref_mut(self) = snapshot.fields;
+        }
+    }
 }
 
 impl ModRevision {
@@ -230,6 +264,26 @@ mod tests {
         assert_ne!(other_kind, machine);
         let fresh = ModBlockEntity::default();
         assert_ne!(fresh.revision(), ModBlockEntity::default().revision());
+    }
+
+    #[test]
+    fn returned_snapshot_changes_only_fields_and_keeps_native_revision_bookkeeping() {
+        let mut entity = ModBlockEntity::new("test:machine".into(), Default::default());
+        let revision = entity.revision();
+        let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+        snapshot.id = "forged:identity".into();
+        snapshot.revision = ModBlockEntity::default().revision();
+        entity.apply_snapshot(snapshot);
+        assert_eq!(entity.id(), "test:machine");
+        assert_eq!(entity.revision(), revision);
+        let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+        snapshot.fields.data = vec![17];
+        entity.apply_snapshot(snapshot);
+        assert_eq!(entity.data, [17]);
+        assert_eq!(entity.id(), "test:machine");
+        assert_ne!(entity.revision(), revision);
+        let restored = ModBlockEntity::from(ModBlockEntitySnapshot::from(&entity));
+        assert_eq!(restored.revision(), entity.revision());
     }
 
     #[test]

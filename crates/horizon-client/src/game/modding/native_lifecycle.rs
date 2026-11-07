@@ -199,6 +199,7 @@ impl Game<'_> {
     }
 
     pub(super) fn native_lifecycle_open_started(&mut self) {
+        self.entity_initialization = Default::default();
         if let Some(remote) = &mut self.remote {
             remote.attachments.clear();
         }
