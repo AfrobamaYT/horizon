@@ -8,7 +8,7 @@ use crate::{
 use std::sync::{Arc, Mutex};
 use {
     horizon_core::nbt::Tag,
-    horizon_world::attachments::{
+    horizon_mod_runtime::attachments::{
         AttachmentLifetime, AttachmentType, Attachments, HasAttachmentLifetime, Holder,
         index::AttachmentIndex,
     },

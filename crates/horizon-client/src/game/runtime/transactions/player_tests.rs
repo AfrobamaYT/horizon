@@ -1,6 +1,6 @@
 use super::super::native_guest_turn_tests::with_guests;
 use horizon_core::nbt::{Compound, Tag};
-use horizon_world::attachments::{
+use horizon_mod_runtime::attachments::{
     AttachmentCodec, AttachmentError, AttachmentType, Holder, index::AttachmentIndex,
 };
 use mod_api::{AttachmentAccess, AttachmentHolder, ServerHost};
