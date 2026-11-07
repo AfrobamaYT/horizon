@@ -28,6 +28,8 @@ block_state_facts	block_state_matches	block_states
 block_state_facts	block_state_replaceable	block_states
 block_state_facts	block_state_sound	block_states
 block_state_facts	block_states_of	block_states
+fluid_states	fluid_state_definition	block_states
+fluid_states	fluid_state_validate	block_states
 block_state_ids	block_item	block_states
 block_state_ids	block_state_default	block_states
 block_state_ids	block_state_id	block_states
@@ -721,3 +723,4 @@ local_sounds	sound_events	effects
 local_sounds	audio_devices	effects
 local_sounds	audio_device	effects
 chunk_refs	level_loaded_chunks	levels
+base	player_client_brand	players
