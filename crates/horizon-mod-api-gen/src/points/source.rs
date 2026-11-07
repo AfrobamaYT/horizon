@@ -319,6 +319,17 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     assert!(!point_shape::eligible(untouched[0].attrs, untouched[0].sig));
     let public = game_points(&root).unwrap();
     assert_eq!(before, serde_json::to_value(&public).unwrap());
+    let mut spaced = private.clone();
+    spaced[0].target = "horizon_client :: game :: nested :: Game :: hidden".into();
+    fs::write(
+        root.join(FILE),
+        toml::to_string(&Plan { points: spaced }).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        before,
+        serde_json::to_value(game_points(&root).unwrap()).unwrap()
+    );
     let parsed = syn::parse_file(&records(&public, &private)).unwrap();
     // Compile the actual enum and wire tables together, without unrelated API dispatch bodies.
     let ids = parsed
