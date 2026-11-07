@@ -2704,7 +2704,7 @@ impl Game<'_> {
                         out.extend(
                             added
                                 .into_iter()
-                                .map(|text| text.try_into_engine(&()).unwrap()),
+                                .map(|(text, color)| (text.try_into_engine(&()).unwrap(), color)),
                         );
                     }
                 },
@@ -2714,7 +2714,11 @@ impl Game<'_> {
             );
         }
         // ItemTooltipEvent, once the tooltip vanilla shows is complete.
-        if shown && let Ok(stack) = stack.try_into_api() {
+        if shown
+            && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
+            && let Ok(stack) = stack.try_into_api()
+        {
+            let mut api_lines = lines.try_into_api().unwrap();
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
@@ -2722,8 +2726,9 @@ impl Game<'_> {
                 display: &display,
                 advanced,
                 creative,
-                lines: &mut lines,
+                lines: &mut api_lines,
             });
+            lines = api_lines.try_into_engine(&()).unwrap();
         }
         lines
     }

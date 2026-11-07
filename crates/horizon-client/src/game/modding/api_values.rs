@@ -152,7 +152,22 @@ macro_rules! scalar_values {
         }
     )* };
 }
-scalar_values!(u32, i32, bool, ());
+scalar_values!(i32, bool, ());
+
+impl TryIntoApi for u32 {
+    type Api = Self;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self, Self::Error> {
+        Ok(*self)
+    }
+}
+impl<C: ?Sized> TryIntoEngine<C> for u32 {
+    type Engine = Self;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &C) -> Result<Self, Self::Error> {
+        Ok(*self)
+    }
+}
 
 impl TryIntoApi for String {
     type Api = Self;
