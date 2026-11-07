@@ -163,16 +163,11 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
 fn write_value(types: &Types<'_>, ty: &Ty, value: &str, wire: &str) -> String {
     match ty {
         Ty::Ref(inner, true) => write_value(types, inner, &format!("(*{value})"), wire),
-        Ty::Named(id) if types.defs[*id].writeback.is_some() => {
-            let def = &types.defs[*id];
-            let Kind::Via(form) = &def.kind else {
-                unreachable!("writeback requires via")
-            };
-            format!(
-                "{value}.{}({});",
-                def.writeback.as_ref().unwrap(),
-                lift(types, form, wire)
-            )
+        Ty::Named(id)
+            if let Kind::Via(form) = &types.defs[*id].kind
+                && let Some(method) = &types.defs[*id].writeback =>
+        {
+            format!("{value}.{method}({});", lift(types, form, wire))
         }
         ty if !borrows(types, ty) => format!("{value} = {};", lift(types, ty, wire)),
         Ty::Named(id) => match &types.defs[*id].kind {
