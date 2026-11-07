@@ -3,8 +3,10 @@
 mod facts;
 mod json;
 pub(crate) mod snapshot;
+mod state_range;
 pub use json::BlockStateJsonCodec;
 pub(crate) use json::java_integer;
+pub use state_range::BlockStateRange;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     hash::{DefaultHasher, Hash, Hasher},

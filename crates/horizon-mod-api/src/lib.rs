@@ -1245,11 +1245,11 @@ pub struct NativeScreen {
 /// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeStack {
-    /// The item id, such as `minecraft:stick`.
-    pub item: String,
+    /// The item identity, resolved once at load.
+    pub item: ItemKey,
     /// How many are in the stack.
     pub count: u32,
     /// The stack's data components, as the game's JSON form.
@@ -3765,41 +3765,6 @@ pub struct BlockSoundType {
     pub fall: std::sync::Arc<str>,
 }
 
-/// The states of one block (`StateDefinition.getPossibleStates`): consecutive ids, as the
-/// registry numbers a block's states.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the game builds it with `new`; mods read it
-pub struct BlockStateRange {
-    first: BlockStateId,
-    count: u32,
-}
-impl BlockStateRange {
-    /// `count` states from `first`.
-    pub const fn new(first: BlockStateId, count: u32) -> Self {
-        Self { first, count }
-    }
-    /// The first state's id.
-    pub const fn first(self) -> BlockStateId {
-        self.first
-    }
-    /// How many states the block has.
-    pub const fn len(self) -> u32 {
-        self.count
-    }
-    /// Never true: a block has at least one state.
-    pub const fn is_empty(self) -> bool {
-        self.count == 0
-    }
-    /// Whether `state` is one of them.
-    pub const fn contains(self, state: BlockStateId) -> bool {
-        state.0 >= self.first.0 && state.0 - self.first.0 < self.count
-    }
-    /// Each state, in id order.
-    pub fn iter(self) -> impl Iterator<Item = BlockStateId> {
-        (self.first.0..self.first.0 + self.count).map(BlockStateId)
-    }
-}
-
 /// What a fake player does in `PlayerRef::perform_action`: a player's own action, run through
 /// the game's path for it, as a client's packet is. Its answer is an [`ActionOutcome`], or an
 /// [`ActionRefused`] when none of it ran.
@@ -4958,8 +4923,9 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
-            player.action_bar(host, Text::literal(block.clone()));
-            if block == "minecraft:stone" {
+            let name = __private::block_key_id(block).unwrap().to_owned();
+            player.action_bar(host, Text::literal(name.clone()));
+            if name == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue

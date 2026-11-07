@@ -238,8 +238,10 @@ impl crate::prelude::LevelsBackend for FakeHost {
     fn level_in_place(&self, level: LevelRef) -> bool {
         level == self.level.level()
     }
-    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
-        self.level.block_at(level, pos).map(str::to_owned)
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<crate::BlockKey> {
+        self.level
+            .block_at(level, pos)
+            .and_then(crate::__private::block_key)
     }
 }
 impl crate::prelude::BlockEntitiesBackend for FakeHost {

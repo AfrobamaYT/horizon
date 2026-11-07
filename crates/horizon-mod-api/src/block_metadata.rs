@@ -3,6 +3,7 @@ use crate::{BlockKey, StateConstraint};
 
 /// Transport form for a process-local state. Mods use the BlockState facade, not this record.
 /// Receiving metadata and write boundaries validate the ordinal against the block definition.
+// hidden: generated native/wasm transport for the private-field BlockState facade.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -59,6 +60,7 @@ impl From<horizon_mod_runtime::block_definitions::StateError> for BlockStateErro
 /// Read-only metadata, lent by a host's block-states service or a tint worker.
 /// This is the low-level resource contract; mods call the BlockState facade instead.
 /// Native and generated WebAssembly forwards invoke the same immutable table implementation.
+// hidden: low-level shared resource contract; BlockState methods are the mod-facing operations.
 #[doc(hidden)]
 pub trait BlockMetadata {
     /// Borrow the canonical block name from this context's retained registry.
@@ -171,6 +173,18 @@ mod tests {
         assert_eq!(value.property(&metadata, "lit"), Ok(Some("false")));
         assert_eq!(changed.property(&metadata, "lit"), Ok(Some("true")));
         assert_eq!(changed.ordinal(), 1);
+        let states = crate::__private::block_state_range(block).unwrap();
+        assert_eq!(
+            states
+                .iter()
+                .map(|state| state.property(&metadata, "lit").unwrap().unwrap())
+                .collect::<Vec<_>>(),
+            ["false", "true"]
+        );
+        assert_eq!(
+            crate::__private::block_state_range(BlockKey(999)),
+            Err(BlockStateError::UnknownBlock)
+        );
         assert_eq!(
             changed.with(&metadata, "lit", "invalid"),
             Err(BlockStateError::InvalidValue(0))

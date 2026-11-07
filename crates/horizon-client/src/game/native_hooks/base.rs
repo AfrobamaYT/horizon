@@ -4636,7 +4636,7 @@ impl Game<'_> {
         self
     }
     /// Read a loaded, light-emitting block. No implicit chunk loading.
-    pub(in crate::game) fn lit_block_name(&self, pos: [i32; 3]) -> Option<&str> {
+    pub(in crate::game) fn lit_block_name(&self, pos: [i32; 3]) -> Option<mod_api::BlockKey> {
         self.world
             .chunks
             .contains_key(&(pos[0].div_euclid(16), pos[2].div_euclid(16)))
@@ -4646,7 +4646,7 @@ impl Game<'_> {
                     .get(self.world.block(pos[0], pos[1], pos[2]))
             })
             .filter(|f| f.emission > 0)
-            .map(|f| f.name.as_ref())
+            .and_then(|f| mod_api::__private::block_key(&f.name))
     }
     /// A small local vanilla particle; caller should rate-limit emission.
     pub(in crate::game) fn flame_particle(&mut self, at: [f64; 3], soul: bool) {
@@ -5170,7 +5170,12 @@ impl Game<'_> {
     /// (`minecraft:diamond`) as taking it from the creative inventory does
     /// (`ServerboundSetCreativeModeSlot`): the selected slot first, then the
     /// hotbar, then the inventory. The count is cut to one stack.
-    pub(in crate::game) fn give(&mut self, item: &str, count: u32) -> Result<(), String> {
+    pub(in crate::game) fn give(
+        &mut self,
+        item: mod_api::ItemKey,
+        count: u32,
+    ) -> Result<(), String> {
+        let item = mod_api::__private::item_key_id(item).ok_or("unknown item key")?;
         self.recipe_give(item, count)
     }
 }

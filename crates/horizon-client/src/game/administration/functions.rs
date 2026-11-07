@@ -1256,7 +1256,7 @@ mod tests {
                 let default = registry.default_state(id)?;
                 Some(mod_api::__private::ResolvedBlock {
                     default,
-                    states: mod_api::BlockStateRange::new(default, 1),
+                    states: horizon_world::registry::BlockStateRange::new(default, 1),
                     block: game.res.behaviours().block(default),
                 })
             })

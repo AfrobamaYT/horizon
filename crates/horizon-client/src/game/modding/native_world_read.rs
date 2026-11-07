@@ -196,8 +196,8 @@ impl Game<'_> {
     /// The bucket item that picks `fluid` up (`Fluid.getBucket`), `minecraft:water_bucket` for
     /// water and flowing water. None for `minecraft:empty`, whose bucket is air, and for a name
     /// no fluid has.
-    pub(super) fn fluid_bucket(&self, fluid: &str) -> Option<&'static str> {
-        horizon_world::level::fluid_bucket(fluid_kind(fluid)?)
+    pub(super) fn fluid_bucket(&self, fluid: &str) -> Option<mod_api::ItemKey> {
+        mod_api::__private::item_key(horizon_world::level::fluid_bucket(fluid_kind(fluid)?)?)
     }
 
     /// The sound event a bucket plays as it picks `fluid` up (`Fluid.getPickupSound`),
@@ -342,7 +342,7 @@ mod tests {
                 Some(ResolvedBlock {
                     block: resolve(name)?,
                     default: BlockStateId(0),
-                    states: mod_api::BlockStateRange::new(BlockStateId(0), 1),
+                    states: horizon_world::registry::BlockStateRange::new(BlockStateId(0), 1),
                 })
             })
             .unwrap();
@@ -806,10 +806,15 @@ mod tests {
             assert!(!host.fluid_is_same("nope:missing", "nope:missing"));
 
             assert_eq!(
-                host.fluid_bucket("minecraft:flowing_water"),
+                host.fluid_bucket("minecraft:flowing_water")
+                    .and_then(mod_api::__private::item_key_id),
                 Some("minecraft:water_bucket")
             );
-            assert_eq!(host.fluid_bucket("lava"), Some("minecraft:lava_bucket"));
+            assert_eq!(
+                host.fluid_bucket("lava")
+                    .and_then(mod_api::__private::item_key_id),
+                Some("minecraft:lava_bucket")
+            );
             assert_eq!(host.fluid_bucket("minecraft:empty"), None);
             assert_eq!(host.fluid_bucket("nope:missing"), None);
 

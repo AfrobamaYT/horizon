@@ -3548,7 +3548,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [0, 64, 0]).as_deref(),
+                game.level_block(level, [0, 64, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:water")
             );
             assert_eq!(
@@ -3721,7 +3722,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [2, 64, 2]).as_deref(),
+                game.level_block(level, [2, 64, 2])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:water")
             );
             place(game, [1, 64, 0], "minecraft:chest");
@@ -3749,7 +3751,8 @@ mod fake_action_tests {
                 "survival placement consumes the temporary stack"
             );
             assert_eq!(
-                game.level_block(level, [1, 65, 0]).as_deref(),
+                game.level_block(level, [1, 65, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:oak_log")
             );
             assert_eq!(
@@ -3902,7 +3905,8 @@ mod fake_action_tests {
                     assert!(game.use_failed, "outer per-action flag restored");
                     let level = game.level(game.dim.id()).unwrap();
                     assert_eq!(
-                        game.level_block(level, [1, 64, 0]).as_deref(),
+                        game.level_block(level, [1, 64, 0])
+                            .and_then(mod_api::__private::block_key_id),
                         Some("minecraft:air")
                     );
                     assert_eq!(held(game, 2), Some(ItemStack::new("minecraft:diamond", 1)));
@@ -3996,7 +4000,10 @@ mod fake_action_tests {
                 game.player_perform_action(player, PlayerAction::BreakBlock { pos }),
                 Ok(ActionOutcome::Consumed)
             );
-            assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:air"));
+            assert_eq!(
+                level_block(game, pos).and_then(mod_api::__private::block_key_id),
+                Some("minecraft:air")
+            );
             // Air breaks nothing; bedrock, which no digging breaks (destroy time -1), stays;
             // ten blocks off is out of reach.
             assert_eq!(
@@ -4009,7 +4016,7 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Passed)
             );
             assert_eq!(
-                level_block(game, [-1, 63, 0]).as_deref(),
+                level_block(game, [-1, 63, 0]).and_then(mod_api::__private::block_key_id),
                 Some("minecraft:bedrock")
             );
             place(game, [3, 64, 3], "minecraft:stone");
@@ -4030,7 +4037,7 @@ mod fake_action_tests {
                 Ok(ActionOutcome::Consumed)
             );
             assert_eq!(
-                level_block(game, [1, 63, 0]).as_deref(),
+                level_block(game, [1, 63, 0]).and_then(mod_api::__private::block_key_id),
                 Some("minecraft:air")
             );
         });
@@ -4045,7 +4052,10 @@ mod fake_action_tests {
                     Ok(ActionOutcome::Passed),
                     "game mode {mode}, holding {item:?}"
                 );
-                assert_eq!(level_block(game, pos).as_deref(), Some("minecraft:stone"));
+                assert_eq!(
+                    level_block(game, pos).and_then(mod_api::__private::block_key_id),
+                    Some("minecraft:stone")
+                );
             });
         }
     }
@@ -4130,7 +4140,8 @@ mod fake_action_tests {
             );
             let level = game.level(game.dim.id()).unwrap();
             assert_eq!(
-                game.level_block(level, [1, 64, 0]).as_deref(),
+                game.level_block(level, [1, 64, 0])
+                    .and_then(mod_api::__private::block_key_id),
                 Some("minecraft:oak_sign")
             );
         });

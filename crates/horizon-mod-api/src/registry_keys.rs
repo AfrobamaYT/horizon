@@ -1,7 +1,6 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
 use crate::{
-    BlockEntityTypeKey, BlockKey, BlockStateId, BlockStateRange, DimensionKey, EffectKey, FluidKey,
-    ItemKey,
+    BlockEntityTypeKey, BlockKey, BlockStateId, DimensionKey, EffectKey, FluidKey, ItemKey,
 };
 
 impl BlockKey {
@@ -311,6 +310,8 @@ pub(crate) fn block_entity_type_display_name(key: BlockEntityTypeKey) -> String 
     })
 }
 
+use horizon_world::registry::BlockStateRange;
+
 /// A block slot's mappings in one game's current tables.
 #[derive(Clone, Copy, Debug)]
 // exhaustive: the game builds this mapping at load; mods receive only BlockKey
@@ -559,5 +560,22 @@ mod item_tests {
         assert_eq!(ItemKey::from_slot(apple.0), Ok(apple));
         assert_eq!(item_id(apple), Some("minecraft:apple"));
         assert!(ItemKey::from_slot(3).is_err());
+    }
+}
+
+#[cfg(test)]
+mod hot_call_key_tests {
+    use crate::*;
+    #[test]
+    fn hot_call_signatures_and_unknown_slots_are_typed() {
+        let _: fn(&dyn Host, ItemKey) -> Option<i32> = |h, k| h.item_burn_time(k);
+        let _: fn(&dyn Host, ItemKey) -> Option<f32> = |h, k| h.item_compost_chance(k);
+        let _: fn(&mut dyn ClientHost, ItemKey, u32) -> Result<(), String> = |h, k, n| h.give(k, n);
+        let _: fn(&dyn ClientHost, &str, ItemKey) -> bool = |h, e, k| h.enchantment_supports(e, k);
+        crate::testing::with_mods(Vec::new().into(), || {
+            assert!(ItemKey::from_slot(u32::MAX).is_err());
+            assert_eq!(__private::item_key_id(ItemKey(u32::MAX)), None);
+            assert_eq!(__private::block_key_id(BlockKey(u32::MAX)), None);
+        });
     }
 }
