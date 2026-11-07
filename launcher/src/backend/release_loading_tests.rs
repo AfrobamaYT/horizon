@@ -235,6 +235,54 @@ fn each_platform_download_is_bound_to_the_fork_not_the_provider_url() {
 }
 
 #[test]
+fn decoy_asset_names_never_replace_the_exact_platform_asset() {
+    let asset = "horizon-linux-x86_64.tar.gz";
+    for decoy in [
+        format!("../{asset}"),
+        format!("prefix-{asset}"),
+        format!("{asset}.bak"),
+    ] {
+        for (tag, encoded) in [
+            ("v1/../../x", "v1%2F..%2F..%2Fx"),
+            ("v1%?# é", "v1%25%3F%23%20%C3%A9"),
+        ] {
+            let list = serde_json::json!([{ "tag_name": tag, "html_url": "https://evil.test", "assets": [
+                {"name": decoy, "size": 1, "browser_download_url": "https://evil.test/first"},
+                {"name": asset, "size": 2, "browser_download_url": "https://evil.test/second"}
+            ]}]);
+            let got = parse_releases(&list, Some(asset), is_game_tag);
+            assert_eq!(
+                got[0].asset,
+                Some((
+                    format!(
+                        "https://github.com/arismoko/horizon/releases/download/{encoded}/{asset}"
+                    ),
+                    2
+                ))
+            );
+        }
+    }
+    for tag in ["../x", "prebuilt-1"] {
+        let got = game_releases_with(
+            &serde_json::json!([{"tag_name": tag, "prerelease": true, "assets": [{"name": asset, "size": 1}]}]),
+            Some(asset),
+            None,
+        );
+        assert!(got.is_empty());
+    }
+    let draft = parse_releases(
+        &serde_json::json!([{"tag_name": "v1", "draft": true, "assets": [{"name": asset, "size": 1}]}]),
+        Some(asset),
+        is_game_tag,
+    );
+    assert!(draft.is_empty());
+    assert_eq!(
+        crate::signed::asset_url("../../x", "../evil.zip"),
+        "https://github.com/arismoko/horizon/releases/download/..%2F..%2Fx/..%2Fevil.zip"
+    );
+}
+
+#[test]
 #[ignore = "local release-loading benchmark; run explicitly with --ignored --nocapture"]
 fn benchmark_shared_startup_response() {
     let text = fixture();
