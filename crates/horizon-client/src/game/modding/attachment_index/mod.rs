@@ -21,6 +21,8 @@ mod painting_tests;
 #[cfg(test)]
 mod mob_tests;
 #[cfg(test)]
+mod saved_entity_tests;
+#[cfg(test)]
 mod player_tests;
 #[cfg(test)]
 mod query_tests;
