@@ -702,7 +702,7 @@ mod tests {
                     65,
                 )
                 .unwrap();
-                for (name, ticks) in [("minecraft:smelting", 200), ("minecraft:blasting", 100)] {
+                for (name, ticks) in [("minecraft:smelting", 200), ("minecraft:blasting", 200)] {
                     let made = level
                         .recipe_for(game, &kind(name), &RecipeInput::Single(raw.clone()))
                         .unwrap()
@@ -716,7 +716,7 @@ mod tests {
                     assert_eq!(made.experience, 0.7);
                 }
                 for (name, ticks) in [
-                    ("minecraft:smoking", 100),
+                    ("minecraft:smoking", 200),
                     ("minecraft:campfire_cooking", 600),
                 ] {
                     let made = level

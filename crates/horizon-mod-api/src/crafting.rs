@@ -625,6 +625,7 @@ pub struct RecipeMatch {
     /// Remaining items in input slot order after consuming one item per occupied slot.
     pub remainders: Vec<Option<ItemStack>>,
     pub experience: f32,
+    /// Recipe-file cooking time; station-specific speed adjustments are not applied here.
     pub processing_time: u32,
 }
 impl RecipeMatch {
