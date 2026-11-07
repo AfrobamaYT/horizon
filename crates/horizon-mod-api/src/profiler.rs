@@ -19,8 +19,7 @@ thread_local! { static SLOT: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
 
 /// One call, shared by native and wasm timing producers. Names are resolved at load time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// exhaustive: the host builds call records; mods never consume this game-side data.
-pub struct Record {
+pub(crate) struct Record {
     pub mod_id: &'static str,
     pub hook: &'static str,
     pub part: Option<&'static str>,
@@ -28,8 +27,7 @@ pub struct Record {
 }
 /// Inclusive nanoseconds; bucket 0 contains 0 and 1, bucket n contains [2^n, 2^(n+1)).
 #[derive(Debug)]
-// exhaustive: only the game's report consumer reads these counters, never mods.
-pub struct Aggregate {
+pub(crate) struct Aggregate {
     pub count: u64,
     pub total: u128,
     pub min: u64,
@@ -49,8 +47,7 @@ impl Default for Aggregate {
 }
 type Key = (&'static str, &'static str, Option<&'static str>);
 #[derive(Default, Debug)]
-// exhaustive: the game builds and presents reports; no mod depends on their fields.
-pub struct Report {
+pub(crate) struct Report {
     pub calls: BTreeMap<Key, Aggregate>,
     /// Capacity exhaustion is explicit, never silently presented as a complete profile.
     pub dropped: usize,
@@ -161,8 +158,20 @@ fn start_with_clock(clock: fn() -> u64) -> bool {
     ENABLED.store(true, SeqCst);
     true
 }
+static SUMMARY: Mutex<String> = Mutex::new(String::new());
+/// Stop outside any profiled guard, retaining the text report for the command.
+pub fn stop() {
+    let mut text = SUMMARY.lock().unwrap_or_else(|e| e.into_inner());
+    if is_enabled() {
+        *text = stop_report().summary();
+    }
+}
+/// The last stopped session's text report, or an empty string before the first stop.
+pub fn summary() -> String {
+    SUMMARY.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 /// Disable, drain active calls, and merge every thread. Call outside any profiled guard.
-pub fn stop() -> Report {
+pub(crate) fn stop_report() -> Report {
     let _control = CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     if !ENABLED.swap(false, SeqCst) {
         return Report::default();
@@ -260,6 +269,7 @@ impl Drop for Guard {
 
 #[cfg(test)]
 mod tests {
+    use super::stop_report as stop;
     use super::*;
     use crate::crash::enter_native_mod;
     static SERIAL: Mutex<()> = Mutex::new(());
@@ -328,7 +338,10 @@ mod tests {
         assert!(stop().calls.is_empty());
         assert!(start_with_clock(tick));
         drop(enter_native_mod(call("fresh", "epoch", None)));
-        assert_eq!(stop().calls[&("fresh", "epoch", None)].count, 1);
+        super::stop();
+        assert!(super::summary().contains("fresh:"));
+        super::stop();
+        assert!(super::summary().contains("fresh:"));
     }
     #[test]
     fn profiler_drains_in_flight_and_reports_overflow() {
