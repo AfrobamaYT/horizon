@@ -842,7 +842,7 @@ impl Game<'_> {
         self.rockets.clear();
         self.crystals.clear();
         // The dragon a server sent goes with its crystals.
-        self.dragon = None;
+        self.dragon.discard();
         self.potions.clear_thrown();
         self.potions.clouds.clear();
         self.dragon_fireballs.clear();

@@ -122,7 +122,7 @@ mod tests {
             let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = game.take_entity_id();
             let dragon_id = dragon.id;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let dragon = game.entity(dragon_id).unwrap();
             assert_eq!(dragon.no_physics(game), Some(true));
 

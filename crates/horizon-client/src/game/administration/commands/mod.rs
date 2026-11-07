@@ -944,7 +944,7 @@ impl Game<'_> {
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
         candidates.extend(self.crystals.iter().map(|c| Target::Crystal(c.id)));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             candidates.push(Target::Dragon(d.id));
         }
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));

@@ -157,7 +157,7 @@ impl Game<'_> {
         self.tick_chunks.clear();
         self.sync_tick_chunks();
         self.mobs.clear();
-        self.dragon = None;
+        self.dragon.discard();
         self.dropped.clear();
         self.creatures.projectiles.clear();
         self.tnts.clear();
@@ -1185,7 +1185,7 @@ impl Game<'_> {
             let (p, v) = (m.position, m.velocity);
             out.push(line(&m.kind.id, [p.x, p.y, p.z], [v.x, v.y, v.z], ""));
         }
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             let p = d.position;
             out.push(line(
                 "minecraft:ender_dragon",
