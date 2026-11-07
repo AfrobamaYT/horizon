@@ -20,10 +20,13 @@ impl Game<'_> {
             return;
         }
         // PlayerList.respawn replaces the player, retaining only opted-in data.
-        if let Some(attachments) = self.guest_attachments.get_mut(&conn)
+        if let Some(attachments) = self
+            .lan
+            .as_mut()
+            .and_then(|host| host.hub.guests.attachments_mut(conn))
             && let Ok(copy) = attachments.copy_on_death()
         {
-            *attachments = copy;
+            attachments.replace_contents(copy);
         }
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(i);
@@ -268,7 +271,7 @@ impl Game<'_> {
         }
         // PlayerRespawnEvent, at the end of PlayerList.respawn: the player is
         // placed, in their respawn level, with their state swapped in so the
-        // helpers reach them (as for native_perform_command).
+        // helpers reach them (as for native_run_mod_command).
         let Some(host) = self.lan.as_ref() else {
             return;
         };

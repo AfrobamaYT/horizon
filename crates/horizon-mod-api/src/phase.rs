@@ -220,6 +220,8 @@ pub fn check_access(operation: &str, access: LoadAccess) {
             | "fluid_is_same"
             | "fluid_bucket"
             | "fluid_pickup_sound"
+            | "fluid_state_definition"
+            | "fluid_state_validate"
     ) || operation.starts_with("block_state_");
     let settings = operation == "setting";
     let allowed = match phase {
@@ -766,6 +768,20 @@ mod tests {
             assert_eq!(current_phase(), Setup);
         }
         assert_eq!(current_phase(), World);
+    }
+
+    #[test]
+    fn fluid_state_facts_follow_metadata_access() {
+        use ModPhase::*;
+        for phase in [Packages, Registration, Setup, Config, Reloading, World] {
+            let _owner = PhaseOwner::new(phase);
+            for operation in ["fluid_state_definition", "fluid_state_validate"] {
+                let result = std::panic::catch_unwind(|| {
+                    check_access(operation, LoadAccess::WorldOnly);
+                });
+                assert_eq!(result.is_ok(), matches!(phase, Setup | Reloading | World));
+            }
+        }
     }
 
     #[test]

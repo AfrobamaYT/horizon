@@ -139,12 +139,13 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
             .categories()
             .contains(&"alpha:machines".to_owned())
     );
-    mod_api::__private::resolve_block_entity_types(
-        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+    {
+        let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(
             Default::default(),
             vec!["test:counter_box".into()],
-        ),
-    )
+        );
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+    }
     .unwrap();
     let mut answers: Vec<String> = loaded
         .mods

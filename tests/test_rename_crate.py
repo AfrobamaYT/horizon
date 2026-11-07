@@ -86,10 +86,10 @@ assert!(!dependencies.contains_key("horizon-mods"));
                        "commit", "-qm", "Baseline")
             rename.run("git", "mv", rename.OLD_PATH, rename.NEW_PATH)
             (rename.ROOT / rename.NEW_PATH / "Cargo.toml").write_text(
-                '[package]\nname = "horizon-mod-package"\n')
+                '[package]\nname = "horizon-mod-package"\n', newline="\n")
             with self.assertRaisesRegex(AssertionError, "unexpected content change: consumer.rs"):
                 rename.verify("HEAD")
-            consumer.write_text("use horizon_mod_package::Manifest;\n")
+            consumer.write_text("use horizon_mod_package::Manifest;\n", newline="\n")
             with redirect_stdout(io.StringIO()):
                 rename.verify("HEAD")
 

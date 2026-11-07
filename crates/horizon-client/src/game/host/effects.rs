@@ -9,7 +9,7 @@ impl EffectsClientHost for Game<'_> {
         );
         self.native_flame_particle(at, soul)
     }
-    fn play_local_sound(&self, sound: &SoundPlay, after: u32) -> bool {
+    fn play_local_sound(&self, sound: &SoundPlay, after: u32) -> Option<SoundRef> {
         mod_api::__private::check_access(
             "play_local_sound",
             mod_api::__private::LoadAccess::ClientSetup,
@@ -29,5 +29,43 @@ impl EffectsClientHost for Game<'_> {
             mod_api::__private::LoadAccess::ClientSetup,
         );
         self.native_clear_particles()
+    }
+    fn sound_events(&self) -> Vec<Identifier> {
+        mod_api::__private::check_access(
+            "sound_events",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_sound_events()
+    }
+    fn audio_devices(&self) -> Vec<String> {
+        mod_api::__private::check_access(
+            "audio_devices",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_audio_devices()
+    }
+    fn audio_device(&self) -> String {
+        mod_api::__private::check_access(
+            "audio_device",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_audio_device()
+    }
+}
+impl EffectsClientBackend for Game<'_> {
+    fn sound_state(&self, sound: SoundRef) -> Option<SoundState> {
+        mod_api::__private::check_access(
+            "sound_state",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_sound_state(sound)
+    }
+    fn sound_stop(&self, sound: SoundRef) -> bool {
+        mod_api::__private::check_access("sound_stop", mod_api::__private::LoadAccess::ClientSetup);
+        self.native_sound_stop(sound)
+    }
+    fn sound_fade(&self, sound: SoundRef, volume: f32, ticks: u32) -> bool {
+        mod_api::__private::check_access("sound_fade", mod_api::__private::LoadAccess::ClientSetup);
+        self.native_sound_fade(sound, volume, ticks)
     }
 }

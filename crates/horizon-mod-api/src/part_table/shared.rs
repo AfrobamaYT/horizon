@@ -139,10 +139,10 @@ struct Installed {
     keys: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
-    registry_keys: super::registry_keys::Requests,
-    effects: OnceLock<super::registry_keys::Effects>,
-    resolved_block_entity_types: OnceLock<super::registry_keys::Names>,
-    fluids: OnceLock<super::registry_keys::Names>,
+    registry_keys: horizon_mod_runtime::registry_keys::Requests,
+    effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
+    resolved_block_entity_types: OnceLock<horizon_mod_runtime::registry_keys::Names>,
+    fluids: OnceLock<horizon_mod_runtime::registry_keys::Names>,
     /// The ticket controllers the mods registered; a [`TicketController`]'s slot indexes it.
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
@@ -150,19 +150,20 @@ struct Installed {
     tag_hook_bits: Vec<bool>,
 }
 
-pub(crate) fn requested_keys() -> &'static super::registry_keys::Requests {
-    static EMPTY: LazyLock<super::registry_keys::Requests> = LazyLock::new(Default::default);
+pub(crate) fn requested_keys() -> &'static horizon_mod_runtime::registry_keys::Requests {
+    static EMPTY: LazyLock<horizon_mod_runtime::registry_keys::Requests> =
+        LazyLock::new(Default::default);
     installed().map_or(&EMPTY, |installed| &installed.registry_keys)
 }
 
 thread_local! {
     // A reference to the registrar's canonical requests while Hooks::register is in flight.
     // The table is moved, not copied, into Installed when registration finishes.
-    static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<super::registry_keys::Requests>>>> = const { RefCell::new(None) };
+    static REGISTERING_KEYS: RefCell<Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>> = const { RefCell::new(None) };
 }
 
 pub(crate) fn with_registering_keys<T>(
-    read: impl FnOnce(Option<&super::registry_keys::Requests>) -> T,
+    read: impl FnOnce(Option<&horizon_mod_runtime::registry_keys::Requests>) -> T,
 ) -> T {
     REGISTERING_KEYS.with(|keys| match keys.borrow().as_ref() {
         Some(keys) => read(Some(&keys.borrow())),
@@ -511,8 +512,8 @@ pub struct PartRegistrar {
     parts: Parts,
     tags: TagParts,
     block_entity_types: Vec<BlockEntityType>,
-    registry_keys: Rc<RefCell<super::registry_keys::Requests>>,
-    effects: OnceLock<super::registry_keys::Effects>,
+    registry_keys: Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>,
+    effects: OnceLock<horizon_mod_runtime::registry_keys::Effects>,
     controllers: Vec<ControllerInfo>,
     structure_types: Vec<super::structure_type::StructureTypeInfo>,
     refused: Vec<String>,
@@ -611,7 +612,7 @@ fn namespaced(id: &str) -> bool {
 /// Every mod's [`Hooks::register`](super::Hooks::register) run against one registrar, in dispatch order.
 fn register_all(mods: &[ModEntry]) -> PartRegistrar {
     let mut registrar = PartRegistrar::new(mods.first().map_or("horizon", |entry| entry.id));
-    struct RestoreKeys(Option<Rc<RefCell<super::registry_keys::Requests>>>);
+    struct RestoreKeys(Option<Rc<RefCell<horizon_mod_runtime::registry_keys::Requests>>>);
     impl Drop for RestoreKeys {
         fn drop(&mut self) {
             REGISTERING_KEYS.set(self.0.take());
@@ -725,11 +726,18 @@ pub mod tests {
     /// its installed test mods and Parts. Production mods request only the entries they use.
     pub fn register_game_keys(ids: impl IntoIterator<Item = String>) {
         let mut registrar = super::register_all(super::super::mods());
+        registrar.mod_id = "horizon";
+        registrar.declare_fluid("definition_test");
         for id in ids {
             registrar.block_key(&id);
         }
         super::install_registrar(registrar).unwrap();
-        crate::registry_keys::resolve_effects().unwrap();
+        crate::registry_keys::resolve_effects(
+            horizon_client_core::potions::all_effects()
+                .map(|def| horizon_client_core::potions::namespaced(def.id)),
+            |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+        )
+        .unwrap();
         crate::registry_keys::resolve_fluids(&[
             "minecraft:empty",
             "minecraft:water",
@@ -739,7 +747,8 @@ pub mod tests {
         ])
         .unwrap();
         if let Some(types) = horizon_client_core::block_entity_types::current() {
-            crate::registry_keys::resolve_block_entity_types(types).unwrap();
+            crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
+                .unwrap();
         }
     }
 
@@ -808,7 +817,12 @@ pub mod tests {
             ["mod lookup requested unknown block absent:block"]
         );
         assert_eq!(
-            crate::registry_keys::resolve_effects().unwrap_err(),
+            crate::registry_keys::resolve_effects(
+                horizon_client_core::potions::all_effects()
+                    .map(|def| horizon_client_core::potions::namespaced(def.id)),
+                |id| horizon_client_core::potions::effect(id).map(|def| def.index)
+            )
+            .unwrap_err(),
             ["mod lookup requested unknown effect absent:effect"]
         );
     }

@@ -2803,6 +2803,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-runtime"
+version = "0.1.0"
+dependencies = [
+ "horizon-core",
+]
+
+[[package]]
 name = "horizon-port-pack"
 version = "0.1.0"
 dependencies = [
@@ -2838,6 +2845,7 @@ dependencies = [
  "flate2",
  "getrandom 0.3.4",
  "horizon-core",
+ "horizon-mod-runtime",
  "horizon-world",
  "ipconfig",
  "log",
@@ -2910,6 +2918,7 @@ dependencies = [
  "flate2",
  "horizon-assets",
  "horizon-core",
+ "horizon-mod-runtime",
  "libm",
  "log",
  "lz4_flex",

@@ -12,6 +12,7 @@ use horizon_client::{
     collisions,
     containers::{BlockEntity, CreakingHeart},
     items::{ItemStack, Items},
+    join_seq::JoinList,
     light::{LightTables, apply_lighting, light_chunk},
     mobs::{
         Damage, MobType, creaking,
@@ -329,7 +330,7 @@ fn spawn_seed(index: usize) -> i64 {
 /// draws from the level's random and joins the scenario's mobs next tick,
 /// seeded as the oracle seeds what a tick spawned.
 fn summon_golem(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     a: usize,
     needed: usize,
     w: &MobWorld,
@@ -369,7 +370,7 @@ fn summon_golem(
 /// Villager events that act at once in vanilla (`TradeWithVillager` and
 /// `VillagerMakeLove` write the other villager directly).
 fn villager_events(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     events: &mut Vec<MobEvent>,
     from: usize,
     w: &MobWorld,
@@ -452,7 +453,7 @@ fn seen(m: &Mob) -> Seen {
 /// The probe's mobs as a creaking heart sees them: creakings it creates take
 /// the n-th seed from 1000, as the oracle's do.
 struct Host<'a> {
-    mobs: &'a mut Vec<Mob>,
+    mobs: &'a mut JoinList<Mob>,
     added: Vec<Mob>,
     types: &'a MobTypes,
     created: &'a mut i64,
@@ -1008,7 +1009,7 @@ pub fn main() -> horizon_client::Result<()> {
         }
         world.day_time = s.time;
         world.game_time = 1000;
-        let mut mobs: Vec<Mob> = Vec::new();
+        let mut mobs = JoinList::<Mob>::default();
         for (i, spec) in s.mobs.iter().enumerate() {
             let kind = types
                 .types
@@ -1616,8 +1617,8 @@ pub fn main() -> horizon_client::Result<()> {
                     }
                 }
             }
-            mobs.append(&mut born);
-            mobs.append(&mut added);
+            mobs.extend(born);
+            mobs.extend(added);
             for e in &heart_events {
                 match e {
                     HeartEvent::SetBlock(at, st) => world.set(at[0], at[1], at[2], *st)?,

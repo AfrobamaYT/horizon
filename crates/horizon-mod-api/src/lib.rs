@@ -193,6 +193,17 @@ impl FluidState {
     pub fn is_source(self) -> bool {
         self.source
     }
+    /// Match carried vanilla properties locally. Unknown names or noncanonical values
+    /// do not match. Validate against `host.fluid_states()` separately for indexed errors.
+    pub fn matches(self, constraints: &[StateConstraint]) -> bool {
+        constraints.iter().all(|c| match c.name.as_str() {
+            "falling" if !self.is_empty() => c.value == if self.falling { "true" } else { "false" },
+            "level" if !self.is_empty() && !self.source => {
+                (1..=8).contains(&self.amount) && c.value.as_bytes() == [b'0' + self.amount]
+            }
+            _ => false,
+        })
+    }
 }
 
 /// A hook's mutable block entity payload, with a read-only type identity.
@@ -905,6 +916,34 @@ impl SoundPlay {
             ..self
         }
     }
+}
+
+/// A sound a client mod started with `play_local_sound`, to follow and control: `state`, `stop`
+/// and `fade`. Each handle names one play and is never reused. Once the sound has ended, been
+/// stopped or been cleared (leaving or changing levels stops every sound), the handle is stale: it
+/// reads [`SoundState::Stopped`] and its writes do nothing. It stays valid across a change of
+/// output device, which keeps the sounds playing.
+///
+/// Dropping or overwriting the handle doesn't stop the sound: keep a looping sound's handle while
+/// it plays (stop it before starting another in its place), or nothing can stop it until the
+/// player leaves the level.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its field is private, so mods cannot build or destructure it
+pub struct SoundRef {
+    pub(crate) id: u64,
+}
+
+/// Where a mod's sound is ([`SoundRef`]'s `state`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum SoundState {
+    /// Not started yet: queued for the next audio update, waiting out `play_local_sound`'s
+    /// `after` ticks, or between a looping sound's repeats (`SoundPlay::looping`'s `delay`).
+    Waiting,
+    /// Playing (`SoundEngine.isActive`).
+    Playing,
+    /// Over: it ended, was stopped, faded to 0 or was cleared. It never plays again.
+    Stopped,
 }
 
 /// A playing sound's channel, for `play_sound_source` and
@@ -3069,6 +3108,31 @@ impl BossBarOverlay {
     }
 }
 
+/// One boss bar the client shows (vanilla's `LerpingBossEvent`), as
+/// `customize_boss_event_progress` reads it. Any bar the server sends: mob,
+/// raid and `/bossbar` ones alike.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientBossBar {
+    /// The bar's UUID, as the server's boss event packets name it.
+    pub uuid: u128,
+    /// The title drawn above the bar.
+    pub name: Text,
+    /// The fill drawn this frame, 0 to 1 (`getProgress`, eased toward the
+    /// server's value).
+    pub progress: f32,
+    /// The bar's color.
+    pub color: BossBarColor,
+    /// The notches drawn over it.
+    pub overlay: BossBarOverlay,
+    /// Whether it darkens the sky (`shouldDarkenScreen`).
+    pub darken_screen: bool,
+    /// Whether it plays the boss music (`shouldPlayBossMusic`).
+    pub play_boss_music: bool,
+    /// Whether it thickens the fog (`shouldCreateWorldFog`).
+    pub create_world_fog: bool,
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
 ///
@@ -4557,6 +4621,14 @@ mod tests {
     #[test]
     fn dimension_keys_name_one_dimension_each() {
         use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(
+            dimension_key("minecraft:overworld"),
+            DimensionKey::OVERWORLD
+        );
+        assert_eq!(
+            dimension_id(DimensionKey::OVERWORLD),
+            Some("minecraft:overworld")
+        );
         assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
         assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
         let first = dimension_key("test:first");
