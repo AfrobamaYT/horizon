@@ -3873,11 +3873,11 @@ pub enum ActionRefused {
     Protected,
     /// The scoped setup's eye position, rotation or entity hit is not finite.
     InvalidSetup,
-    /// The setup's held stack was refused before swapping player state or running the action.
-    InvalidStack(StackWriteError),
     /// The action's target isn't an entity in the fake's level, or is the fake itself
     /// (`handleInteract`'s "Attempting to attack an invalid entity").
     InvalidTarget,
+    /// The setup's held stack was refused before swapping player state or running the action.
+    InvalidStack(StackWriteError),
 }
 
 /// An error a handle method answers when its host has no game behind it (a mod's test double):
