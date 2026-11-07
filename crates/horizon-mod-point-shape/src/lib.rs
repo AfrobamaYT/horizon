@@ -83,6 +83,8 @@ pub struct Shape {
     /// It has a raw form (`raw` in the attribute): the staging pass declared its raw record and
     /// listener types beside it ([`Shape::raw_items`]).
     pub raw: bool,
+    /// Staging-only raw dispatch, with no API record or API listeners.
+    pub raw_only: bool,
     /// A free function (`free` in the attribute), not an associated one.
     pub free: bool,
 }
@@ -171,9 +173,13 @@ pub fn raw_able(sig: &syn::Signature, impl_generics: Option<&syn::Generics>) -> 
 /// The point of the function `sig`, from `#[point(side = "…", name = "…", raw, free)]`'s arguments.
 pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape> {
     let (mut name, mut side, mut raw, mut free) = (sig.ident.to_string(), None, false, false);
+    let mut raw_only = false;
     let parser = syn::meta::parser(|meta| {
         if meta.path.is_ident("raw") {
             raw = true;
+        } else if meta.path.is_ident("raw_only") {
+            raw = true;
+            raw_only = true;
         } else if meta.path.is_ident("free") {
             free = true;
         } else if meta.path.is_ident("name") {
@@ -262,6 +268,7 @@ pub fn shape(attribute: TokenStream, sig: &syn::Signature) -> syn::Result<Shape>
         returns,
         borrowed_return,
         raw,
+        raw_only,
         free,
     })
 }

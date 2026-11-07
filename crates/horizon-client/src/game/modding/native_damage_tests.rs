@@ -175,7 +175,7 @@ fn a_hit_on_the_dragon_fires_pre_and_post() {
     let heard = heard(|game| {
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 225009;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
         let _ = game.hit_special(SPECIAL, 6.0, true, DamageKind::Generic, None);
         assert_eq!(game.dragon.as_ref().unwrap().health, 194.0);
     });
@@ -195,7 +195,7 @@ fn mob_and_dragon_post_records_fresh_hit_decision() {
         assert_eq!(pig.health, 6.0);
         let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 225015;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
         for amount in [2.0, 4.0, 3.0] {
             let _ = game.hit_special(SPECIAL, amount, true, DamageKind::Generic, None);
         }
@@ -270,7 +270,7 @@ fn arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon() {
             game.mobs.push(mob(game, 43, "minecraft:pig"));
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 44;
-            game.dragon = Some(dragon);
+            game.dragon.replace(dragon);
             let mut arrow = Projectile::new(
                 ProjectileKind::Arrow {
                     base_damage: 2.0,
