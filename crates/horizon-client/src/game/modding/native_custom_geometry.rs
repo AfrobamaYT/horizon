@@ -632,6 +632,29 @@ mod tests {
                 game.prepared_model_draws.borrow().is_empty(),
                 "cull group-transformed bounds"
             );
+            group
+                .set_group_transform(game, mod_api::IDENTITY_TRANSFORM)
+                .unwrap();
+            group
+                .write(
+                    game,
+                    0,
+                    &[ModelInstance::at(
+                        [30_000_000.25, 30_000_000.5, 30_000_000.75],
+                        0xFFFF_FFFF,
+                    )],
+                )
+                .unwrap();
+            group.set_len(game, 1).unwrap();
+            draw.reset([30_000_000.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            {
+                let staged = game.prepared_model_draws.borrow();
+                assert_eq!(staged.len(), 1);
+                // Subtract world coordinates in f64: each fractional block survives.
+                assert_eq!(staged[0].instance.model[3], [0.25, 0.5, 0.75, 1.0]);
+            }
             let sibling = game.create_group(model, 16_384).unwrap();
             let third = game.create_group(model, 16_384).unwrap();
             let fourth = game.create_group(model, 16_384).unwrap();
