@@ -97,3 +97,18 @@ fn singleton_client_dragon_install_explicitly_replaces_network_owner() {
         assert!(game.dragon.is_none());
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn singleton_late_dragon_id_reserves_all_eight_parts_once() {
+    with_game(|game| {
+        game.dragon.discard();
+        assert!(game.dragon.install(Dragon::new(Vec3::ZERO, 0.0, 0)).is_ok());
+        let before = game.next_entity;
+        game.assign_dragon_and_crystal_ids();
+        assert_eq!(game.dragon.as_ref().unwrap().id, before + 1);
+        assert_eq!(game.next_entity, before + 9);
+        game.assign_dragon_and_crystal_ids();
+        assert_eq!(game.next_entity, before + 9);
+    });
+}
