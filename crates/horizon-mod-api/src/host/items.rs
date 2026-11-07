@@ -101,6 +101,14 @@ pub trait ItemsBackend {
     /// Side: both. The effective vanilla bar, before client drawing hooks.
     #[access(WorldOnly)]
     fn item_resource_bar(&self, stack: &ItemStack) -> Option<ItemBar>;
+    /// Side: client. The item's standard tooltip lines before mod callbacks or drawing.
+    #[access(WorldOnly)]
+    fn item_resource_tooltip(
+        &self,
+        stack: &ItemStack,
+        advanced: bool,
+        creative: bool,
+    ) -> Option<Vec<TooltipElement>>;
     /// Side: server.
     /// How many slots of the block entity at `at` its side reaches (none: every slot), by its
     /// `WorldlyContainer` rules: a furnace's top reaches its input only. None where no block
@@ -198,6 +206,15 @@ pub trait ItemsBackend {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackendMut {
+    /// Side: server. Roll an enchantment result with the named level's random source.
+    #[access(WorldOnly)]
+    fn item_resource_enchant_randomly(
+        &mut self,
+        stack: &ItemStack,
+        level: LevelRef,
+        power: i32,
+        pool: &Identifier,
+    ) -> Result<Option<ItemStack>, StackWriteError>;
     /// Side: server.
     /// Puts up to `amount` of `resource` into slot `slot` of those `at`'s side reaches, as a hopper
     /// would (`canPlaceItem`, the slot's limit, the same item and components), in transaction
