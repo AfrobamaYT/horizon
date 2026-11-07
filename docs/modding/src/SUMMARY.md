@@ -19,6 +19,7 @@
 
 - [Making a content mod](how-to/content-mods.md)
 - [Native mods](how-to/native-mods.md)
+- [Caching reload-stable recipe definitions](how-to/reload-recipes.md)
 - [Game rule categories](how-to/game-rule-categories.md)
 - [Declaring a machine's menu data](how-to/block-entities.md)
 - [Controlling spawns](how-to/spawning.md)
