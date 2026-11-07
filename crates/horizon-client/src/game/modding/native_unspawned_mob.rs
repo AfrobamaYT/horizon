@@ -511,7 +511,7 @@ impl UnspawnedMobEdits for Edits<'_, '_> {
         mob: UnspawnedMobRef,
         name: Option<mod_api::Text>,
     ) -> Result<(), UnspawnedMobError> {
-        let name = name.try_into_engine(&()).unwrap();
+        let name = name.try_into_engine(&())?;
         self.game.edit_lent_mob(mob, |_, m| {
             m.custom_name = name.as_ref().map(Text::plain);
             m.custom_name_text = name;

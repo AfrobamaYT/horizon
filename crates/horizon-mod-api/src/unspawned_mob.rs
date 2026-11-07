@@ -91,6 +91,8 @@ pub trait UnspawnedMobEdits {
     -> Result<bool, UnspawnedMobError>;
 
     /// Names the mob (`Entity.setCustomName`), or takes its name away with `None`.
+    /// A component deeper than 512 nodes is refused with `UnspawnedMobError::Text`
+    /// before changing the mob's name.
     fn set_custom_name(
         &self,
         mob: crate::UnspawnedMobRef,
