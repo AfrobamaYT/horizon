@@ -2066,6 +2066,57 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resident_other_and_fangs_load_tick_and_reset() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.others.clear();
+            game.fangs.list.clear();
+            let tag = |kind| {
+                let mut tag = entity(kind);
+                if let Tag::Compound(c) = &mut tag {
+                    c.insert(
+                        "Pos".into(),
+                        Tag::List(vec![
+                            Tag::Double(0.0_f64.to_bits()),
+                            Tag::Double(80.0_f64.to_bits()),
+                            Tag::Double(0.0_f64.to_bits()),
+                        ]),
+                    );
+                    c.insert("Warmup".into(), Tag::Int(40));
+                }
+                tag
+            };
+            let id = game
+                .load_other(tag("minecraft:marker"), "minecraft:marker")
+                .unwrap();
+            assert_eq!(game.others[0].id, id);
+            let snapshot = game.others.to_vec();
+            game.others.update(0, |o| o.yaw = 90.0);
+            assert_eq!(snapshot[0].yaw, 0.0);
+            game.load_unlisted(
+                (0, 0),
+                "minecraft:evoker_fangs",
+                None,
+                tag("minecraft:evoker_fangs"),
+            )
+            .unwrap();
+            let survivor = game.fangs.list[0].id;
+            game.insert_fangs(survivor + 1, [0.0, 80.0, 0.0], 0.0, -30, 0);
+            game.fangs.list.update(1, |f| {
+                f.life = 0;
+                f.started = true;
+            });
+            game.tick_fangs();
+            assert_eq!(game.fangs.list.len(), 1);
+            assert_eq!(game.fangs.list[0].id, survivor);
+            assert_eq!(game.fangs.list[0].warmup, 39);
+            game.others.clear();
+            game.fangs.list.clear();
+            assert!(game.others.is_empty() && game.fangs.list.is_empty());
+        });
+    }
+
     const MOUNT: [i32; 4] = [1, 2, 3, 4];
 
     #[test]

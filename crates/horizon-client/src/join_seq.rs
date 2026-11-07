@@ -134,6 +134,16 @@ pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
 /// ```compile_fail
 /// use horizon_client_lib::join_seq::ResidentList;
 /// let mut list = ResidentList::<u32>::default();
+/// let _: &mut [u32] = &mut list;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// list.iter_mut().for_each(|entity| *entity = 1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
 /// let escaped = list.update(0, |entity| entity);
 /// ```
 #[derive(Clone, Debug)]
@@ -581,5 +591,57 @@ mod tests {
             [fresh, joins[0], joins[1]]
         );
         assert!(joins.into_iter().all(|join| join < fresh));
+    }
+}
+
+#[cfg(test)]
+mod resident_tests {
+    use super::ResidentList;
+    use std::{cell::Cell, rc::Rc};
+
+    #[test]
+    fn resident_restore_keeps_spawn_buffer_and_snapshot_order() {
+        let mut list = ResidentList::default();
+        for value in [1, 2, 3] {
+            list.push(value);
+        }
+        let snapshot = list.to_vec();
+        let mut taken = list.take();
+        list.push(4);
+        taken.retain_mut(|value| {
+            *value *= 10;
+            *value != 20
+        });
+        list.restore(taken);
+        assert_eq!(&*list, &[10, 30, 4]);
+        assert_eq!(snapshot, [1, 2, 3]);
+        assert_eq!(list.remove(1), 30);
+        assert_eq!(list.drain(..1).collect::<Vec<_>>(), [10]);
+        assert_eq!(&*list, &[4]);
+    }
+
+    #[test]
+    fn resident_owners_drop_only_on_discard() {
+        struct Owner(Rc<Cell<usize>>);
+        impl Drop for Owner {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+        let dropped = Rc::new(Cell::new(0));
+        let mut list = ResidentList::default();
+        for _ in 0..3 {
+            list.push(Owner(dropped.clone()));
+        }
+        let taken = list.take();
+        list.push(Owner(dropped.clone()));
+        assert_eq!(dropped.get(), 0);
+        list.restore(taken);
+        assert_eq!(dropped.get(), 0);
+        list.clear();
+        assert_eq!(dropped.get(), 4);
+        list.push(Owner(dropped.clone()));
+        drop(list);
+        assert_eq!(dropped.get(), 5);
     }
 }
