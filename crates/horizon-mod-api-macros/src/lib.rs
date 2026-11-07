@@ -629,7 +629,7 @@ impl syn::parse::Parse for IfInstalled {
 
 /// Declares how a plain-data type crosses the generated wasm interface.
 ///
-/// `#[wasm(via = Form)]` on a type or its re-export checks `From<&Type> for Form`
+/// `#[wasm(via = Form)]` on a type or its re-export checks `TryFrom<&Type> for Form`
 /// and `TryFrom<Form> for Type`. `#[wasm(host_constructor = method)]` on an owned
 /// tuple struct makes incoming host lifts call that checked constructor with the
 /// lifted fields instead of constructing the tuple directly. It returns `Result<Self, E>`
@@ -712,7 +712,7 @@ pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
         const _: () = {
             fn crosses_as_its_form()
             where
-                #via: for<'a> ::core::convert::From<&'a #ty>,
+                #via: for<'a> ::core::convert::TryFrom<&'a #ty>,
                 #ty: ::core::convert::TryFrom<#via>,
             {
             }
