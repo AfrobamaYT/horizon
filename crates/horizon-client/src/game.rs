@@ -16607,7 +16607,6 @@ fn autosave_interval(rate: f32) -> i64 {
 
 /// winit's events for a window's game, with any loop: a headless client (#4951) has no
 /// winit loop and calls these from its own.
-impl Game<'_> {}
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
 fn load_clouds(root: &horizon_assets::resource_source::ResourceSource) -> (u32, u32, Vec<bool>) {
     root.read("assets/minecraft/textures/environment/clouds.png")
