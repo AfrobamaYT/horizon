@@ -398,6 +398,38 @@ pub trait LevelsBackend {
     /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
     #[access(WorldOnly)]
     fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>>;
+    /// Side: both.
+    /// Whether any block collision shape shares volume with `aabb` (`[min_x, min_y, min_z, max_x,
+    /// max_y, max_z]`): the block half of `CollisionGetter.noCollision(aabb)`, negated. The same
+    /// walk and limits as `collision_boxes`, stopping at the first shape it finds; entities and
+    /// the world border are not counted. None as for `collision_boxes`.
+    #[access(WorldOnly)]
+    fn level_has_collisions(&self, level: LevelRef, aabb: [f64; 6]) -> Option<bool>;
+    /// Side: both.
+    /// The fluid's shape at `pos` (`FluidState.getShape`), as block-local boxes: none for no
+    /// fluid, else one box from the floor to the fluid's height (`FluidState.getHeight`), a
+    /// full block under the same fluid, else the fluid's own height (`amount / 9`). None as for
+    /// `block_state`; an unloaded block above counts as no fluid there.
+    #[access(WorldOnly)]
+    fn level_fluid_shape(&self, level: LevelRef, pos: [i32; 3]) -> Option<Vec<[f64; 6]>>;
+    /// Side: server.
+    /// Every entity the segment from `from` to `to` passes through, nearest first: the test
+    /// `ProjectileUtil.getEntityHitResult` makes on each candidate, each entity's box grown by
+    /// `margin` on every side and clipped against the segment. A ray that starts inside a box
+    /// does not hit that entity, as in vanilla. `exclude` (the shooter) is skipped. Vanilla's
+    /// filter (`canHitEntity`, `isPickable`) is the caller's: take the first hit it accepts.
+    /// Candidates are those `entities_in` finds, so spectators are not hit and the same kinds
+    /// are left out. None for a negative or non-finite margin, a non-finite point, and where
+    /// `entities_in` is None (a client, a stale handle, a parked level).
+    #[access(WorldOnly)]
+    fn level_ray_trace_entities(
+        &self,
+        level: LevelRef,
+        from: [f64; 3],
+        to: [f64; 3],
+        margin: f64,
+        exclude: Option<EntityRef>,
+    ) -> Option<Vec<EntityRayHit>>;
 }
 /// The handles' writes of the `levels` area, implemented by the game and reached through [`BackendMut`].
 // hidden: a handle's backend, reached through `Backend`; mods call the handle, never this trait
@@ -476,7 +508,24 @@ pub trait LevelsBackendMut {
         drop: bool,
         tool: Option<&ItemStack>,
         collect: bool,
-    ) -> Option<Vec<ItemStack>>;
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
+    /// Side: server.
+    /// What the block at `pos` would drop (`Block.getDrops(state, level, pos, blockEntity,
+    /// entity, tool)`), without breaking it or spawning anything: its loot table rolled with
+    /// `tool` (None is an empty hand) and `entity` as the breaker, with what its block entity
+    /// copies into the drops (a shulker box's contents, a banner's patterns, a pot's sherds).
+    /// The roll draws from the table's random sequence, else the level random, as vanilla's
+    /// does, so it moves later draws: that is why this is a write. No `block_drops` event,
+    /// item entity or experience: that is `destroy_block`. None for a refused write, a stale or
+    /// parked handle, a client, an unloaded or out-of-height position, and a stale `entity`.
+    #[access(WorldOnly)]
+    fn level_block_drops(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
     /// Side: server.
     /// Send `ServerLevel.destroyBlockProgress` in this level: stages 0..9 show a crack,
     /// any other stage removes it. A machine uses a stable negative breaker id.
@@ -579,7 +628,7 @@ pub trait LevelsBackendMut {
         level: LevelRef,
         pos: [i32; 3],
         stack: ItemStack,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// Spawns `stack` as an item entity at `x y z` (`new ItemEntity(level, x,
     /// y, z, stack)` and `addFreshEntity`): its own random motion (up 0.2, up
@@ -599,7 +648,7 @@ pub trait LevelsBackendMut {
         z: f64,
         stack: ItemStack,
         pickup_delay: u32,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// `spawn_item` with the item entity's motion set to
     /// `motion` (blocks a tick), as `new ItemEntity(level, x, y, z, stack,
@@ -616,7 +665,7 @@ pub trait LevelsBackendMut {
         stack: ItemStack,
         motion: [f64; 3],
         pickup_delay: u32,
-    ) -> Option<EntityRef>;
+    ) -> Result<Option<EntityRef>, StackWriteError>;
     /// Side: server.
     /// Awards `amount` experience at `x y z` as vanilla's `ExperienceOrb.award`
     /// does: orbs of the largest sizes first (2477, 1237, ... 3, 1), each
