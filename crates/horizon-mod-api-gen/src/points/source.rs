@@ -143,7 +143,7 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                     ""
                 };
                 let attribute = format!(
-                    "#[horizon_mod_api_macros::point(raw, name = {:?}{free})] ",
+                    "#[horizon_mod_api_macros::point(raw_only, name = {:?}{free})] ",
                     point.name
                 );
                 let mut out = text.clone();
@@ -218,6 +218,15 @@ fn private_build_dependencies_track_only_existing_plans() {
 }
 
 #[test]
+#[ignore = "manual real-game public emitter snapshot"]
+fn public_points_snapshot() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = std::path::PathBuf::from(std::env::var_os("HORIZON_POINT_SNAPSHOT").unwrap());
+    fs::create_dir_all(&out).unwrap();
+    crate::generate_points(&root, &out).unwrap();
+}
+
+#[test]
 fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
         "../../target/private-source-{}",
@@ -261,7 +270,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
         GAME,
         &staged.replace(
             "#[inline(always)]",
-            "#[horizon_mod_api_macros::point(raw)] #[inline(always)]",
+            "#[horizon_mod_api_macros::point(raw_only)] #[inline(always)]",
         ),
     );
     assert!(
@@ -301,6 +310,19 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     );
     assert_eq!(found.len(), 1);
     assert!(point_shape::eligible(found[0].attrs, found[0].sig));
+    let marker = found[0]
+        .attrs
+        .iter()
+        .find(|attr| attr.path().segments.last().unwrap().ident == "point")
+        .unwrap();
+    let syn::Meta::List(marker) = &marker.meta else {
+        panic!("point arguments")
+    };
+    assert!(
+        point_shape::shape(marker.tokens.clone(), found[0].sig)
+            .unwrap()
+            .raw_only
+    );
     assert!(
         found[0]
             .attrs
