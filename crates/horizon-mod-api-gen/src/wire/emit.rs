@@ -56,7 +56,7 @@ fn fields<'f>(types: &Types<'_>, list: &'f [Field]) -> Option<Vec<(&'f str, Stri
 }
 
 /// Values tied to a game process or a live capability are not wire data.
-const SKIPPED: &[(&str, &str)] = &[
+pub(super) const SKIPPED: &[(&str, &str)] = &[
     ("OwnProvider", "provider capability"),
     ("LoadedMods", "live mod state"),
     ("TintLayer", "render callback"),
@@ -75,7 +75,7 @@ const SKIPPED: &[(&str, &str)] = &[
     ("ItemProviderOf", "provider capability"),
 ];
 
-fn references_skipped(ty: &Ty, skipped: &[bool]) -> bool {
+pub(super) fn references_skipped(ty: &Ty, skipped: &[bool]) -> bool {
     match ty {
         Ty::Named(id) => skipped[*id],
         Ty::List(t, _)

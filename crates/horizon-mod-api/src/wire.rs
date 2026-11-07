@@ -14,6 +14,28 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::sync::Arc;
 
+/// Intern a static API string with bounded process-lifetime storage.
+pub fn intern(value: &str) -> Result<&'static str, WireError> {
+    use std::sync::{Mutex, OnceLock};
+    static STRINGS: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    if value.len() > 256 {
+        return Err(WireError::Invalid("static string too long"));
+    }
+    let mut strings = STRINGS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(&existing) = strings.get(value) {
+        return Ok(existing);
+    }
+    if strings.len() >= 4096 {
+        return Err(WireError::Invalid("too many static strings"));
+    }
+    let value = Box::leak(value.to_owned().into_boxed_str());
+    strings.insert(value);
+    Ok(value)
+}
+
 /// The deepest nesting of one value (a component of a component of…) a reader accepts.
 pub const MAX_DEPTH: u16 = 512;
 
