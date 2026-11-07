@@ -133,16 +133,17 @@ impl Game<'_> {
         let mut gpu_left = self.prepared_copy_room(already, wanted).unwrap_or(0);
         let cut = entities.len() as u32;
         let mut staged = self.prepared_model_draws.borrow_mut();
+        let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
         for index in 0..draw.copy_count() {
             let copy = draw.copy(index);
             let on_gpu = copy.gpu && copy.overlay == 0 && gpu_left > 0;
             if on_gpu {
                 gpu_left -= 1;
-                let mut instance = super::native_block_entity_draw::prepared_instance(
+                let mut instance = builder.instance(
                     world_geometry::row_major_3x4(copy.transform),
                     DVec3::from(copy.origin),
                     camera,
-                    copy.tint,
+                    super::native_block_entity_draw::prepared_tint(copy.tint),
                     copy.light,
                 );
                 instance.tint[3] = (copy.tint >> 24) as f32 / 255.0;

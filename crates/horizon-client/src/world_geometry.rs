@@ -213,6 +213,7 @@ impl WorldGeometry {
 }
 
 /// Row-major 3×4 to a column-major matrix. The last row is the affine 0,0,0,1.
+#[inline]
 pub fn row_major_3x4(m: [f32; 12]) -> Mat4 {
     Mat4::from_cols(
         Vec4::new(m[0], m[4], m[8], 0.0),
@@ -263,8 +264,24 @@ fn copy_visible(
     let z0 = local.z_axis.truncate() * bounds[0][2];
     let z1 = local.z_axis.truncate() * bounds[1][2];
     let translation = local.w_axis.truncate();
-    let min = translation + (z0.min(z1) + (y0.min(y1) + x0.min(x1))) + shift;
-    let max = translation + (z0.max(z1) + (y0.max(y1) + x0.max(x1))) + shift;
+    let mut min = translation + (z0.min(z1) + (y0.min(y1) + x0.min(x1))) + shift;
+    let mut max = translation + (z0.max(z1) + (y0.max(y1) + x0.max(x1))) + shift;
+    if !min.is_finite() || !max.is_finite() {
+        // Overflow can produce NaNs whose min/max depends on corner order.
+        // Preserve that order only for these exceptional finite inputs.
+        min = Vec3::splat(f32::INFINITY);
+        max = Vec3::splat(f32::NEG_INFINITY);
+        for corner in 0..8 {
+            let point = Vec3::new(
+                bounds[usize::from(corner & 1 != 0)][0],
+                bounds[usize::from(corner & 2 != 0)][1],
+                bounds[usize::from(corner & 4 != 0)][2],
+            );
+            let world = local.transform_point3(point) + shift;
+            min = min.min(world);
+            max = max.max(world);
+        }
+    }
     !min.is_finite() || !max.is_finite() || cull.intersects(min, max)
 }
 
@@ -489,11 +506,12 @@ mod tests {
         let camera = [30_000_000.0, 5.25, -30_000_000.0];
         let shift = (DVec3::from(origin) - DVec3::from(camera)).as_vec3();
         let mut seed = 42u32;
-        for _ in 0..1024 {
-            // Include shear, reflections, nonuniform scales and translations.
+        for case in 0..1024 {
+            // Include shear, reflections, nonuniform scales, and finite inputs that overflow.
+            let scale = if case < 512 { 1.0 } else { f32::MAX * 0.25 };
             let transform = std::array::from_fn(|_| {
                 seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                (seed >> 8) as f32 / 2097152.0 - 4.0
+                ((seed >> 8) as f32 / 2097152.0 - 4.0) * scale
             });
             let matrix = row_major_3x4(transform);
             let mut expected = [Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY)];
@@ -514,7 +532,9 @@ mod tests {
                 camera,
                 Some(&capture)
             ));
-            assert_eq!(capture.0.get(), expected);
+            if expected.iter().all(|point| point.is_finite()) {
+                assert_eq!(capture.0.get(), expected);
+            }
         }
     }
 }
