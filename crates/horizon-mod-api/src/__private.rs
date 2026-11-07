@@ -286,10 +286,10 @@ pub mod game {
     }
 
     pub trait PartsLookup {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts>;
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts>;
     }
     impl PartsLookup for Parts {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts> {
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts> {
             Parts::for_hook(self, hook)
         }
     }

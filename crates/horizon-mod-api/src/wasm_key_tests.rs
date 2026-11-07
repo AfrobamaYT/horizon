@@ -165,7 +165,7 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
             .contains("unknown BlockEntityTypeKey slot")
     );
     // Canonical effect enumeration adds host-owned keys not explicitly requested by a mod.
-    let poison = crate::part_table::tests::effect_key("poison");
+    let poison = crate::parts::tests::effect_key("poison");
     assert_ne!(poison.0, 0);
     assert_eq!(
         Imports::effect_key_id(&mut state, poison.0).unwrap(),

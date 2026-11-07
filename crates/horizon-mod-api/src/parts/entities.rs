@@ -1,3 +1,4 @@
+use super::*;
 /// What answers an entity capability for one entity type: given the entity and the lookup's
 /// context (its [`EntityCapabilityKey`]'s `C`), its handler, or none to leave it to the next
 /// provider. A closure is one.
@@ -16,36 +17,10 @@ where
 /// An entity capability provider, as the registrar keeps it.
 pub type EntityProvider<T, C = ()> = dyn EntityCapabilityProvider<T, C>;
 
-/// How a lookup reads the capability providers mods registered, in the order they are asked
-/// (those registered `before_game`, then the others, each in registration order): the game's
-/// table, which a wasm mod reads through the game.
-// hidden: a lookup's view of the registrar's table, not part of the mod surface
-#[doc(hidden)]
-pub trait CapabilityProviders {
-    /// The next enabled provider of entity capability `name` for entity type `kind`, advancing `index`.
-    fn entity_provider(
-        &self,
-        name: &str,
-        kind: &str,
-        index: &mut u32,
-    ) -> Option<(EntityProviderOf, &'static str, bool)>;
-}
-
-impl CapabilityProviders for InstalledProviders {
-    fn entity_provider(
-        &self,
-        name: &str,
-        kind: &str,
-        index: &mut u32,
-    ) -> Option<(EntityProviderOf, &'static str, bool)> {
-        next(&installed()?.keys.entity_capabilities, name, kind, index)
-    }
-}
-
 /// Whether any mod attached an entity part, so `Mob` construction asks for
 /// goals and the mob tick builds a goal read view.
 pub fn has_entity_parts() -> bool {
-    !super::mods().is_empty()
+    !crate::mods().is_empty()
         && installed().is_some_and(|installed| !installed.keys.entities.is_empty())
 }
 
@@ -116,10 +91,10 @@ pub fn entity_providers<T: ?Sized + 'static, C: Copy + 'static>(
 /// An entity's providers of one capability ([`entity_providers`]).
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct EntityProviders<T: ?Sized + 'static, C: 'static> {
-    parts: &'static [CapabilityPart<EntityProviderOf>],
-    entity: EntityRef,
-    context: C,
-    handler: PhantomData<fn() -> Box<T>>,
+    pub(crate) parts: &'static [CapabilityPart<EntityProviderOf>],
+    pub(crate) entity: EntityRef,
+    pub(crate) context: C,
+    pub(crate) handler: PhantomData<fn() -> Box<T>>,
 }
 
 impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
@@ -138,34 +113,6 @@ impl<T: ?Sized + 'static, C: Copy + 'static> EntityProviders<T, C> {
             Answer::Game | Answer::Nobody => None,
         }
     }
-}
-
-/// What a mod's [`Hooks::register`](super::Hooks::register) attaches its parts with, and
-/// declares its block entity types and ticket controllers on. A thing takes one part of each
-/// kind: the same kind twice on one thing refuses the mods at startup, naming both.
-///
-/// Mods call the generic methods on `dyn Registrar` after requesting registry keys;
-/// they reach the trait's own methods, one implementation for native and wasm mods.
-pub trait Registrar {
-    /// Attach `part`, of kind `kind`, to the entity type `entity`
-    /// (`minecraft:zombie`, `mymod:golem`): its `register_goals` runs at every
-    /// `Mob` construction of that type (#1077).
-    ///
-    /// Not on wasm: the goal surface a part's `register_goals` hands the game
-    /// does not cross yet (#1077); entity parts are a native mod's for now.
-    /// The gate keeps a wasm mod's call a compile error, not a runtime one;
-    /// the generator still keeps the method off the wasm world by this doc.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>);
-    /// Answer entity capability `name` for entity type `kind` with `provider`; mods reach it
-    /// through `entity_capability`.
-    fn provide_entity_capability(
-        &mut self,
-        name: &'static str,
-        kind: &str,
-        before_game: bool,
-        provider: EntityProviderOf,
-    );
 }
 
 impl dyn Registrar + '_ {
@@ -211,37 +158,15 @@ impl dyn Registrar + '_ {
     }
 }
 
-impl Registrar for PartRegistrar {
-    #[cfg(not(target_arch = "wasm32"))]
-    fn attach_entity_part(&mut self, entity: &str, kind: &'static str, part: Arc<dyn EntityPart>) {
-        self.attach(|p| &mut p.entities, kind, entity, part);
-    }
-
-    fn provide_entity_capability(
-        &mut self,
-        name: &'static str,
-        kind: &str,
-        before_game: bool,
-        provider: EntityProviderOf,
-    ) {
-        self.capability(
-            |p| &mut p.entity_capabilities,
-            name,
-            ProviderTarget::Id(kind),
-            before_game,
-            {
-                let handler = provider.handler();
-                (provider, handler)
-            },
-        );
-    }
-}
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    use super::*;
+    use crate::parts::tests::*;
+    use crate::*;
 
     #[test]
-    fn entity_parts_refuse_unnamespaced_ids_and_doubles() {
+    pub(crate) fn entity_parts_refuse_unnamespaced_ids_and_doubles() {
         struct Once;
         #[mod_api::horizon_part]
         impl super::EntityPart for Once {
@@ -258,7 +183,7 @@ pub mod tests {
         }
         struct Invalid;
         #[mod_api::__subscriptions]
-        impl super::super::Hooks for Invalid {
+        impl crate::Hooks for Invalid {
             fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
                 r.entity_part("zombie", Twice);
                 r.entity_part("minecraft:zombie", Once);
@@ -277,7 +202,7 @@ pub mod tests {
         );
     }
 
-    struct EntityBattery(EntityRef);
+    pub(crate) struct EntityBattery(pub(crate) EntityRef);
     impl EnergyHandler for EntityBattery {
         fn amount(&self, host: &mut dyn ServerHost) -> u32 {
             ROBOT_ENERGY
@@ -306,7 +231,7 @@ pub mod tests {
         }
     }
 
-    struct EntityTank(EntityRef);
+    pub(crate) struct EntityTank(pub(crate) EntityRef);
     impl ResourceHandler<FluidResource> for EntityTank {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             1

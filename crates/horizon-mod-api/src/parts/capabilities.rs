@@ -1,7 +1,8 @@
-type Capabilities<P> = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart<P>>>>;
+use super::*;
+pub(crate) type Capabilities<P> = HashMap<&'static str, HashMap<Box<str>, Vec<CapabilityPart<P>>>>;
 
-enum ProviderTarget<'a> {
-    BlockEntity(&'a super::BlockEntityTypeKey),
+pub(crate) enum ProviderTarget<'a> {
+    BlockEntity(&'a crate::BlockEntityTypeKey),
     Id(&'a str),
 }
 
@@ -9,13 +10,13 @@ enum ProviderTarget<'a> {
 /// [`EntityProviderOf`].
 #[derive(Clone)]
 pub(crate) struct CapabilityPart<P> {
-    mod_id: &'static str,
-    mod_index: usize,
+    pub(crate) mod_id: &'static str,
+    pub(crate) mod_index: usize,
     /// The handler type it gives, for refusing a capability name answered with two.
-    type_name: &'static str,
+    pub(crate) type_name: &'static str,
     /// Asked ahead of the game's own provider.
-    before_game: bool,
-    provider: P,
+    pub(crate) before_game: bool,
+    pub(crate) provider: P,
 }
 
 /// A capability provider whose handler type is a mod's own (a key a library's `[api]` crate
@@ -31,31 +32,10 @@ pub struct OwnProvider {
     pub(crate) handler: &'static str,
 }
 
-/// How a lookup reads the capability providers mods registered, in the order they are asked
-/// (those registered `before_game`, then the others, each in registration order): the game's
-/// table, which a wasm mod reads through the game.
-// hidden: a lookup's view of the registrar's table, not part of the mod surface
-#[doc(hidden)]
-pub trait CapabilityProviders {
-    /// Whether any mod registered capability `name` for the things `by` names. This presence
-    /// check includes disabled mods; enumeration skips their providers.
-    fn provided(&self, by: ProvidedBy, name: &str) -> bool;
-}
-
 /// The registrar's table, as the game reads it.
 pub(crate) struct InstalledProviders;
 
-impl CapabilityProviders for InstalledProviders {
-    fn provided(&self, by: ProvidedBy, name: &str) -> bool {
-        installed().is_some_and(|installed| match by {
-            ProvidedBy::BlockEntity => installed.keys.capabilities.contains_key(name),
-            ProvidedBy::Item => installed.keys.item_capabilities.contains_key(name),
-            ProvidedBy::Entity => installed.keys.entity_capabilities.contains_key(name),
-        })
-    }
-}
-
-fn next<P: Clone>(
+pub(crate) fn next<P: Clone>(
     table: &Capabilities<P>,
     name: &str,
     id: &str,
@@ -67,7 +47,7 @@ fn next<P: Clone>(
 /// A provider by its handler type: one case for each handler type `mod_api`'s keys name
 /// (generated from them), and [`OwnProvider`] for a mod's own.
 #[allow(missing_docs)]
-mod providers_of {
+pub(crate) mod providers_of {
     use super::*;
     // The keys' handler types and contexts, as the generated cases name them.
     #[allow(unused_imports)]
@@ -141,7 +121,7 @@ impl PartRegistrar {
     /// another handler type (two mods each declaring their own key under one name, rather than
     /// sharing the one the defining mod's `[api]` crate publishes): asked by one type, the other's
     /// providers would never answer.
-    fn capability<P>(
+    pub(crate) fn capability<P>(
         &mut self,
         table: fn(&mut Parts) -> &mut Capabilities<P>,
         name: &'static str,
@@ -212,6 +192,11 @@ impl PartRegistrar {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
+    use super::*;
+    #[cfg(test)]
+    use crate::parts::tests::*;
+    use crate::*;
 
     /// A chemical, as Mekanism's: the test mods' own resource, which the game knows nothing of.
     #[derive(Clone, Debug, PartialEq)]
@@ -301,7 +286,7 @@ pub mod tests {
         }
     }
 
-    const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
+    pub(crate) const ROBOT_ENERGY: AttachmentType<u32> = AttachmentType {
         namespace: "test",
         name: "energy",
         default: || 0,
@@ -321,7 +306,7 @@ pub mod tests {
 
     /// A second test mod, sharing `CHEMICALS` and `Chemical` with the first, as a mod depending
     /// on another's `[api]` crate does: its vats answer the same capability.
-    struct Chemist;
+    pub(crate) struct Chemist;
     #[mod_api::__subscriptions]
     impl Hooks for Chemist {
         fn register(&self, r: &mut dyn Registrar, _: &crate::RegistrationContext) {
@@ -330,7 +315,7 @@ pub mod tests {
         }
     }
 
-    const CAPABILITY_TYPES: &[&str] = &[
+    pub(crate) const CAPABILITY_TYPES: &[&str] = &[
         "pipe",
         "greedy",
         "item_overstates",
@@ -345,7 +330,7 @@ pub mod tests {
     ];
 
     #[test]
-    fn a_level_not_in_place_asks_no_provider() {
+    pub(crate) fn a_level_not_in_place_asks_no_provider() {
         game_thread();
         let mut world = PipeWorld::default();
         let host: &mut dyn ServerHost = &mut world;
@@ -357,7 +342,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_mod_reads_a_vanilla_chests_items_from_the_game_with_no_provider_for_it() {
+    pub(crate) fn a_mod_reads_a_vanilla_chests_items_from_the_game_with_no_provider_for_it() {
         game_thread();
         let mut world = PipeWorld {
             chest: Some(stick()),
@@ -374,7 +359,7 @@ pub mod tests {
     }
 
     #[test]
-    fn a_capability_part_answers_by_side_and_forwards_to_its_neighbours_capability() {
+    pub(crate) fn a_capability_part_answers_by_side_and_forwards_to_its_neighbours_capability() {
         game_thread();
         let mut world = PipeWorld::default();
         let host: &mut dyn ServerHost = &mut world;
@@ -415,7 +400,12 @@ pub mod tests {
     #[cfg(test)]
     /// Puts `amount` of `item` into slot 0 of [`ITEM_ITEMS`]' handler for the item at `place`, in a
     /// transaction committed when all went in: how much did.
-    fn fill(host: &mut dyn ServerHost, place: &ItemPlace, item: ItemStack, amount: u32) -> u32 {
+    pub(crate) fn fill(
+        host: &mut dyn ServerHost,
+        place: &ItemPlace,
+        item: ItemStack,
+        amount: u32,
+    ) -> u32 {
         let handler = place
             .capability(host, &ITEM_ITEMS)
             .expect("the item's part");
@@ -434,7 +424,7 @@ pub mod tests {
     /// handler type is refused at load, naming both mods and both types, as is a key whose name
     /// has no namespace; the same name with the same type, from another mod, is not.
     #[test]
-    fn a_capability_name_answered_with_two_handler_types_is_refused() {
+    pub(crate) fn a_capability_name_answered_with_two_handler_types_is_refused() {
         const NOT_CHEMICALS: CapabilityKey<dyn ResourceHandler<FluidResource>> =
             CapabilityKey::new("test:chemical");
         const UNNAMESPACED: CapabilityKey<dyn ResourceHandler<Chemical>> =
@@ -477,7 +467,7 @@ pub mod tests {
     }
 
     /// A handler that only tells which provider made it, by its slot count.
-    struct Marked(usize);
+    pub(crate) struct Marked(pub(crate) usize);
     impl ResourceHandler<ItemResource> for Marked {
         fn size(&self, _: &mut dyn ServerHost) -> usize {
             self.0
@@ -515,7 +505,7 @@ pub mod tests {
 
     #[cfg(test)]
     /// `test:ordered` block entities, where the game has slots of its own from x = 8 on.
-    struct Ordered;
+    pub(crate) struct Ordered;
     #[cfg(test)]
     impl ServerHost for Ordered {}
     #[cfg(test)]
@@ -558,7 +548,7 @@ pub mod tests {
     mod_api::impl_host_areas!(Ordered, except(block_entities));
 
     #[test]
-    fn disabled_capability_providers_are_skipped_and_resume() {
+    pub(crate) fn disabled_capability_providers_are_skipped_and_resume() {
         struct Later;
         #[mod_api::__subscriptions]
         impl Hooks for Later {
@@ -671,7 +661,7 @@ pub mod tests {
     }
 
     #[test]
-    fn disabling_a_provider_during_lookup_does_not_skip_the_next_mod() {
+    pub(crate) fn disabling_a_provider_during_lookup_does_not_skip_the_next_mod() {
         struct SwitchOff;
         #[mod_api::__subscriptions]
         impl Hooks for SwitchOff {
@@ -712,7 +702,7 @@ pub mod tests {
     }
 
     #[test]
-    fn providers_are_asked_ahead_of_the_game_then_the_game_then_the_mods_in_order() {
+    pub(crate) fn providers_are_asked_ahead_of_the_game_then_the_game_then_the_mods_in_order() {
         game_thread();
         let host: &mut dyn ServerHost = &mut Ordered;
         let answer = |host: &mut dyn ServerHost, x| {
@@ -772,7 +762,7 @@ pub mod tests {
     }
 
     #[test]
-    fn with_no_parts_the_block_entity_is_never_named() {
+    pub(crate) fn with_no_parts_the_block_entity_is_never_named() {
         let parts = Parts::default();
         let named = std::cell::Cell::new(false);
         let id = || {
