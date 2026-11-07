@@ -69,8 +69,10 @@ impl Game<'_> {
             radius: parameters.radius,
             horizontal: parameters.horizontal_step,
             vertical: parameters.vertical_step,
-            min_y: world.bottom_y(),
-            max_y: world.top_y() - 1,
+            // Resident columns are padded to the Overworld's storage span.
+            // BiomeSource searches use the dimension's build range instead.
+            min_y: world.shape.min_y,
+            max_y: world.shape.max_y() - 1,
         };
         terrain
             .find_closest_biome(&query)
