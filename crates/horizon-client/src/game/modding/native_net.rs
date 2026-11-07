@@ -203,7 +203,7 @@ impl Game<'_> {
         if self.screen != super::Screen::Playing {
             return Err("another screen is open".into());
         }
-        self.begin_chat_screen(text);
+        self.begin_chat_screen(text, false);
         Ok(())
     }
 

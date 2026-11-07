@@ -758,10 +758,13 @@ impl Game<'_> {
             .as_ref()
             .filter(|d| !command || d.command)
             .map(|d| d.text.clone());
-        self.begin_chat_screen(draft.as_deref().unwrap_or(prefix));
+        self.begin_chat_screen(draft.as_deref().unwrap_or(prefix), draft.is_some());
         self.ui.chat_draft_shown = draft.is_some() && self.ui.chat_screen.is_some();
     }
-    pub(super) fn begin_chat_screen(&mut self, initial: &str) {
+    /// Open the chat box on `initial`; `is_draft` when that text is the saved
+    /// draft (`ChatComponent.createScreen`), which draws grey italic until it
+    /// is edited.
+    pub(super) fn begin_chat_screen(&mut self, initial: &str, is_draft: bool) {
         if self.player.is_none() {
             return;
         }
@@ -781,6 +784,7 @@ impl Game<'_> {
             &m,
             &c,
             initial,
+            is_draft,
             self.ui.chat.recent.len(),
             b.width as i32,
             b.height as i32,
@@ -874,11 +878,13 @@ impl Game<'_> {
                     .map_or_else(String::new, |s| s.value().to_owned());
                 self.close_chat(ChatExit::Interrupted);
                 if !text.is_empty() {
-                    self.begin_chat_screen(&text);
+                    // InBedChatScreen.onPlayerWokeUp: a new ChatScreen with
+                    // the typed text, not a draft.
+                    self.begin_chat_screen(&text, false);
                 }
             }
         } else if self.sleeping.is_some() && self.screen == Screen::Playing {
-            self.begin_chat_screen("");
+            self.begin_chat_screen("", false);
             self.ui.in_bed_chat = self.screen == Screen::Chat;
         }
     }
@@ -2333,6 +2339,7 @@ mod tests {
             &m,
             &c,
             "",
+            false,
             0,
             width as i32,
             height as i32,
