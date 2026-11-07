@@ -7,15 +7,15 @@ use syn::Item;
 /// A capability key's shape: what its providers are registered by, its handler trait as
 /// written (`ResourceHandler<ItemResource>`), and an entity key's lookup context.
 #[derive(Clone, PartialEq)]
-struct KeyShape {
-    by: &'static str,
-    handler: String,
-    context: String,
+pub(crate) struct KeyShape {
+    pub(crate) by: &'static str,
+    pub(crate) handler: String,
+    pub(crate) context: String,
 }
 
 /// The shapes of `mod_api`'s capability keys (`CapabilityKey<dyn T>` and the item and entity
 /// forms), each once, in the order their keys are exported.
-fn key_shapes(index: &mut Index<'_>) -> Result<Vec<KeyShape>, String> {
+pub(crate) fn key_shapes(index: &mut Index<'_>) -> Result<Vec<KeyShape>, String> {
     let api = index.module("mod_api", &[])?;
     let names: Vec<String> = index.modules[api]
         .items
@@ -71,7 +71,7 @@ fn key_shapes(index: &mut Index<'_>) -> Result<Vec<KeyShape>, String> {
 
 impl KeyShape {
     /// Its provider trait, as an owner (`BlockCapabilityProvider<dyn ResourceHandler<ItemResource>>`).
-    fn provider(&self) -> String {
+    pub(crate) fn provider(&self) -> String {
         match self.by {
             "Entity" => format!(
                 "EntityCapabilityProvider<dyn {}, {}>",
@@ -81,7 +81,7 @@ impl KeyShape {
         }
     }
     /// Its case in the provider enum (`ResourceHandlerItemResource`).
-    fn case(&self) -> String {
+    pub(crate) fn case(&self) -> String {
         let context = if self.by == "Entity" && self.context != "()" {
             self.context.as_str()
         } else {
