@@ -177,13 +177,22 @@ mod tests {
         assert_eq!(restored.read(&KEY), Err(AttachmentError::Decode));
         let mismatch = AttachmentEntry::from(AttachmentEntryForm::Decoded {
             value: Arc::new("other type"),
-            encoded: Some(Compound::new()),
+            encoded: Some([("payload".into(), Tag::Int(37))].into()),
             policy: AttachmentPolicy {
-                copy_on_death: false,
-                sync: false,
+                copy_on_death: true,
+                sync: true,
             },
         });
         let restored = AttachmentEntry::from(AttachmentEntryForm::from(&mismatch));
         assert_eq!(restored.read(&KEY), Err(AttachmentError::TypeMismatch));
+        let AttachmentEntryForm::Decoded {
+            encoded, policy, ..
+        } = AttachmentEntryForm::from(&restored)
+        else {
+            panic!("decoded entry lost its form");
+        };
+        assert_eq!(encoded, Some([("payload".into(), Tag::Int(37))].into()));
+        assert!(policy.copy_on_death);
+        assert!(policy.sync);
     }
 }

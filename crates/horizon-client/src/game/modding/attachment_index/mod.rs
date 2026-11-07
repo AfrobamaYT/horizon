@@ -107,6 +107,8 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod block_entity_tests;
+#[cfg(test)]
+mod boundary_tests;
 
 #[cfg(test)]
 mod tests {

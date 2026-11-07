@@ -199,6 +199,9 @@ impl Game<'_> {
     }
 
     pub(super) fn native_lifecycle_open_started(&mut self) {
+        if let Some(remote) = &mut self.remote {
+            remote.attachments.clear();
+        }
         self.attachment_indexes.clear();
         self.native_lifecycle
             .begin_open(self.native_lifecycle_authority());
