@@ -4111,7 +4111,9 @@ impl<'a> BackendMutRef<'a> {
 
 /// The read backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(crate) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
+// hidden: a game-side helper, the wasm host half serves backend calls through it
+#[doc(hidden)]
+pub fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
     host.backend().map(|wrapper| wrapper.open())
 }
 
@@ -4193,11 +4195,15 @@ impl LevelSide<'_> {
 
 /// The write backend behind `host`, or `None` where the host has none; the
 /// caller answers its typed refusal instead of running on.
-pub(crate) fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
+// hidden: a game-side helper, the wasm host half serves backend calls through it
+#[doc(hidden)]
+pub fn backend_mut_of(host: &mut dyn ServerHost) -> Option<&mut dyn BackendMut> {
     host.backend_mut().map(|wrapper| wrapper.open())
 }
 
-pub(crate) fn client_backend_mut_of(
+// hidden: a game-side helper, the wasm host half serves backend calls through it
+#[doc(hidden)]
+pub fn client_backend_mut_of(
     host: &mut dyn ClientHost,
 ) -> Option<&mut dyn ClientBackendMut> {
     host.client_backend_mut().map(|wrapper| wrapper.open())
