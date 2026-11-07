@@ -197,6 +197,8 @@ pub struct AttachmentIndex<H> {
     buckets: HashMap<BucketKey, Arc<Vec<AttachmentRow<H>>>>,
     owners: HashMap<H, Owner>,
     empty: Arc<Vec<AttachmentRow<H>>>,
+    #[cfg(feature = "test-work-count")]
+    work: AtomicU64,
 }
 
 impl<H> Default for AttachmentIndex<H> {
@@ -205,11 +207,26 @@ impl<H> Default for AttachmentIndex<H> {
             buckets: HashMap::new(),
             owners: HashMap::new(),
             empty: Arc::new(Vec::new()),
+            #[cfg(feature = "test-work-count")]
+            work: AtomicU64::new(0),
         }
     }
 }
 
 impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
+    #[inline]
+    fn record_work(&self) {
+        #[cfg(feature = "test-work-count")]
+        self.work.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Number of lookup, validation or mutation calls, for owning-thread idle proofs.
+    #[doc(hidden)]
+    #[cfg(feature = "test-work-count")]
+    pub fn work_count(&self) -> u64 {
+        self.work.load(Ordering::Relaxed)
+    }
+
     /// Install the authoritative map, replacing the holder's previous membership.
     /// Only lifecycle code may register; a bound map publishes through its token.
     /// Rebinding invalidates stale save/COW bindings, even when their keys match.
@@ -222,6 +239,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         holder: H,
         entries: impl IntoIterator<Item = (AttachmentKey, Arc<AttachmentEntry>)>,
     ) -> AttachmentChange<AttachmentOwner<H>> {
+        self.record_work();
         let mut omitted = self
             .owners
             .remove(&holder)
@@ -255,6 +273,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Capture current membership and values. Missing keys share the same empty Arc;
     /// acquiring an empty snapshot neither allocates nor registers the key.
     pub fn snapshot(&self, key: &AttachmentKey) -> Arc<Vec<AttachmentRow<H>>> {
+        self.record_work();
         self.buckets
             .get(key as &dyn Lookup)
             .unwrap_or(&self.empty)
@@ -264,6 +283,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Capture a bucket by UTF-8 names without allocating UTF-16 lookup keys.
     /// Both present and absent types use expected O(1) lookup, with no full scan.
     pub fn snapshot_named(&self, namespace: &str, name: &str) -> Arc<Vec<AttachmentRow<H>>> {
+        self.record_work();
         self.buckets
             .get(&Named(namespace, name) as &dyn Lookup)
             .unwrap_or(&self.empty)
@@ -282,6 +302,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         &self,
         token: &AttachmentOwner<H>,
     ) -> Result<(), super::AttachmentRowError> {
+        self.record_work();
         if self
             .owners
             .get(&token.holder)
@@ -301,6 +322,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         key: &AttachmentKey,
         entry: Arc<AttachmentEntry>,
     ) -> AttachmentChange<bool> {
+        self.record_work();
         let Some(owner) = self
             .owners
             .get_mut(&token.holder)
@@ -345,6 +367,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         token: &AttachmentOwner<H>,
         key: &AttachmentKey,
     ) -> AttachmentChange<bool> {
+        self.record_work();
         let Some(owner) = self
             .owners
             .get_mut(&token.holder)
@@ -363,6 +386,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Explicitly unload this registration. Stale or foreign tokens cannot unload
     /// a replacement owner. Retained snapshots keep their original rows and values.
     pub fn unregister(&mut self, token: &AttachmentOwner<H>) -> AttachmentChange<bool> {
+        self.record_work();
         let Some(owner) = self.owners.get(&token.holder) else {
             return AttachmentChange::new(false);
         };
@@ -377,6 +401,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
     /// Unlike token-checked unregistration, this is only for trusted holder unload,
     /// never for a map observer or Drop. Return false if the holder was not registered.
     pub fn unload(&mut self, holder: H) -> AttachmentChange<bool> {
+        self.record_work();
         let Some(owner) = self.owners.remove(&holder) else {
             return AttachmentChange::new(false);
         };
