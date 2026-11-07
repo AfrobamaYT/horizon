@@ -1272,6 +1272,7 @@ impl Game<'_> {
         self.ambience.clear(&mut self.audio);
         self.music.stop_playing(None, &mut self.audio);
         self.audio.stop_all();
+        self.mod_sounds.clear();
         // A world is leaving either way: its icon attempt goes with it.
         self.world_icon = None;
         // Minecraft.disconnect: the client level goes.
