@@ -428,4 +428,5 @@ mod tests {
 }
 
 #[cfg(test)]
+#[path = "falling_damage/helmet_tests.rs"]
 mod helmet_tests;

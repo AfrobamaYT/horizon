@@ -249,24 +249,22 @@ pub fn select_equipment_hurt<W: HurtWorld>(
     }
     let fresh = !(s.cooldown as f32 > 10.0 && !w.tag(s, HurtTag::BypassesCooldown)?);
     hit.container.record_should_cause_side_effects(fresh);
-    let damage;
-    let cooldown;
-    if fresh {
-        cooldown = hit.container.post_attack_invulnerability_ticks();
+    let (damage, cooldown) = if fresh {
+        let cooldown = hit.container.post_attack_invulnerability_ticks();
         s.last_hurt = hit.damage;
         s.cooldown = cooldown;
-        damage = hit.damage;
+        (hit.damage, cooldown)
     } else {
         if hit.damage <= s.last_hurt {
             return Ok(None);
         }
         hit.container
             .record_reduction(Reduction::Invulnerability, s.last_hurt);
-        cooldown = s.cooldown;
+        let cooldown = s.cooldown;
         hit.container
             .set_post_attack_invulnerability_ticks(cooldown);
-        damage = hit.damage - s.last_hurt;
-    }
+        (hit.damage - s.last_hurt, cooldown)
+    };
     Ok(Some(SelectedHurt {
         hit,
         damage,
