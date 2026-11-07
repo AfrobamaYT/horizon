@@ -182,6 +182,11 @@ pub fn apply_enchantment(
     stack: &ItemStack,
 ) -> Option<ItemStack> {
     let list = enchantment_list(e, items, seed, slot, cost, &stack.item);
+    apply_enchantment_list(stack, list)
+}
+
+/// Apply a selection to a copy of the stack, storing a book's enchantments in an enchanted book.
+pub fn apply_enchantment_list(stack: &ItemStack, list: Levels) -> Option<ItemStack> {
     if list.is_empty() {
         return None;
     }

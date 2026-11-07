@@ -1410,7 +1410,15 @@ impl Game<'_> {
         {
             let _ = p.set_health(0.0, true);
         }
-        // EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
+        self.refresh_armor_protection();
+        let mut status = self.potions.effects.status();
+        if let Some(p) = self.player.as_mut() {
+            status.protection = std::mem::take(&mut p.status.protection);
+            p.status = status;
+        }
+    }
+    /// EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
+    pub(in crate::game) fn refresh_armor_protection(&mut self) {
         let armor: Vec<Option<ItemStack>> = self.armor.to_vec();
         if !self
             .potions
@@ -1451,11 +1459,6 @@ impl Game<'_> {
             if let Some(p) = self.player.as_mut() {
                 p.status.protection = table;
             }
-        }
-        let mut status = self.potions.effects.status();
-        if let Some(p) = self.player.as_mut() {
-            status.protection = std::mem::take(&mut p.status.protection);
-            p.status = status;
         }
     }
     /// The players a thrown potion can hit (`Projectile.canHitEntity`): the
@@ -1759,11 +1762,12 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
-        self.breath_clouds.append(&mut clouds);
+        self.breath_clouds
+            .restore(clouds, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
     }
     /// `AreaEffectCloud.serverTick`: configured lifetime/radius changes and
     /// five-tick doses, with each victim's configured reapplication delay.

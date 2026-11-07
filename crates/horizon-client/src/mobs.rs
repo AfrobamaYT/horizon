@@ -1799,6 +1799,9 @@ pub struct Mob {
     pub profile: Option<horizon_protocol::entity_data::Profile>,
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
+    /// What `entity_size` answered for its pose and vanilla size (`EntityEvent.Size`):
+    /// `dims` uses it while it holds.
+    pub size_answer: Option<crate::pose::SizeAnswer>,
 }
 impl crate::entity_rules::EntityRules for Mob {
     fn is_no_gravity(&self) -> bool {
@@ -3233,6 +3236,7 @@ pub fn apply_brain_events(
                     attacker: mob as i32,
                     // Pufferfish.touch uses DamageSources.sting: the fish, no projectile.
                     projectile: None,
+                    direct: None,
                     held: [held, None],
                     player_uuid: None,
                 };
@@ -3679,6 +3683,7 @@ impl Mob {
             cape: None,
             profile: None,
             random_textures: Default::default(),
+            size_answer: None,
             attrs: Attrs {
                 speed: kind.speed,
                 attack_damage: kind.attack_damage,
@@ -3870,11 +3875,19 @@ impl Mob {
         self.damage_with(level, amount, source, None)
     }
     /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
-    /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
+    /// past the flag. Fire-immune mobs also refuse fire, except a ghast's reflected fireball.
+    /// The guard every damage hook runs after (`LivingIncomingDamageEvent`).
     pub fn refuses_damage(&self, source: &Damage) -> bool {
         !self.alive()
             || self.removed
             || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+            || (source.is_fire() && self.kind.flags.fire_immune && !self.reflected_fireball(source))
+    }
+    /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a player's return hit.
+    fn reflected_fireball(&self, source: &Damage) -> bool {
+        &*self.kind.id == "minecraft:ghast"
+            && source.kind == DamageKind::Fireball
+            && source.attacker == Some(Who::Player)
     }
     /// `LivingEntity.hurtServer`'s partial mob adapter, with health reductions inline.
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
@@ -3923,12 +3936,7 @@ impl Mob {
         }
         // Ghast.isReflectedFireball: a fireball a player turned back is
         // no fire to it, and kills it (Ghast.hurtServer: 1000 damage).
-        let reflected = &*self.kind.id == "minecraft:ghast"
-            && source.kind == DamageKind::Fireball
-            && source.attacker == Some(Who::Player);
-        if source.is_fire() && (self.kind.flags.fire_immune) && !reflected {
-            return false;
-        }
+        let reflected = self.reflected_fireball(&source);
         if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
             return false;
         }

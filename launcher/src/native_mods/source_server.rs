@@ -189,8 +189,7 @@ fn run(proof: Proof, private: bool) {
         )
         .unwrap();
     }
-    let native = bundle.manifest.native.as_mut().unwrap();
-    for entry in &mut native.internals {
+    for entry in &mut bundle.manifest.internals {
         entry.hash = catalog
             .internals
             .iter()
@@ -239,7 +238,7 @@ fn run(proof: Proof, private: bool) {
     .unwrap()
     .trim()
     .into();
-    document["native"]["internals"] = toml::Value::try_from(&bundle.native().internals).unwrap();
+    document["internals"] = toml::Value::try_from(&bundle.manifest.internals).unwrap();
     document["inject"] = toml::Value::try_from(&bundle.manifest.inject).unwrap();
     fs::write(manifest_path, toml::to_string(&document).unwrap()).unwrap();
     assert_eq!(

@@ -542,7 +542,7 @@ pub(super) mod tests {
                 ),
                 Ok(false)
             );
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert_eq!(villager.level(game), None);
             game.mobs = taken;
         });

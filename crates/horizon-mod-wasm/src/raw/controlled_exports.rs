@@ -256,7 +256,7 @@ fn controlled_load_and_registration() {
     };
     assert!(crate::INTERNALS.set(&TABLE).is_ok());
     let text = format!(
-        "id='controlled'\nname='Controlled'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[native]\n[[native.internals]]\npath='Counter'\nhash='internal'\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='a'\nat=\"{}\"\nkind='head'\naccess='internals'\nwith='listener'\nhash='signature'\npriority=10\n",
+        "id='controlled'\nname='Controlled'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[internals]]\npath='Counter'\nhash='internal'\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='a'\nat=\"{}\"\nkind='head'\naccess='internals'\nwith='listener'\nhash='signature'\npriority=10\n",
         "0".repeat(128),
         TARGETS[mod_points::PointId::Tick as usize]
     );
@@ -370,7 +370,7 @@ fn manifest_listener_loads_at_its_declared_place() {
     };
     assert!(crate::INTERNALS.set(&TABLE).is_ok());
     let text = format!(
-        "id='controlled'\nname='Controlled'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[native]\n[[native.internals]]\npath='Counter'\nhash='internal'\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='a'\nat=\"{}\"\nkind='head'\naccess='internals'\nwith='listener'\nhash='signature'\npriority=0\n",
+        "id='controlled'\nname='Controlled'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[[internals]]\npath='Counter'\nhash='internal'\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='a'\nat=\"{}\"\nkind='head'\naccess='internals'\nwith='listener'\nhash='signature'\npriority=0\n",
         "0".repeat(128),
         TARGETS[mod_points::PointId::Tick as usize]
     );
@@ -379,6 +379,10 @@ fn manifest_listener_loads_at_its_declared_place() {
     assert!(listen(&manifest, &exports).unwrap().is_some());
     manifest.inject[0].priority = 1;
     assert!(listen(&manifest, &exports).unwrap().is_some());
+    manifest.internals[0].hash = "changed".into();
+    assert!(
+        matches!(listen(&manifest, &exports), Err(crate::Refusal::ChangedInternal { path }) if path == "Counter")
+    );
 }
 mod build_script {
     include!(concat!(
@@ -393,7 +397,7 @@ mod build_script {
         let catalog = r#"[{"path":"horizon_client::game::Game","kind":"struct","signature":"struct Game {}","hash":"g"},{"path":"horizon_client::game::Game<'_>::tick","kind":"method","signature":"fn tick(&mut self)","hash":"h"}]"#;
         fs::write(dir.join("catalog.json"), catalog).unwrap();
         let manifest = format!(
-            "id='generation'\nname='Generation'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n[native]\ninternals=[{{path=\"horizon_client::game::Game<'_>::tick\",hash='h'}}]\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='internals'\nhash='h'\nwith='chosen'",
+            "id='generation'\nname='Generation'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\ninternals=[{{path=\"horizon_client::game::Game<'_>::tick\",hash='h'}}]\n[wasm]\nsha512='{}'\ntoolchain='1.99.1'\n[[inject]]\nid='listener'\nat=\"horizon_client::game::Game<'_>::tick\"\nkind='head'\naccess='internals'\nhash='h'\nwith='chosen'",
             "0".repeat(128)
         );
         let manifest = format!(

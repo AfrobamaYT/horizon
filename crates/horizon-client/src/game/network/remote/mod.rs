@@ -52,7 +52,7 @@ use std::{
 use winit::{event::MouseButton, keyboard::KeyCode};
 use {
     horizon_core::nbt::Tag,
-    horizon_mod_runtime::attachments::{Attachments, Holder},
+    horizon_mod_runtime::attachments::{Holder, ResidentAttachments},
     horizon_world::{
         level::InteractionResult,
         registry::BlockStateId,
@@ -509,7 +509,7 @@ pub(super) struct Remote {
     /// The server announced it carries mod messages.
     pub mod_net: bool,
     /// The synced attachments the server sent, by holder.
-    pub attachments: HashMap<Holder, Attachments>,
+    pub attachments: HashMap<Holder, ResidentAttachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -6692,6 +6692,8 @@ impl Game<'_> {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        // `EntityEvent.Size` for the pose the tick set.
+        self.native_local_player_size();
         if let Some(player) = player {
             self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
         }
@@ -7688,7 +7690,7 @@ impl Game<'_> {
             .retain(|_, (_, steps)| *steps > 0);
         let mut entered = Vec::new();
         if running {
-            let mut items = std::mem::take(&mut self.dropped);
+            let mut items = self.dropped.lift();
             items.retain_mut(|item| {
                 // The server decides entity collisions. This copy predicts block movement.
                 let (_, discarded) =
@@ -8926,6 +8928,31 @@ impl Game<'_> {
         }
     }
 
+    /// Another player of this level, whose copy passes every click (`Player.interactOn`).
+    pub(super) fn is_level_player(&self, id: i32) -> bool {
+        self.remote
+            .as_ref()
+            .is_some_and(|r| r.level_players.contains_key(&id))
+    }
+
+    /// Whether a main-hand right click with `held` would end on the block hit, for the gameplay
+    /// guide: what `remote_block_reacts` answers on its dry level.
+    pub(super) fn block_takes_click(&mut self, hit: &super::Hit, held: Option<&ItemStack>) -> bool {
+        self.remote_block_reacts(hit, held).0.consumes_action()
+    }
+    /// `InteractionResult.CONSUME` for this click: the block keeps it and does nothing, so the
+    /// item in hand never gets it either (an empty flower pot, a pressed button).
+    pub(super) fn block_swallows_click(
+        &mut self,
+        hit: &super::Hit,
+        held: Option<&ItemStack>,
+    ) -> bool {
+        matches!(
+            self.remote_block_reacts(hit, held).0,
+            InteractionResult::Consume
+        )
+    }
+
     /// Whether the block hit takes a main-hand right click with `held`
     /// (`BlockState.useItemOn`, then `useWithoutItem`), once the caller let
     /// the block react (no sneaking with full hands): a door, a button, a
@@ -9125,7 +9152,11 @@ impl Game<'_> {
     /// blocks it set. The real level supplies collision shapes and
     /// building-blocking entities; random draws, scheduled ticks and events
     /// stay in the preview.
-    fn remote_can_place(&mut self, hit: &super::Hit, stack: &ItemStack) -> Option<DryPlace> {
+    pub(super) fn remote_can_place(
+        &mut self,
+        hit: &super::Hit,
+        stack: &ItemStack,
+    ) -> Option<DryPlace> {
         if !self.may_build() {
             return None;
         }
@@ -11592,7 +11623,7 @@ fn boat_interact_passes(chest: bool, sneaking: bool, out_of_control: bool, has_r
 /// server decides; this is the client's guess of whether to go on. A carrot or warped fungus
 /// on a stick is not here: `FoodOnAStickItem.use` passes on a client, and only the server's
 /// answer to a boost that can run swings the hand.
-fn item_has_use(info: &horizon_client::items::ItemInfo) -> bool {
+pub(super) fn item_has_use(info: &horizon_client::items::ItemInfo) -> bool {
     let id = info.id.trim_start_matches("minecraft:");
     id.ends_with("_spear")
         || info.consumable.is_some()
@@ -12066,6 +12097,8 @@ mod effect_blend_tests;
 #[cfg(test)]
 mod level_sound_tests;
 
+#[cfg(test)]
+mod attachment_query_tests;
 #[cfg(test)]
 mod tests {
     use super::super::api_values::TryIntoApi;

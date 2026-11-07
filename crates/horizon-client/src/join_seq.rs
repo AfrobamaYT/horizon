@@ -15,6 +15,9 @@ use std::{
     slice::SliceIndex,
 };
 
+#[path = "join_seq/residency.rs"]
+pub mod residency;
+
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// When an entity joined: a number above every earlier join's. Zero means it
@@ -54,6 +57,15 @@ impl JoinSeq {
 pub trait Joined {
     fn join_seq(&self) -> JoinSeq;
     fn set_join_seq(&mut self, seq: JoinSeq);
+}
+
+/// The existing pass-specific order of survivors and nested spawns.
+#[derive(Clone, Copy, Debug)]
+pub enum RestoreOrder {
+    /// Keep ticked survivors before entities created during the pass.
+    SurvivorsFirst,
+    /// Keep nested spawns before the ticked survivors.
+    SpawnsFirst,
 }
 
 /// Implements [`Joined`] for a struct with a `join: JoinSeq` field.
@@ -274,13 +286,12 @@ impl<T: Joined> ResidentList<T> {
         self.0.0.iter_mut().for_each(edit);
     }
     /// Take the owners for a pass, leaving a spawn buffer in their place.
-    pub fn take(&mut self) -> Self {
-        std::mem::take(self)
+    pub fn lift(&mut self) -> Self {
+        Self(self.0.lift())
     }
     /// Restore survivors before entities spawned while the pass was lifted.
-    pub fn restore(&mut self, mut taken: Self) {
-        taken.0.append(&mut self.0);
-        *self = taken;
+    pub fn restore(&mut self, taken: Self, order: RestoreOrder) {
+        self.0.restore(taken.0, order);
     }
 }
 
@@ -312,6 +323,21 @@ impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
 }
 
 impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
+    /// Lift a whole pass, leaving an empty spawn buffer behind.
+    pub fn lift(&mut self) -> Self {
+        std::mem::take(self)
+    }
+    /// Restore a lifted pass using its established spawn-buffer ordering.
+    pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
+        match order {
+            RestoreOrder::SurvivorsFirst => {
+                taken.append(self);
+                *self = taken;
+            }
+            RestoreOrder::SpawnsFirst if self.is_empty() => *self = taken,
+            RestoreOrder::SpawnsFirst => self.append(&mut taken),
+        }
+    }
     pub fn with_capacity(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
     }
@@ -486,6 +512,18 @@ impl<T: Joined, const DIRECT: bool> JoinList<T, DIRECT> {
             Ok(i) => Some(i),
             Err(_) => self.0.iter().position(|entity| entity.join_seq() == join),
         }
+    }
+
+    /// Temporarily lift one numbered owner without treating it as a retirement.
+    pub fn extract(&mut self, join: JoinSeq) -> Option<T> {
+        let index = self.locate(join)?;
+        Some(self.0.remove(index))
+    }
+
+    /// Return an extracted owner at its former position, preserving its number.
+    /// If other mutations shortened the list, restore it at the end instead.
+    pub fn put_back(&mut self, index: usize, entity: T) {
+        self.0.insert(index.min(self.0.len()), entity);
     }
 
     fn number(entity: &mut T) {
@@ -885,6 +923,83 @@ mod resident_tests {
     use std::{cell::Cell, rc::Rc};
 
     #[test]
+    fn joined_lift_leaves_a_spawn_buffer_and_keeps_the_original_numbers() {
+        fn check<const DIRECT: bool>() {
+            let mut owners: super::JoinList<_, DIRECT> = (1..=2).map(Numbered::new).collect();
+            let joins: Vec<_> = owners.iter().map(Joined::join_seq).collect();
+            let taken = owners.lift();
+            assert!(owners.is_empty());
+            assert_eq!(taken.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 2]);
+            owners.push(Numbered::new(3));
+            let spawned = owners[0].join;
+            assert!(spawned > joins[1]);
+            owners.restore(taken, super::RestoreOrder::SurvivorsFirst);
+            assert_eq!(
+                owners.iter().map(|e| e.value).collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+            for (index, join) in joins.into_iter().chain([spawned]).enumerate() {
+                assert_eq!(owners.locate(join), Some(index));
+            }
+        }
+        check::<true>();
+        check::<false>();
+    }
+
+    #[test]
+    fn restore_respects_both_pass_orders_with_and_without_spawns() {
+        for (order, expected) in [
+            (super::RestoreOrder::SurvivorsFirst, [1, 2, 3]),
+            (super::RestoreOrder::SpawnsFirst, [3, 1, 2]),
+        ] {
+            let mut owners: super::JoinList<_> = (1..=2).map(Numbered::new).collect();
+            let joins: Vec<_> = owners.iter().map(Joined::join_seq).collect();
+            let taken = owners.lift();
+            owners.push(Numbered::new(3));
+            owners.restore(taken, order);
+            assert_eq!(owners.iter().map(|e| e.value).collect::<Vec<_>>(), expected);
+            for join in joins {
+                assert!(owners.locate(join).is_some());
+            }
+            let taken = owners.lift();
+            owners.restore(taken, order);
+            assert_eq!(owners.iter().map(|e| e.value).collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn extraction_keeps_identity_and_restores_the_original_position() {
+        let mut list: super::JoinList<_> = (1..=3).map(Numbered::new).collect();
+        let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
+        assert!(list.extract(JoinSeq::UNJOINED).is_none());
+        let mut owner = list.extract(joins[1]).unwrap();
+        assert_eq!(owner.value, 2);
+        assert_eq!(list.locate(joins[1]), None);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 3]);
+        owner.value = 20;
+        list.put_back(1, owner);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 20, 3]);
+        for (index, join) in joins.into_iter().enumerate() {
+            assert_eq!(list.locate(join), Some(index));
+        }
+    }
+
+    #[test]
+    fn put_back_clamps_a_position_invalidated_by_other_removals() {
+        let mut list: super::JoinList<_> = (1..=3).map(Numbered::new).collect();
+        let join = list[2].join;
+        let owner = list.extract(join).unwrap();
+        list.remove(0);
+        list.put_back(2, owner);
+        assert_eq!(list.iter().map(|e| e.value).collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(list.locate(join), Some(1));
+        let owner = list.extract(join).unwrap();
+        list.clear();
+        list.put_back(usize::MAX, owner);
+        assert_eq!(list.locate(join), Some(0));
+    }
+
+    #[test]
     fn resident_lookup_tracks_numbered_owners_across_membership_changes() {
         let mut list: ResidentList<_> = (1..=3).map(Numbered::new).collect();
         let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
@@ -898,12 +1013,12 @@ mod resident_tests {
         list.retain(|entity| entity.value != 2);
         assert_eq!(list.locate(joins[1]), None);
         assert_eq!(list.locate(joins[2]), Some(0));
-        let taken = list.take();
+        let taken = list.lift();
         list.push(Numbered::new(4));
         let spawned = list[0].join;
         assert!(spawned > joins[2]);
         assert_eq!(list.locate(joins[2]), None);
-        list.restore(taken);
+        list.restore(taken, super::RestoreOrder::SurvivorsFirst);
         assert_eq!(list.locate(joins[2]), Some(0));
         assert_eq!(list.locate(spawned), Some(1));
         list.push(removed);
@@ -942,13 +1057,13 @@ mod resident_tests {
             list.push(Numbered::new(value));
         }
         let snapshot = list.to_vec();
-        let mut taken = list.take();
+        let mut taken = list.lift();
         list.push(Numbered::new(4));
         taken.retain_mut(|value| {
             value.value *= 10;
             value.value != 20
         });
-        list.restore(taken);
+        list.restore(taken, super::RestoreOrder::SurvivorsFirst);
         assert_eq!(
             list.iter().map(|e| e.value).collect::<Vec<_>>(),
             [10, 30, 4]
@@ -965,7 +1080,7 @@ mod resident_tests {
     #[test]
     fn resident_append_preserves_spawn_buffer_before_survivors() {
         let mut list: ResidentList<_> = [1, 2].into_iter().map(Numbered::new).collect();
-        let mut taken = list.take();
+        let mut taken = list.lift();
         list.push(Numbered::new(3));
         taken.retain(|e| e.value != 1);
         list.append(&mut taken);
@@ -994,10 +1109,10 @@ mod resident_tests {
         for _ in 0..3 {
             list.push(Owner(dropped.clone(), JoinSeq::UNJOINED));
         }
-        let taken = list.take();
+        let taken = list.lift();
         list.push(Owner(dropped.clone(), JoinSeq::UNJOINED));
         assert_eq!(dropped.get(), 0);
-        list.restore(taken);
+        list.restore(taken, super::RestoreOrder::SurvivorsFirst);
         assert_eq!(dropped.get(), 0);
         list.clear();
         assert_eq!(dropped.get(), 4);

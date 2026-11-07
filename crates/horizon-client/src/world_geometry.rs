@@ -39,6 +39,7 @@ pub struct WorldGeometry {
     lines: [Vec<[f32; 8]>; 2],
     quads: [Vec<Vertex>; 2],
     copies: Vec<ModelCopy>,
+    groups: std::collections::HashSet<mod_api::InstanceGroupRef>,
     accepted_models: u32,
     model_cut: u32,
     /// The stage lines and quads go to now (`RenderLevelStage::ALL`'s index).
@@ -55,6 +56,7 @@ impl Default for WorldGeometry {
             lines: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize)),
             quads: std::array::from_fn(|_| Vec::with_capacity(CAPACITY as usize * 4)),
             copies: Vec::with_capacity(INSTANCE_CAPACITY as usize),
+            groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
             accepted_models: 0,
             model_cut: 0,
             stage: 0,
@@ -72,6 +74,7 @@ impl WorldGeometry {
         self.quads.iter_mut().for_each(Vec::clear);
         self.clear_copies();
         self.model_cut = 0;
+        self.groups.clear();
         self.stage = 0;
         self.stage_ends = [[0; 4]; STAGES - 1];
     }
@@ -119,7 +122,22 @@ impl WorldGeometry {
         batch: ModelBatch,
         instances: &[ModelInstance],
         cull: Option<&impl crate::gfx::Cull>,
-        mut stage: impl FnMut(&ModelCopy) -> bool,
+        stage: impl FnMut(&ModelCopy) -> bool,
+    ) -> Result<(), InstanceError> {
+        if instances.len() > INSTANCE_CAPACITY as usize {
+            return Err(InstanceError::CapacityExceeded);
+        }
+        validate_instances(instances)?;
+        let mut stage = stage;
+        self.submit_validated_model(batch, instances, cull, |_, copy| stage(copy))
+    }
+    /// Submit copies validated when written into persistent storage.
+    pub fn submit_validated_model(
+        &mut self,
+        batch: ModelBatch,
+        instances: &[ModelInstance],
+        cull: Option<&impl crate::gfx::Cull>,
+        mut stage: impl FnMut(usize, &ModelCopy) -> bool,
     ) -> Result<(), InstanceError> {
         if instances.is_empty() {
             return Ok(());
@@ -130,19 +148,9 @@ impl WorldGeometry {
         if batch.translucent {
             return Err(InstanceError::Translucent);
         }
-        for instance in instances {
-            if instance.origin.iter().any(|v| !v.is_finite())
-                || instance.transform.iter().any(|v| !v.is_finite())
-            {
-                return Err(InstanceError::NonFinite);
-            }
-            if instance.light.block > 15 || instance.light.sky > 15 {
-                return Err(InstanceError::InvalidLight);
-            }
-        }
         let start = self.copies.len();
         let accepted = self.accepted_models;
-        for instance in instances {
+        for (index, instance) in instances.iter().enumerate() {
             if !copy_visible(
                 batch.bounds,
                 instance.transform,
@@ -168,12 +176,21 @@ impl WorldGeometry {
                 light: pack_light(instance.light),
                 overlay: pack_overlay(instance.overlay),
             };
-            if !stage(&copy) {
+            if !stage(index, &copy) {
                 self.copies.push(copy);
             }
             self.accepted_models += 1;
         }
         Ok(())
+    }
+    pub fn group_room(&self) -> bool {
+        self.groups.len() < INSTANCE_CAPACITY as usize
+    }
+    pub fn has_group(&self, group: mod_api::InstanceGroupRef) -> bool {
+        self.groups.contains(&group)
+    }
+    pub fn mark_group(&mut self, group: mod_api::InstanceGroupRef) {
+        self.groups.insert(group);
     }
     pub fn copy_count(&self) -> usize {
         self.copies.len()
@@ -350,6 +367,20 @@ fn copy_visible(
     !min.is_finite() || !max.is_finite() || cull.intersects(min, max)
 }
 
+pub fn validate_instances(instances: &[ModelInstance]) -> Result<(), InstanceError> {
+    for instance in instances {
+        if instance.origin.iter().any(|v| !v.is_finite())
+            || instance.transform.iter().any(|v| !v.is_finite())
+        {
+            return Err(InstanceError::NonFinite);
+        }
+        if instance.light.block > 15 || instance.light.sky > 15 {
+            return Err(InstanceError::InvalidLight);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,6 +495,13 @@ mod tests {
             translucent: false,
             bounds: [[0.0; 3], [1.0; 3]],
         };
+        let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+        assert_eq!(
+            draw.submit_model(batch, &oversized, None::<&NearX>, |_| panic!(
+                "oversized batch staged"
+            )),
+            Err(InstanceError::CapacityExceeded)
+        );
         let kept = draw.usage();
         let mut bad = ModelInstance::at([1.0, 0.0, 0.0], 0xFF11_2233);
         bad.light.block = 16;

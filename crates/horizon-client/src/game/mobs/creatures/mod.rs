@@ -1263,6 +1263,9 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
+        // commands, a player's interaction), before the ticks move by them.
+        self.native_mob_sizes();
         // LivingEntity.die runs when the killing blow lands: mobs killed
         // since the last tick (by the player, explosions...) die first.
         let killed: Vec<Mob> = self
@@ -1301,7 +1304,9 @@ impl Game<'_> {
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = Vec::new();
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut dead = Vec::new();
         let mut corpses = Vec::new();
         let mut died = std::mem::take(&mut self.died);
@@ -1625,11 +1630,8 @@ impl Game<'_> {
         // The mobs added during the tick (into the emptied `self.mobs`) come
         // first, as `append` put them; with none, the ticked list goes back
         // as it is instead of being copied into a new one, every mob a tick.
-        if self.mobs.is_empty() {
-            self.mobs = mobs;
-        } else {
-            self.mobs.append(&mut mobs);
-        }
+        self.mobs
+            .restore(mobs, horizon_client::join_seq::RestoreOrder::SpawnsFirst);
         self.died = died;
         snapshot.clear();
         self.creatures.seen_buf = snapshot;
@@ -1696,6 +1698,8 @@ impl Game<'_> {
         // The enderman teleports those hurts asked for (`Enderman.hurtServer`).
         self.settle_hurt_teleports()?;
         laps.lap("creature_outbox");
+        // And for the sizes the ticks changed (a pose, a baby grown, a scale).
+        self.native_mob_sizes();
         Ok(())
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
@@ -4420,6 +4424,7 @@ impl Game<'_> {
             None => self.current_attack(),
         };
         attack.projectile = self.combat.attack().projectile;
+        attack.direct = self.combat.attack().direct;
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4655,7 +4660,9 @@ impl Game<'_> {
         .inflate(Vec3::new(1.0, 0.5, 1.0));
         // Player.hasInfiniteMaterials.
         let creative = self.creative;
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut picked = Vec::new();
         projectiles.retain(|shot| {
             let Some(a) = shot.arrow.as_ref().filter(|a| !a.removed) else {
@@ -4688,7 +4695,10 @@ impl Game<'_> {
             }
             !taken
         });
-        self.creatures.projectiles = projectiles;
+        self.creatures.projectiles.restore(
+            projectiles,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
         for shot in picked {
             self.add_pickup(
                 super::pickups::Taken::Arrow(Box::new(shot)),
@@ -4697,12 +4707,12 @@ impl Game<'_> {
         }
     }
 
-    fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
         }
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
         let mut hits = Vec::new();
         // The breezes that deflected a projectile, and where.
         let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();
@@ -5003,7 +5013,10 @@ impl Game<'_> {
         for (at, event) in arrow_events {
             self.arrow_event(at, event);
         }
-        self.creatures.projectiles.append(&mut projectiles);
+        self.creatures.projectiles.restore(
+            projectiles,
+            horizon_client::join_seq::RestoreOrder::SpawnsFirst,
+        );
         for (p, hit) in hits {
             // A player's arrow on another player lands as the victim's hurt.
             if let Some(victim) = self.projectile_pvp_victim(&p, hit) {

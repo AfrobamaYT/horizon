@@ -171,7 +171,10 @@ fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>
                 (camel, name.as_str()),
                 (
                     "Draw",
-                    "DrawContext" | "BlockEntityDrawContext" | "WorldDrawContext"
+                    "DrawContext"
+                        | "BlockEntityDrawContext"
+                        | "WorldDrawContext"
+                        | "CameraDrawContext"
                 ) | (
                     "Services",
                     "ClientSession"
@@ -180,6 +183,7 @@ fn area_tiers(camel: &str, file: syn::File) -> Result<BTreeMap<Tier, Vec<Entry>>
                         | "Messages"
                         | "Players"
                         | "RenderAssets"
+                        | "InstanceGroups"
                 )
             ) {
                 continue;

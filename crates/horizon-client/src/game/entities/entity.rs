@@ -779,14 +779,13 @@ macro_rules! define_entity_handles {
             /// Moves every list out; give it back with `restore_entities`.
             pub(super) fn take_entities(&mut self) -> TakenEntities {
                 TakenEntities {
-                    $($field: std::mem::take(&mut self$(.$list)+),)*
+                    $($field: self$(.$list)+.lift(),)*
                 }
             }
-            pub(super) fn restore_entities(&mut self, mut taken: TakenEntities) {
+            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
                 $({
                     let expected = self$(.$list)+.len() + taken.$field.len();
-                    std::mem::swap(&mut self$(.$list)+, &mut taken.$field);
-                    self$(.$list)+.append(&mut taken.$field);
+                    self$(.$list)+.restore(taken.$field, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
                     debug_assert_eq!(self$(.$list)+.len(), expected);
                 })*
             }
@@ -1081,6 +1080,9 @@ impl Game<'_> {
             .chain(self.crystals.iter().map(|e| e.id))
             .chain(self.dragon.iter().map(|e| e.id))
             .chain(self.ominous_spawners.iter().map(|e| e.id))
+            // Cast hooks live with their players, not in the saveable lists.
+            // Keep both their identities and attachment holders until they leave.
+            .chain(self.fishing_hooks_here().map(|(hook, _)| hook.id()))
     }
     /// The ids of every entity in the level that is not removed: one walk.
     pub(super) fn live_entity_ids(&self) -> HashSet<u32> {
@@ -1803,7 +1805,7 @@ impl Entity for Projectile {
                 game.load_arrow(tag, uuid, player_uuid)
             }
             "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
-                game.load_spit_or_bullet(tag, player_uuid)
+                game.load_spit_or_bullet(tag, uuid, player_uuid)
             }
             "minecraft:fireball"
             | "minecraft:small_fireball"
@@ -2223,7 +2225,7 @@ mod join_order_tests {
     #[test]
     fn an_entity_put_back_keeps_its_join_number() {
         let (mut lists, joined) = mixed();
-        let taken = std::mem::take(&mut lists.tridents);
+        let taken = lists.tridents.lift();
         let before: Vec<_> = taken
             .iter()
             .map(horizon_client::join_seq::Joined::join_seq)

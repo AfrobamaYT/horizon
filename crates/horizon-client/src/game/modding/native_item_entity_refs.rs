@@ -207,7 +207,7 @@ mod tests {
             let air = test_snapshot(&ItemStack::new("minecraft:air", 1));
             assert_eq!(item.set_stack(game, air), Ok(false));
             assert_eq!(item.stack(game).unwrap().damage(), 21);
-            let taken = std::mem::take(&mut game.dropped);
+            let taken = game.dropped.lift();
             assert!(item.stack(game).is_none());
             assert!(!item.set_no_pickup_delay(game));
             game.dropped = taken;

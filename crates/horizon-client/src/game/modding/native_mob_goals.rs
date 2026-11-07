@@ -184,7 +184,9 @@ impl Game<'_> {
             .iter()
             .map(|m| super::creatures::seen(m, self.level.player_uuid))
             .collect();
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
         let mut w = self.mob_world_base(&snapshot);
         let pos = mobs[index].position;
@@ -221,7 +223,8 @@ impl Game<'_> {
         };
         drop(w);
         lent.give_back(&mut self.world);
-        self.mobs = mobs;
+        self.mobs
+            .restore(mobs, horizon_client::join_seq::RestoreOrder::SurvivorsFirst);
         self.handle_mob_events(events).ok();
         removed
     }
@@ -634,7 +637,7 @@ mod tests {
         with_game(|game| {
             let handle = mob_in_game(game, "minecraft:zombie", 99);
             mob_in_game(game, "minecraft:zombie", 100);
-            let mut mobs = std::mem::take(&mut game.mobs);
+            let mut mobs = game.mobs.lift();
             let snapshot: Vec<_> = mobs
                 .iter()
                 .map(|m| super::super::creatures::seen(m, game.level.player_uuid))
@@ -677,7 +680,7 @@ mod tests {
         with_game(|game| {
             let handle = mob_in_game(game, "minecraft:pillager", 99);
             mob_in_game(game, "minecraft:pillager", 100);
-            let mut mobs = std::mem::take(&mut game.mobs);
+            let mut mobs = game.mobs.lift();
             raider::state_mut(&mut mobs[0]).patrolling = true;
             mobs[0].ai.target = Some(Who::Player);
             let snapshot: Vec<_> = mobs
@@ -715,7 +718,7 @@ mod tests {
         with_game(|game| {
             let follower = mob_in_game(game, "minecraft:cod", 99);
             let _leader = mob_in_game(game, "minecraft:cod", 100);
-            let mut mobs = std::mem::take(&mut game.mobs);
+            let mut mobs = game.mobs.lift();
             mobs[0].extra.leader = Some(100);
             mobs[1].extra.followers = 1;
             let snapshot: Vec<_> = mobs
@@ -850,7 +853,9 @@ mod tests {
                 }
             ));
             // Remove: the species' melee attack goes, and only that one.
-            assert_eq!(zombie.remove_goal(game, "melee_attack"), Some(1));
+            crate::game::entity::taken_pass_tests::assert_mob_spawn_survives(game, |game| {
+                assert_eq!(zombie.remove_goal(game, "melee_attack"), Some(1));
+            });
             assert!(!has(game, zombie, "melee_attack"));
             assert_eq!(zombie.remove_goal(game, "melee_attack"), Some(0));
             assert_eq!(zombie.remove_target_goal(game, "hurt_by_target"), Some(1));
@@ -858,7 +863,7 @@ mod tests {
             let stale = MobRef::new(EntityRef::new(NativeWorldEpoch::new(999), 99));
             assert!(!stale.add_goal(game, 1, &NativeGoal::Float));
             assert!(stale.goals(game).is_none());
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert!(zombie.goals(game).is_none());
             assert_eq!(zombie.remove_goal(game, "panic"), None);
             game.mobs = taken;
