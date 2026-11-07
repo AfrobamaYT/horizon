@@ -29,10 +29,22 @@ pub fn after(_: Receiver<'_, '_>, value: &Output) {
 pub fn call_value(_: Receiver<'_, '_>, value: Output) -> Output {
     assert!(
         AFTER.swap(false, Ordering::SeqCst),
-        "after then modify value"
+        "after then value transform"
     );
     if value == 300 {
         eprintln!("SLOT ORDER CALL VALUE: 300 -> 319");
     }
     value + 19
+}
+pub fn wrap_value(
+    receiver: Receiver<'_, '_>,
+    args: &mut Args,
+    original: &mut dyn FnMut(Receiver<'_, '_>, &mut Args) -> Output,
+) -> Output {
+    let value = original(receiver, args);
+    let value = call_value(receiver, value);
+    if value == 319 {
+        eprintln!("SLOT ORDER CALL WRAP: 300 -> 319");
+    }
+    value
 }

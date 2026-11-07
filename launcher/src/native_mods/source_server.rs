@@ -4,14 +4,14 @@ use super::*;
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES (prepared 26.3), Rust, Python and a real game build"]
 fn dedicated_function_slots_keep_order_and_write_back() {
-    run(false, false, false);
+    run(Proof::Sites, false);
 }
 
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES (prepared 26.3), Rust, Python and two real game builds"]
 fn identical_callbacks_use_listed_and_source_routes() {
     for private in [false, true] {
-        run(true, private, false);
+        run(Proof::Functions, private);
     }
 }
 
@@ -19,11 +19,30 @@ fn identical_callbacks_use_listed_and_source_routes() {
 #[ignore = "requires prepared 26.3 and two real game builds"]
 fn identical_call_callbacks_use_listed_and_source_routes() {
     for private in [false, true] {
-        run(false, private, true);
+        run(Proof::Calls, private);
     }
 }
 
-fn run(functions: bool, private: bool, calls: bool) {
+#[test]
+#[ignore = "requires prepared 26.3 and two real game builds"]
+fn identical_wrap_callbacks_use_listed_and_source_routes() {
+    for private in [false, true] {
+        run(Proof::Wrapping, private);
+    }
+}
+
+#[derive(Debug)]
+enum Proof {
+    Sites,
+    Functions,
+    Calls,
+    Wrapping,
+}
+
+fn run(proof: Proof, private: bool) {
+    let functions = matches!(proof, Proof::Functions);
+    let calls = matches!(proof, Proof::Calls | Proof::Wrapping);
+    let wrapping = matches!(proof, Proof::Wrapping);
     let resources = PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared 26.3"),
@@ -31,7 +50,7 @@ fn run(functions: bool, private: bool, calls: bool) {
     assert!(resources.join("asset-index.json").is_file());
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let scratch = repo.join("target").join(format!(
-        "source-server-{}-{functions}-{private}-{calls}",
+        "source-server-{}-{proof:?}-{private}",
         std::process::id()
     ));
     fs::create_dir_all(&scratch).unwrap();
@@ -148,7 +167,10 @@ fn run(functions: bool, private: bool, calls: bool) {
             .iter_mut()
             .find(|entry| entry.id == "value")
             .unwrap();
-        value.with = "call_value".into();
+        value.with = if wrapping { "wrap_value" } else { "call_value" }.into();
+        if wrapping {
+            value.kind = horizon_mod_package::manifest::inject::Kind::WrapCall;
+        }
         value.priority = 7;
         let mut before = value.clone();
         before.id = "before".into();
@@ -288,6 +310,9 @@ fn run(functions: bool, private: bool, calls: bool) {
     }
     if calls {
         driver.arg("--calls");
+    }
+    if wrapping {
+        driver.arg("--wrapping");
     }
     checked(driver);
 }

@@ -41,10 +41,12 @@ facade. `head` and `return` use function slots. If no compiled slot exists, nati
 listeners use a private source point and rebuild the game; the callback and its facade record path
 stay unchanged. The log says `source (private slot, reason)` and private rows are never published
 in `points.json`. Targets below `mod_points` are refused because dispatch would create a Cargo cycle.
-`before_call`, `after_call` and `modify_value` also use private source calls when the canonical callee
-is absent from every slot list. U2 validates their exact identity against the staged SDK before any game
-build; missing, moved or ambiguous calls refuse. Listed stale calls never fall back to source.
-`wrap_call` and `wrap_if` currently require listed call slots. For all call kinds, use the catalog's
+`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` also use private source calls
+when the canonical callee is absent from every slot list. The launcher validates their exact identity
+against the staged SDK before any game build; missing, moved or ambiguous calls refuse. Listed stale
+calls never fall back to source. `wrap_call` controls whether and how often to invoke the original;
+`wrap_if` runs it only when its condition returns true and requires unit output. The unit check runs
+once the private site's metadata exists, before game compilation. For all call kinds, use the catalog's
 canonical `call`, `nth` and statement `ctx`, not its place fingerprint `hash`.
 The generated `Listener`, `Receiver`, `Args` and `Output` facade names derive from that canonical callee
 and are identical on listed and source routes; physical IDs and dispatch remain distinct. The same
