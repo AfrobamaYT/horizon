@@ -605,26 +605,42 @@ impl Game<'_> {
             });
         }
         let next = &mut self.next_entity;
-        let mut give = |id: &mut u32| {
+        self.tnts.iter_mut().for_each(|t| {
+            super::entity::assign_stored_id(next, &mut t.id, None);
+        });
+        self.falling.for_each_mut(|f| {
+            super::entity::assign_stored_id(next, &mut f.id, Some(&f.attachment_lifetime));
+        });
+        self.creatures.projectiles.iter_mut().for_each(|p| {
+            super::entity::assign_stored_id(next, &mut p.id, Some(&p.attachment_lifetime));
+        });
+        self.tridents.iter_mut().for_each(|t| {
+            super::entity::assign_stored_id(next, &mut t.id, None);
+        });
+        self.rockets.iter_mut().for_each(|r| {
+            super::entity::assign_stored_id(next, &mut r.id, None);
+        });
+        self.crystals.iter_mut().for_each(|c| {
+            super::entity::assign_stored_id(next, &mut c.id, None);
+        });
+        self.bolts.iter_mut().for_each(|b| {
+            assign_entity_id(next, &mut b.id);
+        });
+        self.ominous_spawners.for_each_mut(|o| {
+            super::entity::assign_stored_id(next, &mut o.id, None);
+        });
+        self.potions.thrown_ids().for_each(|id| {
             assign_entity_id(next, id);
-        };
-        self.tnts.iter_mut().for_each(|t| give(&mut t.id));
-        self.falling.for_each_mut(|f| give(&mut f.id));
-        self.creatures
-            .projectiles
-            .iter_mut()
-            .for_each(|p| give(&mut p.id));
-        self.tridents.iter_mut().for_each(|t| give(&mut t.id));
-        self.rockets.iter_mut().for_each(|r| give(&mut r.id));
-        self.crystals.iter_mut().for_each(|c| give(&mut c.id));
-        self.bolts.iter_mut().for_each(|b| give(&mut b.id));
-        self.ominous_spawners.for_each_mut(|o| give(&mut o.id));
-        self.potions.thrown_ids().for_each(&mut give);
-        self.end.eye_ids().for_each(&mut give);
-        self.breath_clouds.for_each_mut(|b| give(&mut b.id));
-        self.dragon_fireballs
-            .iter_mut()
-            .for_each(|b| give(&mut b.id));
+        });
+        self.end.eye_ids().for_each(|id| {
+            assign_entity_id(next, id);
+        });
+        self.breath_clouds.for_each_mut(|b| {
+            super::entity::assign_stored_id(next, &mut b.id, None);
+        });
+        self.dragon_fireballs.iter_mut().for_each(|b| {
+            assign_entity_id(next, &mut b.id);
+        });
     }
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
