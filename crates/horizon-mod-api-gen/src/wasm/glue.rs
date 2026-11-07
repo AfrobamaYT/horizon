@@ -158,6 +158,59 @@ fn borrows(types: &Types<'_>, ty: &Ty) -> bool {
     }
 }
 
+/// Apply a full returned value through the mutable borrows it contains. A via type
+/// owns its update policy; in particular, returning a snapshot must not replace identity.
+fn write_value(types: &Types<'_>, ty: &Ty, value: &str, wire: &str) -> String {
+    match ty {
+        Ty::Ref(inner, true) => write_value(types, inner, &format!("(*{value})"), wire),
+        Ty::Named(id) if types.defs[*id].writeback.is_some() => {
+            let def = &types.defs[*id];
+            let Kind::Via(form) = &def.kind else {
+                unreachable!("writeback requires via")
+            };
+            format!(
+                "{value}.{}({});",
+                def.writeback.as_ref().unwrap(),
+                lift(types, form, wire)
+            )
+        }
+        ty if !borrows(types, ty) => format!("{value} = {};", lift(types, ty, wire)),
+        Ty::Named(id) => match &types.defs[*id].kind {
+            Kind::Record(fields) => fields
+                .iter()
+                .filter(|field| writable(&field.ty) && crosses(types, &field.ty))
+                .map(|field| {
+                    write_value(
+                        types,
+                        &field.ty,
+                        &format!("{value}.{}", field.rust),
+                        &format!("{wire}.{}", bound_ident(&field.wit)),
+                    )
+                })
+                .collect(),
+            Kind::TupleRecord(fields) => fields
+                .iter()
+                .enumerate()
+                .filter(|(_, field)| writable(field) && crosses(types, field))
+                .map(|(i, field)| {
+                    write_value(
+                        types,
+                        field,
+                        &format!("{value}.{i}"),
+                        &if fields.len() == 1 {
+                            wire.to_owned()
+                        } else {
+                            format!("{wire}.{i}")
+                        },
+                    )
+                })
+                .collect(),
+            _ => panic!("unsupported borrowed writeback: {}", types.defs[*id].rust),
+        },
+        _ => panic!("unsupported borrowed writeback: {ty:?}"),
+    }
+}
+
 /// Whether a type holds a record with a lifetime, which has nothing to borrow from when the
 /// game hands it back to the mod.
 pub(super) fn borrowed_record(types: &Types<'_>, ty: &Ty) -> bool {
@@ -996,7 +1049,7 @@ pub(super) fn conversions(
                             .unwrap();
                     }
                     Ty::Ref(inner, true) if !borrows(types, inner) => writes.push_str(&unchanged(
-                        format!("*v.{} = {};", f.rust, lift(types, inner, &source)),
+                        write_value(types, inner, &format!("(*v.{})", f.rust), &source),
                     )),
                     Ty::Ref(inner, true) => {
                         if let Ty::Named(inner) = &**inner
@@ -1007,26 +1060,26 @@ pub(super) fn conversions(
                                 f.rust
                             )));
                         } else {
-                            writeln!(writes, "let _ = {field};").unwrap();
+                            writes.push_str(&unchanged(write_value(
+                                types,
+                                &f.ty,
+                                &format!("v.{}", f.rust),
+                                &source,
+                            )));
                         }
                     }
-                    ty if !borrows(types, ty) => writes.push_str(&unchanged(format!(
-                        "v.{} = {};",
-                        f.rust,
-                        lift(types, ty, &source)
+                    ty if !borrows(types, ty) => writes.push_str(&unchanged(write_value(
+                        types,
+                        ty,
+                        &format!("v.{}", f.rust),
+                        &source,
                     ))),
-                    // A wrapper around one mutable borrow (`CarriedAccess`): write through it.
-                    Ty::Named(inner)
-                        if let Kind::TupleRecord(items) = &types.defs[*inner].kind
-                            && let [Ty::Ref(target, true)] = items.as_slice()
-                            && !borrows(types, target) =>
-                    {
-                        writes.push_str(&unchanged(format!(
-                            "*v.{}.0 = {};",
-                            f.rust,
-                            lift(types, target, &source)
-                        )))
-                    }
+                    ty @ Ty::Named(_) => writes.push_str(&unchanged(write_value(
+                        types,
+                        ty,
+                        &format!("v.{}", f.rust),
+                        &source,
+                    ))),
                     _ => writeln!(writes, "let _ = {field};").unwrap(),
                 }
             }
