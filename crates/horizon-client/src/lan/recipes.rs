@@ -399,6 +399,9 @@ pub fn content() -> Arc<Vec<Vec<u8>>> {
         .unwrap_or_default()
 }
 
+/// Horizon recipe viewer transfer channel.
+pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
+
 #[cfg(test)]
 mod content_tests {
     use super::*;
@@ -684,6 +687,3 @@ mod content_tests {
         assert_eq!(last.last.map(|t| t.len()), Some(5000));
     }
 }
-
-/// Horizon recipe viewer transfer channel.
-pub const TRANSFER_CHANNEL: &str = "horizon:recipe_transfer";
