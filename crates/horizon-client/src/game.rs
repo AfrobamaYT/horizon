@@ -3063,7 +3063,7 @@ struct Game<'a> {
     spectated_post_effect: Option<&'static str>,
     /// `LocalPlayer.experienceDisplayStartTick`: (last progress, seen a change, tick).
     experience_display: (f32, bool, u64),
-    boats: horizon_client::join_seq::JoinList<boats::Boat>,
+    boats: horizon_client::join_seq::JoinList<boats::Boat, false>,
     /// The boats a mob's lead can hang on, for this tick's mob ticks.
     leash_boats: Vec<(u32, horizon_client::mobs::leash::HolderState)>,
     boat_models: boats::BoatModels,

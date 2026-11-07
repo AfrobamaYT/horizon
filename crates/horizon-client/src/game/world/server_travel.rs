@@ -147,8 +147,8 @@ fn drop_hook(host: &mut LanHost, conn: u32) {
     }
 }
 
-fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined>(
-    list: &mut horizon_client::join_seq::JoinList<T>,
+fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined, const DIRECT: bool>(
+    list: &mut horizon_client::join_seq::JoinList<T, DIRECT>,
     id: u32,
     at: Vec3,
     yaw: f32,
