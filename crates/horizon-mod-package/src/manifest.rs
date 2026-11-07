@@ -435,7 +435,8 @@ impl Manifest {
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
             Internal::check_all(&native.internals)?;
-            let mut ids = std::collections::HashSet::new();
+            let mut ids: std::collections::HashSet<_> =
+                m.inject.iter().map(|entry| &entry.id).collect();
             for injection in &native.injection {
                 if injection.id.is_empty() || !ids.insert(&injection.id) {
                     return Err(format!("{MANIFEST}: empty or duplicate injection id"));
@@ -1067,6 +1068,19 @@ version = "0.1.0"
 api = "0.2"
 capabilities = ["registries"]
 "#;
+
+    #[test]
+    fn unified_and_native_raw_injections_share_the_id_namespace() {
+        let pin = "a".repeat(40);
+        let text = |raw_id| {
+            format!(
+                "{EXAMPLE}[native]\ngame='26.3'\nhorizon='{pin}'\nmixins='{pin}'\n[[inject]]\nid='shared'\nat='game::tick'\nkind='head'\nwith='tick'\nhash='signature'\n[[native.injection]]\nid='{raw_id}'\ntarget='game::tick'\nkind='HEAD'\nraw='raw_tick'\n"
+            )
+        };
+        assert!(Manifest::parse(&text("distinct")).is_ok());
+        let error = Manifest::parse(&text("shared")).unwrap_err();
+        assert!(error.contains("duplicate injection id"), "{error}");
+    }
 
     #[test]
     fn refuses_bad_ids_and_retired_manifests() {
