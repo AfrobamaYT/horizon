@@ -3080,11 +3080,16 @@ impl Game<'_> {
                 let Some(host) = self.lan.as_mut() else {
                     return;
                 };
-                let guests: Vec<(u32, i32)> = host
+                let mut guests: Vec<(u64, u32, i32)> = host
                     .hub
                     .guests
                     .iter()
-                    .filter_map(|g| Some((g.vehicle?, g.entity_id)))
+                    .filter_map(|g| Some((g.vehicle_order, g.vehicle?, g.entity_id)))
+                    .collect();
+                guests.sort_by_key(|&(order, ..)| order);
+                let guests: Vec<(u32, i32)> = guests
+                    .into_iter()
+                    .map(|(_, vehicle, id)| (vehicle, id))
                     .collect();
                 let mut riding = std::mem::take(&mut host.hub.riding);
                 self.lan_riding(&guests, &mut riding);

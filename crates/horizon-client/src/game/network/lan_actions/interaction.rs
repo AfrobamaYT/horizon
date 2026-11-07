@@ -290,6 +290,9 @@ impl Game<'_> {
             .border
             .contains(f64::from(hit.pos[0]), f64::from(hit.pos[2]))
         {
+            if spectator && self.spectator_use_portal(conn, gi, hit.pos) {
+                return Ok(());
+            }
             let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
             let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
             let used = self
@@ -299,6 +302,7 @@ impl Game<'_> {
                     g.forced_hit = Some(hit);
                     g.guest_use = Some(GuestUse::OnBlock(hand));
                     let swings = g.swings_started;
+                    let predicted = g.predicted_swings;
                     let consumed = matches!(g.use_item(), Ok(Some(_)));
                     // handleUseItemOn: a consuming useItemOn triggers
                     // ANY_BLOCK_USE with the hand's stack as it now is.
@@ -312,7 +316,11 @@ impl Game<'_> {
                     }
                     (g.forced_hit, g.guest_use) = saved;
                     reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
-                    (g.swings_started != swings, consumed, attempt)
+                    (
+                        g.swings_started != swings && g.predicted_swings == predicted,
+                        consumed,
+                        attempt,
+                    )
                 })
                 .ok();
             consumed = used.is_some_and(|u| u.1);

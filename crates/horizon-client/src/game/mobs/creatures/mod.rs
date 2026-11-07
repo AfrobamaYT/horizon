@@ -5257,7 +5257,9 @@ impl Game<'_> {
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         let mut attack = self.attack_of_who(p.owner);
         attack.projectile = Some(p.id as i32);
-        self.with_attack(attack, |g| g.projectile_hit_landed(p, hit))
+        let result = self.with_attack(attack, |g| g.projectile_hit_landed(p, hit));
+        self.settle_dealt_absorbed(p.owner == Some(Who::Player));
+        result
     }
     fn projectile_hit_landed(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
