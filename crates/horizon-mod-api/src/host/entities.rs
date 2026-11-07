@@ -554,7 +554,7 @@ pub trait EntitiesBackendMut {
     #[access(WorldOnly)]
     fn entity_leash_to(&mut self, entity: EntityRef, holder: EntityRef) -> bool;
     /// Side: server.
-    /// Ties the mob's or boat's lead to the fence at `pos`, as `native_entity_leash_to` does to
+    /// Ties the mob's or boat's lead to the fence at `pos`, as `entity_leash_to` does to
     /// an entity; the knot is there while a lead hangs on it. False for a stale handle, an
     /// entity that takes no lead, or no fence at `pos`.
     #[access(WorldOnly)]
