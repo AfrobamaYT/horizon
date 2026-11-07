@@ -1043,7 +1043,6 @@
   "technology": "teknologio",
   "the message in the server list": "la mesaĝo en la servillisto",
   "the port": "la haveno",
-  "the prebuilt game couldn't be downloaded ({why}), so the game builds from source": "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
   "the update failed: {error}": "la ĝisdatigo malsukcesis: {error}",
   "themed": "temeitaj",
   "through {wrapper}": "tra {wrapper}",
@@ -1124,7 +1123,6 @@
   "{online} of {max} players": "{online} el {max} ludantoj",
   "{path} already exists. Move it away, or build into another folder.": "{path} jam ekzistas. Movu ĝin for, aŭ konstruu en alian dosierujon.",
   "{path} is not a folder to build into.": "{path} ne estas enkonstruenda dosierujo.",
-  "{profile} builds the game on this computer; only Optimized uses the prebuilt game": "{profile} builds the game on this computer; only Optimized uses the prebuilt game",
   "{program} is not installed here (or not on the PATH): copy the config instead.": "{program} ne estas instalita ĉi tie (aŭ ne sur la PATH): kopiu la agordon anstataŭe.",
   "{program} said: {output}": "{program} diris: {output}",
   "{size} on disk": "{size} sur disko",
@@ -1196,5 +1194,14 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.": "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.",
   "Rust toolchain archive has {actual} bytes; expected {expected}.": "Rust toolchain archive has {actual} bytes; expected {expected}.",
-  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size."
+  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size.",
+  "Needs attention": "Needs attention",
+  "The prebuilt game couldn't be downloaded ({why}). Try again.": "The prebuilt game couldn't be downloaded ({why}). Try again.",
+  "No prebuilt game for this version": "No prebuilt game for this version",
+  "1 mod requires a full game rebuild": "1 mod requires a full game rebuild",
+  "{count} mods require a full game rebuild": "{count} mods require a full game rebuild",
+  "Injects outside the slots": "Injects outside the slots",
+  "Has a build script": "Has a build script",
+  "Uses Cargo features": "Uses Cargo features",
+  "Depends on the crate {crate}": "Depends on the crate {crate}"
 }

@@ -667,6 +667,19 @@ mod tests {
     }
 
     #[test]
+    fn missing_host_or_release_still_allows_an_explicit_source_build() {
+        let _guard = super::super::TEST_STATE.lock().unwrap();
+        for reason in [
+            SourceReason::Host,
+            SourceReason::NoRelease {
+                revision: "deadbeef".into(),
+            },
+        ] {
+            assert!(or_source(Err(reason)).unwrap().is_none());
+        }
+    }
+
+    #[test]
     fn mods_on_the_mod_api_alone_take_the_prebuilt_game() {
         assert_eq!(refusal_of("[dependencies]\nhorizon-mod-api='0.1'"), None);
         assert_eq!(

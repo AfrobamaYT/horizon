@@ -463,12 +463,10 @@ impl Launcher {
             )
     }
 
-    /// Each turned-on native mod's route under the chosen mode, read again when the files or the
-    /// mode change.
+    /// Each turned-on native mod's structural route, read again when its files change.
     fn native_routes(&self) -> native_mods::Routes {
         let home = self.mods.home();
-        let profile = Profile::chosen(&self.settings);
-        let key = format!("{}{profile:?}", native_status::fingerprint(&home, None));
+        let key = native_status::fingerprint(&home, None);
         let mut memo = self.mods.native_routes.borrow_mut();
         match memo.as_ref() {
             Some((k, routes)) if *k == key => routes.clone(),

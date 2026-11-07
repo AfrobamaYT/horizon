@@ -1043,7 +1043,6 @@
   "technology": "تکنولوژی",
   "the message in the server list": "پیام در لیست سرور",
   "the port": "بندر",
-  "the prebuilt game couldn't be downloaded ({why}), so the game builds from source": "the prebuilt game couldn't be downloaded ({why}), so the game builds from source",
   "the update failed: {error}": "به روز رسانی انجام نشد: {error}",
   "themed": "موضوعی",
   "through {wrapper}": "از طریق {wrapper}",
@@ -1124,7 +1123,6 @@
   "{online} of {max} players": "{online} از {max} بازیکن",
   "{path} already exists. Move it away, or build into another folder.": "{path} از قبل وجود دارد. آن را دور ببرید یا در پوشه دیگری ایجاد کنید.",
   "{path} is not a folder to build into.": "{path} پوشه ای برای ساختن نیست.",
-  "{profile} builds the game on this computer; only Optimized uses the prebuilt game": "{profile} builds the game on this computer; only Optimized uses the prebuilt game",
   "{program} is not installed here (or not on the PATH): copy the config instead.": "{program} در اینجا نصب نشده است (یا در PATH نیست): به جای آن پیکربندی را کپی کنید.",
   "{program} said: {output}": "{program} گفت: {output}",
   "{size} on disk": "{size} روی دیسک",
@@ -1196,5 +1194,14 @@
   "horizon-server on {host} failed in {dir}.": "horizon-server on {host} failed in {dir}.",
   "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.": "Native mods are native code that runs inside your game with your rights. Allow native mods in Settings, Storage, or pass --trust-native-code.",
   "Rust toolchain archive has {actual} bytes; expected {expected}.": "Rust toolchain archive has {actual} bytes; expected {expected}.",
-  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size."
+  "Rust toolchain archive exceeds its pinned size.": "Rust toolchain archive exceeds its pinned size.",
+  "Needs attention": "Needs attention",
+  "The prebuilt game couldn't be downloaded ({why}). Try again.": "The prebuilt game couldn't be downloaded ({why}). Try again.",
+  "No prebuilt game for this version": "No prebuilt game for this version",
+  "1 mod requires a full game rebuild": "1 mod requires a full game rebuild",
+  "{count} mods require a full game rebuild": "{count} mods require a full game rebuild",
+  "Injects outside the slots": "Injects outside the slots",
+  "Has a build script": "Has a build script",
+  "Uses Cargo features": "Uses Cargo features",
+  "Depends on the crate {crate}": "Depends on the crate {crate}"
 }
