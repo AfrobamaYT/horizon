@@ -580,7 +580,7 @@ mod tests {
         let dir = fixture();
         let path = dir.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap()
-            + "[[native.injection]]\nid='test'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n";
+            + "[[native.module]]\nid='test'\nfile='crates/horizon-client/src/game.rs'\nname='support'\nsource='src/lib.rs'\n";
         fs::write(&path, &text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         assert!(bundle.needs_mixins());
@@ -588,7 +588,8 @@ mod tests {
         let value = read(&dir.join(super::super::MANIFEST)).unwrap();
         assert!(!value.contains_key("api"));
         assert!(!value.contains_key("native"));
-        assert!(value.contains_key("injection"));
+        assert!(value.contains_key("module"));
+        assert!(!value.contains_key("injection"));
         assert_eq!(value["mod"]["id"].as_str(), Some("example"));
         assert_eq!(fs::read_to_string(path).unwrap(), text);
         fs::remove_dir_all(dir).unwrap();

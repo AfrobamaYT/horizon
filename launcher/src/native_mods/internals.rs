@@ -493,7 +493,7 @@ mod tests {
         fs::write(dir.join("Cargo.toml"), "[package]\nname='example'\nversion='1.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api={version='0.1'}\n").unwrap();
         let path = dir.join(horizon_mod_package::manifest::MANIFEST);
         let text = fs::read_to_string(&path).unwrap().replace("[native]", "internals = [{ path = 'horizon_client::game::Game', hash = '1234' }, { path = 'horizon_client::game::maps::dimension_id', hash = '5678' }]\n[native]\n")
-            + "[[native.injection]]\nid = 'count'\ntarget = \"horizon_client::game::Game<'_>::tick\"\nkind = 'HEAD'\nraw = 'count'\n";
+            + "[[inject]]\nid = 'count'\nat = \"horizon_client::game::Game<'_>::tick\"\nkind = 'head'\nwith = 'count'\naccess = 'internals'\nhash = 'tick-hash'\n";
         fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
         let catalog = Catalog {
@@ -502,7 +502,8 @@ mod tests {
             internals: serde_json::from_value(serde_json::json!([
                 { "path": "horizon_client::game::Game", "kind": "struct", "signature": "struct Game<'a> { world: World }", "hash": "1234" },
                 { "path": "horizon_client::game::maps::dimension_id", "kind": "fn", "signature": "fn dimension_id() -> u8", "hash": "5678" },
-                { "path": "horizon_client::game::maps::Game<'_>::dimension_id", "kind": "method", "signature": "impl Game<'_> { fn dimension_id(&self) -> u8 }", "hash": "abcd" }
+                { "path": "horizon_client::game::maps::Game<'_>::dimension_id", "kind": "method", "signature": "impl Game<'_> { fn dimension_id(&self) -> u8 }", "hash": "abcd" },
+                { "path": "horizon_client::game::Game<'_>::tick", "kind": "method", "signature": "fn tick(&mut self)", "hash": "tick-hash" }
             ])).unwrap(),
             points: serde_json::from_value(serde_json::json!([
                 { "name": "tick", "target": "horizon_client::game::Game<'_>::tick", "raw": true, "at_return": true,
@@ -622,18 +623,22 @@ pub mod raw {
         for missing in [false, true] {
             if missing {
                 catalog.points.clear();
+                catalog.internals.pop();
             } else {
                 catalog.points[0].raw = false;
             }
             let error = catalog.check(&bundle.manifest).unwrap_err();
-            assert_eq!(
-                error,
-                Error::NotRaw {
-                    mod_id: "example".into(),
-                    target: "horizon_client::game::Game<'_>::tick".into()
-                }
-            );
-            assert!(error.to_string().contains("E_NOT_RAW"));
+            if missing {
+                assert!(matches!(
+                    error,
+                    Error::Inject(
+                        horizon_mod_package::manifest::inject::InjectError::Missing { .. }
+                    )
+                ));
+            } else {
+                assert!(matches!(error, Error::NotRaw { .. }));
+                assert!(error.to_string().contains("E_NOT_RAW"));
+            }
         }
         fs::remove_dir_all(dir).unwrap();
     }
@@ -655,13 +660,12 @@ pub mod raw {
     #[test]
     fn method_entries_export_the_owner_and_return_listeners_use_the_return_place() {
         let (dir, mut bundle, catalog) = fixture("owner-return");
-        let native = bundle.manifest.native.as_mut().unwrap();
         bundle.manifest.internals[1] = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::maps::Game<'_>::dimension_id".into(),
             kind: None,
             hash: "abcd".into(),
         };
-        native.injection[0].kind = horizon_mod_package::manifest::InjectionKind::Return;
+        bundle.manifest.inject[0].kind = horizon_mod_package::manifest::inject::Kind::Return;
         let text = catalog.facade(&bundle.manifest).unwrap().source;
         assert_eq!(
             text.matches("pub use horizon_client::game::Game;").count(),
@@ -679,7 +683,9 @@ pub mod raw {
             &catalog.points,
             &catalog.sites,
         );
-        assert!(main.contains("mod_0_internals::raw::tick_return(\"example\", mod_0::count)"));
+        assert!(main.contains(
+            "mod_0_internals::raw::tick_return(\"example\", mod_0::count).ordered(0, \"count\")"
+        ));
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1,4 +1,6 @@
-//! A point listener, beside the helper injection in `count.rs`.
+//! The API slot and internals source callbacks share one unified manifest.
+mod count;
+pub use count::count;
 #[derive(Default)]
 struct Check;
 

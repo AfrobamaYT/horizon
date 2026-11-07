@@ -3501,7 +3501,7 @@ mod tests {
             ("plain", ""),
             (
                 "ordinary",
-                "[[native.injection]]\nid='ordinary'\ntarget='horizon_client::game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
+                "[[native.module]]\nid='ordinary'\nfile='crates/horizon-client/src/game.rs'\nname='ordinary'\nsource='src/lib.rs'\n",
             ),
             (
                 "slot_injection",
@@ -3650,7 +3650,7 @@ mod tests {
         fs::write(
             injected.join(NATIVE_MANIFEST),
             project_manifest("injected", "0.3.0", A, B)
-                + "[[native.injection]]\nid='marker'\ntarget='game::tick'\nkind='HEAD'\nhelper='src/lib.rs'\n",
+                + "[[native.module]]\nid='marker'\nfile='crates/horizon-client/src/game.rs'\nname='marker'\nsource='src/lib.rs'\n",
         )
         .unwrap();
         let mut mods = found.clone();
