@@ -360,7 +360,7 @@ mod tests {
             let pos = std::array::from_fn(|i| input["pos"][i].as_f64().unwrap());
             let yaw = input["yaw"].as_f64().unwrap() as f32;
             assert_eq!(
-                super::super::native_mobs::spawnable(pos),
+                super::in_bounds(pos),
                 expected["spawnable"].as_bool().unwrap(),
                 "{}",
                 input["name"]
