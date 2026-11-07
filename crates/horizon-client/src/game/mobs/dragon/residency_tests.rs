@@ -53,6 +53,17 @@ fn singleton_dragon_load_keeps_state_and_reserves_nine_ids() {
         game.load_dragon(tag, Some(uuid));
         assert_eq!(game.next_entity, before + 9);
         assert_eq!(game.dragon.as_ref().unwrap().id, before + 1);
+        let chunks = game.entity_chunks(&[(0, 0)].into_iter().collect(), false);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].1.len(), 1);
+        assert_eq!(
+            chunks[0].1[0].get("Health"),
+            Some(&Tag::Float(73.0f32.to_bits()))
+        );
+        assert_eq!(
+            chunks[0].1[0].get("UUID"),
+            Some(&Tag::IntArray(uuid.to_vec()))
+        );
         let entity = game.entity(before + 1).unwrap();
         assert!(entity.discard(game));
         game.native_removals_flush();
@@ -150,6 +161,17 @@ fn singleton_death_fight_scan_and_resets_discard_owners() {
         game.spawn_remote_dragon(604, [1.0, 80.0, 1.0], 0.0);
         game.clear_remote_projectiles();
         assert!(game.dragon.is_none(), "remote reset");
+        game.spawn_remote_dragon(605, [1.0, 80.0, 1.0], 0.0);
+        game.set_allow_commands(true);
+        assert!(game.run_command("kill @e[type=minecraft:ender_dragon]"));
+        assert!(game.dragon.is_none(), "command selector");
+        game.spawn_remote_dragon(606, [1.0, 80.0, 1.0], 0.0);
+        game.world.modified.clear();
+        game.tick_dragon();
+        assert!(
+            game.world.modified.contains(&(0, 0)),
+            "tick dirties the owner's chunk"
+        );
     });
 }
 
@@ -183,6 +205,46 @@ fn singleton_join_rejection_discards_the_installed_dragon() {
                     game.dragon.is_none(),
                     "join rejection left its owner installed"
                 );
+            });
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn singleton_live_owner_is_not_reported_as_departed() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    struct Witness(Arc<AtomicUsize>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Witness {
+        fn entity_leave_level(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            _: &mut mod_api::EntityLeaveLevelEvent<'_>,
+        ) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let leaves = Arc::new(AtomicUsize::new(0));
+    mod_api::testing::with_mods(
+        vec![mod_api::ModEntry::new(
+            "dragon-leaves",
+            Box::new(Witness(leaves.clone())),
+        )]
+        .into(),
+        || {
+            with_game(|game| {
+                let id = game
+                    .spawn_dragon_spawned([1.0, 80.0, 1.0], SpawnSite::Plain)
+                    .unwrap();
+                game.native_leaves_flush();
+                assert_eq!(leaves.load(Ordering::Relaxed), 0);
+                game.kill_dragon(id);
+                game.native_leaves_flush();
+                assert_eq!(leaves.load(Ordering::Relaxed), 1);
             });
         },
     );
