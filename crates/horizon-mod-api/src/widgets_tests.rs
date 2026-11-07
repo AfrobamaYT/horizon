@@ -262,3 +262,63 @@ fn drawing_asks_the_game_for_each_widget() {
         Some([10.0, 70.0, 100.0, 20.0])
     );
 }
+
+/// A widget made inactive while it has the focus takes no more input: Enter on a button
+/// presses nothing and plays nothing, typing and the edit keys leave a field as it is, and a
+/// drag no longer selects (`AbstractButton.keyPressed`, `EditBox.canConsumeInput`). Tab still
+/// moves on from it.
+#[test]
+fn a_focused_widget_made_inactive_takes_no_input() {
+    let host = Fake::default();
+    let (mut widgets, [a, b, copy, _]) = screen();
+    let mut draw = Recorder::default();
+    widgets.draw(&mut draw, &host, [0.0, 0.0]);
+    widgets.set_focus(&host, Some(copy));
+    widgets.button_mut(copy).unwrap().active = false;
+    assert_eq!(
+        widgets.key_pressed(&host, "key.keyboard.enter", 0),
+        Outcome::Ignored
+    );
+    assert!(host.sounds.borrow().is_empty());
+    widgets.text_field_mut(a).unwrap().set_value("hello");
+    widgets.mouse_pressed(&host, [14.0, 15.0], 0, 0);
+    widgets.text_field_mut(a).unwrap().active = false;
+    assert_eq!(widgets.char_typed(&host, 'x'), Outcome::Ignored);
+    assert_eq!(
+        widgets.key_pressed(&host, "key.keyboard.delete", 0),
+        Outcome::Ignored
+    );
+    assert_eq!(
+        widgets.key_pressed(&host, "key.keyboard.v", CONTROL),
+        Outcome::Ignored
+    );
+    assert_eq!(
+        widgets.mouse_dragged(&host, [33.0, 15.0], 0),
+        Outcome::Ignored
+    );
+    let edit = &widgets.text_field(a).unwrap().edit;
+    assert_eq!((edit.value.as_str(), edit.highlight, edit.cursor), ("hello", 0, 0));
+    assert_eq!(widgets.key_pressed(&host, "key.keyboard.tab", 0), Outcome::Handled);
+    assert_eq!(widgets.focused(), Some(b));
+}
+
+/// A press over no widget is not the first click of a double click (`MouseHandler.onButton`
+/// keeps the time only of a click the screen took): a click on a field right after it only
+/// places the cursor.
+#[test]
+fn an_ignored_press_starts_no_double_click() {
+    let host = Fake::default();
+    let (mut widgets, [a, ..]) = screen();
+    let mut draw = Recorder::default();
+    widgets.text_field_mut(a).unwrap().set_value("hello");
+    widgets.draw(&mut draw, &host, [0.0, 0.0]);
+    host.now.set(1000);
+    assert_eq!(
+        widgets.mouse_pressed(&host, [300.0, 300.0], 0, 0),
+        Outcome::Ignored
+    );
+    host.now.set(1100);
+    widgets.mouse_pressed(&host, [27.0, 15.0], 0, 0);
+    let edit = &widgets.text_field(a).unwrap().edit;
+    assert_eq!((edit.highlight, edit.cursor), (2, 2));
+}

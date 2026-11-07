@@ -359,6 +359,14 @@ impl Widgets {
         self.focus_index(id.map(|id| id.0), host.millis());
     }
 
+    /// The focused widget while it is active: a widget made inactive after taking the focus
+    /// keeps it (Tab moves on from there) but takes no input (`AbstractButton.keyPressed`,
+    /// `EditBox.canConsumeInput`).
+    fn active_focus(&self) -> Option<usize> {
+        self.focus
+            .filter(|&i| self.widgets.get(i).is_some_and(Widget::active))
+    }
+
     fn focus_index(&mut self, index: Option<usize>, now: u64) {
         let index = index.filter(|&i| self.widgets.get(i).is_some_and(Widget::active));
         if index != self.focus
@@ -408,7 +416,6 @@ impl Widgets {
         let double = self
             .last_press
             .is_some_and(|then| now.saturating_sub(then) < DOUBLE_CLICK_MS);
-        self.last_press = Some(now);
         let Some(index) = self
             .widgets
             .iter()
@@ -417,6 +424,8 @@ impl Widgets {
             self.focus_index(None, now);
             return Outcome::Ignored;
         };
+        // `MouseHandler.onButton` keeps the time only of a click the screen took.
+        self.last_press = Some(now);
         self.focus_index(Some(index), now);
         self.dragging = true;
         match &mut self.widgets[index] {
@@ -455,7 +464,7 @@ impl Widgets {
             return Outcome::Ignored;
         }
         let now = host.millis();
-        match self.focus.and_then(|i| self.widgets.get_mut(i)) {
+        match self.active_focus().and_then(|i| self.widgets.get_mut(i)) {
             Some(Widget::TextField(field)) => {
                 let pos = field.position_at(at[0]);
                 field.edit.set_cursor(pos, true);
@@ -481,7 +490,7 @@ impl Widgets {
         if key == "key.keyboard.tab" {
             return self.tab(!shift, now);
         }
-        let Some(index) = self.focus else {
+        let Some(index) = self.active_focus() else {
             return Outcome::Ignored;
         };
         let id = WidgetId(index);
@@ -546,7 +555,7 @@ impl Widgets {
     /// A character was typed (`screen_char_typed_pre`): the focused field takes it
     /// (`EditBox.charTyped`) when it is one a chat line may hold.
     pub fn char_typed(&mut self, host: &dyn ClientHost, c: char) -> Outcome {
-        let Some(index) = self.focus else {
+        let Some(index) = self.active_focus() else {
             return Outcome::Ignored;
         };
         let Some(Widget::TextField(field)) = self.widgets.get_mut(index) else {

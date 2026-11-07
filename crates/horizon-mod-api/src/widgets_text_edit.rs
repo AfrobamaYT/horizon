@@ -68,12 +68,21 @@ impl TextEdit {
         self.move_cursor_to_end(false);
     }
 
-    /// The selection's start and end, in characters.
+    /// The selection's start and end, in characters (kept within the text).
     pub fn selected(&self) -> (usize, usize) {
+        let len = char_len(&self.value);
         (
-            self.cursor.min(self.highlight),
-            self.cursor.max(self.highlight),
+            self.cursor.min(self.highlight).min(len),
+            self.cursor.max(self.highlight).min(len),
         )
+    }
+
+    /// Brings a cursor or anchor left past the end, by setting `value` directly, back within
+    /// the text, so every edit starts from positions inside it.
+    fn clamp(&mut self) {
+        let len = char_len(&self.value);
+        self.cursor = self.cursor.min(len);
+        self.highlight = self.highlight.min(len);
     }
 
     /// `EditBox.getHighlighted`: the selected text.
@@ -85,6 +94,7 @@ impl TextEdit {
     /// `EditBox.insertText`: `text`, filtered as `StringUtil.filterText` does, replaces the
     /// selection, cut to what the maximum length leaves room for.
     pub fn insert_text(&mut self, text: &str) {
+        self.clamp();
         let (a, b) = self.selected();
         let filtered = filter_text(text, self.multiline);
         let room = self
@@ -100,6 +110,7 @@ impl TextEdit {
     /// `EditBox.deleteChars`: `n` characters after the cursor (before it when negative), or the
     /// selection when there is one.
     pub fn delete_chars(&mut self, n: isize) {
+        self.clamp();
         if self.cursor != self.highlight {
             self.insert_text("");
             return;
@@ -158,6 +169,7 @@ impl TextEdit {
     /// `EditBox.keyPressed`'s editing keys. True when the key edits or moves (the caller then
     /// scrolls to the cursor and restarts its blink).
     pub fn key(&mut self, key: EditKey, ctrl: bool, shift: bool) -> bool {
+        self.clamp();
         match key {
             EditKey::Backspace => {
                 let n = if ctrl {
@@ -294,6 +306,26 @@ mod tests {
         let mut edit = TextEdit::new(32);
         edit.set_value(value);
         edit
+    }
+
+    /// A cursor or selection left past the end by setting `value` directly is brought back
+    /// within the text before an edit, instead of overflowing.
+    #[test]
+    fn edits_after_the_value_is_set_directly_stay_within_it() {
+        let mut edit = field("hello");
+        edit.select_all();
+        edit.value.clear();
+        assert_eq!(edit.selected_text(), "");
+        edit.insert_text("x");
+        assert_eq!((edit.value.as_str(), edit.cursor, edit.highlight), ("x", 1, 1));
+        let mut edit = field("hello world");
+        edit.value = "hi".into();
+        assert!(edit.key(EditKey::Backspace, true, false));
+        assert_eq!((edit.value.as_str(), edit.cursor), ("", 0));
+        let mut edit = field("hello");
+        edit.value.truncate(2);
+        edit.delete_chars(-1);
+        assert_eq!((edit.value.as_str(), edit.cursor), ("h", 1));
     }
 
     /// Typing replaces the selection, filters control characters and `§`, and stops at the
