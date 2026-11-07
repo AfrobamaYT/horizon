@@ -9,6 +9,11 @@ description = "The runtime for wasm mods: groups packages by their dependencies 
 [dependencies]
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
 log = "0.4"
+wasmparser = "0.261"
+wasmtime = { version = "50", default-features = false, features = ["anyhow", "cranelift", "runtime", "std", "parallel-compilation", "pulley"] }
+
+[dev-dependencies]
+wat = "1.261"
 
 [lints]
 workspace = true

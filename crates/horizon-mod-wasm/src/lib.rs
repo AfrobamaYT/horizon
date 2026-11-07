@@ -2,6 +2,8 @@
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
+pub mod link;
+
 use horizon_mod_package::dependencies;
 use horizon_mod_package::manifest::Manifest;
 use std::collections::BTreeMap;
