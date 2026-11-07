@@ -174,6 +174,23 @@ impl Levels {
             .map(|(_, level)| &mut level.streaming)
     }
 
+    /// `ServerLevel.setChunkForced`: force a column in an already open level without changing the acting
+    /// player's level; the same queue and load barrier serve the active level.
+    pub(super) fn force_parked_chunk(
+        &mut self,
+        dimension: &str,
+        x: i32,
+        z: i32,
+        forced: bool,
+    ) -> Option<bool> {
+        let level = self.parked_mut_of(dimension)?;
+        Some(
+            level
+                .streaming
+                .set_forced_loaded(&mut level.world, x, z, forced),
+        )
+    }
+
     pub(super) fn parked_anims(&self, dim: Dim) -> Option<&BlockEntityAnims> {
         self.parked.get(&dim).map(|level| &level.anims)
     }
