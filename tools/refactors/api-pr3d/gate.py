@@ -8,6 +8,8 @@ EVENTS = ("HandDrawnEvent", "RenderNeedsEvent", "WorldDrawnEvent")
 
 
 def records(source):
+    if re.search(r"#(?:\s|/\*[\s\S]*?\*/|//[^\n]*(?:\n|$))*!", source):
+        raise ValueError("inner attributes are unsupported in raw record source")
     # This byte gate supports only the generator's contiguous, single-line attributes.
     # Refuse other Rust layouts rather than silently dropping an attribute from the proof.
     for start in re.finditer(r"#\s*\[", source):
