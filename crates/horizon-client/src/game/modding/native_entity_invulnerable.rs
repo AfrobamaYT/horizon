@@ -40,7 +40,11 @@ impl Game<'_> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_flag),
             t @ (Target::Player | Target::Guest(_)) => {
-                Some(self.native_player_body(t)?.invulnerable)
+                Some(
+                    self.native_player_body(t)?
+                        .health
+                        .permanently_invulnerable,
+                )
             }
             t => Some(self.saved_invulnerable_flag(t)?),
         }
@@ -65,7 +69,7 @@ impl Game<'_> {
             Some(t @ (Target::Player | Target::Guest(_))) => {
                 self.native_player_body_mut(t)
                     .is_some_and(|p| {
-                        p.invulnerable = invulnerable;
+                        p.health.permanently_invulnerable = invulnerable;
                         true
                     })
             }
@@ -82,12 +86,7 @@ impl Game<'_> {
             Target::Stand(id) | Target::Dragon(id) | Target::Item(id) => id,
             _ => return None,
         };
-        Some(
-            self.persist
-                .raw
-                .get(&id)
-                .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable")),
-        )
+        Some(self.saved_invulnerability(id).0)
     }
     /// Writes the `Invulnerable` tag into a non-mob entity's saved data
     /// (#916), the compound its own save builds on.
@@ -148,23 +147,50 @@ impl Game<'_> {
         }
     }
 
+    /// A non-mob kind's saved invulnerability (#916), the one parse of its
+    /// entity data: the `Invulnerable` flag and the `invulnerable_time`
+    /// window. `(false, 0)` where its data has neither.
+    fn saved_invulnerability(&self, id: u32) -> (bool, i32) {
+        use horizon_core::nbt::Tag;
+        match self.persist.raw.get(&id) {
+            Some(Tag::Compound(map)) => (
+                matches!(map.get(&"Invulnerable".into()), Some(Tag::Byte(1))),
+                match map.get(&"invulnerable_time".into()) {
+                    Some(Tag::Int(ticks)) => *ticks,
+                    _ => 0,
+                },
+            ),
+            _ => (false, 0),
+        }
+    }
     /// The saved `invulnerable_time` tag of a non-mob entity's data (#916):
     /// 0 where its entity data has none. None for a kind that keeps none.
     fn saved_invulnerable_time(&self, t: Target) -> Option<i32> {
-        use horizon_core::nbt::Tag;
         let id = match t {
             Target::Stand(id) | Target::Dragon(id) | Target::Item(id) => id,
             _ => return None,
         };
-        Some(
-            match self.persist.raw.get(&id) {
-                Some(Tag::Compound(map)) => match map.get(&"invulnerable_time".into()) {
-                    Some(Tag::Int(ticks)) => *ticks,
-                    _ => 0,
-                },
-                _ => 0,
-            },
-        )
+        Some(self.saved_invulnerability(id).1)
+    }
+    /// `Entity.isInvulnerableToBase` over a non-mob kind's saved flag and
+    /// window (#916) — the one place that refusal is decided: past only for
+    /// `#bypasses_invulnerability` damage and a creative player's hit
+    /// (`isCreativePlayer`). False where the saved state has neither.
+    pub(in crate::game) fn saved_refuses_damage(
+        &self,
+        id: u32,
+        damage_type: &str,
+        creative_source: bool,
+    ) -> bool {
+        let (flag, window) = self.saved_invulnerability(id);
+        if !flag && window <= 0 {
+            return false;
+        }
+        let registry = &self.health_resources.damage;
+        let bypass = registry.id(damage_type).is_some_and(|kind| {
+            registry.in_tag(kind, "minecraft:bypasses_invulnerability")
+        });
+        !(bypass || creative_source)
     }
     /// Writes the `invulnerable_time` tag into a non-mob entity's saved data
     /// (#916).
@@ -188,18 +214,11 @@ impl Game<'_> {
     /// player's do.
     pub(in crate::game) fn tick_saved_invulnerable_time(&mut self, id: u32) {
         use horizon_core::nbt::Tag;
-        let Some(Tag::Int(ticks)) = self
-            .persist
-            .raw
-            .get(&id)
-            .and_then(|tag| match tag {
-                Tag::Compound(map) => map.get(&"invulnerable_time".into()),
-                _ => None,
-            })
-        else {
+        let ticks = self.saved_invulnerability(id).1;
+        if ticks <= 0 {
             return;
-        };
-        let ticks = (*ticks - 1).max(0);
+        }
+        let ticks = ticks - 1;
         let mut compound = match self.persist.raw.get(&id) {
             Some(Tag::Compound(map)) => map.clone(),
             _ => std::collections::BTreeMap::new(),
@@ -504,12 +523,15 @@ mod tests {
         });
     }
 
-    /// #916, review: a creative player's hit passes the victim's temporary
-    /// window (`isInvulnerableToBase`'s one exception), while the ability
-    /// flag holds even it back, as vanilla `Player.hurtServer` does.
+    /// #916, review round 2: `Entity.setInvulnerable` on a player is the
+    /// permanent flag, apart from `Abilities.invulnerable` — the abilities
+    /// stay untouched, a survival hit is refused and a creative player's
+    /// passes the flag (`isInvulnerableToBase`'s one exception), while the
+    /// ability gate (a creative player's own mode) holds even a creative
+    /// hit back, as vanilla `Player.hurtServer` does.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
-    fn a_creative_players_hit_passes_the_victims_invulnerability() {
+    fn the_players_permanent_flag_is_apart_from_their_abilities() {
         use horizon_client::motion::PlayerMotion;
         super::super::native_entity_refs::tests::with_game(|game| {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
@@ -532,15 +554,41 @@ mod tests {
                 15.0,
                 "a creative player's hit passes the window"
             );
-
-            // The ability flag is another gate (`Player.hurtServer`): even a
-            // creative player's hit does not pass it, as in vanilla.
             game.player.as_mut().unwrap().health.invulnerable_time = 0;
+            // The landed hit started the hurt cooldown: a later hit must
+            // out-damage it to land at all (`LivingEntity.hurtServer`).
+            game.player.as_mut().unwrap().health.hurt.cooldown = 0;
+            game.player.as_mut().unwrap().health.hurt.last_hurt = 0.0;
+
+            // The permanent flag is not the abilities: set_invulnerable
+            // leaves `Abilities.invulnerable` alone.
             assert!(game.native_entity_set_invulnerable(player, true));
-            game.mob_hits_player_from(5.0, [0.0; 3], "minecraft:player_attack", true);
+            assert!(
+                !game.player.as_ref().unwrap().invulnerable,
+                "the abilities are untouched"
+            );
+            game.mob_hits_player(5.0, [0.0; 3], "minecraft:player_attack");
             assert_eq!(
                 game.player.as_ref().unwrap().health.health(),
                 15.0,
+                "the flag refused the survival hit"
+            );
+            game.mob_hits_player_from(5.0, [0.0; 3], "minecraft:player_attack", true);
+            assert_eq!(
+                game.player.as_ref().unwrap().health.health(),
+                10.0,
+                "and a creative player's hit passes the flag"
+            );
+            game.player.as_mut().unwrap().health.hurt.cooldown = 0;
+            game.player.as_mut().unwrap().health.hurt.last_hurt = 0.0;
+
+            // The ability flag is another gate (`Player.hurtServer`): even a
+            // creative player's hit does not pass it, as in vanilla.
+            game.player.as_mut().unwrap().invulnerable = true;
+            game.mob_hits_player_from(5.0, [0.0; 3], "minecraft:player_attack", true);
+            assert_eq!(
+                game.player.as_ref().unwrap().health.health(),
+                10.0,
                 "the ability flag holds even a creative hit back"
             );
         });
@@ -567,6 +615,51 @@ mod tests {
                 game.tick_saved_invulnerable_time(14);
             }
             assert_eq!(game.native_entity_invulnerable_time(stand), Some(0));
+        });
+    }
+
+    /// #916, review round 2: the dragon's saved flag refuses `/damage`
+    /// except from a creative player — the one refusal every saved kind
+    /// shares (`saved_refuses_damage`).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_dragons_saved_flag_refuses_all_but_a_creative_player() {
+        use super::super::dragon::Dragon;
+        use horizon_client::mobs::DamageKind;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
+            dragon.id = 15;
+            game.dragon = Some(dragon);
+            let entity = game.native_entity(15).unwrap();
+            assert!(game.native_entity_set_invulnerable(entity, true));
+
+            // A survival player's blow: refused.
+            game.creative = false;
+            assert!(!game.command_damage_dragon(
+                15,
+                10.0,
+                "minecraft:generic",
+                DamageKind::Generic,
+                (Some(super::Target::Player), None, None),
+            ));
+            // A creative player's blow passes the flag (`isCreativePlayer`).
+            game.creative = true;
+            assert!(game.command_damage_dragon(
+                15,
+                10.0,
+                "minecraft:generic",
+                DamageKind::Generic,
+                (Some(super::Target::Player), None, None),
+            ));
+            // And the void needs no creative help (`#bypasses_invulnerability`).
+            game.creative = false;
+            assert!(game.command_damage_dragon(
+                15,
+                1000.0,
+                "minecraft:out_of_world",
+                DamageKind::OutOfWorld,
+                (Some(super::Target::Player), None, None),
+            ));
         });
     }
 }

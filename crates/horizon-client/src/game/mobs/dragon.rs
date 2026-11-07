@@ -363,7 +363,7 @@ impl Phase {
         }
     }
 }
-pub(super) struct Dragon {
+pub(in crate::game) struct Dragon {
     pub join: horizon_client::join_seq::JoinSeq,
     /// `Entity.id` once tracked to guests (0 before); its parts take the
     /// eight ids after it (`EnderDragon`'s constructor reserves them).
@@ -1554,7 +1554,7 @@ impl Game<'_> {
     /// `by` is the direct entity, `cause` the causing one (`by` without `from`), and `from`
     /// the source position (`at`, else the direct entity's), which `dealDefaultKnockback`
     /// pushes away from for a type not in `#no_knockback`.
-    pub(super) fn command_damage_dragon(
+    pub(in crate::game) fn command_damage_dragon(
         &mut self,
         id: u32,
         amount: f32,
@@ -1574,32 +1574,22 @@ impl Game<'_> {
             Some(Target::Trident(_)) => Some(ProjectileKind::Trident),
             _ => None,
         };
+        // `Entity.isInvulnerableToBase` over the saved flag and window
+        // (#916), with the attacker's creative mode as `isCreativePlayer`,
+        // before the dragon's own borrow of the game.
+        let creative = match cause.or(by) {
+            Some(Target::Player) => self.creative,
+            Some(Target::Guest(conn)) => {
+                self.command_guest(conn).is_some_and(|g| g.creative())
+            }
+            _ => false,
+        };
+        if self.saved_refuses_damage(id, ty, creative) {
+            return false;
+        }
         let Some(d) = self.dragon.as_mut().filter(|d| d.id == id) else {
             return false;
         };
-        // `Entity.isInvulnerableToBase` over the saved flag and window (#916):
-        // past only for `#bypasses_invulnerability`.
-        {
-            use horizon_core::nbt::Tag;
-            let saved = self.persist.raw.get(&id);
-            let flag = saved.is_some_and(|t| horizon_client::entity_nbt::flag(t, "Invulnerable"));
-            let window = saved.is_some_and(|t| {
-                matches!(
-                    match t {
-                        Tag::Compound(map) => map.get(&"invulnerable_time".into()),
-                        _ => None,
-                    },
-                    Some(Tag::Int(ticks)) if *ticks > 0
-                )
-            });
-            let registry = &self.health_resources.damage;
-            let bypass = registry
-                .id(ty)
-                .is_some_and(|k| registry.in_tag(k, "minecraft:bypasses_invulnerability"));
-            if (flag || window) && !bypass {
-                return false;
-            }
-        }
         if is_fire(kind) {
             let level = super::entity::damage_level_of!(self, scoped);
             let hurt = d.hurt_from(level, BODY, amount, None, shrugs(direct.as_ref()), None);

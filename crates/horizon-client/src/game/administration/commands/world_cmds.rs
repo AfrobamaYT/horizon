@@ -328,23 +328,7 @@ impl Game<'_> {
             Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
             _ => false,
         };
-        let saved = self.persist.raw.get(&id);
-        let invulnerable = saved
-            .is_some_and(|tag| horizon_client::entity_nbt::flag(tag, "Invulnerable"));
-        // `Entity.isTemporarilyInvulnerable` (#916): the saved window refuses
-        // like the flag does.
-        let window = saved.is_some_and(|tag| {
-            matches!(
-                match tag {
-                    horizon_core::nbt::Tag::Compound(map) => map.get(&"invulnerable_time".into()),
-                    _ => None,
-                },
-                Some(horizon_core::nbt::Tag::Int(ticks)) if *ticks > 0
-            )
-        });
-        if (invulnerable || window)
-            && !creative
-            && !registry.in_tag(kind, "minecraft:bypasses_invulnerability")
+        if self.saved_refuses_damage(id, damage_type, creative)
             || !self
                 .ui
                 .rules

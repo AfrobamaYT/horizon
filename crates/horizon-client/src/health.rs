@@ -618,6 +618,12 @@ pub struct PlayerHealth {
     pub ids: PlayerFloatIds,
     pub food: FoodData,
     pub hurt: State,
+    /// `Entity.permanentlyInvulnerable` (#916): the NBT `Invulnerable` flag,
+    /// what `Entity.setInvulnerable` writes — a field apart from
+    /// `Abilities.invulnerable` (the game mode the client is told about),
+    /// which vanilla keeps separately too. Not saved: Horizon's player save
+    /// keeps no such field yet.
+    pub permanently_invulnerable: bool,
     /// `Entity.invulnerableTime` (#916): the entity-level invulnerability
     /// window, its own field — never the damage cooldown (`hurt.cooldown`).
     pub invulnerable_time: i32,
@@ -680,6 +686,7 @@ impl PlayerHealth {
                 last_source: None,
                 last_stamp: 0,
             },
+            permanently_invulnerable: false,
             invulnerable_time: 0,
             hurt_animation_time: 0,
             hurt_dir: 0.0,
@@ -846,6 +853,7 @@ impl PlayerMotion {
         let totem_ready = self.health.totem_ready;
         let totem_off_hand = self.health.totem_off_hand;
         let invulnerable = self.invulnerable;
+        let permanently_invulnerable = self.health.permanently_invulnerable;
         let invulnerable_time = self.health.invulnerable_time > 0;
         let victim = self.victim();
         let h = &mut self.health;
@@ -855,6 +863,7 @@ impl PlayerMotion {
             victim,
             causing,
             invulnerable,
+            permanently_invulnerable,
             invulnerable_time,
             creative_source,
             client_loaded: self.client_loaded,
@@ -969,8 +978,11 @@ pub(crate) struct Environment<'a> {
     /// Where the player stands and looks, for the incoming-damage hook.
     pub(crate) victim: Victim,
     pub(crate) causing: i32,
-    /// Abilities.invulnerable.
+    /// `Abilities.invulnerable`, the game mode (`Player.hurtServer`'s own
+    /// gate answers it, which no creative hit passes).
     pub(crate) invulnerable: bool,
+    /// `Entity.permanentlyInvulnerable` (#916): the NBT flag.
+    pub(crate) permanently_invulnerable: bool,
     /// `Entity.invulnerableTime > 0` (#916): the entity-level window.
     pub(crate) invulnerable_time: bool,
     /// The hit is a creative player's (`DamageSource.isCreativePlayer`,
@@ -1230,7 +1242,7 @@ impl ImmunityWorld for Environment<'_> {
         false
     }
     fn permanently_invulnerable(&mut self) -> io::Result<bool> {
-        Ok(self.invulnerable)
+        Ok(self.permanently_invulnerable)
     }
     fn temporarily_invulnerable(&mut self) -> io::Result<bool> {
         Ok(self.invulnerable_time)
