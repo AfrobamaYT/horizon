@@ -2,7 +2,7 @@
 //! whose fields all have a wire form. `mod_api` includes the output at its root, so it reaches
 //! the fields a handle keeps private to the crate, and the checked constructors a host uses
 //! on what a mod sends.
-use super::ty::{Case, Def, Field, Kind, List, Payload, Str, Ty, Types};
+use super::ty::{Case, Field, Kind, List, Payload, Str, Ty, Types};
 use std::fmt::Write;
 
 /// `ty` as Rust spells it when it is owned plain data; none for a type with no wire form.

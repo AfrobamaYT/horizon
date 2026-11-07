@@ -1,6 +1,7 @@
 //! The WebAssembly interface of the mod API: every method of the traits a mod calls (the hosts,
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
 //! capability handlers), as one WIT world and the glue on both sides of it.
+mod calls;
 mod emit;
 mod ty;
 
@@ -474,7 +475,6 @@ fn hidden(attrs: &[syn::Attribute]) -> bool {
     })
 }
 
-
 /// The `Wire` impls of the API's plain data, from its sources and its generated files.
 pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<String, String> {
     let providers = crate::capability_providers::generate(root, included)?.0;
@@ -503,10 +503,82 @@ mod tests {
                 let mut kinds = std::collections::BTreeMap::<String, usize>::new();
                 for def in &surface.types.defs {
                     let kind = format!("{:?}", def.kind);
-                    let kind = kind.split(|c: char| !c.is_alphanumeric()).next().unwrap().to_owned();
+                    let kind = kind
+                        .split(|c: char| !c.is_alphanumeric())
+                        .next()
+                        .unwrap()
+                        .to_owned();
                     *kinds.entry(kind).or_default() += 1;
                 }
-                println!("methods {} unbound {} defs {} kinds {kinds:?}", surface.methods.len(), surface.unbound.len(), surface.types.defs.len());
+                println!(
+                    "methods {} unbound {} defs {} kinds {kinds:?}",
+                    surface.methods.len(),
+                    surface.unbound.len(),
+                    surface.types.defs.len()
+                );
+                fn has(ty: &super::ty::Ty, f: &dyn Fn(&super::ty::Ty) -> bool) -> bool {
+                    use super::ty::Ty::*;
+                    f(ty)
+                        || match ty {
+                            List(t, _)
+                            | Option(t)
+                            | Array(t, _)
+                            | Ref(t, _)
+                            | Boxed(t)
+                            | Shared(t) => has(t, f),
+                            Result(a, b) => has(a, f) || has(b, f),
+                            Tuple(v) => v.iter().any(|t| has(t, f)),
+                            _ => false,
+                        }
+                }
+                let mut classes = std::collections::BTreeMap::<String, usize>::new();
+                for m in &surface.methods {
+                    let tys: Vec<&super::ty::Ty> =
+                        m.params.iter().map(|p| &p.1).chain([&m.ret]).collect();
+                    let class = if tys
+                        .iter()
+                        .any(|t| has(t, &|t| matches!(t, super::ty::Ty::Handler(..))))
+                    {
+                        "handler"
+                    } else if tys
+                        .iter()
+                        .any(|t| has(t, &|t| matches!(t, super::ty::Ty::Dyn(..))))
+                    {
+                        "dyn"
+                    } else if m
+                        .params
+                        .iter()
+                        .any(|p| has(&p.1, &|t| matches!(t, super::ty::Ty::Ref(_, true))))
+                    {
+                        "mutref"
+                    } else if has(&m.ret, &|t| {
+                        matches!(
+                            t,
+                            super::ty::Ty::Ref(..)
+                                | super::ty::Ty::Str(super::ty::Str::Borrowed)
+                                | super::ty::Ty::List(_, super::ty::List::Slice)
+                        )
+                    }) {
+                        "borrowed-ret"
+                    } else {
+                        "plain"
+                    };
+                    *classes
+                        .entry(format!(
+                            "{} {class}",
+                            if super::EXPORTS.contains(&m.owner)
+                                || super::exports().contains(&m.owner)
+                            {
+                                "export"
+                            } else {
+                                "import"
+                            }
+                        ))
+                        .or_default() += 1;
+                }
+                println!("classes {classes:?}");
+                let code = super::calls::guest(&surface.types, &surface.methods);
+                std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
                 for def in &surface.types.defs {
                     if let super::ty::Kind::Opaque(why) = &def.kind {
                         println!("opaque {}: {why}", def.rust);
