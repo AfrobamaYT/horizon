@@ -9,15 +9,14 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-pub const REPO: &str = "horizon-rust/horizon";
-/// The fork the launcher reads `links.json` from and sends bug reports to.
-pub const LINKS_REPO: &str = "arismoko/horizon";
+/// Authority for game, launcher and native SDK release reads on this fork.
+pub const REPO: &str = "arismoko/horizon";
 
 /// Where a crash is reported.
 pub fn issues_url() -> String {
-    format!("https://github.com/{LINKS_REPO}/issues")
+    format!("https://github.com/{REPO}/issues")
 }
-pub const README_URL: &str = "https://github.com/horizon-rust/horizon/blob/main/launcher/README.md";
+pub const README_URL: &str = "https://github.com/arismoko/horizon/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -685,9 +684,10 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
 /// Every published release of the repository, both kinds, as GitHub's JSON (kept on disk with its
 /// ETag, and read through Kira's mirror past GitHub's rate limit: [`crate::github`]).
 fn release_list() -> Result<serde_json::Value, String> {
-    crate::github::json(&format!(
+    Ok(crate::github::json_optional(&format!(
         "https://api.github.com/repos/{REPO}/releases?per_page=100"
-    ))
+    ))?
+    .unwrap_or_else(|| serde_json::json!([])))
 }
 
 /// The releases in `list` whose tag passes `keep`, newest first, with the asset named `asset`.
@@ -703,12 +703,9 @@ pub(crate) fn parse_releases(
             continue;
         }
         let found = r["assets"].as_array().into_iter().flatten().find_map(|a| {
-            (Some(a["name"].as_str()?) == asset).then(|| {
-                Some((
-                    a["browser_download_url"].as_str()?.to_string(),
-                    a["size"].as_u64()?,
-                ))
-            })?
+            let name = a["name"].as_str()?;
+            (Some(name) == asset)
+                .then(|| Some((crate::signed::asset_url(tag, name), a["size"].as_u64()?)))?
         });
         out.push(Release {
             tag: tag.into(),
@@ -796,12 +793,12 @@ fn game_releases_with(
 /// `launcher@` and `launcher-v` tags are looked up one by one (a draft's tag is skipped: it has no
 /// public release).
 fn launcher_releases_in(list: &serde_json::Value) -> Vec<Release> {
-    launcher_releases_in_with(list, |url| crate::github::json(&url))
+    launcher_releases_in_with(list, |url| crate::github::json_optional(&url))
 }
 
 fn launcher_releases_in_with(
     list: &serde_json::Value,
-    json: impl Fn(String) -> Result<serde_json::Value, String>,
+    json: impl Fn(String) -> Result<Option<serde_json::Value>, String>,
 ) -> Vec<Release> {
     let found = parse_releases(list, launcher_asset(), is_launcher_tag);
     if found.iter().any(|r| r.asset.is_some()) {
@@ -812,13 +809,13 @@ fn launcher_releases_in_with(
     for prefix in [LAUNCHER_TAG_PREFIX, OLD_LAUNCHER_TAG_PREFIX] {
         // Every `launcher@` tag is newer than every `launcher-v` one: those only when there is none.
         if tags.is_empty() {
-            if let Ok(refs) = json(format!("{api}/git/matching-refs/tags/{prefix}")) {
+            if let Ok(Some(refs)) = json(format!("{api}/git/matching-refs/tags/{prefix}")) {
                 tags = newest_launcher_tags(&refs);
             }
         }
     }
     for tag in tags.into_iter().take(3) {
-        if let Ok(release) = json(format!("{api}/releases/tags/{tag}")) {
+        if let Ok(Some(release)) = json(format!("{api}/releases/tags/{tag}")) {
             let one = parse_releases(
                 &serde_json::json!([release]),
                 launcher_asset(),
@@ -904,7 +901,7 @@ impl Links {
 
 /// The links from main, or the built-in ones when offline.
 pub fn links() -> Links {
-    let url = format!("https://raw.githubusercontent.com/{LINKS_REPO}/main/launcher/links.json");
+    let url = format!("https://raw.githubusercontent.com/{REPO}/main/launcher/links.json");
     get(&url)
         .ok()
         .and_then(|r| r.into_string().ok())
@@ -6012,15 +6009,17 @@ pub fn {f}("
                     .borrow_mut()
                     .push(url.rsplit('/').next().unwrap_or("").to_string());
                 if url.ends_with("matching-refs/tags/launcher@") {
-                    Ok(serde_json::json!(if with_new {
+                    Ok(Some(serde_json::json!(if with_new {
                         vec![serde_json::json!({"ref": "refs/tags/launcher@0.2.0"})]
                     } else {
                         Vec::new()
-                    }))
+                    })))
                 } else if url.ends_with("matching-refs/tags/launcher-v") {
-                    Ok(serde_json::json!([{"ref": "refs/tags/launcher-v0.17.0"}]))
+                    Ok(Some(
+                        serde_json::json!([{"ref": "refs/tags/launcher-v0.17.0"}]),
+                    ))
                 } else {
-                    Ok(release(url.rsplit('/').next().unwrap_or("")))
+                    Ok(Some(release(url.rsplit('/').next().unwrap_or(""))))
                 }
             })
             .into_iter()

@@ -4449,18 +4449,32 @@ impl Game<'_> {
         let mut default_push: Option<([f64; 2], HurtSource<'_>)> = None;
         let rules = self.world.health_rules;
         let events_before = self.player.as_ref().map_or(0, |p| p.events.len());
-        if let Some(player) = self.player.as_mut()
-            && let Some(id) = self.health_resources.damage.id(damage_type)
-            && let Ok(o) = player.hurt_caused_by(
-                crate::game::entity::damage_level_of!(self, &attack),
-                &self.motion.health,
-                rules,
-                id,
-                amount,
-                blocking,
-                living_cause,
-                causing,
-            )
+        let damage_outcome = if let Some(id) = self.health_resources.damage.id(damage_type) {
+            if self
+                .health_resources
+                .damage
+                .in_tag(id, "minecraft:damages_helmet")
+            {
+                self.hurt_player_equipment(id, amount, blocking, living_cause, causing, &attack)
+            } else if let Some(player) = self.player.as_mut() {
+                player.hurt_caused_by(
+                    crate::game::entity::damage_level_of!(self, &attack),
+                    &self.motion.health,
+                    rules,
+                    id,
+                    amount,
+                    blocking,
+                    living_cause,
+                    causing,
+                )
+            } else {
+                Ok(Default::default())
+            }
+        } else {
+            Ok(Default::default())
+        };
+        if let Ok(o) = damage_outcome
+            && let Some(player) = self.player.as_mut()
             && {
                 outcome = o;
                 o.hurt
@@ -4541,7 +4555,7 @@ impl Game<'_> {
                 is_direct: !projectile,
                 source,
                 original: amount,
-                actual: amount - outcome.blocked,
+                actual: outcome.dealt,
                 blocked: outcome.blocked > 0.0,
             });
         }

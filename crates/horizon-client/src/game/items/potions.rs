@@ -1417,8 +1417,10 @@ impl Game<'_> {
             p.status = status;
         }
     }
-    /// EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
+    /// `EnchantmentHelper.getDamageProtection` after equipment changes. This
+    /// does not tick effects or clear absorption while a hit is in progress.
     pub(in crate::game) fn refresh_armor_protection(&mut self) {
+        // EnchantmentHelper.getDamageProtection per damage type, recomputed on armor change.
         let armor: Vec<Option<ItemStack>> = self.armor.to_vec();
         if !self
             .potions
