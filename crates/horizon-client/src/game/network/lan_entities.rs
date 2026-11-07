@@ -609,7 +609,7 @@ impl Game<'_> {
             assign_entity_id(next, id);
         };
         self.tnts.iter_mut().for_each(|t| give(&mut t.id));
-        self.falling.iter_mut().for_each(|f| give(&mut f.id));
+        self.falling.for_each_mut(|f| give(&mut f.id));
         self.creatures.projectiles.for_each_mut(|p| give(&mut p.id));
         self.tridents.iter_mut().for_each(|t| give(&mut t.id));
         self.rockets.iter_mut().for_each(|r| give(&mut r.id));

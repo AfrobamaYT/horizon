@@ -1784,12 +1784,14 @@ impl Game<'_> {
                 }
             }
             Target::Falling(id) => {
-                if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
-                    f.position = v;
-                    f.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(f, r);
-                    }
+                if let Some(i) = self.falling.iter().position(|f| f.id == id) {
+                    self.falling.update(i, |f| {
+                        f.position = v;
+                        f.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(f, r);
+                        }
+                    });
                 }
             }
             Target::Rocket(id) => {

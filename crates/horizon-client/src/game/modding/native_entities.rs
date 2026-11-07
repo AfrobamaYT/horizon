@@ -95,11 +95,18 @@ impl Game<'_> {
         // Target variant. Select the newly appended root, never an older waiting entity.
         let root = match kind {
             "minecraft:tnt" => self.tnts.get_mut(deferred.0).map(|e| &mut e.id),
-            "minecraft:falling_block" => self.falling.get_mut(deferred.1).map(|e| &mut e.id),
+            "minecraft:falling_block" => None,
             "minecraft:firework_rocket" => self.rockets.get_mut(deferred.2).map(|e| &mut e.id),
             _ => None,
         };
         let root = root.map(|id| super::lan_entities::assign_entity_id(&mut self.next_entity, id));
+        let root = if kind == "minecraft:falling_block" && deferred.1 < self.falling.len() {
+            Some(self.falling.update(deferred.1, |f| {
+                super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id)
+            }))
+        } else {
+            root
+        };
         self.native_mobs_joined(from, false);
         // Otherwise the root is the first entity spawned, also for kinds no
         // command target stands for (experience orbs, end crystals, cushions). An id handed out to an
@@ -190,9 +197,9 @@ impl Game<'_> {
         for t in &mut self.tnts {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
         }
-        for f in &mut self.falling {
+        self.falling.for_each_mut(|f| {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id);
-        }
+        });
         self.creatures.projectiles.for_each_mut(|p| {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut p.id);
         });

@@ -681,6 +681,9 @@ macro_rules! direct_entity_edit {
     (Projectile) => {
         false
     };
+    (Falling) => {
+        false
+    };
     (Boat) => {
         false
     };

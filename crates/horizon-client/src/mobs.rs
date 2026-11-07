@@ -1590,6 +1590,7 @@ fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
         amplifier,
         ambient: false,
         show_particles: true,
+        show_icon: true,
     };
     vec![
         ConsumeEffect::ClearAllEffects,
@@ -4469,6 +4470,7 @@ impl Mob {
                 amplifier: stored.amplifier,
                 ambient: false,
                 visible: true,
+                show_icon: true,
                 client_blend: (false, false),
                 hidden: None,
             };
@@ -6396,6 +6398,7 @@ mod totem_tests {
                     amplifier: 1,
                     ambient: false,
                     show_particles: true,
+                    show_icon: true,
                 }],
             };
             mob.apply_death_effect(&mut level.level(), &effect);
