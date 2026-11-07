@@ -716,6 +716,8 @@ impl Game<'_> {
             self.console_broadcast = None;
             self.send_admin_feedback(None);
             self.admin_feedback.clear();
+            // Then onTickRateChanged, its mods outside the server's broadcast.
+            self.on_tick_rate_changed();
         }
         let now = Instant::now();
         if !paused && self.clock.sprinting() {
