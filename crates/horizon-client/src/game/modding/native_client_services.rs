@@ -5,9 +5,9 @@ use super::Game;
 use horizon_client::{
     hud::{HudBatch, rgba},
     hud_layout::GuiDraw,
+    text::Text,
 };
 use horizon_items::items::ItemStack;
-use mod_api::Text;
 
 impl Game<'_> {
     /// Paint GUI extraction calls through this window's atlas, including player faces.
