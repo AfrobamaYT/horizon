@@ -579,6 +579,16 @@ mod tests {
                 println!("classes {classes:?}");
                 let code = super::calls::guest(&surface.types, &surface.methods);
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
+                let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
+                std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
+                println!(
+                    "dispatch arms {} apart {}",
+                    hooks.matches("answer").count(),
+                    apart.len()
+                );
+                for a in apart.iter().take(40) {
+                    println!("apart {a}");
+                }
                 for def in &surface.types.defs {
                     if let super::ty::Kind::Opaque(why) = &def.kind {
                         println!("opaque {}: {why}", def.rust);

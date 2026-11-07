@@ -184,3 +184,199 @@ pub(super) fn guest(types: &Types<'_>, methods: &[Method]) -> String {
     }
     out
 }
+
+/// The type a decoded argument is held as: the owned form of a borrowed one.
+fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
+    Some(match ty {
+        Ty::Str(Str::Borrowed) => "String".into(),
+        Ty::List(item, List::Slice) => format!("Vec<{}>", held(types, item)?),
+        Ty::Ref(inner, _) => held(types, inner)?,
+        Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
+        Ty::Dyn(..) | Ty::Handler(..) => return None,
+        Ty::Option(inner) => format!("Option<{}>", held(types, inner)?),
+        Ty::List(item, List::Vec) => format!("Vec<{}>", held(types, item)?),
+        other => rust_ty(types, other, false),
+    })
+}
+
+/// How a field of a borrowed record is read into one: the expression building it from `local`,
+/// the local's owned type, and whether the mod may change it (so it is sent back).
+struct Lent {
+    owned: String,
+    expr: String,
+    mutable: bool,
+}
+
+fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
+    let (owned, expr, mutable) = match ty {
+        Ty::Ref(inner, m) if !matches!(**inner, Ty::Dyn(..)) => (
+            held(types, inner)?,
+            format!("&{}{local}", if *m { "mut " } else { "" }),
+            *m,
+        ),
+        Ty::Str(Str::Borrowed) => ("String".into(), format!("&{local}"), false),
+        Ty::List(_, List::Slice) => (held(types, ty)?, format!("&{local}"), false),
+        Ty::Option(inner) => match &**inner {
+            Ty::Ref(t, m) => (
+                format!("Option<{}>", held(types, t)?),
+                format!("{local}.as_{}ref()", if *m { "m" } else { "" })
+                    .replace("as_mref", "as_mut"),
+                *m,
+            ),
+            Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => {
+                (held(types, ty)?, format!("{local}.as_deref()"), false)
+            }
+            _ => (held(types, ty)?, local.to_string(), true),
+        },
+        _ => (held(types, ty)?, local.to_string(), true),
+    };
+    Some(Lent {
+        owned,
+        expr,
+        mutable,
+    })
+}
+
+/// A record that borrows, as the statements reading it into locals, the expression building it
+/// from them, and the statements sending back what a mod may change.
+fn borrowed(
+    types: &Types<'_>,
+    def: usize,
+    name: &str,
+    mutable: bool,
+) -> Option<(String, String, String)> {
+    let d = &types.defs[def];
+    let super::ty::Kind::Record(fields) = &d.kind else {
+        return None;
+    };
+    let (mut read, mut build, mut back_ref, mut back_own) =
+        (String::new(), Vec::new(), String::new(), String::new());
+    for (i, f) in fields.iter().enumerate() {
+        let local = format!("{name}_{i}");
+        let lent = lend(types, &f.ty, &local)?;
+        let m = if matches!(f.ty, Ty::Ref(_, true))
+            || matches!(&f.ty, Ty::Option(t) if matches!(**t, Ty::Ref(_, true)))
+        {
+            "mut "
+        } else {
+            ""
+        };
+        writeln!(read, "let {m}{local}: {} = input.take()?;", lent.owned).unwrap();
+        build.push(format!("{}: {}", f.rust, lent.expr));
+        if mutable && lent.mutable {
+            if matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local {
+                write!(back_ref, "out.put(&{local});").unwrap();
+            } else {
+                write!(back_own, "out.put(&{name}.{});", f.rust).unwrap();
+            }
+        }
+    }
+    let m = if mutable { "mut " } else { "" };
+    read.push_str(&format!(
+        "let {m}{name} = {} {{ {} }};",
+        d.rust,
+        build.join(", ")
+    ));
+    Some((read, format!("{name}"), format!("{back_own}{back_ref}")))
+}
+
+/// Whether an export has what its dispatch arm needs: every argument decodes to an owned value
+/// or is the frame's host, and the answer is owned.
+fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
+    !has_frame(&m.ret)
+        && !borrowed_ret(&m.ret)
+        && m.params.iter().all(|(_, ty)| match ty {
+            Ty::Dyn(..) => true,
+            Ty::Ref(inner, m) => match &**inner {
+                Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                    borrowed(types, *d, "e", *m).is_some()
+                }
+                _ => held(types, ty).is_some(),
+            },
+            _ => held(types, ty).is_some(),
+        })
+}
+
+/// The guest's `hook`: one arm for every export a mod can be called through, reading the
+/// arguments from the buffer, calling the mod, and writing the answer then each `&mut`
+/// argument back whole (the host takes from it the fields a mod may change). The arms'
+/// ids are the exports' positions; the exports that need more than that are returned by name.
+pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<String>) {
+    let all: Vec<&Method> = methods
+        .iter()
+        .filter(|m| exports().contains(&m.owner))
+        .collect();
+    let mut arms = String::new();
+    let mut apart = Vec::new();
+    for (id, m) in all.iter().enumerate() {
+        if !dispatchable(types, m) {
+            apart.push(format!("{}::{}", m.owner, m.name));
+            continue;
+        }
+        let receiver = match super::mod_receiver(m.owner) {
+            Some(receiver) => receiver.to_string(),
+            None => format!(
+                "crate::wire::guest::handler::<dyn {}>(input.take()?)?",
+                trait_path(m.owner)
+            ),
+        };
+        let mut body = String::new();
+        let mut args = Vec::new();
+        let mut back = String::new();
+        for (i, (_, ty)) in m.params.iter().enumerate() {
+            match ty {
+                Ty::Dyn(_, true) => args.push("&mut host".to_string()),
+                Ty::Dyn(..) => args.push("&host".to_string()),
+                Ty::Ref(inner, m) if matches!(&**inner, Ty::Named(d) if types.defs[*d].lifetimes != 0) =>
+                {
+                    let Ty::Named(d) = &**inner else {
+                        unreachable!()
+                    };
+                    let (read, name, send) = borrowed(types, *d, &format!("p{i}"), *m).unwrap();
+                    writeln!(body, "{read}").unwrap();
+                    args.push(format!("&{}{name}", if *m { "mut " } else { "" }));
+                    back.push_str(&send);
+                }
+                Ty::Ref(_, true) => {
+                    writeln!(
+                        body,
+                        "let mut p{i}: {} = input.take()?;",
+                        held(types, ty).unwrap()
+                    )
+                    .unwrap();
+                    args.push(format!("&mut p{i}"));
+                    write!(back, "out.put(&p{i});").unwrap();
+                }
+                Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => {
+                    writeln!(
+                        body,
+                        "let p{i}: {} = input.take()?;",
+                        held(types, ty).unwrap()
+                    )
+                    .unwrap();
+                    args.push(format!("&p{i}"));
+                }
+                _ => {
+                    writeln!(
+                        body,
+                        "let p{i}: {} = input.take()?;",
+                        held(types, ty).unwrap()
+                    )
+                    .unwrap();
+                    args.push(format!("p{i}"));
+                }
+            }
+        }
+        writeln!(
+            arms,
+            "{id} => {{ let receiver = {receiver}; {body} let answer = receiver.{}({}); out.put(&answer); {back} }}",
+            m.name,
+            args.join(", ")
+        )
+        .unwrap();
+    }
+    let code = format!(
+        "// @generated by horizon-mod-api-gen; do not edit.\npub fn hook(id: u32, input: &mut crate::wire::Reader<'_>, out: &mut crate::wire::Writer) -> Result<(), crate::wire::WireError> {{\nlet mut host = Guest;\nmatch id {{\n{arms}_ => return Err(crate::wire::WireError::Tag(id)) }}\nOk(())\n}}\n"
+    );
+    (code, apart)
+}
