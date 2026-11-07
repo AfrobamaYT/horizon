@@ -410,7 +410,7 @@ impl Game<'_> {
         // Only the vehicle's controlling passenger moves it: the move of a
         // player in a boat's second seat is ignored (#11541).
         if g.vehicle
-            .is_some_and(|v| !self.guest_controls_vehicle(host, conn, v))
+            .is_some_and(|v| !self.guest_controls_vehicle(conn, v))
         {
             return;
         }
@@ -628,7 +628,6 @@ mod controller_tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:25565".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             1000 + conn as i32,
             [4.5, 200.0, 4.5],
@@ -739,7 +738,18 @@ mod controller_tests {
         host.hub.guests.push(passenger);
         host.hub.guests.push(driver);
 
-        game.lan_riding(&host.hub.guests, &mut host.hub.riding);
+        let mut seated: Vec<_> = host
+            .hub
+            .guests
+            .iter()
+            .filter_map(|g| Some((g.vehicle_order, g.vehicle?, g.entity_id)))
+            .collect();
+        seated.sort_by_key(|&(order, ..)| order);
+        let guests: Vec<_> = seated
+            .into_iter()
+            .map(|(_, vehicle, id)| (vehicle, id))
+            .collect();
+        game.lan_riding(&guests, &mut host.hub.riding);
         assert_eq!(
             host.hub.riding.passengers(boat as i32),
             [driver_id, passenger_id],
@@ -752,12 +762,13 @@ mod controller_tests {
             pitch: 0.0,
             on_ground: true,
         };
-        game.guest_move_vehicle(&mut host, 2, &move_to(start.x + 0.3));
+        game.lan = Some(host);
+        game.guest_move_vehicle(2, &move_to(start.x + 0.3));
         assert_eq!(
             game.boats[0].position, start,
             "the second seat moves nothing"
         );
-        game.guest_move_vehicle(&mut host, 3, &move_to(start.x + 0.3));
+        game.guest_move_vehicle(3, &move_to(start.x + 0.3));
         assert!(
             (game.boats[0].position.x - (start.x + 0.3)).abs() < 1.0e-9,
             "the driver moves the boat: {:?}",

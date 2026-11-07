@@ -513,13 +513,7 @@ impl Game<'_> {
             self.settle_dealt_absorbed(true);
             return;
         };
-        let Some(mut host) = self.lan.take() else {
-            // No host to enter: still drain the mobs so nothing leaks to a later hit.
-            self.settle_dealt_absorbed(false);
-            return;
-        };
-        let entered = self.as_guest(&mut host, conn, |g| g.settle_dealt_absorbed(true));
-        self.lan = Some(host);
+        let entered = self.as_guest(conn, |g| g.settle_dealt_absorbed(true));
         if entered.is_none() {
             self.settle_dealt_absorbed(false);
         }
