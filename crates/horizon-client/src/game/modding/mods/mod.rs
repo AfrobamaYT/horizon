@@ -268,6 +268,15 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
+/// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
+/// refresh of the list (`Game::refresh_debug_renderers`).
+pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
+    let mut renderers = Vec::new();
+    if role.is_client() {
+        Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+    }
+    renderers
+}
 /// The native mods' numeric item model properties
 /// (`native_register_range_select_item_model_property`), kept once at start, before
 /// resources load, so `range_dispatch` models on them read the mod's number.
