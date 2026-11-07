@@ -320,6 +320,14 @@ impl Text {
     pub fn translation_key(&self) -> Option<&str> {
         self.source.as_deref()?.get("translate")?.as_str()
     }
+    /// Borrow retained structured source without recursively cloning it.
+    /// Span-only text is materialized once because it has no retained source.
+    pub fn component_view(&self) -> std::borrow::Cow<'_, Value> {
+        match &self.source {
+            Some(source) => std::borrow::Cow::Borrowed(source),
+            None => std::borrow::Cow::Owned(self.component()),
+        }
+    }
     pub fn component(&self) -> Value {
         if let Some(c) = &self.source {
             return (**c).clone();
@@ -339,17 +347,9 @@ impl Text {
     /// A translation argument: vanilla passes numbers as numbers, which
     /// Horizon formats into unstyled literals.
     fn argument(&self) -> Value {
-        let c = self.component();
-        match c
-            .as_object()
-            .and_then(|o| o.get("text").filter(|_| o.len() == 1))
-        {
-            Some(Value::String(s)) if s.parse::<i64>().is_ok_and(|n| n.to_string() == *s) => {
-                s.parse::<i64>().map_or(c.clone(), Value::from)
-            }
-            _ => c,
-        }
+        argument_component(self.component())
     }
+
     /// Style fields the spans don't model (an entity hover, an insertion),
     /// set on the component sent to vanilla only.
     pub fn with_component_fields(mut self, fields: Vec<(String, Value)>) -> Self {
@@ -821,6 +821,19 @@ impl From<TextForm> for Text {
 impl From<serde_json::Value> for Text {
     fn from(component: serde_json::Value) -> Self {
         crate::component::spans_of(component)
+    }
+}
+
+/// Apply vanilla's numeric translation-argument representation to an owned component.
+pub fn argument_component(c: Value) -> Value {
+    match c
+        .as_object()
+        .and_then(|o| o.get("text").filter(|_| o.len() == 1))
+    {
+        Some(Value::String(s)) if s.parse::<i64>().is_ok_and(|n| n.to_string() == *s) => {
+            s.parse::<i64>().map_or(c.clone(), Value::from)
+        }
+        _ => c,
     }
 }
 
