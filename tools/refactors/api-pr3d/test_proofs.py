@@ -35,6 +35,9 @@ class ProofTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             records(source + source)
         self.assertNotEqual(records(source), records(source.replace("u32", "u64")))
+        attributed = source.replace("pub struct", "#[non_exhaustive]\n#[derive(Debug)]\npub struct")
+        self.assertNotEqual(records(source), records(attributed))
+        self.assertNotEqual(records(attributed), records(attributed.replace("Debug", "Clone")))
 
 
 if __name__ == "__main__":
