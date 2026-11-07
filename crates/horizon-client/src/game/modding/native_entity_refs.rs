@@ -913,6 +913,10 @@ pub(super) mod tests {
             })
             .collect();
         crate::game::api_values::register_game_keys(ids);
+        // Re-registering fixture keys installs a fresh Parts registry after resource loading.
+        // Publish its complete immutable definitions before preparing the numeric owner index.
+        crate::game::api_values::resolve_block_definitions(registry)
+            .expect("fixture block definitions resolve against its loaded state registry");
         mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
             .expect("fixture item keys resolve against its loaded catalog");
 
