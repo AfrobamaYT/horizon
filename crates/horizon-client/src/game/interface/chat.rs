@@ -1644,6 +1644,7 @@ impl Game<'_> {
                 &self.level.enabled_features,
             ),
         ));
+        self.restore_native_commands();
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.

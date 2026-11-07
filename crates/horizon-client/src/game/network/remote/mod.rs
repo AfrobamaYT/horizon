@@ -52,8 +52,8 @@ use std::{
 use winit::{event::MouseButton, keyboard::KeyCode};
 use {
     horizon_core::nbt::Tag,
+    horizon_mod_runtime::attachments::{Attachments, Holder},
     horizon_world::{
-        attachments::{Attachments, Holder},
         level::InteractionResult,
         registry::BlockStateId,
         stepped_interpolation::{Path, PosRot, Start, SteppedInterpolation},

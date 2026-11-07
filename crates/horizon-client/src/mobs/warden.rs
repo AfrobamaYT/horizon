@@ -554,7 +554,12 @@ pub fn listen(
 }
 /// `Level.gameEvent` for the mobs' own movement events from `from` on, as
 /// the mob AI probe has no sculk layer: every warden's listener hears them.
-pub fn hear_mob_events(mobs: &mut [Mob], events: &[MobEvent], from: usize, w: &MobWorld) {
+pub fn hear_mob_events(
+    mobs: &mut crate::join_seq::JoinList<Mob>,
+    events: &[MobEvent],
+    from: usize,
+    w: &MobWorld,
+) {
     for e in &events[from..] {
         let MobEvent::GameEvent {
             event,

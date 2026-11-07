@@ -287,6 +287,7 @@ fn wrap(d: f32) -> f32 {
 impl Game<'_> {
     /// `key.togglePerspective`: the next camera type, as a mod's `camera_type_cycle` leaves it.
     pub(super) fn cycle_camera(&mut self) {
+        self.apply_requested_camera_type();
         let previous = self.camera_type;
         let mut next = previous.cycle();
         self.native_camera_type_cycle(previous, &mut next);
@@ -295,11 +296,21 @@ impl Game<'_> {
     /// `Options.setCameraType`, then `Minecraft.handleKeybinds`' check: the chain
     /// follows the first-person view.
     pub(super) fn set_camera_type(&mut self, camera_type: CameraType) {
+        self.requested_camera_type.take();
         let previous = self.camera_type;
         self.camera_type = camera_type;
         if previous.is_first_person() != camera_type.is_first_person() {
             self.check_entity_post_effect(camera_type.is_first_person());
         }
+    }
+    /// Apply the last shared-host request through the same path as F5.
+    pub(super) fn apply_requested_camera_type(&mut self) -> bool {
+        let Some(camera_type) = self.requested_camera_type.take() else {
+            return false;
+        };
+        let changed = self.camera_type != camera_type;
+        self.set_camera_type(camera_type);
+        changed
     }
     /// `Camera.update` (`alignWithEntity` and `getMaxZoom`): the
     /// interpolated eye, or a point up to the camera distance behind (or in

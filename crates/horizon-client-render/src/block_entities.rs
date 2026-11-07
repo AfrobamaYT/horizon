@@ -25,7 +25,7 @@
 //! the start of the next tick, from the block state then.
 use crate::chunk::block_entity::{BlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 use crate::fast_hash::{FxHashMap, FxHashSet};
-use horizon_world::attachments::{Attachments, Holder, observer::AttachmentObserver};
+use horizon_mod_runtime::attachments::{Attachments, Holder, observer::AttachmentObserver};
 use std::collections::HashMap;
 use std::sync::{
     Arc,
@@ -305,7 +305,7 @@ impl BlockEntities {
     pub fn attachments_mut(
         &mut self,
         pos: Pos,
-    ) -> Option<&mut horizon_world::attachments::Attachments> {
+    ) -> Option<&mut horizon_mod_runtime::attachments::Attachments> {
         if !self.map.contains_key(&pos) && !self.out.contains_key(&pos) {
             return None;
         }
@@ -318,7 +318,7 @@ impl BlockEntities {
         Some(map)
     }
     /// The attachment map of the block entity at `pos`, if it has one.
-    pub fn attachments(&self, pos: Pos) -> Option<&horizon_world::attachments::Attachments> {
+    pub fn attachments(&self, pos: Pos) -> Option<&horizon_mod_runtime::attachments::Attachments> {
         self.attachments.get(&pos)
     }
     /// Puts the attachment map of the live block entity at `pos` back as `data`, or removes it
@@ -326,7 +326,7 @@ impl BlockEntities {
     pub fn set_attachments(
         &mut self,
         pos: Pos,
-        data: Option<horizon_world::attachments::Attachments>,
+        data: Option<horizon_mod_runtime::attachments::Attachments>,
     ) {
         match data {
             Some(data) => self.restore_attachments(pos, data),
@@ -344,7 +344,7 @@ impl BlockEntities {
         &self,
         x: i32,
         z: i32,
-    ) -> Vec<(Pos, horizon_world::attachments::Attachments)> {
+    ) -> Vec<(Pos, horizon_mod_runtime::attachments::Attachments)> {
         self.attachments
             .iter()
             .filter(|(p, _)| p.0 >> 4 == x && p.2 >> 4 == z)
@@ -352,7 +352,11 @@ impl BlockEntities {
             .collect()
     }
     /// Restore a loaded block entity's attachment map.
-    pub fn restore_attachments(&mut self, pos: Pos, data: horizon_world::attachments::Attachments) {
+    pub fn restore_attachments(
+        &mut self,
+        pos: Pos,
+        data: horizon_mod_runtime::attachments::Attachments,
+    ) {
         if self.map.contains_key(&pos) || self.out.contains_key(&pos) {
             let map = self.attachments.entry(pos).or_default();
             map.replace_contents(data);
@@ -824,7 +828,7 @@ mod tests {
     }
     #[test]
     fn attachments_follow_block_entity_lifetime() {
-        use horizon_world::attachments::{AttachmentType, Holder};
+        use horizon_mod_runtime::attachments::{AttachmentType, Holder};
         let ty = AttachmentType {
             namespace: "test",
             name: "value",
