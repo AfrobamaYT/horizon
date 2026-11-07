@@ -544,12 +544,16 @@ impl Game<'_> {
         let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
         let server = self.serving.is_some() || self.options.dedicated.is_some();
         // A config edited while the server is paused (empty) still reloads.
+        // The parts outside every level get spans of their own, so that a slow
+        // tick's line and `horizon-report` say when a mod's tick hook took it.
         if server {
+            let _span = horizon_client::spans::guard("mod_configs_poll");
             self.native_configs_poll();
         }
         if let Some(running) = running
             && server
         {
+            let _span = horizon_client::spans::guard("mods_server_tick_start");
             self.native_lifecycle_server_tick_start(running);
         }
         let observe_level =
@@ -626,7 +630,11 @@ impl Game<'_> {
             self.native_lifecycle.cancel_server_tick();
         }
         result?;
-        if let Err(error) = self.close_idle_levels() {
+        let closed = {
+            let _span = horizon_client::spans::guard("close_idle_levels");
+            self.close_idle_levels()
+        };
+        if let Err(error) = closed {
             self.native_lifecycle.cancel_server_tick();
             return Err(error);
         }
