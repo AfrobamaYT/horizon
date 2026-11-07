@@ -138,7 +138,7 @@ impl FluidIngredient {
         // the file, as a kind outside these does.
         let keys = std::cell::RefCell::new(std::collections::HashMap::new());
         let unknown = std::cell::RefCell::new(None);
-        let source = WalkedIngredient::walk_resolved(v, &tags, &|_| None, &|id| {
+        let source = WalkedIngredient::walk_resolved(v, &tags, &|_| None, &|_| None, &|id| {
             let Some(key) = context.fluid_key(id) else {
                 *unknown.borrow_mut() = Some(id.to_owned());
                 return None;
@@ -589,20 +589,34 @@ mod tests {
     #[test]
     fn item_ingredients_still_parse_the_same() {
         let items = horizon_items::items::Items::for_tests(HashMap::new());
+        // Supply the resolved ids fixture, not a second JSON/NBT converter.
+        let parse = |v: &serde_json::Value, items: &horizon_items::items::Items| {
+            crate::Ingredient::parse(v, items, &|data| {
+                let ids = data.get("horizon:resolved_items")?.as_array()?;
+                let ids = ids
+                    .iter()
+                    .map(|v| horizon_core::nbt::Tag::String(v.as_str().unwrap().into()))
+                    .collect();
+                Some(horizon_core::nbt::Compound::from([(
+                    "horizon:resolved_items".into(),
+                    horizon_core::nbt::Tag::List(ids),
+                )]))
+            })
+        };
         let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
-        let stone = crate::Ingredient::parse(&json(r#""minecraft:stone""#), &items).unwrap();
+        let stone = parse(&json(r#""minecraft:stone""#), &items).unwrap();
         assert_eq!(stone.order, ["minecraft:stone"]);
-        let union = crate::Ingredient::parse(
+        let union = parse(
             &json(r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:stone"]}"#),
             &items,
         )
         .unwrap();
         assert_eq!(union.order, ["minecraft:oak_planks", "minecraft:stone"]);
-        assert!(crate::Ingredient::parse(&json(r#"{"type":"mymod:aspect"}"#), &items).is_none());
+        assert!(parse(&json(r#"{"type":"mymod:aspect"}"#), &items).is_none());
         // A mod's kind nested in a shape brings the list its hook left at
         // load into the shape's ids, as on main before the shared walk.
         let aspect = r#"{"type":"mymod:aspect","horizon:resolved_items":["minecraft:oak_planks","minecraft:stone"]}"#;
-        let union = crate::Ingredient::parse(
+        let union = parse(
             &json(&format!(
                 r#"{{"type":"neoforge:compound","children":[{aspect},"minecraft:dirt"]}}"#
             )),
@@ -613,7 +627,7 @@ mod tests {
             union.order,
             ["minecraft:oak_planks", "minecraft:stone", "minecraft:dirt"]
         );
-        let both = crate::Ingredient::parse(
+        let both = parse(
             &json(&format!(
                 r#"{{"type":"neoforge:intersection","children":[{aspect},["minecraft:stone","minecraft:dirt"]]}}"#
             )),
@@ -621,9 +635,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(both.order, ["minecraft:stone"]);
-        assert!(
-            crate::Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items)
-                .is_none()
-        );
+        assert!(parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items).is_none());
     }
 }

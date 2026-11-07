@@ -3,7 +3,7 @@ use super::{ItemStack, Items};
 use crate::native_stack_hooks::ingredient_test as native_ingredient_test;
 use horizon_world::native_load_context::LoadContext;
 pub use mod_api::crafting::Shape;
-use mod_api::crafting::{WalkedIngredient, native_ingredient};
+use mod_api::crafting::{WalkedIngredient, dedup_keep_order, native_ingredient, resolved_items};
 use serde_json::Value;
 use std::collections::HashSet;
 /// Where `Ingredient::resolve` leaves the hook's answer inside the occurrence
@@ -24,25 +24,9 @@ fn is_custom(kind: &str) -> bool {
     kind.contains(':') && !kind.starts_with("minecraft:")
 }
 
-/// Takes the answer `resolve` left out of `data`.
-fn resolved_items(data: &mut serde_json::Map<String, Value>) -> Option<Vec<String>> {
-    let answer = data.remove(RESOLVED_ITEMS)?;
-    answer
-        .as_array()?
-        .iter()
-        .map(|i| i.as_str().map(str::to_owned))
-        .collect()
-}
-/// Keep first-seen order, drop the rest.
-// hidden: a game-side helper, not part of the mod surface
-#[doc(hidden)]
-pub fn dedup_keep_order(items: &mut Vec<String>) {
-    let mut seen = std::collections::HashSet::new();
-    items.retain(|i| seen.insert(i.clone()));
-}
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct Ingredient {
     /// The items it accepts, however the source shape named them.
@@ -50,8 +34,8 @@ pub struct Ingredient {
     /// The same items in `HolderSet` order (`display`).
     pub order: Vec<String>,
     /// A mod's own kind, for matching at craft time: the kind and its
-    /// JSON, as the load-time hook saw them (`native_ingredient_test`).
-    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    /// NBT compound, as the load-time hook saw them (`native_ingredient_test`).
+    pub custom: Option<(String, horizon_core::nbt::Compound)>,
     /// NeoForge's shapes, with their children parsed: matching a concrete
     /// stack asks each child its own `test` (a mod's kind among them),
     /// as on NeoForge — the flat list above only names items.
@@ -99,7 +83,9 @@ impl Ingredient {
                     }
                     Some(k) if is_custom(k) => {
                         let mut list = Vec::new();
-                        native_ingredient(context, k, o, &mut list);
+                        if let Ok(data) = crate::json_nbt::json_to_compound(o) {
+                            native_ingredient(context, k, &data, &mut list);
+                        }
                         dedup_keep_order(&mut list);
                         o.insert(RESOLVED_ITEMS.to_owned(), list.into());
                         changed = true;
@@ -144,10 +130,11 @@ impl Ingredient {
             v,
             &items.item_tag_order,
             &resolved_items,
+            &|data| crate::json_nbt::json_to_compound(data).ok(),
         )?)
     }
     /// The walk of an item ingredient's answer: NeoForge's standard shapes
-    /// keep their children, and a mod's own kind keeps its kind and JSON,
+    /// keep their children, and a mod's own kind keeps its kind and NBT metadata,
     /// since the load-time list only names items and matching a concrete
     /// stack (its components) is the match-time hook's.
     fn of_walked(walked: WalkedIngredient) -> Option<Self> {

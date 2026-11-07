@@ -3075,6 +3075,13 @@ registration path.
   the terrain shader skips the lookup.
   When a native mod bundles a Horizon shader pack, naming its folder
   `native-<mod-id>` makes the Mods On/Off control pause that pack too (without
-  changing the player's saved shader selection); other packs are unaffected."#]
+  changing the player's saved shader selection); other packs are unaffected.
+
+### Custom ingredient metadata
+`ingredient` and `ingredient_test` carry an API `Compound`. Recipe JSON is
+converted at load by the shared JsonOps-to-NbtOps boundary; mod code matches
+`Tag` variants rather than JSON fields. Nested null refuses the recipe as an
+unclaimed kind does; numeric and heterogeneous arrays remain lists. Matching
+borrows the retained compound and never converts metadata on the tick."#]
     fn general();
 }

@@ -31,6 +31,17 @@ pub fn json_to_tag(value: &Value) -> Result<Tag, JsonNbtError> {
     convert(value, false)
 }
 
+/// Convert an already borrowed JSON object without cloning its JSON tree.
+/// Fields use the same nested-null and numeric rules as [`json_to_tag`].
+pub fn json_to_compound(
+    values: &serde_json::Map<String, Value>,
+) -> Result<horizon_core::nbt::Compound, JsonNbtError> {
+    values
+        .iter()
+        .map(|(key, value)| Ok((key.as_str().into(), convert(value, true)?)))
+        .collect()
+}
+
 fn convert(value: &Value, nested: bool) -> Result<Tag, JsonNbtError> {
     Ok(match value {
         Value::Null if nested => return Err(JsonNbtError::NestedNull),
@@ -44,12 +55,7 @@ fn convert(value: &Value, nested: bool) -> Result<Tag, JsonNbtError> {
                 .map(|v| convert(v, true))
                 .collect::<Result<_, _>>()?,
         ),
-        Value::Object(values) => Tag::Compound(
-            values
-                .iter()
-                .map(|(key, value)| Ok((key.as_str().into(), convert(value, true)?)))
-                .collect::<Result<_, JsonNbtError>>()?,
-        ),
+        Value::Object(values) => Tag::Compound(json_to_compound(values)?),
     })
 }
 

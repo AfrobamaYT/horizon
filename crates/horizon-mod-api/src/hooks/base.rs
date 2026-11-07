@@ -3380,7 +3380,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn hopper_pickup_item();
     /// A recipe ingredient of a mod's own kind: the entry named a type in a
     /// namespace outside `minecraft:`, and the loader kept it for this call.
-    /// The kind and the JSON the file wrote are here; fill `items` with the
+    /// The kind and the converted NBT compound the file wrote are here; fill `items` with the
     /// item ids the ingredient matches (item ids only: components are not
     /// checked here; a match-time hook follows separately). Duplicates are
     /// removed keeping first-seen order. The hook is called once per
