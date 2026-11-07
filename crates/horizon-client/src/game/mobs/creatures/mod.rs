@@ -1637,6 +1637,19 @@ impl Game<'_> {
             // The callback sees the real owning rows and level RNG/attachments,
             // and its writes are the state the continuation will resume from.
             lent.give_back(&mut self.world);
+            // Earlier mobs' pushes become visible before the listener can read
+            // or replace another actor's velocity. Departed rows must no longer
+            // resolve as live handles while the batch is temporarily installed.
+            for m in &mut mobs {
+                horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
+            }
+            mobs.retain(|m| {
+                index
+                    .get(&m.id)
+                    .and_then(|&slot| keep.get(slot as usize))
+                    .copied()
+                    .unwrap_or(true)
+            });
             if self.mobs.is_empty() {
                 std::mem::swap(&mut self.mobs, &mut mobs);
             } else {
