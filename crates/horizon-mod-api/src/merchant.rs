@@ -9,6 +9,10 @@ pub struct ItemCost {
     pub stack: ItemStack,
 }
 impl ItemCost {
+    /// Construct a payment from a nonempty item value.
+    pub fn new(stack: ItemStack) -> Self {
+        Self { stack }
+    }
     /// Whether `stack` matches the payment's identity and explicit component predicate.
     pub fn test(&self, stack: &ItemStack) -> bool {
         stack.same_item(&self.stack)
@@ -42,6 +46,29 @@ pub struct MerchantOffer {
     pub xp: i32,
 }
 impl MerchantOffer {
+    /// Construct an unused offer with explicit payments, output, limits and experience.
+    /// Discounts and demand begin at zero; completing it rewards experience.
+    pub fn new(
+        base_cost_a: ItemCost,
+        cost_b: Option<ItemCost>,
+        result: ItemStack,
+        max_uses: i32,
+        xp: i32,
+        price_multiplier: f32,
+    ) -> Self {
+        Self {
+            base_cost_a,
+            cost_b,
+            result,
+            uses: 0,
+            max_uses,
+            reward_exp: true,
+            special_price_diff: 0,
+            demand: 0,
+            price_multiplier,
+            xp,
+        }
+    }
     /// The adjusted first payment count, or none if its item metadata is unavailable.
     pub fn cost_a_count(&self, host: &dyn Host) -> Option<u32> {
         let maximum = host.max_stack_size(self.base_cost_a.stack.item())?;

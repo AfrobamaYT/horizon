@@ -6,7 +6,8 @@
 //! server's players, and in-frame on the window's own level. Clients get the
 //! new entities through the tracker, as any other.
 use super::{Game, dispenser, spill};
-use mod_api::{EntityRef, ItemStack, LevelRef};
+use horizon_items::items::ItemStack;
+use mod_api::{EntityRef, LevelRef};
 
 impl Game<'_> {
     /// Whether vanilla could make an item entity of `stack`: not empty
