@@ -3447,6 +3447,9 @@ pub(super) struct Breath {
     /// A lingering potion's cloud (`ThrownLingeringPotion`): what it applies.
     pub(super) potion: Option<super::potions::PotionCloud>,
 }
+
+horizon_client::impl_joined!(Breath, Dragon);
+
 impl Breath {
     /// `AreaEffectCloud.isWaiting`: before its wait time (20 ticks, 10 for a
     /// lingering potion's).
@@ -6219,5 +6222,3 @@ mod tests {
 #[cfg(test)]
 #[path = "dragon/residency_tests.rs"]
 mod residency_tests;
-
-horizon_client::impl_joined!(Breath, Dragon);

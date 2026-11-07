@@ -109,6 +109,9 @@ pub(in crate::game) struct OtherEntity {
     pub pitch: f32,
     pub item_transformation: Option<super::persist::ItemDisplayTransformation>,
 }
+
+horizon_client::impl_joined!(OtherEntity);
+
 pub(super) fn err(key: &str, args: &[&dyn std::fmt::Display]) -> CommandError {
     CommandError::tr(key, args)
 }
@@ -5196,5 +5199,3 @@ mod forced_respawn_tests {
         }
     }
 }
-
-horizon_client::impl_joined!(OtherEntity);

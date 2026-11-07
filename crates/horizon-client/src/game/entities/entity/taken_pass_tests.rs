@@ -138,6 +138,27 @@ impl LifecycleFixture {
         crate::game::native_entity_refs::tests::with_game(|game| {
             let mut ids = |game: &mut Game<'_>| {
                 observe(game);
+                use horizon_client::join_seq::Joined;
+                let mut unique = std::collections::HashSet::new();
+                macro_rules! lookup {
+                    ($list:expr) => {
+                        for (index, entity) in $list.iter().enumerate() {
+                            let join = entity.join_seq();
+                            assert!(join.is_joined());
+                            assert!(unique.insert(join), "duplicate owner join");
+                            assert_eq!($list.locate(join), Some(index));
+                        }
+                    };
+                }
+                lookup!(game.others);
+                lookup!(game.fangs.list);
+                lookup!(game.ominous_spawners);
+                lookup!(game.breath_clouds);
+                if let Some(dragon) = game.dragon.as_ref() {
+                    assert!(dragon.join.is_joined());
+                    assert!(unique.insert(dragon.join));
+                    assert_eq!(game.dragon.locate(dragon.join), Some(0));
+                }
                 (self.ids)(game)
             };
             let root = ScratchDirectory(std::env::temp_dir().join(format!(
@@ -248,6 +269,32 @@ fn lifecycle_fixture_walks_fangs_owners() {
         },
         ids: |game| game.fangs.list.iter().map(|f| f.id).collect(),
         target: crate::game::commands::Target::Fangs,
+        unloads_with_chunk: true,
+        remote: None,
+    }
+    .run();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_fixture_walks_other_owners() {
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.others.clear();
+            for &(id, at) in entries {
+                game.others.push(crate::game::commands::OtherEntity {
+                    join: Default::default(),
+                    id,
+                    kind: "minecraft:marker".into(),
+                    position: horizon_core::geometry::Vec3::new(at[0], at[1], at[2]),
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    item_transformation: None,
+                });
+            }
+        },
+        ids: |game| game.others.iter().map(|entity| entity.id).collect(),
+        target: crate::game::commands::Target::Other,
         unloads_with_chunk: true,
         remote: None,
     }

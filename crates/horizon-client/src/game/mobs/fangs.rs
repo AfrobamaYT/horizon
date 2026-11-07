@@ -20,6 +20,9 @@ pub(super) struct Fangs {
     /// `Entity.random`. The attack sound's pitch is its first draw.
     random: LegacyRandom,
 }
+
+horizon_client::impl_joined!(Fangs);
+
 /// `EvokerFangs.handleEntityEvent`: `nextFloat() * 0.2 + 0.85`.
 pub(super) fn fang_attack_pitch(random: &mut impl RandomSource) -> f32 {
     random.next_float() * 0.2 + 0.85
@@ -465,5 +468,3 @@ mod tests {
         ));
     }
 }
-
-horizon_client::impl_joined!(Fangs);

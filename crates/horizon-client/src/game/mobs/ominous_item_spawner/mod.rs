@@ -36,6 +36,8 @@ pub(super) struct OminousItemSpawner {
     pub(super) raw: Option<Box<horizon_core::nbt::Tag>>,
 }
 
+horizon_client::impl_joined!(OminousItemSpawner);
+
 /// `ProjectileItem.DispenseConfig` of the items fired down: power,
 /// uncertainty and `overrideDispenseEvent`; None for items that just fall.
 fn projectile(item: &str) -> Option<(f32, f32, Option<i32>)> {
@@ -243,5 +245,3 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod warning_tests;
-
-horizon_client::impl_joined!(OminousItemSpawner);
