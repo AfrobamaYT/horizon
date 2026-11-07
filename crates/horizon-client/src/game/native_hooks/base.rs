@@ -4676,8 +4676,20 @@ impl Game<'_> {
     /// The most of the item `item` one slot holds (`Item.getDefaultMaxStackSize`),
     /// or `None` for an unknown item: for a mod's container that fills or
     /// merges stacks itself.
-    pub(in crate::game) fn max_stack_size(&self, item: &str) -> Option<u32> {
-        self.res.items().get(item).map(|i| i.max_stack)
+    pub(in crate::game) fn max_stack_size(&self, item: mod_api::ItemKey) -> Option<u32> {
+        self.res
+            .items()
+            .get(mod_api::__private::item_key_id(item)?)
+            .map(|i| i.max_stack)
+    }
+    pub(in crate::game) fn max_damage(&self, item: mod_api::ItemKey) -> Option<u32> {
+        self.res
+            .items()
+            .get(mod_api::__private::item_key_id(item)?)
+            .map(|i| i.max_damage)
+    }
+    pub(in crate::game) fn item_key(&self, id: &mod_api::Identifier) -> Option<mod_api::ItemKey> {
+        mod_api::__private::item_key_by_identifier(id)
     }
     /// Sets property `key` of the block at `pos` to `value`, as a furnace's
     /// tick sets its `lit` (`Level.setBlock` with `UPDATE_ALL`: neighbours

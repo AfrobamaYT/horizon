@@ -1,5 +1,5 @@
 //! Load-owned declarations and resolved mappings for registration-slot keys.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{LazyLock, RwLock};
 
 #[derive(Clone, Default)]
@@ -17,6 +17,8 @@ pub struct Requests {
 pub struct Names {
     pub entries: Vec<Request>,
     pub slots: HashMap<String, u32>,
+    /// Typed identifier lookup without formatting a string on metadata reads.
+    pub identifiers: BTreeMap<horizon_core::identifier::Identifier, u32>,
     pub utf16_slots: HashMap<Vec<u16>, u32>,
     pub world_fluids: Vec<Option<u32>>,
 }
@@ -35,9 +37,8 @@ impl Names {
         } else {
             format!("minecraft:{id}")
         };
-        if horizon_core::identifier::Identifier::parse_namespaced(&id).is_none() {
-            return Err(format!("mod {mod_id}: invalid registry key {id:?}"));
-        }
+        let identifier = horizon_core::identifier::Identifier::parse_namespaced(&id)
+            .ok_or_else(|| format!("mod {mod_id}: invalid registry key {id:?}"))?;
         let slot = *self.slots.entry(id.clone()).or_insert_with(|| {
             let slot = u32::try_from(self.entries.len()).expect("registry key slots exhausted");
             self.entries.push(Request {
@@ -46,6 +47,7 @@ impl Names {
             });
             slot
         });
+        self.identifiers.insert(identifier, slot);
         let mods = &mut self.entries[slot as usize].mods;
         if !mods.contains(&mod_id) {
             mods.push(mod_id);

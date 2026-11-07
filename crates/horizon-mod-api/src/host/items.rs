@@ -9,7 +9,17 @@ pub trait ItemsHost {
     /// or `None` for an unknown item: for a mod's container that fills or
     /// merges stacks itself.
     #[access(Metadata)]
-    fn max_stack_size(&self, item: &str) -> Option<u32>;
+    fn max_stack_size(&self, item: ItemKey) -> Option<u32>;
+    /// Side: both.
+    /// Default durability of the resolved item, or none if its metadata is unavailable.
+    /// Stack-specific component overrides are checked at the game's write boundary.
+    #[access(Metadata)]
+    fn max_damage(&self, item: ItemKey) -> Option<u32>;
+    /// Side: both.
+    /// Resolve an item once at load, including vanilla items, to its process-local identity.
+    /// None if the completed registry does not contain the identifier.
+    #[access(Metadata)]
+    fn item_key(&self, id: &Identifier) -> Option<ItemKey>;
     /// Side: both.
     /// Item `item`'s default value of component `component`, in its prototype
     /// (`Item.components().get`): `minecraft:max_damage` on an iron sword is `250`, data
@@ -17,7 +27,7 @@ pub trait ItemsHost {
     /// number is an `Int`, `Long` or `Double` and a boolean a `Byte`. None where the item
     /// hasn't the component, and for an unknown item.
     #[access(Metadata)]
-    fn item_default_component(&self, item: &str, component: &str) -> Option<Tag>;
+    fn item_default_component(&self, item: ItemKey, component: &str) -> Option<Tag>;
     /// Side: both.
     /// Item `item`'s cooking-fuel burn time in ticks (`FuelValues.burnDuration` of its `cooking_fuel`
     /// component, the data pack's context int provider resolved), None where it is no fuel. API
