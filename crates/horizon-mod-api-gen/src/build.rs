@@ -118,11 +118,7 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let private = super::points::source::read(root)?;
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join(super::points::source::FILE).display()
-    );
+    let private = super::points::source::build_input(root)?;
     let code = super::points::records(&super::points::game_points(root)?, &private)
         + &super::sites::ids(root).map_err(|e| e.to_string())?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;

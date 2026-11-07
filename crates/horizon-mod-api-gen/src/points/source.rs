@@ -9,7 +9,8 @@ pub struct Point {
     pub target: String,
     pub items: String,
     pub module: String,
-    pub record: String,
+    /// The stable facade export, not the physical private record declared by `items`.
+    pub record_export: String,
 }
 
 /// The private plan in a disposable staged tree, not a mod manifest.
@@ -30,6 +31,15 @@ pub fn read(root: &Path) -> Result<Vec<Point>, String> {
     toml::from_str::<Plan>(&text)
         .map(|plan| plan.points)
         .map_err(|error| error.to_string())
+}
+
+/// Track an existing private build input; tracking an absent path would invalidate every build.
+pub fn build_input(root: &Path) -> Result<Vec<Point>, String> {
+    let path = root.join(FILE);
+    if path.exists() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    read(root)
 }
 
 /// Mark checked source targets after normal point staging, retaining their lexical type scope.
@@ -132,7 +142,7 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
                 out.insert_str(at, &attribute);
                 fs::write(&file.path, out).map_err(|error| error.to_string())?;
                 point.module = file.module.clone();
-                point.record = format!("__{}Raw", point_shape::camel(&function.name()));
+                point.record_export = format!("__{}Raw", point_shape::camel(&function.name()));
                 matched = true;
             }
         }
@@ -149,6 +159,40 @@ pub fn stage(root: &Path, points: &mut [Point]) -> Result<(), String> {
         toml::to_string(&plan).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())
+}
+
+#[test]
+fn private_build_dependencies_track_only_existing_plans() {
+    const ENV: &str = "HORIZON_PRIVATE_BUILD_INPUT_TEST_ROOT";
+    if let Some(root) = std::env::var_os(ENV) {
+        assert!(build_input(Path::new(&root)).unwrap().is_empty());
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../target/private-build-input-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    for exists in [false, true] {
+        if exists {
+            fs::write(root.join(FILE), "points = []").unwrap();
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "points::source::private_build_dependencies_track_only_existing_plans",
+                "--nocapture",
+            ])
+            .env(ENV, &root)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).contains("cargo:rerun-if-changed="),
+            exists
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -186,7 +230,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
             .raw_items(&sig, Some(&syn::parse_quote!(Game)), None)
             .to_string(),
         module: String::new(),
-        record: String::new(),
+        record_export: String::new(),
     }];
     let mut collision = private.clone();
     collision[0].name = "listed".into();
@@ -196,7 +240,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
             .contains("E_SOURCE_COLLISION: Listed")
     );
     stage(&root, &mut private).unwrap();
-    assert_eq!(private[0].record, "__HiddenRaw");
+    assert_eq!(private[0].record_export, "__HiddenRaw");
     let mut cycle = private.clone();
     cycle[0].target = "horizon_mod_points::blocked".into();
     assert!(
@@ -215,7 +259,7 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     assert!(ids.contains("Source123Return"));
     syn::parse_file(&ids).unwrap();
     let file = root.join("ids.rs");
-    fs::write(&file, format!("{ids}\nfn main() {{ assert_eq!(POINT_COUNT, 2); assert_eq!(places::NAMES, [\"source123\", \"source123_return\"]); assert_eq!(places::SHAPES, [\"\", \"\"]); assert_eq!(places::IDS[1], PointId::Source123Return); }}")).unwrap();
+    fs::write(&file, format!("pub struct Game; {} pub use __Source123Raw as {}; {ids}\nfn main() {{ assert_eq!(POINT_COUNT, 2); assert_eq!(places::NAMES, [\"source123\", \"source123_return\"]); assert_eq!(places::SHAPES, [\"\", \"\"]); assert_eq!(places::IDS[1], PointId::Source123Return); }}", private[0].items, private[0].record_export)).unwrap();
     let binary = root.join(format!("ids{}", std::env::consts::EXE_SUFFIX));
     let output = std::process::Command::new("rustc")
         .args(["--edition=2024", "--cfg", "feature=\"wasm-host\""])
