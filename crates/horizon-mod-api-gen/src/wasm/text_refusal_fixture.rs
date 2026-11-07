@@ -26,8 +26,26 @@ impl std::fmt::Display for TextFormError {
 }
 impl std::error::Error for TextFormError {}
 // REFUSED
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Text(u32);
+#[derive(Clone, Debug, PartialEq)]
+pub enum GuiDraw {
+    Label(Text),
+}
+#[derive(Debug, PartialEq)]
+pub struct TextEvent {
+    pub first: u32,
+    pub text: Text,
+    pub last: u32,
+}
+fn unsent<T>(
+    module: &std::cell::RefCell<Option<Refused>>,
+    why: Refused,
+    no_answer: impl FnOnce() -> T,
+) -> T {
+    *module.borrow_mut() = Some(why);
+    no_answer()
+}
 impl TryFrom<&Text> for u32 {
     type Error = TextFormError;
     fn try_from(t: &Text) -> Result<Self, Self::Error> {
@@ -84,6 +102,20 @@ mod horizon {
     pub mod mod_api {
         pub mod types {
             pub type Text = u32;
+            #[derive(Debug)]
+            pub enum GuiDraw {
+                Label(Text),
+            }
+            pub struct TextEvent {
+                pub first: u32,
+                pub text: Text,
+                pub last: u32,
+            }
+            pub struct TextEventOut {
+                pub first: Option<u32>,
+                pub text: Option<Text>,
+                pub last: Option<u32>,
+            }
             #[derive(Debug, PartialEq)]
             pub enum TextFormError {
                 TooDeep,
@@ -113,6 +145,58 @@ mod imports {
     }
 }
 // GENERATED
+#[test]
+fn health_hud_refuses_as_typed_data_instead_of_trapping() {
+    let proxy = proxy::Proxy {
+        module: Default::default(),
+    };
+    assert_eq!(
+        proxy.health(512).unwrap(),
+        Some(vec![GuiDraw::Label(Text(512))])
+    );
+    for (depth, error) in [
+        (513, TextFormError::TooDeep),
+        (600, TextFormError::Malformed),
+        (700, TextFormError::Invalid),
+    ] {
+        assert_eq!(proxy.health(depth).unwrap(), None);
+        assert!(matches!(proxy.module.take(), Some(Refused::Text(why)) if why == error));
+    }
+}
+#[test]
+fn refused_event_writeback_keeps_every_field_unchanged() {
+    let proxy = proxy::Proxy {
+        module: Default::default(),
+    };
+    let mut event = TextEvent {
+        first: 1,
+        text: Text(2),
+        last: 3,
+    };
+    proxy.multi(&mut event, 513).unwrap();
+    assert_eq!(
+        event,
+        TextEvent {
+            first: 1,
+            text: Text(2),
+            last: 3
+        }
+    );
+    assert!(matches!(
+        proxy.module.take(),
+        Some(Refused::Text(TextFormError::TooDeep))
+    ));
+    proxy.multi(&mut event, 512).unwrap();
+    assert_eq!(
+        event,
+        TextEvent {
+            first: 10,
+            text: Text(512),
+            last: 20
+        }
+    );
+    assert!(proxy.module.take().is_none());
+}
 #[test]
 fn guest_refuses_before_import_and_preserves_variants() {
     let mut g = guest::Guest;

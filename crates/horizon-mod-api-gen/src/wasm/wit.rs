@@ -341,6 +341,55 @@ pub(super) fn signature(types: &Types<'_>, method: &Method) -> Result<Signature,
     Ok(Signature { params, results })
 }
 
+/// A Text-bearing export needs a typed refusal before applying any returned field.
+pub(super) fn text_export_refusal(types: &Types<'_>, method: &Method) -> bool {
+    if !exports().contains(&method.owner) {
+        return false;
+    }
+    let contains = |ty| super::sides::contains_text(types, ty, &mut BTreeSet::new());
+    contains(&method.ret)
+        || method.params.iter().any(|(_, ty)| {
+            let Ty::Ref(inner, true) = ty else {
+                return false;
+            };
+            match &**inner {
+                Ty::Named(id) if matches!(types.defs[*id].kind, Kind::Record(_)) => {
+                    let Kind::Record(fields) = &types.defs[*id].kind else {
+                        unreachable!()
+                    };
+                    fields.iter().any(|f| writable(&f.ty) && contains(&f.ty))
+                }
+                ty => contains(ty),
+            }
+        })
+}
+
+pub(super) fn text_error(types: &Types<'_>) -> Ty {
+    Ty::Named(
+        types
+            .defs
+            .iter()
+            .position(|d| d.rust == "mod_api::TextFormError")
+            .expect("Text export refusal requires the public TextFormError type"),
+    )
+}
+
+/// Logical results stay separate from the export-only refusal envelope.
+pub(super) fn wire_results(types: &Types<'_>, method: &Method, sig: &Signature) -> Vec<String> {
+    if !text_export_refusal(types, method) {
+        return sig.results.clone();
+    }
+    let payload = match sig.results.as_slice() {
+        [] => "_".into(),
+        [one] => one.clone(),
+        many => format!("tuple<{}>", many.join(", ")),
+    };
+    vec![format!(
+        "result<{payload}, {}>",
+        value(types, &text_error(types)).unwrap()
+    )]
+}
+
 /// The interface a trait's methods live in.
 pub(super) fn interface(owner: &str) -> String {
     owner.rsplit("::").next().unwrap().to_kebab_case()
@@ -359,6 +408,9 @@ pub(super) fn reached(
             mut_records(ty, &mut outs);
         }
         named(types, &method.ret, &mut defs);
+        if text_export_refusal(types, method) {
+            named(types, &text_error(types), &mut defs);
+        }
     }
     // A `&mut` record inside a written-back record is written back too.
     loop {
@@ -467,7 +519,10 @@ pub(super) fn package(
                 .iter()
                 .map(|(n, t)| format!("{n}: {}", rename(t)))
                 .collect();
-            let results: Vec<_> = sig.results.iter().map(|t| rename(t)).collect();
+            let results: Vec<_> = wire_results(types, method, &sig)
+                .iter()
+                .map(|t| rename(t))
+                .collect();
             let results = match results.as_slice() {
                 [] => String::new(),
                 [one] => format!(" -> {one}"),
@@ -529,6 +584,9 @@ fn used(types: &Types<'_>, methods: &[&Method], owner: &str) -> Vec<String> {
             }
         }
         direct(&method.ret, &mut defs);
+        if text_export_refusal(types, method) {
+            direct(&text_error(types), &mut defs);
+        }
     }
     let handler = methods
         .iter()

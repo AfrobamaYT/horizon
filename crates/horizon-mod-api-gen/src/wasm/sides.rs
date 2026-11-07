@@ -116,7 +116,7 @@ fn header(wit_text: &str, macro_call: &str, options: &str) -> String {
 
 /// A copy of what `local`, a `&mut` record argument, holds before the call, so only what the
 /// call changed is sent back.
-fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
+pub(super) fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
     if let Ty::Named(def) = ty
         && sig.results.contains(&wit::out_name(&types.defs[*def]))
     {
@@ -125,7 +125,7 @@ fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut St
 }
 
 /// The function returning what the method's results tuple holds, after the call.
-fn results(
+pub(super) fn results(
     types: &Types<'_>,
     method: &Method,
     sig: &Signature,
@@ -307,15 +307,22 @@ pub(super) fn guest(
                 None => format!("super::handler::<dyn {}>(handler)", trait_path(owner)),
             };
             let result = results(types, method, &sig, "r", &mut_locals);
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}({}) {} {{ super::expect((|| -> Result<_, Refused> {{ {} let r = {receiver}.{}({}); Ok({result}) }})()) }}",
-                bound_ident(&wit_ident(&method.name)),
-                export_params(types, method, &sig)?,
-                export_ret(&sig),
-                out,
+            let call = format!(
+                "(|| -> Result<_, Refused> {{ {out} let r = {receiver}.{}({}); Ok({result}) }})()",
                 method.name,
                 call_args.join(", ")
+            );
+            let answer = export_answer(types, method, &call);
+            let wire_sig = Signature {
+                params: sig.params.clone(),
+                results: wit::wire_results(types, method, &sig),
+            };
+            writeln!(
+                code,
+                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}({}) {} {{ {answer} }}",
+                bound_ident(&wit_ident(&method.name)),
+                export_params(types, method, &sig)?,
+                export_ret(&wire_sig),
             )
             .unwrap();
         }
@@ -324,13 +331,45 @@ pub(super) fn guest(
     Ok(code)
 }
 
-struct Writeback {
-    prepare: String,
-    apply: String,
+/// Refuse the whole answer before preparing or applying any returned field.
+pub(super) fn export_payload(
+    types: &Types<'_>,
+    method: &Method,
+    call: &str,
+    no_answer: &str,
+) -> String {
+    if !wit::text_export_refusal(types, method) {
+        return call.into();
+    }
+    let error = lift(types, &wit::text_error(types), "why");
+    format!(
+        "match {call} {{ Ok(value) => value, Err(why) => return Ok(super::unsent(&self.module, Refused::Text({error}), {no_answer})) }}"
+    )
+}
+
+/// Keep Text refusal as data on the wire; only unrelated transport failures trap.
+pub(super) fn export_answer(types: &Types<'_>, method: &Method, call: &str) -> String {
+    if !wit::text_export_refusal(types, method) {
+        return format!("super::expect({call})");
+    }
+    let error = lower_owned(types, &wit::text_error(types), "why");
+    format!(
+        "match {call} {{ Ok(value) => Ok(value), Err(Refused::Text(why)) => Err(super::expect((|| -> Result<_, Refused> {{ Ok({error}) }})())), Err(why) => super::expect(Err(why)) }}"
+    )
+}
+
+pub(super) struct Writeback {
+    pub(super) prepare: String,
+    pub(super) apply: String,
 }
 
 /// Validate every returned parameter before applying any of them (or the return value).
-fn writeback(types: &Types<'_>, method: &Method, sig: &Signature, names: &[String]) -> Writeback {
+pub(super) fn writeback(
+    types: &Types<'_>,
+    method: &Method,
+    sig: &Signature,
+    names: &[String],
+) -> Writeback {
     let mut out = Writeback {
         prepare: String::new(),
         apply: String::new(),
@@ -772,13 +811,17 @@ pub(super) fn host(
                     "let ({sent},) = match super::lowering(&self.module, || -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }}) {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
                 );
             }
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {}, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {prepare} let value = {value}; {apply} Ok(value) }}) }}",
-                rust_sig(types, method),
-                super::call_class(types, method),
+            let call = format!(
+                "m.horizon_mod_api_{iface}().call_{}(store, {})?",
                 bound_ident(&wit_ident(&method.name)),
                 args.join(", ")
+            );
+            let call = export_payload(types, method, &call, no_answer);
+            writeln!(
+                code,
+                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {}, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = {call}; {prepare} let value = {value}; {apply} Ok(value) }}) }}",
+                rust_sig(types, method),
+                super::call_class(types, method),
             )
             .unwrap();
         }
@@ -807,7 +850,10 @@ pub(super) fn host(
             entries.push((
                 wit_ident(&method.name),
                 sig.params.iter().map(|(_, w)| wire_rust(w)).collect(),
-                sig.results.iter().map(|r| wire_rust(r)).collect(),
+                wit::wire_results(types, method, &sig)
+                    .iter()
+                    .map(|r| wire_rust(r))
+                    .collect(),
             ));
         }
         if super::SUBSCRIBED.iter().any(|(o, _)| o == owner) {

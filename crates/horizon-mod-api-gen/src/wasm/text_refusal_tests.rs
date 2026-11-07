@@ -11,7 +11,7 @@ fn generated_text_refusals_are_typed_on_both_sides() {
     ];
     let mut types = ty::Types::new(index::Index::new(&root, &included)).unwrap();
     let module = types.index.module("mod_api", &[]).unwrap();
-    types.index.modules[module].items.extend(syn::parse_file("pub struct TextBatch { pub values: Vec<Option<Text>>, pub shape: [u32; 13] } pub enum TextFormError { TooDeep, Malformed, Invalid }").unwrap().items);
+    types.index.modules[module].items.extend(syn::parse_file("pub struct TextBatch { pub values: Vec<Option<Text>>, pub shape: [u32; 13] } pub enum TextFormError { TooDeep, Malformed, Invalid } pub struct TextEvent { pub first: u32, pub text: Text, pub last: u32 }").unwrap().items);
     let text = types
         .ty(module, &syn::parse_str("Text").unwrap(), &[])
         .unwrap();
@@ -60,7 +60,10 @@ fn generated_text_refusals_are_typed_on_both_sides() {
         owner: "TextProbe",
         name: "gui_paint".into(),
         receiver: Some(true),
-        params: vec![("draws".into(), Ty::List(Box::new(gui), ty::List::Vec))],
+        params: vec![(
+            "draws".into(),
+            Ty::List(Box::new(gui.clone()), ty::List::Vec),
+        )],
         ret: methods[0].ret.clone(),
     };
     wit::refuse(&mut types);
@@ -69,8 +72,81 @@ fn generated_text_refusals_are_typed_on_both_sides() {
             .unwrap()
             .contains("Err(Refused::Text(why))")
     );
-    let (defs, _) = wit::reached(&types, &methods.iter().collect::<Vec<_>>());
-    let conversions = glue::conversions(&types, &defs, &BTreeSet::new());
+    let Ty::Named(gui_id) = gui else { panic!() };
+    types.defs[gui_id].kind = ty::Kind::Variant(vec![ty::Case {
+        rust: "Label".into(),
+        wit: "label".into(),
+        payload: ty::Payload::Tuple(vec![Ty::Named(text_id)]),
+        link: None,
+    }]);
+    let event = types
+        .ty(module, &syn::parse_str("TextEvent").unwrap(), &[])
+        .unwrap();
+    let health = Method {
+        via: None,
+        owner: "Hooks",
+        name: "health_hud".into(),
+        receiver: Some(false),
+        params: vec![],
+        ret: Ty::Option(Box::new(Ty::List(Box::new(gui), ty::List::Vec))),
+    };
+    let multi = Method {
+        via: None,
+        owner: "Hooks",
+        name: "multi".into(),
+        receiver: Some(false),
+        params: vec![("event".into(), Ty::Ref(Box::new(event.clone()), true))],
+        ret: Ty::Unit,
+    };
+    wit::refuse(&mut types);
+    let (defs, outs) = wit::reached(
+        &types,
+        &methods.iter().chain([&health, &multi]).collect::<Vec<_>>(),
+    );
+    let conversions = glue::conversions(&types, &defs, &outs);
+    let health_sig = wit::signature(&types, &health).unwrap();
+    assert_eq!(
+        wit::wire_results(&types, &health, &health_sig),
+        ["result<option<list<gui-draw>>, text-form-error>"]
+    );
+    let health_value = sides::results(&types, &health, &health_sig, "r", &[]);
+    let health_answer = sides::export_answer(
+        &types,
+        &health,
+        &format!(
+            "(|| -> Result<_, Refused> {{ let r = Some(vec![GuiDraw::Label(Text(depth))]); Ok({health_value}) }})()"
+        ),
+    );
+    let health_payload =
+        sides::export_payload(&types, &health, "guest_exports::health(depth)", "|| None");
+    let health_lift = glue::lift(&types, &health.ret, "r0");
+    let multi_sig = wit::signature(&types, &multi).unwrap();
+    let mut before = String::new();
+    sides::before(&types, &multi_sig, &event, "m0", &mut before);
+    let multi_value = sides::results(
+        &types,
+        &multi,
+        &multi_sig,
+        "r",
+        &[(0, "m0".into(), event.clone())],
+    );
+    let multi_lift = glue::lift(&types, &event, "input");
+    let multi_answer = sides::export_answer(
+        &types,
+        &multi,
+        &format!(
+            "(|| -> Result<_, Refused> {{ let mut m0 = {multi_lift}; {before} m0.first = 10; m0.text = Text(depth); m0.last = 20; Ok({multi_value}) }})()"
+        ),
+    );
+    let multi_lower = glue::lower(&types, &event, "p0");
+    let multi_payload = sides::export_payload(
+        &types,
+        &multi,
+        &format!("guest_exports::multi({multi_lower}, depth)"),
+        "|| ()",
+    );
+    let (multi_pattern, names) = glue::unpack(&multi_sig);
+    let sides::Writeback { prepare, apply } = sides::writeback(&types, &multi, &multi_sig, &names);
     let host = methods
         .iter()
         .map(|m| sides::host_import(&types, m, "self", false).unwrap())
@@ -103,6 +179,17 @@ mod host {{ use super::*; {conversions}
     impl ProbeCalls for Probe {{ {host} }}
 }}
 mod guest {{ use super::*; {conversions} pub struct Guest; impl TextProbe for Guest {{ {guest} }} }}
+mod guest_exports {{ use super::*; {conversions}
+    pub fn health(depth: u32) -> Result<Option<Vec<wire::GuiDraw>>, wire::TextFormError> {{ {health_answer} }}
+    pub fn multi(input: wire::TextEvent, depth: u32) -> Result<wire::TextEventOut, wire::TextFormError> {{ {multi_answer} }}
+}}
+mod proxy {{ use super::*; {conversions}
+    pub struct Proxy {{ pub module: std::cell::RefCell<Option<Refused>> }}
+    impl Proxy {{
+        pub fn health(&self, depth: u32) -> Result<Option<Vec<GuiDraw>>, Refused> {{ let r0 = {health_payload}; Ok({health_lift}) }}
+        pub fn multi(&self, p0: &mut TextEvent, depth: u32) -> Result<(), Refused> {{ let {multi_pattern} = {multi_payload}; {prepare} {apply} Ok(()) }}
+    }}
+}}
 "#
             ),
         );
