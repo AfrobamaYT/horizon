@@ -13,6 +13,7 @@ pub use mod_api::game::NativeExperienceOrb;
 // Their old home, for mixin code that names them here.
 use horizon_client::{
     command::{Arg, ArgType, Context, Dispatcher},
+    items::ItemStack,
     lan::{abilities::PlayerAbilities, data::component_nbt, guest::Guest},
     motion::PlayerMotion,
     text::Text,
