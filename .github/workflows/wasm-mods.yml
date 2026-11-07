@@ -2,8 +2,9 @@ name: wasm-mods
 # What dyna-checks used to run as its wasm-mods job: the wasm32 mod API, the real game's internals
 # bindings, mods built to mod.wasm and loaded by the runtime, and the mod API's generated WIT as an
 # artifact with its diff in the job summary. Main pushes and dispatches only, never pull requests.
-# Its own workflow so that dyna-checks (never cancelled on main) is not held up by it: a newer main
-# push supersedes this run, as with mixins-check.
+# Its own workflow so that dyna-checks (never cancelled on main) is not held up by it. A started run
+# is never cancelled (it takes long enough that every push used to cancel it and main got no verdict):
+# a newer main push replaces only the run still waiting, so each finished run judges a recent main.
 on:
   push:
     branches: [main]
@@ -19,7 +20,7 @@ permissions:
   actions: read
 concurrency:
   group: wasm-mods-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   # The same runner choice dyna-checks makes: Dyna's large runner while the pool is up, else GitHub's.
   runner:
