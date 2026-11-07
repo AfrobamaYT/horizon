@@ -124,6 +124,9 @@ impl WorldGeometry {
         cull: Option<&impl crate::gfx::Cull>,
         stage: impl FnMut(&ModelCopy) -> bool,
     ) -> Result<(), InstanceError> {
+        if instances.len() > INSTANCE_CAPACITY as usize {
+            return Err(InstanceError::CapacityExceeded);
+        }
         validate_instances(instances)?;
         self.submit_validated_model(batch, instances, cull, stage)
     }

@@ -32,7 +32,9 @@ impl InstanceGroupStorage {
             .get_mut(fields.slot as usize)
             .and_then(Option::as_mut)
             .filter(|g| {
-                g.generation == fields.generation && g.model.fields().generation == model_generation
+                g.owner == mod_api::crash::current_native_mod()
+                    && g.generation == fields.generation
+                    && g.model.fields().generation == model_generation
             })
             .ok_or(GroupError::Stale)
     }

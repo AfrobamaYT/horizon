@@ -94,6 +94,9 @@ impl Game<'_> {
         model: ModelRef,
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
+        if instances.len() > 16_384 {
+            return Err(InstanceError::CapacityExceeded);
+        }
         horizon_client::world_geometry::validate_instances(instances)?;
         self.prepared_model_draws
             .borrow_mut()
@@ -333,57 +336,30 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs prepared resources; measure on a real GPU host"]
-    fn persistent_groups_submission_cost() {
-        use mod_api::InstanceGroups;
-        let _fixture =
-            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
-        super::super::native_entity_refs::tests::with_client_game(|game| {
-            let _restore = Restore;
-            let model = grass(game);
-            horizon_client::gfx::cap_prepared_instance_slots(16_384);
-            let mut draw = WorldGeometry::default();
-            for n in [1, 16, 128] {
-                let groups: Vec<_> = (0..n)
-                    .map(|_| {
-                        let group = game.create_group(model, 128).unwrap();
-                        group.set_len(game, 128).unwrap();
-                        group
-                    })
-                    .collect();
-                let start = std::time::Instant::now();
-                for _ in 0..1000 {
-                    draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
-                    game.prepared_model_draws.borrow_mut().clear();
-                    for group in &groups {
-                        context(game, &mut draw)
-                            .draw_instance_group(*group)
-                            .unwrap();
-                    }
-                    std::hint::black_box(&draw);
-                }
-                eprintln!(
-                    "{n} groups, {} copies, CPU submission ms/frame: {:.6}",
-                    n * 128,
-                    start.elapsed().as_secs_f64()
-                );
-                for group in groups {
-                    group.destroy(game).unwrap();
-                }
-            }
-        });
-    }
-
-    #[test]
     #[ignore = "needs software Vulkan"]
     fn persistent_groups_match_batch() {
         use mod_api::{GroupError, InstanceGroups};
-        let _fixture =
-            horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
+        let _fixture = horizon_client::models::standalone_fixture(vec![
+            "minecraft:block/grass_block".into(),
+            "minecraft:block/glass".into(),
+        ]);
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
             let model = grass(game);
             horizon_client::gfx::cap_prepared_instance_slots(16_384);
+            let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                id: "a",
+                hook: "test",
+                part: None,
+            });
+            assert_eq!(
+                game.create_group(model, 16_385),
+                Err(GroupError::CapacityExceeded)
+            );
+            let glass = game
+                .native_model(&Identifier::parse("minecraft:block/glass").unwrap())
+                .unwrap();
+            assert_eq!(game.create_group(glass, 1), Err(GroupError::Translucent));
             let group = game.create_group(model, 8).unwrap();
             let near = ModelInstance::at([0.0; 3], 0xFF80_C040);
             let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
@@ -405,6 +381,25 @@ mod tests {
                 glam::Vec4::W,
             ]));
             let mut draw = WorldGeometry::default();
+            {
+                let _other = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: "b",
+                    hook: "test",
+                    part: None,
+                });
+                assert_eq!(group.write(game, 0, &[near]), Err(GroupError::Stale));
+                assert_eq!(group.set_len(game, 0), Err(GroupError::Stale));
+                assert_eq!(group.destroy(game), Err(GroupError::Stale));
+                assert_eq!(
+                    context(game, &mut draw).draw_instance_group(group),
+                    Err(GroupError::Stale)
+                );
+            }
+            let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+            assert_eq!(
+                context(game, &mut draw).draw_model_instances(model, &oversized),
+                Err(InstanceError::CapacityExceeded)
+            );
             let render = |game: &Game<'_>| {
                 let staged = game.prepared_model_draws.borrow();
                 assert_eq!(staged.len(), 1, "the far copy must be culled");
@@ -449,9 +444,9 @@ mod tests {
             );
             let sibling = game.create_group(model, 16_384).unwrap();
             let third = game.create_group(model, 16_384).unwrap();
-            let fourth = game.create_group(model, 16_384).unwrap();
+            let fourth = game.create_group(model, 16_376).unwrap();
             assert_eq!(
-                game.create_group(model, 16_384),
+                game.create_group(model, 1),
                 Err(GroupError::CapacityExceeded)
             );
             for handle in [sibling, third, fourth] {
@@ -465,8 +460,25 @@ mod tests {
             );
             let fresh = game.create_group(model, 8).unwrap();
             assert_ne!(fresh, group);
-            game.instance_groups.borrow_mut().clear();
+            game.spawn_pack_reload(super::super::packs::ReloadKind::Selection)
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while game.pack_reload.is_some() && std::time::Instant::now() < deadline {
+                game.drive_pack_reload();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_ne!(
+                game.standalone_geometry.generation(),
+                model.fields().generation
+            );
             assert_eq!(fresh.set_len(game, 1), Err(GroupError::Stale));
+            let after_reload: Vec<_> = (0..4)
+                .map(|_| game.create_group(grass(game), 16_384).unwrap())
+                .collect();
+            assert_ne!(fresh, after_reload[0]);
+            game.native_lifecycle_world_closed();
+            assert_eq!(after_reload[0].destroy(game), Err(GroupError::Stale));
+            assert_ne!(after_reload[0], game.create_group(grass(game), 1).unwrap());
         });
     }
 
