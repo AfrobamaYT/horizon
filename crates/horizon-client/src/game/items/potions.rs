@@ -1693,6 +1693,8 @@ impl Game<'_> {
             .filter(|p| p.alive)
             .collect();
         let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
         self.breath_clouds.append(&mut clouds);
     }
@@ -2519,6 +2521,61 @@ mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_breath_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(false);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_potion_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(true);
+    }
+
+    fn cloud_spawns_during_pass(potion_pass: bool) {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            for _ in 0..2 {
+                game.spawn_creeper_cloud([0.0, 80.0, 0.0], Vec::new(), Vec::new(), Vec::new(), 0);
+            }
+            if !potion_pass {
+                game.breath_clouds.for_each_mut(|c| c.potion = None);
+            }
+            let first = game.breath_clouds[0].id;
+            let second = game.breath_clouds[1].id;
+            let next = game.next_entity;
+            super::super::entity::taken_pass_tests::with_spawn(
+                |game| {
+                    assert!(game.breath_clouds.is_empty());
+                    for _ in 0..2 {
+                        game.spawn_creeper_cloud(
+                            [0.0, 80.0, 0.0],
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            0,
+                        );
+                    }
+                },
+                || {
+                    if potion_pass {
+                        game.tick_potion_clouds();
+                    } else {
+                        game.tick_breath();
+                    }
+                },
+            );
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(next + 1, 0), (next + 2, 0), (first, 1), (second, 1)]
+            );
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn residency_cloud_load_expiry_bottling_and_late_ids() {

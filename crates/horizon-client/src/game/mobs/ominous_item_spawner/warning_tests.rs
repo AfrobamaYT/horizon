@@ -147,3 +147,42 @@ fn residency_spawner_load_expiry_and_spawn_order() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn taken_spawner_tick_keeps_survivors_before_both_spawns() {
+    use horizon_client::items::ItemStack;
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.ominous_spawners.clear();
+        for _ in 0..2 {
+            game.add_ominous_item_spawner(
+                ItemStack::new("minecraft:air", 1),
+                [0.0, 80.0, 0.0],
+                100,
+            );
+        }
+        let first = game.ominous_spawners[0].id;
+        let second = game.ominous_spawners[1].id;
+        let next = game.next_entity;
+        crate::game::entity::taken_pass_tests::with_spawn(
+            |game| {
+                assert!(game.ominous_spawners.is_empty());
+                for delay in [200, 300] {
+                    game.add_ominous_item_spawner(
+                        ItemStack::new("minecraft:air", 1),
+                        [0.0, 80.0, 0.0],
+                        delay,
+                    );
+                }
+            },
+            || game.tick_ominous_item_spawners(),
+        );
+        assert_eq!(
+            game.ominous_spawners
+                .iter()
+                .map(|s| (s.id, s.tick_count))
+                .collect::<Vec<_>>(),
+            [(first, 1), (second, 1), (next + 1, 0), (next + 2, 0)]
+        );
+    });
+}

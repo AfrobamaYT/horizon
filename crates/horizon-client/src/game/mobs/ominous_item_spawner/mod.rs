@@ -108,6 +108,8 @@ impl Game<'_> {
     /// game ticks).
     pub(super) fn tick_ominous_item_spawners(&mut self) {
         let mut spawners = self.ominous_spawners.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         spawners.retain_mut(|s| {
             s.tick_count += 1;
             let at = block(s.position);

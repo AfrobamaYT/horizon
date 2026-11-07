@@ -3158,6 +3158,8 @@ impl Game<'_> {
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
         let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {
             // Lingering potions' clouds tick with the potions.
             if c.potion.is_some() {
