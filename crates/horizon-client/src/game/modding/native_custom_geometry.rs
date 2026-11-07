@@ -680,6 +680,7 @@ mod tests {
     #[test]
     #[ignore = "needs software Vulkan"]
     fn persistent_groups_cpu_routes_and_lifetime() {
+        use mod_api::__private::game::Fields;
         use mod_api::{GroupError, InstanceGroups};
         let _fixture =
             horizon_client::models::standalone_fixture(vec!["minecraft:block/grass_block".into()]);
