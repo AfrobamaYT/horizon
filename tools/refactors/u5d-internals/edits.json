@@ -1,5 +1,5 @@
 {
-  "base": "663a03f7ca4243014fca96972abbd709dcd7e34d",
+  "base": "a21791aac58c4a470a5c4a2e6f660b5192250e09",
   "files": {
     "crates/horizon-mod-package/src/manifest.rs": [
       {
@@ -1598,6 +1598,25 @@
       },
       {
         "old": [
+          "    manifest.inject[0].priority = 1;\n",
+          "    assert!(listen(&manifest, &exports).unwrap().is_some());\n",
+          "}\n",
+          "mod build_script {\n"
+        ],
+        "new": [
+          "    manifest.inject[0].priority = 1;\n",
+          "    assert!(listen(&manifest, &exports).unwrap().is_some());\n",
+          "    manifest.internals[0].hash = \"changed\".into();\n",
+          "    assert!(\n",
+          "        matches!(listen(&manifest, &exports), Err(crate::Refusal::ChangedInternal { path }) if path == \"Counter\")\n",
+          "    );\n",
+          "}\n",
+          "mod build_script {\n"
+        ],
+        "count": 1
+      },
+      {
+        "old": [
           "        fs::write(dir.join(\"catalog.json\"), catalog).unwrap();\n",
           "        let manifest = format!(\n",
           "            \"id='generation'\\nname='Generation'\\nversion='1.0.0'\\napi='0.2'\\nside='both'\\ncapabilities=['registries']\\n[native]\\ninternals=[{{path=\\\"horizon_client::game::Game<'_>::tick\\\",hash='h'}}]\\n[wasm]\\nsha512='{}'\\ntoolchain='1.99.1'\\n[[inject]]\\nid='listener'\\nat=\\\"horizon_client::game::Game<'_>::tick\\\"\\nkind='head'\\naccess='internals'\\nhash='h'\\nwith='chosen'\",\n",
@@ -1646,6 +1665,40 @@
           "[[native.injection]]\n"
         ],
         "count": 1
+      },
+      {
+        "old": [
+          "checks the mod against a discovery-only copy of the pinned game's source, uses compiler\n",
+          "warnings to find actual internal uses (including glob imports and macros), and replaces\n",
+          "`[native].internals` with their exact paths, kinds and hashes. Unused declarations are removed;\n",
+          "retained declarations keep their formatting. The command prints added and removed entries.\n",
+          "It is explicit: a normal build never changes the declarations reviewers and players read.\n"
+        ],
+        "new": [
+          "checks the mod against a discovery-only copy of the pinned game's source, uses compiler\n",
+          "warnings to find actual internal uses (including glob imports and macros), and replaces\n",
+          "top-level `internals` with their exact paths, kinds and hashes. Unused declarations are removed;\n",
+          "retained declarations keep their formatting. The command prints added and removed entries.\n",
+          "It is explicit: a normal build never changes the declarations reviewers and players read.\n"
+        ],
+        "count": 1
+      },
+      {
+        "old": [
+          "### Wasm raw listeners\n",
+          "\n",
+          "A wasm mod uses the same `[native] internals` declarations and `raw` injections beside `[wasm]`,\n",
+          "but omits all three native pins and carries no helper or support-module source. Its generated view\n",
+          "imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.\n"
+        ],
+        "new": [
+          "### Wasm raw listeners\n",
+          "\n",
+          "A wasm mod uses the same top-level `internals` declarations and `[[inject]]` listeners beside `[wasm]`,\n",
+          "but omits all three native pins and carries no helper or support-module source. Its generated view\n",
+          "imports `horizon:mod-internals/view`: roots, path nodes, plain values and declared function calls.\n"
+        ],
+        "count": 1
       }
     ],
     "launcher/src/instance_mods.rs": [
@@ -1684,6 +1737,9 @@
     "tools/refactors/u5d-internals/move.py",
     "tools/refactors/u5d-internals/edits.json",
     "tools/refactors/u5d-internals/README.md",
-    "crates/horizon-mod-package/tests/internals_owner.rs"
+    "crates/horizon-mod-package/tests/internals_owner.rs",
+    "docs/modding/src/how-to/wasm-mods.md",
+    "docs/modding/src/reference/manifest.md",
+    "docs/modding/src/reference/registry-index.md"
   ]
 }
