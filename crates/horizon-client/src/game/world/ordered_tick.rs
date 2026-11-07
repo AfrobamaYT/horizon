@@ -60,17 +60,6 @@ pub(super) fn first_join<T: Joined>(list: &[T]) -> Option<JoinSeq> {
     list.iter().map(Joined::join_seq).min()
 }
 
-/// Where the entity that joined as `join` is in `list`, if still there. A list
-/// is usually in join order (spawns append), so a binary search finds it; a
-/// list put back out of order falls back to the walk.
-fn find_join<T: Joined>(list: &[T], join: JoinSeq) -> Option<usize> {
-    match list.binary_search_by_key(&join, Joined::join_seq) {
-        // Join numbers are unique, so a hit is the entity even in a list out of order.
-        Ok(i) => Some(i),
-        Err(_) => list.iter().position(|e| e.join_seq() == join),
-    }
-}
-
 impl Game<'_> {
     /// A level tick starts: what has joined so far ticks this tick.
     pub(super) fn begin_ordered_ticks(&mut self) {
@@ -141,7 +130,7 @@ impl Game<'_> {
             // ServerLevel.tick: only entities in entity-ticking chunks tick.
             match kind {
                 Pending::Tnt => {
-                    let Some(i) = find_join(&self.tnts, join) else {
+                    let Some(i) = self.tnts.locate(join) else {
                         continue;
                     };
                     let at = self.tnts[i].position;
@@ -165,7 +154,7 @@ impl Game<'_> {
                     }
                 }
                 Pending::Falling => {
-                    let Some(i) = find_join(&self.falling, join) else {
+                    let Some(i) = self.falling.locate(join) else {
                         continue;
                     };
                     let at = self.falling[i].position;
@@ -187,7 +176,7 @@ impl Game<'_> {
                     }
                 }
                 Pending::Orb => {
-                    let Some(i) = find_join(&self.orbs, join) else {
+                    let Some(i) = self.orbs.locate(join) else {
                         continue;
                     };
                     let followed = followed.get_or_insert_with(|| self.orb_followed());
@@ -255,40 +244,5 @@ impl Game<'_> {
             return Ok(());
         }
         self.run_ordered_ticks(cut, false)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::find_join;
-    use horizon_client::join_seq::{JoinList, JoinSeq, Joined as _};
-
-    #[derive(Clone)]
-    struct E {
-        join: JoinSeq,
-    }
-    horizon_client::impl_joined!(E);
-
-    /// The run looks each entity up by join number: in a list in join order,
-    /// one put back out of order, and after the entity left.
-    #[test]
-    fn find_join_finds_by_number_in_or_out_of_order() {
-        let mut list = JoinList::<E>::default();
-        for _ in 0..5 {
-            list.push(E {
-                join: JoinSeq::UNJOINED,
-            });
-        }
-        let joins: Vec<JoinSeq> = list.iter().map(|e| e.join_seq()).collect();
-        for (i, &j) in joins.iter().enumerate() {
-            assert_eq!(find_join(&list, j), Some(i));
-        }
-        list.swap(0, 4);
-        list.swap(1, 3);
-        assert_eq!(find_join(&list, joins[0]), Some(4));
-        assert_eq!(find_join(&list, joins[4]), Some(0));
-        assert_eq!(find_join(&list, joins[1]), Some(3));
-        let gone = list.remove(2).join_seq();
-        assert_eq!(find_join(&list, gone), None);
     }
 }
