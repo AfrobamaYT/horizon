@@ -1335,7 +1335,16 @@ mod transfer_lifetime_tests {
             for bound in [true, false] {
                 super::super::native_entity_refs::tests::with_game(|game| {
                     game.tickets.update(None);
-                    let id = game.summon_with_nbt(kind, [0.5, 70.0, 0.5], "{}").unwrap();
+                    let target = game
+                        .summon_with_nbt(kind, [0.5, 70.0, 0.5], "{}")
+                        .unwrap()
+                        .unwrap();
+                    let id = match target {
+                        super::super::commands::Target::Cart(id)
+                        | super::super::commands::Target::Boat(id)
+                        | super::super::commands::Target::Mob(id) => id,
+                        _ => panic!("unexpected vehicle target"),
+                    };
                     let uuid = game.uuid_for(id);
                     let source = game.dim;
                     let source_ref = game.entity(id).unwrap();
