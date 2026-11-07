@@ -8,6 +8,7 @@
 //! everything else.
 use super::remote_chunks::{ChunkDecoder, ChunkFormat, Next};
 use super::{Dim, Game, Mining, Screen, level_sounds::LevelSound};
+use crate::game::api_values::TryIntoApi;
 use horizon_client::actions::Action;
 use horizon_client::first_person::{Hand, SwingAnimation};
 use horizon_client::{
@@ -590,7 +591,8 @@ pub(super) struct Remote {
     /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
     pub(super) craft_result: Option<ItemStack>,
     /// The open menu's title as the server named it, with its styles.
-    pub(super) menu_title: Option<horizon_client::text::Text>,
+    menu_title: Option<horizon_client::text::Text>,
+    menu_title_snapshot: Option<mod_api::Text>,
     state_id: i32,
     use_target: Option<[i32; 3]>,
     /// A mod menu's extra data, kept for the `OpenScreen` of its window that
@@ -1141,6 +1143,7 @@ impl Game<'_> {
             menu: ClientMenu::default(),
             craft_result: None,
             menu_title: None,
+            menu_title_snapshot: None,
             state_id: 0,
             use_target: None,
             menu_extra: None,
@@ -10260,7 +10263,7 @@ impl Game<'_> {
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
             r.menu.set(None);
-            r.menu_title = None;
+            r.set_menu_title(None);
             r.craft_result = None;
         }
         self.mount_menu_reset();
@@ -10291,7 +10294,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu
                 .set(Some((container, "minecraft:merchant".to_owned())));
-            r.menu_title = Some(text);
+            r.set_menu_title(Some(text));
         }
         let session = horizon_client::merchant::Session::new(Vec::new(), true);
         self.open_remote_merchant(session, (!title.is_empty()).then_some(title));
@@ -10460,7 +10463,7 @@ impl Game<'_> {
         let title = menu_title(&p.title);
         if let Some(r) = self.remote.as_mut() {
             r.menu.set(Some((p.container, menu.clone())));
-            r.menu_title = Some(title);
+            r.set_menu_title(Some(title));
         }
         self.craft_size = if menu == "minecraft:crafting" { 3 } else { 2 };
         self.container = None;
@@ -10485,7 +10488,7 @@ impl Game<'_> {
                 self.container = None;
                 if let Some(r) = self.remote.as_mut() {
                     r.menu.set(None);
-                    r.menu_title = None;
+                    r.set_menu_title(None);
                 }
                 self.send(S::ContainerClose(play::ContainerClose {
                     container: p.container,
@@ -10507,7 +10510,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu
                 .set(Some((p.container, format!("{MOUNT_MENU}{columns}"))));
-            r.menu_title = None;
+            r.set_menu_title(None);
         }
     }
     /// The type of the menu a server opened (`MenuType`'s id).
@@ -11444,6 +11447,15 @@ impl ClientMenu {
 }
 
 impl Remote {
+    pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
+        self.menu_title_snapshot = title.try_into_api().unwrap();
+        self.menu_title = title;
+    }
+
+    pub(super) fn menu_title_snapshot(&self) -> Option<&mod_api::Text> {
+        self.menu_title_snapshot.as_ref()
+    }
+
     /// Resolve registry keys only when registries or the dimension change.
     fn resolve_clocks(&mut self) {
         self.overworld_clock = self
@@ -11726,6 +11738,23 @@ mod level_sound_tests;
 #[cfg(test)]
 mod tests {
     use super::super::api_values::TryIntoApi;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn menu_title_snapshot_tracks_open_replacement_and_close() {
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "menu-title-test").unwrap();
+            let remote = game.remote.as_mut().unwrap();
+            for value in [Some("first"), Some("replacement"), None] {
+                remote.set_menu_title(value.map(horizon_client::text::Text::literal));
+                assert_eq!(
+                    remote.menu_title_snapshot(),
+                    remote.menu_title.try_into_api().unwrap().as_ref()
+                );
+            }
+        });
+    }
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

@@ -18,7 +18,7 @@ pub(super) struct ObservedScreen {
     /// it open or close.
     overlay: bool,
     menu: Option<String>,
-    title: Option<Text>,
+    title: Option<mod_api::Text>,
     rect: [f32; 4],
     slots: usize,
     mouse: [f32; 2],
@@ -226,7 +226,7 @@ impl Game<'_> {
             title: self
                 .remote
                 .as_ref()
-                .and_then(|r| r.menu_title.as_ref())
+                .and_then(|r| r.menu_title_snapshot())
                 .filter(|_| !none),
             rect,
             slots: if none { 0 } else { self.slot_count() },
@@ -935,7 +935,7 @@ impl Game<'_> {
         NativeScreenView::from(mod_api::__private::built::NativeScreenView {
             id: screen.id(),
             menu: self.remote_menu_type().filter(|m| !m.is_empty()),
-            title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
+            title: self.remote.as_ref().and_then(|r| r.menu_title_snapshot()),
             rect: self.screen_rect(batch, screen),
             slots: self.slot_count(),
             mouse: self.cursor(),
