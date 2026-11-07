@@ -25,7 +25,12 @@ impl Game<'_> {
     /// packs' and native mods' changes included. Read from the item report's JSON, so a
     /// number is an `Int`, `Long` or `Double` and a boolean a `Byte`. None where the item
     /// hasn't the component, and for an unknown item.
-    pub(super) fn item_default_component(&self, item: &str, component: &str) -> Option<Tag> {
+    pub(super) fn item_default_component(
+        &self,
+        item: mod_api::ItemKey,
+        component: &str,
+    ) -> Option<Tag> {
+        let item = mod_api::__private::item_key_id(item)?;
         let prototype = self.pack.item_renderer.models.prototypes.get(item)?;
         Some(horizon_client::scoreboard::json_to_tag(
             prototype.get(component)?,

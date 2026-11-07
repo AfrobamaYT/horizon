@@ -85,6 +85,11 @@ pub fn item_key(id: &str) -> Option<ItemKey> {
     Some(ItemKey(*resolved_items().get()?.slots.get(id)?))
 }
 
+/// Resolve a typed identifier at a load boundary without formatting it as a string.
+pub fn item_key_by_identifier(id: &crate::Identifier) -> Option<ItemKey> {
+    Some(ItemKey(*resolved_items().get()?.identifiers.get(id)?))
+}
+
 impl EffectKey {
     /// Resolved effects also expose registry entries no mod explicitly requested.
     pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
