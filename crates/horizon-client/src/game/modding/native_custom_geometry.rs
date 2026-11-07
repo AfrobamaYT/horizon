@@ -331,6 +331,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
             let model = grass(game);
+            horizon_client::gfx::cap_prepared_instance_slots(16_384);
             let mut draw = WorldGeometry::default();
             for n in [1, 16, 128] {
                 let groups: Vec<_> = (0..n)
@@ -372,6 +373,7 @@ mod tests {
         super::super::native_entity_refs::tests::with_client_game(|game| {
             let _restore = Restore;
             let model = grass(game);
+            horizon_client::gfx::cap_prepared_instance_slots(16_384);
             let group = game.create_group(model, 8).unwrap();
             let near = ModelInstance::at([0.0; 3], 0xFF80_C040);
             let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
@@ -427,6 +429,14 @@ mod tests {
             context(game, &mut draw).draw_instance_group(group).unwrap();
             assert_eq!(draw.usage().instances_used, 1);
             assert_eq!(expected, render(game));
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(
+                expected,
+                render(game),
+                "another view draws the group independently"
+            );
             let sibling = game.create_group(model, 16_384).unwrap();
             let third = game.create_group(model, 16_384).unwrap();
             let fourth = game.create_group(model, 16_384).unwrap();

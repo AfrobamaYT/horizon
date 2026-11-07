@@ -179,6 +179,16 @@ impl From<InstanceError> for GroupError {
     }
 }
 
+impl crate::__private::game::Fields for InstanceGroupRef {
+    type Fields<'a> = crate::__private::game::ModelRefFields;
+    fn fields(&self) -> Self::Fields<'_> {
+        crate::__private::game::ModelRefFields {
+            generation: self.0,
+            slot: self.1,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,15 +201,5 @@ mod tests {
             ModelInstance::at([1.0, 2.0, 3.0], 0xFF80_C040).tint,
             0xFF80_C040
         );
-    }
-}
-
-impl crate::__private::game::Fields for InstanceGroupRef {
-    type Fields<'a> = crate::__private::game::ModelRefFields;
-    fn fields(&self) -> Self::Fields<'_> {
-        crate::__private::game::ModelRefFields {
-            generation: self.0,
-            slot: self.1,
-        }
     }
 }
