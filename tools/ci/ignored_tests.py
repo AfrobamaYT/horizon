@@ -23,6 +23,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+from tools import lab  # noqa: E402
+
 KNOWN = Path(__file__).with_name("ignored-tests-known-failures.txt")
 RESULT = re.compile(r"^test (\S+) \.\.\. (ok|FAILED)$")
 SUMMARY = re.compile(r"^test result: ")
@@ -64,7 +67,7 @@ def run(package, skip):
             env[key] = str(home)
         for key in ("HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             env[key] = str(Path(scratch) / key.lower())
-        env.update(HORIZON_LAUNCHER_NO_SELF_UPDATE="1", HORIZON_NO_AUDIO="1")
+        env = lab.game_env(env)
         process = subprocess.run(
             [
                 "cargo", "test", "-p", package, "--lib", *(["--bins", "--tests"] if package in INTEGRATION_TESTS else []),
