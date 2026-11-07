@@ -104,6 +104,16 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
     }
     let batch = host.query_mut(&VALUE).unwrap();
     assert_eq!(batch.iter().len(), 5);
+    let captured = || {
+        batch
+            .iter()
+            .map(|row| {
+                let row = row.unwrap();
+                (row.holder(), *row.value())
+            })
+            .collect::<Vec<_>>()
+    };
+    let original: Vec<_> = cases.iter().map(|(holder, _)| (*holder, 10)).collect();
     for (scoped, target) in cases {
         let row = batch
             .iter()
@@ -119,7 +129,17 @@ fn all_scoped_variants_write_and_remove_the_exact_storage_target() {
                 .read(&VALUE),
             Ok(&23)
         );
+        assert_eq!(
+            *batch
+                .iter()
+                .map(Result::unwrap)
+                .find(|captured| captured.holder() == scoped)
+                .unwrap()
+                .value(),
+            10
+        );
         assert_eq!(row.remove(&mut host).unwrap(), Some(23));
+        assert_eq!(captured(), original);
         assert!(
             host.maps[&target]
                 .entry("mapping", "value")

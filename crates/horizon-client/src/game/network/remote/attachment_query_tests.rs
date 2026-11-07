@@ -7,7 +7,7 @@ use mod_api::{AttachmentCodec, AttachmentType, Host};
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "mirror",
     name: "value",
-    default: || panic!("no default"),
+    default: || 73,
     codec: Some(AttachmentCodec {
         encode: |n| Ok([("n".into(), Tag::Int(*n))].into()),
         decode: |c| match c.get(&"n".into()) {
@@ -27,6 +27,9 @@ fn values(game: &Game<'_>) -> Vec<i32> {
         .map(|r| *r.unwrap().value)
         .collect()
 }
+fn client<'a>(game: &'a mut Game<'_>) -> &'a mut Remote {
+    game.remote.as_mut().unwrap()
+}
 fn sync(game: &mut Game<'_>, holder: Holder, value: i32) {
     game.remote_attachment_sync(
         &encode(&Message {
@@ -45,8 +48,8 @@ fn sync(game: &mut Game<'_>, holder: Holder, value: i32) {
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
 fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
     with_client_game(|game| {
-        let (client, _server) = horizon_protocol::connection::Pipe::pair();
-        game.connect_local(client, "QueryMirror").unwrap();
+        let (pipe, _server) = horizon_protocol::connection::Pipe::pair();
+        game.connect_local(pipe, "QueryMirror").unwrap();
         let mut spawn = horizon_protocol::packets::play::SpawnInfo {
             dimension_type: 0,
             dimension: "test:pocket".into(),
@@ -60,7 +63,16 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
             sea_level: 63,
         };
         game.enter_remote_dimension(&spawn, false, horizon_client::level_loading::Reason::Other);
-        game.remote.as_mut().unwrap().logged_in = true;
+        client(game).logged_in = true;
+        assert!(values(game).is_empty());
+        let host: &mut dyn Host = game;
+        VALUE.set(host.attachments(), Holder::Level, 73).unwrap();
+        assert_eq!(values(game), [73]);
+        client(game).attachments.clear();
+        let host: &mut dyn Host = game;
+        assert_eq!(VALUE.get(host.attachments(), Holder::Level), Ok(73));
+        assert_eq!(values(game), [73]);
+        client(game).attachments.clear();
         sync(game, Holder::Level, 41);
         assert_eq!(values(game), [41]);
         let captured = game.attachment_query("mirror", "value");
@@ -71,22 +83,8 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
         );
         sync(game, Holder::Level, 42);
         assert_eq!(values(game), [42]);
-        assert_eq!(
-            *captured
-                .query(&VALUE)
-                .unwrap()
-                .iter()
-                .next()
-                .unwrap()
-                .unwrap()
-                .value,
-            41
-        );
-        game.remote
-            .as_mut()
-            .unwrap()
-            .attachments
-            .remove(&Holder::Level);
+        assert_eq!(forms[0].entry.read(&VALUE), Ok(&41));
+        client(game).attachments.remove(&Holder::Level);
         assert!(values(game).is_empty());
         assert_eq!(
             game.attachment_validate_write(forms[0].token.clone().into()),
@@ -94,14 +92,10 @@ fn synced_client_queries_follow_replacement_retirement_and_level_changes() {
         );
         sync(game, Holder::Chunk([1, 2]), 51);
         assert_eq!(values(game), [51]);
-        game.remote
-            .as_mut()
-            .unwrap()
-            .attachments
-            .retain(|_, _| false);
+        client(game).attachments.retain(|_, _| false);
         assert!(values(game).is_empty());
         sync(game, Holder::Level, 61);
-        game.remote.as_mut().unwrap().attachments.clear();
+        client(game).attachments.clear();
         assert!(values(game).is_empty());
         sync(game, Holder::Level, 71);
         spawn.dimension = "minecraft:the_nether".into();
