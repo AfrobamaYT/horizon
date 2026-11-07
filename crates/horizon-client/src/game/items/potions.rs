@@ -577,10 +577,10 @@ fn thrown_kind(stack: &ItemStack) -> &'static str {
 /// within the player's box grown by 2, and shrink its radius by 0.5.
 pub(super) fn collect_dragon_breath(
     player_box: Aabb,
-    clouds: &mut [super::dragon::Breath],
+    clouds: &mut horizon_client::join_seq::ResidentList<super::dragon::Breath>,
 ) -> bool {
     let search_box = player_box.inflate(Vec3::new(2.0, 2.0, 2.0));
-    if let Some(c) = clouds.iter_mut().find(|c| {
+    if let Some(i) = clouds.iter().position(|c| {
         if !c.from_dragon || c.potion.is_some() || super::dragon::breath_expired(c.age, c.duration)
         {
             return false;
@@ -592,7 +592,7 @@ pub(super) fn collect_dragon_breath(
         );
         search_box.intersects(cloud_box)
     }) {
-        c.radius = (c.radius - 0.5).max(0.0);
+        clouds.update(i, |c| c.radius = (c.radius - 0.5).max(0.0));
         true
     } else {
         false
@@ -1742,7 +1742,9 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = std::mem::take(&mut self.breath_clouds);
+        let mut clouds = self.breath_clouds.take();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));
         self.breath_clouds.append(&mut clouds);
     }
@@ -2569,6 +2571,132 @@ mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
     use horizon_client::{motion::PlayerMotion, screen_effects::nausea_blend_added};
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn lifecycle_cloud_commands_and_parked_owners() {
+        super::super::entity::taken_pass_tests::LifecycleFixture {
+            seed: |game, entries| {
+                game.breath_clouds.clear();
+                for &(id, at) in entries {
+                    game.spawn_creeper_cloud(at, Vec::new(), Vec::new(), Vec::new(), 0);
+                    let i = game.breath_clouds.len() - 1;
+                    game.breath_clouds.update(i, |c| c.id = id);
+                }
+            },
+            ids: |game| game.breath_clouds.iter().map(|c| c.id).collect(),
+            target: super::super::commands::Target::Cloud,
+            unloads_with_chunk: false,
+            remote: None,
+        }
+        .run();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_breath_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(false);
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn taken_potion_tick_keeps_both_spawns_before_survivors() {
+        cloud_spawns_during_pass(true);
+    }
+
+    fn cloud_spawns_during_pass(potion_pass: bool) {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            for _ in 0..2 {
+                game.spawn_creeper_cloud([0.0, 80.0, 0.0], Vec::new(), Vec::new(), Vec::new(), 0);
+            }
+            if !potion_pass {
+                game.breath_clouds.for_each_mut(|c| c.potion = None);
+            }
+            let first = game.breath_clouds[0].id;
+            let second = game.breath_clouds[1].id;
+            let next = game.next_entity;
+            super::super::entity::taken_pass_tests::with_spawn(
+                |game| {
+                    assert!(game.breath_clouds.is_empty());
+                    for _ in 0..2 {
+                        game.spawn_creeper_cloud(
+                            [0.0, 80.0, 0.0],
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            0,
+                        );
+                    }
+                },
+                || {
+                    if potion_pass {
+                        game.tick_potion_clouds();
+                    } else {
+                        game.tick_breath();
+                    }
+                },
+            );
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(next + 1, 0), (next + 2, 0), (first, 1), (second, 1)]
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn residency_cloud_load_expiry_bottling_and_late_ids() {
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.breath_clouds.clear();
+            game.ominous_spawners.clear();
+            let (tag, _) =
+                horizon_core::nbt::parse_snbt("{Pos:[0d,80d,0d],Duration:2,WaitTime:0,Radius:3f}")
+                    .unwrap();
+            let potion = game.load_potion_cloud(&tag).unwrap();
+            for (age, duration) in [(20, 1), (0, 40)] {
+                game.breath_clouds.push(super::super::dragon::Breath {
+                    id: 0,
+                    at: [0.0, 80.0, 0.0],
+                    radius: 3.0,
+                    age,
+                    duration,
+                    from_dragon: false,
+                    victims: Vec::new(),
+                    potion: None,
+                });
+            }
+            game.add_remote_ominous_item_spawner(0, [0.0, 80.0, 0.0]);
+            let before = game.next_entity;
+            assert_eq!(game.breath_clouds[1].id, 0);
+            game.lan_assign_ids();
+            assert_eq!(game.ominous_spawners[0].id, before + 1);
+            assert_eq!(game.breath_clouds[1].id, before + 2);
+            assert_eq!(game.breath_clouds[2].id, before + 3);
+            game.tick_breath();
+            assert_eq!(
+                game.breath_clouds
+                    .iter()
+                    .map(|c| (c.id, c.age))
+                    .collect::<Vec<_>>(),
+                [(potion, 0), (before + 3, 1)]
+            );
+            game.tick_potion_clouds();
+            game.tick_potion_clouds();
+            assert_eq!(game.breath_clouds.len(), 1);
+            assert_eq!(game.breath_clouds[0].age, 1);
+            game.breath_clouds.update(0, |c| c.from_dragon = true);
+            assert!(collect_dragon_breath(
+                Aabb::new(Vec3::new(-0.3, 80.0, -0.3), Vec3::new(0.3, 81.8, 0.3)),
+                &mut game.breath_clouds
+            ));
+            assert_eq!(game.breath_clouds[0].radius, 2.5);
+            game.breath_clouds.clear();
+            assert!(game.breath_clouds.is_empty());
+        });
+    }
 
     fn effect_test_mod() {
         use mod_api::{self, *};
@@ -2841,7 +2969,7 @@ mod tests {
     #[test]
     fn glass_bottle_collects_dragon_breath_from_dragon_cloud() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
-        let mut clouds = vec![super::super::dragon::Breath {
+        let mut clouds = [super::super::dragon::Breath {
             id: 1,
             at: [1.0, 64.0, 0.0],
             radius: 5.0,
@@ -2850,7 +2978,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut clouds));
         assert_eq!(clouds[0].radius, 4.5);
         assert!(collect_dragon_breath(player_box, &mut clouds));
@@ -2863,7 +2993,7 @@ mod tests {
     fn glass_bottle_ignores_non_dragon_or_expired_or_out_of_range_clouds() {
         let player_box = Aabb::new(Vec3::new(-0.3, 64.0, -0.3), Vec3::new(0.3, 65.8, 0.3));
         // Non-dragon cloud (`from_dragon: false`).
-        let mut non_dragon = vec![super::super::dragon::Breath {
+        let mut non_dragon = [super::super::dragon::Breath {
             id: 1,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2872,12 +3002,14 @@ mod tests {
             from_dragon: false,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut non_dragon));
         assert_eq!(non_dragon[0].radius, 3.0);
 
         // Lingering potion cloud (`potion: Some(...)`).
-        let mut lingering = vec![super::super::dragon::Breath {
+        let mut lingering = [super::super::dragon::Breath {
             id: 2,
             at: [0.0, 64.0, 0.0],
             radius: 3.0,
@@ -2897,13 +3029,15 @@ mod tests {
                 owner: None,
                 guest: None,
             }),
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut lingering));
         assert_eq!(lingering[0].radius, 3.0);
 
         // Its last tick before the wait-shifted end still holds breath
         // (`tickCount - waitTime < duration`).
-        let mut last = vec![super::super::dragon::Breath {
+        let mut last = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2912,12 +3046,14 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(collect_dragon_breath(player_box, &mut last));
         assert_eq!(last[0].radius, 4.5);
 
         // Expired cloud (`tickCount - waitTime >= duration`).
-        let mut expired = vec![super::super::dragon::Breath {
+        let mut expired = [super::super::dragon::Breath {
             id: 3,
             at: [0.0, 64.0, 0.0],
             radius: 5.0,
@@ -2926,13 +3062,15 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut expired));
         assert_eq!(expired[0].radius, 5.0);
 
         // Out of horizontal reach: cloud at 10 blocks away with radius 1:
         // cloud X range [9.0, 11.0], player inflated X range [-2.3, 2.3] -> no overlap.
-        let mut far = vec![super::super::dragon::Breath {
+        let mut far = [super::super::dragon::Breath {
             id: 4,
             at: [10.0, 64.0, 0.0],
             radius: 1.0,
@@ -2941,14 +3079,16 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(player_box, &mut far));
         assert_eq!(far[0].radius, 1.0);
 
         // Out of vertical reach: cloud at Y=64.0 (Y bounds [64.0, 64.5]),
         // player at Y=67.0 (inflated Y bounds [65.0, 70.8] does not reach 64.5).
         let high_player = Aabb::new(Vec3::new(-0.3, 67.0, -0.3), Vec3::new(0.3, 68.8, 0.3));
-        let mut ground_cloud = vec![super::super::dragon::Breath {
+        let mut ground_cloud = [super::super::dragon::Breath {
             id: 5,
             at: [0.0, 64.0, 0.0],
             radius: 1.0,
@@ -2957,7 +3097,9 @@ mod tests {
             from_dragon: true,
             victims: Vec::new(),
             potion: None,
-        }];
+        }]
+        .into_iter()
+        .collect();
         assert!(!collect_dragon_breath(high_player, &mut ground_cloud));
         assert_eq!(ground_cloud[0].radius, 1.0);
     }
