@@ -145,7 +145,7 @@ impl Catalog {
                 listener: Some(format!("{}::__{name}Listener", point.module)),
                 return_listener: Some(format!("{}::__{name}ReturnListener", point.module)),
                 private: true,
-                record_name: Some(point.record),
+                record_name: Some(point.record_export),
             });
         }
         Ok(Self {

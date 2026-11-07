@@ -165,7 +165,7 @@ pub(super) fn stage(
                     target: item.path.clone(),
                     items: adapter.code.to_string(),
                     module: String::new(),
-                    record: String::new(),
+                    record_export: String::new(),
                 });
         }
     }
