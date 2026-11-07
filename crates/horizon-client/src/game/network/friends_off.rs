@@ -13,7 +13,7 @@ impl Game<'_> {
 
     /// Only reached by naming the screen (`horizon-ctl`): back to the pause menu.
     pub(super) fn draw_friends_screen(&mut self, _batch: &mut HudBatch) {
-        self.screen = Screen::Paused;
+        self.set_screen(Screen::Paused);
     }
 
     pub(super) fn friends_screen_click(&mut self) {}
