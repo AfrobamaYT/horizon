@@ -738,6 +738,48 @@ impl Wire for crate::ItemPlace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn round<T: Wire + std::fmt::Debug + PartialEq>(value: T) {
+        let mut out = Writer::new();
+        out.put(&value);
+        assert_eq!(Reader::decode::<T>(out.bytes()).unwrap(), value);
+        for n in 0..out.bytes().len() {
+            assert!(Reader::decode::<T>(&out.bytes()[..n]).is_err());
+        }
+    }
+
+    #[test]
+    fn wire_checked_values_and_garbage() {
+        round(crate::ConfigPath::new("example/options.toml").unwrap());
+        round(crate::SpawnerKey::new("example:spawner").unwrap());
+        round(crate::CustomSpawners::vanilla());
+        round(crate::Identifier::parse("example:thing").unwrap());
+        round(crate::ItemPlace::Nested {
+            parent: Box::new(crate::ItemPlace::Mod {
+                provider: "example:provider",
+                key: 3,
+            }),
+            slot: 4,
+        });
+        let mut out = Writer::new();
+        out.put_str("../escape");
+        assert!(Reader::decode::<crate::ConfigPath>(out.bytes()).is_err());
+        out.clear();
+        out.put_str("not namespaced");
+        assert!(Reader::decode::<crate::SpawnerKey>(out.bytes()).is_err());
+        out.clear();
+        out.put(&vec![
+            crate::SpawnerEntry::Builtin(crate::SpawnerKind::Cat),
+            crate::SpawnerEntry::Builtin(crate::SpawnerKind::Cat),
+        ]);
+        assert!(Reader::decode::<crate::CustomSpawners>(out.bytes()).is_err());
+        assert!(crate::wire::intern(&"x".repeat(257)).is_err());
+        for len in 0..64 {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 37 + len * 11) as u8).collect();
+            let _ = Reader::decode::<crate::ItemPlace>(&bytes);
+            let _ = Reader::decode::<crate::ItemStack>(&bytes);
+            let _ = Reader::decode::<crate::ParticleOptions>(&bytes);
+        }
+    }
     #[test]
     fn wire_dimension_key_checked() {
         let mut out = Writer::new();
