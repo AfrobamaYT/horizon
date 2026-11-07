@@ -1006,6 +1006,7 @@ impl Game<'_> {
         horizon_client::mobs::armor::prepare(&m, &self.motion.attributes);
         let id = m.id;
         self.remember(id, uuid, tag);
+        self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
