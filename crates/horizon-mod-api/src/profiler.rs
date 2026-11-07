@@ -133,6 +133,8 @@ pub fn is_enabled() -> bool {
 }
 /// Allocate all thread buffers before enabling. Returns false if already running.
 pub fn start() -> bool {
+    // Initialize the monotonic origin on the control path, never in the first call.
+    clock();
     start_with_clock(clock)
 }
 fn start_with_clock(clock: fn() -> u64) -> bool {
@@ -252,10 +254,14 @@ mod tests {
     use super::*;
     use crate::crash::enter_native_mod;
     static SERIAL: Mutex<()> = Mutex::new(());
-    static TIME: AtomicUsize = AtomicUsize::new(0);
+    thread_local! { static TIME: Cell<u64> = const { Cell::new(0) }; }
     pub(super) static CLOCK_READS: AtomicUsize = AtomicUsize::new(0);
     fn tick() -> u64 {
-        TIME.fetch_add(1, SeqCst) as u64
+        TIME.with(|t| {
+            let now = t.get();
+            t.set(now + 1);
+            now
+        })
     }
     fn call(id: &'static str, hook: &'static str, part: Option<&'static str>) -> NativeModCall {
         NativeModCall { id, hook, part }
@@ -264,10 +270,10 @@ mod tests {
     fn profiler_guards_and_threads() {
         let _serial = SERIAL.lock().unwrap();
         stop();
-        TIME.store(0, SeqCst);
+        TIME.with(|t| t.set(0));
         CLOCK_READS.store(0, SeqCst);
         drop(enter_native_mod(call("off", "off", None)));
-        assert_eq!(TIME.load(SeqCst), 0);
+        assert_eq!(TIME.with(Cell::get), 0);
         assert_eq!(CLOCK_READS.load(SeqCst), 0);
         assert!(start_with_clock(tick));
         assert!(!start());
@@ -279,15 +285,22 @@ mod tests {
             panic!("mod panic");
         });
         assert!(panic.is_err());
-        for _ in 0..2 {
-            std::thread::spawn(|| {
-                drop(enter_native_mod(call("d", "thread", None)));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    let guard = enter_native_mod(call("d", "thread", None));
+                    barrier.wait();
+                    drop(guard);
+                })
             })
-            .join()
-            .unwrap();
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
         }
         let report = stop();
-        assert_eq!(report.calls.len(), 4);
+        // Unrelated crate tests may enter other native hooks while this session runs.
         for (key, count, total) in [
             (("a", "outer", None), 1, 3),
             (("b", "inner", Some("Part")), 1, 1),
@@ -297,12 +310,46 @@ mod tests {
             let a = &report.calls[&key];
             assert_eq!((a.count, a.total), (count, total));
         }
-        assert_eq!(TIME.load(SeqCst), 10);
+        assert_eq!(TIME.with(Cell::get), 6);
         assert_eq!(report.dropped, 0);
         assert!(stop().calls.is_empty());
         assert!(start_with_clock(tick));
         drop(enter_native_mod(call("fresh", "epoch", None)));
-        assert_eq!(stop().calls.len(), 1);
+        assert_eq!(stop().calls[&("fresh", "epoch", None)].count, 1);
+    }
+    #[test]
+    fn profiler_drains_in_flight_and_reports_overflow() {
+        let _serial = SERIAL.lock().unwrap();
+        assert!(start_with_clock(tick));
+        let (entered, ready) = std::sync::mpsc::channel();
+        let (release, exit) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let _guard = enter_native_mod(call("drain", "waiting", None));
+            entered.send(()).unwrap();
+            exit.recv().unwrap();
+        });
+        ready.recv().unwrap();
+        let stopper = std::thread::spawn(stop);
+        while is_enabled() {
+            std::thread::yield_now();
+        }
+        assert!(!stopper.is_finished());
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(
+            stopper.join().unwrap().calls[&("drain", "waiting", None)].count,
+            1
+        );
+        assert!(start_with_clock(tick));
+        for _ in 0..=CALLS {
+            drop(enter_native_mod(call("capacity", "bounded", None)));
+        }
+        let report = stop();
+        assert_eq!(
+            report.calls[&("capacity", "bounded", None)].count,
+            CALLS as u64
+        );
+        assert!(report.dropped >= 1);
     }
     #[test]
     fn profiler_histogram_and_summary() {
