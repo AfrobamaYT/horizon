@@ -577,6 +577,12 @@ impl Game<'_> {
     }
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
+    pub(super) fn install_parts(&self, prepared: PreparedParts) {
+        mod_api::__private::install_blocks(prepared.blocks);
+        native_world_read::install_block_tags(prepared.tags);
+        mod_api::__private::install_resolved_parts(prepared.parts);
+        self.resolve_pathfindable();
+    }
     pub(super) fn resolve_pathfindable(&self) {
         let asked = mod_api::__private::has_scoped_hook(mod_api::HookId::IsPathfindable);
         let data = &self.res.rest().mob_data;

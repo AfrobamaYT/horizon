@@ -7950,7 +7950,12 @@ impl Game<'_> {
             game_master: self.can_use_game_master_blocks(),
         }
     }
-    fn apply_consume_effect(&mut self, effect: &horizon_client::items::ConsumeEffect) {
+    fn apply_consume_effect(
+        &mut self,
+        effect: &horizon_client::items::ConsumeEffect,
+        mob: Option<mod_api::LivingRef>,
+        allow_native: bool,
+    ) -> Option<bool> {
         use horizon_client::items::ConsumeEffect;
         Some(match effect {
             ConsumeEffect::ApplyEffects {
