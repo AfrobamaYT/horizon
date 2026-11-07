@@ -292,4 +292,11 @@ impl MobsBackendMut for Game<'_> {
         );
         self.native_mob_set_no_action_time(mob, ticks)
     }
+    fn mob_set_brain_target(&mut self, mob: MobRef, target: Option<LivingRef>) -> bool {
+        mod_api::__private::check_access(
+            "mob_set_brain_target",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_mob_set_brain_target(mob, target)
+    }
 }
