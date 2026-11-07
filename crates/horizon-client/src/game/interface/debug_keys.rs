@@ -1239,7 +1239,7 @@ impl Game<'_> {
             g.hitbox(c.at, (c.radius * 2.0, 0.5), 0.425, false, (0.0, 0.0));
         }
         // The dragon: 16 by 8, a living entity; its parts follow.
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             g.hitbox(
                 at(d.previous, d.position),
                 (16.0, 8.0),

@@ -132,6 +132,67 @@ macro_rules! impl_joined {
 #[derive(Clone, Debug)]
 pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
 
+/// A singleton resident owner with explicit membership operations.
+/// State borrows remain audited: callers must not replace the whole entity or
+/// change its identity through [`Self::as_mut`]. No mutable `Option` escapes.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner = Some(1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// let _: &mut Option<u32> = &mut owner;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner.take();
+/// ```
+pub struct ResidentSlot<T>(Option<T>);
+
+impl<T> Default for ResidentSlot<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> ResidentSlot<T> {
+    /// Install only into an empty owner, returning a refused entity unchanged.
+    pub fn install(&mut self, entity: T) -> Result<(), T> {
+        if self.0.is_some() {
+            return Err(entity);
+        }
+        self.replace(entity);
+        Ok(())
+    }
+    /// Explicitly retire any previous owner and install its replacement.
+    pub fn replace(&mut self, entity: T) {
+        self.0 = Some(entity);
+    }
+    /// Move the owner out without dropping it.
+    pub fn extract(&mut self) -> Option<T> {
+        self.0.take()
+    }
+    /// Physically discard the owner, if present.
+    pub fn discard(&mut self) {
+        drop(self.extract());
+    }
+    /// Borrow entity state; identity and whole-value replacement stay audited.
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        self.0.as_mut()
+    }
+}
+
+impl<T> Deref for ResidentSlot<T> {
+    type Target = Option<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Non-joining entity storage using the same structural boundary as [`JoinList`].
 /// No mutable vector, slice, element reference or iterator escapes. State edits
 /// are scoped; identity and replacement remain audited by their callers.
