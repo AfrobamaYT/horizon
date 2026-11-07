@@ -173,6 +173,42 @@ impl Game<'_> {
 mod tests {
     #[test]
     #[ignore = "needs prepared resources"]
+    fn destroying_a_cart_spills_all_slots_after_the_removal_flush() {
+        use super::super::{
+            minecarts::{CartKind, Minecart},
+            native_entity_refs::tests::with_game,
+        };
+        use super::*;
+        with_game(|game| {
+            let mut cart = Minecart::new(600, CartKind::Chest, Vec3::new(1.0, 70.0, 2.0));
+            cart.items[0] = Some(ItemStack::new("minecraft:stone", 64));
+            cart.items[5] = Some(ItemStack::new("minecraft:stone", 19));
+            cart.items[26] = Some(ItemStack::new("minecraft:sand", 7));
+            game.carts.push(cart);
+            let entity = game.entity(600).unwrap();
+            assert!(game.entity_remove(entity, NativeRemovalReason::Killed));
+            assert!(game.dropped.is_empty());
+            game.native_removals_flush();
+            assert!(game.carts.is_empty());
+            let mut totals = std::collections::BTreeMap::new();
+            for item in game.dropped.iter() {
+                *totals.entry(item.stack.item.to_string()).or_insert(0) += item.stack.count;
+            }
+            assert_eq!(
+                totals,
+                std::collections::BTreeMap::from([
+                    ("minecraft:stone".to_owned(), 83),
+                    ("minecraft:sand".to_owned(), 7),
+                ])
+            );
+            let count = game.dropped.len();
+            game.native_removals_flush();
+            assert_eq!(game.dropped.len(), count);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources"]
     fn discard_other_clears_nbt_and_saved_entity() {
         use super::super::{commands::OtherEntity, native_entity_refs::tests::with_game};
         use horizon_client::{chunk::Chunk, save::SaveDir};

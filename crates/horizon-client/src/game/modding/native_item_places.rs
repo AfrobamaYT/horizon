@@ -1358,6 +1358,20 @@ pub(super) mod tests {
                 panic!("missing live menu");
             };
             assert_eq!(open[0], Some(ItemStack::new("minecraft:sand", 7)));
+            game.store_cart_items(key);
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:sand", 7))
+            );
+            game.edit_cart_slots(600, |slots| {
+                slots[0] = Some(ItemStack::new("minecraft:gravel", 9))
+            });
+            game.close_cart_container(key);
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:gravel", 9))
+            );
+            assert!(!game.world.block_entities.contains_key(&key));
             game.carts.remove(0);
             assert_eq!(
                 game.edit_cart_slots(600, |_| panic!("stale owner reached its menu")),

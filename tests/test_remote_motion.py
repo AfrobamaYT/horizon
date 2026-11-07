@@ -73,6 +73,9 @@ fn main() {
     }
     game.remote_motion(43, [0.1, 0.2, 0.3]);
     assert_eq!(game.dropped[0].velocity, Vec3::new(0.1, 0.2, 0.3));
+    game.carts.push(Entity { id: 44, ..Entity::default() });
+    game.remote_motion(44, [-0.7, 0.25, 1.5]);
+    assert_eq!(game.carts[0].velocity, Vec3::new(-0.7, 0.25, 1.5));
     game.remote_motion(999, [1.0; 3]); // Untracked entity is harmless.
 }
 '''.replace("METHOD", source[start:end])
