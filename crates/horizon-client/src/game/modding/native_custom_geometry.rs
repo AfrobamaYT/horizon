@@ -94,6 +94,21 @@ impl Game<'_> {
         model: ModelRef,
         instances: &[ModelInstance],
     ) -> Result<(), InstanceError> {
+        if instances.len() > 16_384 {
+            return Err(InstanceError::CapacityExceeded);
+        }
+        horizon_client::world_geometry::validate_instances(instances)?;
+        self.prepared_model_draws
+            .borrow_mut()
+            .reserve(instances.len().min(16_384));
+        self.draw_validated_model_instances(draw, model, instances)
+    }
+    pub(super) fn draw_validated_model_instances(
+        &self,
+        draw: &mut WorldGeometry,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
         use mod_api::__private::game::Fields;
         let fields = model.fields();
         if fields.generation != self.standalone_geometry.generation() {
@@ -120,13 +135,14 @@ impl Game<'_> {
         let mut gpu_left = if gpu {
             self.prepared_copy_room(start as u64, instances.len())
                 .unwrap_or(0)
+                .min(staged.capacity() - start)
         } else {
             0
         };
         let cut = draw.model_cut();
         let camera = DVec3::from(draw.camera());
         let mut builder = horizon_client::gfx::PreparedInstanceBuilder::default();
-        let result = draw.submit_model(
+        let result = draw.submit_validated_model(
             ModelBatch {
                 slot: fields.slot,
                 generation: fields.generation,
@@ -317,6 +333,149 @@ mod tests {
         let generation = mod_api::__private::game::Fields::fields(&model).generation;
         horizon_client::gfx::set_test_prepared_generation(Some(generation));
         model
+    }
+
+    #[test]
+    #[ignore = "needs software Vulkan"]
+    fn persistent_groups_match_batch() {
+        use mod_api::{GroupError, InstanceGroups};
+        let _fixture = horizon_client::models::standalone_fixture(vec![
+            "minecraft:block/grass_block".into(),
+            "minecraft:block/glass".into(),
+        ]);
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let _restore = Restore;
+            let model = grass(game);
+            horizon_client::gfx::cap_prepared_instance_slots(16_384);
+            let _owner = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                id: "a",
+                hook: "test",
+                part: None,
+            });
+            assert_eq!(
+                game.create_group(model, 16_385),
+                Err(GroupError::CapacityExceeded)
+            );
+            let glass = game
+                .native_model(&Identifier::parse("minecraft:block/glass").unwrap())
+                .unwrap();
+            assert_eq!(game.create_group(glass, 1), Err(GroupError::Translucent));
+            let group = game.create_group(model, 8).unwrap();
+            let near = ModelInstance::at([0.0; 3], 0xFF80_C040);
+            let far = ModelInstance::at([40.0, 0.0, 0.0], 0xFFFF_FFFF);
+            group.write(game, 0, &[far, near]).unwrap();
+            assert_eq!(group.write(game, 8, &[near]), Err(GroupError::OutOfRange));
+            let mut bad = near;
+            bad.light.block = 16;
+            assert_eq!(
+                group.write(game, 1, &[far, bad]),
+                Err(GroupError::InvalidLight)
+            );
+            assert_eq!(group.set_len(game, 9), Err(GroupError::OutOfRange));
+            game.view_frustum = Some(horizon_client::gfx::test_frustum([
+                glam::Vec4::new(-1.0, 0.0, 0.0, 4.0),
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+                glam::Vec4::W,
+            ]));
+            let mut draw = WorldGeometry::default();
+            {
+                let _other = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: "b",
+                    hook: "test",
+                    part: None,
+                });
+                assert_eq!(group.write(game, 0, &[near]), Err(GroupError::Stale));
+                assert_eq!(group.set_len(game, 0), Err(GroupError::Stale));
+                assert_eq!(group.destroy(game), Err(GroupError::Stale));
+                assert_eq!(
+                    context(game, &mut draw).draw_instance_group(group),
+                    Err(GroupError::Stale)
+                );
+            }
+            let oversized = vec![ModelInstance::at([f64::NAN; 3], 0); 16_385];
+            assert_eq!(
+                context(game, &mut draw).draw_model_instances(model, &oversized),
+                Err(InstanceError::CapacityExceeded)
+            );
+            let render = |game: &Game<'_>| {
+                let staged = game.prepared_model_draws.borrow();
+                assert_eq!(staged.len(), 1, "the far copy must be culled");
+                let (vertices, ranges) = game.standalone_geometry.prepared_upload();
+                horizon_client::gfx::entity_pixel_test::render_instance(
+                    horizon_client::gfx::entity_pixel_test::PreparedInstanceDraw {
+                        vertices: &vertices,
+                        ranges,
+                        uploaded: model.fields().generation,
+                        requested: model.fields().generation,
+                        slot: model.fields().slot,
+                        instances: &[staged[0].instance],
+                        per_copy: false,
+                        hdr: false,
+                        atlas_size: [game.gui.atlas.width, game.gui.atlas.height],
+                        atlas: &game.gui.atlas.pixels(),
+                        view_proj: Mat4::IDENTITY,
+                    },
+                )
+                .expect("software Vulkan group pixels")
+            };
+            use mod_api::__private::game::Fields;
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw)
+                .draw_model_instances(model, &[far, near])
+                .unwrap();
+            let expected = render(game);
+            assert!(expected.as_chunks::<4>().0.iter().any(|p| p[..3] != [0; 3]));
+            game.prepared_model_draws.borrow_mut().clear();
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(expected, render(game));
+            draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
+            game.prepared_model_draws.borrow_mut().clear();
+            context(game, &mut draw).draw_instance_group(group).unwrap();
+            assert_eq!(expected, render(game));
+            let sibling = game.create_group(model, 16_384).unwrap();
+            let third = game.create_group(model, 16_384).unwrap();
+            let fourth = game.create_group(model, 16_384).unwrap();
+            let fifth = game.create_group(model, 16_376).unwrap();
+            assert_eq!(
+                game.create_group(model, 1),
+                Err(GroupError::CapacityExceeded)
+            );
+            for handle in [sibling, third, fourth, fifth] {
+                handle.destroy(game).unwrap();
+            }
+            group.destroy(game).unwrap();
+            assert_eq!(group.set_len(game, 1), Err(GroupError::Stale));
+            assert_eq!(
+                context(game, &mut draw).draw_instance_group(group),
+                Err(GroupError::Stale)
+            );
+            let fresh = game.create_group(model, 8).unwrap();
+            assert_ne!(fresh, group);
+            game.spawn_pack_reload(super::super::packs::ReloadKind::Selection)
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while game.pack_reload.is_some() && std::time::Instant::now() < deadline {
+                game.drive_pack_reload();
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            assert_ne!(
+                game.standalone_geometry.generation(),
+                model.fields().generation
+            );
+            assert_eq!(fresh.set_len(game, 1), Err(GroupError::Stale));
+            let after_reload: Vec<_> = (0..4)
+                .map(|_| game.create_group(grass(game), 16_384).unwrap())
+                .collect();
+            assert_ne!(fresh, after_reload[0]);
+            game.native_lifecycle_world_closed();
+            assert_eq!(after_reload[0].destroy(game), Err(GroupError::Stale));
+            assert_ne!(after_reload[0], game.create_group(grass(game), 1).unwrap());
+        });
     }
 
     #[test]

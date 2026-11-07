@@ -2580,6 +2580,7 @@ struct Game<'a> {
     pack: PackResources,
     /// The title and menu bundle (GUI atlas, font and panorama).
     gui: UiResources,
+    instance_groups: std::cell::RefCell<native_instance_groups::InstanceGroupStorage>,
     standalone_geometry: native_block_entity_draw::StandaloneGeometry,
     /// `FogRenderer`'s evolving state.
     fog: horizon_client::fog::FogState,
@@ -21539,6 +21540,7 @@ impl<'a> Game<'a> {
             damage_tag_generation: 1,
             pack,
             gui,
+            instance_groups: Default::default(),
             standalone_geometry,
             fog: Default::default(),
             screen_fx: Default::default(),
