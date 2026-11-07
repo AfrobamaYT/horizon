@@ -5218,7 +5218,10 @@ mod screen_open_tests {
             _host: &mut dyn ClientHost,
             event: &mut InteractionKeyMappingTriggeredEvent,
         ) -> Flow {
-            self.0.lock().unwrap().push(format!("{:?}", event.key));
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{:?}:{:?}", event.key, event.attempt));
             match event.key {
                 InteractionKey::Attack => {
                     event.swing_hand = false;
@@ -5259,7 +5262,7 @@ mod screen_open_tests {
                 );
             });
         });
-        assert_eq!(take(&log), ["Attack", "Use", "PickBlock"]);
+        assert_eq!(take(&log), ["Attack:Held", "Use:Press", "PickBlock:Press"]);
     }
 
     struct MappingProbe(Arc<Mutex<Vec<String>>>);
