@@ -126,6 +126,8 @@ fn actual_item_interact_mob_fallback_priority_and_filters() {
             None,
         )
         .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
         game.world = World::new(game.res.facts().air, 1);
         game.world
             .chunks

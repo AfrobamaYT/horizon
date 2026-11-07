@@ -13,6 +13,7 @@ pub trait Hooks {
         cancellable = false,
         target = "horizon_client_render::sound_engine::hooks::native_play_sound"
     )]
+    /// `instance` is an engine-local sound instance id, unchanged across its live updates.
     fn play_sound();
     /// A sound that is not streamed has started on `channel` (`PlaySoundSourceEvent`), after the engine set its pitch, volume, attenuation, looping and position: `sound` is what is playing, after `play_sound`'s edits. A notice: the channel is an id only and gives no control. Streamed sounds (music, records) fire `play_streaming_source` instead. Client-side only.
     #[hook(

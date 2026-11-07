@@ -38,7 +38,8 @@ not moved earlier merely because their implementation also calls `Audio`.
 ### Engine playback and live parameters
 
 `play_sound` also observes transient playback updates. `event.starting` is true for a
-new sound and false while it plays. At an update only volume and pitch edits apply;
+new sound and false while it plays. `event.instance` identifies the same engine-local
+instance across those calls. At an update only volume and pitch edits apply;
 `None` stops playback. Invalid edited volume (negative or non-finite) or pitch
 (non-positive or non-finite) refuses that refresh. Updates do not replay the sound,
 resolve a different source, or modify the instance's stored settings. This is the

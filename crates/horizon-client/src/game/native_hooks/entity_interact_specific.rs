@@ -32,7 +32,7 @@ mod tests {
         ) -> mod_api::Flow {
             assert_eq!(event.entity, 7);
             assert_eq!(event.kind, "minecraft:cow");
-            assert_eq!(event.stack.unwrap().item, "minecraft:stick");
+            assert_eq!(event.stack.unwrap().item.as_ref(), "minecraft:stick");
             self.seen.lock().unwrap().push((self.name, event.location));
             if self.claim {
                 mod_api::Flow::Cancel

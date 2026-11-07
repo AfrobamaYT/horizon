@@ -77,6 +77,8 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
     )
     .unwrap();
     game.options.dedicated = Some(Vec::new());
+    game.native_lifecycle
+        .begin_open(mod_api::NativeAuthority::IntegratedServer);
     game.world = World::new(game.res.facts().air, 1);
     game.world
         .chunks
@@ -120,7 +122,20 @@ fn the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entit
         vec![mod_api::ModEntry::new("contact", Box::new(probe.clone()))].into();
     mod_api::testing::with_mods(mods.clone(), || {
         mod_api::__private::install_parts(&mods).unwrap();
+        let registry = game.pack.assets.registry;
+        mod_api::__private::part_tests::register_game_keys(
+            (0..registry.len())
+                .map(|i| {
+                    registry
+                        .state(mod_api::BlockStateId(i as u32))
+                        .unwrap()
+                        .name
+                        .clone()
+                })
+                .collect::<std::collections::HashSet<_>>(),
+        );
         mod_api::__private::mark_game_thread();
+        game.resolve_parts().unwrap();
         let old = spawn(&mut game, 13);
         game.tick_items();
         let item = &game.dropped[0];

@@ -13,11 +13,18 @@ use mod_api::{ChannelRef, HookId, OwningLoop, SoundAttenuation, SoundPlay, Sound
 #[inline(never)]
 pub fn native_play_sound(
     context: &horizon_world::native_load_context::LoopContext,
+    instance: u64,
     starting: bool,
     original: &SoundPlay,
     sound: &mut Option<SoundPlay>,
 ) {
-    mod_api::dispatch_play_sound(&OwningLoop::new(context), starting, original, sound);
+    mod_api::dispatch_play_sound(
+        &OwningLoop::new(context),
+        instance,
+        starting,
+        original,
+        sound,
+    );
 }
 
 /// Hook point for native mods (docs/modding/src/how-to/native-mods.md, declared in `hooks/`
@@ -52,23 +59,39 @@ pub fn native_sound_engine_load(context: &horizon_world::native_load_context::Lo
     mod_api::dispatch_sound_engine_load(&OwningLoop::new(context));
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct LiveSettings {
+    original: SoundPlay,
+    edited: Option<SoundPlay>,
+}
+
 impl SoundInstance {
     fn play_settings(&self) -> SoundPlay {
-        built::SoundPlay {
-            identifier: self.identifier.clone(),
-            source: SoundSource::ALL[self.source],
-            volume: self.volume,
-            pitch: self.pitch,
-            position: self.position,
-            looping: self.looping,
-            delay: self.delay,
-            attenuation: match self.attenuation {
-                Attenuation::None => SoundAttenuation::None,
-                Attenuation::Linear => SoundAttenuation::Linear,
-            },
-            relative: self.relative,
-        }
-        .into()
+        let mut sound = SoundPlay::ui("");
+        self.write_play_settings(&mut sound);
+        sound
+    }
+    fn live_play_settings(&self) -> &std::cell::RefCell<LiveSettings> {
+        self.live_settings.get_or_init(|| {
+            let original = self.play_settings();
+            let edited = Some(original.clone());
+            std::cell::RefCell::new(LiveSettings { original, edited })
+        })
+    }
+    // Reuse string storage for live playback; starts prepare the buffers.
+    fn write_play_settings(&self, sound: &mut SoundPlay) {
+        sound.identifier.clone_from(&self.identifier);
+        sound.source = SoundSource::ALL[self.source];
+        sound.volume = self.volume;
+        sound.pitch = self.pitch;
+        sound.position = self.position;
+        sound.looping = self.looping;
+        sound.delay = self.delay;
+        sound.attenuation = match self.attenuation {
+            Attenuation::None => SoundAttenuation::None,
+            Attenuation::Linear => SoundAttenuation::Linear,
+        };
+        sound.relative = self.relative;
     }
 
     /// A sound a mod asks for (`ClientHost::play_local_sound`), through the same mapping
@@ -137,13 +160,14 @@ impl SoundEngine {
         };
         let original = instance.play_settings();
         let mut sound = Some(original.clone());
-        native_play_sound(source, true, &original, &mut sound);
+        native_play_sound(source, id, true, &original, &mut sound);
         match sound {
             None => false,
             Some(edited) => {
                 if edited != original {
                     instance.apply_play_settings(edited);
                 }
+                instance.live_play_settings();
                 true
             }
         }
@@ -160,10 +184,12 @@ impl SoundEngine {
         else {
             return Some((instance.volume, instance.pitch));
         };
-        let original = instance.play_settings();
-        let mut sound = Some(original.clone());
-        native_play_sound(source, false, &original, &mut sound);
-        let edited = sound?;
+        let mut cache = instance.live_play_settings().borrow_mut();
+        let LiveSettings { original, edited } = &mut *cache;
+        instance.write_play_settings(original);
+        instance.write_play_settings(edited.as_mut()?);
+        native_play_sound(source, id, false, original, edited);
+        let edited = edited.as_ref()?;
         let volume_edited = edited.volume.to_bits() != original.volume.to_bits();
         let pitch_edited = edited.pitch.to_bits() != original.pitch.to_bits();
         if volume_edited && (!edited.volume.is_finite() || edited.volume < 0.0)
@@ -355,7 +381,7 @@ mod tests {
     }
     #[test]
     fn live_play_sound_edits_reach_the_channel_without_changing_the_instance() {
-        struct Live(std::sync::atomic::AtomicUsize);
+        struct Live(std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicU64);
         #[mod_api::__subscriptions]
         impl mod_api::Hooks for Live {
             fn play_sound(
@@ -365,6 +391,15 @@ mod tests {
             ) {
                 let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 assert_eq!(event.starting, n == 0);
+                if n == 0 {
+                    self.1
+                        .store(event.instance, std::sync::atomic::Ordering::SeqCst);
+                } else {
+                    assert_eq!(
+                        event.instance,
+                        self.1.load(std::sync::atomic::Ordering::SeqCst)
+                    );
+                }
                 if n == 1 {
                     let sound = event.sound.as_mut().unwrap();
                     sound.volume = 0.25;
@@ -374,7 +409,10 @@ mod tests {
                 }
             }
         }
-        let mods = vec![mod_api::ModEntry::new("live", Box::new(Live(0.into())))];
+        let mods = vec![mod_api::ModEntry::new(
+            "live",
+            Box::new(Live(0.into(), 0.into())),
+        )];
         mod_api::testing::with_mods(mods.into(), || {
             let (mut engine, mut backend) = (engine(), Null::default());
             let instance =

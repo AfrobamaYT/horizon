@@ -36,6 +36,8 @@ fn discarded_mob_leaves_selectors_and_saves_while_frozen() {
         None,
     )
     .unwrap();
+    game.native_lifecycle
+        .begin_open(mod_api::NativeAuthority::IntegratedServer);
     game.world = World::new(game.res.facts().air, 1);
     game.world
         .chunks
