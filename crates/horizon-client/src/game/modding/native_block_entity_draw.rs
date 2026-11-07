@@ -32,23 +32,51 @@ use mod_api::{Identifier, ModelError, ModelPart, ModelRef};
 pub(super) struct StandaloneGeometry {
     generation: u64,
     slots: Vec<Option<Vec<super::minecarts::PreparedModelFace>>>,
+    translucent: Vec<bool>,
+    bounds: Vec<[[f32; 3]; 2]>,
+}
+
+/// Whether a resolved slot can take instances, and the local box used to cull copies.
+pub(super) struct InstanceSlot {
+    pub translucent: bool,
+    pub bounds: [[f32; 3]; 2],
+}
+
+fn face_bounds(faces: &[super::minecarts::PreparedModelFace]) -> [[f32; 3]; 2] {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    for face in faces {
+        for pos in face.positions() {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(pos[axis]);
+                max[axis] = max[axis].max(pos[axis]);
+            }
+        }
+    }
+    if min[0].is_finite() {
+        [min, max]
+    } else {
+        [[0.0; 3], [0.0; 3]]
+    }
 }
 
 impl StandaloneGeometry {
     pub(super) fn new(pack: &super::PackResources, gui: &super::UiResources) -> Self {
         let catalog = &pack.render.model_catalog;
         let mut slots = Vec::new();
+        let mut translucent = Vec::new();
+        let mut bounds = Vec::new();
         for slot in catalog.standalone_slots() {
             let index = slot as usize;
             if slots.len() <= index {
                 slots.resize_with(index + 1, || None);
+                translucent.resize(index + 1, false);
+                bounds.resize(index + 1, [[0.0; 3], [0.0; 3]]);
             }
 
-            let faces = &catalog
-                .model_by_slot(slot)
-                .expect("standalone slot exists")
-                .faces;
-            let prepared = faces
+            let model = catalog.model_by_slot(slot).expect("standalone slot exists");
+            let prepared: Vec<_> = model
+                .faces
                 .iter()
                 .filter_map(|face| {
                     let sprite = pack
@@ -60,12 +88,28 @@ impl StandaloneGeometry {
                     ))
                 })
                 .collect();
+            translucent[index] = model.faces.iter().any(|face| face.translucent);
+            bounds[index] = face_bounds(&prepared);
             slots[index] = Some(prepared);
         }
         Self {
             generation: pack.render.generation,
             slots,
+            translucent,
+            bounds,
         }
+    }
+
+    pub(super) fn instance_slot(&self, slot: u32) -> Option<InstanceSlot> {
+        let index = slot as usize;
+        self.slots.get(index)?.is_some().then_some(InstanceSlot {
+            translucent: self.translucent[index],
+            bounds: self.bounds[index],
+        })
+    }
+
+    pub(super) fn faces(&self, slot: u32) -> Option<&[super::minecarts::PreparedModelFace]> {
+        self.slots.get(slot as usize)?.as_deref()
     }
 
     pub(super) fn generation(&self) -> u64 {
@@ -797,7 +841,7 @@ impl Game<'_> {
         *out = draw.vertices;
     }
 
-    fn prepared_copy_room(&self, already: u64, incoming: usize) -> Option<usize> {
+    pub(super) fn prepared_copy_room(&self, already: u64, incoming: usize) -> Option<usize> {
         let room = self
             .renderer
             .as_ref()
