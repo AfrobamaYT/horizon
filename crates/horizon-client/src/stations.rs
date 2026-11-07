@@ -215,10 +215,7 @@ pub fn is_valid_repair_item(
     if let Some(data) = stack.data() {
         if let Some(component) = data.other("minecraft:repairable") {
             return horizon_items::properties::repairable(component, &material.item, |tag| {
-                items
-                    .item_tags
-                    .get(tag)
-                    .is_some_and(|members| members.contains(&*material.item))
+                items.item_in_tag(tag, &material.item)
             });
         }
         if data.other("!minecraft:repairable").is_some() {

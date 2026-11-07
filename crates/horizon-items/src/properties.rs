@@ -44,9 +44,24 @@ pub fn damageable(mut has: impl FnMut(&str) -> bool) -> bool {
     has("minecraft:max_damage") && !has("minecraft:unbreakable") && has("minecraft:damage")
 }
 
-/// `ItemStack.hasFoil`: the effective override wins over enchantments.
-pub fn foil(override_glint: Option<bool>, enchanted: bool) -> bool {
-    override_glint.unwrap_or(enchanted)
+/// `ItemStack.hasFoil`: the effective override wins over the item-specific fallback.
+pub fn foil(override_glint: Option<bool>, item_foil: bool) -> bool {
+    override_glint.unwrap_or(item_foil)
+}
+
+/// `Item.isFoil`, including the compass override before enchantments.
+pub fn item_foil(item: &str, lodestone_tracker: bool, enchanted: bool) -> bool {
+    (item == "minecraft:compass" && lodestone_tracker) || enchanted
+}
+
+/// Compare registry identifiers with vanilla's default minecraft namespace.
+pub fn same_item_id(a: &str, b: &str) -> bool {
+    fn path(id: &str) -> &str {
+        id.strip_prefix("minecraft:")
+            .or_else(|| id.strip_prefix(':'))
+            .unwrap_or(id)
+    }
+    path(a) == path(b)
 }
 
 /// `Item.getBarWidth` and `getBarColor`, when the durability bar is visible.
@@ -67,7 +82,7 @@ pub fn damage_bar(damage: i32, max_damage: i32) -> Option<ItemBar> {
 pub fn item_matches(spec: &str, item: &str, mut in_tag: impl FnMut(&str) -> bool) -> bool {
     match spec.strip_prefix('#') {
         Some(tag) => in_tag(tag),
-        None => spec == item,
+        None => same_item_id(spec, item),
     }
 }
 
@@ -77,7 +92,7 @@ pub fn repairable(component: &Tag, item: &str, in_tag: impl FnMut(&str) -> bool)
         Some(Tag::String(spec)) => item_matches(&spec.to_string_lossy(), item, in_tag),
         Some(Tag::List(ids)) => ids
             .iter()
-            .any(|id| matches!(id, Tag::String(id) if id.to_string_lossy() == item)),
+            .any(|id| matches!(id, Tag::String(id) if same_item_id(&id.to_string_lossy(), item))),
         _ => false,
     }
 }

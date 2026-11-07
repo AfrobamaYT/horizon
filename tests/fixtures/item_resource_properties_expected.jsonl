@@ -39,3 +39,11 @@
 {"name":"repair_tag_excludes","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":false,"enchantable":true,"bar":null}
 {"name":"repair_removed","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":false,"enchantable":true,"bar":null}
 {"name":"repair_literal","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":true,"enchantable":true,"bar":null}
+{"name":"compass-tracker","damageable":false,"foil":true,"use_duration":0,"rarity":"common","repairable":false,"enchantable":false,"bar":null}
+{"name":"compass-tracker-glint-off","damageable":false,"foil":false,"use_duration":0,"rarity":"common","repairable":false,"enchantable":false,"bar":null}
+{"name":"compass-tracker-removed","damageable":false,"foil":false,"use_duration":0,"rarity":"common","repairable":false,"enchantable":false,"bar":null}
+{"name":"repair-short-tag","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":true,"enchantable":true,"bar":{"width":11,"color":3997440}}
+{"name":"repair-short-item","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":true,"enchantable":true,"bar":{"width":13,"color":982784}}
+{"name":"repair-short-list","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":true,"enchantable":true,"bar":{"width":13,"color":982784}}
+{"name":"repair-short-tag-refused","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":false,"enchantable":true,"bar":{"width":11,"color":3997440}}
+{"name":"prototype-damage-equivalent","damageable":true,"foil":false,"use_duration":0,"rarity":"common","repairable":true,"enchantable":true,"bar":{"width":9,"color":10092288}}

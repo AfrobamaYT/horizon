@@ -85,12 +85,12 @@ def main():
                    HORIZON_ITEM_PROPERTIES_CASES=str(inputs),
                    HORIZON_ITEM_PROPERTIES_EXPECTED=str(build / 'server-expected.jsonl'))
         with (build / 'rust.log').open('w') as output:
-            subprocess.run([executable, 'effective_resource_properties_match_vanilla',
+            subprocess.run([executable, 'item_resource_property_tests',
                             '--ignored', '--test-threads=1', '--nocapture'],
                            cwd=scratch, env=env, stdout=output, stderr=subprocess.STDOUT,
                            check=True, timeout=900)
         text = (build / 'rust.log').read_text()
-        assert re.search(r'^test result: ok\. 1 passed;', text, re.MULTILINE), text
+        assert re.search(r'^test result: ok\. 2 passed;', text, re.MULTILINE), text
     base.ensure_sources_unchanged(source_paths, hashes)
     assert lab.digest(inputs, 'sha256') == input_hash, 'Inputs changed during validation'
     lab.write_json(report, dict(schema=1, minecraft=lock['minecraft']['version'],
@@ -101,8 +101,8 @@ def main():
         rust_test_executable_sha256=lab.digest(Path(executable), 'sha256'),
         scope='Seven effective ItemResource reads against real client/server ItemStacks with '
               'loaded registry defaults and tags. Rust uses a resource-backed Game and its existing '
-              'duration, damageability, glint, rarity and repair consumers. Bar colors are RGB24. '
-              'Does not run a server tick loop, draw a GUI, or exercise guest transport.'))
+              'duration, damageability, glint, rarity and repair consumers; changed-default HUD calculations and '
+              'patched mod-item use completion. Bar colors are RGB24. Does not draw a GUI or exercise guest transport.'))
     print(f'{len(rows)} effective item property cases match both vanilla jars: {report}', flush=True)
 
 

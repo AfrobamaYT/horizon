@@ -333,7 +333,7 @@ mod item_resource_property_tests {
                     item.damageable(game)
                 );
                 assert_eq!(
-                    stack.has_foil(props.is_some_and(|value| value.glint)),
+                    stack.has_foil(props.and_then(|value| value.glint)),
                     item.foil(game)
                 );
                 assert_eq!(
@@ -356,4 +356,87 @@ mod item_resource_property_tests {
             game.session_lock = None;
         });
     }
+    /// Changed defaults and a patched mod consumable exercise the real game consumers.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn item_resource_changed_defaults_and_consumption() {
+        use horizon_client::items::ItemStack;
+        use mod_api::{ComponentId, ItemResource, Tag};
+        use serde_json::json;
+        use std::{fs, os::unix::fs::symlink};
+        let resources = std::path::PathBuf::from(std::env::var("HORIZON_TEST_RESOURCES").unwrap());
+        // A private default report goes through the owning resource load and all its metadata
+        // readers, exactly as a registration-time change does. Shared resources stay read-only.
+        let root = std::env::temp_dir().join(format!("horizon-property-defaults-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        for entry in fs::read_dir(&resources).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "items.json" {
+                symlink(entry.path(), root.join(entry.file_name())).unwrap();
+            }
+        }
+        let mut defaults: Value = serde_json::from_slice(&fs::read(resources.join("items.json")).unwrap()).unwrap();
+        defaults["minecraft:iron_sword"]["minecraft:damage"] = json!(75);
+        defaults["minecraft:iron_sword"]["minecraft:enchantment_glint_override"] = json!(false);
+        defaults["horizon:consumable_fixture"] = defaults["minecraft:stick"].clone();
+        fs::write(root.join("items.json"), serde_json::to_vec(&defaults).unwrap()).unwrap();
+        crate::game::native_entity_refs::tests::with_game_at(root.clone(), |game| {
+            let stack = ItemStack::new("minecraft:iron_sword", 1);
+            let resource = ItemResource::of(&stack);
+            let bar = resource.bar(game).unwrap();
+            // The independent oracle records the equivalent effective damage as a stack patch.
+            let expected: Value = include_str!(concat!(env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/item_resource_properties_expected.jsonl"))
+                .lines().map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .find(|row| row["name"] == "prototype-damage-equivalent").unwrap();
+            assert_eq!(serde_json::json!({"width":bar.width,"color":bar.color}), expected["bar"]);
+            let info = game.items().get(&stack.item);
+            assert_eq!(stack.effective_damage(info), 75);
+            assert_eq!(horizon_client::hud_overlays::damage_bar(stack.effective_damage(info), stack.max_damage(info)),
+                Some((bar.width, bar.color)));
+            let damage = ComponentId::new("minecraft:damage").unwrap();
+            let zero = resource.with_component(game, &damage, Tag::Int(0));
+            assert_eq!(zero.component(&damage), Some(Tag::Int(0)));
+            assert_eq!(zero.to_stack(1).effective_damage(info), 0);
+            assert!(zero.bar(game).is_none());
+            let removed = resource.without_component(game, &damage);
+            assert_eq!(removed.to_stack(1).effective_damage(info), 0);
+            assert!(removed.bar(game).is_none());
+            let enchanted = resource.with_component(game, &ComponentId::new("minecraft:enchantments").unwrap(),
+                Tag::compound([("minecraft:sharpness", Tag::Int(1))]));
+            let glint = game.items().enchantments.props(&stack.item).and_then(|p| p.glint);
+            assert_eq!(glint, Some(false));
+            assert!(!enchanted.foil(game));
+            assert!(!enchanted.to_stack(1).has_foil(glint));
+            let inherited = enchanted.without_component(game, &ComponentId::new("minecraft:enchantment_glint_override").unwrap());
+            assert!(inherited.foil(game));
+            assert!(inherited.to_stack(1).has_foil(glint));
+
+            let base = ItemResource::of(&ItemStack::new("horizon:consumable_fixture", 2));
+            let consumable = ComponentId::new("minecraft:consumable").unwrap();
+            let patched = base.with_component(game, &consumable, Tag::compound([
+                ("consume_seconds", Tag::Float(0.1_f32.to_bits())),
+                ("has_consume_particles", Tag::Byte(0)),
+            ]));
+            let stack = patched.to_stack(2);
+            let info = game.items().get(&stack.item).unwrap().clone();
+            assert_eq!(game.use_duration(&stack), 2);
+            assert!(!game.mod_use(&stack));
+            assert!(base.without_component(game, &consumable).to_stack(1).consumable(Some(&info)).is_none());
+            game.creative = false;
+            game.right = true;
+            game.screen = crate::game::Screen::Playing;
+            game.inventory[game.selected] = Some(stack);
+            assert!(game.start_eating(&info));
+            assert!(game.using.is_some());
+            game.tick_using();
+            assert_eq!(game.held().unwrap().count, 2);
+            game.tick_using();
+            assert!(game.using.is_none());
+            assert_eq!(game.held().unwrap().count, 1, "completion must consume the patched mod item");
+        });
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }

@@ -117,13 +117,18 @@ impl ItemResource {
         matches!(self.value_id(host, "minecraft:enchantments"), Some(Tag::Compound(levels)) if !levels.is_empty())
     }
     /// `ItemStack.hasFoil`: the effective glint override wins, otherwise a
-    /// nonempty enchantments component glints. Stored book enchantments do not.
+    /// item-specific foil applies (lodestone compass or nonempty enchantments).
     pub fn foil(&self, host: &dyn Host) -> bool {
         let override_glint = self
             .value_id(host, "minecraft:enchantment_glint_override")
             .as_ref()
             .and_then(horizon_items::item_data::component_bool);
-        horizon_items::properties::foil(override_glint, self.enchanted(host))
+        let item_foil = horizon_items::properties::item_foil(
+            self.item(),
+            self.value_id(host, "minecraft:lodestone_tracker").is_some(),
+            self.enchanted(host),
+        );
+        horizon_items::properties::foil(override_glint, item_foil)
     }
     /// `ItemStack.getRarity`: the effective rarity, upgraded for a nonempty
     /// enchantments component; removing rarity restores common before the upgrade.

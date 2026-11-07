@@ -39,3 +39,11 @@
 {"name":"repair_tag_excludes","stack":{"id":"minecraft:iron_sword","count":1,"components":{"minecraft:repairable":{"items":"#minecraft:planks"}}},"repair":"minecraft:iron_ingot"}
 {"name":"repair_removed","stack":{"id":"minecraft:iron_sword","count":1,"components":{"!minecraft:repairable":{}}},"repair":"minecraft:iron_ingot"}
 {"name":"repair_literal","stack":{"id":"minecraft:iron_sword","count":1,"components":{"minecraft:repairable":{"items":["minecraft:copper_ingot"]}}},"repair":"minecraft:copper_ingot"}
+{"name":"compass-tracker","stack":{"id":"minecraft:compass","count":1,"components":{"minecraft:lodestone_tracker":{"tracked":false}}},"repair":"minecraft:iron_ingot"}
+{"name":"compass-tracker-glint-off","stack":{"id":"minecraft:compass","count":1,"components":{"minecraft:lodestone_tracker":{"tracked":false},"minecraft:enchantment_glint_override":false}},"repair":"minecraft:iron_ingot"}
+{"name":"compass-tracker-removed","stack":{"id":"minecraft:compass","count":1,"components":{"!minecraft:lodestone_tracker":{}}},"repair":"minecraft:iron_ingot"}
+{"name":"repair-short-tag","stack":{"id":"minecraft:wooden_sword","count":1,"components":{"minecraft:damage":7,"minecraft:repairable":{"items":"#planks"}}},"repair":"minecraft:oak_planks"}
+{"name":"repair-short-item","stack":{"id":"minecraft:iron_sword","count":1,"components":{"minecraft:damage":7,"minecraft:repairable":{"items":"iron_ingot"}}},"repair":"minecraft:iron_ingot"}
+{"name":"repair-short-list","stack":{"id":"minecraft:iron_sword","count":1,"components":{"minecraft:damage":7,"minecraft:repairable":{"items":["iron_ingot","diamond"]}}},"repair":"minecraft:iron_ingot"}
+{"name":"repair-short-tag-refused","stack":{"id":"minecraft:wooden_sword","count":1,"components":{"minecraft:damage":7,"minecraft:repairable":{"items":"#planks"}}},"repair":"minecraft:iron_ingot"}
+{"name":"prototype-damage-equivalent","stack":{"id":"minecraft:iron_sword","count":1,"components":{"minecraft:damage":75}},"repair":"minecraft:iron_ingot"}
