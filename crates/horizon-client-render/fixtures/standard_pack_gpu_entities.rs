@@ -28,9 +28,11 @@ use winit::{
 
 static NEEDS_SPANS: AtomicBool = AtomicBool::new(false);
 static OBSERVED: AtomicUsize = AtomicUsize::new(0);
+static SLOT_CALLS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
 fn observe_needs(
     event: &mut native_render::__ModRenderRenderRenderNeedsRaw<'_, &mut native_render::RenderNeeds>,
 ) {
+    SLOT_CALLS[0].fetch_add(1, Ordering::Relaxed);
     event.needs.entity_spans |= NEEDS_SPANS.load(Ordering::Relaxed);
 }
 fn observe_world(
@@ -39,6 +41,7 @@ fn observe_world(
         &mut native_render::WorldDrawn<'_>,
     >,
 ) {
+    SLOT_CALLS[1].fetch_add(1, Ordering::Relaxed);
     if NEEDS_SPANS.load(Ordering::Relaxed) {
         assert_eq!(event.world.entities.len(), 12);
         assert_eq!(
@@ -51,6 +54,7 @@ fn observe_world(
 fn observe_hand(
     _: &mut native_render::__ModRenderRenderHandDrawnRaw<'_, &mut native_render::HandDrawn<'_>>,
 ) {
+    SLOT_CALLS[2].fetch_add(1, Ordering::Relaxed);
 }
 
 fn install_observer() {
@@ -236,12 +240,38 @@ fn fixture(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
     let out = Path::new(&out);
     std::fs::create_dir_all(out)?;
     let empty_slots = benchmark_slots()?;
+    assert!(
+        SLOT_CALLS
+            .iter()
+            .all(|calls| calls.load(Ordering::Relaxed) == 0)
+    );
     install_observer();
     let subscribed_slots = benchmark_slots()?;
+    assert!(
+        SLOT_CALLS
+            .iter()
+            .all(|calls| calls.load(Ordering::Relaxed) > 0)
+    );
     println!(
         "raw slot measurements: {}",
         serde_json::json!({"empty": empty_slots, "subscribed": subscribed_slots})
     );
+    if std::env::args().any(|arg| arg == "--raw-slots-only") {
+        NEEDS_SPANS.store(true, Ordering::Relaxed);
+        assert!(native_render::needs().entity_spans);
+        assert!(native_render::world_drawn_hooked());
+        mod_points::stop("fixture");
+        assert!(!native_render::needs().entity_spans);
+        std::fs::write(
+            out.join("raw-slots.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "empty_skips_listeners": true, "all_three_slots_called": true,
+                "needs_write_visible": true, "disabled_owner_skipped": true,
+                "empty": empty_slots, "subscribed": subscribed_slots,
+            }))?,
+        )?;
+        return Ok(());
+    }
     let white = [255; 16 * 16 * 4];
     let zero = [0; 4];
     let mut renderer = pollster::block_on(Renderer::new(

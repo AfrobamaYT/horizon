@@ -13,6 +13,7 @@ import prebuilt_game
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--raw-slots-only", action="store_true", help="test raw dispatch without shader-pack rendering")
     args = parser.parse_args()
     target = prebuilt_game.ROOT / "target" / "standard-pack-gpu-entities"
     staged = prebuilt_game.stage(target)
@@ -24,13 +25,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix="homes-", dir=target) as home:
         env = dict(os.environ, CARGO_TARGET_DIR=str(target / "build"),
                    HORIZON_LAUNCHER_NO_SELF_UPDATE="1", HORIZON_NO_AUDIO="1")
-        for name in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+        for name in ("HORIZON_HOME", "HORIZON_LAUNCHER_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR",
                      "HORIZON_LAUNCHER_TRASH", "HORIZON_LAUNCHER_CLIPBOARD", "HORIZON_LAUNCHER_DESKTOP"):
             path = Path(home) / name
-            path.mkdir()
+            path.mkdir(mode=0o700)
             env[name] = str(path)
         subprocess.run(["cargo", "run", "--profile", "dev", "-p", "horizon-client-render",
-                        "--example", "standard_pack_gpu_entities", "--", str(output)],
+                        "--example", "standard_pack_gpu_entities", "--", str(output),
+                        *(["--raw-slots-only"] if args.raw_slots_only else [])],
                        cwd=staged, env=env, check=True)
 
 
