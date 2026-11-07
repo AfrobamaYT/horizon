@@ -1,4 +1,5 @@
 use super::*;
+use crate::game::api_values::TryIntoApi;
 use horizon_client::item_tooltip::{
     AttributeFilter, AttributeTooltipContext, AttributeTooltipListener,
 };
@@ -36,12 +37,15 @@ impl<'a, 'g> HookedAttributeTooltips<'a, 'g> {
 
 impl AttributeTooltipListener for HookedAttributeTooltips<'_, '_> {
     fn skipped(&self, stack: &ItemStack, ctx: &AttributeTooltipContext) -> AttributeFilter {
+        let Ok(stack) = stack.try_into_api() else {
+            return AttributeFilter::default();
+        };
         let (mut skip_all, mut ids, mut groups) = (false, Vec::new(), Vec::new());
         self.game.native_gather_skipped_attribute_tooltips(
             mod_api::__private::GatherSkippedAttributeTooltipsCall {
                 player: self.player.map(|p| p.0),
                 player_entity_id: self.player.map(|p| p.1),
-                stack,
+                stack: &stack,
                 advanced: ctx.advanced,
                 creative: ctx.creative,
                 skip_all: &mut skip_all,
@@ -62,12 +66,15 @@ impl AttributeTooltipListener for HookedAttributeTooltips<'_, '_> {
         ctx: &AttributeTooltipContext,
         shown: bool,
     ) -> Vec<(Text, u32)> {
+        let Ok(stack) = stack.try_into_api() else {
+            return Vec::new();
+        };
         let mut lines = Vec::new();
         self.game
             .native_add_attribute_tooltips(mod_api::__private::AddAttributeTooltipsCall {
                 player: self.player.map(|p| p.0),
                 player_entity_id: self.player.map(|p| p.1),
-                stack,
+                stack: &stack,
                 shown,
                 advanced: ctx.advanced,
                 creative: ctx.creative,
