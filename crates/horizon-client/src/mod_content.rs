@@ -109,11 +109,12 @@ static FLUID_LOOKS: std::sync::RwLock<BTreeMap<String, FluidLook>> =
 
 /// Remembers how the mods' fluids look (`data/<id>/horizon/fluid/`), for what the client draws.
 pub fn set_fluid_looks(mods: &[ContentMod]) {
-    let looks = mods
+    let looks: BTreeMap<String, FluidLook> = mods
         .iter()
         .flat_map(|m| &m.content.fluids)
         .map(|f| (f.id.clone(), f.clone()))
         .collect();
+    crate::fluid_models::set_world_looks(looks.values());
     *FLUID_LOOKS.write().unwrap_or_else(|e| e.into_inner()) = looks;
 }
 

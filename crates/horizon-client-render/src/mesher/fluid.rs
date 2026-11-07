@@ -251,15 +251,18 @@ pub(super) fn tesselate(
     if !render_up && !render_down && !sides.iter().any(|&s| s) {
         return;
     }
-    // A mod's fluid draws as water until it has a model of its own.
+    // A mod's fluid draws as water does, with the sprites and tint of its own model.
+    let model = kind
+        .mod_fluid()
+        .and_then(|fluid| tables.mod_fluids.get(fluid.index()).copied().flatten());
     let water = matches!(
         kind,
         FluidKind::Water | FluidKind::FlowingWater | FluidKind::Mod(_) | FluidKind::ModFlowing(_)
     );
-    let tint = if water {
-        water_color & 0xFF_FFFF
-    } else {
-        0xFF_FFFF
+    let tint = match model.and_then(|model| model.tint) {
+        Some(tint) => tint,
+        None if water => water_color & 0xFF_FFFF,
+        None => 0xFF_FFFF,
     };
     let emission = if water {
         0
@@ -335,7 +338,9 @@ pub(super) fn tesselate(
             lighting::coords_at(pad, lighting::state_at(pad, info, above), above),
         ))
     };
-    let (still, flow, overlay) = if water {
+    let (still, flow, overlay) = if let Some(model) = model {
+        (model.still, model.flow, model.overlay)
+    } else if water {
         (
             tables.water_still,
             tables.water_flow,

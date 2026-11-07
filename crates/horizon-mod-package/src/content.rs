@@ -488,6 +488,20 @@ impl FluidLook {
     }
 }
 
+/// What a world fluid draws with beyond its [`FluidLook`], as NeoForge's fluid models: registered
+/// by a client mod in `register_fluid_models`. An unset sprite keeps the look's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FluidModel {
+    /// The world fluid's id, `<mod id>:<path>`.
+    pub fluid: String,
+    /// The block atlas sprite on a surface at rest; the look's `sprite` when unset.
+    pub still: Option<String>,
+    /// The sprite on a surface that flows, and on its sides; `still` when unset.
+    pub flowing: Option<String>,
+    /// The sprite on sides against glass and leaves, as water's overlay; `flowing` when unset.
+    pub overlay: Option<String>,
+}
+
 /// A creative inventory tab the mod adds (`data/<id>/horizon/creative_tab/`):
 /// its title, the item on its button, and its items in order. Items no mod
 /// or vanilla registers are left out when the game loads.
