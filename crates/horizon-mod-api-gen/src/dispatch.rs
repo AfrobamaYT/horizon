@@ -253,7 +253,9 @@ pub(super) fn emit(
                             format!("{table}(|| {level}.state_block({key}))")
                         }
                     }
-                    "& ItemStack" => format!("{table}(|| Some(&*{key}.item))"),
+                    "& ItemStack" => {
+                        format!("{table}(|| super::registry_keys::item_id({key}.item()))")
+                    }
                     "& str" => format!("{table}(|| Some({key}))"),
                     // An entity's type id need not be its block's: its own table.
                     "& ModBlockEntity" | "& mut ModBlockEntity" => {
