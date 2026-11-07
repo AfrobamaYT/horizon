@@ -453,18 +453,12 @@ impl ItemPlace {
                     _ => {
                         return Ok(match insert {
                             true => backend_mut_of(host).map_or(0, |backend| {
-                                backend.game_insert(
-                                    self,
-                                    resource.to_stack(amount).expect("amount is nonzero"),
-                                    tx,
-                                )
+                                backend.game_insert(self, resource, amount, tx).unwrap_or(0)
                             }),
                             false => backend_mut_of(host).map_or(0, |backend| {
-                                backend.game_extract(
-                                    self,
-                                    resource.to_stack(amount).expect("amount is nonzero"),
-                                    tx,
-                                )
+                                backend
+                                    .game_extract(self, resource, amount, tx)
+                                    .unwrap_or(0)
                             }),
                         });
                     }
@@ -488,18 +482,12 @@ impl ItemPlace {
             }
             _ => Ok(match insert {
                 true => backend_mut_of(host).map_or(0, |backend| {
-                    backend.game_insert(
-                        self,
-                        resource.to_stack(amount).expect("amount is nonzero"),
-                        tx,
-                    )
+                    backend.game_insert(self, resource, amount, tx).unwrap_or(0)
                 }),
                 false => backend_mut_of(host).map_or(0, |backend| {
-                    backend.game_extract(
-                        self,
-                        resource.to_stack(amount).expect("amount is nonzero"),
-                        tx,
-                    )
+                    backend
+                        .game_extract(self, resource, amount, tx)
+                        .unwrap_or(0)
                 }),
             }),
         });

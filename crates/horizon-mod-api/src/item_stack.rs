@@ -105,6 +105,8 @@ pub enum StackWriteError {
     },
     /// A maximum component is not a valid nonnegative integer.
     InvalidMaximum,
+    /// An engine result contained a zero-count stack instead of an empty slot.
+    EmptyEngineStack,
 }
 
 /// The two nonempty portions of a consuming split. Either portion can be absent.
