@@ -12,7 +12,8 @@ use super::Game;
 use super::commands::Target;
 use horizon_client::effects::{EffectInstance, PlayerEffects};
 use horizon_client::mobs::Mob;
-use mod_api::{EffectKey, ItemStack, LivingRef, NativeActiveEffect};
+use horizon_items::items::ItemStack;
+use mod_api::{EffectKey, LivingRef, NativeActiveEffect};
 
 /// A player's effect as the API's load-owned key and instance data.
 pub(super) fn active_effect(e: &EffectInstance) -> NativeActiveEffect {

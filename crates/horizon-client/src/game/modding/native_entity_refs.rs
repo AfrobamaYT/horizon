@@ -14,9 +14,10 @@ use super::{
     entity::{Entity as _, entity_lists_of, for_each_entity},
 };
 use horizon_core::geometry::{Aabb, Vec3};
+use horizon_items::items::ItemStack;
 use horizon_world::registry::BlockStateId;
 use mod_api::{
-    DimensionKey, EntityRef, ItemStack, LevelRef, NativeBlockFace, NativeBlockShapeKind,
+    DimensionKey, EntityRef, LevelRef, NativeBlockFace, NativeBlockShapeKind,
     NativeBlockUpdateFlags, NativeClipBlock, NativeClipFluid, NativeClipHit, NativeSupportType,
     NeighbourUpdate,
 };
