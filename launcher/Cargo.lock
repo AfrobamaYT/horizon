@@ -2720,6 +2720,7 @@ dependencies = [
  "horizon-release-sign",
  "horizon-server-launch",
  "horizon-system",
+ "horizon-shader-api",
  "horizon-theme",
  "horizon-world",
  "image",
