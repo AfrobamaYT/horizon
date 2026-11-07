@@ -102,7 +102,10 @@ fn chat(hooks: &dyn Hooks, host: &mut Server, text: &str) -> String {
             replies: &mut Vec::new(),
         },
     );
-    message.plain()
+    match message.content {
+        mod_api::text::TextContent::Literal(value) => value,
+        other => panic!("expected a literal reply, got {other:?}"),
+    }
 }
 #[test]
 #[ignore = "needs attachments/mod built with cargo horizon-mod build --wasm and the std member"]
