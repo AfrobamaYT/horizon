@@ -24,6 +24,13 @@ subprocess.run(['git', 'diff', 'HEAD', '--exit-code', '--', str(lan), str(dragon
 logs = Path('target/tracking-id-proof')
 logs.mkdir(parents=True, exist_ok=True)
 command = ['cargo', 'test', '-p', 'horizon-client', '--lib']
+def check_production(label):
+    for test in ['tracking_ids_', 'late_dragon_ids_']:
+        result = subprocess.run(command + [test, '--', '--ignored'], capture_output=True, text=True)
+        (logs / (label + '-' + test + '.log')).write_text(result.stdout + result.stderr)
+        assert result.returncode == 0 and '0 passed' not in result.stdout, result.stdout + result.stderr
+
+
 cases = []
 start = originals[lan].index('    pub(super) fn lan_assign_ids(')
 end = originals[lan].index('\n    }', start)
@@ -49,6 +56,7 @@ for name, expr in [('dragon', 'super::entity::assign_stored_id(&mut self.next_en
     offset = originals[dragon].index(expr, start, end)
     cases.append((name, dragon, offset, offset + len(expr), ';',
                   'late_dragon_ids_reserve_parts_before_crystals'))
+check_production('baseline')
 try:
     for name, path, start, end, replacement, test in cases:
         path.write_text(originals[path][:start] + replacement + originals[path][end:])
@@ -63,8 +71,5 @@ try:
 finally:
     for path, content in originals.items():
         path.write_text(content)
-for test in ['tracking_ids_', 'late_dragon_ids_']:
-    result = subprocess.run(command + [test, '--', '--ignored'], capture_output=True, text=True)
-    (logs / ('restored-' + test + '.log')).write_text(result.stdout + result.stderr)
-    assert result.returncode == 0 and '0 passed' not in result.stdout, result.stdout + result.stderr
+check_production('restored')
 print(f'{len(cases)} runtime kills; production restored and focused tests passed')
