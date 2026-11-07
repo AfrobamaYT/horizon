@@ -22,6 +22,13 @@ struct Vec3(f64, f64, f64);
 impl Vec3 { fn new(x: f64, y: f64, z: f64) -> Self { Self(x,y,z) } }
 #[derive(Default)]
 struct Entity { id: u32, velocity: Vec3 }
+// The handler's closed entity lists scope writes through update.
+trait ScopedEdit {
+    fn update(&mut self, index: usize, edit: impl FnOnce(&mut Entity));
+}
+impl ScopedEdit for Vec<Entity> {
+    fn update(&mut self, index: usize, edit: impl FnOnce(&mut Entity)) { edit(&mut self[index]); }
+}
 #[derive(Default)]
 struct Remote { pending_items: HashMap<i32, ((), Vec3)> }
 #[derive(Default)]
