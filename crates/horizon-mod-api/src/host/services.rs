@@ -98,9 +98,22 @@ pub trait ClientSession {
 /// The commands service, reached through its host.
 pub trait Commands {
     /// Side: server.
-    /// A line of the command's answer, inside `native_perform_command`:
-    /// sent to the player whose command it is after the call, as vanilla
-    /// commands' feedback is.
+    /// A mod changed the commands it registers (`native_register_commands`):
+    /// at the start of the next server tick every mod is asked again, the
+    /// commands players may run are rebuilt, and every player on the server is
+    /// sent their tree again, after `native_player_commands_sent`. Nothing
+    /// happens where no world is open to players, and nothing for a server
+    /// whose mods never call it. API @API:refresh_commands@.
+    fn refresh_commands(&mut self) {
+        crate::phase::unprovided(
+            "Commands::refresh_commands",
+            "refresh_commands",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: server.
+    /// A command's success feedback, routed to its originating source using
+    /// vanilla's silence, send-command-feedback and block/cart track-output rules.
     fn feedback(&mut self, line: Text) {
         crate::phase::unprovided(
             "Commands::feedback",
@@ -182,7 +195,7 @@ pub trait Players {
     }
     /// Side: server.
     /// The player whose action or command a hook hears, as their state is
-    /// swapped in (`native_perform_command`, `native_right_click_block`,
+    /// swapped in (`native_run_mod_command`, `native_right_click_block`,
     /// `native_use_on`, `native_break_block`...): None outside such a
     /// hook.
     fn acting_player(&self) -> Option<PlayerRef> {

@@ -173,6 +173,60 @@ fn registered_range_property_thresholds_on_the_mods_number_per_stack() {
 }
 
 #[test]
+fn registered_tint_source_colours_each_stack_from_its_entry() {
+    struct Env;
+    impl ItemEnv for Env {
+        fn item_tint_source(&self, source: &str, config: &Value, stack: &StackView) -> i32 {
+            assert_eq!(source, "tinttest:charge");
+            match stack.count {
+                1 => config["default"].as_i64().unwrap() as i32,
+                _ => 0xFF11_2233_u32 as i32,
+            }
+        }
+    }
+    let kept = register_tint_sources(vec![
+        "tinttest:charge".into(),
+        "minecraft:dye".into(),
+        "unnamespaced".into(),
+    ]);
+    assert_eq!(kept, ["tinttest:charge"]);
+    assert!(register_tint_sources(vec!["tinttest:charge".into()]).is_empty());
+    let json = r#"{"model":{
+        "type":"minecraft:model", "model":"tinttest:item/grey",
+        "tints":[
+            {"type":"tinttest:charge","default":-5614336},
+            {"type":"tinttest:unregistered"},
+            {"type":"minecraft:constant","value":255}
+        ]
+    }}"#;
+    let mut models = ItemModels::default();
+    models
+        .definitions
+        .insert("tinttest:grey".into(), ClientItem::from_json(json).unwrap());
+    let context = Context {
+        display: DisplayContext::Gui,
+        owner: None,
+        level: None,
+        seed: 0,
+    };
+    let tints = |count: i32, env: &dyn ItemEnv| {
+        let mut stack = StackView::new("tinttest:grey", count);
+        stack.patch.insert(
+            "minecraft:item_model".into(),
+            Some(serde_json::json!("tinttest:grey")),
+        );
+        models.resolve(&stack, &context, env).layers[0]
+            .tints
+            .clone()
+    };
+    let blue = 0xFF00_00FF_u32 as i32;
+    assert_eq!(tints(1, &Env), [-5614336, -1, blue]);
+    assert_eq!(tints(2, &Env), [0xFF11_2233_u32 as i32, -1, blue]);
+    // With no mod answering, the entry draws white.
+    assert_eq!(tints(1, &NoEnv), [-1, -1, blue]);
+}
+
+#[test]
 fn registered_select_property_picks_the_case_the_mod_answers_per_stack() {
     struct Env;
     impl ItemEnv for Env {

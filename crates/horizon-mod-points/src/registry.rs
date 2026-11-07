@@ -224,6 +224,13 @@ impl RawListener {
         }
     }
 
+    /// Orders a point by priority, then dependency order, then inject id within its mod.
+    pub const fn ordered(mut self, priority: i32, injection: &'static str) -> Self {
+        self.priority = priority;
+        self.injection = injection;
+        self
+    }
+
     /// The mod's id.
     pub fn id(&self) -> &'static str {
         self.id
@@ -292,7 +299,16 @@ pub fn seal() {
     for (place, function) in raw_list {
         raw[place].push(function);
     }
-    for site in &mut raw[POINT_COUNT..] {
+    for (place, site) in raw.iter_mut().enumerate() {
+        if place < POINT_COUNT {
+            site.sort_by_key(|entry| std::cmp::Reverse(entry.priority));
+            for group in
+                site.chunk_by_mut(|a, b| a.priority == b.priority && a.listener == b.listener)
+            {
+                group.sort_by_key(|entry| entry.injection);
+            }
+            continue;
+        }
         site.sort_by(|a, b| {
             b.priority
                 .cmp(&a.priority)

@@ -1275,7 +1275,10 @@ impl Game<'_> {
             .path_writes
             .get_or_insert_with(Vec::new)
             .split_off(0);
-        // The mobs whose bodies go this tick: (id, feet, width, height).
+        // The mobs whose bodies go this tick: (id, feet, width, height, split).
+        // 🤖 Agent: the last field is the grown slime, magma cube or sulfur
+        // cube the body leaves behind (`AbstractCubeMob.remove`), captured as
+        // the body goes because it has left the list by the time it splits.
         let mut gone = Vec::new();
         // The level's random and attachments, lent to the mobs (brain behaviours draw from
         // the random, and a hit's damage hooks get both) and taken back after their ticks.
@@ -1477,7 +1480,21 @@ impl Game<'_> {
                 // LivingEntity.tickDeath: after twenty ticks the body is removed.
                 if !kept && !m.removed && !m.alive() && m.death_time >= 20 {
                     let (width, height) = (f64::from(m.width()), f64::from(m.height()));
-                    gone.push((m.id, m.position, width, height));
+                    // 🤖 Agent: `AbstractCubeMob.remove` splits a grown cube into
+                    // its smaller halves when it is removed, twenty ticks after
+                    // the death. The parent leaves the list before the split
+                    // runs, so its size, position, kind and persistence are
+                    // captured here, as they are at the removal.
+                    let split = if matches!(
+                        m.species(),
+                        Species::Slime | Species::MagmaCube | Species::SulfurCube
+                    ) && m.extra.size > 1
+                    {
+                        Some(m.clone())
+                    } else {
+                        None
+                    };
+                    gone.push((m.id, m.position, width, height, split));
                 }
                 if let Some(conn) = seen_guest {
                     // ShulkerBullet.finalTarget is the guest's entity: the
@@ -1550,10 +1567,15 @@ impl Game<'_> {
         self.creatures.ticked = ticked;
         self.native_tick_post_batch(round);
         // ... and entity event 60 goes out as it is: the poof.
-        for (id, at, width, height) in gone {
+        // 🤖 Agent: the split follows the poof, as `LivingEntity.tickDeath`
+        // broadcasts event 60 before it calls `remove`.
+        for (id, at, width, height, split) in gone {
             let at = [at.x, at.y, at.z];
             self.lan_entity_event(id as i32, 60, at);
             self.death_poof(at, width, height);
+            if let Some(m) = split {
+                self.split_dead_cube(m);
+            }
         }
         laps.lap("creature_retain");
         self.tick_boarding();
@@ -1763,10 +1785,17 @@ impl Game<'_> {
             source,
         );
         self.create_wither_rose(m);
+        if m.species() == Species::CopperGolem {
+            // CopperGolem.dropEquipment: the preserved equipment too.
+            self.golem_drop_equipment(&mut dying);
+        }
+    }
+    /// `AbstractCubeMob.remove`: split only as the dead body is removed.
+    fn split_dead_cube(&mut self, mut dying: Mob) {
         if matches!(
-            m.species(),
+            dying.species(),
             Species::Slime | Species::MagmaCube | Species::SulfurCube
-        ) && m.extra.size > 1
+        ) && dying.extra.size > 1
         {
             // AbstractCubeMob.remove: convert without spawn finalization.
             let drawn = horizon_client::mobs::cube::split_count(&mut dying);
@@ -1774,7 +1803,8 @@ impl Game<'_> {
                 let count = self.mob_split_count(&dying, drawn);
                 for i in 0..count {
                     self.next_entity += 1;
-                    let mut child = Mob::new(self.next_entity, m.kind.clone(), m.position, 0.0);
+                    let mut child =
+                        Mob::new(self.next_entity, dying.kind.clone(), dying.position, 0.0);
                     horizon_client::mobs::cube::split_child(&mut dying, &mut child, i);
                     self.mobs.push(child);
                     self.native_mobs_joined(self.mobs.len() - 1, false);

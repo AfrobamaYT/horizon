@@ -1,7 +1,7 @@
 //! Server commands and players for native mods (docs/modding/src/how-to/native-mods.md,
 //! "Server commands and players"): the commands mods add to the
 //! server's command tree (`native_register_commands`), a player's command
-//! reaching them (`native_perform_command`), and the helpers a server mod
+//! reaching them (`native_run_mod_command`), and the helpers a server mod
 //! answers with: the players online, a line to one of them or to all, the
 //! command's feedback and the world's folder; and the acting
 //! player's plain items: count, take, give. They act on the server's own
@@ -19,11 +19,11 @@ use horizon_client::{
 };
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use mod_api::LevelRef;
+pub(crate) use mod_api::NativeCommand;
 use mod_api::{
     ActionOutcome, ActionRefused, FakeEffect, GameMode, NativePlayerAbilities, NativePlayerFood,
     PlayerAction, PlayerActionSetup, PlayerRef, ScopedActionResult,
 };
-pub(crate) use mod_api::{NativeCommand, NativeServerPlayer};
 use serde_json::{Map, Value, json};
 use std::sync::{
     Mutex, PoisonError,
@@ -491,7 +491,6 @@ impl Game<'_> {
         host.mob_players.retain(|_, conn| *conn != guest.conn);
         self.destroying.remove(&guest.entity_id);
         self.guest_combat.remove(&guest.conn);
-        self.guest_attachments.remove(&guest.conn);
     }
 
     /// Remove a fake without treating it as a disconnect or saving it.
@@ -1308,17 +1307,20 @@ impl Game<'_> {
         super::dedicated::events::record("announce", name, uuid, json!({ "message": message }));
         true
     }
-    /// A line of the command's answer, inside `native_perform_command`:
-    /// sent to the player whose command it is after the call, as vanilla
-    /// commands' feedback is.
+    /// A command's success feedback, routed to its originating source using
+    /// vanilla's silence, send-command-feedback and block/cart track-output rules.
     pub(super) fn native_feedback(&mut self, line: Text) {
-        match &mut self.chat_capture {
-            Some(lines) => lines.push(line),
-            None => self.system_message(line),
-        }
+        let source = self.command_source.unwrap_or_else(|| self.player_source());
+        self.with_source(
+            super::commands::execute::Source {
+                dimension: source.origin_dimension,
+                ..source
+            },
+            |game| game.feedback_unbroadcast(line),
+        );
     }
     /// The player whose action or command a hook hears, as their state is
-    /// swapped in (`native_perform_command`, `native_right_click_block`,
+    /// swapped in (`native_run_mod_command`, `native_right_click_block`,
     /// `native_use_on`, `native_break_block`...): None outside such a
     /// hook.
     pub(super) fn native_acting_player(&self) -> Option<PlayerRef> {
@@ -1347,7 +1349,9 @@ impl Game<'_> {
         };
         let outer = self.command_source.replace(server);
         let filter = std::mem::replace(&mut self.native_command_filter, true);
+        let outer_exec = std::mem::take(&mut self.exec);
         let ok = self.as_console(|g| g.run_command(line));
+        self.exec = outer_exec;
         self.native_command_filter = filter;
         self.command_source = outer;
         ok
@@ -1498,24 +1502,28 @@ fn system_chat(line: &Text) -> C {
 /// Native command metadata and the server dispatcher containing their parsed usages.
 pub(super) struct NativeCommands {
     levels: HashMap<String, u8>,
-    pub(super) dispatcher: Arc<Dispatcher>,
+    tree: Value,
 }
 
 /// Where the game calls the server hook points.
 impl Game<'_> {
     /// Asks the mods for their commands once per hub, and puts them in every
-    /// player's command tree.
+    /// player's command tree; again when a mod asked (`native_refresh_commands`).
     pub(super) fn register_native_commands(&mut self) {
+        let refresh = std::mem::take(&mut self.native_commands_refresh);
         if self
             .lan
             .as_ref()
-            .is_none_or(|host| host.native_commands.is_some())
+            .is_none_or(|host| host.native_commands.is_some() && !refresh)
         {
             return;
         }
         let mut commands = Vec::new();
         self.native_register_commands(&mut commands);
-        let vanilla = self.ui.dispatcher.0.clone();
+        let vanilla = Arc::new(horizon_client::command::vanilla::session_dispatcher(
+            &self.level.rule_registry,
+            &self.level.enabled_features,
+        ));
         let Some(host) = self.lan.as_ref() else {
             return;
         };
@@ -1537,14 +1545,52 @@ impl Game<'_> {
                 .iter()
                 .any(|c| c.usage.split(' ').next() == Some(name.as_str()))
         });
-        let mut dispatcher = Dispatcher::new();
-        register_dispatcher(&mut dispatcher, &tree, "native_mod_command");
-        let dispatcher = Arc::new(dispatcher);
+        let mut execution_tree = tree.clone();
+        if let Some(children) = execution_tree["children"].as_object_mut() {
+            children.retain(|name, _| levels.contains_key(name));
+        }
         let Some(host) = self.lan.as_mut() else {
             return;
         };
-        host.hub.set_mod_commands(0, tree);
-        host.native_commands = Some(NativeCommands { levels, dispatcher });
+        host.native_commands = Some(NativeCommands {
+            levels,
+            tree: execution_tree,
+        });
+        if refresh {
+            host.hub.store_mod_commands(0, tree);
+        } else {
+            host.hub.set_mod_commands(0, tree);
+        }
+        self.ui.dispatcher.0 = vanilla;
+        self.restore_native_commands();
+        if refresh {
+            self.resend_commands_filtered();
+        }
+    }
+
+    /// Restore mod nodes after vanilla rebuilds the session's command tree.
+    pub(super) fn restore_native_commands(&mut self) {
+        if let Some(commands) = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.native_commands.as_ref())
+        {
+            register_dispatcher(
+                Arc::make_mut(&mut self.ui.dispatcher.0),
+                &commands.tree,
+                "native_mod_command",
+            );
+        }
+    }
+
+    /// A mod changed the commands it registers (`native_register_commands`):
+    /// at the start of the next server tick every mod is asked again, the
+    /// commands players may run are rebuilt, and every player on the server is
+    /// sent their tree again, after `native_player_commands_sent`. Nothing
+    /// happens where no world is open to players, and nothing for a server
+    /// whose mods never call it. API @API:refresh_commands@.
+    pub(super) fn native_refresh_commands(&mut self) {
+        self.native_commands_refresh = true;
     }
 
     /// Asks the mods what root commands each player's tree keeps
@@ -1606,30 +1652,59 @@ impl Game<'_> {
         host.native_commands.as_ref()?.levels.get(name).copied()
     }
 
-    /// Parse once with the source's permission, then resolve its typed arguments.
-    /// A denied or malformed invocation never reaches argument resolution or listeners.
-    fn native_command_input(
+    /// Resolve the source once at the command boundary, retaining its output origin.
+    fn native_command_origin(
         &mut self,
-        line: &str,
         permission: u8,
-    ) -> Option<mod_api::CommandInvocation> {
-        let commands = self
-            .lan
-            .as_ref()
-            .and_then(|host| host.native_commands.as_ref())?;
-        let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
-        let parse = commands.dispatcher.parse(line, &self.ui.registries);
-        self.ui.registries.permission = previous;
-        if let Err(error) = parse.executable() {
-            self.syntax_failure(&error, line);
-            return None;
-        }
-        match self.resolve_native_command(parse.context) {
-            Ok(command) => Some(command),
-            Err(error) => {
-                self.syntax_failure(&error, line);
-                None
+    ) -> super::commands::R<mod_api::CommandSource> {
+        use super::commands::err;
+        use mod_api::CommandSource;
+        let permission = mod_api::NativePermissionLevel::from_level(i32::from(permission));
+        let source = self.command_source.unwrap_or_else(|| self.player_source());
+        let origin = if let Some(id) = self.exec.functions.last() {
+            CommandSource::Function {
+                id: mod_api::Identifier::parse(id).map_err(|_| err("command.failed", &[]))?,
+                permission,
             }
+        } else if let Some((x, y, z)) = source.block {
+            CommandSource::CommandBlock {
+                position: [x, y, z],
+                level: source.origin_dimension.key(),
+                permission,
+            }
+        } else if let Some(id) = source.cart {
+            let entity = self
+                .with_source(
+                    super::commands::execute::Source {
+                        dimension: source.origin_dimension,
+                        ..source
+                    },
+                    |game| game.native_entity(id),
+                )
+                .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
+            CommandSource::CommandBlockMinecart { entity, permission }
+        } else if source.origin_player {
+            let player = self
+                .native_acting_player()
+                .ok_or_else(|| err("argument.entity.notfound.player", &[]))?;
+            CommandSource::Player { player, permission }
+        } else {
+            CommandSource::Console { permission }
+        };
+        Ok(origin)
+    }
+
+    /// The shared command-node executor, also reached by functions and `execute`.
+    pub(super) fn run_native_command(&mut self, context: Context) -> super::commands::R<i32> {
+        use super::commands::err;
+        let command = self.resolve_native_command(context)?;
+        let origin = self.native_command_origin(self.ui.registries.permission)?;
+        let mut ran = false;
+        self.native_run_mod_command(&origin, &command, &mut ran);
+        if ran {
+            Ok(1)
+        } else {
+            Err(err("command.unknown.command", &[]))
         }
     }
 
@@ -1682,34 +1757,12 @@ impl Game<'_> {
         if Self::native_command_level(host, line).is_none_or(|level| level > permission) {
             return false;
         }
-        let Some(g) = host.hub.guest(conn) else {
+        if host.hub.guest(conn).is_none() {
             return false;
-        };
-        let player = NativeServerPlayer::from(mod_api::__private::built::NativeServerPlayer {
-            uuid: g.uuid,
-            name: g.name.clone(),
-            permission,
-            dimension: g.dimension.clone(),
-            position: g.position,
-            game_mode: g.game_mode,
-            health: g.health,
-            yaw: g.yaw,
-            pitch: g.pitch,
-            entity_id: g.entity_id,
-            address: g.address.ip().to_string(),
-        });
-        let Some(command) = self.native_command_input(line, permission) else {
-            return true;
-        };
-        let mut ran = false;
-        self.native_perform_command(&player, &command, &mut ran);
-        if !ran {
-            // Registered, but no mod took it: vanilla's unknown command.
-            self.native_feedback(
-                Text::translate("command.unknown.command", &[])
-                    .with_color(horizon_client::text::RED),
-            );
         }
+        let previous = std::mem::replace(&mut self.ui.registries.permission, permission);
+        self.run_command(line);
+        self.ui.registries.permission = previous;
         true
     }
 }
@@ -1733,16 +1786,7 @@ impl Game<'_> {
                     silent: false,
                     ..game.server_source()
                 });
-            if let Some(command) = game.native_command_input(line, 4) {
-                let mut ran = false;
-                game.native_perform_console_command(&command, &mut ran);
-                if !ran {
-                    game.native_feedback(
-                        Text::translate("command.unknown.command", &[])
-                            .with_color(horizon_client::text::RED),
-                    );
-                }
-            }
+            game.run_command(line);
             game.command_source = previous;
         });
         true
@@ -1898,6 +1942,96 @@ impl Drop for Acting {
 mod tests {
     use super::*;
     use horizon_client::items::ItemStack;
+
+    fn with_command_sources(test: impl FnOnce(&mut Game<'_>)) {
+        use horizon_client::{
+            chunk::Chunk, chunk::block_entity::BlockEntity, command_block::CommandBlock,
+        };
+        use horizon_core::geometry::Vec3;
+        super::super::native_guest_turn_tests::with_guests(|game| {
+            game.build_registries();
+            game.register_native_commands();
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:command_block")
+                .unwrap();
+            game.world.set(1, 64, 1, state).unwrap();
+            game.world.block_entities.insert(
+                (1, 64, 1),
+                BlockEntity::CommandBlock(Box::new(CommandBlock {
+                    command: "execute in minecraft:the_nether run origin".into(),
+                    condition_met: true,
+                    ..Default::default()
+                })),
+            );
+            let mut cart = super::super::minecarts::Minecart::new(
+                99,
+                super::super::minecarts::CartKind::CommandBlock,
+                Vec3::new(1.0, 64.0, 1.0),
+            );
+            cart.command.command = "origin".into();
+            game.carts.push(cart);
+            test(game);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_command_feedback_respects_track_output_and_silence() {
+        use super::super::commands::execute::Source;
+        use horizon_client::chunk::block_entity::BlockEntity;
+        with_command_sources(|game| {
+            let source = Source {
+                block: Some((1, 64, 1)),
+                silent: false,
+                ..game.server_source()
+            };
+            for track in [true, false] {
+                if let Some(BlockEntity::CommandBlock(block)) =
+                    game.world.block_entities.get_mut(&(1, 64, 1))
+                {
+                    block.track_output = track;
+                    block.last_output = None;
+                }
+                game.with_source(source, |game| game.native_feedback(Text::literal("answer")));
+                let Some(BlockEntity::CommandBlock(block)) =
+                    game.world.block_entities.get(&(1, 64, 1))
+                else {
+                    panic!("block missing")
+                };
+                assert_eq!(block.last_output.is_some(), track);
+            }
+            game.chat_capture = Some(Vec::new());
+            game.with_source(
+                Source {
+                    silent: true,
+                    block: None,
+                    ..source
+                },
+                |game| game.native_feedback(Text::literal("silent")),
+            );
+            assert!(game.chat_capture.take().unwrap().is_empty());
+            assert!(game.command_source.is_none());
+            game.as_guest(12, |game| {
+                let source = game.server_source();
+                game.with_source(source, |game| {
+                    assert!(matches!(
+                        game.native_command_origin(4),
+                        Ok(mod_api::CommandSource::Console { .. })
+                    ));
+                });
+            })
+            .unwrap();
+            game.exec.functions.push("test:outer".into());
+            assert!(game.native_run_command("list"));
+            assert_eq!(game.exec.functions, ["test:outer"]);
+        });
+    }
 
     type Heard = Vec<(&'static str, u32, u128, &'static str, [i32; 2])>;
     /// Logs each of the watch trio: (hook, player id, UUID, level, chunk).
@@ -2258,6 +2392,107 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn command_refresh_rebuilds_the_typed_dispatcher_only_on_request() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        struct ChangingCommands {
+            changed: Arc<AtomicBool>,
+            registrations: Arc<AtomicUsize>,
+        }
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for ChangingCommands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                self.registrations.fetch_add(1, Ordering::Relaxed);
+                event.commands.push(NativeCommand::new(
+                    if self.changed.load(Ordering::Relaxed) {
+                        "after <n:integer>"
+                    } else {
+                        "before"
+                    },
+                ));
+            }
+        }
+        let changed = Arc::new(AtomicBool::new(false));
+        let registrations = Arc::new(AtomicUsize::new(0));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "refresh",
+                Box::new(ChangingCommands {
+                    changed: changed.clone(),
+                    registrations: registrations.clone(),
+                }),
+            )]
+            .into(),
+            || {
+                super::super::native_guest_turn_tests::with_guests(|game| {
+                    game.build_registries();
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    changed.store(true, Ordering::Relaxed);
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 1);
+                    let host = game.lan.as_ref().unwrap();
+                    assert!(
+                        host.native_commands
+                            .as_ref()
+                            .unwrap()
+                            .levels
+                            .contains_key("before")
+                    );
+                    mod_api::Commands::refresh_commands(game);
+                    mod_api::Commands::refresh_commands(game);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        1,
+                        "requests are deferred"
+                    );
+                    game.register_native_commands();
+                    assert!(!game.native_commands_refresh);
+                    assert_eq!(
+                        registrations.load(Ordering::Relaxed),
+                        2,
+                        "requests coalesce"
+                    );
+                    let commands = game.lan.as_ref().unwrap().native_commands.as_ref().unwrap();
+                    assert!(!commands.levels.contains_key("before"));
+                    assert!(commands.levels.contains_key("after"));
+                    let dispatcher = &game.ui.dispatcher.0;
+                    assert!(
+                        dispatcher
+                            .parse("after 7", &game.ui.registries)
+                            .executable()
+                            .is_ok()
+                    );
+                    assert!(
+                        dispatcher
+                            .parse("after nope", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    assert!(
+                        dispatcher
+                            .parse("before", &game.ui.registries)
+                            .executable()
+                            .is_err()
+                    );
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 2);
+                    mod_api::Commands::refresh_commands(game);
+                    game.register_native_commands();
+                    assert_eq!(registrations.load(Ordering::Relaxed), 3);
+                    assert!(
+                        Game::native_command_level(game.lan.as_ref().unwrap(), "after").is_some()
+                    );
+                })
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn native_typed_commands_reach_listeners_after_parse_and_source_resolution() {
         use mod_api::{CommandArgumentValue as Value, CommandInvocation};
         struct Commands(Arc<Mutex<Vec<(bool, CommandInvocation)>>>);
@@ -2291,20 +2526,15 @@ mod tests {
                     NativeCommand::op("protected <who:player>", 4),
                 ]);
             }
-            fn perform_command(
+            fn run_mod_command(
                 &self,
                 _: &mut dyn mod_api::ServerHost,
-                event: &mut mod_api::PerformCommandEvent<'_>,
+                event: &mut mod_api::RunModCommandEvent<'_>,
             ) -> mod_api::Flow {
-                self.record(false, event.command);
-                mod_api::Flow::Cancel
-            }
-            fn perform_console_command(
-                &self,
-                _: &mut dyn mod_api::ServerHost,
-                event: &mut mod_api::PerformConsoleCommandEvent<'_>,
-            ) -> mod_api::Flow {
-                self.record(true, event.command);
+                self.record(
+                    matches!(event.source, mod_api::CommandSource::Console { .. }),
+                    event.command,
+                );
                 mod_api::Flow::Cancel
             }
         }
@@ -2382,8 +2612,12 @@ mod tests {
                     ));
                     assert!(game.perform_native_console_command("typed repeat guest13 3"));
                     assert!(game.command_source.is_none(), "console source restored");
+                    game.as_guest(12, |game| {
+                        assert!(game.native_run_command("execute as guest13 run typed opt 13"))
+                    })
+                    .unwrap();
                     let heard = heard.lock().unwrap();
-                    assert_eq!(heard.len(), 10);
+                    assert_eq!(heard.len(), 11);
                     let first = &heard[0].1;
                     assert_eq!(first.literals, ["typed", "give"]);
                     assert_eq!(first.argument("who"), Some(&Value::Player(other)));
@@ -2434,6 +2668,112 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn native_commands_keep_function_block_and_cart_sources() {
+        use horizon_client::{
+            chunk::block_entity::BlockEntity,
+            datapack::{Function, FunctionLine},
+        };
+        use horizon_core::position::BlockPos;
+        use mod_api::{CommandSource, NativePermissionLevel as Permission};
+        struct Commands(Arc<Mutex<Vec<CommandSource>>>);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Commands {
+            fn register_commands(
+                &self,
+                _: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RegisterCommandsEvent<'_>,
+            ) {
+                event.commands.extend([
+                    NativeCommand::new("origin"),
+                    NativeCommand::op("denied", 4),
+                    NativeCommand::new("unhandled"),
+                ]);
+            }
+            fn run_mod_command(
+                &self,
+                host: &mut dyn mod_api::ServerHost,
+                event: &mut mod_api::RunModCommandEvent<'_>,
+            ) -> mod_api::Flow {
+                if event.command.literals == ["unhandled"] {
+                    return mod_api::Flow::Continue;
+                }
+                self.0.lock().unwrap().push(event.source.clone());
+                host.commands().feedback(Text::literal("source answer"));
+                mod_api::Flow::Cancel
+            }
+        }
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "origins",
+                Box::new(Commands(heard.clone())),
+            )]
+            .into(),
+            || {
+                with_command_sources(|game| {
+                    game.command_block_tick(BlockPos::new(1, 64, 1));
+                    let Some(BlockEntity::CommandBlock(block)) =
+                        game.world.block_entities.get(&(1, 64, 1))
+                    else {
+                        panic!("block missing")
+                    };
+                    assert_eq!(block.success_count, 1);
+                    let source = heard.lock().unwrap()[0].clone();
+                    assert!(
+                        matches!(source, CommandSource::CommandBlock { position: [1, 64, 1], level, .. } if level == game.dim.key())
+                    );
+                    assert_eq!(source.permission(), Permission::Gamemasters);
+                    assert!(game.perform_cart_command(99));
+                    assert_eq!(game.carts[0].command.success_count, 1);
+                    assert!(game.carts[0].command.last_output.is_some());
+                    assert!(
+                        matches!(heard.lock().unwrap().last().unwrap(), CommandSource::CommandBlockMinecart { entity, .. } if entity.id() == 99)
+                    );
+                    game.chat_capture = Some(Vec::new());
+                    let mut function = Function {
+                        id: "test:inner".into(),
+                        lines: vec![
+                            FunctionLine::Command("execute positioned 2 64 3 run origin".into()),
+                            FunctionLine::Command("denied".into()),
+                        ],
+                        parameters: vec![],
+                    };
+                    game.ensure_datapacks();
+                    game.fns
+                        .store
+                        .functions
+                        .insert(function.id.clone(), function.clone());
+                    function.id = "test:outer".into();
+                    function.lines = vec![FunctionLine::Command("function test:inner".into())];
+                    let before = heard.lock().unwrap().len();
+                    game.run_function(&function, None, game.server_source())
+                        .unwrap();
+                    assert_eq!(heard.lock().unwrap().len(), before + 1);
+                    assert!(
+                        matches!(heard.lock().unwrap().last().unwrap(), CommandSource::Function { id, permission } if id.to_string() == "test:inner" && *permission == Permission::Gamemasters)
+                    );
+                    assert!(
+                        game.chat_capture.take().unwrap().is_empty(),
+                        "functions suppress both success and failure"
+                    );
+                    assert!(game.exec.functions.is_empty());
+                    game.ui.registries.permission = 4;
+                    assert!(!game.run_command("unhandled"));
+                    assert!(game.run_command(
+                        "execute store result storage test:result value int 1 run origin"
+                    ));
+                    assert!(
+                        game.run_command(
+                            "execute if data storage test:result {value:1} run origin"
+                        )
+                    );
+                });
+            },
+        );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn native_unauthorized_commands_never_reach_the_listener() {
         struct Commands(Arc<Mutex<Vec<mod_api::CommandInvocation>>>);
         #[mod_api::__subscriptions]
@@ -2451,10 +2791,10 @@ mod tests {
                     NativeCommand::new("choice <b:word>"),
                 ]);
             }
-            fn perform_command(
+            fn run_mod_command(
                 &self,
                 _: &mut dyn mod_api::ServerHost,
-                event: &mut mod_api::PerformCommandEvent<'_>,
+                event: &mut mod_api::RunModCommandEvent<'_>,
             ) -> mod_api::Flow {
                 self.0.lock().unwrap().push(event.command.clone());
                 mod_api::Flow::Cancel

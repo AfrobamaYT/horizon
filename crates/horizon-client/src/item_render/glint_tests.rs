@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn png(path: &Path, w: u32, h: u32, color: [u8; 4]) {
+pub(super) fn png(path: &Path, w: u32, h: u32, color: [u8; 4]) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), w, h);
     encoder.set_color(png::ColorType::Rgba);
