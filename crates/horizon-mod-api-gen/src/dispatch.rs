@@ -658,7 +658,7 @@ fn stack_crossing(
                     && path.path.segments.last().is_some_and(|s| {
                         matches!(
                             s.ident.to_string().as_str(),
-                            "ItemStack" | "ItemCost" | "MerchantOffer"
+                            "ItemStack" | "ItemCost" | "MerchantOffer" | "Suggestion"
                         )
                     });
                 syn::visit::visit_type_path(self, path);
