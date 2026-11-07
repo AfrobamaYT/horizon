@@ -1,7 +1,7 @@
 // game-module-visibility: pub(crate)
 //! The game-owned conversion boundary between API records and engine values.
 //! Rust's orphan rule prevents foreign From/TryFrom implementations here.
-use horizon_core::nbt::{JavaString, Tag};
+use horizon_core::nbt::{Compound, JavaString, Tag};
 use horizon_items::items::{ItemStack as EngineStack, Items};
 use mod_api::item_stack::{ItemStack as ApiStack, StackWriteError};
 
@@ -380,16 +380,20 @@ impl TryIntoEngine for mod_api::ItemResource {
 /// The write conversion below adds authoritative registry-dependent validation.
 pub(in crate::game) fn stack_value(value: &ApiStack) -> Result<EngineStack, StackWriteError> {
     let id = mod_api::__private::item_key_id(value.item()).ok_or(StackWriteError::UnknownItem)?;
+    Ok(encode_stack(value, id.into()))
+}
+
+fn encode_stack(value: &ApiStack, item: std::sync::Arc<str>) -> EngineStack {
     let patch = value
         .components()
         .map(|patch| Tag::Compound(patch.as_nbt().clone()));
     let (_, extra) = horizon_items::item_data::decode_components(patch.as_ref());
-    Ok(EngineStack {
-        item: id.clone(),
+    EngineStack {
+        item,
         count: value.count(),
         damage: value.damage(),
         extra,
-    })
+    }
 }
 
 impl TryIntoEngine for ApiStack {
@@ -397,8 +401,13 @@ impl TryIntoEngine for ApiStack {
     type Error = StackWriteError;
 
     fn try_into_engine(&self, items: &Items) -> Result<EngineStack, Self::Error> {
-        let stack = stack_value(self)?;
-        let definition = items.get(&stack.item).ok_or(StackWriteError::UnknownItem)?;
+        let id =
+            mod_api::__private::item_key_id(self.item()).ok_or(StackWriteError::UnknownItem)?;
+        let (id, definition) = items
+            .items
+            .get_key_value(id)
+            .ok_or(StackWriteError::UnknownItem)?;
+        let stack = encode_stack(self, id.clone());
         let effective = |name: &str, default: u32| -> Result<u32, StackWriteError> {
             match stack.data().and_then(|data| data.other(name)) {
                 Some(Tag::Int(value)) => {
@@ -1330,6 +1339,30 @@ impl super::Game<'_> {
             self.native_block_entity_render_bounding_box(pos, block, state, &api, bounds);
         }
     }
+    /// Shared click metadata borrows the already-converted API snapshot for this call.
+    pub(in crate::game) fn block_click<'a>(
+        &mut self,
+        hit: &super::Hit,
+        hand: mod_api::Hand,
+        stack: Option<&'a ApiStack>,
+    ) -> mod_api::NativeBlockClick<'a> {
+        let (player, player_entity_id) = self.native_clicker();
+        mod_api::NativeBlockClick::from(mod_api::__private::built::NativeBlockClick {
+            side: if self.remote.is_some() {
+                mod_api::LogicalSide::Client
+            } else {
+                mod_api::LogicalSide::Server
+            },
+            dimension: self.dim.level(),
+            pos: hit.pos,
+            hit: hit.native(),
+            hand,
+            stack,
+            player,
+            player_entity_id,
+        })
+    }
+
     pub(in crate::game) fn api_menu_button(
         &mut self,
         context: &mod_api::menu::MenuButtonContext,

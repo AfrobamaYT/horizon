@@ -106,7 +106,9 @@ impl Game<'_> {
     }
     /// `ItemStack.isBarVisible`, `getBarWidth`, `getBarColor`, before client-only hooks.
     pub(in crate::game) fn item_resource_bar(&self, stack: &ItemStack) -> Option<mod_api::ItemBar> {
-        let resource = mod_api::ItemResource::of(stack);
+        use super::api_values::TryIntoApi;
+        let snapshot = stack.try_into_api().ok()?;
+        let resource = mod_api::ItemResource::of(&snapshot);
         let component = |id| {
             resource.value(
                 self,

@@ -70,6 +70,7 @@ mod host;
 mod native_hooks;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).
+use self::api_values::TryIntoApi;
 use horizon_client::actions::Action as Mapping;
 use horizon_client::held::Source;
 use horizon_client::spans::startup;
@@ -7464,11 +7465,13 @@ impl Game<'_> {
                     return Ok(false);
                 }
                 block_hit = None;
-            } else {
+            } else if mod_api::__private::has_part_hook(mod_api::HookId::UseOn)
+                && let Ok(snapshot) = stack.try_into_api()
+            {
                 let (player, player_entity_id) = self.native_clicker();
                 let (hand, at) = (self.hand, hit.native());
                 self.native_use_on(mod_api::__private::UseOnCall {
-                    stack: &stack,
+                    stack: &snapshot,
                     pos: hit.pos,
                     face: hit.face,
                     hand,
@@ -14317,7 +14320,7 @@ impl Game<'_> {
                 .filter_map(|(i, e)| {
                     Some(mod_api::NativeArmorHurt {
                         slot: armor_slot(i),
-                        stack: e.as_ref()?.clone(),
+                        stack: e.as_ref()?.try_into_api().ok()?,
                         damage: durability_damage(damage),
                         new_damage: durability_damage(damage),
                     })
@@ -15761,11 +15764,19 @@ impl Game<'_> {
             let attack = attacks[i];
             let inverse_height =
                 horizon_client::first_person::equip_displacement(heights[i], scale);
+            let snapshot = if mod_api::__private::listened(mod_api::HookId::RenderHand) {
+                item.as_ref()
+                    .filter(|stack| stack.count > 0)
+                    .try_into_api()
+                    .ok()
+            } else {
+                None
+            };
             let mut render = mod_api::NativeHandRender {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
                 hand,
-                stack: item.as_ref(),
+                stack: snapshot.as_ref().and_then(Option::as_ref),
                 partial: a,
                 interpolated_pitch,
                 swing: attack,
@@ -15778,7 +15789,7 @@ impl Game<'_> {
                 scale: 1.0,
             };
             let mut canceled = false;
-            if mod_api::__private::listened(mod_api::HookId::RenderHand) {
+            if snapshot.is_some() {
                 self.native_render_hand(&mut render, &mut canceled);
             }
             if canceled {
