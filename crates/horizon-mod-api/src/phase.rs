@@ -348,6 +348,13 @@ pub fn install_packages(native: &[PackageInfo], content: &[PackageInfo]) {
     );
 }
 
+/// Install the host's ordered package inventory in a guest at initialization.
+// hidden: the guest runtime installs this once before dispatching hooks.
+#[doc(hidden)]
+pub fn install_guest_packages(packages: Vec<PackageInfo>) {
+    let _ = PACKAGES.set(packages.into());
+}
+
 /// Read-only view of the startup package inventory, shared: cloning it copies no package.
 #[derive(Clone)]
 // exhaustive: its fields are private, so mods cannot build or destructure it

@@ -59,14 +59,8 @@ fn fields<'f>(types: &Types<'_>, list: &'f [Field]) -> Option<Vec<(&'f str, Stri
 /// Values tied to a game process or a live capability are not wire data.
 pub(super) const SKIPPED: &[(&str, &str)] = &[
     ("OwnProvider", "provider capability"),
-    ("LoadedMods", "live mod state"),
     ("TintLayer", "render callback"),
     ("FoundStructure", "game-side structure state"),
-    ("RegistrationContext", "registration capability"),
-    ("Transaction", "live transaction"),
-    ("TransactionSeal", "transaction capability"),
-    ("AttachmentBatch", "live attachment state"),
-    ("AttachmentWriteToken", "attachment capability"),
     ("BlockProviderOf", "provider capability"),
     ("EntityProviderOf", "provider capability"),
     ("ItemProviderOf", "provider capability"),
