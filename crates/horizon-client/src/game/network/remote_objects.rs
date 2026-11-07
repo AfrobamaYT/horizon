@@ -195,11 +195,11 @@ impl Game<'_> {
                 && self.ominous_spawners.iter().any(|s| s.id == id)
             {
                 // OminousItemSpawner.DATA_ITEM.
-                if let (Some(item), Some(s)) = (
+                if let (Some(item), Some(i)) = (
                     self.to_stack(stack),
-                    self.ominous_spawners.iter_mut().find(|s| s.id == id),
+                    self.ominous_spawners.iter().position(|s| s.id == id),
                 ) {
-                    s.item = item;
+                    self.ominous_spawners.update(i, |s| s.item = item);
                 }
             } else if self.item_frames.iter().any(|f| f.id == id) {
                 // HangingEntity.DATA_DIRECTION, ItemFrame.DATA_ITEM and DATA_ROTATION.

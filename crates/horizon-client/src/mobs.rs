@@ -4460,7 +4460,6 @@ impl Mob {
         // including a weaker incoming instance saved behind the active effect.
         incoming.id = effect;
         let index = self.extra.effects.iter().position(|e| e.id == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
             let stored = &self.extra.effects[i];
             let mut active = crate::effects::EffectInstance {
@@ -4501,8 +4500,8 @@ impl Mob {
         if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
-        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
-            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        if effect == "minecraft:absorption" {
+            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
         }
         self.effects_dirty |= changed;
         changed
@@ -4675,15 +4674,15 @@ impl Mob {
         amplifier: i32,
         scale: f64,
     ) {
-        let amp = amplifier.clamp(0, 30);
+        let shift = amplifier as u32;
         if harm != inverted {
             self.damage(
                 level,
-                (scale * f64::from(6i32 << amp)) as i32 as f32,
+                (scale * f64::from(6i32.wrapping_shl(shift))) as i32 as f32,
                 Damage::of(DamageKind::Magic),
             );
         } else {
-            let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
+            let heal = (scale * f64::from(4i32.wrapping_shl(shift).max(0))) as i32 as f32;
             self.heal(context, heal);
         }
     }
@@ -5870,6 +5869,20 @@ mod magic_absorb_tests {
             m.extra.effects,
             vec![crate::mobs::StoredEffect::new(speed, 900, 0)]
         );
+    }
+
+    #[test]
+    fn absorption_refills_on_equal_and_weaker_adds() {
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 1, false, true);
+        m.absorption = 0.0;
+        assert!(!m.add_effect_with("absorption", 100, 1, false, true));
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 0.0;
+        m.add_effect("minecraft:absorption", 50, 0);
+        assert_eq!(m.absorption, 4.0);
+        assert_eq!(m.extra.effects[0].amplifier, 1);
+        assert_eq!(m.extra.effects[0].duration, 200);
     }
 
     #[test]

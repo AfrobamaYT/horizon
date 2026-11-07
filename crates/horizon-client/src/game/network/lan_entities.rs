@@ -618,12 +618,10 @@ impl Game<'_> {
         self.rockets.iter_mut().for_each(|r| give(&mut r.id));
         self.crystals.iter_mut().for_each(|c| give(&mut c.id));
         self.bolts.iter_mut().for_each(|b| give(&mut b.id));
-        self.ominous_spawners
-            .iter_mut()
-            .for_each(|o| give(&mut o.id));
+        self.ominous_spawners.for_each_mut(|o| give(&mut o.id));
         self.potions.thrown_ids().for_each(&mut give);
         self.end.eye_ids().for_each(&mut give);
-        self.breath_clouds.iter_mut().for_each(|b| give(&mut b.id));
+        self.breath_clouds.for_each_mut(|b| give(&mut b.id));
         self.dragon_fireballs
             .iter_mut()
             .for_each(|b| give(&mut b.id));
