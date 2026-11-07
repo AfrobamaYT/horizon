@@ -13,3 +13,18 @@ a version. New parameters before the out-parameter, with the old ones kept in na
 binding names a parameter, and a trait mod's event gains fields; a test that calls the `dispatch_*` function passes them. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks/`, `horizon-mod-api`'s `render.rs`, `horizon-world`'s `loot.rs`) in step.
+
+#### Teleport hooks
+
+`ender_pearl_teleport` covers player-owned and mob-owned pearls. Its `owner` is an
+`EntityRef`; listeners can cancel or redirect `target`. Player owners retain the
+acting-player context and mutable fall `damage`. Mob owners take no pearl damage
+and make no endermite roll. The pearl is consumed even when teleportation is canceled.
+
+`item_consumption_teleport` covers players and foxes with the random-teleport
+consume effect. Its `consumer` is a `LivingRef`, and `consumed` is the stack captured
+before use, including count and components. Cancellation ends further teleport
+attempts, not consumption. Fox callbacks run before that fox's living AI/movement
+and before the next mob ticks, with the full server host. Listener changes to an
+actor's item, position or eligibility survive rather than being overwritten by a
+stale teleport decision. Command and Ender-entity teleport hooks are unchanged.
