@@ -1,6 +1,60 @@
-//! Parsed native command input, shared by player and console listeners.
+//! Parsed native command input and the source that executes it.
 
-use crate::{ItemStack, PlayerRef};
+use crate::{DimensionKey, EntityRef, Identifier, ItemStack, NativePermissionLevel, PlayerRef};
+
+/// The origin of a registered mod command, independent of `execute as`'s executor.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum CommandSource {
+    /// A player's command; their state is swapped in for the listener.
+    Player {
+        /// The player who submitted the command.
+        player: PlayerRef,
+        /// The execution permission, including function overrides.
+        permission: NativePermissionLevel,
+    },
+    /// The dedicated server console or RCON.
+    Console {
+        /// The execution permission.
+        permission: NativePermissionLevel,
+    },
+    /// A command block, including when `execute` moves its execution position.
+    CommandBlock {
+        /// The block's position, not the execution position.
+        position: [i32; 3],
+        /// The block's dimension.
+        level: DimensionKey,
+        /// The execution permission.
+        permission: NativePermissionLevel,
+    },
+    /// A command-block minecart.
+    CommandBlockMinecart {
+        /// The minecart that submitted the command.
+        entity: EntityRef,
+        /// The execution permission.
+        permission: NativePermissionLevel,
+    },
+    /// The innermost executing function; feedback still follows its caller.
+    Function {
+        /// The function's namespaced identifier.
+        id: Identifier,
+        /// The function's execution permission.
+        permission: NativePermissionLevel,
+    },
+}
+
+impl CommandSource {
+    /// The effective permission checked before parsing and argument resolution.
+    pub fn permission(&self) -> NativePermissionLevel {
+        match self {
+            Self::Player { permission, .. }
+            | Self::Console { permission }
+            | Self::CommandBlock { permission, .. }
+            | Self::CommandBlockMinecart { permission, .. }
+            | Self::Function { permission, .. } => *permission,
+        }
+    }
+}
 
 /// One validated native command argument, resolved against its command source.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,7 +98,7 @@ impl CommandArgument {
 ///
 /// Missing optional arguments are absent. Player selectors must resolve to one
 /// online player before any listener runs; a failed parse or resolution produces
-/// command feedback instead. Both player and console hooks receive this same data.
+/// command feedback instead. Every source receives this same data.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct CommandInvocation {

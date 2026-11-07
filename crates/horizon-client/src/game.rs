@@ -2683,9 +2683,9 @@ struct Game<'a> {
     skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
     /// The glowing entities' silhouettes this frame (game/entities/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
-    /// Client mods' sounds (`native_play_local_sound`), with the ticks each waits, until the
-    /// next audio update plays them (`tick_sound_engine`).
-    mod_sounds: std::cell::RefCell<Vec<(mod_api::SoundPlay, u32)>>,
+    /// Client mods' sounds (`native_play_local_sound`): those waiting for the next audio update
+    /// (`tick_sound_engine`), the stops and fades asked of them, and their handles.
+    mod_sounds: native_local_sounds::ModSounds,
     /// A client mod asked to clear the particles (`native_clear_particles`), done before
     /// the next frame or particle tick (`apply_mod_particle_clear`).
     mod_clear_particles: std::cell::Cell<bool>,
@@ -3441,6 +3441,7 @@ struct Game<'a> {
     /// The Server Links screens' state (game/network/server_links.rs).
     links_ui: server_links::LinksUi,
     camera_type: horizon_client::camera::CameraType,
+    requested_camera_type: std::cell::Cell<Option<horizon_client::camera::CameraType>>,
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
@@ -17393,6 +17394,7 @@ impl Game<'_> {
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
+        self.apply_requested_camera_type();
         let vanilla = self.camera_view(camera_alpha as f32);
         let view = vanilla.map(|view| {
             if self.shows_panorama() {
@@ -21519,6 +21521,7 @@ impl<'a> Game<'a> {
             adv_ui: Default::default(),
             links_ui: Default::default(),
             camera_type: Default::default(),
+            requested_camera_type: Default::default(),
             fangs: Default::default(),
             player_model: None,
         };
@@ -24260,6 +24263,7 @@ pub fn run_with(
     mods::register_debug_entries(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
+    mods::register_item_tint_sources(options.execution_role);
     mods::freeze_declarations();
     mod_phase.advance(mod_api::__private::ModPhase::Setup)?;
     // Minecraft.<init>: read the last start's flag, then mark this one as not

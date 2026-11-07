@@ -105,36 +105,30 @@ fn empty_dispatch_checks_before_event_construction() {
 }
 
 #[test]
-fn command_dispatch_forwards_typed_input_to_player_and_console_listeners() {
+fn command_dispatch_forwards_typed_input_and_source() {
     struct Observer(Arc<Mutex<Vec<i32>>>);
     #[mod_api::__subscriptions]
     impl Hooks for Observer {
-        fn perform_command(
+        fn run_mod_command(
             &self,
             _: &mut dyn ServerHost,
-            event: &mut PerformCommandEvent<'_>,
+            event: &mut RunModCommandEvent<'_>,
         ) -> Flow {
-            self.0.lock().unwrap().push(event.command.amount);
-            Flow::Cancel
-        }
-        fn perform_console_command(
-            &self,
-            _: &mut dyn ServerHost,
-            event: &mut PerformConsoleCommandEvent<'_>,
-        ) -> Flow {
-            self.0.lock().unwrap().push(-event.command.amount);
+            self.0
+                .lock()
+                .unwrap()
+                .push(event.command.amount * event.source.sign);
             Flow::Cancel
         }
     }
     let calls = Arc::new(Mutex::new(Vec::new()));
     install(vec![ModEntry::new("commands", Box::new(Observer(calls.clone())))].into());
     let command = CommandInvocation { amount: 37 };
-    let mut ran = false;
-    dispatch_perform_command(&mut TestHost, &NativeServerPlayer, &command, &mut ran);
-    assert!(ran);
-    ran = false;
-    dispatch_perform_console_command(&mut TestHost, &command, &mut ran);
-    assert!(ran);
+    for sign in [1, -1] {
+        let mut ran = false;
+        dispatch_run_mod_command(&mut TestHost, &CommandSource { sign }, &command, &mut ran);
+        assert!(ran);
+    }
     assert_eq!(*calls.lock().unwrap(), vec![37, -37]);
 }
 
@@ -696,6 +690,9 @@ mod stubs {
     pub(super) struct NativeLifecycleContext;
     pub(super) struct Load(pub &'static str);
     pub(super) struct NativeServerPlayer;
+    pub(super) struct CommandSource {
+        pub(super) sign: i32,
+    }
     pub(super) struct CommandInvocation {
         pub(super) amount: i32,
     }
@@ -716,6 +713,7 @@ mod api {
     }
     #[derive(Clone, Copy)]
     pub struct RaidRef;
+    pub struct ClientBossBar;
     #[derive(Clone, Copy)]
     pub enum KeyAction {}
     pub mod fog {
