@@ -1114,7 +1114,10 @@ fn tooltip_box(
     tooltip_sprites(
         batch,
         atlas,
-        ["gui/sprites/tooltip/background", "gui/sprites/tooltip/frame"],
+        [
+            "gui/sprites/tooltip/background",
+            "gui/sprites/tooltip/frame",
+        ],
         [x, y, w, h],
     );
     let mut ly = y;
@@ -2440,7 +2443,10 @@ mod tests {
             (20, 12, [3; 4])
         );
         // Another namespace's sprite is named with it, as the GUI atlas packs it.
-        let frame = metadata.0.get("lobby:gui/sprites/tooltip/gold_frame").unwrap();
+        let frame = metadata
+            .0
+            .get("lobby:gui/sprites/tooltip/gold_frame")
+            .unwrap();
         assert_eq!((frame.width, frame.border), (40, [6; 4]));
     }
     /// A tooltip style names its sprites as `TooltipRenderUtil` does, in the GUI atlas's names;
