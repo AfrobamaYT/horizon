@@ -2720,11 +2720,13 @@ impl Game<'_> {
                     if let Ok(stack) = stack.try_into_api() {
                         let mut added = Vec::new();
                         appender.append(self, &stack, &context, &mut added);
-                        out.extend(
-                            added
-                                .into_iter()
-                                .map(|(text, color)| (text.try_into_engine(&()).unwrap(), color)),
-                        );
+                        let converted: Result<Vec<_>, mod_api::text::TextFormError> = added
+                            .into_iter()
+                            .map(|(text, color)| Ok((text.try_into_engine(&())?, color)))
+                            .collect();
+                        if let Ok(converted) = converted {
+                            out.extend(converted);
+                        }
                     }
                 },
                 appenders
@@ -2737,7 +2739,9 @@ impl Game<'_> {
             && mod_api::__private::listened(mod_api::HookId::ItemTooltip)
             && let Ok(stack) = stack.try_into_api()
         {
-            let mut api_lines = lines.try_into_api().unwrap();
+            let Ok(mut api_lines) = lines.try_into_api() else {
+                return lines;
+            };
             self.native_item_tooltip(mod_api::__private::ItemTooltipCall {
                 player: self.own_uuid(),
                 player_entity_id: self.own_entity_id(),
@@ -2747,7 +2751,9 @@ impl Game<'_> {
                 creative,
                 lines: &mut api_lines,
             });
-            lines = api_lines.try_into_engine(&()).unwrap();
+            if let Ok(converted) = api_lines.try_into_engine(&()) {
+                lines = converted;
+            }
         }
         lines
     }
@@ -2812,11 +2818,15 @@ impl Game<'_> {
             return Some(at);
         }
         let stack = stack.try_into_api().ok()?;
-        let elements: Vec<TooltipElement> = lines
+        let mut elements: Vec<TooltipElement> = lines
             .iter()
-            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), *color))
-            .chain(images.iter().cloned().map(TooltipElement::Image))
-            .collect();
+            .map(|(text, color)| {
+                text.try_into_api()
+                    .map(|text| TooltipElement::Text(text, *color))
+            })
+            .collect::<Result<_, _>>()
+            .ok()?;
+        elements.extend(images.iter().cloned().map(TooltipElement::Image));
         let mut place = mod_api::TooltipPlace {
             x: at.0 as i32,
             y: at.1 as i32,
@@ -3056,9 +3066,13 @@ impl Game<'_> {
         }
         let mut elements: Vec<TooltipElement> = lines
             .into_iter()
-            .map(|(text, color)| TooltipElement::Text(text.try_into_api().unwrap(), color))
-            .chain(images.into_iter().map(TooltipElement::Image))
-            .collect();
+            .map(|(text, color)| {
+                text.try_into_api()
+                    .map(|text| TooltipElement::Text(text, color))
+            })
+            .collect::<Result<_, _>>()
+            .ok()?;
+        elements.extend(images.into_iter().map(TooltipElement::Image));
         let (mut max_width, mut cancel) = (-1, false);
         self.native_render_tooltip_gather_components(
             stack,
@@ -3076,7 +3090,7 @@ impl Game<'_> {
         for element in elements {
             match element {
                 TooltipElement::Text(text, color) => {
-                    let text = text.try_into_engine(&()).unwrap();
+                    let text = text.try_into_engine(&()).ok()?;
                     if max_width < 0 {
                         lines.push((text, color));
                     } else {

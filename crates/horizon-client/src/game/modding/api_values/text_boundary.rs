@@ -1039,6 +1039,55 @@ mod iterative_tests {
     }
 
     #[test]
+    fn too_deep_is_refused_before_cloning_opaque_metadata() {
+        // Keep opaque metadata much deeper than the small stack could recursively clone.
+        // The component-depth refusal must win before any metadata is copied.
+        let mut opaque = serde_json::Value::Null;
+        for _ in 0..4096 {
+            opaque = serde_json::Value::Array(vec![opaque]);
+        }
+        let mut api = mod_api::Text::literal("leaf");
+        for _ in 1..513 {
+            api = mod_api::Text::literal("parent").append(api);
+        }
+        // Build the source separately without serde's recursive json! value serializer.
+        let mut component = json!({"text":"leaf"});
+        for _ in 1..513 {
+            let mut parent = serde_json::Map::new();
+            parent.insert("text".into(), "parent".into());
+            parent.insert("extra".into(), serde_json::Value::Array(vec![component]));
+            component = serde_json::Value::Object(parent);
+        }
+        api.metadata.insert("test:opaque".into(), opaque);
+        // A separate opaque value avoids cloning either deep input in the test itself.
+        let mut opaque = serde_json::Value::Null;
+        for _ in 0..4096 {
+            opaque = serde_json::Value::Array(vec![opaque]);
+        }
+        component
+            .as_object_mut()
+            .unwrap()
+            .insert("test:opaque".into(), opaque);
+        let engine = horizon_client_core::text::Text::empty().with_component(component);
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                assert!(matches!(
+                    api.try_into_engine(&()),
+                    Err(mod_api::text::TextFormError::TooDeep)
+                ));
+                assert!(matches!(
+                    engine.try_into_api(),
+                    Err(mod_api::text::TextFormError::TooDeep)
+                ));
+                std::mem::forget((api, engine));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn span_only_hover_sources_are_validated_and_materialized_iteratively() {
         std::thread::Builder::new()
             .stack_size(256 * 1024)

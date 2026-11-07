@@ -776,7 +776,8 @@ mod tests {
         assert_eq!(text.plain(), "visibleresolved");
         assert_eq!(*calls.borrow(), ["parent", "extra", "@a"]);
         let value = serde_json::json!({"id":"override", "translate":"missing", "with":[{"selector":"unused"}], "fallback":{"selector":"unused"}});
-        let text = to_text_with(&value, &mut |_| panic!("unused branch"), &mut |_| {
+        let text = to_text_with(&value, &mut |_| panic!("unused branch"), &mut |o| {
+            assert_eq!(o.get("id").and_then(Value::as_str), Some("override"));
             Some(Text::literal("override"))
         });
         assert_eq!(text.plain(), "override");

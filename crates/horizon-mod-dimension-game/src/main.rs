@@ -101,11 +101,14 @@ impl Hooks for DimProbe {
         let line = travel(level, &name);
         if event.command.literals.iter().any(|word| word == "later") {
             *self.later.lock().unwrap() = Some(line);
-            host.commands().feedback(Text::literal("dimprobe queued"));
+            host.commands()
+                .feedback(Text::literal("dimprobe queued"))
+                .expect("bounded probe text");
         } else {
             let ran = host.commands().run_command(&line);
             host.commands()
-                .feedback(Text::literal(format!("dimprobe ran={ran}")));
+                .feedback(Text::literal(format!("dimprobe ran={ran}")))
+                .expect("bounded probe text");
         }
         Flow::Cancel
     }
