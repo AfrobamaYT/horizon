@@ -115,6 +115,70 @@ pub enum InstanceError {
     Translucent,
 }
 
+/// Persistent copies of one resolved model, retired on reload, world close or destroy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the engine creates handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
+pub struct InstanceGroupRef(u64, u32);
+
+impl InstanceGroupRef {
+    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
+        if generation == 0 {
+            return Err("unpublished instance group generation");
+        }
+        Ok(Self(generation, slot))
+    }
+    /// Atomically overwrite a range, extending length up to reserved capacity.
+    pub fn write(
+        self,
+        host: &dyn crate::ClientHost,
+        first: u32,
+        instances: &[ModelInstance],
+    ) -> Result<(), GroupError> {
+        host.instance_group_write(self, first, instances)
+    }
+    /// Atomically change the drawn length. Newly exposed copies start at identity, full bright.
+    pub fn set_len(self, host: &dyn crate::ClientHost, len: u32) -> Result<(), GroupError> {
+        host.instance_group_set_len(self, len)
+    }
+    /// Retire this handle and release its reserved copies.
+    pub fn destroy(self, host: &dyn crate::ClientHost) -> Result<(), GroupError> {
+        host.instance_group_destroy(self)
+    }
+}
+
+/// Why a persistent group operation was refused. Errors leave storage and view unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GroupError {
+    /// The group was destroyed or its world/resources retired.
+    Stale,
+    /// The model could not be resolved.
+    Model(crate::ModelError),
+    /// An origin or transform component is not finite.
+    NonFinite,
+    /// A light channel is outside 0..=15.
+    InvalidLight,
+    /// The range exceeds reserved capacity.
+    OutOfRange,
+    /// The mod's reserved capacity or the view budget would be exceeded.
+    CapacityExceeded,
+    /// Translucent models cannot use this route.
+    Translucent,
+}
+
+impl From<InstanceError> for GroupError {
+    fn from(error: InstanceError) -> Self {
+        match error {
+            InstanceError::Model(error) => Self::Model(error),
+            InstanceError::NonFinite => Self::NonFinite,
+            InstanceError::InvalidLight => Self::InvalidLight,
+            InstanceError::CapacityExceeded => Self::CapacityExceeded,
+            InstanceError::Translucent => Self::Translucent,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
