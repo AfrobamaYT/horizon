@@ -29,6 +29,17 @@ use horizon_world::{level::data::PushReaction, piston_push};
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
+/// Assign a stored owner's delayed id at its existing allocation point.
+/// Kinds without a lifetime slot pass None; a bound owner must keep its id.
+pub(super) fn assign_stored_id(
+    next: &mut u32,
+    id: &mut u32,
+    lifetime: Option<&horizon_mod_runtime::attachments::AttachmentLifetime>,
+) -> u32 {
+    debug_assert!(*id != 0 || lifetime.is_none_or(|slot| !slot.is_bound()));
+    super::lan_entities::assign_entity_id(next, id)
+}
+
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
 /// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
 /// nothing (projectiles, rockets, TNT, falling blocks, armor stands here) stays
@@ -689,6 +700,15 @@ macro_rules! entity_lists {
 pub(crate) use entity_lists;
 
 macro_rules! direct_entity_edit {
+    (Projectile) => {
+        false
+    };
+    (Cart) => {
+        false
+    };
+    (Falling) => {
+        false
+    };
     (Boat) => {
         false
     };
@@ -726,7 +746,7 @@ macro_rules! define_entity_handles {
             /// cursor per list. Static dispatch and nothing allocated. Checked:
             /// a list out of join order, or an entity that never joined, stops
             /// the walk with the entity at fault.
-            #[allow(dead_code)] // read by the tick order slices that follow
+            #[allow(dead_code, reason = "the tick order work that reads this has not landed yet")]
             pub(super) fn walk_in_join_order(
                 self,
                 visit: impl FnMut(EntityHandle, JoinSeq),
@@ -762,8 +782,13 @@ macro_rules! define_entity_handles {
                     $($field: std::mem::take(&mut self$(.$list)+),)*
                 }
             }
-            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
-                $(self$(.$list)+ = taken.$field;)*
+            pub(super) fn restore_entities(&mut self, mut taken: TakenEntities) {
+                $({
+                    let expected = self$(.$list)+.len() + taken.$field.len();
+                    std::mem::swap(&mut self$(.$list)+, &mut taken.$field);
+                    self$(.$list)+.append(&mut taken.$field);
+                    debug_assert_eq!(self$(.$list)+.len(), expected);
+                })*
             }
             /// Every entity's handle: lengths read now, nothing allocated, and
             /// no borrow of `Game` held, so the caller can change it mid-walk.
@@ -794,7 +819,10 @@ pub(crate) use define_entity_handles;
 
 /// Why [`EntityLists::walk_in_join_order`] stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // read by the tick order slices that follow
+#[allow(
+    dead_code,
+    reason = "the tick order work that reads this has not landed yet"
+)]
 pub(super) enum JoinOrderError {
     /// Never put in its list through the list's own `push`, so it has no
     /// join number.
@@ -808,7 +836,10 @@ pub(super) enum JoinOrderError {
 /// lengths, `seq(list, i)` the join number of entity `i` of a list, `handle`
 /// names it. Each step takes the lowest next number among the `N` cursors
 /// (a stack array; no allocation).
-#[allow(dead_code)] // read by the tick order slices that follow
+#[allow(
+    dead_code,
+    reason = "the tick order work that reads this has not landed yet"
+)]
 fn merge_in_join_order<const N: usize>(
     lens: [usize; N],
     seq: impl Fn(usize, usize) -> JoinSeq,
@@ -2089,6 +2120,10 @@ mod trident_selector_tests {
         assert_eq!(t.selector_target(), Some(Target::Trident(9)));
     }
 }
+
+#[cfg(test)]
+#[path = "entity/restore_tests.rs"]
+mod restore_tests;
 
 #[cfg(test)]
 mod join_order_tests {

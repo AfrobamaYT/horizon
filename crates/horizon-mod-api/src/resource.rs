@@ -106,7 +106,7 @@ impl ItemResource {
     pub fn value(&self, host: &dyn Host, id: &ComponentId) -> Option<Tag> {
         self.value_id(host, id.as_str())
     }
-    fn value_id(&self, host: &dyn Host, id: &str) -> Option<Tag> {
+    pub(crate) fn value_id(&self, host: &dyn Host, id: &str) -> Option<Tag> {
         if let Some(patch) = self.0.components().map(|patch| patch.as_nbt()) {
             if let Some(own) = patch.get(&JavaString::from(id)) {
                 return Some(own.clone());

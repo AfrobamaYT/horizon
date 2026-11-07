@@ -74,6 +74,7 @@ impl Game<'_> {
         let at = Vec3::new(pos[0], pos[1], pos[2]);
         self.next_entity += 1;
         self.falling.push(FallingBlock {
+            attachment_lifetime: Default::default(),
             rotation: [0.0, 0.0],
             join: Default::default(),
             id: self.next_entity,
@@ -98,6 +99,196 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use horizon_mod_runtime::attachments::{
+        AttachmentType, Attachments, HasAttachmentLifetime, Holder, index::AttachmentIndex,
+    };
+    use std::sync::{Arc, Mutex};
+
+    static VALUE: AttachmentType<i32> = AttachmentType {
+        namespace: "test",
+        name: "falling_lifetime",
+        default: || 0,
+        codec: None,
+        copy_on_death: false,
+        sync: false,
+    };
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_tick_preserves_its_owner_on_success_and_collision_error() {
+        bound_falling_case(false, |game, _| {
+            game.tick_one_falling(0, &[]).unwrap();
+            assert_eq!(game.falling[0].age, 1);
+            assert!(game.falling[0].position.y < 70.0);
+            // A corrupt resident palette makes the real collision lookup fail.
+            Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
+            let position = game.falling[0].position;
+            assert!(game.tick_one_falling(0, &[]).is_err());
+            assert_eq!(game.falling[0].position, position);
+            assert_eq!(game.falling[0].age, 1);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_client_tick_commits_state_without_detaching_its_owner() {
+        bound_falling_case(true, |game, _| {
+            game.remote_projectile_data(
+                71,
+                &[(
+                    8,
+                    10,
+                    horizon_protocol::entity_data::Value::Pos([8, 90, -4]),
+                )],
+            );
+            assert_eq!(game.falling[0].start_pos, BlockPos::new(8, 90, -4));
+            for age in 1..=3 {
+                let previous = game.falling[0].position;
+                game.tick_remote_projectiles(|_, at| at);
+                assert_eq!(game.falling[0].age, age);
+                assert_eq!(game.falling[0].previous, previous);
+                assert!(game.falling[0].position.y < previous.y);
+                assert!(game.falling[0].velocity.y < 0.0);
+            }
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_parked_swap_preserves_state_and_owner_until_discard() {
+        bound_falling_case(false, |game, index| {
+            let home = game.dim;
+            game.tick_one_falling(0, &[]).unwrap();
+            let position = game.falling[0].position;
+            game.enter_level(super::super::Dim::Nether).unwrap();
+            assert!(game.falling.is_empty());
+            assert_eq!(
+                index
+                    .lock()
+                    .unwrap()
+                    .snapshot(&("test".into(), "falling_lifetime".into()))
+                    .len(),
+                1
+            );
+            game.enter_level(home).unwrap();
+            assert_eq!(game.falling.len(), 1);
+            assert_eq!(game.falling[0].id, 71);
+            assert_eq!(game.falling[0].age, 1);
+            assert_eq!(game.falling[0].position, position);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn falling_lifecycle_commands_unload_park_and_remote() {
+        use super::super::{
+            commands::Target,
+            entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle, SlotIdentities},
+        };
+        let mut identities = SlotIdentities::default();
+        LifecycleFixture {
+            seed: |game, entries| {
+                game.falling.clear();
+                let state = game
+                    .pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:sand")
+                    .unwrap();
+                for &(id, at) in entries {
+                    assert!(game.spawn_remote_projectile(
+                        id as i32,
+                        "minecraft:falling_block",
+                        at,
+                        (0.0, 0.0),
+                        [0.0; 3],
+                        state.0 as i32
+                    ));
+                }
+            },
+            ids: |game| game.falling.iter().map(|f| f.id).collect(),
+            target: Target::Falling,
+            unloads_with_chunk: true,
+            remote: Some(RemoteLifecycle {
+                prepare: |game| game.clear_remote_projectiles(),
+                apply: |game, remove, _| game.remove_remote_projectile(remove),
+            }),
+        }
+        .run_with(|game| {
+            identities.observe(
+                &mut game.falling,
+                game.native_lifecycle.epoch().unwrap(),
+                |f| f.id,
+            );
+        });
+    }
+
+    fn bound_falling_case(
+        client: bool,
+        exercise: impl FnOnce(&mut Game<'_>, &Arc<Mutex<AttachmentIndex<mod_api::EntityRef>>>),
+    ) {
+        let test = |game: &mut Game<'_>| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            let state = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:sand")
+                .unwrap();
+            let at = Vec3::new(0.5, 70.0, 0.5);
+            game.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
+                rotation: [0.0; 2],
+                join: Default::default(),
+                id: 71,
+                state,
+                start_pos: BlockPos::new(0, 70, 0),
+                position: at,
+                previous: at,
+                velocity: Vec3::ZERO,
+                age: 0,
+                no_gravity: false,
+                portal: Default::default(),
+                drop_item: false,
+                fall_distance: 0.0,
+                stuck: Vec3::ZERO,
+                damage: Default::default(),
+                saved: None,
+            });
+            let id = game.falling[0].id;
+            let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), id);
+            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+            let mut values = Attachments::default();
+            VALUE.set(&mut values, Holder::Entity(id), 10).unwrap();
+            let original = game.falling.update(0, |f| {
+                f.attachment_lifetime().bind(&mut values, &index, holder);
+                f.attachment_lifetime().registration().unwrap()
+            });
+            let key = ("test".into(), "falling_lifetime".into());
+            let before = index.lock().unwrap().snapshot(&key);
+            assert_eq!(before.len(), 1);
+            exercise(game, &index);
+            let current = game
+                .falling
+                .update(0, |f| f.attachment_lifetime().registration().unwrap());
+            assert!(original.same_registration(&current));
+            assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+            assert_eq!(VALUE.get(&mut values, Holder::Entity(id)), Ok(10));
+            // Exercise the production clear before any fixture cleanup can mask it.
+            game.clear_remote_projectiles();
+            assert!(game.falling.is_empty());
+            assert!(index.lock().unwrap().snapshot(&key).is_empty());
+            assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
+        };
+        if client {
+            super::super::native_entity_refs::tests::with_client_game(test);
+        } else {
+            super::super::native_entity_refs::tests::with_game(test);
+        }
+    }
 
     #[test]
     fn a_throw_is_cut_to_the_largest_speed_and_refuses_what_isnt_finite() {
