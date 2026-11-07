@@ -12,7 +12,6 @@ members = [
     "crates/horizon-world",
     "crates/horizon-client",
     "crates/horizon-mod-points",
-    "crates/horizon-mod-internals",
     "crates/horizon-internals",
     "crates/horizon-client-lib",
     "crates/horizon-client-core",

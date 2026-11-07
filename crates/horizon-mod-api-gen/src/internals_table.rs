@@ -1511,37 +1511,6 @@ pub(crate) fn signature(written: &str) -> Option<syn::Signature> {
     parser.parse_str(written).ok()
 }
 
-/// Plain guest copies use the exact same value encoding as the table's native copies.
-pub(crate) fn guest_codecs(rule: &Rule, shapes: &[Shape]) -> TokenStream {
-    let hashes = HashMap::new();
-    let mut generator = Gen::new(rule, &hashes, Selection::default());
-    generator.guest = true;
-    let mut impls = Vec::new();
-    for shape in shapes {
-        let ty = crate::internals_view::spell(shape, rule);
-        let encode = generator.encode(shape, quote!(self));
-        let decode = generator.decode(shape, quote!(value));
-        impls.push(quote! {
-            impl CopyValue for #ty {
-                fn to_value(&self) -> V { #encode }
-                fn from_value(value: V) -> Result<Self, Refusal> {
-                    (|| -> Result<Self, I::Refusal> { Ok(#decode) })().map_err(wire_refusal)
-                }
-            }
-            impl ViewType for #ty {
-                fn from_reached(reached: Reached) -> Result<Self, Refusal> {
-                    match reached {
-                        Reached::Value(cells) => Self::from_value(unflatten(cells).map_err(wire_refusal)?),
-                        Reached::Node(n) => Self::from_value(unflatten(n.read()?).map_err(wire_refusal)?),
-                    }
-                }
-            }
-        });
-    }
-    let items = generator.items;
-    quote!(#(#items)* #(#impls)*)
-}
-
 fn native_only() -> Vec<&'static str> {
     include_str!("../native-only.txt")
         .lines()
@@ -2948,5 +2917,3 @@ pub(crate) mod tests {
     }
 }
 
-#[cfg(test)]
-mod catalog_coverage;

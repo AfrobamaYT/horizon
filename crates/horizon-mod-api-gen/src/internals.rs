@@ -2348,33 +2348,6 @@ const LABEL: &str = "é"; struct AfterUnicode;
             "mod game { pub struct Game<'a> { pub large: [u64; 32], pub marker: &'a str } impl Game<'_> { pub fn next_autosave_interval(&self) -> i64 { 42 } } }",
             "let _ = (std::mem::size_of::<Op>(), std::mem::size_of::<Reply>(), std::mem::size_of::<Value>()); let game = game::Game { large: [0; 32], marker: \"\" }; assert_eq!(game.large[0], 0); assert_eq!(game.marker, \"\");",
         );
-        let declaration = |i: &Internal| crate::internals_view::Declaration {
-            path: i.path.clone(),
-            hash: i.hash.clone(),
-            kind: Some(i.kind.into()),
-        };
-        let owner = entries
-            .iter()
-            .find(|i| i.kind == "struct" && i.path == "horizon_client::game::Game")
-            .unwrap();
-        let view = crate::internals_view::generate(
-            entries,
-            &[declaration(method_entry), declaration(owner)],
-            &[],
-            &[],
-        )
-        .unwrap();
-        let parsed = syn::parse_file(&view).unwrap();
-        let syn::Item::Mod(module) = &parsed.items[0] else {
-            panic!("view module")
-        };
-        let items = &module.content.as_ref().unwrap().1;
-        assert!(items.iter().any(|i| matches!(i, syn::Item::Struct(s) if s.ident.to_string().ends_with("Game") && matches!(s.fields, syn::Fields::Unnamed(_)))));
-        assert!(!view.contains("fn large"));
-        let field_entry = entries.iter().find(|i| i.path == field).unwrap();
-        let error = crate::internals_view::generate(entries, &[declaration(field_entry)], &[], &[])
-            .unwrap_err();
-        assert!(error.contains("conditional field or variant"), "{error}");
     }
 
     #[test]

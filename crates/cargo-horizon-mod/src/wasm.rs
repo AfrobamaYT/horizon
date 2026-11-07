@@ -22,9 +22,6 @@ const LLD_ENV: &str = "HORIZON_MOD_LLD";
 const PROVIDED_ENV: &str = "HORIZON_MOD_PROVIDED";
 const PROFILE: &str = "horizon-wasm";
 
-#[cfg(test)]
-#[path = "wasm/tests.rs"]
-mod tests;
 /// The crates of std, linked whole into the std member and left out of every other member.
 const STD_CRATES: &[&str] = &[
     "std",
@@ -151,34 +148,6 @@ fn toolchain() -> Result<Toolchain, String> {
     })
 }
 
-/// Select the member's own view inputs, never inherited inputs from another mod or std.
-fn member_command(root: &Path, role: &str) -> Result<Command, String> {
-    let mut command = pinned("cargo");
-    command
-        .env_remove("HORIZON_MOD_INTERNALS_MANIFEST")
-        .env_remove("HORIZON_MOD_INTERNALS_CATALOG");
-    if role == "member" {
-        let text = std::fs::read_to_string(root.join(MANIFEST)).map_err(|e| e.to_string())?;
-        let manifest: toml_edit::DocumentMut =
-            text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
-        if manifest.get("internals").is_some_and(|i| {
-            i.as_array().is_some_and(|a| !a.is_empty())
-                || i.as_array_of_tables().is_some_and(|a| !a.is_empty())
-        }) {
-            command.env(
-                "HORIZON_MOD_INTERNALS_MANIFEST",
-                std::path::absolute(root.join(MANIFEST)).map_err(|e| e.to_string())?,
-            );
-            command.env(
-                "HORIZON_MOD_INTERNALS_CATALOG",
-                std::path::absolute(crate::internals::wasm_catalog(root)?)
-                    .map_err(|e| e.to_string())?,
-            );
-        }
-    }
-    Ok(command)
-}
-
 /// Builds the crate at `root` as a group member and gives its module.
 fn cargo_member(
     root: &Path,
@@ -189,7 +158,7 @@ fn cargo_member(
     features: &[String],
 ) -> Result<Vec<u8>, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut command = member_command(root, role)?;
+    let mut command = pinned("cargo");
     command.args(["rustc", "--lib", "--crate-type", "cdylib"]);
     if !features.is_empty() {
         command.args(["--features", &features.join(",")]);
@@ -289,7 +258,6 @@ struct Library {
     /// Declared `optional = true`: the mod is built with the Cargo feature of its id.
     optional: bool,
     krate: String,
-    module: Vec<u8>,
     sha512: String,
 }
 
@@ -354,7 +322,6 @@ fn libraries(root: &Path, manifest: &toml_edit::DocumentMut) -> Result<Vec<Libra
             id: theirs.id,
             optional,
             krate: lib_name(package).ok_or("a library mod has no [lib]")?,
-            module,
             sha512: wasm.sha512().to_owned(),
         });
     }

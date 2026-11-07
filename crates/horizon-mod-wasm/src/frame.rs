@@ -83,30 +83,6 @@ fn not_here(what: &str) -> Refusal {
     Refusal::NotHere(what.to_owned())
 }
 
-/// Fuel to walk a stored path, without resolving any game pointers.
-pub(crate) fn walk_cost(path: &Path<Value>) -> usize {
-    let mut cells = 0usize;
-    let mut bytes = 0usize;
-    let mut pending = Vec::new();
-    for step in &path.steps {
-        if let Step::Key(key) = step {
-            pending.push(key);
-        }
-    }
-    while let Some(value) = pending.pop() {
-        cells = cells.saturating_add(1);
-        match value {
-            Value::Str(s) => bytes = bytes.saturating_add(s.len()),
-            Value::Seq(v) | Value::Rec(v) | Value::Var(_, v) => pending.extend(v),
-            _ => {}
-        }
-    }
-    path.steps
-        .len()
-        .saturating_add(cells)
-        .saturating_add(bytes.div_ceil(64))
-}
-
 /// The retained payload of a plain value. Sequence storage counts too, including byte arrays.
 pub(crate) struct ValueSize {
     pub cells: usize,
@@ -166,7 +142,9 @@ impl<'t> Frame<'t> {
         }
     }
 
-    /// Installs the current mod's field permissions once at the call boundary.
+    /// Installs the current mod's field permissions once at the call boundary. The loader calls
+    /// it per mod; until the new loader exists only the tests do.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn allow_members(&mut self, members: impl IntoIterator<Item = (u32, u32)>) {
         self.allowed_members = members.into_iter().collect();
     }
@@ -391,11 +369,6 @@ impl<'t> Frame<'t> {
         Ok(())
     }
 
-    /// Pending entries to charge before scanning or applying the journal.
-    pub(crate) fn journal_len(&self) -> usize {
-        self.journal.len()
-    }
-
     /// Whether the call wrote under `node`: its whole-node reads would miss those writes.
     fn written_under(&self, node: &Node) -> bool {
         self.journal
@@ -452,15 +425,6 @@ impl<'t> Frame<'t> {
         });
         debug_assert_eq!(gone.len(), refused.len());
         refused
-    }
-
-    /// Trusted signature arity, checked before guest argument payloads are copied.
-    pub(crate) fn argument_count(&self, function: u32) -> Result<usize, Refusal> {
-        self.table
-            .thunks
-            .get(function as usize)
-            .map(|thunk| thunk.args.len())
-            .ok_or_else(|| gone("no such function"))
     }
 
     /// Calls the declared function `function` on `receiver` with `args`, after applying the
@@ -609,32 +573,6 @@ pub(crate) mod tests {
     }
     struct Player {
         health: i64,
-    }
-
-    #[test]
-    fn reused_aggregate_key_path_charges_every_encoded_cell() {
-        let node = Node::new(
-            Path {
-                root: 0,
-                steps: vec![Step::Key(Value::Seq((0..1024).map(Value::U).collect()))],
-            },
-            false,
-        );
-        // One path step, the sequence cell, and 1,024 scalar cells, on every reuse.
-        for _ in 0..2 {
-            assert_eq!(walk_cost(&node.path), 1026);
-        }
-        let nested = Path {
-            root: 0,
-            steps: vec![
-                Step::Field(0),
-                Step::Key(Value::Rec(vec![
-                    Value::Var(1, vec![Value::Str("x".repeat(65)), Value::None]),
-                    Value::S(7),
-                ])),
-            ],
-        };
-        assert_eq!(walk_cost(&nested), 2 + 5 + 2);
     }
 
     const GAME: u32 = 0;

@@ -1872,15 +1872,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "horizon-mod-internals"
-version = "0.1.0"
-dependencies = [
- "horizon-mod-api-gen",
- "horizon-mod-package",
- "horizon-mod-points",
-]
-
-[[package]]
 name = "horizon-mod-package"
 version = "0.1.0"
 dependencies = [
