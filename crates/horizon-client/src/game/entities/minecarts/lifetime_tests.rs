@@ -236,9 +236,8 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
             VALUE.get(&mut spawned_values, Holder::Entity(spawned)),
             Ok(40)
         );
-        game.persist
-            .removals
-            .push(super::super::commands::Target::Cart(71));
+        let live = game.entity(71).unwrap();
+        assert!(game.entity_remove(live, mod_api::NativeRemovalReason::Discarded));
         let clone = game.carts[0].clone();
         assert!(!game.store_cart_back(0, clone));
         game.native_removals_flush();
