@@ -2313,27 +2313,32 @@ impl<R: RandomSource> LootContext<'_, R> {
 
 /// The items engine's stack as the loot engine's (`LootStack`), for a mod's
 /// function hook: the parts of it the hook can change and the engine takes
-/// back. The components the engine keeps as saved travel as their JSON, as
-/// `set_components` writes them.
+/// back. Saved components retain their exact NBT types.
 fn loot_of(stack: &ItemStack) -> horizon_world::loot::LootStack {
-    let mut components: Vec<(String, Value)> = Vec::new();
+    let mut components: Vec<(String, Option<horizon_core::nbt::Tag>)> = Vec::new();
     if let Some(data) = stack.data() {
         for (id, value) in &data.other {
-            components.push((
-                id.clone(),
-                horizon_client_core::scoreboard::tag_to_json(value),
-            ));
+            components.push((id.clone(), Some(value.clone())));
         }
         if let Some(name) = &data.custom_name {
-            components.push((
-                "minecraft:custom_name".to_owned(),
-                horizon_client_core::scoreboard::tag_to_json(name),
-            ));
+            components.push(("minecraft:custom_name".to_owned(), Some(name.clone())));
         }
         if let Some((material, pattern)) = &data.trim {
             components.push((
                 "minecraft:trim".to_owned(),
-                serde_json::json!({"material": &**material, "pattern": &**pattern}),
+                Some(horizon_core::nbt::Tag::Compound(
+                    [
+                        (
+                            "material".into(),
+                            horizon_core::nbt::Tag::String((**material).into()),
+                        ),
+                        (
+                            "pattern".into(),
+                            horizon_core::nbt::Tag::String((**pattern).into()),
+                        ),
+                    ]
+                    .into(),
+                )),
             ));
         }
     }
@@ -2414,14 +2419,14 @@ fn apply_loot(
     }
     // `SetComponentsFunction`'s patch: the components the hook changed or
     // added are set, and the ones it dropped (gone from the stack) removed.
-    for (id, value) in &after.components {
-        if !before.components.iter().any(|(i, v)| i == id && v == value) {
+    if after.components != before.components {
+        for (id, value) in &after.components {
             stack.data_mut().set_loot_component(id, value);
         }
     }
     for (id, _) in &before.components {
         if !after.components.iter().any(|(i, _)| i == id) {
-            stack.data_mut().set_loot_component(id, &Value::Null);
+            stack.data_mut().set_loot_component(id, &None);
         }
     }
     stack.tidy();
@@ -3229,7 +3234,10 @@ mod tests {
                 loot.count = 7;
                 loot.components.push((
                     "minecraft:custom_data".to_owned(),
-                    json!({"machine": "furnace"}),
+                    Some(
+                        horizon_core::json_nbt::json_to_tag(&json!({"machine": "furnace"}))
+                            .unwrap(),
+                    ),
                 ));
             },
         );
@@ -3241,6 +3249,40 @@ mod tests {
                 &json!({"machine": "furnace"})
             ))
         );
+    }
+
+    #[test]
+    fn loot_patches_keep_nbt_types_removals_and_order() {
+        use horizon_core::nbt::Tag;
+        let mut stack = ItemStack::new("minecraft:stone", 1);
+        stack
+            .data_mut()
+            .set_other("test:array", Some(Tag::ByteArray(vec![7])));
+        stack.data_mut().set_other("test:byte", Some(Tag::Byte(7)));
+        let before = loot_of(&stack);
+        assert!(
+            before
+                .components
+                .contains(&("test:array".into(), Some(Tag::ByteArray(vec![7]))))
+        );
+        assert!(
+            before
+                .components
+                .contains(&("test:byte".into(), Some(Tag::Byte(7))))
+        );
+        let mut after = before.clone();
+        after.components.extend([
+            ("test:array".into(), Some(Tag::List(vec![Tag::Int(7)]))),
+            ("test:array".into(), None),
+            ("test:array".into(), Some(Tag::ByteArray(vec![7]))),
+            ("test:byte".into(), None),
+        ]);
+        apply_loot(&before, &after, &mut stack);
+        assert_eq!(
+            stack.data().unwrap().other("test:array"),
+            Some(&Tag::ByteArray(vec![7]))
+        );
+        assert_eq!(stack.data().unwrap().other("test:byte"), None);
     }
 
     /// A function that leaves the stack alone keeps its own form: the round

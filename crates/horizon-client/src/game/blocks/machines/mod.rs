@@ -1860,7 +1860,12 @@ mod brewing_fuel_transfer_tests {
             let mut custom = ItemStack::new("minecraft:stone", 2);
             custom.data_mut().set_loot_component(
                 "minecraft:brewing_fuel",
-                &serde_json::json!({"uses": 7, "speed_multiplier": 2.5}),
+                &Some(
+                    horizon_core::json_nbt::json_to_tag(
+                        &serde_json::json!({"uses": 7, "speed_multiplier": 2.5}),
+                    )
+                    .unwrap(),
+                ),
             );
             let mut removed = default.clone();
             removed.data_mut().set_other(
