@@ -37,12 +37,11 @@ pub struct Report {
 }
 
 impl Category {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::BuildFiles,
         Self::PrebuiltGames,
         Self::SpareGameBuilds,
         Self::RustCompiler,
-        Self::OtherCaches,
     ];
 }
 
@@ -116,6 +115,7 @@ impl Storage {
         for cache in BUILD_CACHES {
             add(&mut entries, &self.root, cache.relative(), cache.category())?;
         }
+        let build_files = Category::BuildFiles;
         for name in [
             "built.json",
             "points.json",
@@ -127,17 +127,12 @@ impl Storage {
                 &mut entries,
                 &self.root,
                 &format!("native/{name}"),
-                Category::BuildFiles,
+                build_files,
             )?;
         }
         // The target lock files must remain in place. Their contents are inventoried here but
         // deletion goes through Cache, which also acquires Cargo's locks.
-        add(
-            &mut entries,
-            &self.root,
-            "native/target",
-            Category::BuildFiles,
-        )?;
+        add(&mut entries, &self.root, "native/target", build_files)?;
         let data = backend::data_dir();
         let played: HashSet<_> = instances::list()
             .into_iter()
@@ -217,11 +212,7 @@ impl Storage {
         // Validate every descendant before any deletion and deduplicate allocated blocks per row.
         let mut rows = Vec::new();
         for category in Category::ALL {
-            let mut seen = HashSet::new();
-            let mut bytes = 0u64;
-            for entry in entries.iter().filter(|entry| entry.category == category) {
-                bytes = bytes.saturating_add(walk(&entry.path, &mut seen)?);
-            }
+            let bytes = allocated(&entries, category)?;
             rows.push(Row {
                 category,
                 bytes,
@@ -240,14 +231,7 @@ impl Storage {
         }
         for row in &mut rows {
             if all || clear == Some(row.category) {
-                let mut seen = HashSet::new();
-                let mut remaining = 0u64;
-                for entry in entries
-                    .iter()
-                    .filter(|entry| entry.category == row.category)
-                {
-                    remaining = remaining.saturating_add(walk(&entry.path, &mut seen)?);
-                }
+                let remaining = allocated(&entries, row.category)?;
                 row.freed_bytes = row.bytes.saturating_sub(remaining);
                 row.remaining_bytes = remaining;
             }
@@ -259,6 +243,16 @@ impl Storage {
             rows,
         })
     }
+}
+
+fn allocated(entries: &[Entry], category: Category) -> Result<u64, Error> {
+    let mut seen = HashSet::new();
+    entries
+        .iter()
+        .filter(|entry| entry.category == category)
+        .try_fold(0u64, |bytes, entry| {
+            Ok(bytes.saturating_add(walk(&entry.path, &mut seen)?))
+        })
 }
 
 fn old_logs(entries: &mut Vec<Entry>, home: &Path) -> Result<(), Error> {
