@@ -12,6 +12,8 @@ use std::{
 
 pub(super) type Indexes = HashMap<Dim, Arc<Mutex<AttachmentIndex<AttachmentHolder>>>>;
 
+mod players;
+
 #[cfg(test)]
 mod painting_tests;
 

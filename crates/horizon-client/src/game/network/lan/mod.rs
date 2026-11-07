@@ -3464,6 +3464,7 @@ impl Game<'_> {
             return;
         };
         host.hub.place_new_player(conn, &mut ctx);
+        self.bind_player_attachments(conn, false);
         if elsewhere && let Err(e) = self.enter_level(back) {
             log::error!("could not reopen {}: {e}", back.id());
         }
