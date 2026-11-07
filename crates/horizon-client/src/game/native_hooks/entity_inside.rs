@@ -30,6 +30,7 @@ mod entity_inside_tests {
     #[test]
     #[ignore = "needs prepared resources"]
     fn landing_writes_apply_at_the_batch_end() {
+        use crate::game::api_values::{TryIntoApi, TryIntoEngine};
         use horizon_client::block_contact::{landed, take_pending};
         use horizon_world::level::LandingWrite;
         crate::game::native_entity_refs::tests::with_game(|game| {
@@ -52,11 +53,14 @@ mod entity_inside_tests {
             game.world.set(5, 64, 1, dirt).unwrap();
             let drops_before = game.dropped.len();
             let at = |x| BlockPos::new(x, 64, 1);
-            landed(
-                farmland,
-                at(1),
-                vec![LandingWrite::SetBlock(stone), LandingWrite::SetBlock(dirt)],
-            );
+            let requested = vec![
+                mod_api::LandingWrite::SetBlock(stone.try_into_api().unwrap()),
+                mod_api::LandingWrite::SetBlock(dirt.try_into_api().unwrap()),
+            ];
+            // Exercise the same complete-batch boundary as generated dispatch before
+            // entering the engine queue, then prove its ordered writes reach the world.
+            let staged = requested.try_into_engine(&*game).unwrap();
+            landed(farmland, at(1), staged);
             landed(dirt, at(4), vec![LandingWrite::DestroyBlock { drop: true }]);
             landed(
                 dirt,
