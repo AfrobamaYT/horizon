@@ -28,7 +28,10 @@ fn mob(uuid: [i32; 4]) -> Tag {
             horizon_mod_runtime::attachments::ATTACHMENTS_KEY,
             Tag::compound([(
                 "test",
-                Tag::compound([("mana", Tag::compound([("value", Tag::compound([]))]))]),
+                Tag::compound([(
+                    "mana",
+                    Tag::compound([("value", Tag::Compound(Default::default()))]),
+                )]),
             )]),
         ),
     ])
@@ -51,7 +54,7 @@ fn saved_mob_binding_survives_store_back_and_retires_at_sweep() {
         let row = old.iter().next().unwrap().unwrap();
         let work = index.lock().unwrap().work_count();
         let replacement = game.mobs[0].clone();
-        game.mobs.store_back(0, replacement);
+        horizon_client::join_seq::store_back(&mut game.mobs[0], replacement);
         assert!(game.mobs[0].attachment_lifetime.is_bound());
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         assert_eq!(VALUE.get(game, Holder::Entity(id)), Ok(7));
