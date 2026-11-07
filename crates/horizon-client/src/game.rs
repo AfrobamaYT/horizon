@@ -3208,7 +3208,7 @@ struct Game<'a> {
     persist: persist::EntityMemory,
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
-    entity_attachments: HashMap<[i32; 4], horizon_world::attachments::Attachments>,
+    entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
@@ -3357,7 +3357,7 @@ struct Game<'a> {
     /// Guests whose records are displaced by nested player swaps, outer first.
     lan_guest_swaps: Vec<u32>,
     /// The active player's map; a guest turn moves it from its owning record.
-    player_attachments: horizon_world::attachments::ResidentAttachments,
+    player_attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     /// The name of the guest `lan_acting` acts for (`Player.getName`).
     lan_acting_name: Option<String>,
     /// Their UUID (`Player.getUUID`).
@@ -3441,6 +3441,7 @@ struct Game<'a> {
     /// The Server Links screens' state (game/network/server_links.rs).
     links_ui: server_links::LinksUi,
     camera_type: horizon_client::camera::CameraType,
+    requested_camera_type: std::cell::Cell<Option<horizon_client::camera::CameraType>>,
     fangs: fangs::FangState,
     /// The local player as a model (third person, the inventory).
     player_model: Option<Mob>,
@@ -17393,6 +17394,7 @@ impl Game<'_> {
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
         let camera_alpha = self.clock.camera_fraction();
+        self.apply_requested_camera_type();
         let vanilla = self.camera_view(camera_alpha as f32);
         let view = vanilla.map(|view| {
             if self.shows_panorama() {
@@ -21519,6 +21521,7 @@ impl<'a> Game<'a> {
             adv_ui: Default::default(),
             links_ui: Default::default(),
             camera_type: Default::default(),
+            requested_camera_type: Default::default(),
             fangs: Default::default(),
             player_model: None,
         };

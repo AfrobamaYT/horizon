@@ -447,14 +447,14 @@ impl VanillaTerrain {
             .collect();
         let fluid_ticks = chunk.terrain.fluid_ticks().pack(0).to_vec();
         if !block_ticks.is_empty() || !fluid_ticks.is_empty() || !chunk.saved_root.is_empty() {
-            let attachments = horizon_world::attachments::attachment_compound(
+            let attachments = horizon_mod_runtime::attachments::attachment_compound(
                 chunk
                     .saved_root
-                    .get(&horizon_world::attachments::ATTACHMENTS_KEY.into()),
+                    .get(&horizon_mod_runtime::attachments::ATTACHMENTS_KEY.into()),
             )
             .ok()
             .flatten()
-            .map(|data| horizon_world::attachments::Attachments::from_nbt(data.clone()))
+            .map(|data| horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()))
             .unwrap_or_default();
             out.saved = Some(Arc::new(crate::save::ChunkExtras {
                 block_ticks,

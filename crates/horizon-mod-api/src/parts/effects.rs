@@ -1,13 +1,15 @@
 use super::*;
-pub(crate) fn resolved_effects() -> &'static OnceLock<crate::registry_keys::Effects> {
-    static EMPTY: OnceLock<crate::registry_keys::Effects> = OnceLock::new();
+pub(crate) fn resolved_effects() -> &'static OnceLock<horizon_mod_runtime::registry_keys::Effects> {
+    static EMPTY: OnceLock<horizon_mod_runtime::registry_keys::Effects> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.effects)
 }
 
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
     use super::*;
+    #[cfg(test)]
     use crate::*;
 
     #[test]
@@ -43,7 +45,12 @@ pub mod tests {
             0x123456,
             horizon_client_core::potions::Category::Neutral
         )]));
-        crate::registry_keys::resolve_effects().unwrap();
+        crate::registry_keys::resolve_effects(
+            horizon_client_core::potions::all_effects()
+                .map(|def| horizon_client_core::potions::namespaced(def.id)),
+            |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+        )
+        .unwrap();
         let keys = requested.lock().unwrap();
         assert_eq!(keys[0], keys[2]);
         assert_eq!(keys[1], keys[3]);

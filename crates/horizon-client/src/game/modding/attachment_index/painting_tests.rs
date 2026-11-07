@@ -4,7 +4,7 @@ use mod_api::{EntityRef, HostTransaction};
 use std::collections::HashSet;
 use {
     horizon_core::nbt::{Compound, Tag},
-    horizon_world::attachments::{
+    horizon_mod_runtime::attachments::{
         ATTACHMENTS_KEY, AttachmentCodec, AttachmentError, AttachmentType, Attachments,
     },
 };
@@ -215,7 +215,7 @@ fn first_write_painting_publication_and_rollback() {
         );
         let id = game.paintings[0].id;
         let holder = Holder::Entity(id);
-        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = game;
         assert_eq!(VALUE.has(store, holder), Ok(false));
         assert_eq!(VALUE.get_existing(store, holder), Ok(None));
         assert_eq!(VALUE.remove(store, holder), Ok(None));
@@ -228,14 +228,14 @@ fn first_write_painting_publication_and_rollback() {
             copy_on_death: true,
             sync: false,
         };
-        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = game;
         assert_eq!(
             bad.set(store, holder, 1),
             Err(AttachmentError::InvalidCopyPolicy)
         );
         assert!(!game.entity_attachments[&uuid].has_index_binding());
         let aborted: Result<(), AttachmentError> = game.transaction(|host, _| {
-            let store: &mut dyn horizon_world::attachments::AttachmentStore = host;
+            let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = host;
             assert_eq!(VALUE.get(store, holder), Ok(0));
             let index = host.attachment_indexes[&Dim::Overworld].clone();
             let key = ("test".into(), "mana".into());
@@ -259,7 +259,7 @@ fn first_write_painting_publication_and_rollback() {
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         let key = ("test".into(), "mana".into());
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
-        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = game;
         VALUE.set(store, holder, 17).unwrap();
         assert_eq!(
             index.lock().unwrap().snapshot(&key)[0].entry.read(&VALUE),
@@ -267,7 +267,7 @@ fn first_write_painting_publication_and_rollback() {
         );
         let entity = game.native_entity(id).unwrap();
         assert!(game.native_entity_discard(entity));
-        let store: &mut dyn horizon_world::attachments::AttachmentStore = game;
+        let store: &mut dyn horizon_mod_runtime::attachments::AttachmentStore = game;
         assert_eq!(
             VALUE.set(store, holder, 18),
             Err(AttachmentError::MissingHolder)

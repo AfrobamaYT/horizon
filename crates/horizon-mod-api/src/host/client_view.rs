@@ -16,6 +16,28 @@ pub trait ClientViewHost {
 /// The client host's methods of the `client_view` area, implemented by the game and reached through [`crate::ClientHost`].
 pub trait ClientViewClientHost {
     /// Side: client.
+    /// The window's camera type (`Options.getCameraType`), including its latest pending request.
+    fn camera_type(&self) -> CameraType {
+        crate::phase::unprovided(
+            "ClientHost::camera_type",
+            "camera_type",
+            crate::phase::LoadAccess::ClientSetup,
+        )
+    }
+    /// Side: client.
+    /// Request the window's camera type without cycling, also from shared-host callbacks.
+    /// The last request wins and [`Self::camera_type`] reports it immediately. Requests before
+    /// or during `camera_pose` apply to that frame's camera, FOV and spectator post effects;
+    /// later requests apply at the next frame's camera extraction. Explicit pose overrides
+    /// remain unchanged when vanilla placement is refreshed. No cycle hook is emitted.
+    fn set_camera_type(&self, camera_type: CameraType) {
+        crate::phase::unprovided(
+            "ClientHost::set_camera_type",
+            "set_camera_type",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: client.
     /// The applied client pause state, not whether a pause screen is open.
     fn is_paused(&self) -> bool {
         crate::phase::unprovided(
@@ -72,25 +94,6 @@ pub trait ClientViewClientHost {
             "ClientHost::camera_entity",
             "camera_entity",
             crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// The window's camera type (`Options.getCameraType`).
-    fn camera_type(&self) -> CameraType {
-        crate::phase::unprovided(
-            "ClientHost::camera_type",
-            "camera_type",
-            crate::phase::LoadAccess::ClientSetup,
-        )
-    }
-    /// Side: client.
-    /// Sets the window's camera type (`Options.setCameraType`) as F5 does, without
-    /// cycling: a freelook mod switches to third person and back.
-    fn set_camera_type(&mut self, camera_type: CameraType) {
-        crate::phase::unprovided(
-            "ClientHost::set_camera_type",
-            "set_camera_type",
-            crate::phase::LoadAccess::WorldOnly,
         )
     }
     /// Side: client.

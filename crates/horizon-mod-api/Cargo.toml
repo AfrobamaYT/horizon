@@ -10,6 +10,7 @@ description = "The mod API: hooks, hosts, handles and parts, for native and WebA
 name = "mod_api"
 
 [dependencies]
+horizon-mod-runtime = { path = "../horizon-mod-runtime" }
 horizon-core = { path = "../horizon-core" }
 horizon-world = { path = "../horizon-world" }
 horizon-items = { path = "../horizon-items" }

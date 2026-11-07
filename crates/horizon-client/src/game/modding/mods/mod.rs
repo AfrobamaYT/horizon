@@ -526,7 +526,12 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
-    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
@@ -571,7 +576,8 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+        .map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }

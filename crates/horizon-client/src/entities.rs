@@ -220,7 +220,7 @@ pub fn drop_motion(
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -1156,7 +1156,7 @@ pub const ORB_QUAD_SCALE: f32 = 0.3;
 #[derive(Clone, Debug)]
 pub struct ExperienceOrb {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -1640,7 +1640,7 @@ mod level_up_sound {
 #[derive(Clone, Debug)]
 pub struct Painting {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
@@ -1705,7 +1705,7 @@ pub fn dye_index(name: &str) -> u8 {
 #[derive(Clone, Debug)]
 pub struct Cushion {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     /// `Entity.position`: the bottom centre of the cushion.
@@ -1761,7 +1761,7 @@ impl Cushion {
 #[derive(Clone, Debug)]
 pub struct ItemFrame {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
@@ -1826,7 +1826,7 @@ impl ItemFrame {
 #[derive(Clone, Debug)]
 pub struct ArmorStand {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.xRot`: kept for `/tp` and `Rotation`; the kind turns only in yaw.
     pub pitch: f32,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -4786,7 +4786,7 @@ crate::impl_joined!(
     Cushion,
     ItemFrame
 );
-horizon_world::impl_attachment_lifetime!(
+horizon_mod_runtime::impl_attachment_lifetime!(
     ItemEntity,
     ExperienceOrb,
     ArmorStand,

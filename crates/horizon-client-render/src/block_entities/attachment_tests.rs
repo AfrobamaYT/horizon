@@ -1,5 +1,5 @@
 use super::*;
-use horizon_world::attachments::{
+use horizon_mod_runtime::attachments::{
     AttachmentType, index::AttachmentIndex, observer::IndexedAttachmentObserver,
 };
 use std::sync::{Mutex, Weak};

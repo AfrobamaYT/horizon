@@ -713,7 +713,7 @@ pub trait CapabilityProviders {
 #[cfg(any(test, feature = "testing"))]
 /// Shared Parts fixtures for engine tests.
 pub mod tests {
-    pub(crate) use super::block_entities::tests::*;
+    pub use super::block_entities::tests::*;
     pub use super::blocks::tests::*;
     pub use super::capabilities::tests::*;
     pub(crate) use super::energy::tests::*;

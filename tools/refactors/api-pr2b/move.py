@@ -98,7 +98,7 @@ def main():
                 root += f'    pub(crate) use super::{kind}::tests::*;\n'
         root += '}\n'
         (new / 'mod.rs').write_text(root)
-        subprocess.run(['git', 'rm', str(API / 'part_table.rs')], check=True)
+        subprocess.run(['git', 'rm', '-f', str(API / 'part_table.rs')], check=True)
         old.rmdir()
     # Replayable even after another structural PR updates a file.
     for folder in ('crates', 'tests', 'docs', '.github'):

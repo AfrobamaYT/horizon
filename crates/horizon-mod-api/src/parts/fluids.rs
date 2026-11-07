@@ -1,12 +1,13 @@
 use super::*;
-pub(crate) fn resolved_fluids() -> &'static OnceLock<crate::registry_keys::Names> {
-    static EMPTY: OnceLock<crate::registry_keys::Names> = OnceLock::new();
+pub(crate) fn resolved_fluids() -> &'static OnceLock<horizon_mod_runtime::registry_keys::Names> {
+    static EMPTY: OnceLock<horizon_mod_runtime::registry_keys::Names> = OnceLock::new();
     installed().map_or(&EMPTY, |installed| &installed.fluids)
 }
 
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
     use super::*;
     use crate::parts::tests::*;
     use crate::*;

@@ -132,7 +132,7 @@ pub(super) enum TurnRefused {
 /// The game's own state while a guest's is swapped in (`enter_guest`), and
 /// the guest's records that live outside `Guest`.
 pub(super) struct GuestSwap {
-    attachments: horizon_world::attachments::ResidentAttachments,
+    attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     conn: u32,
     i: usize,
     play: GuestPlay,

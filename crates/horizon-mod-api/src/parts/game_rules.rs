@@ -39,7 +39,9 @@ pub fn game_rule_bool_slot(key: crate::BoolGameRuleKey) -> Option<u32> {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
     use super::*;
+    #[cfg(test)]
     use crate::*;
     #[test]
     pub(crate) fn cross_mod_categories_resolve_after_all_registration() {

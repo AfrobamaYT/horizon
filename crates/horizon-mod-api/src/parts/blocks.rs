@@ -37,6 +37,7 @@ impl dyn Registrar + '_ {
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
     use super::*;
+    #[cfg(test)]
     use crate::parts::tests::*;
     use crate::*;
 

@@ -31,10 +31,24 @@ def finish(api):
             if p.stem == 'shared':
                 for text in ('    #[cfg(test)]\n    use super::{Attached, KnownIds, resolve_parts};\n', '    #[cfg(test)]\n    use std::any::type_name;\n', '    #[cfg(test)]\n    use std::collections::{HashMap, HashSet};\n'):
                     b = b.replace(text, '')
+            test_only_imports = {
+                'block_entities': ('super::*', 'crate::parts::tests::*'),
+                'blocks': ('crate::parts::tests::*',),
+                'capabilities': ('crate::parts::tests::*',),
+                'effects': ('super::*', 'crate::*'),
+                'energy': ('super::*',),
+                'fluids': ('super::*',),
+                'game_rules': ('super::*', 'crate::*'),
+                'key_mappings': ('super::*', 'crate::*'),
+                'structures': ('super::*', 'crate::*'),
+                'tickets': ('super::*',),
+            }
+            for name in test_only_imports.get(p.stem, ()):
+                b = b.replace(f'    use {name};', f'    #[cfg(test)]\n    use {name};')
             s = a + b
         if p.name == 'mod.rs':
             s = s.replace('pub mod tests {', '/// Shared Parts fixtures for engine tests.\npub mod tests {')
-            for kind in ('blocks', 'shared', 'capabilities'):
+            for kind in ('block_entities', 'blocks', 'shared', 'capabilities'):
                 s = s.replace(f'pub(crate) use super::{kind}::tests::*;', f'pub use super::{kind}::tests::*;')
             for kind in ('effects', 'game_rules', 'key_mappings', 'structures', 'tickets'):
                 s = s.replace(f'    pub(crate) use super::{kind}::tests::*;\n', '')
@@ -43,7 +57,9 @@ def finish(api):
             for kind in ('energy', 'menus'):
                 s = s.replace(f'pub use {kind}::*;\n', '')
         if p.name == 'energy.rs':
-            s = s.replace('use super::*;\n', '#[cfg(any(test, feature = "testing"))]\nuse super::*;\n', 1)
+            s = s.replace('use super::*;\n', '#[cfg(test)]\nuse super::*;\n', 1)
         p.write_text(s)
     p = api / 'exports/part_table.rs'
-    p.write_text(p.read_text().replace('part_table::', 'parts::'))
+    s = p.read_text().replace('part_table::', 'parts::')
+    s = s.replace('#[cfg(any(test, feature = "testing"))]\npub(crate) use parts::install_parts;', '#[cfg(test)]\npub(crate) use parts::install_parts;')
+    p.write_text(s)

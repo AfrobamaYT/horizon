@@ -26,7 +26,9 @@ impl dyn Registrar + '_ {
 /// Fixtures that tests of other crates use to install Parts.
 #[cfg(any(test, feature = "testing"))]
 pub mod tests {
+    #[cfg(test)]
     use super::*;
+    #[cfg(test)]
     use crate::*;
 
     /// A structure type twice, one in another mod's namespace and one without

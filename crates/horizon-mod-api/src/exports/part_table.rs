@@ -1,5 +1,5 @@
 mod parts;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 pub(crate) use parts::install_parts;
 #[cfg(test)]
 pub(crate) use parts::mark_game_thread;
