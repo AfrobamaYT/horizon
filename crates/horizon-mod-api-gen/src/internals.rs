@@ -1878,7 +1878,7 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
     }
 
     #[test]
-    fn explicitly_listed_lower_layouts_are_widened_and_walked() {
+    fn explicitly_listed_lower_layouts_are_widened() {
         let fixture = shapes_fixture("struct Game {}\n");
         fixture.put(
             "crates/horizon-items/src/item_stack.rs",
@@ -1906,9 +1906,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             text.contains("pub struct ItemStack { pub count: u8 }"),
             "{text}"
         );
-        let (code, counts) = crate::internals_table::table(&result.entries, &[path.into()]);
-        assert_eq!(counts.types, 1, "{code}");
-        assert_eq!(counts.skipped, 0);
     }
 
     #[test]
@@ -1931,18 +1928,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             assert_eq!(
                 stack.opaque_reason,
                 Some("not an unconditional game dependency")
-            );
-            let (_, counts) = crate::internals_table::table(
-                &widened.entries,
-                &widened
-                    .entries
-                    .iter()
-                    .map(|i| i.path.clone())
-                    .collect::<Vec<_>>(),
-            );
-            assert_eq!(
-                counts.skipped_types["not an unconditional game dependency"],
-                1
             );
             let source =
                 fs::read_to_string(fixture.0.join("crates/horizon-items/src/item_stack.rs"))
@@ -1974,16 +1959,6 @@ union Value { #[cfg(windows)] windows: u32, #[cfg(test)] test_field: u32 }
             widened.entries[0].opaque_reason,
             Some("shape module walk failed")
         );
-        let (_, counts) = crate::internals_table::table(
-            &widened.entries,
-            &widened
-                .entries
-                .iter()
-                .map(|i| i.path.clone())
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(counts.types, 0);
-        assert_eq!(counts.skipped_types["shape module walk failed"], 1);
     }
 
     #[test]
@@ -2156,16 +2131,12 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
             "struct Guarded { #[cfg(feature = \"audio\")] sound: u8 }\nenum Cases { #[cfg_attr(feature = \"audio\", cfg(unix))] Audio, Normal }\n",
         );
         let widened = widen_with(&fixture.0, &[]).unwrap();
-        let (_, counts) = crate::internals_table::table(
-            &widened.entries,
-            &widened
-                .entries
-                .iter()
-                .map(|i| i.path.clone())
-                .collect::<Vec<_>>(),
-        );
-        assert_eq!(counts.types, 0);
-        assert_eq!(counts.skipped_types["opaque type"], 2);
+        let guarded = widened
+            .entries
+            .iter()
+            .filter(|entry| entry.opaque_reason.is_some())
+            .count();
+        assert_eq!(guarded, 2);
     }
 
     #[test]
@@ -2318,36 +2289,6 @@ const LABEL: &str = "é"; struct AfterUnicode;
                     .contains("pub fn run")
             );
         }
-    }
-
-    #[test]
-    fn guarded_game_keeps_slots_thunks_and_wasm_handles() {
-        use crate::crossing::{Crossing, Rule, Shape};
-        let fixture = Fixture::new(
-            "struct Game<'a> { large: [u64; 32], marker: &'a str, #[cfg(feature = \"x\")] extra: u8 }\nimpl Game<'_> { fn next_autosave_interval(&self) -> i64 { 42 } }\n",
-        );
-        let method = "horizon_client::game::Game<'_>::next_autosave_interval";
-        let field = "horizon_client::game::Game<'_>::large";
-        fixture.put(
-            "crates/horizon-mod-api-gen/slots/test.txt",
-            "horizon_client::game::Game::next_autosave_interval\n",
-        );
-        let result = widen_with(&fixture.0, &[]).unwrap();
-        let entries = &result.entries;
-        let method_entry = entries.iter().find(|i| i.path == method).unwrap();
-        // Discovered from 0af894a3a0^, before #1762 added Game's cfg field.
-        assert_eq!(method_entry.hash, "5829bc5b9f60aaca");
-        let rule = Rule::new(entries);
-        let shape = Shape::Named("horizon_client::game::Game".into(), 1);
-        assert_eq!(rule.crossing_of(&shape), Crossing::Handle);
-        let (code, counts) = crate::internals_table::table(entries, &[method.into(), field.into()]);
-        assert_eq!(counts.thunks, 1);
-        assert_eq!(counts.refused[field], "conditional field or variant");
-        crate::internals_table::tests::run_fixture(
-            &code,
-            "mod game { pub struct Game<'a> { pub large: [u64; 32], pub marker: &'a str } impl Game<'_> { pub fn next_autosave_interval(&self) -> i64 { 42 } } }",
-            "let _ = (std::mem::size_of::<Op>(), std::mem::size_of::<Reply>(), std::mem::size_of::<Value>()); let game = game::Game { large: [0; 32], marker: \"\" }; assert_eq!(game.large[0], 0); assert_eq!(game.marker, \"\");",
-        );
     }
 
     #[test]

@@ -16,10 +16,6 @@
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
 mod registry;
-// hidden: the staged game's internals table, for the wasm runtime
-#[doc(hidden)]
-pub mod internals;
-
 pub use registry::{RegisterError, register, stop};
 
 // hidden: the game's side of the points, not part of the API a mod is written against

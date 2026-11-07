@@ -1,10 +1,3 @@
-//! The one runtime for wasm mods. Packages declaring `[wasm]` are grouped by their
-//! `[dependencies]` (the same model as native mods: required and optional, semver on
-//! `horizon-mod.toml` versions, one library copy shared by its dependents), each group is
-//! linked into one component by `wit_component::Linker` (one memory, one copy of each
-//! member), compiled once and cached by its members' hashes, and instantiated with the
-//! mod API as its only imports. A group runs sandboxed from the others and from the game; a
-//! trap stops its group. Every refusal names its reason for the Mods page.
 //! The runtime for wasm mods. Packages declaring `[wasm]` are grouped by their `[dependencies]`
 //! (the same model as native mods: required and optional, semver on `horizon-mod.toml`
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
@@ -14,9 +7,6 @@ use horizon_mod_package::manifest::Manifest;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-
-pub mod frame;
-pub mod journal;
 
 /// One wasm mod as installed: its manifest and its checked `mod.wasm`.
 pub struct WasmPackage {

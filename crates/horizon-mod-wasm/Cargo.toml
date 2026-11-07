@@ -7,9 +7,7 @@ publish = false
 description = "The runtime for wasm mods: groups packages by their dependencies and refuses what cannot load"
 
 [dependencies]
-horizon-mod-api = { path = "../horizon-mod-api" }
 horizon-mod-package = { path = "../horizon-mod-package", default-features = false }
-horizon-mod-points = { path = "../horizon-mod-points" }
 log = "0.4"
 
 [lints]

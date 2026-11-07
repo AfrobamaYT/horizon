@@ -17,7 +17,7 @@ pub use mod_points::PointId;
 
 /// Start with named mods and their function slots in installed dependency order.
 pub fn main_with(
-    mut mods: Vec<mod_api::ModEntry>,
+    mods: Vec<mod_api::ModEntry>,
     slots: &[NativeSlot],
     built: &'static [horizon_mod_package::runtime::BuiltMod],
 ) {

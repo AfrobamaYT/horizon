@@ -503,55 +503,6 @@ impl Shape {
         items
     }
 
-    /// Every field of its record, in order: the arguments, then `cancel` or `result`.
-    fn fields(&self) -> Vec<syn::Ident> {
-        let extra = match self.returns {
-            Returns::Unit | Returns::UnitResult => Some("cancel"),
-            Returns::Value(_) => Some("result"),
-            Returns::Opaque => None,
-        };
-        self.args
-            .iter()
-            .map(|arg| arg.name.clone())
-            .chain(extra.map(|name| syn::Ident::new(name, Span::call_site())))
-            .collect()
-    }
-
-    /// Its listener's contract, which a wasm mod's listener and the game check against each other
-    /// at load: the host it gets, then its record's field names and types,
-    /// `side|yaw:f64,text:str,cancel:bool`.
-    pub fn wire_shape(&self) -> String {
-        let host = match (self.receiver, self.side) {
-            (_, None) => "none",
-            (Receiver::Mut, Some(Side::Server)) => "server",
-            (Receiver::Mut, Some(Side::Client)) => "client",
-            (Receiver::Mut, Some(Side::Both)) => "side",
-            (_, Some(_)) => "read",
-        };
-        // The record's own field types: a native-width integer as it crosses (`wide`).
-        let spelled = |ty: &Type| {
-            let ty = wide(ty).unwrap_or_else(|| ty.clone());
-            quote!(#ty).to_string().replace(' ', "")
-        };
-        let types = self.args.iter().map(|arg| match &arg.ty {
-            Type::Reference(_) => "str".to_owned(),
-            ty => spelled(ty),
-        });
-        let extra = match &self.returns {
-            Returns::Unit | Returns::UnitResult => Some("bool".to_owned()),
-            Returns::Value(ty) => Some(format!("Option<{}>", spelled(ty))),
-            Returns::Opaque => None,
-        };
-        let fields = self
-            .fields()
-            .iter()
-            .zip(types.chain(extra))
-            .map(|(name, ty)| format!("{name}:{ty}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        format!("{host}|{fields}")
-    }
-
     pub fn has_return(&self) -> bool {
         !self.borrowed_return
     }
