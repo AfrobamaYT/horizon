@@ -692,6 +692,7 @@ impl Game<'_> {
         let was_empty = c.is_empty(view);
         let max = c.max_stack(&stack);
         let mut success = false;
+        let mut filled_empty = false;
         let Some(target) = self.slot_mut_at(view, slot) else {
             return (Some(stack), false);
         };
@@ -709,6 +710,7 @@ impl Game<'_> {
                 });
                 stack.count = 0;
                 success = true;
+                filled_empty = true;
             }
             Some(current)
                 // HopperBlockEntity.canMergeItems
@@ -721,6 +723,17 @@ impl Game<'_> {
                 success = count > 0;
             }
             Some(_) => {}
+        }
+        // tryMoveInItem's setItem on an empty slot: AbstractFurnaceBlockEntity.setItem restarts
+        // the cooking for a new input (a merge only grows the stack, and keeps it).
+        let recipes = world_recipes!(self);
+        if filled_empty
+            && let Some((pos, 0)) = view.locate(slot)
+            && let Some(BlockEntity::Furnace(furnace)) = self.world.block_entities.get_mut(&pos)
+        {
+            use horizon_client::furnace::FurnaceCooking;
+            let input = furnace.items[0].take();
+            furnace.set_input(&self.loop_context, recipes, input);
         }
         if success && was_empty && view.kind == Kind::Hopper {
             let dest = view.parts[0].0;
@@ -1432,8 +1445,8 @@ impl Game<'_> {
         id: u32,
         f: impl FnOnce(&mut Self, &View) -> R,
     ) -> Option<R> {
-        let mut items = if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-            std::mem::take(&mut c.items)
+        let mut items = if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+            self.carts.update(i, |c| std::mem::take(&mut c.items))
         } else {
             let i = self.boats.iter().position(|b| b.id == id)?;
             self.boats.update(i, |b| std::mem::take(&mut b.items))
@@ -1442,8 +1455,8 @@ impl Game<'_> {
         let (view, open) = self.lend_items(key, &mut items);
         let result = f(self, &view);
         self.reclaim_items(key, open, &mut items);
-        if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-            c.items = items;
+        if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+            self.carts.update(i, |c| c.items = items);
         } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
             self.boats.update(i, |b| b.items = items);
         }

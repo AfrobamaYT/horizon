@@ -589,6 +589,7 @@ impl Game<'_> {
             self.remember_uuid(self.next_entity, uuid, &tag);
             let uuid = self.uuid_for(self.next_entity);
             self.falling.push(FallingBlock {
+                attachment_lifetime: Default::default(),
                 rotation: [0.0, 0.0],
                 join: Default::default(),
                 id: self.next_entity,
@@ -760,7 +761,7 @@ impl Game<'_> {
             self.remember_tags(d.id, &tag);
             self.remember_uuid(d.id, uuid, &tag);
             d.join = horizon_client::join_seq::JoinSeq::next();
-            self.dragon = Some(d);
+            assert!(self.dragon.install(d).is_ok());
         }
     }
 
@@ -1406,7 +1407,7 @@ impl Game<'_> {
             keys.iter().map(|k| (*k, Vec::new())).collect();
         // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
         self.save_every_entity(keys, &mut out);
-        if let Some(d) = &self.dragon
+        if let Some(d) = self.dragon.as_ref()
             && keys.contains(&chunk_of(d.position))
         {
             let raw = anon_raw(&self.persist, "minecraft:ender_dragon", d.position);
@@ -1542,7 +1543,7 @@ impl Game<'_> {
             self.ominous_spawners
                 .retain(|s| !gone(Vec3::new(s.position[0], s.position[1], s.position[2])));
             if self.dragon.as_ref().is_some_and(|d| gone(d.position)) {
-                self.dragon = None;
+                self.dragon.discard();
             }
             self.carts.retain(|c| {
                 let keep = !gone(c.position) || Some(c.id) == riding;
@@ -2065,6 +2066,57 @@ fn join_saved_team(board: &mut Scoreboard, name: &str, tag: &Tag) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn resident_other_and_fangs_load_tick_and_reset() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.others.clear();
+            game.fangs.list.clear();
+            let tag = |kind| {
+                let mut tag = entity(kind);
+                if let Tag::Compound(c) = &mut tag {
+                    c.insert(
+                        "Pos".into(),
+                        Tag::List(vec![
+                            Tag::Double(0.0_f64.to_bits()),
+                            Tag::Double(80.0_f64.to_bits()),
+                            Tag::Double(0.0_f64.to_bits()),
+                        ]),
+                    );
+                    c.insert("Warmup".into(), Tag::Int(40));
+                }
+                tag
+            };
+            let id = game
+                .load_other(tag("minecraft:marker"), "minecraft:marker")
+                .unwrap();
+            assert_eq!(game.others[0].id, id);
+            let snapshot = game.others.to_vec();
+            game.others.update(0, |o| o.yaw = 90.0);
+            assert_eq!(snapshot[0].yaw, 0.0);
+            game.load_unlisted(
+                (0, 0),
+                "minecraft:evoker_fangs",
+                None,
+                tag("minecraft:evoker_fangs"),
+            )
+            .unwrap();
+            let survivor = game.fangs.list[0].id;
+            game.insert_fangs(survivor + 1, [0.0, 80.0, 0.0], 0.0, -30, 0);
+            game.fangs.list.update(1, |f| {
+                f.life = 0;
+                f.started = true;
+            });
+            game.tick_fangs();
+            assert_eq!(game.fangs.list.len(), 1);
+            assert_eq!(game.fangs.list[0].id, survivor);
+            assert_eq!(game.fangs.list[0].warmup, 39);
+            game.others.clear();
+            game.fangs.list.clear();
+            assert!(game.others.is_empty() && game.fangs.list.is_empty());
+        });
+    }
 
     const MOUNT: [i32; 4] = [1, 2, 3, 4];
 

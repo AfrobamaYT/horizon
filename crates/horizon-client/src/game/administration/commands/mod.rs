@@ -944,7 +944,7 @@ impl Game<'_> {
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
         candidates.extend(self.crystals.iter().map(|c| Target::Crystal(c.id)));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             candidates.push(Target::Dragon(d.id));
         }
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
@@ -1726,33 +1726,39 @@ impl Game<'_> {
                 }
             }
             Target::Cart(id) => {
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                    c.position = v;
-                    c.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(c, r);
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                    self.carts.update(i, |c| {
+                        c.position = v;
+                        c.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(c, r);
+                        }
+                    });
                 }
             }
             Target::Fangs(id) => {
-                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
-                    f.pos = [v.x, v.y, v.z];
-                    if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
-                        f.yaw = yaw;
-                    }
+                if let Some(i) = self.fangs.list.iter().position(|e| e.id == id) {
+                    self.fangs.list.update(i, |f| {
+                        f.pos = [v.x, v.y, v.z];
+                        if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
+                            f.yaw = yaw;
+                        }
+                    });
                 }
             }
             Target::Other(id) => {
-                if let Some(o) = self.others.iter_mut().find(|o| o.id == id) {
-                    o.position = v;
-                    if let Some([yaw, pitch]) = rotation {
-                        if yaw.is_finite() {
-                            o.yaw = yaw;
+                if let Some(i) = self.others.iter().position(|e| e.id == id) {
+                    self.others.update(i, |o| {
+                        o.position = v;
+                        if let Some([yaw, pitch]) = rotation {
+                            if yaw.is_finite() {
+                                o.yaw = yaw;
+                            }
+                            if !pitch.is_nan() {
+                                o.pitch = entity_pitch(pitch);
+                            }
                         }
-                        if !pitch.is_nan() {
-                            o.pitch = entity_pitch(pitch);
-                        }
-                    }
+                    });
                 }
             }
             Target::Crystal(id) => {
@@ -1776,12 +1782,14 @@ impl Game<'_> {
                 }
             }
             Target::Falling(id) => {
-                if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
-                    f.position = v;
-                    f.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(f, r);
-                    }
+                if let Some(i) = self.falling.iter().position(|f| f.id == id) {
+                    self.falling.update(i, |f| {
+                        f.position = v;
+                        f.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(f, r);
+                        }
+                    });
                 }
             }
             Target::Rocket(id) => {
@@ -1803,13 +1811,17 @@ impl Game<'_> {
                 }
             }
             Target::Spawner(id) => {
-                if let Some(s) = self.ominous_spawners.iter_mut().find(|s| s.id == id) {
-                    s.position = [v.x, v.y, v.z];
+                if let Some(i) = self.ominous_spawners.iter().position(|e| e.id == id) {
+                    self.ominous_spawners.update(i, |s| {
+                        s.position = [v.x, v.y, v.z];
+                    });
                 }
             }
             Target::Cloud(id) => {
-                if let Some(c) = self.breath_clouds.iter_mut().find(|c| c.id == id) {
-                    c.at = pos;
+                if let Some(i) = self.breath_clouds.iter().position(|e| e.id == id) {
+                    self.breath_clouds.update(i, |c| {
+                        c.at = pos;
+                    });
                 }
             }
             // Wall-mounted entities do not move.
@@ -4100,6 +4112,7 @@ impl Game<'_> {
         ));
         Ok(count as i32)
     }
+    /// `SayCommand.register`: resolve the source name and broadcast unsigned announcements.
     fn cmd_say(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let raw = match ctx.get(if id == "me" { "action" } else { "message" }) {
             Some(Arg::Str(s)) => s.clone(),
@@ -4107,13 +4120,42 @@ impl Game<'_> {
         };
         let message = self.expand_selectors(&raw);
         // CommandSourceStack.getDisplayName: the executing entity's name.
-        let name = match self.command_source.map(|s| s.entity) {
-            Some(Some(t)) => self.target_name(t),
-            Some(None) => Text::literal("Server"),
+        let name = match self.command_source {
+            Some(source) => match source.entity {
+                Some(target) => self.target_name(target),
+                None => source
+                    .block
+                    .and_then(|pos| match self.world.block_entities.get(&pos) {
+                        Some(horizon_client::containers::BlockEntity::CommandBlock(block)) => {
+                            Some(block.name())
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        source.cart.and_then(|id| {
+                            self.carts
+                                .iter()
+                                .find(|cart| cart.id == id)
+                                .map(|cart| cart.command.name())
+                        })
+                    })
+                    .unwrap_or_else(|| Text::literal("Server")),
+            },
             None => self.player_display_name(),
         };
         let line = match id {
-            "say" => Text::translate("chat.type.announcement", &[name, message]),
+            "say" => {
+                // SayCommand broadcasts independently of the command source's feedback.
+                if let Some(host) = &self.lan {
+                    use horizon_client::lan::data::component_nbt;
+                    host.hub.broadcast_source_chat(
+                        "say_command",
+                        component_nbt(&name.component()),
+                        component_nbt(&message.component()),
+                    );
+                }
+                Text::translate("chat.type.announcement", &[name, message])
+            }
             "me" => Text::translate("chat.type.emote", &[name, message]),
             _ => {
                 let _ = self.entities(ctx, "targets", true)?;
@@ -4133,6 +4175,21 @@ impl Game<'_> {
                 .italic()
             }
         };
+        if id == "say" {
+            if self.lan.is_some() && self.options.dedicated.is_some() {
+                self.lan_log_event(horizon_client::lan::hub::HostEvent::Chat {
+                    line: line.plain(),
+                    secure: false,
+                });
+            }
+            // SayCommand sends no feedback: the broadcast above already reached
+            // the guest whose command is being captured.
+            if self.lan.is_some() && self.chat_capture.is_some() {
+                return Ok(1);
+            }
+            self.player_message(line);
+            return Ok(1);
+        }
         if let Some(capture) = self.chat_capture.as_mut() {
             capture.push(line.clone());
         }

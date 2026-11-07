@@ -389,17 +389,18 @@ impl Game<'_> {
                 }
             }
             Target::Other(id) => {
-                let slot = self
+                let i = self
                     .others
-                    .iter_mut()
-                    .find(|o| o.id == id)
+                    .iter()
+                    .position(|o| o.id == id)
                     .ok_or_else(stale)?;
+                let slot = &self.others[i];
                 let new = Self::other_from_nbt(&tag, id, &slot.kind).ok_or_else(stale)?;
                 let is_display = matches!(
                     slot.kind.as_str(),
                     "minecraft:block_display" | "minecraft:item_display" | "minecraft:text_display"
                 );
-                *slot = new;
+                self.others.update(i, |slot| *slot = new);
                 // `EntityDataAccessor.setData` keeps the entity's UUID.
                 set_key(&mut tag, "UUID", Tag::IntArray(self.uuid_for(id).to_vec()));
                 if is_display {
@@ -417,11 +418,14 @@ impl Game<'_> {
             Target::Fangs(id) => {
                 let owner = self.loaded_fangs_owner(&tag);
                 let at = entity_nbt::position(&tag).ok_or_else(stale)?;
-                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
-                    f.pos = [at.x, at.y, at.z];
-                    f.yaw = entity_nbt::rotation(&tag)[0];
-                    f.warmup = horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
-                    f.owner = owner;
+                if let Some(i) = self.fangs.list.iter().position(|e| e.id == id) {
+                    self.fangs.list.update(i, |f| {
+                        f.pos = [at.x, at.y, at.z];
+                        f.yaw = entity_nbt::rotation(&tag)[0];
+                        f.warmup =
+                            horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
+                        f.owner = owner;
+                    });
                 }
             }
             Target::Stand(id) => {
@@ -522,7 +526,9 @@ impl Game<'_> {
                     self.state_from_nbt(t).is_some()
                 });
                 self.roll_cart_loot(&mut cart, &tag);
-                self.carts[i] = cart;
+                if !self.store_cart_back(i, cart) {
+                    return Err(stale());
+                }
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
             _ => return Err(stale()),
@@ -582,17 +588,31 @@ impl Game<'_> {
             Target::Rocket(id) | Target::Trident(id) => {
                 Some(self.persist.raw.entry(id).or_insert_with(empty))
             }
-            Target::Falling(id) => {
-                let uuid = self.uuid_for(id);
-                let f = self.falling.iter_mut().find(|f| f.id == id)?;
-                Some(&mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1)
-            }
             _ => None,
         }
     }
     /// Writes `t`'s `Tags`; false when its kind keeps no saved compound to
     /// write them to.
     pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) -> bool {
+        if let Target::Falling(id) = t {
+            let uuid = self.uuid_for(id);
+            let Some(i) = self.falling.iter().position(|f| f.id == id) else {
+                return false;
+            };
+            self.falling.update(i, |f| {
+                let raw = &mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1;
+                set_key(
+                    raw,
+                    "Tags",
+                    Tag::List(
+                        tags.iter()
+                            .map(|s| Tag::String(s.as_str().into()))
+                            .collect(),
+                    ),
+                );
+            });
+            return true;
+        }
         let Some(raw) = self.raw_mut(t) else {
             return false;
         };

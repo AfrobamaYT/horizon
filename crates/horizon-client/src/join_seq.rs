@@ -80,6 +80,21 @@ macro_rules! impl_joined {
 /// let mut list = JoinList::<u32, false>::default();
 /// list[0] = 1;
 /// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_mut(0);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.iter_mut();
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::JoinList;
+/// let mut list = JoinList::<u32, false>::default();
+/// let _ = list.get_disjoint_mut([0, 1]);
+/// ```
 /// An entity put in without a join number gets the next one; a numbered entity
 /// keeps its number when taken out and put back. Mutable element access is for
 /// entity state; identity changes and whole-entity replacement remain audited
@@ -116,6 +131,167 @@ macro_rules! impl_joined {
 /// ```
 #[derive(Clone, Debug)]
 pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>);
+
+/// A singleton resident owner with explicit membership operations.
+/// State borrows remain audited: callers must not replace the whole entity or
+/// change its identity through [`Self::as_mut`]. No mutable `Option` escapes.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner = Some(1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// let _: &mut Option<u32> = &mut owner;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentSlot;
+/// let mut owner = ResidentSlot::<u32>::default();
+/// owner.take();
+/// ```
+pub struct ResidentSlot<T>(Option<T>);
+
+impl<T> Default for ResidentSlot<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> ResidentSlot<T> {
+    /// Install only into an empty owner, returning a refused entity unchanged.
+    pub fn install(&mut self, entity: T) -> Result<(), T> {
+        if self.0.is_some() {
+            return Err(entity);
+        }
+        self.replace(entity);
+        Ok(())
+    }
+    /// Explicitly retire any previous owner and install its replacement.
+    pub fn replace(&mut self, entity: T) {
+        self.0 = Some(entity);
+    }
+    /// Move the owner out without dropping it.
+    pub fn extract(&mut self) -> Option<T> {
+        self.0.take()
+    }
+    /// Physically discard the owner, if present.
+    pub fn discard(&mut self) {
+        drop(self.extract());
+    }
+    /// Borrow entity state; identity and whole-value replacement stay audited.
+    pub fn as_mut(&mut self) -> Option<&mut T> {
+        self.0.as_mut()
+    }
+}
+
+impl<T> Deref for ResidentSlot<T> {
+    type Target = Option<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Non-joining entity storage using the same structural boundary as [`JoinList`].
+/// No mutable vector, slice, element reference or iterator escapes. State edits
+/// are scoped; identity and replacement remain audited by their callers.
+///
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// let _: &mut Vec<u32> = &mut list;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// list[0] = 1;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// let _: &mut [u32] = &mut list;
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// list.iter_mut().for_each(|entity| *entity = 1);
+/// ```
+/// ```compile_fail
+/// use horizon_client_lib::join_seq::ResidentList;
+/// let mut list = ResidentList::<u32>::default();
+/// let escaped = list.update(0, |entity| entity);
+/// ```
+#[derive(Clone, Debug)]
+pub struct ResidentList<T>(JoinList<T, false>);
+
+impl<T> Default for ResidentList<T> {
+    fn default() -> Self {
+        Self(JoinList::default())
+    }
+}
+
+impl<T> ResidentList<T> {
+    /// Install an owner without assigning a join sequence.
+    pub fn push(&mut self, entity: T) {
+        self.0.0.push(entity);
+    }
+    /// Append a batch after any owners already in this storage.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
+    pub fn remove(&mut self, index: usize) -> T {
+        self.0.remove(index)
+    }
+    pub fn retain(&mut self, keep: impl FnMut(&T) -> bool) {
+        self.0.retain(keep);
+    }
+    pub fn retain_mut(&mut self, keep: impl FnMut(&mut T) -> bool) {
+        self.0.0.retain_mut(keep);
+    }
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
+        self.0.drain(range)
+    }
+    pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
+        edit(&mut self.0.0[index])
+    }
+    pub fn for_each_mut(&mut self, edit: impl FnMut(&mut T)) {
+        self.0.0.iter_mut().for_each(edit);
+    }
+    /// Take the owners for a pass, leaving a spawn buffer in their place.
+    pub fn take(&mut self) -> Self {
+        std::mem::take(self)
+    }
+    /// Restore survivors before entities spawned while the pass was lifted.
+    pub fn restore(&mut self, mut taken: Self) {
+        taken.0.append(&mut self.0);
+        *self = taken;
+    }
+}
+
+impl<T> FromIterator<T> for ResidentList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        Self(JoinList(entities.into_iter().collect()))
+    }
+}
+
+impl<T> Deref for ResidentList<T> {
+    type Target = [T];
+    fn deref(&self) -> &[T] {
+        &self.0
+    }
+}
+
+impl<'a, T> IntoIterator for &'a ResidentList<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
     fn default() -> Self {
@@ -501,5 +677,68 @@ mod tests {
             [fresh, joins[0], joins[1]]
         );
         assert!(joins.into_iter().all(|join| join < fresh));
+    }
+}
+
+#[cfg(test)]
+mod resident_tests {
+    use super::ResidentList;
+    use std::{cell::Cell, rc::Rc};
+
+    #[test]
+    fn resident_restore_keeps_spawn_buffer_and_snapshot_order() {
+        let mut list = ResidentList::default();
+        for value in [1, 2, 3] {
+            list.push(value);
+        }
+        let snapshot = list.to_vec();
+        let mut taken = list.take();
+        list.push(4);
+        taken.retain_mut(|value| {
+            *value *= 10;
+            *value != 20
+        });
+        list.restore(taken);
+        assert_eq!(&*list, &[10, 30, 4]);
+        assert_eq!(snapshot, [1, 2, 3]);
+        assert_eq!(list.remove(1), 30);
+        assert_eq!(list.drain(..1).collect::<Vec<_>>(), [10]);
+        assert_eq!(&*list, &[4]);
+    }
+
+    #[test]
+    fn resident_append_preserves_spawn_buffer_before_survivors() {
+        let mut list: ResidentList<_> = [1, 2].into_iter().collect();
+        let mut taken = list.take();
+        list.push(3);
+        taken.retain(|&id| id != 1);
+        list.append(&mut taken);
+        assert_eq!(&*list, &[3, 2]);
+        assert!(taken.is_empty());
+    }
+
+    #[test]
+    fn resident_owners_drop_only_on_discard() {
+        struct Owner(Rc<Cell<usize>>);
+        impl Drop for Owner {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+        let dropped = Rc::new(Cell::new(0));
+        let mut list = ResidentList::default();
+        for _ in 0..3 {
+            list.push(Owner(dropped.clone()));
+        }
+        let taken = list.take();
+        list.push(Owner(dropped.clone()));
+        assert_eq!(dropped.get(), 0);
+        list.restore(taken);
+        assert_eq!(dropped.get(), 0);
+        list.clear();
+        assert_eq!(dropped.get(), 4);
+        list.push(Owner(dropped.clone()));
+        drop(list);
+        assert_eq!(dropped.get(), 5);
     }
 }

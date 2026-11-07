@@ -295,7 +295,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.is_some_and(|s| s.has_foil(item_glint)) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {
@@ -1025,9 +1025,10 @@ impl Game<'_> {
         let mut stand_x = 0.0;
         let mut stand_z = 0.0;
         for (j, shove) in applied {
-            let cart = &mut self.carts[j];
-            cart.velocity.x += shove.cart_x;
-            cart.velocity.z += shove.cart_z;
+            self.carts.update(j, |cart| {
+                cart.velocity.x += shove.cart_x;
+                cart.velocity.z += shove.cart_z;
+            });
             stand_x += shove.stand_x;
             stand_z += shove.stand_z;
         }
@@ -1323,7 +1324,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(&stack.item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.has_foil(item_glint) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {

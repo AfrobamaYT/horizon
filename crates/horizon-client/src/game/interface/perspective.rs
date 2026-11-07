@@ -1006,7 +1006,7 @@ impl Game<'_> {
     pub(super) fn wings_overlay(&self, stack: Option<&horizon_client::items::ItemStack>) -> u32 {
         let item_glint = |item: &str| {
             let props = &self.res.items().enchantments.props;
-            props.get(item).is_some_and(|p| p.glint)
+            props.get(item).and_then(|p| p.glint)
         };
         match stack {
             Some(s) if s.has_foil(item_glint(&s.item)) => horizon_client::mobs::render::ARMOR_GLINT,

@@ -88,11 +88,13 @@ impl Game<'_> {
                 true
             }
             Target::Other(id) => {
-                let Some(o) = self.others.iter_mut().find(|o| o.id == id) else {
+                let Some(i) = self.others.iter().position(|o| o.id == id) else {
                     return false;
                 };
-                o.yaw = yaw;
-                o.pitch = pitch;
+                self.others.update(i, |o| {
+                    o.yaw = yaw;
+                    o.pitch = pitch;
+                });
                 true
             }
             _ => false,

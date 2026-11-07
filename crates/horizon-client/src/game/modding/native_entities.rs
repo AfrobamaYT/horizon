@@ -95,11 +95,18 @@ impl Game<'_> {
         // Target variant. Select the newly appended root, never an older waiting entity.
         let root = match kind {
             "minecraft:tnt" => self.tnts.get_mut(deferred.0).map(|e| &mut e.id),
-            "minecraft:falling_block" => self.falling.get_mut(deferred.1).map(|e| &mut e.id),
+            "minecraft:falling_block" => None,
             "minecraft:firework_rocket" => self.rockets.get_mut(deferred.2).map(|e| &mut e.id),
             _ => None,
         };
         let root = root.map(|id| super::lan_entities::assign_entity_id(&mut self.next_entity, id));
+        let root = if kind == "minecraft:falling_block" && deferred.1 < self.falling.len() {
+            Some(self.falling.update(deferred.1, |f| {
+                super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id)
+            }))
+        } else {
+            root
+        };
         self.native_mobs_joined(from, false);
         // Otherwise the root is the first entity spawned, also for kinds no
         // command target stands for (experience orbs, end crystals, cushions). An id handed out to an
@@ -190,9 +197,9 @@ impl Game<'_> {
         for t in &mut self.tnts {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
         }
-        for f in &mut self.falling {
+        self.falling.for_each_mut(|f| {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut f.id);
-        }
+        });
         for p in &mut self.creatures.projectiles {
             super::lan_entities::assign_entity_id(&mut self.next_entity, &mut p.id);
         }
@@ -230,7 +237,7 @@ impl Game<'_> {
         for (i, f) in self.item_frames.iter().enumerate() {
             offer(Slot::Apart(Apart::Frame(i)), f.id, f.join);
         }
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             offer(Slot::Apart(Apart::Dragon), d.id, d.join);
         }
         best
@@ -290,7 +297,7 @@ impl Game<'_> {
             Slot::Apart(Apart::Cushion(i)) => drop(self.cushions.remove(i)),
             Slot::Apart(Apart::Painting(i)) => drop(self.paintings.remove(i)),
             Slot::Apart(Apart::Frame(i)) => drop(self.item_frames.remove(i)),
-            Slot::Apart(Apart::Dragon) => self.dragon = None,
+            Slot::Apart(Apart::Dragon) => self.dragon.discard(),
         }
     }
     /// Entities that were moved, not added (a portal's arrival keeps being
@@ -353,7 +360,7 @@ impl Game<'_> {
         self.cushions.iter().for_each(|c| seen(c.id));
         self.paintings.iter().for_each(|p| seen(p.id));
         self.item_frames.iter().for_each(|f| seen(f.id));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             seen(d.id);
         }
         while let Some(i) = self.persist.live.iter().position(|l| !l.2) {
@@ -498,7 +505,7 @@ mod tests {
                 let mut dragon = super::super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
                 dragon.id = base + 8;
                 dragon.join = horizon_client::join_seq::JoinSeq::next();
-                game.dragon = Some(dragon);
+                game.dragon.replace(dragon);
                 game.next_entity = base + 8;
                 game.native_joins_flush(true, 0);
                 game.native_joins_flush(true, 0);

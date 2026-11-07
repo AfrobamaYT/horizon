@@ -1272,6 +1272,7 @@ impl Game<'_> {
         self.ambience.clear(&mut self.audio);
         self.music.stop_playing(None, &mut self.audio);
         self.audio.stop_all();
+        self.mod_sounds.clear();
         // A world is leaving either way: its icon attempt goes with it.
         self.world_icon = None;
         // Minecraft.disconnect: the client level goes.
@@ -1451,6 +1452,7 @@ impl Game<'_> {
         let mut e = horizon_client::effects::EffectInstance::from_def(def, p.duration, p.amplifier);
         e.ambient = p.flags & 1 != 0;
         e.visible = p.flags & 2 != 0;
+        e.show_icon = p.flags & 4 != 0;
         let list = &mut self.potions.effects.list;
         match list.iter_mut().find(|x| x.id == id) {
             // forceAddEffect's copyBlendState: an updated effect keeps its fade.
@@ -3123,8 +3125,8 @@ impl Game<'_> {
                 d.on_ground = on_ground;
                 return;
             }
-            if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-                f.position = at;
+            if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+                self.falling.update(i, |f| f.position = at);
                 return;
             }
             if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
@@ -3151,14 +3153,16 @@ impl Game<'_> {
             if r.cart_lerps.contains_key(&id) {
                 // A minecart on NewMinecartBehavior keeps Entity's NO_OP
                 // InterpolationHandler: a teleport puts it there at once.
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-                    if path.is_some() {
-                        c.position = at;
-                    }
-                    if let Some((yaw, pitch)) = rotation {
-                        c.yaw = yaw;
-                        c.pitch = pitch;
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+                    self.carts.update(i, |c| {
+                        if path.is_some() {
+                            c.position = at;
+                        }
+                        if let Some((yaw, pitch)) = rotation {
+                            c.yaw = yaw;
+                            c.pitch = pitch;
+                        }
+                    });
                 }
             } else {
                 // AbstractInterpolationHandler.interpolateTo: without a
@@ -6004,14 +6008,14 @@ impl Game<'_> {
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
             d.velocity = v;
-        } else if let Some(f) = self.falling.iter_mut().find(|f| f.id == id as u32) {
-            f.velocity = v;
+        } else if let Some(i) = self.falling.iter().position(|f| f.id == id as u32) {
+            self.falling.update(i, |f| f.velocity = v);
         } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id == id as u32) {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
-            c.velocity = v;
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id as u32) {
+            self.carts.update(i, |c| c.velocity = v);
         } else if let Some(p) = self
             .creatures
             .projectiles
@@ -8088,12 +8092,11 @@ impl Game<'_> {
             // Minecart.interact resets the passenger's easing baseline on
             // a successful boarding click, not on SetPassengers (commands
             // can mount a player without this interaction).
-            if let Some(c) = self
-                .carts
-                .iter_mut()
-                .find(|c| c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable)
-            {
-                c.player_rotation_offset = c.rotation_offset;
+            if let Some(i) = self.carts.iter().position(|c| {
+                c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable
+            }) {
+                self.carts
+                    .update(i, |c| c.player_rotation_offset = c.rotation_offset);
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {
@@ -12300,6 +12303,115 @@ mod tests {
             super::Game::inventory_screen_slot("minecraft:unknown", 0),
             None
         );
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn transactional_bucket_hands_reach_the_owning_client() {
+        use super::super::{
+            native_entity_refs::tests::with_client_game, native_guest_turn_tests::with_guests,
+        };
+        use horizon_client::{
+            items::ItemStack,
+            lan::{Out, PlayerSender},
+        };
+        use horizon_protocol::{buf::Reader, packets::play::Clientbound as C};
+        use mod_api::{HostTransaction, ITEM_FLUIDS, ItemPlace, ServerHost, move_resources};
+
+        with_guests(|server| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            server.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.sender = PlayerSender::new(tx, std::sync::Arc::default());
+                guest.selected = 2;
+                guest.inventory[2] = Some(ItemStack::new("minecraft:bucket", 1));
+                guest.offhand = Some(ItemStack::new("minecraft:water_bucket", 1));
+            });
+            let main = ItemPlace::PlayerHand {
+                player: 12,
+                hand: horizon_client::first_person::Hand::Main,
+            };
+            let off = ItemPlace::PlayerHand {
+                player: 12,
+                hand: horizon_client::first_person::Hand::Off,
+            };
+            with_client_game(|client| {
+                let (_reader, _writer) = connect_menu_test(client);
+                spawn_menu_test(client);
+                client.selected = 2;
+                // Consume actual server packets through the client's ordinary handler.
+                let deliver = |client: &mut super::Game<'_>| {
+                    let mut slots = Vec::new();
+                    for out in rx.try_iter() {
+                        let bodies = match out {
+                            Out::Packet(body) => vec![body],
+                            Out::Packets(bodies) => bodies,
+                            Out::Disconnect(_) => panic!("owner disconnected"),
+                        };
+                        for body in bodies {
+                            let mut reader = Reader::new(&body);
+                            let id = reader.varint().unwrap();
+                            let packet = C::decode(id, reader.rest()).unwrap();
+                            // Other tick packets concern entity/chunk state, not this contract.
+                            if let C::ContainerSetSlot(ref slot) = packet {
+                                slots.push(slot.slot);
+                                client.handle_packet(packet).unwrap();
+                            }
+                        }
+                    }
+                    slots
+                };
+                server.tick_lan(true);
+                deliver(client);
+                assert_eq!(
+                    client.inventory[2],
+                    Some(ItemStack::new("minecraft:bucket", 1))
+                );
+                assert_eq!(
+                    client.offhand,
+                    Some(ItemStack::new("minecraft:water_bucket", 1))
+                );
+
+                for commit in [false, true] {
+                    let host: &mut dyn ServerHost = server;
+                    let result = host.transaction(|host, tx| {
+                        let source = off.capability(host, &ITEM_FLUIDS).unwrap();
+                        let target = main.capability(host, &ITEM_FLUIDS).unwrap();
+                        assert_eq!(
+                            move_resources(host, &source, &target, |_| true, 1000, tx).unwrap(),
+                            1000
+                        );
+                        if commit { Ok(()) } else { Err(()) }
+                    });
+                    assert_eq!(result.is_ok(), commit);
+                    server.tick_lan(true);
+                    let slots = deliver(client);
+                    if commit {
+                        assert!(slots.contains(&38), "selected hotbar slot published");
+                        assert!(slots.contains(&45), "offhand published");
+                    } else {
+                        assert!(slots.is_empty(), "abort publishes no tentative inventory");
+                    }
+                    let (held, other) = if commit {
+                        ("minecraft:water_bucket", "minecraft:bucket")
+                    } else {
+                        ("minecraft:bucket", "minecraft:water_bucket")
+                    };
+                    assert_eq!(
+                        client.inventory[client.selected],
+                        Some(ItemStack::new(held, 1))
+                    );
+                    assert_eq!(client.offhand, Some(ItemStack::new(other, 1)));
+                    let guest = &server.lan.as_ref().unwrap().hub.guests[0];
+                    assert_eq!(guest.inventory[2], client.inventory[2]);
+                    assert_eq!(guest.offhand, client.offhand);
+                }
+                server.tick_lan(true);
+                assert!(
+                    deliver(client).is_empty(),
+                    "settled slots are not sent twice"
+                );
+            });
+        });
     }
 
     /// A client connecting through a local pipe and through configuration, as

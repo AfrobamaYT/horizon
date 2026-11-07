@@ -332,12 +332,16 @@ impl PreparedModels {
             "fs_entity",
             wgpu::ColorWrites::ALL,
         );
+        // Bias 0, the same as the CPU entity mark (`hdr_mark_pipeline`). The colour
+        // pass writes depth at bias 128, so this mark fails the depth test and the
+        // world keeps no scene gain. A bias of 128 here made instanced copies brighter
+        // in scRGB than the CPU route.
         let hdr_pipeline = make(
             "Prepared model HDR mark",
             wgpu::BlendState::REPLACE,
             false,
             wgpu::DepthBiasState {
-                constant: 128,
+                constant: 0,
                 slope_scale: 0.0,
                 clamp: 0.0,
             },
@@ -429,6 +433,27 @@ pub fn cap_prepared_instance_slots(slots: u64) {
     SLOT_CAP.store(slots, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// `u64::MAX` means the test has not named an uploaded generation.
+#[cfg(feature = "test-support")]
+static UPLOADED_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
+
+/// Pretend prepared geometry for `generation` is resident. `None` clears it.
+#[cfg(feature = "test-support")]
+pub fn set_test_prepared_generation(generation: Option<u64>) {
+    UPLOADED_GENERATION.store(
+        generation.unwrap_or(u64::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The generation `set_test_prepared_generation` published, if any.
+#[cfg(feature = "test-support")]
+pub fn test_prepared_generation() -> Option<u64> {
+    let generation = UPLOADED_GENERATION.load(std::sync::atomic::Ordering::Relaxed);
+    (generation != u64::MAX).then_some(generation)
+}
+
 pub fn prepared_instance_room_for(already: u64, incoming: usize, max_buffer: u64) -> usize {
     let stride = std::mem::size_of::<PreparedModelInstance>() as u64;
     let device = max_instance_slots(stride, max_buffer);
@@ -508,15 +533,26 @@ fn map_bytes(buffer: &wgpu::Buffer, contents: &[u8]) -> Result<()> {
 }
 
 fn take_forced_failure() -> bool {
-    FAIL_UPLOAD.swap(false, std::sync::atomic::Ordering::Relaxed)
+    #[cfg(feature = "test-support")]
+    {
+        FAIL_UPLOAD.with(|flag| flag.replace(false))
+    }
+    #[cfg(not(feature = "test-support"))]
+    {
+        false
+    }
 }
 
-static FAIL_UPLOAD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// The next [`PreparedModels::create`] returns an error and uploads nothing.
+/// The next [`PreparedModels::create`] on this thread returns an error and uploads nothing.
+/// Another thread's upload is left alone, so parallel pixel tests cannot consume each other's failure.
 #[cfg(feature = "test-support")]
 pub fn fail_next_prepared_upload() {
-    FAIL_UPLOAD.store(true, std::sync::atomic::Ordering::Relaxed);
+    FAIL_UPLOAD.with(|flag| flag.set(true));
+}
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    static FAIL_UPLOAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -713,5 +749,15 @@ mod tests {
         })
         .unwrap();
         assert!(mapped);
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn forced_upload_failure_stays_on_the_thread_that_set_it() {
+        fail_next_prepared_upload();
+        let stolen = std::thread::scope(|scope| scope.spawn(take_forced_failure).join().unwrap());
+        assert!(!stolen, "another thread consumed the forced upload failure");
+        assert!(take_forced_failure());
+        assert!(!take_forced_failure());
     }
 }

@@ -55,7 +55,7 @@ impl Game<'_> {
             return Some(edit(&mut m.extra.items[..size], at(&m.position)));
         };
         if self.carts.iter().any(container) {
-            return Some(edit(self.cart_slots(id)?, position));
+            return self.edit_cart_slots(id, |slots| edit(slots, position));
         }
         if let Some(super::BlockEntity::Chest(open)) = self.world.block_entities.get_mut(&key) {
             return Some(edit(open, position));
@@ -1330,6 +1330,56 @@ pub(super) mod tests {
             assert!(plain.capability(host, &ENTITY_ITEMS, ()).is_none());
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn cart_slot_edits_prefer_the_menu_and_refuse_a_removed_owner() {
+        use super::super::minecarts::{CART_KEY_Y, CartKind, Minecart};
+        use horizon_core::geometry::Vec3;
+        with_game(|game| {
+            let mut cart = Minecart::new(600, CartKind::Chest, Vec3::new(1.0, 65.0, 2.0));
+            cart.items[0] = Some(ItemStack::new("minecraft:stone", 4));
+            game.carts.push(cart);
+            let key = (i32::MAX - 15, CART_KEY_Y, 600);
+            game.world
+                .block_entities
+                .insert(key, BlockEntity::Chest(vec![None; 27]));
+            assert_eq!(
+                game.edit_cart_slots(600, |slots| {
+                    slots[0] = Some(ItemStack::new("minecraft:sand", 7));
+                    slots.len()
+                }),
+                Some(27)
+            );
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:stone", 4))
+            );
+            let Some(BlockEntity::Chest(open)) = game.world.block_entities.get(&key) else {
+                panic!("missing live menu");
+            };
+            assert_eq!(open[0], Some(ItemStack::new("minecraft:sand", 7)));
+            game.store_cart_items(key);
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:sand", 7))
+            );
+            game.edit_cart_slots(600, |slots| {
+                slots[0] = Some(ItemStack::new("minecraft:gravel", 9))
+            });
+            game.close_cart_container(key);
+            assert_eq!(
+                game.carts[0].items[0],
+                Some(ItemStack::new("minecraft:gravel", 9))
+            );
+            assert!(!game.world.block_entities.contains_key(&key));
+            game.carts.remove(0);
+            assert_eq!(
+                game.edit_cart_slots(600, |_| panic!("stale owner reached its menu")),
+                None::<()>
+            );
+        });
+    }
+
     /// A mod's `ENTITY_AUTOMATION` handler: one slot of up to 64 items, with the sides it was
     /// asked for.
     #[derive(Clone, Default)]

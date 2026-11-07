@@ -375,7 +375,8 @@ impl Game<'_> {
                 || guest_carts.contains(&cid)
                 || self.mobs.iter().any(|m| m.extra.mount == Some(cid));
             if !ridden {
-                self.carts[c].velocity = self.carts[c].velocity.add_vector(v);
+                self.carts
+                    .update(c, |c| c.velocity = c.velocity.add_vector(v));
             }
         }
     }
