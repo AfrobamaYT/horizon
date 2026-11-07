@@ -515,6 +515,40 @@ impl GameLevel<'_> {
             self.award_orbs(centre, dropped.experience);
         }
     }
+    /// `Block.getDrops(state, level, pos, blockEntity, entity, tool)` for the block still
+    /// standing: `drop_resources_now`'s roll, with what the block entity copies into the drops,
+    /// drawn from the same random, but nothing popped, no `block_drops` event and no
+    /// experience. A scratch record keeps a break in progress at `pos` as it was.
+    pub(super) fn block_drops_of(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        tool: Option<&ItemStack>,
+        entity: Option<EntityRef>,
+    ) -> Vec<ItemStack> {
+        let key = (pos.x, pos.y, pos.z);
+        let at = [pos.x, pos.y, pos.z];
+        let mut copied = Pending::default();
+        if let Some(block_entity) = self.world.block_entities.get(&key) {
+            let name = self.world.block_names.get(&key).cloned();
+            copied.record(at, block_entity, &self.facts.get(state).name, name);
+        } else if let Some(tag) = saved_entity(self.world, at) {
+            copied.record_saved(at, &tag);
+        }
+        let dynamic = copied.dynamic(at);
+        let roll = horizon_client::items::BlockLootRoll {
+            held: tool,
+            dynamic: &dynamic,
+            breaker: entity.is_some(),
+            ..Default::default()
+        };
+        let mut drops = self.roll_block_loot(pos, state, entity, roll);
+        drops.retain(|stack| &*stack.item != "minecraft:air" && stack.count > 0);
+        for stack in &mut drops {
+            copied.attach(at, stack);
+        }
+        drops
+    }
     /// What `Block.dropResources` does with the loot it rolled for the block
     /// `state` at `pos`: `Block.popResource` builds an item entity for each
     /// stack (its position drawn from the level random, its motion from the

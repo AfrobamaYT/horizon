@@ -364,6 +364,24 @@ fn server_inventory_operations_take_a_server_host(
     )
 }
 
+/// Compile-only: the level queries as a mod calls them, the reads on any host and the drop
+/// roll, which moves the level's random, on a server host.
+#[allow(dead_code)]
+fn level_queries_take_their_hosts(
+    read: &dyn Host,
+    server: &mut dyn ServerHost,
+    level: LevelRef,
+    shooter: EntityRef,
+    tool: &ItemStack,
+) {
+    let _: Option<Vec<[f64; 6]>> = level.fluid_shape(read, [0, 64, 0]);
+    let _: Option<bool> = level.has_collisions(read, [0.0, 64.0, 0.0, 1.0, 65.0, 1.0]);
+    let _: Option<Vec<EntityRayHit>> =
+        level.ray_trace_entities(read, [0.0; 3], [8.0, 0.0, 0.0], 0.3, Some(shooter));
+    let _: Result<Option<Vec<ItemStack>>, StackWriteError> =
+        level.block_drops(server, [0, 64, 0], Some(tool), Some(shooter));
+}
+
 /// Compile-only: the world data, tick, sky and sight queries as a mod calls them, the reads on any
 /// host and the writes (which move the level's random or its saved data) on a server host.
 #[allow(dead_code)]

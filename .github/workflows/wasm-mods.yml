@@ -129,7 +129,8 @@ jobs:
           cargo +stable build -p cargo-horizon-mod -p xtask
           for mod in docs/modding/examples/wasm-hello docs/modding/examples/wasm-widgets \
             crates/horizon-mod-wasm/tests/groups/{counter_lib,alpha,beta,gamma} \
-            crates/horizon-mod-wasm/tests/points/{chat_tail,lib_tail}; do
+            crates/horizon-mod-wasm/tests/points/{chat_tail,lib_tail} \
+            crates/horizon-mod-wasm/tests/attachments/mod; do
             mkdir -p "$mod/target"
             ln -s "$GITHUB_WORKSPACE/target" "$mod/target/horizon-mod"
             (cd "$mod" && "$GITHUB_WORKSPACE/target/debug/cargo-horizon-mod" horizon-mod build --wasm)
@@ -155,6 +156,11 @@ jobs:
           HORIZON_WASM_SAMPLE: ${{ github.workspace }}/docs/modding/examples/wasm-hello/target/horizon-mod/hello_wasm.hmod
           HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
         run: '"$WASM_TEST_SAMPLE" --ignored'
+      - name: Attachment batches cross shared reads and explicit server writes
+        env:
+          HORIZON_WASM_ATTACHMENTS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/attachments/mod/target/horizon-mod/query_fixture.hmod
+          HORIZON_WASM_STD: ${{ github.workspace }}/target/horizon-wasm-std.wasm
+        run: '"$WASM_TEST_ATTACHMENTS" --ignored'
       - name: Mods sharing a library, linked in one group, and a mod of another group
         env:
           HORIZON_WASM_GROUPS: ${{ github.workspace }}/crates/horizon-mod-wasm/tests/groups

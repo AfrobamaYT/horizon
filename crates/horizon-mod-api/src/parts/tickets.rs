@@ -45,7 +45,7 @@ pub mod tests {
     fn installed_ticket_controllers_read_the_installed_table() {
         let mut registrar = PartRegistrar::new("first");
         registrar.register_ticket_controller("quarry", true);
-        install_registrar(registrar).unwrap();
+        install_registrar(registrar, &crate::parts::tests::rule_schema()).unwrap();
         let controllers = installed_controllers();
         assert_eq!(controllers.len(), 1);
         assert_eq!(&*controllers[0].id, "first:quarry");

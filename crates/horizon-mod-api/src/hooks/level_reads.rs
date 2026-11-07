@@ -27,6 +27,28 @@ the height is relative to the block, and negative infinity means no floor. An un
 column or an out-of-build-height position returns `None`. These three reads also work on
 parked server levels and the current client level, without loading chunks or swapping dimensions."#]
     fn level_reads_note1();
+    #[notes = r#"## Drops, fluid shapes, collisions and entity rays
+
+`LevelRef::block_drops(host, pos, tool, entity)` is `Block.getDrops`: what the block at `pos`
+would drop if `entity` broke it with `tool`, with what its block entity copies in (a shulker
+box's contents, a banner's patterns, a pot's sherds). It breaks nothing and spawns nothing, and
+fires no `block_drops` event; `destroy_block` with `collect` does all of that. The roll draws
+from the table's random sequence or the level random, as vanilla's does, so it takes a
+`ServerHost` and moves later draws.
+
+`fluid_shape(host, pos)` is `FluidState.getShape`: no box for no fluid, else one block-local box
+up to the fluid's height, a full block under the same fluid. `has_collisions(host, aabb)` asks
+whether any block collision shape is in a box, with `collision_boxes`'s walk and limits and
+without building the list; entities and the world border are not part of it.
+
+`ray_trace_entities(host, from, to, margin, exclude)` lists every entity the segment passes
+through, nearest first, with where it enters each box grown by `margin` and how far that is:
+the test `ProjectileUtil.getEntityHitResult` makes on each candidate. Vanilla's filter is a
+predicate (`canHitEntity`, `isPickable`); here it is the caller's, who takes the first hit it
+accepts, for example the first living entity. A ray starting inside a box does not hit it, so
+pass the shooter as `exclude` or start outside it. Candidates are the entities `entities_in`
+finds, so spectators are never hit."#]
+    fn level_reads_note2();
     #[notes = r#"## Respawn data, maps, ticks, sky and sight
 
 `LevelRef::respawn_data(host)` is the world spawn and the way a player appearing there faces

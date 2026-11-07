@@ -462,6 +462,7 @@ impl Game<'_> {
         self.pack = pack;
         self.gui = gui;
         self.standalone_geometry = standalone_geometry;
+        self.instance_groups.borrow_mut().clear();
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.
         self.skin_slots.forget();

@@ -64,6 +64,9 @@ pub struct Manifest {
     pub native: Option<Native>,
     /// A wasm mod's `mod.wasm`, its toolchain and what it was linked against.
     pub wasm: Option<Wasm>,
+    /// Game internals used by this mod, fingerprinted against its pinned build.
+    #[serde(default)]
+    pub internals: Vec<Internal>,
     /// Unified listeners; routing and staging are separate from manifest parsing.
     #[serde(default)]
     pub inject: Vec<inject::Inject>,
@@ -90,9 +93,6 @@ pub struct Native {
     pub game: String,
     pub horizon: String,
     pub mixins: String,
-    /// Game internals used by this mod, fingerprinted against its pinned build.
-    #[serde(default)]
-    pub internals: Vec<Internal>,
     #[serde(default)]
     pub injection: Vec<Injection>,
     #[serde(default)]
@@ -338,14 +338,6 @@ fn check_injection(injection: &Injection) -> Result<(), String> {
     Ok(())
 }
 
-/// A wasm mod's declared internals and raw listeners; API listeners use `Manifest::inject`.
-#[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WasmNative {
-    #[serde(default)]
-    internals: Vec<Internal>,
-}
-
 impl Internal {
     fn check_all(internals: &[Self]) -> Result<(), String> {
         let mut paths = std::collections::HashSet::new();
@@ -366,34 +358,22 @@ impl Internal {
 
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let mut table: toml::Table =
-            toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
-        // Raw internals share native spelling, not native build pins or source modules.
-        let declarations = if table.contains_key("wasm") {
-            table
-                .remove("native")
-                .map(|native| native.try_into::<WasmNative>())
-                .transpose()
-                .map_err(|e| format!("{MANIFEST}: {e}"))?
-                .unwrap_or_default()
-        } else {
-            WasmNative::default()
-        };
-        let mut m: Manifest = toml::Value::Table(table)
-            .try_into()
-            .map_err(|e| format!("{MANIFEST}: {e}"))?;
-        if let Some(wasm) = &mut m.wasm {
-            Internal::check_all(&declarations.internals)?;
-            if declarations.internals.is_empty()
-                && m.inject
-                    .iter()
-                    .any(|i| i.access == inject::Access::Internals)
-            {
-                return Err(format!(
-                    "{MANIFEST}: a wasm internals listener needs declared internals"
-                ));
-            }
-            wasm.internals = declarations.internals;
+        let m: Manifest = toml::from_str(text).map_err(|e| format!("{MANIFEST}: {e}"))?;
+        Internal::check_all(&m.internals)?;
+        if m.wasm.is_some()
+            && m.internals.is_empty()
+            && m.inject
+                .iter()
+                .any(|i| i.access == inject::Access::Internals)
+        {
+            return Err(format!(
+                "{MANIFEST}: a wasm internals listener needs declared internals"
+            ));
+        }
+        if !m.internals.is_empty() && m.native.is_none() && m.wasm.is_none() {
+            return Err(format!(
+                "{MANIFEST}: internals need a [native] or [wasm] mod"
+            ));
         }
         if !valid_mod_id(&m.id) {
             return Err(format!(
@@ -418,7 +398,6 @@ impl Manifest {
         inject::Inject::check_all(&m.inject, &m.id, m.native.is_some() || m.wasm.is_some())
             .map_err(|e| format!("{MANIFEST}: {e}"))?;
         if let Some(native) = &m.native {
-            Internal::check_all(&native.internals)?;
             let mut ids: std::collections::HashSet<_> =
                 m.inject.iter().map(|entry| &entry.id).collect();
             for injection in &native.injection {
@@ -1139,25 +1118,23 @@ capabilities = ["registries"]
             "b".repeat(40)
         );
         let declaration = "internals=[{path='Round::listening',kind='field',hash='1234'}, {path='Round::listening',kind='method',hash='5678'}]\n";
-        let manifest = Manifest::parse(&format!("{base}{declaration}")).unwrap();
+        let manifest =
+            Manifest::parse(&base.replace("[native]", &format!("{declaration}[native]"))).unwrap();
+        assert_eq!(manifest.internals[1].kind.as_deref(), Some("method"));
+        let row = toml::to_string(&manifest.internals[1]).unwrap();
+        assert_eq!(
+            toml::from_str::<Internal>(&row).unwrap(),
+            manifest.internals[1]
+        );
         let native = manifest.native.unwrap();
-        assert_eq!(native.internals[1].kind.as_deref(), Some("method"));
         let text = toml::to_string(&native).unwrap();
         assert_eq!(toml::from_str::<Native>(&text).unwrap(), native);
-        assert!(
-            Manifest::parse(&format!(
-                "{base}{}",
-                declaration.replace("kind='method'", "kind='field'")
-            ))
-            .is_err()
-        );
-        assert!(
-            Manifest::parse(&format!(
-                "{base}{}",
-                declaration.replace("kind='method'", "kind=''")
-            ))
-            .is_err()
-        );
+        for kind in ["field", ""] {
+            let invalid = declaration.replace("kind='method'", &format!("kind='{kind}'"));
+            assert!(
+                Manifest::parse(&base.replace("[native]", &format!("{invalid}[native]"))).is_err()
+            );
+        }
         let untyped = Internal {
             path: "Game".into(),
             kind: None,
@@ -1175,11 +1152,15 @@ capabilities = ["registries"]
         );
         let injection = "[[native.injection]]\nid='count'\ntarget=\"horizon_client::game::Game<'_>::tick\"\nkind='HEAD'\n";
         let text = format!(
-            "{base}internals=[{{path='horizon_client::game::Game',hash='1234'}}]\n{injection}raw='count'\n"
+            "{}{injection}raw='count'\n",
+            base.replace(
+                "[native]",
+                "internals=[{path='horizon_client::game::Game',hash='1234'}]\n[native]"
+            )
         );
         let manifest = Manifest::parse(&text).unwrap();
+        assert_eq!(manifest.internals[0].path, "horizon_client::game::Game");
         let native = manifest.native.unwrap();
-        assert_eq!(native.internals[0].path, "horizon_client::game::Game");
         assert_eq!(native.injection[0].raw.as_deref(), Some("count"));
         for keys in [
             "",
@@ -1429,7 +1410,7 @@ capabilities = ["registries"]
         assert!(
             Manifest::parse(&both)
                 .unwrap_err()
-                .contains("unknown field")
+                .contains("a mod is [native] or [wasm], not both")
         );
     }
 
@@ -1447,7 +1428,7 @@ capabilities = ["registries"]
         assert!(
             Manifest::parse(&format!("{base}{missing_raw}"))
                 .unwrap_err()
-                .contains("unknown field")
+                .contains("missing field `game`")
         );
         for unified in [
             "",
@@ -1465,24 +1446,27 @@ capabilities = ["registries"]
             let mut archive = zip::ZipArchive::new(zip.finish().unwrap()).unwrap();
             let error = Package::read_zip(&mut archive)
                 .err()
-                .expect("non-raw wasm declaration refused");
-            assert!(error.contains("unknown field"), "{error}");
+                .expect("native source declaration without native pins refused");
+            assert!(error.contains("missing field `game`"), "{error}");
         }
     }
 
     #[test]
-    fn a_wasm_raw_listener_uses_the_native_internal_declaration_without_native_code() {
+    fn a_wasm_listener_uses_root_internal_declarations_without_native_code() {
         let wasm = format!(
             "{}\n[wasm]\nsha512 = '{}'\ntoolchain = '1.99.1'\n",
             EXAMPLE.trim_end(),
             "0".repeat(128)
         );
-        let native = "[native]\ninternals=[{path='Game::world',kind='field',hash='world-hash'}]\n";
+        let native = "internals=[{path='Game::world',kind='field',hash='world-hash'}]\n";
         let injection = "[[inject]]\nid='fell'\nat='Game::break_block'\nkind='head'\nwith='fell'\naccess='internals'\nhash='h'\n";
-        let parsed = Manifest::parse(&format!("{wasm}{native}{injection}")).unwrap();
+        let parsed = Manifest::parse(&format!(
+            "{}{injection}",
+            wasm.replace("[wasm]", &format!("{native}[wasm]"))
+        ))
+        .unwrap();
         assert!(parsed.native.is_none());
-        let declarations = parsed.wasm.unwrap();
-        assert_eq!(declarations.internals()[0].hash, "world-hash");
+        assert_eq!(parsed.internals[0].hash, "world-hash");
 
         for wrong in [
             "internals=[{path='',hash='h'}]",
