@@ -173,3 +173,37 @@ fn travel_moves_rows_before_guest_callbacks_and_keeps_captured_values() {
         );
     });
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn queued_level_teleport_moves_the_player_row_and_later_writes_stay_in_the_destination() {
+    with_guests(|game| {
+        game.options.dedicated = Some(Vec::new());
+        game.native_level_opened(Dim::Overworld);
+        let host: &mut dyn ServerHost = game;
+        VALUE.set(host, Holder::Player(12), 21).unwrap();
+        let before = snapshot(game, Dim::Overworld);
+        game.level_teleports
+            .push(crate::game::server_travel::LevelTeleport {
+                conn: 12,
+                dim: Dim::Nether,
+                at: [8.5, 70.0, 8.5],
+                rotation: None,
+                vehicle: None,
+            });
+        game.run_level_teleports();
+        assert!(snapshot(game, Dim::Overworld).is_empty());
+        let nether = snapshot(game, Dim::Nether);
+        assert_eq!(nether.len(), 1);
+        assert_eq!(nether[0].entry.read(&VALUE), Ok(&21));
+        let AttachmentHolder::Player(player) = nether[0].holder else {
+            panic!("not a player")
+        };
+        assert_eq!(player, game.native_player_ref(12).unwrap());
+        let host: &mut dyn ServerHost = game;
+        VALUE.set(host, Holder::Player(12), 22).unwrap();
+        assert!(snapshot(game, Dim::Overworld).is_empty());
+        assert_eq!(snapshot(game, Dim::Nether)[0].entry.read(&VALUE), Ok(&22));
+        assert_eq!(before[0].entry.read(&VALUE), Ok(&21));
+    });
+}
