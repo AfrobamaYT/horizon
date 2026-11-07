@@ -4155,7 +4155,8 @@ pub(crate) fn backend_of(host: &dyn Host) -> Option<&dyn Backend> {
 /// fn read(host: &dyn Host) { let _ = host.downcast_ref::<dyn ServerHost>(); }
 /// ```
 impl HostSide<'_> {
-    fn reborrow(&mut self) -> HostSide<'_> {
+    /// Borrows this side's host again for a shorter call.
+    pub fn reborrow(&mut self) -> HostSide<'_> {
         match self {
             Self::Server(host) => HostSide::Server(&mut **host),
             Self::Client(host) => HostSide::Client(&mut **host),
