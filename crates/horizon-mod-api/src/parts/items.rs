@@ -454,6 +454,7 @@ pub mod tests {
             "test:case",
             "test:cell",
             "test:outer",
+            "test:ordered_item",
             "test:pipe",
             "test:item",
             "test:item_overstates",
@@ -468,7 +469,9 @@ pub mod tests {
     pub(crate) fn stack(item: &str, count: u32, damage: u32) -> ItemStack {
         let mut stack =
             ItemStack::new(fixture_item_key(item), count).expect("fixture stacks are nonempty");
-        stack.set_damage(damage);
+        if damage != 0 {
+            stack.set_damage(damage);
+        }
         stack
     }
 
