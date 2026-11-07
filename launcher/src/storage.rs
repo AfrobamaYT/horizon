@@ -1,13 +1,12 @@
 //! Disposable launcher storage. Player-owned files are never accepted as cleanup targets.
+use crate::cache_cleanup::Plan;
 pub use crate::native_cache::Error;
 use crate::native_cache::{checked, linked, Cache};
 use cap_fs_ext::DirExt;
 use cap_std::fs::Dir;
-mod safe;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 mod inventory;
 pub use inventory::{Report, Row};
@@ -148,12 +147,22 @@ impl Storage {
         let mut parts = relative.components().peekable();
         while let Some(part) = parts.next() {
             if parts.peek().is_none() {
-                safe::clear(&parent, Path::new(part.as_os_str()))?;
+                Self::clear_entry(&self.directory, &parent, Path::new(part.as_os_str()))?;
             } else {
                 parent = parent.open_dir_nofollow(part.as_os_str())?;
             }
         }
-        Ok(bytes)
+        Ok(bytes.saturating_sub(allocated_bytes(path)?))
+    }
+
+    fn clear_entry(trash: &Dir, parent: &Dir, name: &Path) -> Result<(), Error> {
+        let meta = parent.symlink_metadata(name)?;
+        let plan = if meta.is_dir() && !meta.file_type().is_symlink() {
+            Plan::pin(&parent.open_dir_nofollow(name)?)?
+        } else {
+            Plan::pin_file(parent, name)?
+        };
+        plan.clear(trash)
     }
 
     pub fn sweep(&self) -> Result<(), Error> {
@@ -161,7 +170,11 @@ impl Storage {
         for entry in self.directory.entries()? {
             let entry = entry?;
             if entry.file_name().to_string_lossy().starts_with(".trash-") {
-                safe::clear(&self.directory, Path::new(&entry.file_name()))?;
+                Self::clear_entry(
+                    &self.directory,
+                    &self.directory,
+                    Path::new(&entry.file_name()),
+                )?;
             }
         }
         Ok(())

@@ -1,4 +1,7 @@
 //! The CLI and Storage page share one fixed-path inventory.
+#[cfg(test)]
+#[path = "inventory_regressions.rs"]
+mod regressions;
 use super::*;
 use crate::{backend, instances, native_mods};
 use serde::Serialize;
@@ -24,6 +27,7 @@ pub struct Row {
     pub category: Category,
     pub bytes: u64,
     pub freed_bytes: u64,
+    pub remaining_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -66,10 +70,11 @@ impl Entry {
                 return Err(Error::Unsafe(relative.to_owned()));
             };
             path.push(component);
-            if let Ok(meta) = fs::symlink_metadata(&path) {
-                if linked(&meta) {
-                    return Err(Error::Unsafe(path));
-                }
+            match fs::symlink_metadata(&path) {
+                Ok(meta) if linked(&meta) => return Err(Error::Unsafe(path)),
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
             }
         }
         Ok(Self {
@@ -78,6 +83,20 @@ impl Entry {
             relative: relative.to_owned(),
             path,
         })
+    }
+
+    fn clear(&self) -> Result<(), Error> {
+        if !self.path.try_exists()? {
+            return Ok(());
+        }
+        let Some(root) = &self.directory else {
+            return Ok(());
+        };
+        let mut parent = root.try_clone()?;
+        for part in self.relative.parent().unwrap_or(Path::new("")).components() {
+            parent = parent.open_dir_nofollow(part.as_os_str())?;
+        }
+        Storage::clear_entry(root, &parent, Path::new(self.relative.file_name().unwrap()))
     }
 }
 
@@ -207,14 +226,15 @@ impl Storage {
                 category,
                 bytes,
                 freed_bytes: 0,
+                remaining_bytes: bytes,
             });
         }
         for entry in &entries {
             if all || clear == Some(entry.category) {
                 if entry.path == self.root.join("native/target") {
                     self.lease.clear()?;
-                } else if let Some(directory) = &entry.directory {
-                    safe::clear_path(directory, &entry.relative)?;
+                } else {
+                    entry.clear()?;
                 }
             }
         }
@@ -229,6 +249,7 @@ impl Storage {
                     remaining = remaining.saturating_add(walk(&entry.path, &mut seen)?);
                 }
                 row.freed_bytes = row.bytes.saturating_sub(remaining);
+                row.remaining_bytes = remaining;
             }
         }
         Ok(Report {
@@ -294,13 +315,13 @@ fn unused_jars(entries: &mut Vec<Entry>, home: &Path) -> Result<(), Error> {
                     .manifest
                     .jar
                     .iter()
-                    .map(|jar| jar.sha512().to_owned()),
+                    .map(|jar| jar.cache_path(&folder)),
             );
         }
     }
     for entry in fs::read_dir(folder)? {
         let entry = entry?;
-        if !referenced.contains(entry.file_name().to_string_lossy().as_ref()) {
+        if !referenced.contains(&entry.path()) {
             entries.push(Entry::fixed(
                 home,
                 &Path::new("jars").join(entry.file_name()),
@@ -340,7 +361,7 @@ mod tests {
                 .freed_bytes
                 > 0
         );
-        assert!(!home.0.join("native/source").exists());
+        assert!(!home.0.join("native/source/rev/lib.rs").exists());
         assert!(home.0.join("native/prebuilt/rev/game").exists());
         assert!(home.0.join("settings.json").exists());
         assert!(Entry::fixed(&home.0, Path::new("../worlds"), Category::OtherCaches).is_err());
