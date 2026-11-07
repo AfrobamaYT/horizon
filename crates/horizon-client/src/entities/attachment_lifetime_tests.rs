@@ -30,7 +30,7 @@ fn exercise<T: Clone + Joined + HasAttachmentLifetime>(template: T) {
         VALUE.set(&mut map, Holder::Level, 10).unwrap();
         let mut entity = template.clone();
         *entity.attachment_lifetime() = AttachmentLifetime::new(map.bind_index(&index, 1u32));
-        let mut list = JoinList::default();
+        let mut list = JoinList::<T>::default();
         list.push(entity);
         let snapshot = || {
             index
