@@ -18,6 +18,8 @@ mod players;
 mod painting_tests;
 #[cfg(test)]
 mod player_tests;
+#[cfg(test)]
+mod query_tests;
 
 impl Game<'_> {
     pub(in crate::game) fn attachment_query(
