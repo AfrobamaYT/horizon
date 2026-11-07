@@ -9,6 +9,21 @@ pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> b
 }
 
 impl HookParts {
+    /// Parts for a checked API state. Key lookup does not depend on world state numbers.
+    pub fn block_value(&self, state: crate::BlockState) -> &[Attached<dyn BlockPart>] {
+        let Some(blocks) = crate::__private::block_definitions() else {
+            return &[];
+        };
+        let Some(definition) = blocks.definitions.get(state.block().0 as usize) else {
+            return &[];
+        };
+        if definition.property(state.ordinal(), "").is_err() {
+            return &[];
+        }
+        crate::registry_keys::block_id(state.block())
+            .and_then(|name| self.blocks.get(name))
+            .map_or(&[], |parts| parts.as_slice())
+    }
     /// The block Parts attached to a block state, in dispatch order.
     pub fn block_state(&self, state: BlockStateId) -> &[Attached<dyn BlockPart>] {
         self.block_states
@@ -103,6 +118,22 @@ pub mod tests {
         assert_eq!(read(0), 6);
         assert_eq!(read(1), 6);
         assert_eq!(read(2), 6);
+        crate::registry_keys::resolve_block_keys(["minecraft:stone", "later:machine"], |_| {
+            let properties = std::collections::BTreeMap::new();
+            horizon_mod_runtime::block_definitions::BlockDefinition::new(&[&properties], 0)
+                .map_err(|error| format!("{error:?}"))
+        })
+        .unwrap();
+        let table = parts(HookId::AnalogOutput, "analog_output");
+        let table = table.for_hook(HookId::AnalogOutput).unwrap();
+        let value = crate::BlockState::from(crate::BlockStateRecord::new(keys[0], 0));
+        assert_eq!(
+            table.block_value(value).len(),
+            table.block_state(BlockStateId(0)).len()
+        );
+        assert_eq!(table.block_value(value).len(), 1);
+        let invalid = crate::BlockState::from(crate::BlockStateRecord::new(keys[0], u16::MAX));
+        assert!(table.block_value(invalid).is_empty());
         let bind = |offset: u32| {
             resolve_blocks(|id| {
                 let index: u32 = if id == "minecraft:stone" { 0 } else { 1 };
