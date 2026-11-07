@@ -1053,11 +1053,44 @@ impl TryIntoApi for crate::containers::ModBlockEntity {
     type Api = mod_api::ModBlockEntity;
     type Error = StackReadError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
-        Ok(mod_api::ModBlockEntity::new(
+        Ok(mod_api::ModBlockEntity::from_snapshot(
             self.id().to_owned(),
             (**self).try_into_api()?,
+            mod_api::containers::ModRevision::from_snapshot(
+                self.revision().identity(),
+                self.revision().changes(),
+            ),
         ))
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BlockEntitySnapshotError {
+    InvalidRevision,
+    InvalidStack,
+}
+
+fn apply_block_entity_snapshot(
+    entity: &mut crate::containers::ModBlockEntity,
+    snapshot: &mod_api::ModBlockEntity,
+    before: mod_api::containers::ModRevision,
+    items: &Items,
+) -> Result<(), BlockEntitySnapshotError> {
+    let current = entity.revision();
+    let revision = snapshot.revision();
+    if snapshot.id() != entity.id()
+        || revision.identity() != current.identity()
+        || revision.changes() < current.changes()
+    {
+        return Err(BlockEntitySnapshotError::InvalidRevision);
+    }
+    if revision != before {
+        let fields = (**snapshot)
+            .try_into_engine(items)
+            .map_err(|_| BlockEntitySnapshotError::InvalidStack)?;
+        entity.apply_snapshot(fields, snapshot.revision().changes());
+    }
+    Ok(())
 }
 
 impl super::Game<'_> {
@@ -1071,11 +1104,7 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_block_entity_tick(pos, &mut api);
-        if let Ok(fields) = (*api).try_into_engine(self.items()) {
-            if api.revision() != revision {
-                **entity = fields;
-            }
-        }
+        let _ = apply_block_entity_snapshot(entity, &api, revision, self.items());
     }
     pub(in crate::game) fn api_block_entity_update_tag(
         pos: [i32; 3],
@@ -1121,13 +1150,9 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_menu_button(context, &mut api, &mut cursor);
-        if let (Ok(fields), Ok(cursor)) = (
-            (*api).try_into_engine(self.items()),
-            cursor.try_into_engine(self.items()),
-        ) {
-            if api.revision() != revision {
-                **entity = fields;
-            }
+        if let Ok(cursor) = cursor.try_into_engine(self.items())
+            && apply_block_entity_snapshot(entity, &api, revision, self.items()).is_ok()
+        {
             *carried = cursor;
         }
     }
@@ -1145,17 +1170,12 @@ impl super::Game<'_> {
         };
         let revision = api.revision();
         self.native_menu_quick_move(pos, &mut api, container_slots, slot, &mut held, handled);
-        match (
-            (*api).try_into_engine(self.items()),
-            held.try_into_engine(self.items()),
-        ) {
-            (Ok(fields), Ok(held)) => {
-                if api.revision() != revision {
-                    **entity = fields;
-                }
-                *stack = held;
-            }
-            _ => *handled = false,
+        if let Ok(held) = held.try_into_engine(self.items())
+            && apply_block_entity_snapshot(entity, &api, revision, self.items()).is_ok()
+        {
+            *stack = held;
+        } else {
+            *handled = false;
         }
     }
 }
@@ -1175,5 +1195,50 @@ impl super::GameLevel<'_> {
         if let Ok(added) = added.try_into_engine(self.items) {
             drops.extend(added);
         }
+    }
+}
+
+#[cfg(test)]
+mod block_entity_snapshot_tests {
+    use super::*;
+    #[test]
+    fn unchanged_snapshots_keep_revision_and_callback_writes_advance_it() {
+        let mut entity =
+            crate::containers::ModBlockEntity::new("test:machine".into(), Default::default());
+        let first = entity.try_into_api().unwrap();
+        let mut second = entity.try_into_api().unwrap();
+        assert_eq!(first.revision(), second.revision());
+        let before = second.revision();
+        second.data.push(7);
+        second.data.push(8);
+        assert_ne!(before, second.revision());
+        apply_block_entity_snapshot(
+            &mut entity,
+            &second,
+            before,
+            &Items::for_tests(Default::default()),
+        )
+        .unwrap();
+        let third = entity.try_into_api().unwrap();
+        assert_ne!(first.revision(), third.revision());
+        assert_eq!(second.revision(), third.revision());
+        assert_eq!(third.revision(), entity.try_into_api().unwrap().revision());
+        assert_eq!(entity.id(), "test:machine");
+        assert_eq!(entity.data, [7, 8]);
+        let other = mod_api::ModBlockEntity::new("test:machine".into(), Default::default());
+        assert_ne!(other.revision(), third.revision());
+        entity.data.push(9);
+        let fourth = entity.try_into_api().unwrap();
+        assert_ne!(fourth.revision(), second.revision());
+        let items = Items::for_tests(Default::default());
+        assert_eq!(
+            apply_block_entity_snapshot(&mut entity, &second, before, &items),
+            Err(BlockEntitySnapshotError::InvalidRevision)
+        );
+        assert_eq!(
+            apply_block_entity_snapshot(&mut entity, &other, before, &items),
+            Err(BlockEntitySnapshotError::InvalidRevision)
+        );
+        assert_eq!(entity.data, [7, 8, 9]);
     }
 }
