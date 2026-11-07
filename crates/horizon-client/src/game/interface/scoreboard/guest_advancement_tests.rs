@@ -77,11 +77,18 @@ fn selector_reads_independent_host_and_guest_progress() {
         const CRITERION: &str = "crafting_table";
         game.advancement_tree();
         assert!(game.adv.tree.get(ROOT).is_some());
-        assert!(game.lan.as_mut().unwrap().hub.guests[0].advancements.grant(
-            ROOT,
-            CRITERION,
-            "2026-11-05 00:00:00 +0000"
-        ));
+        assert!(
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |guest| guest.advancements.grant(
+                    ROOT,
+                    CRITERION,
+                    "2026-11-05 00:00:00 +0000"
+                ))
+        );
         let select = |g: &mut Game<'_>, condition: &str| {
             let text = format!("@a[advancements={{{ROOT}={condition}}}]");
             let s = horizon_client::command::selector::parse(
@@ -93,37 +100,33 @@ fn selector_reads_independent_host_and_guest_progress() {
             g.select(&s)
         };
         // The real Game traversal must read the selected guest, not the host.
-        assert_eq!(select(&mut game, "true"), vec![Target::Guest(2)]);
-        assert_eq!(select(&mut game, "false"), vec![Target::Player]);
+        assert_eq!(select(game, "true"), vec![Target::Guest(2)]);
+        assert_eq!(select(game, "false"), vec![Target::Player]);
         assert_eq!(
-            select(&mut game, "{crafting_table=true}"),
+            select(game, "{crafting_table=true}"),
             vec![Target::Guest(2)]
         );
-        assert_eq!(
-            select(&mut game, "{crafting_table=false}"),
-            vec![Target::Player]
-        );
+        assert_eq!(select(game, "{crafting_table=false}"), vec![Target::Player]);
         assert!(
             game.adv
                 .progress
                 .grant(ROOT, CRITERION, "2026-11-05 00:00:00 +0000")
         );
         assert!(
-            game.lan.as_mut().unwrap().hub.guests[0]
-                .advancements
-                .revoke(ROOT, CRITERION)
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |guest| guest.advancements.revoke(ROOT, CRITERION))
         );
-        assert_eq!(select(&mut game, "true"), vec![Target::Player]);
-        assert_eq!(select(&mut game, "false"), vec![Target::Guest(2)]);
+        assert_eq!(select(game, "true"), vec![Target::Player]);
+        assert_eq!(select(game, "false"), vec![Target::Guest(2)]);
+        assert_eq!(select(game, "{crafting_table=true}"), vec![Target::Player]);
         assert_eq!(
-            select(&mut game, "{crafting_table=true}"),
-            vec![Target::Player]
-        );
-        assert_eq!(
-            select(&mut game, "{crafting_table=false}"),
+            select(game, "{crafting_table=false}"),
             vec![Target::Guest(2)]
         );
-        drop(game);
         std::fs::remove_dir_all(scratch).unwrap();
     });
 }

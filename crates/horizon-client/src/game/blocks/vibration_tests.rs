@@ -23,7 +23,7 @@ fn entering_hive_posts_block_change_from_bee() {
         game.world.set(2, 4, 3, hive).unwrap();
         game.world
             .block_entities
-            .put((2, 4, 3), BlockEntity::Beehive(Box::default()));
+            .insert((2, 4, 3), BlockEntity::Beehive(Box::default()));
         let kind = game.res.mob_types().get("minecraft:bee").unwrap().clone();
         game.mobs
             .push(Mob::new(42, kind, Vec3::new(2.0, 4.0, 3.0), 0.0));
