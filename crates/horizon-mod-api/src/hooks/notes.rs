@@ -1303,9 +1303,10 @@ stock client shows as a chest (`generic_9x1` to `generic_9x6`); nothing is insta
 
 ### Render hook points
 
-`crates/horizon-mod-api/src/render.rs`: the renderer's own hook points, free functions rather than
-`Game` methods, which a bundle targets as `mod_render::render::native_<name>`. They run on the
-render thread with the frame's wgpu objects; what a mod draws there shows in that frame.
+`crates/horizon-mod-render/src/render.rs`: native-only, unstable raw frame places, outside `mod_api`.
+Use `[[inject]]` with `access = "internals"`, `kind = "head"` and a checked listener signature at
+`horizon_mod_render::render::<name>`. They run on the render thread with the frame's wgpu objects;
+what a mod draws there shows in that frame. Draw contexts remain the API-typed drawing route.
 
 - `world_drawn(world)`: the world is drawn (sky, terrain, entities, particles, weather and the world post pass),
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's

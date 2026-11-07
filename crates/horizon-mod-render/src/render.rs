@@ -13,6 +13,9 @@ pub use wgpu;
 pub fn world_drawn_hooked() -> bool {
     mod_points::__private::POINTS[mod_points::PointId::ModRenderRenderWorldDrawn as usize]
         .load(std::sync::atomic::Ordering::Relaxed)
+        || mod_points::__private::POINTS
+            [mod_points::PointId::ModRenderRenderWorldDrawnReturn as usize]
+            .load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// What a mod can draw with once the world is drawn: after the sky, terrain, entities,

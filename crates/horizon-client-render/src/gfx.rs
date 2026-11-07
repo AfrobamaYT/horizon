@@ -10959,7 +10959,7 @@ impl Renderer {
                 None => (&self.depth, size),
             };
             native_render::world_drawn(&mut native_render::WorldDrawn::from(
-                mod_api::__private::built::WorldDrawn {
+                mod_render::render::built::WorldDrawn {
                     device: &self.device,
                     queue: &self.queue,
                     encoder: &mut encoder,
@@ -10978,7 +10978,7 @@ impl Renderer {
                     atlas: self.hud.atlas_texture.as_ref(),
                     quad_indices: &self.indices,
                     block_sprites: native_render::BlockSpriteArrays::from(
-                        mod_api::__private::built::BlockSpriteArrays {
+                        mod_render::render::built::BlockSpriteArrays {
                             views: &self.sprite_views,
                             split: self.sprite_split,
                             size: self.sprite_textures[0].width(),
@@ -11305,7 +11305,7 @@ impl Renderer {
         // A native mod's turn after the hand, on the real frame only.
         if overlay.real && !frame.title {
             native_render::hand_drawn(&mut native_render::HandDrawn::from(
-                mod_api::__private::built::HandDrawn {
+                mod_render::render::built::HandDrawn {
                     device: &self.device,
                     queue: &self.queue,
                     encoder: &mut *encoder,
