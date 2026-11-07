@@ -155,6 +155,39 @@ impl Style {
         self.italic == Some(true)
     }
 }
+// A builder may produce no spans for a styled empty component. Release its
+// unretained hover data explicitly rather than recursively dropping a deep chain.
+pub(crate) fn discard_style(mut style: Style) {
+    let mut pending = Vec::new();
+    loop {
+        if let Some(hover) = style.hover.take()
+            && let Ok(text) = std::sync::Arc::try_unwrap(hover)
+        {
+            if let Some(source) = text.source
+                && let Ok(source) = std::sync::Arc::try_unwrap(source)
+            {
+                crate::component::discard_component(source);
+            }
+            pending.extend(text.spans.into_iter().map(|span| span.style));
+        }
+        for value in [style.hover_item.take(), style.hover_entity.take()]
+            .into_iter()
+            .flatten()
+        {
+            if let Ok(value) = std::sync::Arc::try_unwrap(value) {
+                crate::component::discard_component(value);
+            }
+        }
+        if let Some(InlineObject::Player { profile, .. }) = style.inline_object.take() {
+            crate::component::discard_component(profile);
+        }
+        let Some(next) = pending.pop() else {
+            break;
+        };
+        style = next;
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     pub text: String,
@@ -323,6 +356,10 @@ impl Text {
     pub fn translation_key(&self) -> Option<&str> {
         self.source.as_deref()?.get("translate")?.as_str()
     }
+    /// The retained source, if present, without materializing span-only text.
+    pub fn source_component(&self) -> Option<&Value> {
+        self.source.as_deref()
+    }
     /// Borrow retained structured source without recursively cloning it.
     /// Span-only text is materialized once because it has no retained source.
     pub fn component_view(&self) -> std::borrow::Cow<'_, Value> {
@@ -332,20 +369,51 @@ impl Text {
         }
     }
     pub fn component(&self) -> Value {
-        if let Some(c) = &self.source {
-            return (**c).clone();
+        let mut pending = vec![(self, false)];
+        let mut done = Vec::new();
+        while let Some((text, ready)) = pending.pop() {
+            if let Some(source) = &text.source {
+                done.push(crate::component::clone_value(source));
+            } else if !ready {
+                pending.push((text, true));
+                pending.extend(
+                    text.spans
+                        .iter()
+                        .rev()
+                        .filter_map(|s| s.style.hover.as_deref())
+                        .map(|hover| (hover, false)),
+                );
+            } else {
+                let count = text
+                    .spans
+                    .iter()
+                    .filter(|s| s.style.hover.is_some())
+                    .count();
+                let mut hovers = done.split_off(done.len() - count).into_iter();
+                let mut span = |s: &Span| {
+                    let mut o = Map::new();
+                    o.insert("text".into(), s.text.clone().into());
+                    o.extend(style_json_with(&s.style, &mut |_| {
+                        hovers.next().expect("scheduled hover")
+                    }));
+                    Value::Object(o)
+                };
+                done.push(match text.spans.as_slice() {
+                    [] => json!({ "text": "" }),
+                    [one] => span(one),
+                    many => {
+                        let mut o = Map::new();
+                        o.insert("text".into(), "".into());
+                        o.insert(
+                            "extra".into(),
+                            Value::Array(many.iter().map(span).collect()),
+                        );
+                        Value::Object(o)
+                    }
+                });
+            }
         }
-        let span = |s: &Span| {
-            let mut o = Map::new();
-            o.insert("text".into(), s.text.clone().into());
-            o.extend(style_json(&s.style));
-            Value::Object(o)
-        };
-        match self.spans.as_slice() {
-            [] => json!({ "text": "" }),
-            [one] => span(one),
-            many => json!({ "text": "", "extra": many.iter().map(span).collect::<Vec<_>>() }),
-        }
+        done.pop().expect("scheduled component")
     }
     /// A translation argument: vanilla passes numbers as numbers, which
     /// Horizon formats into unstyled literals.
@@ -568,6 +636,12 @@ const STYLE_KEYS: [&str; 11] = [
 ];
 /// `Style.Serializer`: the fields a style sets.
 fn style_json(style: &Style) -> Vec<(String, Value)> {
+    style_json_with(style, &mut Text::component)
+}
+fn style_json_with(
+    style: &Style,
+    hover_component: &mut dyn FnMut(&Text) -> Value,
+) -> Vec<(String, Value)> {
     let mut out = Vec::new();
     if let Some(c) = style.color {
         let name = COLORS
@@ -620,16 +694,22 @@ fn style_json(style: &Style) -> Vec<(String, Value)> {
         out.push(("click_event".to_owned(), event));
     }
     if let Some(hover) = &style.hover {
-        out.push((
-            "hover_event".to_owned(),
-            json!({ "action": "show_text", "value": hover.component() }),
-        ));
+        out.push(("hover_event".to_owned(), {
+            let mut event = Map::new();
+            event.insert("action".into(), "show_text".into());
+            event.insert("value".into(), hover_component(hover));
+            Value::Object(event)
+        }));
     } else if let Some(Value::Object(item)) = style.hover_item.as_deref() {
-        let mut event = item.clone();
+        let Value::Object(mut event) = crate::component::clone_object(item) else {
+            unreachable!()
+        };
         event.insert("action".into(), "show_item".into());
         out.push(("hover_event".to_owned(), Value::Object(event)));
     } else if let Some(Value::Object(entity)) = style.hover_entity.as_deref() {
-        let mut event = entity.clone();
+        let Value::Object(mut event) = crate::component::clone_object(entity) else {
+            unreachable!()
+        };
         event.insert("action".into(), "show_entity".into());
         out.push(("hover_event".to_owned(), Value::Object(event)));
     }
