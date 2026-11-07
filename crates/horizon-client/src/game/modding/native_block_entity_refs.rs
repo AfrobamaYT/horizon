@@ -748,11 +748,31 @@ mod tests {
         if super::super::native_entity_refs::tests::run_fresh_cases(
             "game::native_block_entity_refs::tests::player_opens_provider_and_refuses_non_provider",
             "HORIZON_BE_MENU_CASE",
-            &["provider", "replacement"],
+            &[
+                "provider",
+                "replacement",
+                "existing",
+                "close",
+                "close_reentry",
+            ],
         ) {
             return;
         }
         struct ReplaceDuringOpen;
+        impl ReplaceDuringOpen {
+            fn replace(host: &mut dyn ServerHost) {
+                let level = host.level("minecraft:overworld").unwrap();
+                for block in ["minecraft:stone", "minecraft:chest"] {
+                    let state = host.block_state_id(block).unwrap();
+                    assert!(level.set_block(
+                        host,
+                        [0, 64, 0],
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ));
+                }
+            }
+        }
         #[mod_api::__subscriptions]
         impl Hooks for ReplaceDuringOpen {
             fn inventory_block_start(
@@ -760,20 +780,34 @@ mod tests {
                 host: &mut dyn ServerHost,
                 event: &mut InventoryBlockStartEvent<'_>,
             ) -> Flow {
-                let level = host.level("minecraft:overworld").unwrap();
-                for block in ["minecraft:stone", "minecraft:chest"] {
-                    let state = host.block_state_id(block).unwrap();
-                    assert!(level.set_block(
-                        host,
-                        event.pos,
-                        state,
-                        NativeBlockUpdateFlags::NEIGHBORS
-                    ));
+                if event.pos == [0, 64, 0]
+                    && !std::env::var("HORIZON_BE_MENU_CASE")
+                        .unwrap()
+                        .starts_with("close")
+                {
+                    Self::replace(host);
                 }
                 Flow::Continue
             }
+            fn player_container_close(
+                &self,
+                host: &mut dyn ServerHost,
+                _event: &mut PlayerContainerCloseEvent<'_>,
+            ) {
+                let case = std::env::var("HORIZON_BE_MENU_CASE").unwrap();
+                if case.starts_with("close") {
+                    Self::replace(host);
+                    if case == "close_reentry" {
+                        let level = host.level("minecraft:overworld").unwrap();
+                        let other = host.block_entity(level, [5, 64, 0]).unwrap();
+                        let player = host.player(12).unwrap();
+                        assert!(player.open_menu(host, other).unwrap());
+                    }
+                }
+            }
         }
-        let replacing = std::env::var("HORIZON_BE_MENU_CASE").unwrap() == "replacement";
+        let case = std::env::var("HORIZON_BE_MENU_CASE").unwrap();
+        let replacing = case != "provider";
         if replacing {
             let mods: Mods = vec![ModEntry::new("replace", Box::new(ReplaceDuringOpen))].into();
             mod_api::__private::install(mods.clone());
@@ -801,20 +835,68 @@ mod tests {
             let player = game.native_player_ref(12).unwrap();
             let chest = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
             if replacing {
+                use horizon_client::lan::{Out, PlayerSender};
+                use horizon_protocol::{buf::Reader, ids::play::clientbound};
+                let (tx, rx) = std::sync::mpsc::channel();
+                game.lan.as_mut().unwrap().hub.update_guest(12, |guest| {
+                    guest.sender = PlayerSender::new(tx, Arc::default());
+                });
+                let previous = if case != "replacement" {
+                    let state = game.world.block(0, 64, 0);
+                    assert!(game.native_level_set_block(
+                        level,
+                        [5, 64, 0],
+                        state,
+                        NativeBlockUpdateFlags::NEIGHBORS
+                    ));
+                    let other = game.native_block_entity_ref(level, [5, 64, 0]).unwrap();
+                    assert!(player.open_menu(game, other).unwrap());
+                    game.tick_player_menus();
+                    let host = game.lan.as_ref().unwrap();
+                    Some(host.hub.guest(12).unwrap().menu.as_ref().unwrap().window)
+                } else {
+                    None
+                };
+                while rx.try_recv().is_ok() {}
                 assert_eq!(player.open_menu(game, chest), Err(BlockEntityError::Stale));
                 let replacement = game.native_block_entity_ref(level, [0, 64, 0]).unwrap();
                 assert_ne!(chest, replacement);
                 assert_eq!(chest.position(game), None);
-                assert!(
-                    game.lan
-                        .as_ref()
-                        .unwrap()
-                        .hub
-                        .guest(12)
-                        .unwrap()
-                        .menu
-                        .is_none()
+                let menu = game
+                    .lan
+                    .as_ref()
+                    .unwrap()
+                    .hub
+                    .guest(12)
+                    .unwrap()
+                    .menu
+                    .as_ref();
+                assert_eq!(menu.is_some(), case == "close_reentry");
+                if let Some(menu) = menu {
+                    assert!(matches!(menu.slots, Slots::Block((5, 64, 0))));
+                }
+                let mut opens = Vec::new();
+                let mut closes = Vec::new();
+                for out in rx.try_iter() {
+                    if let Out::Packet(packet) = out {
+                        let mut reader = Reader::new(&packet);
+                        match reader.varint().unwrap() {
+                            clientbound::OPEN_SCREEN => opens.push(reader.varint().unwrap()),
+                            clientbound::CONTAINER_CLOSE => closes.push(reader.varint().unwrap()),
+                            _ => {}
+                        }
+                    }
+                }
+                assert_eq!(
+                    opens,
+                    menu.map(|menu| menu.window).into_iter().collect::<Vec<_>>()
                 );
+                let expected_closes = if case == "close_reentry" {
+                    Vec::new()
+                } else {
+                    previous.into_iter().collect()
+                };
+                assert_eq!(closes, expected_closes);
                 return;
             }
             let furnace = game.native_block_entity_ref(level, [2, 64, 0]).unwrap();
