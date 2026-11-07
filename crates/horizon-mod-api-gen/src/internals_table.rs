@@ -2791,7 +2791,7 @@ pub(crate) mod tests {
             ),
         ]);
         assert_eq!(counts.types, 1, "{code}");
-        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
+        assert_eq!(counts.skipped_types["opaque type"], 2);
         assert_eq!(counts.skipped_types["lower-crate layout not widened"], 2);
         assert_eq!(counts.skipped_types["generic type"], 1);
     }

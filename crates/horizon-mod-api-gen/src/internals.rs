@@ -2165,7 +2165,7 @@ pub struct ItemStack { a: First, b: Second, c: second::Kind }
                 .collect::<Vec<_>>(),
         );
         assert_eq!(counts.types, 0);
-        assert_eq!(counts.skipped_types["conditional field or variant"], 2);
+        assert_eq!(counts.skipped_types["opaque type"], 2);
     }
 
     #[test]
