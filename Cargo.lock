@@ -491,6 +491,7 @@ name = "cargo-horizon-mod"
 version = "0.1.0"
 dependencies = [
  "cap-std",
+ "horizon-mod-api-gen",
  "horizon-mod-package",
  "horizon-port-pack",
  "serde_json",
