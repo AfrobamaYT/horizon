@@ -22754,7 +22754,28 @@ fn gameplay_tables(
         let motion = startup::time("core.motion", || {
             let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
             let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
-            MotionResources::load_with_conditions(root, assets, &facts, &conditions)
+            let mut motion =
+                MotionResources::load_with_conditions(root, assets, &facts, &conditions)?;
+            // #845: a mod's declared attribute sets
+            // (`EntityAttributeCreationEvent`) become their entity types' rows
+            // in the live attribute map's catalog — the one record the mob
+            // logic and the attribute sync read (#1493) — built from the
+            // template's row, as the type's content row is.
+            for declaration in mod_api::__private::entity_attribute_declarations() {
+                motion.attributes = std::sync::Arc::new(
+                    motion
+                        .attributes
+                        .with_entity_row(
+                            &declaration.id,
+                            &declaration.template,
+                            &declaration.attributes,
+                        )
+                        .map_err(|error| {
+                            format!("mod entity attributes of {}: {error}", declaration.id)
+                        })?,
+                );
+            }
+            Ok::<_, Box<dyn std::error::Error>>(motion)
         })
         .map_err(|e| e.to_string());
         (light.join(), motion)
@@ -23208,18 +23229,41 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
-        let mob_types: HashMap<_, _> = if draws {
+        let mut types = if draws {
             match entity_models {
                 Some(document) => MobTypes::load_with_document(root, document)?,
                 None => MobTypes::load(root)?,
             }
         } else {
             MobTypes::load_for_server(root)?
+        };
+        // #845: the declared sets take their types' rows — the merged rows
+        // the live attribute map's catalog took in core (the template's with
+        // the declared set on top) — as their attribute map and spawn
+        // fields, so a mob of the type spawns with what the map answers.
+        for declaration in mod_api::__private::entity_attribute_declarations() {
+            let row = resources
+                .motion()
+                .attributes
+                .entity_row(&declaration.id)
+                .map(std::sync::Arc::new);
+            match (types.types.get_mut(&declaration.id), row) {
+                (Some(kind), Some(row)) => kind.take_attribute_row(row),
+                (Some(_), None) => log::warn!(
+                    "Horizon: mod entity attributes of {} never reached the catalog; ignored",
+                    declaration.id
+                ),
+                (None, _) => log::warn!(
+                    "Horizon: mod entity attributes of {} name no loaded entity type; ignored",
+                    declaration.id
+                ),
+            }
         }
-        .types
-        .into_iter()
-        .map(|(k, v)| (k, Arc::new(v)))
-        .collect();
+        let mob_types: HashMap<_, _> = types
+            .types
+            .into_iter()
+            .map(|(k, v)| (k, Arc::new(v)))
+            .collect();
         let mut mob_data = horizon_client::mobs::MobData::load(resource_root, facts);
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
             horizon_client::mobs::cem::CemModels::load(resource_root.source(), &mob_types)
