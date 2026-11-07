@@ -512,10 +512,13 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::super::native_entity_refs::tests::with_game;
-    use horizon_client::items::ItemStack;
+    use mod_api::ItemStack;
 
     fn stack(item: &str) -> Option<ItemStack> {
-        Some(ItemStack::new(&format!("minecraft:{item}"), 1))
+        ItemStack::new(
+            mod_api::__private::item_key(&format!("minecraft:{item}")).unwrap(),
+            1,
+        )
     }
 
     /// `level.craft` against vanilla's own recipes: a shaped recipe that hands back buckets, the
@@ -539,8 +542,8 @@ mod tests {
             ];
             let made = level.craft(game, 3, 3, &cake).unwrap();
             assert_eq!(
-                (&*made.output.item, made.output.count),
-                ("minecraft:cake", 1)
+                (made.output.item(), made.output.count()),
+                (mod_api::__private::item_key("minecraft:cake").unwrap(), 1)
             );
             let bucket = stack("bucket");
             let mut kept = vec![bucket.clone(), bucket.clone(), bucket];
@@ -550,8 +553,8 @@ mod tests {
             let planks = [stack("oak_planks"), stack("oak_planks")];
             let made = level.craft(game, 1, 2, &planks).unwrap();
             assert_eq!(
-                (&*made.output.item, made.output.count),
-                ("minecraft:stick", 4)
+                (made.output.item(), made.output.count()),
+                (mod_api::__private::item_key("minecraft:stick").unwrap(), 4)
             );
             assert_eq!(made.remainders, [None, None]);
             let mut corner = vec![None; 9];
@@ -559,16 +562,19 @@ mod tests {
             corner[8] = stack("birch_planks");
             let made = level.craft(game, 3, 3, &corner).unwrap();
             assert_eq!(
-                (&*made.output.item, made.output.count),
-                ("minecraft:stick", 4)
+                (made.output.item(), made.output.count()),
+                (mod_api::__private::item_key("minecraft:stick").unwrap(), 4)
             );
             assert_eq!(made.remainders, vec![None; 9]);
 
             let rocket = [stack("paper"), stack("gunpowder")];
             let made = level.craft(game, 2, 1, &rocket).unwrap();
             assert_eq!(
-                (&*made.output.item, made.output.count),
-                ("minecraft:firework_rocket", 3)
+                (made.output.item(), made.output.count()),
+                (
+                    mod_api::__private::item_key("minecraft:firework_rocket").unwrap(),
+                    3
+                )
             );
 
             assert!(level.craft(game, 1, 1, &[stack("dirt")]).is_none());

@@ -133,6 +133,7 @@ fn passes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mod_api::ItemStack;
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -197,6 +198,9 @@ mod tests {
 
     #[test]
     fn a_mods_criterion_takes_its_own_test_and_the_player_predicate() {
+        mod_api::__private::install(Default::default());
+        mod_api::__private::resolve_items(["minecraft:copper_ingot", "minecraft:iron_ingot"])
+            .unwrap();
         let burning = EntityView {
             kind: "minecraft:player".into(),
             on_fire: true,
@@ -206,7 +210,11 @@ mod tests {
             on_fire: false,
             ..burning.clone()
         };
-        let copper = ItemStack::new("minecraft:copper_ingot", 2);
+        let copper = ItemStack::new(
+            mod_api::__private::item_key("minecraft:copper_ingot").unwrap(),
+            2,
+        )
+        .unwrap();
         let pipe = |stack: &ItemStack| ItemTest {
             key: "pipe",
             stack: stack.clone(),
@@ -218,13 +226,21 @@ mod tests {
             Ok(false),
             "the player predicate"
         );
-        let one = ItemStack::new("minecraft:copper_ingot", 1);
+        let one = ItemStack::new(
+            mod_api::__private::item_key("minecraft:copper_ingot").unwrap(),
+            1,
+        )
+        .unwrap();
         assert_eq!(
             passes(&c, &burning, &Plains, &pipe(&one)),
             Ok(false),
             "the item's count"
         );
-        let iron = ItemStack::new("minecraft:iron_ingot", 2);
+        let iron = ItemStack::new(
+            mod_api::__private::item_key("minecraft:iron_ingot").unwrap(),
+            2,
+        )
+        .unwrap();
         assert_eq!(
             passes(&c, &burning, &Plains, &pipe(&iron)),
             Ok(false),
