@@ -257,6 +257,33 @@ pub fn resolve_effects<'a>(
     })
 }
 
+#[cfg(test)]
+mod item_tag_tests {
+    use super::*;
+    use horizon_core::identifier::Identifier;
+    #[test]
+    fn typed_requests_share_canonical_slots_and_preserve_requesters() {
+        let mut names = Names::default();
+        let slot = names.request("first", "stick").unwrap();
+        let identifier = Identifier::parse("minecraft:stick").unwrap();
+        assert_eq!(names.request_identifier("second", &identifier), Ok(slot));
+        assert_eq!(names.entries.len(), 1);
+        assert_eq!(names.entries[0].mods, ["first", "second"]);
+        assert_eq!(names.identifiers.get(&identifier), Some(&slot));
+        assert!(names.request("bad", "Not valid").is_err());
+        assert_eq!(names.entries.len(), 1);
+    }
+    #[test]
+    fn tag_name_keys_keep_their_identity_and_refuse_unknown_slots() {
+        let first = Identifier::parse("test:retained_tag_name").unwrap();
+        let slot = tag_slot(&first).unwrap();
+        tag_slot(&Identifier::parse("test:unrelated_tag_name").unwrap()).unwrap();
+        assert_eq!(tag_slot(&first), Some(slot));
+        assert!(with_tag_name(slot, |name| name == Some("test:retained_tag_name")));
+        assert!(with_tag_name(u32::MAX, |name| name.is_none()));
+    }
+}
+
 /// Resolve all block entity types after registration and content loading.
 pub fn resolve_block_entity_types<'a, T>(
     requests: &Names,

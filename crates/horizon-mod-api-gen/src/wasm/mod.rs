@@ -483,7 +483,9 @@ pub(super) fn surface<'a>(
                 .iter()
                 .map(|segment| segment.ident.to_string())
                 .collect();
-            if segments.len() != 4 || segments[..2] != ["crate", "host"] {
+            let area_union = (segments.len() == 4 && segments[..2] == ["crate", "host"])
+                || (segments.len() == 3 && segments[..2] == ["crate", "parts"]);
+            if !area_union {
                 continue;
             }
             let via = segments[1..].join("::");
