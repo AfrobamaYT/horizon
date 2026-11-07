@@ -1,9 +1,10 @@
 //! Fixed-capacity output for a view's custom geometry; the GPU consumer owns drawing.
-use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY};
+use crate::gfx::world_primitives::{Batch, DEFAULT_CAPACITY as CAPACITY, STAGES};
 use crate::{gizmos, mesher::Vertex};
 use glam::{DVec3, Mat4, Vec3, Vec4};
 use mod_api::{
-    DrawError, InstanceError, ModelInstance, WorldDepth, WorldDrawUsage, WorldLine, WorldQuad,
+    DrawError, InstanceError, ModelInstance, RenderLevelStage, WorldDepth, WorldDrawUsage,
+    WorldLine, WorldQuad,
 };
 
 /// Copies of resolved models accepted for one view. Reserved once, never grown in a frame.
@@ -41,6 +42,10 @@ pub struct WorldGeometry {
     groups: std::collections::HashSet<mod_api::InstanceGroupRef>,
     accepted_models: u32,
     model_cut: u32,
+    /// The stage lines and quads go to now (`RenderLevelStage::ALL`'s index).
+    stage: usize,
+    /// Where each stage before `stage` ended (`Batch::stage_ends`).
+    stage_ends: [[u32; 4]; STAGES - 1],
 }
 impl Default for WorldGeometry {
     fn default() -> Self {
@@ -54,6 +59,8 @@ impl Default for WorldGeometry {
             groups: std::collections::HashSet::with_capacity(INSTANCE_CAPACITY as usize),
             accepted_models: 0,
             model_cut: 0,
+            stage: 0,
+            stage_ends: [[0; 4]; STAGES - 1],
         }
     }
 }
@@ -68,6 +75,21 @@ impl WorldGeometry {
         self.clear_copies();
         self.model_cut = 0;
         self.groups.clear();
+        self.stage = 0;
+        self.stage_ends = [[0; 4]; STAGES - 1];
+    }
+    /// From now on, lines and quads draw at `stage`: the stages before it end here. Stages
+    /// come in frame order, so a stage before the current one is refused and keeps the current.
+    pub fn begin_stage(&mut self, stage: RenderLevelStage) {
+        let index = RenderLevelStage::ALL
+            .iter()
+            .position(|s| *s == stage)
+            .unwrap_or(STAGES - 1);
+        let counts = self.counts();
+        for ended in self.stage..index.min(STAGES - 1) {
+            self.stage_ends[ended] = counts;
+        }
+        self.stage = self.stage.max(index);
     }
     /// Entity-stream cut used by directly staged instances in this view.
     pub fn set_model_cut(&mut self, cut: u32) {
@@ -242,7 +264,29 @@ impl WorldGeometry {
             lines_through: &self.lines[1],
             quads: &self.quads[0],
             quads_through: &self.quads[1],
+            stage_ends: self.stage_ends(),
         }
+    }
+    /// Quads, quads through walls, lines and lines through walls queued so far.
+    fn counts(&self) -> [u32; 4] {
+        [
+            self.quads[0].len() as u32 / 4,
+            self.quads[1].len() as u32 / 4,
+            self.lines[0].len() as u32,
+            self.lines[1].len() as u32,
+        ]
+    }
+    /// The ends of the stages before the current one; those not reached yet end at the counts
+    /// so far, so what follows draws at the current stage.
+    fn stage_ends(&self) -> [[u32; 4]; STAGES - 1] {
+        let counts = self.counts();
+        std::array::from_fn(|stage| {
+            if stage < self.stage {
+                self.stage_ends[stage]
+            } else {
+                counts
+            }
+        })
     }
 }
 
@@ -336,6 +380,38 @@ pub fn validate_instances(instances: &[ModelInstance]) -> Result<(), InstanceErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stages_end_where_the_next_begins_and_never_go_back() {
+        use RenderLevelStage::*;
+        let mut draw = WorldGeometry::default();
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.5, 0.5]);
+        let line = |depth| WorldLine::new([0.0, 0.0, -1.0], [1.0, 0.0, -1.0], !0, 1.0, depth);
+        let quad = WorldQuad::new([[0.0, 0.0, -1.0]; 4], !0, WorldDepth::ThroughWalls);
+        draw.begin_stage(AfterSky);
+        draw.lines(&[line(WorldDepth::Tested)]).unwrap();
+        // Nothing at AfterOpaqueBlocks; a quad through walls at AfterTranslucentBlocks.
+        draw.begin_stage(AfterTranslucentBlocks);
+        draw.quads(&[quad]).unwrap();
+        // Still in the current stage: what follows a backwards step is not reordered.
+        draw.begin_stage(AfterSky);
+        draw.lines(&[line(WorldDepth::ThroughWalls)]).unwrap();
+        assert_eq!(
+            draw.batch().stage_ends,
+            [[0, 0, 1, 0], [0, 0, 1, 0], [0, 1, 1, 1], [0, 1, 1, 1]],
+            "the current stage runs to the end until the next begins"
+        );
+        draw.begin_stage(AfterLevel);
+        draw.lines(&[line(WorldDepth::Tested)]).unwrap();
+        assert_eq!(
+            draw.batch().stage_ends,
+            [[0, 0, 1, 0], [0, 0, 1, 0], [0, 1, 1, 1], [0, 1, 1, 1]]
+        );
+        assert_eq!(draw.batch().lines.len(), 2);
+        // A new view starts at the first stage again.
+        draw.reset([0.0; 3], Mat4::IDENTITY, [0.5, 0.5]);
+        draw.lines(&[line(WorldDepth::Tested)]).unwrap();
+        assert_eq!(draw.batch().stage_ends, [[0, 0, 1, 0]; 4]);
+    }
     #[test]
     fn world_geometry_batches_are_atomic_and_reset_per_view() {
         let mut draw = WorldGeometry::default();

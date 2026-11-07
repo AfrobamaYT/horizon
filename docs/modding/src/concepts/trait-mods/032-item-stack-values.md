@@ -1,4 +1,5 @@
-# Owned item values
+<!-- chapter: Owned item values -->
+<!-- separator: 1 -->
 
 `ItemStack` is the mod API's own nonempty value, not an engine inventory slot or a borrowed
 rendering view. It contains an `ItemKey`, a nonzero count, an optional numeric damage override
