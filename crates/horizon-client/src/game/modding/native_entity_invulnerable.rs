@@ -223,7 +223,7 @@ mod tests {
                     .unwrap()
                     .clone();
                 game.mobs.push(Mob::new(300001, pig, Vec3::ZERO, 0.0));
-                let victim = game.native_entity(300001).unwrap();
+                let victim = game.entity(300001).unwrap();
                 // An accepted hit: taken, the health drops, the damage hooks
                 // the engine's own path fires are the ones that fire.
                 assert_eq!(
@@ -240,7 +240,7 @@ mod tests {
                 assert_eq!(game.mobs[0].health, 5.0, "the window held");
                 // The flag refuses all but what bypasses it, and the query
                 // answers the same decision the hit ran.
-                assert!(game.native_entity_set_invulnerable(victim, true));
+                assert!(game.entity_set_invulnerable(victim, true));
                 assert_eq!(
                     victim.hurt(game, "minecraft:generic", 5.0, None, None),
                     Some(false)
@@ -288,8 +288,8 @@ mod tests {
                 .clone();
             game.mobs.push(Mob::new(300001, zombie.clone(), Vec3::ZERO, 0.0));
             game.mobs.push(Mob::new(300002, zombie, Vec3::ZERO, 0.0));
-            let a = game.native_entity(300001).unwrap();
-            let b = game.native_entity(300002).unwrap();
+            let a = game.entity(300001).unwrap();
+            let b = game.entity(300002).unwrap();
             // No team on either side: damage is allowed, and a mob without
             // the flag answers the piercing query false.
             assert_eq!(a.entities_team_damage_allowed(game, b), Some(true));
