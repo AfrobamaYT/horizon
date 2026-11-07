@@ -884,6 +884,19 @@ pub(super) mod tests {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use mod_api::NativeAuthority;
 
+        // Parts registration replaces its metadata snapshot. Finish registration before
+        // loading the resource graph, whose registry retains one immutable worker snapshot.
+        let (registry, _) = horizon_world::level::data::load_registry_with_flags(&root).unwrap();
+        let ids: std::collections::HashSet<_> = (0..registry.len())
+            .map(|i| {
+                registry
+                    .state(mod_api::BlockStateId(i as u32))
+                    .unwrap()
+                    .name
+                    .clone()
+            })
+            .collect();
+        crate::game::api_values::register_game_keys(ids);
         let settings = Settings::default();
         let loaded = load_resources(
             horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
@@ -915,17 +928,6 @@ pub(super) mod tests {
         .unwrap();
         game.native_lifecycle
             .begin_open(NativeAuthority::IntegratedServer);
-        let registry = game.pack.assets.registry;
-        let ids: std::collections::HashSet<_> = (0..registry.len())
-            .map(|i| {
-                registry
-                    .state(mod_api::BlockStateId(i as u32))
-                    .unwrap()
-                    .name
-                    .clone()
-            })
-            .collect();
-        crate::game::api_values::register_game_keys(ids);
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.

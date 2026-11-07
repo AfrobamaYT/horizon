@@ -646,6 +646,7 @@ mod tests {
             }
         }
         let calls = Arc::new(AtomicUsize::new(0));
+        let mut overridden_geometry = None;
         let mods: Mods = vec![ModEntry::new("animation", Box::new(Mod(calls.clone())))].into();
         crate::game::api_values::install_parts(&mods).unwrap();
         mod_api::testing::with_mods(mods, || {
@@ -722,16 +723,30 @@ mod tests {
                 game.visible_hands[0].1 = game.inventory[game.selected].clone();
                 let (kinetic_geometry, _) = game.hand_geometry(0.0);
                 assert!(!kinetic_geometry.is_empty());
-                game.inventory[game.selected] =
-                    Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
-                game.visible_hands[0].1 = game.inventory[game.selected].clone();
-                crate::game::api_values::install_parts(&[]).unwrap();
-                crate::game::native_entity_refs::tests::resolve_parts(game).unwrap();
-                let (vanilla, _) = game.hand_geometry(0.0);
-                assert!(!overridden.is_empty());
-                assert_eq!(overridden.len(), vanilla.len());
-                assert!(overridden.iter().zip(&vanilla).any(|(a, b)| a.pos != b.pos));
+                overridden_geometry = Some(overridden);
             });
+        });
+        // The unmodified comparison owns a new resource graph and Parts snapshot.
+        crate::game::api_values::install_parts(&[]).unwrap();
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            game.player = Some(
+                horizon_client::motion::PlayerMotion::new(
+                    game.motion,
+                    horizon_core::geometry::Vec3::ZERO,
+                )
+                .unwrap(),
+            );
+            game.inventory[game.selected] =
+                Some(horizon_client::items::ItemStack::new("minecraft:bow", 1));
+            game.using = Some((game.selected, 0));
+            game.tick_player_model();
+            game.visible_hands[0].1 = game.inventory[game.selected].clone();
+            game.use_duration = 72_000;
+            let (vanilla, _) = game.hand_geometry(0.0);
+            let overridden = overridden_geometry.unwrap();
+            assert!(!overridden.is_empty());
+            assert_eq!(overridden.len(), vanilla.len());
+            assert!(overridden.iter().zip(&vanilla).any(|(a, b)| a.pos != b.pos));
         });
     }
 
