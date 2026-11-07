@@ -85,7 +85,7 @@ impl Game<'_> {
         // the client's listener, particles and sounds above still run there.
         if self.is_logical_server() {
             for effect in &consumable.effects {
-                self.apply_consume_effect(effect, None, true);
+                self.apply_consume_effect(stack, effect, None, true);
             }
         }
         let event = if consumable.animation == UseAnimation::Drink {
@@ -129,12 +129,16 @@ impl Game<'_> {
             .map(|p| [p.position.x, p.position.y, p.position.z])
     }
     /// `TeleportRandomlyConsumeEffect.apply` for the local player.
-    pub(super) fn teleport_randomly(&mut self, teleport: &TeleportConsume) -> bool {
+    pub(super) fn teleport_randomly(
+        &mut self,
+        teleport: &TeleportConsume,
+        consumed: &ItemStack,
+    ) -> bool {
         if self.player.is_none() {
             return false;
         }
         let dim = self.dim;
-        let Ok(result) = teleport.apply(&mut Teleporter(self), dim);
+        let Ok(result) = teleport.apply(&mut Teleporter(self, consumed), dim);
         result
     }
     /// `LivingEntity.randomTeleport(x, y, z, true, avoid)`: down to the first
@@ -356,7 +360,7 @@ impl EmissionWorld for Emitter<'_, '_> {
 }
 
 /// The local player as `TeleportRandomlyConsumeEffect`'s user.
-struct Teleporter<'a, 'g>(&'a mut Game<'g>);
+struct Teleporter<'a, 'g>(&'a mut Game<'g>, &'a ItemStack);
 impl Teleporter<'_, '_> {
     fn at(&self) -> Vec3 {
         self.0.player.as_ref().map_or(Vec3::ZERO, |p| p.position)
@@ -404,6 +408,7 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
         self.0.native_item_consumption_teleport(
             uuid,
             &name,
+            self.1,
             [from.x, from.y, from.z],
             &mut to,
             &mut cancel,
@@ -466,5 +471,84 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
             p.impulse.reset();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod teleport_hook_tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::motion::PlayerMotion;
+    use mod_api::{Flow, Hooks, ItemConsumptionTeleportEvent, ModEntry, ServerHost};
+    use std::sync::{Arc, Mutex};
+
+    struct ConsumptionProbe(Arc<Mutex<Vec<ItemStack>>>);
+    impl Hooks for ConsumptionProbe {
+        fn item_consumption_teleport(
+            &self,
+            _: &mut dyn ServerHost,
+            event: &mut ItemConsumptionTeleportEvent<'_>,
+        ) -> Flow {
+            self.0.lock().unwrap().push(event.consumed.clone());
+            Flow::Cancel
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    fn consumption_hook_keeps_the_stack_before_use_and_cancellation_stops_attempts() {
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "consumed-stack-proof",
+            Box::new(ConsumptionProbe(Arc::clone(&heard))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let at = Vec3::new(0.0, 65.0, 0.0);
+                game.player = Some(PlayerMotion::new(game.motion, at).unwrap());
+                game.lan_acting_uuid = Some(7);
+                game.lan_acting_name = Some("ConsumedStackTest".into());
+                game.creative = false;
+                let mut consumed = ItemStack::new("minecraft:chorus_fruit", 7);
+                consumed.damage = 3;
+                consumed.data_mut().set_loot_name(
+                    "minecraft:custom_name",
+                    &serde_json::json!("Captured fruit"),
+                );
+                game.inventory[game.selected] = Some(consumed.clone());
+                let info = game.items().get(&consumed.item).unwrap().clone();
+                let consumable = consumed.consumable(Some(&info)).unwrap().clone();
+                game.finish_consuming(&info, &consumable, &consumed);
+                assert_eq!(*heard.lock().unwrap(), [consumed.clone()]);
+                assert_eq!(
+                    game.held().unwrap().count,
+                    6,
+                    "veto stops teleport, not consumption"
+                );
+                assert_eq!(game.player.as_ref().unwrap().position, at);
+
+                // The source stack is explicit, even if the hand has since changed.
+                game.inventory[game.selected] = Some(ItemStack::new("minecraft:stone", 1));
+                let mut expected_random = game.world.random.clone();
+                for _ in 0..3 {
+                    expected_random.next_double();
+                }
+                assert!(!game.teleport_randomly(
+                    &TeleportConsume {
+                        diameter: 16.0,
+                        directional_particles: true,
+                    },
+                    &consumed
+                ));
+                assert_eq!(*heard.lock().unwrap(), [consumed.clone(), consumed]);
+                assert_eq!(
+                    game.world.random.next_long(),
+                    expected_random.next_long(),
+                    "veto ends the effect after the first candidate's three draws"
+                );
+                assert_eq!(game.player.as_ref().unwrap().position, at);
+            })
+        });
     }
 }

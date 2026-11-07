@@ -1884,17 +1884,19 @@ impl Game<'_> {
     /// drawn; a mod may move it (its y kept inside the level's height, a
     /// value that is not a number ignored), and the game still looks down
     /// from it for ground it may land on. Canceling ends the effect: no teleport and no
-    /// more attempts. The player's state is swapped in
+    /// more attempts. `consumed` is the stack captured before use, including its
+    /// count and components. The player's state is swapped in
     /// (`native_acting_player`). Foxes are not heard.
     pub(in crate::game) fn native_item_consumption_teleport(
         &mut self,
         player: u128,
         name: &str,
+        consumed: &ItemStack,
         from: [f64; 3],
         target: &mut [f64; 3],
         cancel: &mut bool,
     ) {
-        self.fire_item_consumption_teleport(player, name, from, target, cancel);
+        self.fire_item_consumption_teleport(player, name, consumed, from, target, cancel);
     }
     /// A server player a command teleported (NeoForge's
     /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
