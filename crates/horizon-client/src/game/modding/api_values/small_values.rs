@@ -93,7 +93,11 @@ mod recipe_tests {
                 mod_api::RecipeJsonError::InvalidJson
             );
             assert_eq!(
-                game.recipe_result(r#""iron_ingot""#).unwrap().unwrap().item,
+                game.recipe_result(r#""iron_ingot""#)
+                    .unwrap()
+                    .unwrap()
+                    .item
+                    .as_ref(),
                 "minecraft:iron_ingot"
             );
             let bare = game.recipe_ingredient(r#""iron_ingot""#).unwrap().unwrap();
@@ -124,7 +128,7 @@ mod recipe_tests {
                     .is_none()
             );
             let stack = game.recipe_result(r#"{"id":"iron_ingot","count":2,"components":{"minecraft:custom_data":{"answer":42}}}"#).unwrap().unwrap();
-            assert_eq!(stack.item, "minecraft:iron_ingot");
+            assert_eq!(stack.item.as_ref(), "minecraft:iron_ingot");
             assert_eq!(stack.count, 2);
             assert_eq!(
                 stack
