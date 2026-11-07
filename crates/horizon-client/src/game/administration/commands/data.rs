@@ -586,17 +586,31 @@ impl Game<'_> {
             Target::Rocket(id) | Target::Trident(id) => {
                 Some(self.persist.raw.entry(id).or_insert_with(empty))
             }
-            Target::Falling(id) => {
-                let uuid = self.uuid_for(id);
-                let f = self.falling.iter_mut().find(|f| f.id == id)?;
-                Some(&mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1)
-            }
             _ => None,
         }
     }
     /// Writes `t`'s `Tags`; false when its kind keeps no saved compound to
     /// write them to.
     pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) -> bool {
+        if let Target::Falling(id) = t {
+            let uuid = self.uuid_for(id);
+            let Some(i) = self.falling.iter().position(|f| f.id == id) else {
+                return false;
+            };
+            self.falling.update(i, |f| {
+                let raw = &mut f.saved.get_or_insert_with(|| Box::new((uuid, empty()))).1;
+                set_key(
+                    raw,
+                    "Tags",
+                    Tag::List(
+                        tags.iter()
+                            .map(|s| Tag::String(s.as_str().into()))
+                            .collect(),
+                    ),
+                );
+            });
+            return true;
+        }
         let Some(raw) = self.raw_mut(t) else {
             return false;
         };

@@ -221,6 +221,10 @@ impl<T> ResidentList<T> {
     pub fn push(&mut self, entity: T) {
         self.0.0.push(entity);
     }
+    /// Append a batch after any owners already in this storage.
+    pub fn append(&mut self, other: &mut Self) {
+        self.0.append(&mut other.0);
+    }
     pub fn remove(&mut self, index: usize) -> T {
         self.0.remove(index)
     }
@@ -250,6 +254,12 @@ impl<T> ResidentList<T> {
     pub fn restore(&mut self, mut taken: Self) {
         taken.0.append(&mut self.0);
         *self = taken;
+    }
+}
+
+impl<T> FromIterator<T> for ResidentList<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(entities: I) -> Self {
+        Self(JoinList(entities.into_iter().collect()))
     }
 }
 
@@ -679,6 +689,17 @@ mod resident_tests {
         assert_eq!(list.remove(1), 30);
         assert_eq!(list.drain(..1).collect::<Vec<_>>(), [10]);
         assert_eq!(&*list, &[4]);
+    }
+
+    #[test]
+    fn resident_append_preserves_spawn_buffer_before_survivors() {
+        let mut list: ResidentList<_> = [1, 2].into_iter().collect();
+        let mut taken = list.take();
+        list.push(3);
+        taken.retain(|&id| id != 1);
+        list.append(&mut taken);
+        assert_eq!(&*list, &[3, 2]);
+        assert!(taken.is_empty());
     }
 
     #[test]

@@ -229,6 +229,7 @@ impl Game<'_> {
         host.hub.guests.update(i, |g| {
             std::mem::swap(&mut self.inventory, &mut g.inventory);
             std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.location_armor, &mut g.location_armor);
             std::mem::swap(&mut self.offhand, &mut g.offhand);
             std::mem::swap(&mut self.equipment, &mut g.equipment);
             std::mem::swap(&mut self.carried, &mut g.carried);
@@ -819,6 +820,7 @@ impl Game<'_> {
             g.selected = std::mem::replace(&mut self.selected, selected);
             std::mem::swap(&mut self.inventory, &mut g.inventory);
             std::mem::swap(&mut self.armor, &mut g.armor);
+            std::mem::swap(&mut self.location_armor, &mut g.location_armor);
             std::mem::swap(&mut self.offhand, &mut g.offhand);
             std::mem::swap(&mut self.equipment, &mut g.equipment);
             std::mem::swap(&mut self.carried, &mut g.carried);
