@@ -1932,29 +1932,36 @@ fn owned_text_component(text: &mod_api::text::Text) -> serde_json::Value {
                 out.insert("separator".into(), owned_text_component(separator));
             }
         }
-        C::Object(O::Player {
-            profile,
-            hat,
-            fallback,
-        }) => {
-            out.extend([
-                ("object".into(), "player".into()),
-                ("player".into(), profile.clone()),
-                ("hat".into(), (*hat).into()),
-                ("fallback".into(), fallback.clone().into()),
-            ]);
-        }
-        C::Object(O::Atlas {
-            atlas,
-            sprite,
-            fallback,
-        }) => {
-            out.extend([
-                ("object".into(), "atlas".into()),
-                ("atlas".into(), atlas.clone().into()),
-                ("sprite".into(), sprite.clone().into()),
-                ("fallback".into(), fallback.clone().into()),
-            ]);
+        C::Object(object) => {
+            let fallback = match object {
+                O::Player {
+                    profile,
+                    hat,
+                    fallback,
+                } => {
+                    out.extend([
+                        ("object".into(), "player".into()),
+                        ("player".into(), profile.clone()),
+                        ("hat".into(), (*hat).into()),
+                    ]);
+                    fallback
+                }
+                O::Atlas {
+                    atlas,
+                    sprite,
+                    fallback,
+                } => {
+                    out.extend([
+                        ("object".into(), "atlas".into()),
+                        ("atlas".into(), atlas.clone().into()),
+                        ("sprite".into(), sprite.clone().into()),
+                    ]);
+                    fallback
+                }
+            };
+            if let Some(fallback) = fallback {
+                out.insert("fallback".into(), owned_text_component(fallback));
+            }
         }
     }
     out.extend(owned_text_style(&text.style));
@@ -2158,13 +2165,57 @@ mod text_encoding_tests {
                 C::Object(TextObject::Player {
                     profile: json!({"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}),
                     hat: false,
-                    fallback: "head".into(),
+                    fallback: Some(Box::new(Text::literal("head"))),
                 }),
-                json!({"object":"player", "player":{"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}, "hat":false, "fallback":"head"}),
+                json!({"object":"player", "player":{"name":"Test", "properties":[{"name":"textures", "value":"data", "signature":"signed"}]}, "hat":false, "fallback":{"text":"head"}}),
             ),
         ] {
             let engine = Text::new(content).try_into_engine(&()).unwrap();
             assert_eq!(engine.component(), expected);
+        }
+    }
+
+    #[test]
+    fn object_fallback_encoder_keeps_default_styling_and_translation_tree() {
+        let mut styled = Text::literal("styled");
+        styled.style.italic = Some(false);
+        for player in [true, false] {
+            for (fallback, expected) in [
+                (None, None),
+                (
+                    Some(Box::new(styled.clone())),
+                    Some(json!({"text":"styled", "italic":false})),
+                ),
+                (
+                    Some(Box::new(Text::translate("test.head", vec![]))),
+                    Some(json!({"translate":"test.head"})),
+                ),
+            ] {
+                let object = if player {
+                    TextObject::Player {
+                        profile: json!({"name":"Test"}),
+                        hat: true,
+                        fallback,
+                    }
+                } else {
+                    TextObject::Atlas {
+                        atlas: "minecraft:blocks".into(),
+                        sprite: "test:icon".into(),
+                        fallback,
+                    }
+                };
+                let engine = Text::new(C::Object(object)).try_into_engine(&()).unwrap();
+                match expected {
+                    None => {
+                        assert!(engine.component().get("fallback").is_none());
+                        assert_eq!(
+                            engine.plain(),
+                            if player { "[Test head]" } else { "[test:icon]" }
+                        );
+                    }
+                    Some(expected) => assert_eq!(engine.component()["fallback"], expected),
+                }
+            }
         }
     }
 
