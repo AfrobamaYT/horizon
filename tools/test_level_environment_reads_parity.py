@@ -13,10 +13,12 @@ except ImportError:
 
 
 def read_rows(path):
+    """Decode nonempty JSONL fixture or outcome records in their original order."""
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def main():
+    """Compare both authenticated vanilla references and run the public Game regressions."""
     lock, jars, libraries = base.verify_artifacts()
     build = lab.LOCAL / 'level-environment-reads'
     build.mkdir(parents=True, exist_ok=True)

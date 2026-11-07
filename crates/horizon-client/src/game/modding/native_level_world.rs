@@ -93,8 +93,12 @@ impl Game<'_> {
             Dim::Nether => self.res.nether_environment(),
             Dim::End => self.res.end_environment(),
         };
-        let (rain, thunder) = weather_for_world(world, dimension == Dim::End);
-        horizon_client::environment::sky_darken(environment, world.day_time, rain, thunder)
+        let (rain, thunder) = weather_for_level(
+            world.shape,
+            dimension == Dim::End,
+            self.world.weather.levels(1.0),
+        );
+        horizon_client::environment::sky_darken(environment, self.world.day_time, rain, thunder)
     }
 
     /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.

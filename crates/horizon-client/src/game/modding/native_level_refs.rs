@@ -1884,6 +1884,9 @@ mod environment_read_tests {
                 game.world.day_time = time;
                 assert_eq!(overworld.get_sky_darken(game), Some(game.sky_darken()));
             }
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.0, 0.0);
+            game.world.weather.thunder_level = (0.0, 0.0);
             game.enter_level(Dim::Nether).unwrap();
             let nether = game.level("minecraft:the_nether").unwrap();
             assert_eq!(nether.logical_height(game), Some(128));
@@ -1893,6 +1896,22 @@ mod environment_read_tests {
                 "logical and build heights differ"
             );
             assert_eq!(nether.get_sky_darken(game), Some(11));
+            // The vanilla fixture records clear midnight as 11 and half-rain noon as 1.
+            // Change the shared state while the Overworld snapshot stays parked at noon.
+            game.world.day_time = 18000;
+            assert_eq!(overworld.day_time(game), Some(18000));
+            assert_eq!(overworld.get_sky_darken(game), Some(11));
+            game.world.day_time = 6000;
+            game.world.weather.rain_level = (0.5, 0.5);
+            assert_eq!(overworld.get_sky_darken(game), Some(1));
+            assert_eq!(nether.get_sky_darken(game), Some(11));
+            assert_eq!(game.dim, Dim::Nether, "a read does not swap levels");
+            let parked = game.levels.parked_world_of("minecraft:overworld").unwrap();
+            assert_eq!(
+                parked.day_time, 6000,
+                "the parked snapshot is not rewritten"
+            );
+            assert_eq!(parked.weather.levels(1.0), (0.0, 0.0));
             game.enter_level(Dim::Overworld).unwrap();
             game.world.day_time = 6000;
             assert_eq!(nether.logical_height(game), Some(128));

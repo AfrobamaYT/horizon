@@ -24,15 +24,19 @@ import net.minecraft.world.level.material.FluidState;
 /** Original fixtures calling the pinned biome, floor, dimension and sky-light queries. */
 public final class VanillaLevelEnvironmentReadsOracle {
     private static final String[] BIOMES = {"minecraft:plains", "minecraft:desert", "minecraft:forest"};
+    /** Decode the fixture's three signed block coordinates. */
     private static int[] position(JsonArray values) {
         return new int[]{values.get(0).getAsInt(), values.get(1).getAsInt(), values.get(2).getAsInt()};
     }
+    /** Encode a matched block position as three JSON integers. */
     private static JsonArray coordinates(int x, int y, int z) {
         var array = new JsonArray(); array.add(x); array.add(y); array.add(z); return array;
     }
+    /** Create the fixture dimension key used to select a world-preset stem. */
     private static ResourceKey<LevelStem> dimensionKey(String name) {
         return ResourceKey.create(Registries.LEVEL_STEM, Identifier.parse(name));
     }
+    /** Read the fixture palette through vanilla chunk storage and fuzzy biome zoom. */
     private static JsonElement biome(JsonObject input, DimensionType dimension) {
         var lookup = ParityData.access.lookupOrThrow(Registries.BIOME);
         var chunks = new HashMap<ChunkPos, ProtoChunk>();
@@ -55,6 +59,7 @@ public final class VanillaLevelEnvironmentReadsOracle {
         var result = manager.getBiome(new BlockPos(p[0], p[1], p[2]));
         return result == null ? JsonNull.INSTANCE : new JsonPrimitive(result.unwrapKey().orElseThrow().identifier().toString());
     }
+    /** Invoke the collision-floor query on the fixture's two block states. */
     private static JsonElement floor(JsonObject input) {
         BlockState here = BuiltInRegistries.BLOCK.getValue(Identifier.parse(input.get("here").getAsString())).defaultBlockState();
         BlockState below = BuiltInRegistries.BLOCK.getValue(Identifier.parse(input.get("below").getAsString())).defaultBlockState();
@@ -72,6 +77,7 @@ public final class VanillaLevelEnvironmentReadsOracle {
         return Double.isInfinite(result) ? new JsonPrimitive("-Infinity") : new JsonPrimitive(result);
     }
     @SuppressWarnings("deprecation")
+    /** Build dimension/weather attributes and invoke the real Level update/get pair. */
     private static JsonElement sky(JsonObject input, DimensionType dimension) {
         long time = input.get("time").getAsLong();
         float rain = input.get("rain").getAsFloat(), thunder = input.get("thunder").getAsFloat();
@@ -95,6 +101,7 @@ public final class VanillaLevelEnvironmentReadsOracle {
         ParityData.level.updateSkyBrightness();
         return new JsonPrimitive(ParityData.level.getSkyDarken());
     }
+    /** Search the preset's real biome source with the requested selector and sampling bounds. */
     private static JsonElement search(JsonObject input, LevelStem stem) {
         var generator = (NoiseBasedChunkGenerator) stem.generator();
         var settings = generator.generatorSettings().value();
@@ -120,6 +127,7 @@ public final class VanillaLevelEnvironmentReadsOracle {
         BlockPos pos = result.getFirst(); output.add("position", coordinates(pos.getX(), pos.getY(), pos.getZ()));
         return output;
     }
+    /** Emit one vanilla outcome per JSONL input with the loaded registry data. */
     public static void main(String[] args) throws Exception {
         ParityData.init();
         var preset = ParityData.access.lookupOrThrow(Registries.WORLD_PRESET).getOrThrow(WorldPresets.NORMAL).value();
