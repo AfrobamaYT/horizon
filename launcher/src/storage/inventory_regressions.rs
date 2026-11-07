@@ -51,3 +51,43 @@ fn hard_linked_outputs_across_entries_count_once() {
         .unwrap();
     assert_eq!(row.bytes, expected);
 }
+
+#[test]
+fn referenced_jar_path_is_kept_and_unused_jar_is_removed() {
+    use horizon_mod_package::{manifest::JarRef, Package};
+    use sha2::{Digest, Sha512};
+    use std::io::Write;
+    let home = Home::new();
+    fs::create_dir_all(home.0.join("jars")).unwrap();
+    let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    archive
+        .start_file(
+            "assets/example/lang/en_us.json",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+    archive.write_all(b"{}").unwrap();
+    let bytes = archive.finish().unwrap().into_inner();
+    let jar = JarRef::new(
+        "original".into(),
+        "1.0.0".into(),
+        format!("{:x}", Sha512::digest(&bytes)),
+    )
+    .unwrap();
+    let referenced = jar.cache_path(&home.0.join("jars"));
+    fs::write(&referenced, bytes).unwrap();
+    let manifest = home.seed("horizon-mods/example/horizon-mod.toml");
+    fs::write(&manifest, format!("id='example'\nname='Example'\nversion='1.0.0'\napi='0.2'\ncapabilities=['registries']\n[[jar]]\nid='original'\nversion='1.0.0'\nsha512='{}'\n", jar.sha512())).unwrap();
+    Package::read(manifest.parent().unwrap()).unwrap();
+    let unused = home.seed("jars/unused.jar");
+    let storage = Storage::at(&home.0).unwrap();
+    let mut entries = Vec::new();
+    unused_jars(&mut entries, &home.0).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, unused);
+    storage
+        .apply(entries, Some(Category::OtherCaches), false)
+        .unwrap();
+    assert!(referenced.exists());
+    assert!(!unused.exists());
+}

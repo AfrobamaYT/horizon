@@ -97,3 +97,96 @@ fn running_unplayed_version_is_excluded_until_its_process_exits() {
     home.clear("spare-game-builds");
     assert!(!game.exists());
 }
+
+impl Home {
+    fn installed_version(&self) {
+        self.file("launcher/versions/v0.0.1/.installed", b"");
+        self.file("launcher/settings.json", br#"{"selected":"v0.0.1"}"#);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn instance_caches_are_preserved_while_running_and_cleared_when_idle() {
+    use std::process::Stdio;
+    let home = Home::new();
+    home.installed_version();
+    let game = home.file("launcher/versions/v0.0.1/game", b"running");
+    let cache = home.file("game/.horizon-cache/held-output", b"active instance cache");
+    let mut process = Command::new("sh")
+        .args(["-c", "read -r ignored", "storage-instance"])
+        .arg(game)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    home.clear("other-caches");
+    assert_eq!(
+        fs::read(&cache).unwrap(),
+        b"active instance cache",
+        "running instance cache was selected"
+    );
+    process.kill().unwrap();
+    process.wait().unwrap();
+    home.clear("other-caches");
+    assert!(!cache.exists(), "idle instance cache was not selected");
+}
+
+#[test]
+fn unresolved_instance_caches_are_never_selected() {
+    let home = Home::new();
+    home.file(
+        "launcher/settings.json",
+        br#"{"selected":"missing-version"}"#,
+    );
+    let cache = home.file("game/wasm-cache/precious", b"unresolved instance cache");
+    home.clear("other-caches");
+    assert_eq!(
+        fs::read(cache).unwrap(),
+        b"unresolved instance cache",
+        "an unresolved instance cannot prove it is idle"
+    );
+}
+
+#[test]
+fn retention_removes_only_reports_older_than_fourteen_days_and_keeps_the_newest() {
+    use std::time::{Duration, SystemTime};
+    let home = Home::new();
+    home.installed_version();
+    for (name, days) in [
+        ("logs/old.log", 15),
+        ("logs/recent.log", 13),
+        ("logs/latest.log", 0),
+        ("crash-reports/old.txt", 20),
+        ("crash-reports/newest.txt", 16),
+    ] {
+        let path = home.file(&format!("game/{name}"), b"report");
+        let modified = SystemTime::now() - Duration::from_secs(days * 86400);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+    home.clear("other-caches");
+    assert!(
+        !home.0.join("game/logs/old.log").exists(),
+        "15-day log was not cleared"
+    );
+    assert!(
+        home.0.join("game/logs/recent.log").exists(),
+        "13-day log was cleared"
+    );
+    assert!(
+        home.0.join("game/logs/latest.log").exists(),
+        "latest log was cleared"
+    );
+    assert!(
+        !home.0.join("game/crash-reports/old.txt").exists(),
+        "old crash report was not cleared"
+    );
+    assert!(
+        home.0.join("game/crash-reports/newest.txt").exists(),
+        "newest crash report must survive even after 14 days"
+    );
+}

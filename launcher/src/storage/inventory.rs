@@ -156,6 +156,49 @@ impl Storage {
                 )?;
             }
         }
+        for relative in ["cache/github", "mod-browser", "profile-heads"] {
+            add(&mut entries, &data, relative, Category::OtherCaches)?;
+        }
+        for instance in instances::list() {
+            // A missing version cannot prove that the instance is idle. Keep its caches.
+            let Ok(version) = instance.resolve_version(None) else {
+                continue;
+            };
+            if backend::in_use(&version) {
+                continue;
+            }
+            old_logs(&mut entries, &instance.home)?;
+            unused_jars(&mut entries, &instance.home)?;
+            for relative in [".horizon-cache", "wasm-cache", "cache"] {
+                add(
+                    &mut entries,
+                    &instance.home,
+                    relative,
+                    Category::OtherCaches,
+                )?;
+            }
+        }
+        // Detached trees can remain beside any managed cache after an interrupted removal.
+        let parents: HashSet<_> = entries
+            .iter()
+            .filter_map(|entry| entry.path.parent().map(Path::to_owned))
+            .chain([self.root.clone(), data])
+            .collect();
+        for parent in parents {
+            if checked(&parent, true)?.is_none() {
+                continue;
+            }
+            for entry in fs::read_dir(&parent)? {
+                let entry = entry?;
+                if entry.file_name().to_string_lossy().starts_with(".trash-") {
+                    entries.push(Entry::fixed(
+                        &parent,
+                        Path::new(&entry.file_name()),
+                        Category::OtherCaches,
+                    )?);
+                }
+            }
+        }
         Ok(entries)
     }
 
@@ -216,4 +259,75 @@ impl Storage {
             rows,
         })
     }
+}
+
+fn old_logs(entries: &mut Vec<Entry>, home: &Path) -> Result<(), Error> {
+    for directory in ["logs", "crash-reports"] {
+        let folder = Entry::fixed(home, Path::new(directory), Category::OtherCaches)?.path;
+        if checked(&folder, true)?.is_none() {
+            continue;
+        }
+        let mut files = Vec::new();
+        for entry in fs::read_dir(&folder)? {
+            let entry = entry?;
+            let Some(meta) = checked(&entry.path(), false)? else {
+                continue;
+            };
+            files.push((meta.modified()?, entry.file_name()));
+        }
+        files.sort();
+        files.pop(); // Always retain the latest report, even when it is older than fourteen days.
+        for (modified, name) in files {
+            if modified
+                .elapsed()
+                .is_ok_and(|age| age.as_secs() > 14 * 86400)
+            {
+                entries.push(Entry::fixed(
+                    home,
+                    &Path::new(directory).join(name),
+                    Category::OtherCaches,
+                )?);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unused_jars(entries: &mut Vec<Entry>, home: &Path) -> Result<(), Error> {
+    use horizon_mod_package::{
+        mod_list::{DIR, NATIVE_DIR},
+        Package,
+    };
+    let folder = Entry::fixed(home, Path::new("jars"), Category::OtherCaches)?.path;
+    if checked(&folder, true)?.is_none() {
+        return Ok(());
+    }
+    let mut referenced = HashSet::new();
+    for directory in [DIR, NATIVE_DIR] {
+        let path = Entry::fixed(home, Path::new(directory), Category::OtherCaches)?.path;
+        for package in horizon_mod_package::find(&path) {
+            // A malformed package cannot prove a jar is unused. Retain all jars in that case.
+            let Ok(package) = Package::read(&package) else {
+                return Ok(());
+            };
+            referenced.extend(
+                package
+                    .manifest
+                    .jar
+                    .iter()
+                    .map(|jar| jar.cache_path(&folder)),
+            );
+        }
+    }
+    for entry in fs::read_dir(folder)? {
+        let entry = entry?;
+        if !referenced.contains(&entry.path()) {
+            entries.push(Entry::fixed(
+                home,
+                &Path::new("jars").join(entry.file_name()),
+                Category::OtherCaches,
+            )?);
+        }
+    }
+    Ok(())
 }
