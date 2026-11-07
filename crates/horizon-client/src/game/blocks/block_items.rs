@@ -93,7 +93,13 @@ impl Game<'_> {
         if let (Some(name), Tag::Compound(map)) = (self.world.block_names.get(&key), &mut tag) {
             map.insert("CustomName".into(), Tag::String(name.as_str().into()));
         }
-        block_entity_nbt::canonical(&tag)
+        if matches!(entity, BlockEntity::Mod(_)) {
+            // The mod owns its serializer; the vanilla canonicalizer only knows
+            // vanilla entity types and must not discard this instance's data.
+            Some(tag)
+        } else {
+            block_entity_nbt::canonical(&tag)
+        }
     }
 
     /// The `CustomName` a block entity loads from `tag`
@@ -479,7 +485,7 @@ mod tests {
                     .expect("native type");
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
-                event.blocks.push(horizon_mods::content::Block {
+                event.blocks.push(horizon_mod_package::content::Block {
                     id: CRATE.into(),
                     template: "minecraft:white_banner".into(),
                     item: true,
@@ -500,10 +506,10 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let state = game.pack.assets.registry.default_state(CRATE).unwrap();
             for x in [1, 2] {
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 64, 0],
                     state,

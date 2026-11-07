@@ -944,7 +944,7 @@ impl Game<'_> {
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
         candidates.extend(self.crystals.iter().map(|c| Target::Crystal(c.id)));
-        if let Some(d) = &self.dragon {
+        if let Some(d) = self.dragon.as_ref() {
             candidates.push(Target::Dragon(d.id));
         }
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
@@ -965,6 +965,7 @@ impl Game<'_> {
             Dim::Overworld => 0,
             Dim::Nether => 1,
             Dim::End => 2,
+            Dim::Extra(_) => 3,
         });
         dims
     }
@@ -996,12 +997,13 @@ impl Game<'_> {
         .into_iter()
         .find(|t| self.level_holds(*t))
     }
-    /// Whether the level in place holds the entity a target names.
+    /// `ServerLevel.getEntity`: whether the level in place still holds the
+    /// entity a target names. Discard removes mobs from lookup immediately.
     fn level_holds(&self, t: Target) -> bool {
         match t {
             // A player is in no level of its own.
             Target::Player | Target::Guest(_) => true,
-            Target::Mob(id) => self.mobs.iter().any(|m| m.id == id),
+            Target::Mob(id) => self.mobs.iter().any(|m| m.id == id && !m.removed),
             Target::Item(id) => self.dropped.iter().any(|i| i.id == id),
             Target::Orb(id) => self.orbs.iter().any(|o| o.id == id),
             Target::Projectile(id) => self.creatures.projectiles.iter().any(|p| p.id == id),
@@ -1096,6 +1098,7 @@ impl Game<'_> {
 
     fn execute_command(&mut self, id: &str, ctx: &Context) -> R<i32> {
         match id {
+            "native_mod_command" => self.run_native_command(ctx.clone()),
             "help" => self.cmd_help(ctx),
             "gamemode" => self.cmd_gamemode(ctx),
             "defaultgamemode" => {
@@ -1475,7 +1478,7 @@ impl Game<'_> {
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    let left = g.give(ItemStack {
+                    let left = g.add_stack_to_inventory(ItemStack {
                         item: id.as_str().into(),
                         count: size as u32,
                         damage,
@@ -1692,12 +1695,14 @@ impl Game<'_> {
                 }
             }
             Target::Projectile(id) => {
-                if let Some(a) = self.creatures.projectiles.iter_mut().find(|a| a.id == id) {
-                    a.position = v;
-                    a.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(a, r);
-                    }
+                if let Some(i) = self.creatures.projectiles.iter().position(|a| a.id == id) {
+                    self.creatures.projectiles.update(i, |a| {
+                        a.position = v;
+                        a.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(a, r);
+                        }
+                    });
                 }
             }
             Target::Stand(id) => {
@@ -1713,42 +1718,50 @@ impl Game<'_> {
                 }
             }
             Target::Boat(id) => {
-                if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                    b.position = v;
-                    b.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(b, r);
-                    }
+                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                    self.boats.update(i, |b| {
+                        b.position = v;
+                        b.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(b, r);
+                        }
+                    });
                 }
             }
             Target::Cart(id) => {
-                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                    c.position = v;
-                    c.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(c, r);
-                    }
+                if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                    self.carts.update(i, |c| {
+                        c.position = v;
+                        c.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(c, r);
+                        }
+                    });
                 }
             }
             Target::Fangs(id) => {
-                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
-                    f.pos = [v.x, v.y, v.z];
-                    if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
-                        f.yaw = yaw;
-                    }
+                if let Some(i) = self.fangs.list.iter().position(|e| e.id == id) {
+                    self.fangs.list.update(i, |f| {
+                        f.pos = [v.x, v.y, v.z];
+                        if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
+                            f.yaw = yaw;
+                        }
+                    });
                 }
             }
             Target::Other(id) => {
-                if let Some(o) = self.others.iter_mut().find(|o| o.id == id) {
-                    o.position = v;
-                    if let Some([yaw, pitch]) = rotation {
-                        if yaw.is_finite() {
-                            o.yaw = yaw;
+                if let Some(i) = self.others.iter().position(|e| e.id == id) {
+                    self.others.update(i, |o| {
+                        o.position = v;
+                        if let Some([yaw, pitch]) = rotation {
+                            if yaw.is_finite() {
+                                o.yaw = yaw;
+                            }
+                            if !pitch.is_nan() {
+                                o.pitch = entity_pitch(pitch);
+                            }
                         }
-                        if !pitch.is_nan() {
-                            o.pitch = entity_pitch(pitch);
-                        }
-                    }
+                    });
                 }
             }
             Target::Crystal(id) => {
@@ -1772,12 +1785,14 @@ impl Game<'_> {
                 }
             }
             Target::Falling(id) => {
-                if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
-                    f.position = v;
-                    f.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(f, r);
-                    }
+                if let Some(i) = self.falling.iter().position(|f| f.id == id) {
+                    self.falling.update(i, |f| {
+                        f.position = v;
+                        f.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(f, r);
+                        }
+                    });
                 }
             }
             Target::Rocket(id) => {
@@ -1799,13 +1814,17 @@ impl Game<'_> {
                 }
             }
             Target::Spawner(id) => {
-                if let Some(s) = self.ominous_spawners.iter_mut().find(|s| s.id == id) {
-                    s.position = [v.x, v.y, v.z];
+                if let Some(i) = self.ominous_spawners.iter().position(|e| e.id == id) {
+                    self.ominous_spawners.update(i, |s| {
+                        s.position = [v.x, v.y, v.z];
+                    });
                 }
             }
             Target::Cloud(id) => {
-                if let Some(c) = self.breath_clouds.iter_mut().find(|c| c.id == id) {
-                    c.at = pos;
+                if let Some(i) = self.breath_clouds.iter().position(|e| e.id == id) {
+                    self.breath_clouds.update(i, |c| {
+                        c.at = pos;
+                    });
                 }
             }
             // Wall-mounted entities do not move.
@@ -2151,7 +2170,7 @@ impl Game<'_> {
         let clock = match ctx.get("clock") {
             Some(Arg::Resource(c)) => c.clone(),
             _ => match self.dim {
-                Dim::Overworld => "minecraft:overworld".to_owned(),
+                Dim::Overworld | Dim::Extra(_) => "minecraft:overworld".to_owned(),
                 Dim::End => "minecraft:the_end".to_owned(),
                 Dim::Nether => {
                     return Err(err("commands.time.no_default_clock", &[&self.dim.id()]));
@@ -2579,12 +2598,14 @@ impl Game<'_> {
                     // EndCrystal's constructor takes an id from the entity
                     // counter, and the crystal is shown with its base.
                     self.next_entity += 1;
+                    let at = Vec3::new(pos[0], pos[1], pos[2]);
+                    let drawn = self.world.random.next_int_bound(100_000).unwrap_or(0);
                     self.crystals.push(super::dragon::Crystal {
                         join: Default::default(),
                         id: self.next_entity,
-                        position: Vec3::new(pos[0], pos[1], pos[2]),
+                        position: at,
                         show_bottom: true,
-                        time: self.world.random.next_int_bound(100_000).unwrap_or(0),
+                        time: super::dragon::Crystal::start_time(at, drawn, self.clock.still()),
                         beam: None,
                         invulnerable: false,
                     });
@@ -3433,6 +3454,8 @@ impl Game<'_> {
         let Some(rule) = self.ui.rules.rule(&name).cloned() else {
             return Ok(0);
         };
+        // GameRule.id(): only the default namespace is omitted in messages.
+        let rule_id = rule.name.strip_prefix("minecraft:").unwrap_or(&rule.name);
         let current = self.ui.rules.get(&rule.name).unwrap_or(rule.default);
         let value = match ctx.get("value") {
             Some(Arg::Bool(b)) => Value::Bool(*b),
@@ -3440,7 +3463,7 @@ impl Game<'_> {
             _ => {
                 self.feedback_unbroadcast(Text::tr(
                     "commands.gamerule.query",
-                    &[&rule.name, &current],
+                    &[&rule_id, &current],
                 ));
                 return Ok(match current {
                     Value::Bool(b) => i32::from(b),
@@ -3449,7 +3472,7 @@ impl Game<'_> {
             }
         };
         if current == value {
-            return Err(err("commands.gamerule.not_set", &[&rule.name, &value]));
+            return Err(err("commands.gamerule.not_set", &[&rule_id, &value]));
         }
         let name = self.lan_acting_name.clone();
         let actor = match (
@@ -3465,7 +3488,7 @@ impl Game<'_> {
             _ => None,
         };
         self.set_game_rule(&rule, value, actor.as_ref());
-        self.feedback(Text::tr("commands.gamerule.set", &[&rule.name, &value]));
+        self.feedback(Text::tr("commands.gamerule.set", &[&rule_id, &value]));
         Ok(match value {
             Value::Bool(b) => i32::from(b),
             Value::Int(i) => i,
@@ -4094,6 +4117,7 @@ impl Game<'_> {
         ));
         Ok(count as i32)
     }
+    /// `SayCommand.register`: resolve the source name and broadcast unsigned announcements.
     fn cmd_say(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let raw = match ctx.get(if id == "me" { "action" } else { "message" }) {
             Some(Arg::Str(s)) => s.clone(),
@@ -4101,13 +4125,47 @@ impl Game<'_> {
         };
         let message = self.expand_selectors(&raw);
         // CommandSourceStack.getDisplayName: the executing entity's name.
-        let name = match self.command_source.map(|s| s.entity) {
-            Some(Some(t)) => self.target_name(t),
-            Some(None) => Text::literal("Server"),
+        let name = match self.command_source {
+            Some(source) => match source.entity {
+                Some(target) => self.target_name(target),
+                None => source
+                    .block
+                    .and_then(|pos| match self.world.block_entities.get(&pos) {
+                        Some(horizon_client::containers::BlockEntity::CommandBlock(block)) => {
+                            Some(block.name())
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        source.cart.and_then(|id| {
+                            self.carts
+                                .iter()
+                                .find(|cart| cart.id == id)
+                                .map(|cart| cart.command.name())
+                        })
+                    })
+                    .unwrap_or_else(|| Text::literal("Server")),
+            },
             None => self.player_display_name(),
         };
+        // A player's command whose output is captured (a function, `execute …
+        // run say`, the command harness) gets the announcement with that
+        // output, in order; everyone else gets the broadcast.
+        let captured_for = self.chat_capture.as_ref().and(self.lan_acting);
         let line = match id {
-            "say" => Text::translate("chat.type.announcement", &[name, message]),
+            "say" => {
+                // SayCommand broadcasts independently of the command source's feedback.
+                if let Some(host) = &self.lan {
+                    use horizon_client::lan::data::component_nbt;
+                    host.hub.broadcast_source_chat(
+                        "say_command",
+                        component_nbt(&name.component()),
+                        component_nbt(&message.component()),
+                        captured_for,
+                    );
+                }
+                Text::translate("chat.type.announcement", &[name, message])
+            }
             "me" => Text::translate("chat.type.emote", &[name, message]),
             _ => {
                 let _ = self.entities(ctx, "targets", true)?;
@@ -4127,6 +4185,27 @@ impl Game<'_> {
                 .italic()
             }
         };
+        if id == "say" {
+            if self.lan.is_some() && self.options.dedicated.is_some() {
+                self.lan_log_event(horizon_client::lan::hub::HostEvent::Chat {
+                    line: line.plain(),
+                    secure: false,
+                });
+            }
+            if self.lan.is_some() && self.chat_capture.is_some() {
+                // The broadcast skipped the acting player: their copy goes with
+                // the captured output. Without one (the console), the broadcast
+                // reached everyone and the console logged it above.
+                if captured_for.is_some()
+                    && let Some(capture) = self.chat_capture.as_mut()
+                {
+                    capture.push(line);
+                }
+                return Ok(1);
+            }
+            self.player_message(line);
+            return Ok(1);
+        }
         if let Some(capture) = self.chat_capture.as_mut() {
             capture.push(line.clone());
         }
@@ -4705,6 +4784,66 @@ mod teleport_rider_tests {
             let rider = game.mobs.iter().find(|m| m.id == 43).unwrap();
             assert_eq!(rider.extra.mount, None, "the teleported rider dismounted");
             assert_eq!(rider.position, Vec3::new(0.0, 64.0, 0.0));
+            // #9335 (2): a rider keeps its angle to the vehicle through an
+            // absolute turn, and a relative turn adds the delta: a villager 30
+            // degrees off a horse turning 0 -> 40 ends at 70.
+            let horse2 = game.res.mob_types().get("minecraft:horse").unwrap().clone();
+            let villager2 = game
+                .res
+                .mob_types()
+                .get("minecraft:villager")
+                .unwrap()
+                .clone();
+            game.mobs.push(horizon_client::mobs::Mob::new(
+                50,
+                horse2,
+                Vec3::new(10.0, 64.0, 10.0),
+                0.0,
+            ));
+            let mut rider2 =
+                horizon_client::mobs::Mob::new(51, villager2, Vec3::new(10.0, 64.5, 10.0), 30.0);
+            rider2.extra.mount = Some(50);
+            game.mobs.push(rider2);
+            // Absolute turn: vehicle 0 -> 40, rider keeps its 30-degree offset.
+            game.teleport_to_in_level(
+                Target::Mob(50),
+                [10.0, 64.0, 10.0],
+                Some([40.0, 0.0]),
+                [false; 3],
+                true,
+            );
+            let rider2 = game.mobs.iter().find(|m| m.id == 51).unwrap();
+            assert_eq!(
+                rider2.yaw, 70.0,
+                "absolute turn keeps the rider's angle to the vehicle"
+            );
+            // Relative turn (~10 on the vehicle): the transition carries the
+            // 10-degree delta and the rider adds it to its own angle (70 -> 80).
+            game.teleport_to_in_level(
+                Target::Mob(50),
+                [10.0, 64.0, 10.0],
+                Some([50.0, 0.0]),
+                [false; 3],
+                true,
+            );
+            let rider2 = game.mobs.iter().find(|m| m.id == 51).unwrap();
+            assert_eq!(
+                rider2.yaw, 80.0,
+                "relative turn shifts the rider by the delta"
+            );
+            // `facing` (turn_riders = false) leaves the rider's angle alone.
+            game.teleport_to_in_level(
+                Target::Mob(50),
+                [10.0, 64.0, 10.0],
+                Some([0.0, 0.0]),
+                [false; 3],
+                false,
+            );
+            let rider2 = game.mobs.iter().find(|m| m.id == 51).unwrap();
+            assert_eq!(
+                rider2.yaw, 80.0,
+                "a vehicle turned by `facing` leaves its rider"
+            );
         });
     }
 }
@@ -4802,6 +4941,84 @@ mod selector_bounds_tests {
 
 #[cfg(test)]
 mod query_feedback_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn gamerule_feedback_uses_short_ids_without_changing_registry_identity() {
+        use super::{Arg, Context};
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::{
+            command::ParsedArg,
+            gamerules::{GameRules, Rule, RuleRegistry, Value},
+        };
+        use std::sync::Arc;
+        with_game(|game| {
+            let registry = RuleRegistry::with_bool_rules(
+                &["test:feedback".into()],
+                &[Rule {
+                    name: "test:spawn_monsters".into(),
+                    category: "test:feedback".into(),
+                    default: Value::Bool(true),
+                    min: 0,
+                    max: 0,
+                }],
+            )
+            .unwrap();
+            game.ui.rules = GameRules::with_registry(Arc::new(registry), &[]);
+            for (input, display, stored) in [
+                (
+                    "spawn_monsters",
+                    "spawn_monsters",
+                    "minecraft:spawn_monsters",
+                ),
+                (
+                    "minecraft:spawn_monsters",
+                    "spawn_monsters",
+                    "minecraft:spawn_monsters",
+                ),
+                (
+                    "test:spawn_monsters",
+                    "test:spawn_monsters",
+                    "test:spawn_monsters",
+                ),
+            ] {
+                game.ui.rules.set(stored, Value::Bool(true));
+                let mut context = Context {
+                    root: 0,
+                    nodes: Vec::new(),
+                    args: Vec::new(),
+                    command: None,
+                    range: (0, 0),
+                    child: None,
+                    literals: vec!["gamerule".into(), input.into()],
+                };
+                game.chat_capture = Some(Vec::new());
+                assert_eq!(game.cmd_gamerule(&context).unwrap(), 1);
+                let lines = game.chat_capture.take().unwrap();
+                assert_eq!(lines.len(), 1);
+                let component = lines[0].component();
+                assert_eq!(component["translate"], "commands.gamerule.query");
+                assert_eq!(component["with"][0]["text"], display);
+                context.args.push(ParsedArg {
+                    name: "value".into(),
+                    value: Arg::Bool(false),
+                    range: (0, 0),
+                });
+                game.chat_capture = Some(Vec::new());
+                assert_eq!(game.cmd_gamerule(&context).unwrap(), 0);
+                let lines = game.chat_capture.take().unwrap();
+                assert_eq!(lines.len(), 1);
+                let component = lines[0].component();
+                assert_eq!(component["translate"], "commands.gamerule.set");
+                assert_eq!(component["with"][0]["text"], display);
+                let error = game.cmd_gamerule(&context).unwrap_err();
+                assert_eq!(error.key, "commands.gamerule.not_set");
+                assert_eq!(error.message.component()["with"][0]["text"], display);
+                assert_eq!(game.ui.rules.get(stored), Some(Value::Bool(false)));
+                assert_eq!(game.ui.rules.rule(input).unwrap().name, stored);
+            }
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_silent_source_drops_query_results_but_still_stores_them() {

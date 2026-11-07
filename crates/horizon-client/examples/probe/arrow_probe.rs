@@ -116,6 +116,7 @@ pub fn main() -> Result<()> {
                             mob_griefing: true,
                             tnt_explodes: true,
                             mob_hooks: None,
+                            owners: &(),
                         };
                         let targets: Vec<_> = target.iter().map(|t| (Who::Mob(2), t.0)).collect();
                         let (_, hit) = arrows::tick(&mut arrow, &view, &targets);

@@ -1,13 +1,13 @@
 //! Horizon's own registry (docs/modding/src/reference/registry-index.md): mods, modpacks and resource packs made for
 //! Horizon, reviewed as pull requests in horizon-rust/horizon-mods. One file lists them all,
 //! `index.json`; every download is checked against it before it reaches the game folder
-//! (`horizon_mods::index::check_file`: size, SHA-256, the author's signature, the file's own
+//! (`horizon_mod_package::index::check_file`: size, SHA-256, the author's signature, the file's own
 //! manifest), and files the index says were taken down are refused and turned off.
 use super::{
     details::{Details, GitHub, Link},
     download, installed, java, FileRef, Kind, Project, Query, Source, SourceId, Version, GAME,
 };
-use horizon_mods::index::{self, Index, Trust};
+use horizon_mod_package::index::{self, Index, Trust};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -776,7 +776,14 @@ fn install_version(
     home: &Path,
     progress: &dyn Fn(&str, f32),
 ) -> Result<installed::Entry, String> {
-    install_version_guarded(index, local, p, v, home, &|_| Ok(()), progress)
+    let entry = install_version_guarded(index, local, p, v, home, &|_| Ok(()), progress)?;
+    // The player asked for this install: the mod starts on. An automatic update installs
+    // through the guarded function alone, so it leaves the player's on/off choice as it was
+    // (#10071).
+    if entry.kind == Kind::Mod {
+        java::set_enabled(home, &p.id, true)?;
+    }
+    Ok(entry)
 }
 
 /// [`install_version`], with `guard` asked about the downloaded file once it passed the index's
@@ -876,9 +883,6 @@ fn install_version_guarded(
         .and_then(|o| o.path(home))
     {
         let _ = fs::remove_file(old);
-    }
-    if project.kind == Kind::Mod {
-        java::set_enabled(home, &p.id, true)?;
     }
     let entry = installed::Entry {
         source: SourceId::Horizon,

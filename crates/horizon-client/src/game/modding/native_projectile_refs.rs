@@ -57,7 +57,7 @@ impl Game<'_> {
     /// Narrows an entity to a projectile: one in the projectile list, a trident
     /// a player threw or a firework rocket. None for another kind, a stale
     /// handle or a client.
-    pub(super) fn native_projectile_ref(&self, entity: EntityRef) -> Option<ProjectileRef> {
+    pub(super) fn projectile(&self, entity: EntityRef) -> Option<ProjectileRef> {
         let projectile = ProjectileRef::new(entity);
         self.native_projectile_backing(projectile)
             .map(|_| projectile)
@@ -69,12 +69,12 @@ impl Game<'_> {
             return None;
         }
         let id = u32::try_from(self.network_entity_id(target)?).ok()?;
-        self.native_entity(id)
+        self.entity(id)
     }
 
     /// `Projectile.getOwner`: the owner as a resolved entity. None for no
     /// owner, one that is gone or in another level, or a stale handle.
-    pub(super) fn native_projectile_owner(&self, projectile: ProjectileRef) -> Option<EntityRef> {
+    pub(super) fn projectile_owner(&self, projectile: ProjectileRef) -> Option<EntityRef> {
         let target = match self.native_projectile_backing(projectile)? {
             Backing::List(i) => {
                 let uuid = self.creatures.projectiles[i].owner_uuid?;
@@ -105,7 +105,7 @@ impl Game<'_> {
             Target::Mob(id) => (Who::Mob(id), None),
             _ => return None,
         };
-        let uuid = uuid_ints(self.native_entity_uuid(owner)?);
+        let uuid = uuid_ints(self.entity_uuid(owner)?);
         Some((Some(guest.0), Some(uuid), guest.1))
     }
 
@@ -115,12 +115,13 @@ impl Game<'_> {
         let (who, _, guest) = fields;
         match backing {
             Backing::List(i) => {
-                let p = &mut self.creatures.projectiles[i];
-                (p.owner, p.owner_uuid, p.guest) = fields;
-                // `AbstractArrow.setOwner(Entity)`: a player's arrow may be picked up.
-                if let Some(a) = &mut p.arrow {
-                    a.set_owner(who);
-                }
+                self.creatures.projectiles.update(i, |p| {
+                    (p.owner, p.owner_uuid, p.guest) = fields;
+                    // `AbstractArrow.setOwner(Entity)`: a player's arrow may be picked up.
+                    if let Some(a) = &mut p.arrow {
+                        a.set_owner(who);
+                    }
+                });
             }
             Backing::Trident(i) => {
                 if who != Some(Who::Player) {
@@ -139,7 +140,7 @@ impl Game<'_> {
     /// `Projectile.setOwner`. False for a stale projectile, or an owner that is
     /// stale or neither a player nor a mob (a trident a player threw takes a
     /// player only). Does not touch `leftOwner`.
-    pub(super) fn native_projectile_set_owner(
+    pub(super) fn projectile_set_owner(
         &mut self,
         projectile: ProjectileRef,
         owner: Option<EntityRef>,
@@ -164,7 +165,7 @@ impl Game<'_> {
     /// draw. A trident a player threw and a rocket turn the same way (no
     /// acceleration power). False, and nothing changed, for a stale projectile,
     /// `by` or owner, a non-finite power or a refusal.
-    pub(super) fn native_projectile_deflect(
+    pub(super) fn projectile_deflect(
         &mut self,
         projectile: ProjectileRef,
         deflection: NativeDeflection,
@@ -186,7 +187,7 @@ impl Game<'_> {
             (NativeDeflection::Reverse, _) => Turn::Reverse,
             (_, None) => Turn::Direction(None),
             (NativeDeflection::AimDeflect, Some(by)) => {
-                let Some([x, y, z]) = self.native_entity_view_vector(by) else {
+                let Some([x, y, z]) = self.entity_view_vector(by) else {
                     return false;
                 };
                 Turn::Direction(Some(Vec3::new(x, y, z)))
@@ -202,9 +203,10 @@ impl Game<'_> {
         match backing {
             // `deflect` takes the `EntityReference` overload of `setOwner`: an
             // arrow's pickup does not change, unlike `set_owner`.
-            Backing::List(i) => {
-                self.creatures.projectiles[i].deflect(turn, power, owner, by_attack)
-            }
+            Backing::List(i) => self
+                .creatures
+                .projectiles
+                .update(i, |p| p.deflect(turn, power, owner, by_attack)),
             Backing::Trident(i) => {
                 if owner.0 != Some(Who::Player) {
                     return false;
@@ -229,10 +231,7 @@ impl Game<'_> {
     }
 
     /// `AbstractArrow.pickup`, for an arrow or a mob's trident.
-    pub(super) fn native_projectile_pickup(
-        &self,
-        projectile: ProjectileRef,
-    ) -> Option<NativeArrowPickup> {
+    pub(super) fn projectile_pickup(&self, projectile: ProjectileRef) -> Option<NativeArrowPickup> {
         Some(
             match self.native_projectile(projectile)?.arrow.as_ref()?.pickup {
                 Pickup::Disallowed => NativeArrowPickup::Disallowed,
@@ -244,7 +243,7 @@ impl Game<'_> {
 
     /// Sets `AbstractArrow.pickup`. False for a stale handle or a projectile
     /// that is not an arrow or a mob's trident.
-    pub(super) fn native_projectile_set_pickup(
+    pub(super) fn projectile_set_pickup(
         &mut self,
         projectile: ProjectileRef,
         pickup: NativeArrowPickup,
@@ -252,16 +251,18 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let Some(arrow) = self.creatures.projectiles[index].arrow.as_mut() else {
-            return false;
-        };
-        arrow.pickup = match pickup {
-            NativeArrowPickup::Disallowed => Pickup::Disallowed,
-            NativeArrowPickup::Allowed => Pickup::Allowed,
-            NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
-            _ => unreachable!("NativeArrowPickup: unhandled variant"),
-        };
-        true
+        self.creatures.projectiles.update(index, |p| {
+            let Some(arrow) = p.arrow.as_mut() else {
+                return false;
+            };
+            arrow.pickup = match pickup {
+                NativeArrowPickup::Disallowed => Pickup::Disallowed,
+                NativeArrowPickup::Allowed => Pickup::Allowed,
+                NativeArrowPickup::CreativeOnly => Pickup::CreativeOnly,
+                _ => unreachable!("NativeArrowPickup: unhandled variant"),
+            };
+            true
+        })
     }
 
     fn native_arrow_index(&self, projectile: ProjectileRef) -> Result<usize, PierceLevelError> {
@@ -278,7 +279,7 @@ impl Game<'_> {
     }
 
     /// `AbstractArrow.getPierceLevel`: the signed byte stored by vanilla.
-    pub(super) fn native_projectile_pierce_level(
+    pub(super) fn projectile_pierce_level(
         &self,
         projectile: ProjectileRef,
     ) -> Result<i8, PierceLevelError> {
@@ -291,22 +292,20 @@ impl Game<'_> {
     }
 
     /// `AbstractArrow.setPierceLevel`: stores the signed byte without clamping.
-    pub(super) fn native_projectile_set_pierce_level(
+    pub(super) fn projectile_set_pierce_level(
         &mut self,
         projectile: ProjectileRef,
         level: i8,
     ) -> Result<(), PierceLevelError> {
         let index = self.native_arrow_index(projectile)?;
-        self.creatures.projectiles[index]
-            .arrow
-            .as_mut()
-            .unwrap()
-            .pierce = level as u8;
+        self.creatures
+            .projectiles
+            .update(index, |p| p.arrow.as_mut().unwrap().pierce = level as u8);
         Ok(())
     }
 
     /// `AbstractArrow.getBaseDamage`, for an arrow (a trident's is fixed).
-    pub(super) fn native_projectile_base_damage(&self, projectile: ProjectileRef) -> Option<f64> {
+    pub(super) fn projectile_base_damage(&self, projectile: ProjectileRef) -> Option<f64> {
         match self.native_projectile(projectile)?.kind {
             ProjectileKind::Arrow { base_damage, .. } => Some(base_damage),
             _ => None,
@@ -315,7 +314,7 @@ impl Game<'_> {
 
     /// `AbstractArrow.setBaseDamage`. False for a stale handle, a projectile
     /// that is not an arrow, or a value that is not finite.
-    pub(super) fn native_projectile_set_base_damage(
+    pub(super) fn projectile_set_base_damage(
         &mut self,
         projectile: ProjectileRef,
         damage: f64,
@@ -323,26 +322,27 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let ProjectileKind::Arrow { base_damage, .. } = &mut self.creatures.projectiles[index].kind
-        else {
-            return false;
-        };
-        if !damage.is_finite() {
-            return false;
-        }
-        *base_damage = damage;
-        true
+        self.creatures.projectiles.update(index, |p| {
+            let ProjectileKind::Arrow { base_damage, .. } = &mut p.kind else {
+                return false;
+            };
+            if !damage.is_finite() {
+                return false;
+            }
+            *base_damage = damage;
+            true
+        })
     }
 
     /// `AbstractArrow.isCritArrow`, for an arrow.
-    pub(super) fn native_projectile_critical(&self, projectile: ProjectileRef) -> Option<bool> {
+    pub(super) fn projectile_critical(&self, projectile: ProjectileRef) -> Option<bool> {
         let p = self.native_projectile(projectile)?;
         matches!(p.kind, ProjectileKind::Arrow { .. }).then(|| p.critical())
     }
 
     /// `AbstractArrow.setCritArrow`; clients see the flag at once through the
     /// entity data. False for a stale handle or a projectile that is not an arrow.
-    pub(super) fn native_projectile_set_critical(
+    pub(super) fn projectile_set_critical(
         &mut self,
         projectile: ProjectileRef,
         critical: bool,
@@ -350,12 +350,13 @@ impl Game<'_> {
         let Some(index) = self.native_projectile_index(projectile) else {
             return false;
         };
-        let p = &mut self.creatures.projectiles[index];
-        if !matches!(p.kind, ProjectileKind::Arrow { .. }) {
-            return false;
-        }
-        p.set_critical(critical);
-        true
+        self.creatures.projectiles.update(index, |p| {
+            if !matches!(p.kind, ProjectileKind::Arrow { .. }) {
+                return false;
+            }
+            p.set_critical(critical);
+            true
+        })
     }
 }
 
@@ -392,12 +393,12 @@ mod tests {
                 .unwrap()
                 .clone();
             game.mobs.push(Mob::new(99, kind, Vec3::ZERO, 0.0));
-            let mob = game.native_entity(99).unwrap();
+            let mob = game.entity(99).unwrap();
             game.add_projectile(arrow(Who::Mob(99)));
             let id = game.creatures.projectiles[0].id;
-            let entity = game.native_entity(id).unwrap();
-            assert!(game.native_projectile_ref(mob).is_none());
-            let handle = game.native_projectile_ref(entity).unwrap();
+            let entity = game.entity(id).unwrap();
+            assert!(game.projectile(mob).is_none());
+            let handle = game.projectile(entity).unwrap();
             assert_eq!(handle.entity(), entity);
 
             assert_eq!(handle.owner(game), Some(mob));
@@ -451,7 +452,7 @@ mod tests {
             assert!(p.needs_sync);
 
             // AIM_DEFLECT along the deflector's look, scaled by the power.
-            let look = game.native_entity_view_vector(mob).unwrap();
+            let look = game.entity_view_vector(mob).unwrap();
             assert!(handle.deflect(
                 game,
                 NativeDeflection::AimDeflect,
@@ -488,9 +489,7 @@ mod tests {
             ball.acceleration = 0.1;
             game.add_projectile(ball);
             let ball_id = game.creatures.projectiles[1].id;
-            let ball = game
-                .native_projectile_ref(game.native_entity(ball_id).unwrap())
-                .unwrap();
+            let ball = game.projectile(game.entity(ball_id).unwrap()).unwrap();
             assert_eq!(ball.pierce_level(game), Err(PierceLevelError::NotArrow));
             assert_eq!(
                 ball.set_pierce_level(game, 1),
@@ -527,7 +526,7 @@ mod tests {
         game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
         game.lan_acting_uuid = Some(123);
         game.lan_acting_entity = Some(20);
-        game.native_entity(20).unwrap()
+        game.entity(20).unwrap()
     }
 
     #[test]
@@ -549,10 +548,10 @@ mod tests {
             game.rockets.push(rocket);
 
             let trident = game
-                .native_projectile_ref(game.native_entity(game.tridents[0].id).unwrap())
+                .projectile(game.entity(game.tridents[0].id).unwrap())
                 .unwrap();
             let rocket = game
-                .native_projectile_ref(game.native_entity(game.rockets[0].id).unwrap())
+                .projectile(game.entity(game.rockets[0].id).unwrap())
                 .unwrap();
             // A trident or rocket has no arrow state: those reads are None.
             assert_eq!(trident.pickup(game), None);
@@ -570,7 +569,7 @@ mod tests {
                 .unwrap()
                 .clone();
             game.mobs.push(Mob::new(99, zombie, Vec3::ZERO, 0.0));
-            let mob = game.native_entity(99).unwrap();
+            let mob = game.entity(99).unwrap();
             assert!(!trident.set_owner(game, Some(mob)));
 
             // REVERSE: one float from the trident's own random, the level's untouched.
@@ -628,7 +627,7 @@ mod tests {
                 .unwrap()
                 .clone();
             game.mobs.push(Mob::new(99, kind, Vec3::ZERO, 0.0));
-            let mob = game.native_entity(99).unwrap();
+            let mob = game.entity(99).unwrap();
 
             // A wind charge refuses for its first five ticks, with no change and no draw.
             let mut charge =
@@ -636,14 +635,13 @@ mod tests {
             charge.velocity = Vec3::new(0.0, 1.0, 0.0);
             game.add_projectile(charge);
             let charge = game
-                .native_projectile_ref(
-                    game.native_entity(game.creatures.projectiles[0].id)
-                        .unwrap(),
-                )
+                .projectile(game.entity(game.creatures.projectiles[0].id).unwrap())
                 .unwrap();
             let random = game.creatures.projectiles[0].random.0.clone().next_float();
             for left in 1..=5 {
-                game.creatures.projectiles[0].no_deflect_ticks = left;
+                game.creatures
+                    .projectiles
+                    .update(0, |p| p.no_deflect_ticks = left);
                 assert!(!charge.deflect(
                     game,
                     NativeDeflection::Reverse,
@@ -657,7 +655,9 @@ mod tests {
                 assert_eq!(p.owner, Some(Who::Mob(99)));
                 assert_eq!(p.random.0.clone().next_float(), random);
             }
-            game.creatures.projectiles[0].no_deflect_ticks = 0;
+            game.creatures
+                .projectiles
+                .update(0, |p| p.no_deflect_ticks = 0);
 
             // REVERSE of a non-arrow takes one float from its own random, not the level's.
             let level = game.world.random.clone().next_float();
@@ -677,10 +677,7 @@ mod tests {
             shot.velocity = Vec3::new(0.0, 0.0, 1.0);
             game.add_projectile(shot);
             let arrow_ref = game
-                .native_projectile_ref(
-                    game.native_entity(game.creatures.projectiles[1].id)
-                        .unwrap(),
-                )
+                .projectile(game.entity(game.creatures.projectiles[1].id).unwrap())
                 .unwrap();
             assert_eq!(arrow_ref.pickup(game), Some(NativeArrowPickup::Disallowed));
             assert!(arrow_ref.deflect(
@@ -726,7 +723,7 @@ mod tests {
             boat.position = Vec3::ZERO;
             boat.velocity = Vec3::new(5.0, 0.0, 0.0);
             game.boats.push(boat);
-            let boat = game.native_entity(id).unwrap();
+            let boat = game.entity(id).unwrap();
             assert_eq!(
                 game.native_entity_known_speed(boat),
                 Some(Vec3::new(0.0, 0.0, 2.0))
@@ -735,10 +732,7 @@ mod tests {
             shot.velocity = Vec3::new(1.0, 0.0, 0.0);
             game.add_projectile(shot);
             let arrow_ref = game
-                .native_projectile_ref(
-                    game.native_entity(game.creatures.projectiles[0].id)
-                        .unwrap(),
-                )
+                .projectile(game.entity(game.creatures.projectiles[0].id).unwrap())
                 .unwrap();
             assert!(arrow_ref.deflect(
                 game,
@@ -768,7 +762,9 @@ mod tests {
                 Vec3::new(0.0, 1.0, 0.0)
             );
             assert_eq!(game.creatures.projectiles[i].owner, Some(Who::Mob(99)));
-            game.creatures.projectiles[i].no_deflect_ticks = 0;
+            game.creatures
+                .projectiles
+                .update(i, |p| p.no_deflect_ticks = 0);
             game.attack_ticks = 50;
             assert!(game.deflect(i));
             assert_eq!(game.attack_ticks, 0);

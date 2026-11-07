@@ -53,9 +53,6 @@ pub struct Imported {
     /// asked for: they need the game's tree and its counters.
     pub advancements: Option<Value>,
     pub stats: Option<Value>,
-    /// Whether the mods' attachments came (a whole import): the game's own copy of them is then
-    /// the record's.
-    pub attachments: bool,
     /// Whether the other players are told the player has arrived (when it is placed).
     pub announce: bool,
     /// Whether the request asks the player to be let into the world now. The import never places
@@ -320,11 +317,10 @@ fn check_values(level: &Level) -> Result<(), String> {
     if !(0.0..=40.0).contains(&level.food_exhaustion) {
         return Err("the record's food exhaustion is past what a player can have".into());
     }
-    if level
-        .active_effects
-        .iter()
-        .any(|(_, _, amplifier, _, _)| !(0..=255).contains(amplifier))
-    {
+    if level.active_effects.iter().any(|e| {
+        std::iter::successors(Some(e), |e| e.hidden.as_deref())
+            .any(|e| !(0..=255).contains(&e.amplifier))
+    }) {
         return Err("the record holds an effect no player can have".into());
     }
     Ok(())
@@ -361,7 +357,7 @@ struct Kept {
         Option<(String, [i32; 3])>,
         bool,
         Vec<String>,
-        horizon_world::attachments::Attachments,
+        horizon_mod_runtime::attachments::Attachments,
     )>,
     dimension: String,
 }
@@ -417,7 +413,7 @@ impl Kept {
                     g.last_death.clone(),
                     g.seen_credits,
                     g.post_effects.clone(),
-                    g.attachments.clone(),
+                    horizon_mod_runtime::attachments::Attachments::clone(&g.attachments),
                 )
             }),
             dimension: g.dimension.clone(),
@@ -484,13 +480,8 @@ impl Kept {
             (None, _) => {}
         }
         if let Some((saved, death, credits, post, attachments)) = self.other {
-            (
-                g.saved,
-                g.last_death,
-                g.seen_credits,
-                g.post_effects,
-                g.attachments,
-            ) = (saved, death, credits, post, attachments);
+            (g.saved, g.last_death, g.seen_credits, g.post_effects) = (saved, death, credits, post);
+            g.attachments.replace_contents(attachments);
         }
         // The client is in one dimension, and only a login can change it.
         g.dimension = self.dimension;
@@ -499,11 +490,15 @@ impl Kept {
 
 /// Applies the request to the held player `uuid` and tells its client, leaving it held
 /// (`Hub::confirm_arrival` places it). The caller gives the player its advancements and
-/// statistics (`Imported::advancements`, `Imported::stats`) and its attachments.
+/// statistics (`Imported::advancements`, `Imported::stats`).
 ///
 /// Nothing changes when it refuses: the record is read and checked first, and the
-/// guest is touched only once everything is known to be well.
+/// guest is touched only once everything is known to be well. It refuses everything once
+/// the server has begun to stop.
 pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Imported, String> {
+    if hub.transfers.as_ref().is_some_and(|t| t.stopping) {
+        return Err(super::arrivals::STOPPING.into());
+    }
     let request = read_request(request)?;
     let (tag, handover) = read_compound(request.record, uuid)?;
     let Some(i) = hub
@@ -612,7 +607,6 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     Ok(Imported {
         advancements: records("advancements"),
         stats: records("stats"),
-        attachments: request.parts.len() == PARTS.len(),
         parts: request.parts,
         announce: request.announce,
         place: request.place,
@@ -621,10 +615,11 @@ pub fn import_player(hub: &mut Hub, uuid: u128, request: &Value) -> Result<Impor
     })
 }
 
-/// The dimension a record names, the way `playerdata::apply` places it.
+/// The dimension a record names, the way `playerdata::apply` places it: any level, with the
+/// Overworld for a record that names none.
 fn playerdata_dimension(level: &Level) -> String {
     match level.dimension.as_str() {
-        d @ ("minecraft:the_nether" | "minecraft:the_end") => d.to_owned(),
-        _ => "minecraft:overworld".to_owned(),
+        "" => "minecraft:overworld".to_owned(),
+        d => d.to_owned(),
     }
 }

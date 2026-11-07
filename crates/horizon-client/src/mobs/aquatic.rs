@@ -13,6 +13,7 @@ use super::{
 };
 use crate::blocks::Fluid;
 use crate::health::DamageLevel;
+use crate::join_seq::JoinList;
 use crate::particles::ParticleType;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::{geometry::Vec3, random::RandomSource};
@@ -756,7 +757,7 @@ fn can_be_followed(s: Species, followers: i32) -> bool {
 }
 /// `startFollowing` on a recruit, applied after the recruiter's tick. A fish
 /// another leader took this tick (its snapshot was older) stays with it.
-pub fn start_following(mobs: &mut [Mob], fish: u32, leader: u32) {
+pub fn start_following(mobs: &mut JoinList<Mob>, fish: u32, leader: u32) {
     let alive = |mobs: &[Mob], id: u32| mobs.iter().any(|m| m.id == id && m.alive() && !m.removed);
     let Some(current) = mobs.iter().find(|m| m.id == fish).map(|m| m.extra.leader) else {
         return;
@@ -1215,7 +1216,7 @@ mod school_tests {
     }
     #[test]
     fn a_recruit_another_leader_took_stays_with_it() {
-        let mut mobs = vec![cod(1), cod(2), cod(3)];
+        let mut mobs: JoinList<_> = [cod(1), cod(2), cod(3)].into_iter().collect();
         start_following(&mut mobs, 3, 1);
         assert_eq!(mobs[2].extra.leader, Some(1));
         assert_eq!(mobs[0].extra.followers, 1);
@@ -1465,7 +1466,7 @@ mod pufferfish_sting_tests {
                         .iter()
                         .any(|e| matches!(e, MobEvent::PufferfishSting { .. }))
                 );
-                let mut mobs = vec![fish, invuln_pig];
+                let mut mobs: JoinList<_> = [fish, invuln_pig].into_iter().collect();
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 10.0, "invulnerable mob takes no damage");
                 assert!(
@@ -1498,7 +1499,7 @@ mod pufferfish_sting_tests {
                         .iter()
                         .any(|e| matches!(e, MobEvent::PufferfishSting { .. }))
                 );
-                let mut mobs = vec![fish, cooldown_pig];
+                let mut mobs: JoinList<_> = [fish, cooldown_pig].into_iter().collect();
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 10.0, "cooldown mob takes no damage");
                 assert!(
@@ -1534,7 +1535,7 @@ mod pufferfish_sting_tests {
                         .iter()
                         .any(|e| matches!(e, MobEvent::PufferfishSting { .. }))
                 );
-                let mut mobs = vec![fish, pig];
+                let mut mobs: JoinList<_> = [fish, pig].into_iter().collect();
                 apply_brain_events(&mut mobs, level, &mut events, 0);
 
                 // Assertions after fish tick and apply_brain_events:
@@ -1594,7 +1595,7 @@ mod pufferfish_sting_tests {
                 };
                 let mut events = Vec::new();
                 noai_fish.tick(&world, level, &mut events);
-                let mut mobs = vec![noai_fish, noai_pig];
+                let mut mobs: JoinList<_> = [noai_fish, noai_pig].into_iter().collect();
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 7.0);
                 assert_eq!(mobs[1].extra.effects[0].duration, 120);
@@ -1634,7 +1635,7 @@ mod pufferfish_sting_tests {
                     .filter(|e| matches!(e, MobEvent::PufferfishSting { .. }))
                     .collect();
                 assert_eq!(stings.len(), 2, "both touching pigs stung");
-                let mut mobs = vec![fish, pig_a, pig_b];
+                let mut mobs: JoinList<_> = [fish, pig_a, pig_b].into_iter().collect();
                 apply_brain_events(&mut mobs, level, &mut events, 0);
                 assert_eq!(mobs[1].health, 7.0, "pig A damaged");
                 assert_eq!(mobs[2].health, 7.0, "pig B damaged");

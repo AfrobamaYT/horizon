@@ -1,21 +1,9 @@
-//! The `chunk_refs` hooks and helpers: declarations the mod API generator reads (see `hooks/mod.rs`).
+pub trait Notes {
+    #[notes = r#"## Loaded chunks
 
-pub trait Helpers {
-    #[helper(
-        side = "both",
-        target = "horizon_client::game::native_level_refs::Game<'_>::native_chunk"
-    )]
-    fn chunk();
-    #[helper(
-        side = "server",
-        receiver = "chunk",
-        target = "horizon_client::game::native_level_refs::Game<'_>::native_chunk_ref_loaded"
-    )]
-    fn chunk_loaded();
-    #[helper(
-        side = "server",
-        receiver = "chunk",
-        target = "horizon_client::game::native_level_refs::Game<'_>::native_chunk_status"
-    )]
-    fn chunk_status();
+`LevelRef::loaded_chunks(host)` lists the chunks the level holds now, the same ones `chunk`
+finds by position, ordered by x then z so two calls over an unchanged level agree. It loads no
+chunk and sorts a copy of the level's loaded set, so call it when a mod needs the whole set, not
+for a position it already knows."#]
+    fn chunk_refs_note0();
 }

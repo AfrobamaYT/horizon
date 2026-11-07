@@ -5,6 +5,7 @@
 //! a server: nothing of them goes over the network.
 use super::Game;
 use horizon_client::blocks::RenderShape;
+use horizon_client::effects::effect_particle;
 use horizon_client::mobs::{MobEvent, ambient};
 use horizon_client::motion::{LAVA, WATER};
 use horizon_client::particles::{ParticleEngine, ParticleOptions, ParticleType};
@@ -146,7 +147,7 @@ impl Game<'_> {
     /// Spawn sprint particles when called explicitly by a client mod. A
     /// valid entity returns true even if the block beneath it is invisible.
     /// Returns false for stale, untracked, server-side, or unsupported entities.
-    pub(super) fn native_entity_sprint_particles(&mut self, entity: EntityRef) -> bool {
+    pub(super) fn entity_sprint_particles(&mut self, entity: EntityRef) -> bool {
         use super::commands::Target;
         if self.is_logical_server() {
             return false;
@@ -154,13 +155,13 @@ impl Game<'_> {
         let Some(target) = self.native_client_entity_target(entity) else {
             return false;
         };
-        let Some([x, y, z]) = self.native_entity_position(entity) else {
+        let Some([x, y, z]) = self.entity_position(entity) else {
             return false;
         };
-        let Some([vx, vy, vz]) = self.native_entity_velocity(entity) else {
+        let Some([vx, vy, vz]) = self.entity_velocity(entity) else {
             return false;
         };
-        let Some([min, max]) = self.native_entity_bounding_box(entity) else {
+        let Some([min, max]) = self.entity_bounding_box(entity) else {
             return false;
         };
         let support = match target {
@@ -218,7 +219,7 @@ impl Game<'_> {
                 "minecraft:fence_gates",
             ]
             .iter()
-            .any(|tag| game.block_in_tag(tag, &name))
+            .any(|tag| game.named_block_in_tag(tag, &name))
         };
         let at = match support {
             Some(s) if tall(self, s) => s,
@@ -321,25 +322,6 @@ impl Game<'_> {
     }
 }
 
-/// `MobEffect.particleFactory`: the omens have particles of their own, any
-/// other effect an entity effect in its colour, faint when ambient.
-pub(super) fn effect_particle(effect: &str, ambient: bool) -> Option<ParticleOptions> {
-    Some(match effect.trim_start_matches("minecraft:") {
-        "trial_omen" => ParticleOptions::simple(ParticleType::TrialOmen),
-        "raid_omen" => ParticleOptions::simple(ParticleType::RaidOmen),
-        other => {
-            let color = horizon_client::brewing::effect(other)?.color;
-            let channel = |shift: u32| ((color >> shift) & 255) as f32 / 255.0;
-            // MobEffect.AMBIENT_ALPHA is 38 of 255.
-            let alpha = if ambient { 38.0 / 255.0 } else { 1.0 };
-            ParticleOptions::colored(
-                ParticleType::EntityEffect,
-                [channel(16), channel(8), channel(0), alpha],
-            )
-        }
-    })
-}
-
 /// One tick of `LivingEntity.tickEffects`' client branch: a one in four
 /// chance (one in fifteen while invisible, a fifth of either when all the
 /// effects are ambient) of one of the particles at a random spot of the box.
@@ -372,7 +354,7 @@ mod sprint_handle_tests {
     use horizon_client::{chunk::Chunk, motion::PlayerMotion};
     use horizon_core::geometry::Vec3;
     use horizon_protocol::connection::Pipe;
-    use mod_api::{ClientHost, EntityRef, Host, NativeWorldEpoch};
+    use mod_api::{ClientHost, EntityRef, NativeWorldEpoch};
     use std::sync::Arc;
 
     #[test]

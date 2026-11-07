@@ -91,7 +91,7 @@ impl Game<'_> {
                 title: None,
                 rect: [0.0, 0.0, batch.width, batch.height],
                 slots: 0,
-                mouse: self.native_cursor(),
+                mouse: self.cursor(),
                 partial_tick: self.clock.fraction() as f32,
             },
         ))
@@ -227,7 +227,7 @@ impl Game<'_> {
                 .filter(|_| !none),
             rect,
             slots: if none { 0 } else { self.slot_count() },
-            mouse: self.native_cursor(),
+            mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
         })
     }
@@ -705,7 +705,7 @@ pub(crate) struct NativeRecipe {
     pub(crate) cooking_time: u32,
     pub(crate) experience: f32,
     /// The recipe book's id for it (one per way the book shows it), as
-    /// `native_known_recipes` lists them; -1 for the kinds the book doesn't
+    /// `known_recipes` lists them; -1 for the kinds the book doesn't
     /// show (campfire, stonecutting, smithing, brewing).
     pub(crate) book_id: i32,
 }
@@ -733,7 +733,7 @@ pub(crate) struct NativeRecipes {
     pub(crate) recipes: Vec<NativeRecipe>,
 }
 
-/// The mappings `native_mapping` answers for, with the key their default
+/// The mappings `mapping` answers for, with the key their default
 /// binding is (none: a mouse button, attack or use).
 const MAPPINGS: [(&str, Option<KeyCode>); 9] = [
     ("key.forward", Some(KeyCode::KeyW)),
@@ -787,7 +787,17 @@ fn screen_text_hooked(text: &str, mut canceled: impl FnMut(char) -> bool) -> Opt
 /// `ScreenEvent.CharacterTyped.Pre` hook: the characters no mod cancelled,
 /// control ones gone (the key's own handling takes those, and vanilla fires
 /// no `charTyped` for them). `None` when nothing is left to type.
-fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<String> {
+/// With the edit modifier held the key is a shortcut and its characters are
+/// not text (`types_text`): no hook hears them, as vanilla's `textInput`
+/// gets none for Ctrl+A.
+fn chars_to_type(
+    text: &str,
+    types_text: bool,
+    canceled: impl FnMut(char) -> bool,
+) -> Option<String> {
+    if !types_text {
+        return None;
+    }
     let left = screen_text_hooked(text, canceled)?;
     let text: String = left.chars().filter(|c| !c.is_control()).collect();
     (!text.is_empty()).then_some(text)
@@ -853,8 +863,8 @@ impl Game<'_> {
     /// (`HealthHud::layout`, not under F1): `inputs` carries the health,
     /// food, air and vehicle state the layout reads, `wi`/`hi` the screen's
     /// GUI size. A mod that sets `draws` replaces every row — armour,
-    /// hearts, food, air and the heights (`left_height`/`right_height`)
-    /// above the hotbar are the answer's to give; `bubble_pop_sound` too.
+    /// hearts, food and air are the answer's to give; `bubble_pop_sound`
+    /// too.
     /// Nothing set draws Horizon's own.
     /// The hearts the local player's health bar draws (`Gui.HeartType.forPlayer`, then
     /// NeoForge's `PlayerHeartTypeEvent`): poisoned, else withered, else frozen when fully
@@ -935,7 +945,7 @@ impl Game<'_> {
             title: self.remote.as_ref().and_then(|r| r.menu_title.as_ref()),
             rect: self.screen_rect(batch, screen),
             slots: self.slot_count(),
-            mouse: self.native_cursor(),
+            mouse: self.cursor(),
             partial_tick: self.clock.fraction() as f32,
         })
     }
@@ -953,7 +963,7 @@ impl Game<'_> {
                 title: None,
                 rect: [0.0, 0.0, batch.width, batch.height],
                 slots: 0,
-                mouse: self.native_cursor(),
+                mouse: self.cursor(),
                 partial_tick: self.clock.fraction() as f32,
             },
         ))
@@ -1186,16 +1196,16 @@ impl Game<'_> {
             return;
         };
         let modifiers = super::glfw_modifiers(self.modifiers);
-        let Some(text) = chars_to_type(text, |c| {
+        // A held edit modifier makes a shortcut of the key, not text.
+        let Some(text) = chars_to_type(text, self.types_text(), |c| {
             let mut canceled = false;
             self.native_screen_char_typed_pre(&screen, c, modifiers, &mut canceled);
             canceled
         }) else {
             return;
         };
-        // A held edit modifier makes a shortcut of the key, not text.
         // `Err` only says no text box of the screen takes the characters.
-        if !self.types_text() || self.type_chars_into_screen(&text).is_err() {
+        if self.type_chars_into_screen(&text).is_err() {
             self.screen_chars_post(&text);
         }
     }
@@ -1244,17 +1254,17 @@ impl Game<'_> {
                 Pending::Landed(landed) => (landed.state, landed.position),
                 Pending::MinecartPass(pass) => (pass.state, pass.position),
             };
-            let Some(level) = self.native_level(self.dim.id()) else {
+            let Some(level) = self.level(self.dim.id()) else {
                 continue;
             };
-            if self.native_level_state(level, [pos.x, pos.y, pos.z]) != Some(state) {
+            if self.level_block_state(level, [pos.x, pos.y, pos.z]) != Some(state) {
                 continue;
             }
             match contact {
                 Pending::Inside(inside) => {
                     if let Some(entity) = u32::try_from(inside.entity)
                         .ok()
-                        .and_then(|id| self.native_entity(id))
+                        .and_then(|id| self.entity(id))
                     {
                         self.native_entity_inside(state, pos, entity, inside.precise);
                     }
@@ -1262,7 +1272,7 @@ impl Game<'_> {
                 Pending::MinecartPass(pass) => {
                     if let Some(entity) = u32::try_from(pass.entity)
                         .ok()
-                        .and_then(|id| self.native_entity(id))
+                        .and_then(|id| self.entity(id))
                     {
                         self.native_minecart_pass(state, pos, entity);
                     }
@@ -1288,10 +1298,10 @@ impl Game<'_> {
             // `Level.setBlockAndUpdate`: flag 3, the neighbours and the clients.
             LandingWrite::SetBlock(state) => {
                 let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
-                self.native_level_set_block(level, at, state, flags);
+                self.level_set_block(level, at, state, flags);
             }
             LandingWrite::DestroyBlock { drop } => {
-                self.native_level_destroy_block(level, at, drop, None, false);
+                self.level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
             _ => {}
@@ -2143,7 +2153,7 @@ impl Game<'_> {
         let charts = self.debug_charts.corners(!self.has_singleplayer_server());
         !debug_takes(corner, self.debug, charts)
     }
-    /// A mod's own screen closes (Escape, or `native_mod_screen_close`).
+    /// A mod's own screen closes (Escape, or `mod_screen_close`).
     pub(super) fn close_mod_screen(&mut self) {
         if self.screen == Screen::Mod {
             self.set_screen(Screen::Playing);
@@ -2406,7 +2416,7 @@ impl Game<'_> {
                 BlockPlacement::new(at, extra),
             ])),
         };
-        let placer = self.native_entity(placer);
+        let placer = self.entity(placer);
         let mut canceled = false;
         self.native_entity_place(placer, pos, state, placed_against, placement, &mut canceled);
         canceled
@@ -3215,7 +3225,7 @@ impl Game<'_> {
         if let Some(title) = self.remote_menu_title() {
             batch.text_styled(atlas, &title, ox + 8.0, oy + 6.0, grey, false);
         }
-        let inventory = self.translate("container.inventory", "Inventory");
+        let inventory = self.translate_with_fallback("container.inventory", "Inventory");
         let label_y = oy + s.screen.inventory_y - 11.0;
         batch.text(atlas, &inventory, ox + 8.0, label_y, grey, false);
         true
@@ -3227,7 +3237,6 @@ impl Game<'_> {
         };
         // An empty id marks its place while the mod has it.
         let mut taken = std::mem::take(&mut **m);
-        let items = taken.items.clone();
         let state = self.world.block(pos.0, pos.1, pos.2).0;
         let slots = self
             .world
@@ -3238,6 +3247,7 @@ impl Game<'_> {
         if taken.items.len() < slots {
             taken.items.resize(slots, None);
         }
+        let items = taken.items.clone();
         // Without a container, an `Items` item list is the mod's own field.
         if slots == 0 && !taken.items.is_empty() {
             let items = horizon_client::save::encode_items(&std::mem::take(&mut taken.items));
@@ -3445,7 +3455,7 @@ impl Game<'_> {
     /// The zoom in effect while playing (a native mod's); the spyglass's own
     /// view wins.
     pub(super) fn native_zoom_now(&self) -> Option<NativeZoom> {
-        if !self.native_playing() || self.scoping() {
+        if !self.playing() || self.scoping() {
             return None;
         }
         let mut zoom = None;
@@ -3466,7 +3476,7 @@ impl Game<'_> {
     /// The pose of native mods' camera shake in this frame (`native_camera_shake`),
     /// none while not playing.
     pub(super) fn native_shake_matrix(&self, partial: f32) -> glam::Mat4 {
-        if !self.native_playing() {
+        if !self.playing() {
             return glam::Mat4::IDENTITY;
         }
         let mut shake = NativeShake::default();
@@ -3480,13 +3490,36 @@ impl Game<'_> {
     /// The camera native mods draw this frame from (`native_camera_pose`), starting from
     /// `view`, vanilla's position, yaw and pitch.
     pub(super) fn native_camera_pose_now(
-        &self,
+        &mut self,
         partial: f32,
         view: (glam::DVec3, f32, f32),
     ) -> (glam::DVec3, f32, f32) {
         let (mut position, mut yaw, mut pitch) = (view.0.to_array(), view.1, view.2);
         self.native_camera_pose(partial, &mut position, &mut yaw, &mut pitch);
-        posed_camera(view, position, yaw, pitch)
+        let posed = posed_camera(view, position, yaw, pitch);
+        if self.apply_requested_camera_type()
+            && let Some(refreshed) = self.camera_view(partial)
+        {
+            // Refresh vanilla components, not the listener's explicit overrides.
+            return (
+                if posed.0 == view.0 {
+                    refreshed.0
+                } else {
+                    posed.0
+                },
+                if posed.1 == view.1 {
+                    refreshed.1
+                } else {
+                    posed.1
+                },
+                if posed.2 == view.2 {
+                    refreshed.2
+                } else {
+                    posed.2
+                },
+            );
+        }
+        posed
     }
 
     /// What native mods hand shader packs in this frame (`native_shader_params`),
@@ -3582,7 +3615,7 @@ fn finite_params(params: [[f32; 4]; 8]) -> [[f32; 4]; 8] {
     params.map(|v| v.map(|x| if x.is_finite() { x } else { 0.0 }))
 }
 
-/// Whether `native_play_local_sound` takes this sound: a sound event's id (`sound_id`, as
+/// Whether `play_local_sound` takes this sound: a sound event's id (`sound_id`, as
 /// `native_play_sound` takes), a finite position, a volume and pitch at or above 0, a repeat
 /// gap that isn't negative, and a start a minute away at most.
 fn local_sound_ok(sound: &SoundPlay, after: u32) -> bool {
@@ -3629,7 +3662,7 @@ fn box_meets(b: &horizon_core::geometry::Aabb, min: [f64; 3], max: [f64; 3]) -> 
         && hi.z > min[2]
 }
 
-/// What `native_mod_screen_open(mod_id)` does over `screen` (`blocked`: an
+/// What `mod_screen_open(mod_id)` does over `screen` (`blocked`: an
 /// overlay, the title screen, no window or no player; `owner`'s own screen
 /// open): `None` opens it, `Some` answers without changing anything (true:
 /// `mod_id`'s is already open).
@@ -3766,7 +3799,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn enchantment_registry_returns_records_and_unknown_cost() {
         super::super::native_entity_refs::tests::with_game(|game| {
-            let all = game.native_enchantments();
+            let all = game.enchantments();
             let sharpness = all.iter().find(|e| e.id == "minecraft:sharpness").unwrap();
             assert_eq!((sharpness.max_level, sharpness.curse), (5, false));
             let binding = all
@@ -3775,10 +3808,10 @@ mod tests {
                 .unwrap();
             assert!(binding.curse);
             assert!(
-                game.native_enchantment_min_cost("minecraft:sharpness", 1)
+                game.enchantment_min_cost("minecraft:sharpness", 1)
                     .is_some()
             );
-            assert_eq!(game.native_enchantment_min_cost("missing:unknown", 1), None);
+            assert_eq!(game.enchantment_min_cost("missing:unknown", 1), None);
         });
     }
     #[test]
@@ -3794,8 +3827,8 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             let (got, _) = scoped(Language::load(&[&Empty], "en_us"), || {
                 (
-                    game.native_translate("horizon.options.controller"),
-                    game.native_translate("missing.key"),
+                    game.translate("horizon.options.controller"),
+                    game.translate("missing.key"),
                 )
             });
             assert_eq!(got, (Some("Controller".to_owned()), None));
@@ -3804,7 +3837,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_trait_mod_measures_text_through_its_draw_context() {
-        use super::super::mod_api_host::generated::GameDrawContext;
+        use super::super::host::draw::GameDrawContext;
         use super::super::native_entity_refs::tests::with_game;
         use mod_api::DrawContext;
 
@@ -3927,7 +3960,7 @@ mod tests {
             }
             fn blocks(&self, _context: &mod_api::RegistrationContext, event: &mut BlocksEvent<'_>) {
                 event.blocks.extend([FIRST, SECOND, EMPTY, PLAIN].map(|id| {
-                    horizon_mods::content::Block {
+                    horizon_mod_package::content::Block {
                         id: id.into(),
                         template: "minecraft:white_banner".into(),
                         ..Default::default()
@@ -3984,7 +4017,7 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let stone = game
                 .pack
                 .assets
@@ -3999,20 +4032,20 @@ mod tests {
                 (5, "minecraft:chest"),
             ] {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 63, 0],
                     stone,
                     NativeBlockUpdateFlags::NONE
                 ));
-                assert!(game.native_level_set_block(
+                assert!(game.level_set_block(
                     level,
                     [x, 64, 0],
                     state,
                     NativeBlockUpdateFlags::NONE
                 ));
                 let pos = (x, 64, 0);
-                let handle = game.native_block_entity_ref(level, [x, 64, 0]).unwrap();
+                let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                 if block == "minecraft:chest" {
                     assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
                     let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
@@ -4085,14 +4118,13 @@ mod tests {
     fn client_host_reads_current_pause_state() {
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.pause = false;
-            assert!(!ClientHost::is_paused(game));
+            assert!(!mod_api::prelude::ClientViewClientHost::is_paused(game));
             game.pause = true;
-            assert!(ClientHost::is_paused(game));
+            assert!(mod_api::prelude::ClientViewClientHost::is_paused(game));
         });
     }
 
@@ -4102,27 +4134,35 @@ mod tests {
         use super::super::Screen;
         use super::super::execution_role::ExecutionRole;
         use super::super::native_entity_refs::tests::with_game;
-        use mod_api::ClientHost;
+
         use winit::keyboard::KeyCode;
 
         with_game(|game| {
             game.options.execution_role = ExecutionRole::Client;
             game.screen = Screen::Playing;
-            assert!(ClientHost::playing(game));
+            assert!(mod_api::prelude::ClientInputClientHost::playing(game));
             game.screen = Screen::Chat;
-            assert!(!ClientHost::playing(game));
+            assert!(!mod_api::prelude::ClientInputClientHost::playing(game));
 
             // Vanilla's default bindings: forward is W, attack the left mouse button.
-            let forward = ClientHost::mapping(game, "key.forward").unwrap();
+            let forward =
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward").unwrap();
             assert_eq!(
                 (forward.down, forward.label.plain()),
                 (false, "W".to_owned())
             );
             game.keys.insert(KeyCode::KeyW);
-            assert!(ClientHost::mapping(game, "key.forward").unwrap().down);
-            let attack = ClientHost::mapping(game, "key.attack").unwrap();
+            assert!(
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.forward")
+                    .unwrap()
+                    .down
+            );
+            let attack =
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.attack").unwrap();
             assert_eq!(attack.label.plain(), "Left Button");
-            assert!(ClientHost::mapping(game, "key.mymod.boost").is_none());
+            assert!(
+                mod_api::prelude::ClientInputClientHost::mapping(game, "key.mymod.boost").is_none()
+            );
         });
     }
 
@@ -4218,7 +4258,7 @@ mod tests {
     fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
         use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
         use horizon_client::mod_content::{ContentMod, build};
-        use horizon_mods::content::{Block, Content};
+        use horizon_mod_package::content::{Block, Content};
 
         let base = std::path::PathBuf::from(
             std::env::var_os("HORIZON_TEST_RESOURCES")
@@ -4266,7 +4306,10 @@ mod tests {
                 jars: Vec::new(),
             }],
             &root,
-            &horizon_mods::enabled::EnabledMods::new([("ruby".into(), horizon_mods::Side::Both)]),
+            &horizon_mod_package::enabled::EnabledMods::new([(
+                "ruby".into(),
+                horizon_mod_package::Side::Both,
+            )]),
         )
         .unwrap();
         let settings = Settings::default();
@@ -4510,7 +4553,7 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(game.native_screen_hovered_item(), None);
+        assert_eq!(game.screen_hovered_item(), None);
     }
 
     /// A mod's own screen opens only over the world, never over another
@@ -4576,18 +4619,28 @@ mod tests {
     fn a_cancelled_key_still_types_the_characters_left() {
         // `axb` with 'x' cancelled: the key went no further, `ab` still types.
         assert_eq!(
-            super::chars_to_type("axb", |c| c == 'x').as_deref(),
+            super::chars_to_type("axb", true, |c| c == 'x').as_deref(),
             Some("ab")
         );
         // Backspace, Escape and the like are keys, not text.
         assert_eq!(
-            super::chars_to_type("a\u{7f}\u{1b}b", |_| false).as_deref(),
+            super::chars_to_type("a\u{7f}\u{1b}b", true, |_| false).as_deref(),
             Some("ab")
         );
         // Every character cancelled: the box takes none of them.
-        assert_eq!(super::chars_to_type("ab", |_| true), None);
+        assert_eq!(super::chars_to_type("ab", true, |_| true), None);
         // Nothing typed: nothing to hand over.
-        assert_eq!(super::chars_to_type("", |_| false), None);
+        assert_eq!(super::chars_to_type("", true, |_| false), None);
+        // Ctrl+A is a shortcut: its `a` reaches no hook and no box.
+        let mut offered = Vec::new();
+        assert_eq!(
+            super::chars_to_type("a", false, |c| {
+                offered.push(c);
+                false
+            }),
+            None
+        );
+        assert!(offered.is_empty());
     }
 
     /// A mod's camera replaces vanilla's value by value; one that isn't finite keeps vanilla's.
@@ -4771,7 +4824,7 @@ mod tests {
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for head in [
             "    pub(in crate::game) fn native_set_block_property(\n        &mut self,\n        ticks:",
-            "    pub(in crate::game) fn native_set_block_property_with(",
+            "    pub(in crate::game) fn set_block_property_with(",
         ] {
             let body = code.split(head).nth(1).expect(head);
             let body = &body[..body.find("\n    }\n").expect(head)];
@@ -5100,10 +5153,10 @@ mod item_fall_on_tests {
                     }
                 }
                 game.world.set(1, 64, 1, stone).unwrap();
-                let level = game.native_level(game.dim.id()).unwrap();
+                let level = game.level(game.dim.id()).unwrap();
                 let stack = ItemStack::new("minecraft:apple", 1);
                 let item = game
-                    .native_level_spawn_item(level, 1.5, 70.0, 1.5, stack, 10)
+                    .level_spawn_item(level, 1.5, 70.0, 1.5, stack, 10)
                     .unwrap();
                 if let Some(i) = game.dropped.iter_mut().find(|i| i.id == item.id()) {
                     i.velocity = horizon_core::geometry::Vec3::ZERO;
@@ -5261,8 +5314,8 @@ pub(super) mod particle_count_tests {
                     "live guardian, pickup and ordinary particles draw"
                 );
                 game.native_render_gui_pre(&mut false);
-                assert_eq!(ClientHost::particle_count(game), 0);
-                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, Vec::new());
+                assert_eq!(mod_api::prelude::EffectsClientHost::particle_count(game), 0);
+                let (mut after, _, _, _) = game.entity_geometry(camera, 0.0, None, Vec::new());
                 game.client_particle_geometry(camera, 0.0, 70.0, &mut after);
                 assert!(
                     after.is_empty(),

@@ -1,46 +1,33 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging};
-use horizon_mods::selection::{Argument, LaunchArguments};
+use horizon_mod_package::selection::{Argument, LaunchArguments};
 use mod_api::__private::game::*;
 
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
-    main_with(Vec::new(), &[], &[], &[]);
+    main_with(Vec::new(), &[], &[]);
 }
 
-/// Whether a mod's `__HORIZON_POINTS` names a method, at compile time: the launcher's generated
-/// `main` checks each point injection with it.
-#[doc(hidden)]
-pub use mod_points::__private::lists as point_listed;
-
-/// A native mod that listens at injection points: its id, and the generated export that sees its
-/// installed `Hooks` as its `impl Points` (#589).
-pub type NativePoints = (
-    &'static str,
-    fn(&'static dyn mod_api::Hooks) -> &'static dyn mod_points::Points,
-);
-
-/// A native mod's raw listener (#589), which the generated `main` makes after its typed `let`
-/// checked the function against the place's listener type.
-pub use mod_points::__private::RawListener as NativeRaw;
+/// A native function slot, checked against its place's exact type before erasure.
+pub use mod_points::__private::SlotListener as NativeSlot;
 
 /// The places raw listeners register at, named by the generated `main`.
 #[doc(hidden)]
 pub use mod_points::PointId;
 
-/// Start the game with named trait mods in dispatch order, their `impl Points` and their raw
-/// listeners.
+/// Start with named mods and their function slots in installed dependency order.
 pub fn main_with(
     mut mods: Vec<mod_api::ModEntry>,
-    points: &[NativePoints],
-    raw: &[NativeRaw],
-    built: &'static [horizon_mods::runtime::BuiltMod],
+    slots: &[NativeSlot],
+    built: &'static [horizon_mod_package::runtime::BuiltMod],
 ) {
     let exe = std::env::current_exe();
     let native: crate::Result<_> = exe
         .as_ref()
         .map_err(|e| e.to_string().into())
-        .and_then(|exe| horizon_mods::runtime::Runtime::load(exe, built).map_err(Into::into));
+        .and_then(|exe| {
+            horizon_mod_package::runtime::Runtime::load(exe, built).map_err(Into::into)
+        });
     let native = match native {
         Ok(native) => native,
         Err(error) => {
@@ -111,19 +98,19 @@ pub fn main_with(
     );
     let declared: Vec<_> = manifests
         .iter()
-        .map(|m| horizon_mods::dependencies::from_manifest(&m.dependencies))
+        .map(|m| horizon_mod_package::dependencies::from_manifest(&m.dependencies))
         .collect();
     let inputs: Vec<_> = manifests
         .iter()
         .zip(&declared)
-        .map(|(m, dependencies)| horizon_mods::dependencies::Mod {
+        .map(|(m, dependencies)| horizon_mod_package::dependencies::Mod {
             id: &m.id,
             version: &m.version,
             has_api: true,
             dependencies,
         })
         .collect();
-    let order = horizon_mods::dependencies::resolve(&inputs)
+    let order = horizon_mod_package::dependencies::resolve(&inputs)
         .unwrap_or_else(|error| panic!("mod load refused: {error}"));
     let mut entries: std::collections::BTreeMap<_, _> = mods
         .into_iter()
@@ -134,25 +121,23 @@ pub fn main_with(
         .into_iter()
         .map(|i| entries.remove(manifests[i].id.as_str()).unwrap())
         .collect();
+    let ids: Vec<_> = mods.iter().map(|entry| entry.fields().id).collect();
     mod_api::__private::install(mods.into());
-    for (id, listeners) in points {
-        let hooks = mod_api::__private::hooks_of(id)
-            .expect("a native mod listening at points is installed");
-        if let Err(error) = mod_points::register(id, listeners(hooks)) {
+    let mut wasm: std::collections::BTreeMap<_, _> = wasm_listening
+        .into_iter()
+        .map(|listeners| (listeners.id(), listeners))
+        .collect();
+    for id in ids {
+        for slot in slots.iter().filter(|slot| slot.id() == id) {
+            if let Err(error) = mod_points::register(slot) {
+                eprintln!("Horizon: {id}: {error}");
+                std::process::exit(game::exit_code::ERROR);
+            }
+        }
+        if let Some(listeners) = wasm.remove(id)
+            && let Err(error) = listeners.register()
+        {
             eprintln!("Horizon: {id}: {error}");
-            std::process::exit(game::exit_code::ERROR);
-        }
-    }
-    for listener in raw {
-        if let Err(error) = mod_points::__private::register_raw(listener) {
-            eprintln!("Horizon: {}: {error}", listener.id());
-            std::process::exit(game::exit_code::ERROR);
-        }
-    }
-    // Wasm mods' listeners after the native ones', as their hooks are.
-    for listening in wasm_listening {
-        if let Err(error) = listening.register() {
-            eprintln!("Horizon: {error}");
             std::process::exit(game::exit_code::ERROR);
         }
     }

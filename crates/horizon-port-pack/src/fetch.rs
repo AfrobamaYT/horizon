@@ -242,7 +242,7 @@ pub(crate) fn download(
 /// Download exactly the manifest jar through the Modrinth CDN.
 pub fn download_jar(
     url: &str,
-    jar: &horizon_mods::manifest::JarRef,
+    jar: &horizon_mod_package::manifest::JarRef,
     dest: &Path,
 ) -> Result<(), String> {
     let response =
@@ -368,10 +368,10 @@ impl Local {
     fn index(dir: &Path) -> Local {
         let mut local = Local::default();
         local.walk(dir, 3);
-        if let Ok(text) = fs::read_to_string(dir.join("minecraftinstance.json")) {
-            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                local.curseforge = curseforge_names(&v);
-            }
+        if let Ok(text) = fs::read_to_string(dir.join("minecraftinstance.json"))
+            && let Ok(v) = serde_json::from_str::<Value>(&text)
+        {
+            local.curseforge = curseforge_names(&v);
         }
         local
     }

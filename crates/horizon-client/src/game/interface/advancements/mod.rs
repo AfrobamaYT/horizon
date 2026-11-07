@@ -426,6 +426,15 @@ impl Game<'_> {
         let tree = self.adv.tree.clone();
         self.adv.progress = progress;
         self.ui.registries.advancements = tree.list.iter().map(|a| a.id.clone()).collect();
+        // `PlayerAdvancements.checkForAutomaticTriggers`: an advancement with no
+        // criteria is never done (`AdvancementRequirements.test` is false), but
+        // its rewards are granted as the progress loads. Vanilla's `award(holder, "")` finds no `""`
+        // criterion to grant and so returns without a toast or an announcement;
+        // the reward grant is the whole effect, and it happens again on the next
+        // load because there is no criterion to record it.
+        for index in tree.automatic() {
+            self.grant_rewards(&tree.list[index]);
+        }
     }
     pub(super) fn save_advancements(&self) {
         if !self.adv.loaded || self.remote.is_some() || self.no_player_here() {
@@ -695,6 +704,8 @@ impl Game<'_> {
             ..Default::default()
         }
     }
+    /// `Entity.get`: the mob's live custom-name component and type variants,
+    /// alongside the other state the entity predicate asks for.
     pub(super) fn mob_entity(&self, m: &horizon_client::mobs::Mob) -> EntityView {
         // mainhand, offhand, head, chest, legs, feet.
         let slot = |i: Option<&str>| i.map(|id| item_view(&ItemStack::new(id, 1)));
@@ -746,6 +757,7 @@ impl Game<'_> {
                 .map(|(id, value)| (id.to_owned(), value))
                 .into_iter()
                 .collect(),
+            custom_name: m.custom_name_text.as_ref().map(Text::component),
             passengers,
             nbt,
             team: self.mob_team_of(m).map(|t| t.name.clone()),
@@ -1068,35 +1080,7 @@ impl Game<'_> {
         if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_advancement_done(player, &name, &a.id);
         }
-        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
-        self.give_experience_points(a.rewards.experience);
-        // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
-        let rewards: Vec<String> = a
-            .rewards
-            .recipes
-            .iter()
-            .filter(|r| world_stations!(self).recipe_index.contains(r))
-            .cloned()
-            .collect();
-        for table in &a.rewards.loot {
-            let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
-            for s in items {
-                // Inventory.add returns false when anything is left, and
-                // AdvancementRewards then drops that remainder with no
-                // pickup sound. A stack the inventory takes whole plays
-                // entity.item.pickup at the player's feet.
-                if let Some(rest) = self.give(s) {
-                    if let Some(eye) = self.eye_position() {
-                        self.spawn_item(rest, eye, [0.0; 3], 0);
-                    }
-                } else {
-                    self.advancement_pickup_sound();
-                }
-            }
-        }
-        if let Some(function) = &a.rewards.function {
-            self.run_advancement_reward_function(function);
-        }
+        let rewards = self.grant_rewards(a);
         if let Some(d) = &a.display {
             // A network player's client shows its own toast.
             if d.show_toast && !self.adv.quiet && self.lan_acting.is_none() {
@@ -1148,7 +1132,47 @@ impl Game<'_> {
                 }
             }
         }
-        self.award_recipes(&rewards);
+        self.recipe_unlocked(&rewards);
+    }
+    /// `AdvancementRewards.grant`: the experience, recipes, loot and function of
+    /// a finished advancement, and the recipes it unlocked for the
+    /// `recipe_unlocked` trigger, which the caller runs after its toast and
+    /// announcement. Returns those recipes.
+    fn grant_rewards(&mut self, a: &adv::Advancement) -> Vec<String> {
+        // AdvancementRewards.grant: giveExperiencePoints runs even for 0.
+        self.give_experience_points(a.rewards.experience);
+        // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
+        let rewards: Vec<String> = a
+            .rewards
+            .recipes
+            .iter()
+            .filter(|r| world_stations!(self).recipe_index.contains(r))
+            .cloned()
+            .collect();
+        let (_, unlocked) = self
+            .level
+            .recipe_book
+            .add_recipes(&world_stations!(self).recipe_index, &rewards);
+        for table in &a.rewards.loot {
+            let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
+            for s in items {
+                // Inventory.add returns false when anything is left, and
+                // AdvancementRewards then drops that remainder with no
+                // pickup sound. A stack the inventory takes whole plays
+                // entity.item.pickup at the player's feet.
+                if let Some(rest) = self.add_stack_to_inventory(s) {
+                    if let Some(eye) = self.eye_position() {
+                        self.spawn_item(rest, eye, [0.0; 3], 0);
+                    }
+                } else {
+                    self.advancement_pickup_sound();
+                }
+            }
+        }
+        if let Some(function) = &a.rewards.function {
+            self.run_advancement_reward_function(function);
+        }
+        unlocked
     }
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
@@ -2630,6 +2654,94 @@ mod tests {
                 }
             });
         });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mob_name_components_read_live_text_without_saved_nbt() {
+        use crate::game::{Audio, Options, Settings, commands::Target, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &crate::game::Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        let kind = game.res.mob_types()["minecraft:pig"].clone();
+        game.mobs.push(horizon_client::mobs::Mob::new(
+            12500,
+            kind,
+            Vec3::new(4.5, 200.0, 4.5),
+            0.0,
+        ));
+        let matches = |game: &Game<'_>, key: &str, want: Value| {
+            let view = game.entity_view_of(Target::Mob(12500));
+            assert_eq!(view.kind, "minecraft:pig");
+            assert!(view.nbt.is_none());
+            let mut predicate = serde_json::Map::new();
+            predicate.insert(
+                key.into(),
+                serde_json::json!({"minecraft:custom_name": want}),
+            );
+            adv::entity(
+                &Value::Object(predicate),
+                &view,
+                &View(game),
+                [4.5, 200.0, 4.5],
+            )
+        };
+        for key in ["components", "minecraft:components"] {
+            assert!(!matches(&game, key, serde_json::json!("Bob")));
+        }
+        for (name, unequal) in [
+            (serde_json::json!("Bob"), serde_json::json!("minecraft:Bob")),
+            (serde_json::json!("minecraft:Bob"), serde_json::json!("Bob")),
+            (
+                serde_json::json!({"text": "Bob", "color": "red", "bold": true}),
+                serde_json::json!("Bob"),
+            ),
+            (
+                serde_json::json!({"text": "B", "extra": [{"text": "ob"}]}),
+                serde_json::json!("Bob"),
+            ),
+        ] {
+            let text = horizon_client::scoreboard::comp_text(&name);
+            game.mobs[0].custom_name = Some(text.plain());
+            game.mobs[0].custom_name_text = Some(text);
+            for key in ["components", "minecraft:components"] {
+                assert!(matches(&game, key, name.clone()), "{key}: {name}");
+                assert!(!matches(&game, key, unequal.clone()), "{key}: {unequal}");
+            }
+        }
+        game.mobs[0].custom_name = None;
+        game.mobs[0].custom_name_text = None;
+        for key in ["components", "minecraft:components"] {
+            assert!(!matches(&game, key, serde_json::json!("Bob")));
+        }
     }
 
     #[test]

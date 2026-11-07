@@ -108,43 +108,17 @@ pub struct Hook {
     pub call: Vec<(String, String)>,
 }
 
-/// A game function mods reach through the `Host` or a handle.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-pub struct Helper {
-    pub name: String,
-    pub target: String,
-    pub side: Side,
-    /// The prose of `docs/modding/src/reference/hook-notes.md` for this helper, heading included.
-    pub notes: Option<String>,
-    /// The both-side helper's client implementation, when it differs from `target`.
-    pub client_target: Option<String>,
-    /// The handle the helper is also a method of.
-    pub receiver: Option<String>,
-    #[serde(default)]
-    pub backend: bool,
-    /// A published asset/data query, not live world/player state. Cache updates
-    /// are permitted; handle methods have their own access boundary.
-    #[serde(default)]
-    pub resource_read: bool,
-    /// The small service that owns this global helper, instead of the flat host.
-    pub service: Option<String>,
-}
-
 /// A drawing surface of the game's that drawing hooks get as a trait object (the catalog's
-/// `draw_contexts`): the surface's helpers become methods of a trait, implemented by a
-/// game struct pairing `Game` with the surface, and a hook argument of the surface's type is
-/// the trait object in the hook's event.
+/// `draw_contexts`): a hook argument of the surface's type is the trait object, declared in
+/// `host/draw.rs`, in the hook's event.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DrawContext {
-    /// The game's type, as the host implementation names it (`crate::hud::HudBatch`).
+    /// The game's type (`crate::hud::HudBatch`).
     pub surface: String,
     /// The trait mods draw through.
     #[serde(rename = "trait")]
     pub trait_name: String,
-    /// What its helpers' names start with, left off the trait's method names.
-    pub prefix: String,
-    pub doc: String,
 }
 
 /// Why the catalog was refused.
@@ -154,15 +128,12 @@ pub enum CatalogError {
     Declaration { path: String, error: String },
     NamelessHook,
     DuplicateHook(String),
-    DuplicateHelper(String),
     InvalidHook { hook: String, error: String },
-    InvalidHelper { helper: String, error: String },
     MissingDoc(String),
     Counterpart { hook: String, key: &'static str },
     InvalidContract(String),
     AnsweredNeedsGlobalReplace(String),
     ScopeNeedsKey(String),
-    ClientTargetNeedsBoth(String),
     NoHooks,
     Retired(String),
     InvalidModule(String),
@@ -181,9 +152,7 @@ impl fmt::Display for CatalogError {
             Self::InvalidModule(name) => write!(f, "invalid hook declaration filename {name}"),
             Self::NamelessHook => f.write_str("hook name missing"),
             Self::DuplicateHook(name) => write!(f, "duplicate hook {name}"),
-            Self::DuplicateHelper(name) => write!(f, "duplicate helper {name}"),
             Self::InvalidHook { hook, error } => write!(f, "hook {hook}: {error}"),
-            Self::InvalidHelper { helper, error } => write!(f, "helper {helper}: {error}"),
             Self::MissingDoc(name) => write!(
                 f,
                 "hook {name}: doc missing: add `///` lines, the rustdoc of its trait method"
@@ -196,9 +165,6 @@ impl fmt::Display for CatalogError {
                 write!(f, "{name}: answered_by needs a global replace hook")
             }
             Self::ScopeNeedsKey(name) => write!(f, "{name} needs both scope and key, or neither"),
-            Self::ClientTargetNeedsBoth(name) => {
-                write!(f, "helper {name}: client_target requires side both")
-            }
             Self::NoHooks => f.write_str("no native hooks"),
         }
     }
@@ -337,57 +303,13 @@ impl Hook {
     }
 }
 
-impl Helper {
-    fn parse(value: serde_json::Value) -> Result<Self, CatalogError> {
-        let name = value
-            .get("name")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        let helper: Self =
-            serde_json::from_value(value).map_err(|error| CatalogError::InvalidHelper {
-                helper: name.clone(),
-                error: error.to_string(),
-            })?;
-        if helper.client_target.is_some() && helper.side != Side::Both {
-            return Err(CatalogError::ClientTargetNeedsBoth(name));
-        }
-        if helper.resource_read && (helper.receiver.is_some() || helper.backend) {
-            return Err(CatalogError::InvalidHelper {
-                helper: name,
-                error: "a published resource query has no receiver or backend".into(),
-            });
-        }
-        if let Some(service) = &helper.service {
-            let error = if !matches!(
-                service.as_str(),
-                "commands" | "levels" | "messages" | "players" | "client_session" | "render_assets"
-            ) {
-                Some("unknown service")
-            } else if helper.receiver.is_some() || helper.backend {
-                Some("a service helper has no receiver or backend")
-            } else {
-                None
-            };
-            if let Some(error) = error {
-                return Err(CatalogError::InvalidHelper {
-                    helper: name,
-                    error: error.into(),
-                });
-            }
-        }
-        Ok(helper)
-    }
-}
-
 /// Everything the generator reads from the catalog.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Catalog {
     /// In declaration order: base first, then files by name, each file's declarations in order.
     pub hooks: Vec<Hook>,
-    pub helpers: Vec<Helper>,
     pub draw_contexts: Vec<DrawContext>,
-    /// Prose that belongs to no one hook or helper, from the `Notes` trait's `#[notes]`.
+    /// Prose that belongs to no one hook, from the `Notes` trait's `#[notes]`.
     pub general_notes: Option<String>,
 }
 
@@ -491,13 +413,12 @@ fn doc(attrs: &[syn::Attribute]) -> Option<String> {
 #[derive(Default)]
 struct Declared {
     hooks: Vec<serde_json::Value>,
-    helpers: Vec<serde_json::Value>,
     draw_contexts: Vec<serde_json::Value>,
     general_notes: Vec<String>,
 }
 
 impl Declared {
-    /// Reads one declaration file: its `Hooks`, `Helpers` and `DrawContexts` traits.
+    /// Reads one declaration file: its `Hooks`, `DrawContexts` and `Notes` traits.
     fn read(&mut self, path: &str, text: &str) -> Result<(), CatalogError> {
         let invalid = |error: String| CatalogError::Declaration {
             path: path.to_owned(),
@@ -513,6 +434,12 @@ impl Declared {
                 continue;
             };
             let kind = declarations.ident.to_string();
+            if kind == "Helpers" {
+                return Err(invalid(
+                    "helpers are hand-written host traits now: declare the method in `crates/horizon-mod-api/src/host/<area>.rs`"
+                        .into(),
+                ));
+            }
             for member in declarations.items {
                 let syn::TraitItem::Fn(function) = member else {
                     return Err(invalid(format!(
@@ -530,7 +457,6 @@ impl Declared {
                 }
                 let attribute = match kind.as_str() {
                     "Hooks" => "hook",
-                    "Helpers" => "helper",
                     "DrawContexts" => "draw_context",
                     _ => continue,
                 };
@@ -580,19 +506,11 @@ impl Declared {
                         entry.insert("mod_api".into(), api.into());
                         self.hooks.push(entry.into());
                     }
-                    "Helpers" => {
-                        entry.insert("name".into(), name.into());
-                        self.helpers.push(entry.into());
-                    }
                     _ => {
                         entry.remove("target");
                         if let Some(trait_name) = entry.remove("name") {
                             entry.insert("trait".into(), trait_name);
                         }
-                        entry.insert(
-                            "doc".into(),
-                            doc(&function.attrs).unwrap_or_default().into(),
-                        );
                         self.draw_contexts.push(entry.into());
                     }
                 }
@@ -685,19 +603,6 @@ impl Catalog {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let mut seen = HashSet::new();
-        let helpers = declared
-            .helpers
-            .into_iter()
-            .map(|raw| {
-                let helper = Helper::parse(raw)?;
-                if seen.insert(helper.name.clone()) {
-                    Ok(helper)
-                } else {
-                    Err(CatalogError::DuplicateHelper(helper.name))
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         let draw_contexts = declared
             .draw_contexts
             .into_iter()
@@ -710,7 +615,6 @@ impl Catalog {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             hooks,
-            helpers,
             draw_contexts,
             general_notes: (!declared.general_notes.is_empty())
                 .then(|| declared.general_notes.join("\n\n")),
@@ -760,16 +664,14 @@ mod tests {
     }
 
     #[test]
-    fn service_helpers_reject_unknown_services_and_handle_backends() {
-        for attrs in [
-            r#"service = "unknown""#,
-            r#"service = "commands", receiver = "player""#,
-            r#"service = "messages", backend = true"#,
-        ] {
-            let source =
-                format!(r#"trait Helpers {{ #[helper(side = "server", {attrs})] fn example(); }}"#);
-            assert!(super::Catalog::parse(&[("test.rs".into(), source)]).is_err());
-        }
+    fn a_helpers_trait_is_refused_for_the_host_traits() {
+        let source = r#"pub trait Helpers { #[helper(side = "server")] fn example(); }"#;
+        assert!(
+            super::Catalog::parse(&[("test.rs".into(), source.into())])
+                .unwrap_err()
+                .to_string()
+                .contains("host/<area>.rs")
+        );
     }
 
     #[test]
@@ -872,13 +774,9 @@ mod tests {
                        target = "horizon_world::loot::native_scoped")]
                 fn scoped();
             }
-            pub trait Helpers {
-                #[helper(side = "both", client_target = "c", backend = true)]
-                fn help();
-            }
             pub trait DrawContexts {
                 /// Draws.
-                #[draw_context(surface = "crate::s::S", name = "Draw", prefix = "d_")]
+                #[draw_context(surface = "crate::s::S", name = "Draw")]
                 fn draw();
             }
             "#,
@@ -900,15 +798,7 @@ mod tests {
             catalog.hooks[1].scope.as_ref().unwrap().kind,
             PartKind::Item
         );
-        let help = &catalog.helpers[0];
-        assert!(help.backend && help.client_target.as_deref() == Some("c"));
-        assert_eq!(
-            (
-                catalog.draw_contexts[0].trait_name.as_str(),
-                catalog.draw_contexts[0].prefix.as_str()
-            ),
-            ("Draw", "d_")
-        );
+        assert_eq!(catalog.draw_contexts[0].trait_name, "Draw");
     }
 
     #[test]
@@ -1086,38 +976,5 @@ mod tests {
                 CatalogError::AnsweredNeedsGlobalReplace("a".into())
             );
         }
-    }
-
-    #[test]
-    fn resource_reads_can_label_services_but_not_object_operations() {
-        let base = json!({"name": "facts", "target": "t", "side": "both", "resource_read": true});
-        assert!(Helper::parse(base.clone()).unwrap().resource_read);
-        let mut service = base.clone();
-        service["service"] = json!("render_assets");
-        assert!(Helper::parse(service).unwrap().resource_read);
-        for extra in [json!({"receiver": "level"}), json!({"backend": true})] {
-            let mut value = base.clone();
-            value
-                .as_object_mut()
-                .unwrap()
-                .extend(extra.as_object().unwrap().clone());
-            assert!(matches!(
-                Helper::parse(value),
-                Err(CatalogError::InvalidHelper { .. })
-            ));
-        }
-    }
-
-    #[test]
-    fn a_client_target_needs_a_both_side_helper() {
-        let helper = |side: &str| {
-            Helper::parse(json!({"name": "h", "target": "t", "side": side, "client_target": "c"}))
-        };
-        assert_eq!(helper("both").unwrap().client_target.as_deref(), Some("c"));
-        assert_eq!(
-            helper("server").unwrap_err(),
-            CatalogError::ClientTargetNeedsBoth("h".into())
-        );
-        assert!(Helper::parse(json!({"name": "h", "target": "t"})).is_err());
     }
 }

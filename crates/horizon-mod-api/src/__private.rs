@@ -18,14 +18,6 @@ pub fn mod_index_on(index: usize) -> bool {
     crate::mod_index_on(index)
 }
 
-/// The installed mod `id`'s hooks, for the game to hand its other faces (its `impl Points`) on.
-pub fn hooks_of(id: &str) -> Option<&'static dyn Hooks> {
-    crate::mods()
-        .iter()
-        .find(|entry| entry.id == id)
-        .map(|entry| &*entry.hooks)
-}
-
 /// Marks the thread as inside mod `id`'s `call` until the guard drops, as a hook's dispatch does,
 /// so a panic in it names both.
 pub fn enter(id: &'static str, call: &'static str) -> crate::crash::NativeModGuard {
@@ -132,8 +124,20 @@ pub mod game {
     }
 
     /// A block entity handle the game names.
-    pub fn block_entity_ref(level: LevelRef, position: [i32; 3]) -> BlockEntityRef {
-        BlockEntityRef { level, position }
+    pub fn block_entity_ref(
+        level: LevelRef,
+        position: [i32; 3],
+        generation: u64,
+    ) -> BlockEntityRef {
+        BlockEntityRef {
+            level,
+            position,
+            generation,
+        }
+    }
+    /// A client mod's sound handle the game names.
+    pub fn sound_ref(id: u64) -> SoundRef {
+        SoundRef { id }
     }
     /// A boss bar handle the game names.
     pub fn boss_bar_ref(epoch: NativeWorldEpoch, uuid: u128) -> BossBarRef {
@@ -202,6 +206,7 @@ pub mod game {
     pub struct BlockEntityRefFields {
         pub level: LevelRef,
         pub position: [i32; 3],
+        pub generation: u64,
     }
     impl Fields for BlockEntityRef {
         type Fields<'a> = BlockEntityRefFields;
@@ -209,7 +214,18 @@ pub mod game {
             BlockEntityRefFields {
                 level: self.level,
                 position: self.position,
+                generation: self.generation,
             }
+        }
+    }
+
+    pub struct SoundRefFields {
+        pub id: u64,
+    }
+    impl Fields for SoundRef {
+        type Fields<'a> = SoundRefFields;
+        fn fields(&self) -> SoundRefFields {
+            SoundRefFields { id: self.id }
         }
     }
 
@@ -272,10 +288,10 @@ pub mod game {
     }
 
     pub trait PartsLookup {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts>;
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts>;
     }
     impl PartsLookup for Parts {
-        fn for_hook(&self, hook: HookId) -> Option<&crate::part_table::HookParts> {
+        fn for_hook(&self, hook: HookId) -> Option<&crate::parts::HookParts> {
             Parts::for_hook(self, hook)
         }
     }

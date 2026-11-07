@@ -13,7 +13,6 @@ use mod_api::{
 };
 
 // Native mods use this; nothing in Horizon does.
-#[allow(dead_code)]
 impl Game<'_> {
     /// For a server mod: structure template `id` (`mymod:hut`, found as
     /// `StructureTemplateManager.get` finds it: the world's saved structures,
@@ -25,7 +24,7 @@ impl Game<'_> {
     /// entities are left out. None for an id that doesn't parse or has a `.`
     /// or `..` part, a template the game doesn't have, and on a client.
     /// API @API:structure_template@.
-    pub(super) fn native_structure_template(
+    pub(super) fn structure_template(
         &mut self,
         id: &str,
         at: [i32; 3],

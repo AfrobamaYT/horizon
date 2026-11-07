@@ -2,18 +2,20 @@
 //! native mod too.
 // ANCHOR: mod
 use mod_api::{
-    BlockKey, DataLoadContext, EffectKey, Flow, FluidIngredient, FluidStack, Hooks, HostSide,
-    ItemPart, LootTableLoadEvent, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
-    Text, UseItemEvent,
+    BlockKey, DataLoadContext, EffectKey, Flow, FluidDefinition, FluidIngredient, FluidKey,
+    FluidStack, FluidStateError, Hooks, HostFluidStates, HostSide, ItemPart, LootTableLoadEvent,
+    Registrar, RegistrationContext, ServerChatEvent, ServerHost, StateConstraint, Text,
+    UseItemEvent,
 };
-use mod_points::{Points, TickArgs};
+use mod_points::TickArgs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
 pub struct Mod {
-    ticks: AtomicU64,
     stone: std::sync::OnceLock<BlockKey>,
     speed: std::sync::OnceLock<EffectKey>,
+    water: std::sync::OnceLock<FluidKey>,
+    chocolate: std::sync::OnceLock<FluidKey>,
 }
 
 /// Sticks announce each use.
@@ -35,6 +37,8 @@ impl Hooks for Mod {
         registrar.item_part(item, Stick);
         let _ = self.stone.set(registrar.block_key("minecraft:stone"));
         let _ = self.speed.set(registrar.effect_key("minecraft:speed"));
+        let _ = self.water.set(registrar.fluid_key("minecraft:water"));
+        let _ = self.chocolate.set(registrar.declare_fluid("chocolate"));
     }
 
     fn loot_table_load(&self, context: &dyn DataLoadContext, event: &mut LootTableLoadEvent<'_>) {
@@ -65,24 +69,62 @@ impl Hooks for Mod {
             ),
             (0, false, false, true)
         );
+        let service = host.fluid_states();
+        let water = *self.water.get().expect("registered water");
+        let chocolate = *self.chocolate.get().expect("declared chocolate");
+        let Some(FluidDefinition::World {
+            default,
+            properties,
+        }) = service.definition(water)
+        else {
+            panic!("water definition")
+        };
+        assert!(default.matches(&[StateConstraint::new("falling", "true")]));
+        assert!(
+            properties
+                .iter()
+                .any(|p| p.name == "falling" && p.values.contains(&"false".into()))
+        );
+        assert_eq!(service.validate(water, &[]), Ok(()));
+        assert_eq!(
+            service.validate(water, &[StateConstraint::new("level", "8")]),
+            Err(FluidStateError::UnknownProperty(0))
+        );
+        assert_eq!(
+            service.validate(
+                water,
+                &[
+                    StateConstraint::new("falling", "true"),
+                    StateConstraint::new("falling", "true")
+                ]
+            ),
+            Err(FluidStateError::Duplicate(1))
+        );
+        assert_eq!(
+            service.definition(chocolate),
+            Some(FluidDefinition::TankOnly)
+        );
+        assert_eq!(
+            service.validate(chocolate, &[]),
+            Err(FluidStateError::NoWorldState)
+        );
         *event.message = Text::literal(format!("{} (via mod.wasm)", event.raw_text));
         Flow::Continue
     }
 }
 
+static TICKS: AtomicU64 = AtomicU64::new(0);
+
 /// Listens at the game's tick, a point its `horizon-mod.toml` names: every 200 server ticks it
 /// says so in chat.
-#[mod_api::horizon_mod]
-impl Points for Mod {
-    fn tick(&self, host: HostSide<'_>, _args: &mut TickArgs) {
-        let HostSide::Server(host) = host else {
-            return;
-        };
-        let ticks = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
-        if ticks % 200 == 0 {
-            host.messages()
-                .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
-        }
+pub fn tick(host: HostSide<'_>, _args: &mut TickArgs) {
+    let HostSide::Server(host) = host else { return };
+    let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    if ticks % 200 == 0 {
+        host.messages()
+            .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
     }
 }
+#[cfg(target_arch = "wasm32")]
+include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 // ANCHOR_END: mod

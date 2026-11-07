@@ -411,6 +411,26 @@ pub struct Flags {
     pub animal: bool,
 }
 
+/// The fields of [`MobType`] its type's attribute row gives, built by
+/// [`MobType::attribute_fields`]: the one map from an attribute to the
+/// field a mob spawns with.
+pub(crate) struct MobTypeAttributeFields {
+    pub max_health: f32,
+    pub speed: f64,
+    pub flying_speed: f64,
+    pub attack_damage: f32,
+    pub attack_knockback: f64,
+    pub follow_range: f64,
+    pub step_height: f64,
+    pub armor: f32,
+    pub armor_toughness: f32,
+    pub knockback_resistance: f64,
+    pub jump_strength: f64,
+    pub gravity: f64,
+    pub safe_fall_distance: f64,
+    pub fall_damage_multiplier: f64,
+    pub water_efficiency: f64,
+}
 #[derive(Clone, Debug)]
 pub struct MobType {
     pub id: String,
@@ -483,6 +503,65 @@ impl MobType {
         self.layers.get(key)
     }
 
+    /// The spawn fields an entity type's attribute row carries (its
+    /// `entity-types.json` row): the one map from an attribute to the field
+    /// a mob of the type spawns with, over the loader's own fallback. The
+    /// json's parser and the rest loader of a declared set (#845) both take
+    /// it, so the fields cannot drift from the row they read.
+    pub(crate) fn attribute_fields(value: impl Fn(&str) -> Option<f64>) -> MobTypeAttributeFields {
+        let attr = |k: &str| value(&format!("minecraft:{k}"));
+        MobTypeAttributeFields {
+            max_health: attr("max_health").unwrap_or(10.0) as f32,
+            speed: attr("movement_speed").unwrap_or(0.25),
+            flying_speed: attr("flying_speed").unwrap_or(0.4),
+            attack_damage: attr("attack_damage").unwrap_or(0.0) as f32,
+            attack_knockback: attr("attack_knockback").unwrap_or(0.0),
+            follow_range: attr("follow_range").unwrap_or(16.0),
+            step_height: attr("step_height").unwrap_or(0.6),
+            armor: attr("armor").unwrap_or(0.0) as f32,
+            armor_toughness: attr("armor_toughness").unwrap_or(0.0) as f32,
+            knockback_resistance: attr("knockback_resistance").unwrap_or(0.0),
+            jump_strength: attr("jump_strength").unwrap_or(0.42),
+            gravity: attr("gravity").unwrap_or(0.08),
+            safe_fall_distance: attr("safe_fall_distance").unwrap_or(3.0),
+            fall_damage_multiplier: attr("fall_damage_multiplier").unwrap_or(1.0),
+            water_efficiency: attr("water_movement_efficiency").unwrap_or(0.0),
+        }
+    }
+
+    /// Takes the type's row from the live attribute map's catalog (#845):
+    /// the merged row the map itself answers (the template's with the
+    /// declared set on top), as its attribute map and its spawn fields, so
+    /// the two records cannot diverge. Bases stay raw for base-value reads;
+    /// spawn fields use the catalog's computed-value sanitizer before narrowing.
+    pub fn take_attribute_row(
+        &mut self,
+        attributes: Arc<HashMap<String, f64>>,
+        catalog: &horizon_world::attributes::entity::Catalog,
+    ) {
+        let fields = Self::attribute_fields(|name| {
+            let base = *attributes.get(name)?;
+            let id = catalog.id(name)?;
+            Some(catalog.attribute(id).definition.sanitize(base))
+        });
+        self.attributes = attributes;
+        self.max_health = fields.max_health;
+        self.speed = fields.speed;
+        self.flying_speed = fields.flying_speed;
+        self.attack_damage = fields.attack_damage;
+        self.attack_knockback = fields.attack_knockback;
+        self.follow_range = fields.follow_range;
+        self.step_height = fields.step_height;
+        self.armor = fields.armor;
+        self.armor_toughness = fields.armor_toughness;
+        self.knockback_resistance = fields.knockback_resistance;
+        self.jump_strength = fields.jump_strength;
+        self.gravity = fields.gravity;
+        self.safe_fall_distance = fields.safe_fall_distance;
+        self.fall_damage_multiplier = fields.fall_damage_multiplier;
+        self.water_efficiency = fields.water_efficiency;
+    }
+
     /// The vanilla entity type whose class this type's mobs are: the type
     /// itself, or the template a content mod's living type copies. What a
     /// class saves and syncs of its own (`Zombie.addAdditionalSaveData`, its
@@ -527,25 +606,36 @@ pub struct MobTypes {
 }
 impl MobTypes {
     pub fn load(root: &Path) -> crate::Result<Self> {
-        Self::load_with_models(root, true)
+        Self::load_with_models(root, true, None)
     }
 
     /// The dedicated server needs entity facts and AI, but never their render
     /// geometry. Keep one empty part for the fields shared with the client
     /// rather than parsing and retaining every entity-model layer.
     pub fn load_for_server(root: &Path) -> crate::Result<Self> {
-        Self::load_with_models(root, false)
+        Self::load_with_models(root, false, None)
     }
 
-    fn load_with_models(root: &Path, models_needed: bool) -> crate::Result<Self> {
+    /// The client startup already parsed `entity-models.json` for the handoff
+    /// and the other model loaders; read the model layers from that copy.
+    pub fn load_with_document(root: &Path, document: &EntityModelDocument) -> crate::Result<Self> {
+        Self::load_with_models(root, true, Some(document))
+    }
+
+    fn load_with_models(
+        root: &Path,
+        models_needed: bool,
+        document: Option<&EntityModelDocument>,
+    ) -> crate::Result<Self> {
         let bytes = fs::read(root.join("entity-types.json"))?;
         let types: Value = serde_json::from_slice(&bytes)?;
         let exact = exact_attributes(&bytes);
         let models = models_needed
-            .then(|| -> crate::Result<Value> {
-                Ok(serde_json::from_slice(&fs::read(
-                    root.join("entity-models.json"),
-                )?)?)
+            .then(|| -> crate::Result<EntityModelDocument> {
+                match document {
+                    Some(document) => Ok(document.clone()),
+                    None => EntityModelDocument::load(root),
+                }
             })
             .transpose()?;
         let empty_model = Arc::new(Part::parse("root", &Value::Null));
@@ -605,14 +695,19 @@ impl MobTypes {
                 continue;
             }
             let model_key = format!("minecraft:{}", def.model);
-            let model = models.as_ref().and_then(|models| models.get(&model_key));
+            let model = models
+                .as_ref()
+                .and_then(|models| models.value().get(&model_key));
             if models_needed && model.is_none() {
                 continue;
             }
             let defaults = exact.get(&id).cloned().unwrap_or_default();
-            let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
+            let fields = MobType::attribute_fields(|name| defaults.get(name).copied());
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models.as_ref().and_then(Value::as_object) {
+            if let Some(all) = models
+                .as_ref()
+                .and_then(|models| models.value().as_object())
+            {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -628,7 +723,6 @@ impl MobTypes {
                 }
             }
             let category = t["category"].as_str().unwrap_or("creature").to_owned();
-            let speed = attr("movement_speed").unwrap_or(0.25);
             let flags = def.flags(t["fire_immune"].as_bool().unwrap_or(false));
             out.insert(
                 id.clone(),
@@ -638,22 +732,22 @@ impl MobTypes {
                     width: t["width"].as_f64().unwrap_or(0.6),
                     height: t["height"].as_f64().unwrap_or(1.8),
                     eye_height: t["eye_height"].as_f64().unwrap_or(1.6),
-                    max_health: attr("max_health").unwrap_or(10.0) as f32,
-                    speed,
-                    flying_speed: attr("flying_speed").unwrap_or(0.4),
-                    attack_damage: attr("attack_damage").unwrap_or(0.0) as f32,
-                    attack_knockback: attr("attack_knockback").unwrap_or(0.0),
-                    follow_range: attr("follow_range").unwrap_or(16.0),
-                    step_height: attr("step_height").unwrap_or(0.6),
-                    armor: attr("armor").unwrap_or(0.0) as f32,
-                    armor_toughness: attr("armor_toughness").unwrap_or(0.0) as f32,
-                    knockback_resistance: attr("knockback_resistance").unwrap_or(0.0),
-                    jump_strength: attr("jump_strength").unwrap_or(0.42),
+                    max_health: fields.max_health,
+                    speed: fields.speed,
+                    flying_speed: fields.flying_speed,
+                    attack_damage: fields.attack_damage,
+                    attack_knockback: fields.attack_knockback,
+                    follow_range: fields.follow_range,
+                    step_height: fields.step_height,
+                    armor: fields.armor,
+                    armor_toughness: fields.armor_toughness,
+                    knockback_resistance: fields.knockback_resistance,
+                    jump_strength: fields.jump_strength,
                     attributes: Arc::new(defaults.clone()),
-                    gravity: attr("gravity").unwrap_or(0.08),
-                    safe_fall_distance: attr("safe_fall_distance").unwrap_or(3.0),
-                    fall_damage_multiplier: attr("fall_damage_multiplier").unwrap_or(1.0),
-                    water_efficiency: attr("water_movement_efficiency").unwrap_or(0.0),
+                    gravity: fields.gravity,
+                    safe_fall_distance: fields.safe_fall_distance,
+                    fall_damage_multiplier: fields.fall_damage_multiplier,
+                    water_efficiency: fields.water_efficiency,
                     water_slowdown: def.water_slowdown(),
                     air_speed: def.air_speed(),
                     baby_scale: def.baby_scale(),
@@ -729,6 +823,7 @@ impl NamedDamage {
     pub const IS_PROJECTILE: u32 = 1 << 7;
     pub const IS_EXPLOSION: u32 = 1 << 8;
     pub const IS_FALL: u32 = 1 << 9;
+    pub const BYPASSES_ENCHANTMENTS: u32 = 1 << 10;
 
     pub const fn new(name: &'static str, tags: u32) -> Self {
         Self { name, tags }
@@ -828,6 +923,13 @@ impl DamageKind {
             return named.has(NamedDamage::BYPASSES_RESISTANCE);
         }
         matches!(self, DamageKind::OutOfWorld | DamageKind::GenericKill)
+    }
+    /// DamageTypeTags.BYPASSES_ENCHANTMENTS: `sonic_boom` alone in vanilla.
+    pub fn bypasses_enchantments(self) -> bool {
+        if let Self::Named(named) = self {
+            return named.has(NamedDamage::BYPASSES_ENCHANTMENTS);
+        }
+        matches!(self, DamageKind::SonicBoom)
     }
 }
 /// `source.getEntity()` of a blow, as `SulfurCube.knockback` reads it: `getEyePosition()`,
@@ -1145,7 +1247,7 @@ pub struct Extra {
     pub chested: bool,
     /// The chest contents of a donkey or mule (15 slots).
     pub items: Vec<Option<crate::items::ItemStack>>,
-    /// `Piglin.inventory` (`SimpleContainer(8)`): what it picked up and kept.
+    /// Occupied InventoryCarrier stacks: Piglin/trader (8 slots), Pillager (5).
     pub inventory: Vec<crate::items::ItemStack>,
     pub tame: bool,
     pub sitting: bool,
@@ -1170,6 +1272,10 @@ pub struct Extra {
     pub player_created: bool,
     pub carried: Option<horizon_world::registry::BlockStateId>,
     pub charged: bool,
+    /// `Creeper.explosionRadius` (`ExplosionRadius`, a byte): the blast's
+    /// radius, 3 unless the save or a command says otherwise; a powered
+    /// creeper blows with twice it (`explodeCreeper`).
+    pub explosion_radius: i8,
     pub using_item: i32,
     pub using_off_hand: bool,
     /// `LivingEntity.recentKineticEnemies`: when the entities this mob's
@@ -1253,6 +1359,9 @@ pub struct Extra {
     /// server gave them: the swirls around it, and whether they are all faint.
     pub effect_particles: Vec<crate::particles::ParticleOptions>,
     pub effect_ambient: bool,
+    /// The swirls of `effects` as the native mods left them
+    /// (`effect_particle_modification`), sent while one listens.
+    pub modified_effect_particles: Option<crate::effects::ModifiedEffectParticles>,
     /// An invisible illusioner's mirror images.
     pub illusions: Option<illusioner::Illusions>,
     /// A villager's claimed bed head and meeting bell.
@@ -1286,6 +1395,13 @@ pub struct Extra {
     /// `getFirstPassenger`).
     pub mount: Option<u32>,
     pub rider: Option<u32>,
+    /// This rider's place in its vehicle's `getPassengers`, beside `Guest.vehicle_order`: the
+    /// lowest goes first. Passengers that load together keep 0 and their list order.
+    pub vehicle_order: i64,
+    /// Where `positionRider` last seated this rider: its own vehicle
+    /// attachment (`getPassengerRidingPosition(this).y` is its feet plus this)
+    /// and the vehicle's box (`Mob.getAttackBoundingBox`, `getHitbox`).
+    pub seat: Option<(u32, f64, Aabb)>,
     /// `Entity.boardingCooldown`: ticks after leaving a boat before a boat
     /// can pick this mob up again.
     pub boarding_cooldown: i32,
@@ -1354,6 +1470,10 @@ pub struct Extra {
     pub live: crate::living_attributes::LivingAttributes,
     /// The knockback resistance modifiers of the items it wears or holds.
     pub gear_knockback: Option<Box<GearKnockback>>,
+    /// What the game last read from the hands' `minecraft:death_protection`
+    /// components (`game/totem.rs`); `None` until it has, when the totem's id
+    /// stands in for the component.
+    pub hand_protection: Option<HandProtection>,
 }
 /// The knockback resistance modifiers of the items a mob wears or holds, with
 /// the stacks they were read from: the game reads them again only when one
@@ -1363,6 +1483,13 @@ pub struct GearKnockback {
     /// The hand and armor stacks, mainhand to head.
     pub worn: [Option<crate::items::ItemStack>; 6],
     pub modifiers: Vec<(f64, finalize::Op)>,
+}
+/// The `death_effects` of the `death_protection` component each hand's stack
+/// carries; `None` for a hand without the component.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HandProtection {
+    pub main: Option<Vec<crate::items::ConsumeEffect>>,
+    pub off: Option<Vec<crate::items::ConsumeEffect>>,
 }
 impl Extra {
     /// The body item id (`getItemBySlot(BODY)`).
@@ -1456,6 +1583,31 @@ impl Extra {
     }
 }
 
+/// `DeathProtection.TOTEM_EFFECTS`: clear, then regeneration II, absorption II
+/// and fire resistance.
+fn totem_death_effects() -> Vec<crate::items::ConsumeEffect> {
+    use crate::items::{ConsumeEffect, ConsumeEffectSpec};
+    let spec = |id: &str, duration, amplifier| ConsumeEffectSpec {
+        id: id.to_owned(),
+        duration,
+        amplifier,
+        ambient: false,
+        show_particles: true,
+        show_icon: true,
+    };
+    vec![
+        ConsumeEffect::ClearAllEffects,
+        ConsumeEffect::ApplyEffects {
+            effects: vec![
+                spec("minecraft:regeneration", 900, 1),
+                spec("minecraft:absorption", 100, 1),
+                spec("minecraft:fire_resistance", 800, 0),
+            ],
+            probability: 1.0,
+        },
+    ]
+}
+
 /// How far the boxes of a set of mobs reach from their positions: the widest half width and the
 /// tallest height among them. A box query over many mobs (a vehicle's, against every mob of the
 /// level) tests each mob's position against this first, and works out the box ([`Mob::bounds`],
@@ -1492,7 +1644,7 @@ impl BoxReach {
 #[derive(Clone, Debug)]
 pub struct Mob {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
@@ -1959,6 +2111,9 @@ pub enum MobEvent {
         name: crate::text::Text,
         /// `Entity.isInWater` of the source: `BlockAttached.ignoreExplosion`.
         in_water: bool,
+        /// Its entity type: a player the blast kills is still credited to it
+        /// (`getKillCredit` finds the source during its own explosion).
+        kind: String,
     },
     /// The centre, the radius and the kind of the mob blowing up (it may be
     /// gone from the list by the time the blast is handled).
@@ -2327,10 +2482,13 @@ pub enum MobEvent {
     FinishAdmiring {
         mob: u32,
     },
-    /// Throw an entity upward (iron golem swings).
-    Launch {
+    /// `IronGolem.doHurtTarget`: the hit, then, only when `hurtServer` let it
+    /// land, the target thrown up by `0.4f` scaled by
+    /// `max(0, 1 - KNOCKBACK_RESISTANCE)`.
+    IronGolemHit {
         target: Who,
-        up: f64,
+        amount: f32,
+        source: Damage,
     },
     /// Damage the mob itself (snow golems melting).
     HurtSelf {
@@ -2541,6 +2699,7 @@ pub struct Seen {
     pub bred: bool,
     /// A tamed animal's owner (`getOwner`).
     pub owner: Option<[i32; 4]>,
+    /// `instanceof Enemy` (what the golems' target predicates test).
     pub hostile: bool,
     pub target: Option<Who>,
     pub health: f32,
@@ -2576,10 +2735,14 @@ pub struct Seen {
     pub passenger: bool,
     /// The vehicle it rides (`getVehicle`): a mob's or a boat's id.
     pub vehicle: Option<u32>,
+    /// `LivingEntity.getHitbox`: the box, cut below the seat when riding.
+    pub hitbox: Aabb,
     /// A villager's reputation of the player (`getPlayerReputation`).
     pub player_rep: i32,
     /// `isPushable` and pushed by others (`Entity.push(Entity)` moves it).
     pub pushable: bool,
+    /// A sleeping villager, wandering trader or fox vetoes its own `push(Entity)`.
+    pub sleeping: bool,
     /// A cold strider (`Strider.isSuffocating`).
     pub cold_strider: bool,
     /// `MobCategory` (`monster`, `creature`, ...).
@@ -2617,8 +2780,33 @@ pub struct Seen {
     pub hurt_recently: bool,
     /// `Hoglin.canBeHunted`: an adult hoglin without `CannotBeHunted`.
     pub huntable: bool,
+    /// A happy ghast's `isOnStillTimeout` (a player on its back holds it).
+    pub still: bool,
+    /// `Entity.isVehicle`: something rides it.
+    pub carrying: bool,
 }
 impl Seen {
+    /// Whether `canBeCollidedWith` can ever hold for this kind: the slots
+    /// [`MobWorld::others_solid`] lists.
+    pub fn may_block_mobs(&self) -> bool {
+        matches!(self.species, Species::Shulker | Species::HappyGhast)
+    }
+    /// `canBeCollidedWith(mover)` for a mob of species `mover` moving into
+    /// it (`EntityGetter.getEntityCollisions`): a living shulker
+    /// (`Shulker`), or an adult happy ghast held still, or carrying someone
+    /// when the mover is a happy ghast too (`HappyGhast`). Every other mob
+    /// keeps `Entity`'s false.
+    pub fn blocks_mob(&self, mover: Species) -> bool {
+        match self.species {
+            Species::Shulker => self.alive,
+            Species::HappyGhast => {
+                self.alive
+                    && !self.baby
+                    && (self.still || (self.carrying && mover == Species::HappyGhast))
+            }
+            _ => false,
+        }
+    }
     /// `LivingEntity.hasEffect`, by id without namespace.
     pub fn has_effect(&self, effect: &str) -> bool {
         self.effects.contains(&effect)
@@ -2752,6 +2940,7 @@ impl Mob {
             species: m.species(),
             position: m.position,
             bounds: m.bounds(),
+            hitbox: m.hitbox(),
             eye_y: m.eye_y(),
             alive: m.alive(),
             invulnerable: m.invulnerable_flag,
@@ -2765,7 +2954,7 @@ impl Mob {
             tame: m.extra.tame,
             bred: m.extra.bred,
             owner: m.extra.owner,
-            hostile: m.hostile(),
+            hostile: m.is_enemy(),
             target: m.ai.target,
             health: m.health,
             variant: m.extra.variant,
@@ -2791,6 +2980,8 @@ impl Mob {
                 _ => 0,
             },
             pushable: m.pushable(),
+            sleeping: villager::sleeping(m)
+                || (m.species() == Species::Fox && fox::flag(m, fox::SLEEPING)),
             cold_strider: strider::suffocating(m),
             category: m.category(),
             potential_job: villager_brain::potential_job_site(m),
@@ -2809,6 +3000,8 @@ impl Mob {
             lying: m.species() == Species::Cat && (m.extra.flag || m.extra.relax_one),
             ridden: m.rider.is_some() || m.extra.rider.is_some() || m.extra.mount.is_some(),
             is_vehicle: equine::is_vehicle(m),
+            still: m.species() == Species::HappyGhast && happy_ghast::on_still_timeout(m),
+            carrying: m.rider.is_some() || m.extra.rider.is_some(),
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
@@ -2940,7 +3133,7 @@ pub fn apply_mob_pushes(m: &mut Mob, pending: &mut PendingPushes) {
 /// index `from` on), at once: vanilla sets them on the other entity during
 /// the tick, before the mobs after it tick.
 pub fn apply_brain_events(
-    mobs: &mut [Mob],
+    mobs: &mut crate::join_seq::JoinList<Mob>,
     level: &mut DamageLevel<'_>,
     events: &mut Vec<MobEvent>,
     from: usize,
@@ -3182,6 +3375,8 @@ pub struct MobWorld<'a> {
     pub facts: &'a BlockFacts,
     /// Fluid states and flow facts, for the currents that push mobs.
     pub fluid_tables: &'a crate::motion::FluidResources,
+    /// The owning side's attribute definitions for species-specific writes.
+    pub attributes: &'a Arc<horizon_world::attributes::entity::Catalog>,
     pub movement: &'a horizon_world::movement_properties::BoundMovementProperties,
     pub collision: &'a BlockCollisionRegistry<'a>,
     pub suffocation: &'a horizon_world::suffocation::SuffocationRegistry<'a>,
@@ -3211,6 +3406,9 @@ pub struct MobWorld<'a> {
     /// keeps them (the mob ticks: a slot keeps its mob, and its species, all
     /// tick). Each zombie looking for a village read every slot.
     pub others_villagers: Option<&'a [u32]>,
+    /// The slots of `others` that may stop a moving mob
+    /// ([`Seen::may_block_mobs`]), when the caller keeps them; None: any.
+    pub others_solid: Option<&'a [u32]>,
     pub daylight: bool,
     /// The `gameplay/monsters_burn` attribute: the overworld day timeline's
     /// step track, false in every other dimension.
@@ -3482,6 +3680,8 @@ impl Mob {
         if mob.species() == Species::Salmon {
             mob.extra.variant = 1;
         }
+        // `Creeper.explosionRadius = 3` until a save or a command sets it.
+        mob.extra.explosion_radius = 3;
         // The PathNavigation constructor: the base follow range.
         mob.ai.nav.max_visited_nodes = (mob.kind.follow_range * 16.0).floor() as i32;
         ai::register(&mut mob);
@@ -3497,6 +3697,36 @@ impl Mob {
         }
     }
     #[inline]
+    /// `LivingEntity.getHitbox`: a rider's box starts no lower than its seat
+    /// (`vehicle.getPassengerRidingPosition(this).y`).
+    pub fn hitbox(&self) -> Aabb {
+        let b = self.bounds();
+        match self.extra.seat.filter(|s| self.extra.mount == Some(s.0)) {
+            Some((_, offset, _)) => {
+                let (lo, hi) = (b.min_position(), b.max_position());
+                let y = (self.position.y + offset).max(lo.y);
+                Aabb::new(Vec3::new(lo.x, y, lo.z), hi)
+            }
+            None => b,
+        }
+    }
+    /// `Mob.getAttackBoundingBox(range)`: its box, widened to its vehicle's
+    /// (`vehicle`, when it rides) on x and z, grown by `range` on x and z.
+    pub fn attack_box(&self, range: f64, vehicle: Option<Aabb>) -> Aabb {
+        let b = self.bounds();
+        let (mut lo, mut hi) = (b.min_position(), b.max_position());
+        if let Some(vehicle) = vehicle.filter(|_| self.extra.mount.is_some()) {
+            let (vlo, vhi) = (vehicle.min_position(), vehicle.max_position());
+            lo = Vec3::new(lo.x.min(vlo.x), lo.y, lo.z.min(vlo.z));
+            hi = Vec3::new(hi.x.max(vhi.x), hi.y, hi.z.max(vhi.z));
+        }
+        Aabb::new(lo, hi).inflate(Vec3::new(range, 0.0, range))
+    }
+    /// `positionRider` seated it on vehicle `id`: its own vehicle attachment
+    /// and the vehicle's box, good while it rides that vehicle.
+    pub fn seated(&mut self, id: u32, offset: f64, vehicle: Aabb) {
+        self.extra.seat = Some((id, offset, vehicle));
+    }
     pub fn bounds(&self) -> Aabb {
         self.bounds_at(self.position)
     }
@@ -3532,6 +3762,16 @@ impl Mob {
     }
     pub fn hostile(&self) -> bool {
         self.kind.category == "monster"
+    }
+    /// `instanceof Enemy`. The zombie horse, camel husk and zombie nautilus are in
+    /// the monster category but extend `Animal`/`AbstractNautilus`, which do
+    /// not implement `Enemy`.
+    pub fn is_enemy(&self) -> bool {
+        self.hostile()
+            && !matches!(
+                self.species(),
+                Species::ZombieHorse | Species::CamelHusk | Species::ZombieNautilus
+            )
     }
     #[inline]
     pub fn species(&self) -> Species {
@@ -3745,15 +3985,8 @@ impl Mob {
         }
         let after_armor = amount;
         container.record_reduction(Reduction::Armor, entered - after_armor);
-        // CombatRules.getDamageAfterMagicAbsorb: enchantment protection.
-        let epf = gear::protection(self, source.kind);
-        if epf > 0.0 {
-            amount *= 1.0 - epf / 25.0;
-        }
-        container.record_reduction(Reduction::Enchantments, after_armor - amount);
-        let after_enchantments = amount;
         // LivingEntity.getDamageAfterMagicAbsorb: Resistance takes 20% per level off
-        // (`#bypasses_resistance` and `#bypasses_effects` skip it).
+        // (`#bypasses_resistance` and `#bypasses_effects` skip it) ...
         if !source.kind.bypasses_effects()
             && !source.kind.bypasses_resistance()
             && let Some(&StoredEffect { amplifier: amp, .. }) = self
@@ -3766,8 +3999,19 @@ impl Mob {
             amount = (amount * remainder as f32 / 25.0).max(0.0);
             // actuallyHurt is void: zero health damage still lets hurtServer set hurt state.
         }
-        container.record_reduction(Reduction::MobEffects, after_enchantments - amount);
+        container.record_reduction(Reduction::MobEffects, after_armor - amount);
         let after_effects = amount;
+        // ... then, with damage left and outside `#bypasses_enchantments` (a
+        // warden's sonic boom), CombatRules.getDamageAfterMagicAbsorb's
+        // enchantment protection (#11308).
+        if amount > 0.0 && !source.kind.bypasses_enchantments() {
+            let epf = gear::protection(self, source.kind);
+            if epf > 0.0 {
+                amount *= 1.0 - epf / 25.0;
+            }
+        }
+        container.record_reduction(Reduction::Enchantments, after_effects - amount);
+        let after_enchantments = amount;
         // Witch.getDamageAfterMagicAbsorb: none from its own doing, else
         // 85% less from `#witch_resistant_to`.
         if self.species() == Species::Witch {
@@ -3783,7 +4027,7 @@ impl Mob {
                 amount *= 0.15;
             }
         }
-        container.record_reduction(Reduction::InnateResistance, after_effects - amount);
+        container.record_reduction(Reduction::InnateResistance, after_enchantments - amount);
         // Wolf.actuallyHurt: wolf armor takes the damage instead of the wolf.
         let absorbed = self.wolf_armor_absorbs(&source);
         let mut knock = true;
@@ -4250,7 +4494,6 @@ impl Mob {
         // including a weaker incoming instance saved behind the active effect.
         incoming.id = effect;
         let index = self.extra.effects.iter().position(|e| e.id == effect);
-        let old_amp = index.map(|i| self.extra.effects[i].amplifier);
         let mut active = if let Some(i) = index {
             let stored = &self.extra.effects[i];
             let mut active = crate::effects::EffectInstance {
@@ -4260,6 +4503,7 @@ impl Mob {
                 amplifier: stored.amplifier,
                 ambient: false,
                 visible: true,
+                show_icon: true,
                 client_blend: (false, false),
                 hidden: None,
             };
@@ -4291,8 +4535,8 @@ impl Mob {
         if !active.visible {
             self.extra.hidden_effects.push(effect);
         }
-        if effect == "minecraft:absorption" && old_amp.is_none_or(|amp| active.amplifier > amp) {
-            self.absorption = self.absorption.max(4.0 * (active.amplifier + 1) as f32);
+        if effect == "minecraft:absorption" {
+            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
         }
         self.effects_dirty |= changed;
         changed
@@ -4320,39 +4564,54 @@ impl Mob {
         through
     }
     /// `LivingEntity.checkTotemDeathProtection`: the first hand with a
-    /// `death_protection` item uses it up, the mob survives at 1 health with
-    /// the totem's effects, and entity event 35 tells the clients.
+    /// `death_protection` stack uses one item up, the mob survives at 1 health
+    /// with that component's `death_effects`, and entity event 35 tells the
+    /// clients.
     fn use_death_protection(&mut self, level: &mut DamageLevel<'_>, source: &Damage) -> bool {
         // `DamageTypeTags.BYPASSES_INVULNERABILITY`: the void and /kill take it.
         if source.kind.bypasses_invulnerability() {
             return false;
         }
-        // `getItemInHand`: the main hand first. The totem is the only item in
-        // the shipped data with `minecraft:death_protection`.
+        // `getItemInHand`: the main hand first. The game reads the components
+        // (`hand_protection`); before it has, the totem is the only item in the
+        // shipped data with `minecraft:death_protection`.
         const TOTEM: &str = "minecraft:totem_of_undying";
-        let main = self.extra.main_hand_id() == Some(TOTEM);
-        let off = !main && self.extra.off_hand_id() == Some(TOTEM);
-        if !main && !off {
-            return false;
-        }
-        // `LivingUseTotemEvent`: a native mod may cancel, and the mob dies.
-        if level.totem_canceled(crate::health::Hurting::Mob(self, source), off) {
-            return false;
-        }
-        if main {
-            self.extra.set_main_hand(None);
+        let (main, off) = match self.extra.hand_protection.clone() {
+            Some(h) => (h.main, h.off),
+            None => {
+                let totem = || Some(totem_death_effects());
+                (
+                    (self.extra.main_hand_id() == Some(TOTEM))
+                        .then(totem)
+                        .flatten(),
+                    (self.extra.off_hand_id() == Some(TOTEM))
+                        .then(totem)
+                        .flatten(),
+                )
+            }
+        };
+        let (slot, effects) = if let Some(effects) = main {
+            (horizon_items::equipment::MAINHAND, effects)
+        } else if let Some(effects) = off {
+            (horizon_items::equipment::OFFHAND, effects)
         } else {
-            self.extra
-                .set_slot_stack(horizon_items::equipment::OFFHAND, None);
+            return false;
+        };
+        if level.totem_canceled(
+            crate::health::Hurting::Mob(self, source),
+            slot == horizon_items::equipment::OFFHAND,
+        ) {
+            return false;
         }
-        // `setHealth(1.0F)`, then `DeathProtection.TOTEM_EFFECTS`.
+        let remaining = self.extra.slot_stack(slot).cloned().and_then(|mut s| {
+            s.count -= 1;
+            (s.count > 0).then_some(s)
+        });
+        self.extra.set_slot_stack(slot, remaining);
+        self.extra.hand_protection = None;
         self.health = 1.0;
-        for (effect, ticks, amplifier) in [
-            ("regeneration", 900, 1),
-            ("absorption", 100, 1),
-            ("fire_resistance", 800, 0),
-        ] {
-            self.add_effect(effect, ticks, amplifier);
+        for effect in &effects {
+            self.apply_death_effect(level, effect);
         }
         let at = [self.position.x, self.position.y, self.position.z];
         self.outbox.push(MobEvent::EntityEvent {
@@ -4361,6 +4620,74 @@ impl Mob {
             at,
         });
         true
+    }
+    /// One `ConsumeEffect` of a `death_protection` component on the mob.
+    /// Teleporting, sounds and a mod's own kinds are not applied to mobs.
+    fn apply_death_effect(
+        &mut self,
+        level: &mut DamageLevel<'_>,
+        effect: &crate::items::ConsumeEffect,
+    ) {
+        use crate::items::ConsumeEffect;
+        match effect {
+            // `LivingEntity.removeAllEffects`: the absorption hearts go with it.
+            ConsumeEffect::ClearAllEffects => {
+                for e in std::mem::take(&mut self.extra.effects) {
+                    if e.id == "minecraft:absorption" {
+                        self.absorption =
+                            (self.absorption - 4.0 * (e.amplifier + 1) as f32).max(0.0);
+                    }
+                }
+            }
+            ConsumeEffect::RemoveEffects(ids) => {
+                self.extra.effects.retain(|e| {
+                    let held = e.id.trim_start_matches("minecraft:");
+                    !ids.iter()
+                        .any(|id| id.trim_start_matches("minecraft:") == held)
+                });
+            }
+            // `ApplyStatusEffectsConsumeEffect.apply`: one random draw, even at
+            // probability 1.
+            ConsumeEffect::ApplyEffects {
+                effects,
+                probability,
+            } => {
+                if self.random.next_float() >= *probability {
+                    return;
+                }
+                for spec in effects {
+                    let Some(def) = horizon_client_core::potions::effect(&spec.id) else {
+                        continue;
+                    };
+                    if def.instant {
+                        match def.id {
+                            "instant_damage" | "instant_health" => {
+                                let amp = spec.amplifier.clamp(0, 30);
+                                if (def.id == "instant_damage") != self.kind.flags.undead {
+                                    self.damage(
+                                        level,
+                                        (6i32 << amp) as f32,
+                                        Damage::of(DamageKind::Magic),
+                                    );
+                                } else {
+                                    let amount = (4i32 << amp) as f32;
+                                    // No owning loop is lent to a DamageLevel yet. Keep this
+                                    // component's instant healing vanilla-only, not deferred.
+                                    if self.health > 0.0 {
+                                        self.health = (self.health + amount)
+                                            .clamp(0.0, self.attrs.max_health);
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        self.add_effect(def.id, spec.duration, spec.amplifier);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
     /// `LivingEntity.heal`, with the native heal hook.
     pub fn heal(&mut self, context: &LoopContext, mut amount: f32) {
@@ -4382,15 +4709,15 @@ impl Mob {
         amplifier: i32,
         scale: f64,
     ) {
-        let amp = amplifier.clamp(0, 30);
+        let shift = amplifier as u32;
         if harm != inverted {
             self.damage(
                 level,
-                (scale * f64::from(6i32 << amp)) as i32 as f32,
+                (scale * f64::from(6i32.wrapping_shl(shift))) as i32 as f32,
                 Damage::of(DamageKind::Magic),
             );
         } else {
-            let heal = (scale * f64::from(4i32 << amp)) as i32 as f32;
+            let heal = (scale * f64::from(4i32.wrapping_shl(shift).max(0))) as i32 as f32;
             self.heal(context, heal);
         }
     }
@@ -4459,11 +4786,10 @@ impl Mob {
         if self.species() == Species::HappyGhast {
             return 1.0;
         }
-        // Parrot.getVoicePitch: `getPitch(random)`, the plain range, so a baby
-        // parrot does not take the 1.5 that AgeableMob raises a baby by.
-        if self.species() == Species::Parrot {
-            return (self.random.next_float() - self.random.next_float()) * 0.2 + 1.0;
-        }
+        // Parrot.getVoicePitch is `getPitch(random)`, the plain 1.0 ± 0.2 an
+        // adult gets below: a parrot is never a baby (`Parrot.canBeABaby`), so
+        // the 1.5 `AgeableMob` gives a baby cannot reach it and the override
+        // needs no arm of its own.
         // ZombieVillager.getVoicePitch: babies are 2.0, not 1.5.
         let baby = if self.species() == Species::ZombieVillager {
             2.0
@@ -4507,13 +4833,14 @@ pub fn render(
 }
 /// A parsed `entity-models.json` document, shared while loading model batches.
 /// Each lookup still constructs an independent part tree for the caller.
-pub struct EntityModelDocument(Value);
+#[derive(Clone)]
+pub struct EntityModelDocument(Arc<Value>);
 
 impl EntityModelDocument {
     pub fn load(root: &Path) -> crate::Result<Self> {
-        Ok(Self(serde_json::from_slice(&fs::read(
+        Ok(Self(Arc::new(serde_json::from_slice(&fs::read(
             root.join("entity-models.json"),
-        )?)?))
+        )?)?)))
     }
 
     pub fn model(&self, key: &str) -> Option<Part> {
@@ -4525,6 +4852,11 @@ impl EntityModelDocument {
             .as_object()
             .into_iter()
             .flat_map(|all| all.keys().map(String::as_str))
+    }
+
+    /// The parsed document, for loaders that read several keys from it.
+    pub(crate) fn value(&self) -> &Value {
+        &self.0
     }
 }
 
@@ -5027,6 +5359,49 @@ pub(crate) mod sensor_scan_tests {
             tempt: Arc::default(),
         })
     }
+    #[test]
+    #[ignore = "needs prepared attributes in HORIZON_TEST_RESOURCES"]
+    fn declared_health_spawn_fields_match_computed_values() {
+        use horizon_world::attributes::entity::Catalog;
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        // Attributes.MAX_HEALTH is ranged from 1 to 1024 in vanilla.
+        for (declared, expected) in [(-5.0, 1.0), (5000.0, 1024.0), (1e300, 1024.0)] {
+            let merged = Arc::new(
+                catalog
+                    .with_entity_row(
+                        "ruby:ghoul",
+                        "minecraft:zombie",
+                        &[("minecraft:max_health".into(), declared)],
+                    )
+                    .unwrap(),
+            );
+            let mut mob_type = Arc::unwrap_or_clone(kind());
+            mob_type.id = "ruby:ghoul".into();
+            mob_type
+                .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+            let mut live = merged.create("ruby:ghoul").unwrap();
+            let health = merged.id("minecraft:max_health").unwrap();
+            assert_eq!(live.base_value(health).unwrap(), declared);
+            assert_eq!(mob_type.attributes["minecraft:max_health"], declared);
+            assert_eq!(live.value(health).unwrap(), expected);
+            for mob in [
+                Mob::new(7, Arc::new(mob_type.clone()), Vec3::ZERO, 0.0),
+                Mob::new_remote(7, Arc::new(mob_type.clone()), Vec3::ZERO, 0.0),
+            ] {
+                assert_eq!(f64::from(mob.health), expected, "declared {declared}");
+                assert_eq!(
+                    f64::from(mob.attrs.max_health),
+                    expected,
+                    "declared {declared}"
+                );
+            }
+        }
+    }
+
     /// `n` mobs in pens of 20 spread over a square of `side` blocks, as on a
     /// server's farms; their snapshot and its grid.
     fn herd(n: u32, side: f64) -> (Vec<Seen>, seen_grid::SeenGrid) {
@@ -5531,6 +5906,20 @@ mod magic_absorb_tests {
     }
 
     #[test]
+    fn absorption_refills_on_equal_and_weaker_adds() {
+        let mut m = witch();
+        m.add_effect_with("absorption", 200, 1, false, true);
+        m.absorption = 0.0;
+        assert!(!m.add_effect_with("absorption", 100, 1, false, true));
+        assert_eq!(m.absorption, 8.0);
+        m.absorption = 0.0;
+        m.add_effect("minecraft:absorption", 50, 0);
+        assert_eq!(m.absorption, 4.0);
+        assert_eq!(m.extra.effects[0].amplifier, 1);
+        assert_eq!(m.extra.effects[0].duration, 200);
+    }
+
+    #[test]
     fn absorption_downgrade_keeps_spent_hearts() {
         // LivingEntity.onEffectUpdated -> refreshDirtyAttributes clamps
         // absorption to the new MAX_ABSORPTION (4 for amplifier 0); it never raises it.
@@ -6021,6 +6410,42 @@ mod totem_tests {
         Mob::new(1, Arc::new(t), Vec3::ZERO, 0.0)
     }
 
+    #[test]
+    fn death_component_instant_healing_obeys_inversion_cap_and_dead_state() {
+        let mut level = crate::health::TestLevel::new(0);
+        for (undead, id) in [
+            (false, "minecraft:instant_health"),
+            (true, "minecraft:instant_damage"),
+        ] {
+            let mut mob = fox();
+            let mut kind = (*mob.kind).clone();
+            kind.flags.undead = undead;
+            mob.kind = Arc::new(kind);
+            mob.health = 1.0;
+            let effect = crate::items::ConsumeEffect::ApplyEffects {
+                probability: 1.0,
+                effects: vec![crate::items::ConsumeEffectSpec {
+                    id: id.into(),
+                    duration: 1,
+                    amplifier: 1,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                }],
+            };
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(mob.health, 9.0);
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(mob.health, 10.0);
+            mob.health = 0.0;
+            mob.apply_death_effect(&mut level.level(), &effect);
+            assert_eq!(
+                mob.health, 0.0,
+                "instant healing does not revive a dead mob"
+            );
+        }
+    }
+
     /// `LivingEntity.checkTotemDeathProtection`: a totem in the mouth takes
     /// the killing blow, the fox stays at 1 health with the totem's effects,
     /// and entity event 35 tells the clients to draw it.
@@ -6294,8 +6719,68 @@ mod effect_refusal_tests {
         assert_eq!(aquatic::dark_ticks(&struck), 100);
     }
 }
+#[cfg(test)]
+mod model_document_sharing_tests {
+    use super::*;
+
+    fn part_dump(part: &Part) -> String {
+        format!("{part:?}")
+    }
+
+    /// The startup reads `entity-models.json` once and hands the same document
+    /// to every model loader; reading it again per loader must build the same
+    /// types, model for model and layer for layer.
+    #[test]
+    fn a_shared_document_builds_the_same_types() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let document = EntityModelDocument::load(&root).unwrap();
+        let shared = MobTypes::load_with_document(&root, &document).unwrap();
+        let independent = MobTypes::load(&root).unwrap();
+        assert_eq!(shared.types.len(), independent.types.len());
+        for (id, independent) in &independent.types {
+            let shared = shared.types.get(id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(independent.id, shared.id);
+            assert_eq!(independent.species, shared.species);
+            assert_eq!(
+                (
+                    independent.width,
+                    independent.height,
+                    independent.eye_height,
+                ),
+                (shared.width, shared.height, shared.eye_height)
+            );
+            assert_eq!(independent.attributes, shared.attributes);
+            assert_eq!(independent.item_stack_limits, shared.item_stack_limits);
+            assert_eq!(
+                part_dump(&independent.model),
+                part_dump(&shared.model),
+                "{id} model"
+            );
+            let mut independent_layers: Vec<_> = independent.layers.iter().collect();
+            let mut shared_layers: Vec<_> = shared.layers.iter().collect();
+            independent_layers.sort_by_key(|(key, _)| key.as_str());
+            shared_layers.sort_by_key(|(key, _)| key.as_str());
+            assert_eq!(independent_layers.len(), shared_layers.len(), "{id} layers");
+            for ((independent_key, independent_part), (shared_key, shared_part)) in
+                independent_layers.into_iter().zip(shared_layers)
+            {
+                assert_eq!(independent_key, shared_key, "{id} layer key");
+                assert_eq!(
+                    part_dump(independent_part),
+                    part_dump(shared_part),
+                    "{id} layer {independent_key}"
+                );
+            }
+        }
+    }
+}
 crate::impl_joined!(Mob);
-horizon_world::impl_attachment_lifetime!(Mob);
+horizon_mod_runtime::impl_attachment_lifetime!(Mob);
 
 #[cfg(test)]
 mod named_damage_tests {
@@ -6364,6 +6849,25 @@ mod named_damage_tests {
         );
         assert!(no_effects.damage(level, 2.0, fire(NamedDamage::BYPASSES_EFFECTS)));
         assert_eq!(no_effects.health, 8.0);
+        // #bypasses_enchantments (#11308): a warden's sonic boom, or a named
+        // type with the tag, is not reduced by Protection, as
+        // getDamageAfterMagicAbsorb returns it before the enchantments.
+        for kind in [
+            DamageKind::SonicBoom,
+            DamageKind::Named(NamedDamage::new(
+                "example:boom",
+                NamedDamage::BYPASSES_ARMOR | NamedDamage::BYPASSES_ENCHANTMENTS,
+            )),
+        ] {
+            let mut plated = pig();
+            gear::set(
+                &mut plated,
+                gear::CHEST,
+                vec![("minecraft:protection".into(), 4)],
+            );
+            assert!(plated.damage(level, 4.0, Damage::of(kind)));
+            assert_eq!(plated.health, 6.0, "{kind:?}");
+        }
         let mut armor = gear::Gear::default();
         armor.slots[gear::FEET] = vec![("minecraft:feather_falling".into(), 4)];
         armor.slots[gear::CHEST] = vec![("minecraft:blast_protection".into(), 4)];

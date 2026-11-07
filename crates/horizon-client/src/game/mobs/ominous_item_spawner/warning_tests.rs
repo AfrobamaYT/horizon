@@ -113,3 +113,151 @@ fn warning_dispatch_uses_neutral_at_tick_four() {
     drop(game);
     std::fs::remove_dir_all(scratch).unwrap();
 }
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn residency_spawner_load_expiry_and_spawn_order() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.ominous_spawners.clear();
+        game.dropped.clear();
+        for (item, delay) in [("diamond", 1), ("emerald", 3), ("gold_ingot", 1)] {
+            let (tag, _) = horizon_core::nbt::parse_snbt(&format!(
+                "{{Pos:[0d,80d,0d],item:{{id:\"minecraft:{item}\",count:1}},spawn_item_after_ticks:{delay}L}}"
+            )).unwrap();
+            game.load_ominous_item_spawner(tag);
+        }
+        let survivor = game.ominous_spawners[1].id;
+        game.tick_ominous_item_spawners();
+        assert_eq!(game.ominous_spawners.len(), 1);
+        assert_eq!(game.ominous_spawners[0].id, survivor);
+        assert_eq!(game.ominous_spawners[0].tick_count, 1);
+        assert_eq!(
+            game.dropped
+                .iter()
+                .map(|e| e.stack.item.as_ref())
+                .collect::<Vec<_>>(),
+            ["minecraft:diamond", "minecraft:gold_ingot"]
+        );
+        game.tick_ominous_item_spawners();
+        game.tick_ominous_item_spawners();
+        assert!(game.ominous_spawners.is_empty());
+        assert_eq!(
+            game.dropped.last().unwrap().stack.item.as_ref(),
+            "minecraft:emerald"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn taken_spawner_tick_keeps_survivors_before_both_spawns() {
+    use horizon_client::items::ItemStack;
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.ominous_spawners.clear();
+        for _ in 0..2 {
+            game.add_ominous_item_spawner(
+                ItemStack::new("minecraft:air", 1),
+                [0.0, 80.0, 0.0],
+                100,
+            );
+        }
+        let first = game.ominous_spawners[0].id;
+        let second = game.ominous_spawners[1].id;
+        let next = game.next_entity;
+        crate::game::entity::taken_pass_tests::with_spawn(
+            |game| {
+                assert!(game.ominous_spawners.is_empty());
+                for delay in [200, 300] {
+                    game.add_ominous_item_spawner(
+                        ItemStack::new("minecraft:air", 1),
+                        [0.0, 80.0, 0.0],
+                        delay,
+                    );
+                }
+            },
+            || game.tick_ominous_item_spawners(),
+        );
+        assert_eq!(
+            game.ominous_spawners
+                .iter()
+                .map(|s| (s.id, s.tick_count))
+                .collect::<Vec<_>>(),
+            [(first, 1), (second, 1), (next + 1, 0), (next + 2, 0)]
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn lifecycle_spawner_commands_unload_park_and_remote_metadata() {
+    use crate::game::{
+        commands::Target,
+        entity::taken_pass_tests::{LifecycleFixture, RemoteLifecycle},
+    };
+    use horizon_protocol::{
+        connection::Pipe,
+        entity_data::{Value, serializer},
+        item::Stack,
+    };
+    LifecycleFixture {
+        seed: |game, entries| {
+            game.ominous_spawners.clear();
+            for &(id, at) in entries {
+                game.add_remote_ominous_item_spawner(id, at);
+            }
+        },
+        ids: |game| game.ominous_spawners.iter().map(|s| s.id).collect(),
+        target: Target::Spawner,
+        unloads_with_chunk: true,
+        remote: Some(RemoteLifecycle {
+            prepare: |game| {
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "Lifecycle").unwrap();
+            },
+            apply: |game, remove, update| {
+                let item = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:item")
+                    .unwrap()
+                    .id("minecraft:emerald")
+                    .unwrap();
+                game.remote_object_data(
+                    update as i32,
+                    &[(
+                        8,
+                        serializer::ITEM_STACK,
+                        Value::Item(Some(Stack::new(item, 7))),
+                    )],
+                );
+                let changed = game
+                    .ominous_spawners
+                    .iter()
+                    .find(|s| s.id == update)
+                    .unwrap();
+                assert_eq!(changed.item.item.as_ref(), "minecraft:emerald");
+                assert_eq!(changed.item.count, 7);
+                game.remove_remote_object(remove);
+            },
+        }),
+    }
+    .run();
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn residency_command_positions_and_client_spawner_clock() {
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.set_allow_commands(true);
+        game.add_remote_ominous_item_spawner(701, [1.0, 80.0, 1.0]);
+        game.spawn_creeper_cloud([2.0, 80.0, 2.0], Vec::new(), Vec::new(), Vec::new(), 0);
+        assert!(game.run_command("tp @e[type=minecraft:ominous_item_spawner] 64.0 80.0 64.0"));
+        assert_eq!(game.ominous_spawners[0].position, [64.0, 80.0, 64.0]);
+        assert!(game.run_command("tp @e[type=minecraft:area_effect_cloud] -32.0 90.0 -48.0"));
+        assert_eq!(game.breath_clouds[0].at, [-32.0, 90.0, -48.0]);
+        game.tick_remote_ominous_item_spawners();
+        assert_eq!(game.ominous_spawners[0].tick_count, 1);
+    });
+}

@@ -147,8 +147,8 @@ fn drop_hook(host: &mut LanHost, conn: u32) {
     }
 }
 
-fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined>(
-    list: &mut Vec<T>,
+fn take_vehicle<T: Rideable + horizon_client::join_seq::Joined, const DIRECT: bool>(
+    list: &mut horizon_client::join_seq::JoinList<T, DIRECT>,
     id: u32,
     at: Vec3,
     yaw: f32,
@@ -255,6 +255,101 @@ impl Game<'_> {
                 host.play.entry(conn).or_default().portal = portal;
             }
         }
+    }
+
+    /// `ServerPlayerGameMode.useItemOn` for a spectator: a `Portal` block
+    /// (Nether portal, End portal, End gateway) takes the player to its
+    /// destination (`getPortalDestination`, `Entity.teleportToPortalDestination`)
+    /// after the camera goes back to the player, or says `spectator.cannot_teleport`
+    /// when it has none. Returns whether the block was a portal (`CONSUME`).
+    pub(super) fn spectator_use_portal(&mut self, conn: u32, gi: usize, pos: [i32; 3]) -> bool {
+        let name = self.block_name(pos);
+        let name = name.trim_start_matches("minecraft:");
+        if !matches!(name, "nether_portal" | "end_portal" | "end_gateway") {
+            return false;
+        }
+        if self.on_server_trip(conn) {
+            return true;
+        }
+        let Some(g) = self.lan.as_ref().map(|host| &host.hub.guests[gi]) else {
+            return false;
+        };
+        let at = Vec3::new(g.position[0], g.position[1], g.position[2]);
+        let seen_credits = g.seen_credits;
+        // EndGatewayBlock.getPortalDestination: none without its block entity.
+        let gateway_ok = name != "end_gateway"
+            || self
+                .world
+                .block_entities
+                .get(&(pos[0], pos[1], pos[2]))
+                .is_some_and(|e| {
+                    matches!(e, horizon_client::containers::BlockEntity::EndGateway(_))
+                });
+        if !gateway_ok {
+            self.as_guest(conn, |g| {
+                g.send_overlay_message(
+                    horizon_client::text::Text::translate("spectator.cannot_teleport", &[])
+                        .with_color(horizon_client::text::RED),
+                );
+            });
+            return true;
+        }
+        if self.cmds.guest_cameras.contains_key(&conn) {
+            self.guest_set_camera(gi, None);
+        }
+        match name {
+            "nether_portal" => {
+                let plan = self.portal_plan(
+                    BlockPos::new(pos[0], pos[1], pos[2]),
+                    at,
+                    WIDTH as f32,
+                    HEIGHT as f32,
+                    true,
+                );
+                // Entity.teleportToPortalDestination: isAllowedToEnterPortal.
+                if self.may_enter(plan.dim) {
+                    // NetherPortalBlock.getExitPortal: a spectator never
+                    // builds an exit portal, it gets no transition without one.
+                    if !self.spectator_exit_exists(&plan) {
+                        self.as_guest(conn, |g| {
+                            g.send_overlay_message(
+                                horizon_client::text::Text::translate(
+                                    "spectator.cannot_teleport",
+                                    &[],
+                                )
+                                .with_color(horizon_client::text::RED),
+                            );
+                        });
+                        return true;
+                    }
+                    self.start_server_trip(conn, plan.dim, Some(plan));
+                }
+            }
+            "end_portal" => {
+                let from_end = self.dim == Dim::End;
+                // Entity.canTeleport: out of the End only after the credits.
+                if !from_end || seen_credits {
+                    let target = if from_end { Dim::Overworld } else { Dim::End };
+                    self.start_server_trip(conn, target, None);
+                }
+            }
+            _ => self.start_gateway_trip(conn, pos),
+        }
+        true
+    }
+
+    /// Whether an exit portal already stands in the plan's dimension
+    /// (`PortalForcer.findClosestPortalPosition`), searched without building.
+    fn spectator_exit_exists(&mut self, plan: &Plan) -> bool {
+        let source = self.dim;
+        if self.enter_level(plan.dim).is_err() {
+            return false;
+        }
+        let exists = self.find_exit_portal(plan).is_some();
+        if let Err(e) = self.enter_level(source) {
+            log::error!("could not reopen {}: {e}", source.id());
+        }
+        exists
     }
 
     /// Whether this guest's dimension change may start (`native_player_portal`).
@@ -534,6 +629,7 @@ impl Game<'_> {
             host.hub
                 .change_level(i, at, yaw, None, true, PLAYER_DELAY, &ctx);
         }
+        self.bind_player_attachments(conn, false);
         self.as_guest(conn, |g| {
             g.trigger_dimension(source, target, [from.x, from.y, from.z])
         });
@@ -1011,6 +1107,7 @@ impl Game<'_> {
                     }
                 });
             }
+            self.bind_player_attachments(t.conn, false);
             self.as_guest(t.conn, |g| {
                 g.trigger_dimension(source, t.dim, origin);
                 // The mods hear the teleport into another level, with the
@@ -1125,11 +1222,13 @@ mod tests {
     /// 26.3 sent the client a cart arriving with motion (0.4, 0, 0).
     #[test]
     fn a_minecart_a_player_rides_keeps_its_clamped_motion_through_a_portal() {
-        let mut carts = vec![minecarts::Minecart::new(
+        let mut carts: horizon_client::join_seq::JoinList<_> = [minecarts::Minecart::new(
             3,
             minecarts::CartKind::Rideable,
             Vec3::new(9.9, 100.0, 4.5),
-        )];
+        )]
+        .into_iter()
+        .collect();
         let at = Vec3::new(1.5, 100.0, 0.5);
         let cart = take_vehicle(&mut carts, 3, at, 0.0, Vec3::new(1.6, -0.1, -0.7))
             .expect("the cart travels");
@@ -1144,14 +1243,16 @@ mod tests {
     /// ride the vehicle that is recreated in the other dimension).
     #[test]
     fn the_vehicle_a_player_rides_travels_with_it() {
-        let mut boats = vec![boats::Boat::new(
+        let mut boats: horizon_client::join_seq::JoinList<_> = [boats::Boat::new(
             7,
             Arc::from("oak"),
             Vec3::new(0.0, 64.0, 0.0),
             0.0,
-        )];
-        let mut carts: Vec<minecarts::Minecart> = Vec::new();
-        let mut mobs: Vec<Mob> = Vec::new();
+        )]
+        .into_iter()
+        .collect();
+        let mut carts = horizon_client::join_seq::JoinList::<minecarts::Minecart>::default();
+        let mut mobs = horizon_client::join_seq::JoinList::<Mob>::default();
         let at = Vec3::new(1.5, 65.0, -2.5);
         let boat = take_vehicle(&mut boats, 7, at, 90.0, Vec3::ZERO)
             .expect("the vehicle the player rides travels with it");

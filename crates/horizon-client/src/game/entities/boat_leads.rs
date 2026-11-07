@@ -59,7 +59,7 @@ fn distance(a: Vec3, b: Vec3) -> f64 {
 impl Game<'_> {
     /// The player whose lead this is: the lead's `leash_player`, else the
     /// local player.
-    fn boat_leash_player(&self, b: &Boat) -> Option<[i32; 4]> {
+    pub(super) fn boat_leash_player(&self, b: &Boat) -> Option<[i32; 4]> {
         b.leash_player.or(self.level.player_uuid)
     }
     fn boat_holder(&self, holder: Holder, player: Option<[i32; 4]>) -> Held {
@@ -183,8 +183,8 @@ impl Game<'_> {
         }
     }
 
-    fn release_stored_boat_leash(&mut self, i: usize, drop: bool) {
-        if let Some(at) = Self::take_boat_leash(&mut self.boats[i], drop) {
+    pub(super) fn release_stored_boat_leash(&mut self, i: usize, drop: bool) {
+        if let Some(at) = self.boats.update(i, |b| Self::take_boat_leash(b, drop)) {
             self.drop_lead_item(at);
         }
     }
@@ -388,8 +388,8 @@ impl Game<'_> {
                 continue;
             }
             if self.boat_can_attach(i, at) {
-                self.boats[i].leash = Some(to);
-                self.boats[i].leash_player = None;
+                self.boats.update(i, |b| b.leash = Some(to));
+                self.boats.update(i, |b| b.leash_player = None);
                 any = true;
             }
         }
@@ -404,8 +404,8 @@ impl Game<'_> {
         let mut any = false;
         for i in self.boats_on(Holder::Knot(knot)) {
             if self.boat_can_attach(i, player) {
-                self.boats[i].leash = Some(Holder::Player);
-                self.boats[i].leash_player = Some(me);
+                self.boats.update(i, |b| b.leash = Some(Holder::Player));
+                self.boats.update(i, |b| b.leash_player = Some(me));
                 any = true;
             }
         }
@@ -480,8 +480,9 @@ impl Game<'_> {
                 let Some(i) = self.boats.iter().position(|boat| boat.id == id) else {
                     return true;
                 };
-                self.boats[i].leash = Some(Holder::Player);
-                self.boats[i].leash_player = Some(self.acting_player_uuid());
+                self.boats.update(i, |b| b.leash = Some(Holder::Player));
+                let player_uuid = self.acting_player_uuid();
+                self.boats.update(i, |b| b.leash_player = Some(player_uuid));
                 self.lead_sound("tied", at);
                 // The lead is always used up.
                 if let Some(stack) = self.held_mut().as_mut() {
@@ -516,6 +517,43 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn command_view_uses_live_and_pending_boat_leashes_not_raw_tags() {
+        use crate::game::commands::Target;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let (id, uuid, actual_holder, unknown) =
+                (1, [326, 1, 0, 1], [326, 2, 0, 1], [111, 222, 333, 444]);
+            game.boats
+                .push(Boat::new(id, "oak".into(), Vec3::new(6.5, 100.0, 4.5), 0.0));
+            game.persist.uuids.insert(id, uuid);
+            game.level.player_uuid = Some([326, 3, 0, 1]);
+            let read = |game: &mut Game<'_>| game.command_target_nbt(Target::Boat(id)).unwrap();
+            assert!(!game.persist.raw.contains_key(&id));
+            assert_eq!(read(game).get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
+            assert!(read(game).get("leash").is_none());
+            game.boats
+                .update(0, |boat| boat.leash = Some(Holder::Player));
+            game.boats
+                .update(0, |boat| boat.leash_player = Some(actual_holder));
+            let expected = Tag::compound([("UUID", Tag::IntArray(actual_holder.to_vec()))]);
+            assert_eq!(read(game).get("leash"), Some(&expected));
+            assert_eq!(read(game).get("leash"), Some(&expected));
+            let delayed = Tag::compound([("UUID", Tag::IntArray(unknown.to_vec()))]);
+            game.persist
+                .raw
+                .insert(id, Tag::compound([("leash", delayed.clone())]));
+            assert_eq!(read(game).get("leash"), Some(&expected));
+            game.boats.update(0, |boat| boat.leash = None);
+            game.boats.update(0, |boat| boat.leash_player = None);
+            game.boats
+                .update(0, |boat| boat.leash_pending = Some(Pending::Uuid(unknown)));
+            assert_eq!(read(game).get("leash"), Some(&delayed));
+            game.boats.update(0, |boat| boat.leash_pending = None);
+            assert!(read(game).get("leash").is_none());
+        });
+    }
 
     #[test]
     fn a_boat_is_centred_half_its_height_up() {

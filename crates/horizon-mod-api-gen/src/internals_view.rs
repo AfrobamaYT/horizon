@@ -2,7 +2,8 @@
 use crate::crossing::{Collection, Crossing, Rule, Scalar, Shape, bare};
 use crate::internals::Internal;
 use crate::internals_table::{
-    function_scope, guest_codecs, optional_reference, result_success, select, signature,
+    function_scope, guest_codecs, node_fields, optional_reference, result_success, select,
+    signature,
 };
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote};
@@ -431,7 +432,7 @@ pub fn generate(
                     .push(node_ty.clone());
             }
             let mut methods = Vec::new();
-            for (index, f) in rule.fields(path).into_iter().enumerate() {
+            for (index, f) in node_fields(&rule, path).into_iter().enumerate() {
                 if !selected.selection.full.contains(path)
                     && !selected
                         .selection

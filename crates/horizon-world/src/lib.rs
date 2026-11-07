@@ -3,7 +3,6 @@
 
 pub mod active_effect_tick;
 pub mod active_effects;
-pub mod attachments;
 pub mod attribute_health;
 pub mod attribute_map;
 pub mod attribute_updates;
@@ -53,6 +52,7 @@ pub mod extra_items;
 pub mod fall_damage;
 pub mod fluid;
 pub mod fluid_box;
+pub mod fluid_definitions;
 pub mod fluid_flow;
 pub mod fluid_occupancy;
 pub mod fluid_shape;

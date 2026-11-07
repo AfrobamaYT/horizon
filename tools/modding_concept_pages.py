@@ -166,7 +166,7 @@ class HtmlLinks(HTMLParser):
 
 def check_html(directory, src=SRC):
     pages = [p for g in GROUPS for p in [g, *(p for p, _, _ in fragments(src, g))]]
-    pages.append("reference/hook-notes.md")
+    pages.extend(["reference/hook-notes.md", "reference/neoforge-counterparts.md"])
     for page in pages:
         path = directory / Path(page).with_suffix(".html")
         html = HtmlLinks(path.read_text())

@@ -303,9 +303,13 @@ impl Game<'_> {
     /// minutes per level, with Trial Omen's sound when it is new. `uuid` is
     /// the player found: the one in the game's frame, else a guest.
     fn bad_omen_to_trial_omen(&mut self, uuid: Uuid) {
-        let eye = if self.acting_uuid() == uuid {
-            transform_bad_omen(&mut self.potions.effects)
-                .then(|| self.eye_position().unwrap_or_default())
+        // MobEffect.onEffectAdded plays at the player's feet.
+        let feet = if self.acting_uuid() == uuid {
+            let added = transform_bad_omen(&mut self.potions.effects);
+            self.player
+                .as_ref()
+                .filter(|_| added)
+                .map(|p| [p.position.x, p.position.y, p.position.z])
         } else {
             let acting = self.lan_acting;
             let Some(host) = self.lan.as_mut() else {
@@ -317,14 +321,12 @@ impl Game<'_> {
                 return;
             };
             host.hub.guests.update(index, |guest| {
-                let [x, y, z] = guest.position;
-                let eye = [x, y + guest.eye_height(), z];
-                transform_bad_omen(&mut guest.effects).then_some(eye)
+                transform_bad_omen(&mut guest.effects).then_some(guest.position)
             })
         };
-        if let Some(eye) = eye {
+        if let Some(at) = feet {
             self.audio
-                .play("minecraft:event.mob_effect.trial_omen", Some(eye), 1.0, 1.0);
+                .play("minecraft:event.mob_effect.trial_omen", Some(at), 1.0, 1.0);
         }
     }
     /// `sendBlockUpdated` of a block entity: the clients load its new update tag.

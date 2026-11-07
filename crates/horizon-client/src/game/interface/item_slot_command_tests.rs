@@ -19,7 +19,7 @@ fn item_replace_asks_the_slot_predicate_of_a_stand_and_the_dragon() {
         game.armor_stands.push(ArmorStand::new(16, Vec3::ZERO, 0.0));
         let mut dragon = super::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 17;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
         let stand = "@e[type=minecraft:armor_stand,limit=1]";
         let dragon_sel = "@e[type=minecraft:ender_dragon,limit=1]";
         let replace = |game: &mut super::Game<'_>, who: &str, slot: &str, item: &str| {
@@ -43,8 +43,8 @@ fn item_replace_asks_the_slot_predicate_of_a_stand_and_the_dragon() {
 
         // A mod's write is permissive; the command may clear what it wrote.
         let stack = ItemStack::new("minecraft:stone", 1);
-        let living = game.native_living(game.native_entity(16).unwrap()).unwrap();
-        assert!(game.native_living_set_equipment(living, EquipmentSlot::Body, Some(stack.clone())));
+        let living = game.living(game.entity(16).unwrap()).unwrap();
+        assert!(game.living_set_equipment(living, EquipmentSlot::Body, Some(stack.clone())));
         assert_eq!(stand_slot(game, BODY), Some(stack));
         replace(game, stand, "armor.body", "minecraft:air");
         assert_eq!(stand_slot(game, BODY), None);

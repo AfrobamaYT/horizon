@@ -11,6 +11,7 @@ use horizon_core::{
     jmath,
     random::RandomSource,
 };
+use mod_api::Pose;
 use std::collections::HashMap;
 
 // `variant3` is the pose, `variant` the pose the animations last saw,
@@ -166,7 +167,7 @@ pub(super) fn jump_vector(
 /// `LongJumpUtil.isClearTransition`: the box of `Pose.LONG_JUMPING` fits at
 /// points no further apart than nine tenths of its smaller side.
 fn clear_transition(m: &Mob, w: &MobWorld, from: Vec3, to: Vec3) -> bool {
-    let (width, height, _) = m.awake_dims_in(true);
+    let (width, height, _) = m.dims_in_pose(Pose::LongJumping);
     let (width, height) = (width as f32, height as f32);
     let d = to.subtract(from);
     let min = f64::from(width.min(height));
