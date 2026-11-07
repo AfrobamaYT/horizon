@@ -291,6 +291,33 @@ impl TryIntoApi for EngineStack {
     }
 }
 
+impl TryIntoApi for horizon_assets::item_model::StackView {
+    type Api = ApiStack;
+    type Error = StackReadError;
+
+    fn try_into_api(&self) -> Result<ApiStack, StackReadError> {
+        let count = u32::try_from(self.count)
+            .ok()
+            .filter(|&count| count > 0)
+            .ok_or(StackReadError::Empty)?;
+        let components = Tag::compound(self.patch.iter().map(|(name, value)| match value {
+            Some(value) => (
+                name.clone(),
+                horizon_client_core::scoreboard::json_to_tag(value),
+            ),
+            None => (format!("!{name}"), Tag::compound([] as [(String, Tag); 0])),
+        }));
+        let (damage, extra) = horizon_items::item_data::decode_components(Some(&components));
+        EngineStack {
+            item: self.item.clone().into(),
+            count,
+            damage,
+            extra,
+        }
+        .try_into_api()
+    }
+}
+
 impl TryIntoEngine for mod_api::ItemResource {
     type Engine = EngineStack;
     type Error = StackWriteError;
@@ -1384,6 +1411,56 @@ mod mutable_output_tests {
                 EngineStack::new("minecraft:stick", 8),
                 EngineStack::new("minecraft:stick", 64)
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod item_model_snapshot_tests {
+    use super::*;
+    use horizon_assets::item_model::StackView;
+
+    #[test]
+    fn model_snapshots_keep_component_patches_without_runtime_bundle_selection() {
+        prepare_stack_boundary_tests();
+        let mut view = StackView::new("minecraft:stick", 2);
+        view.bundle_selected = 3;
+        view.patch
+            .insert("minecraft:damage".into(), Some(serde_json::json!(7)));
+        view.patch.insert(
+            "example:charge".into(),
+            Some(serde_json::json!({"amount":4})),
+        );
+        view.patch.insert("minecraft:custom_name".into(), None);
+        let snapshot = view.try_into_api().unwrap();
+        assert_eq!(
+            snapshot.item(),
+            mod_api::__private::item_key("minecraft:stick").unwrap()
+        );
+        assert_eq!(snapshot.count(), 2);
+        assert_eq!(snapshot.damage(), 7);
+        let patch = snapshot.components().unwrap().as_nbt();
+        assert_eq!(
+            patch.get("example:charge").unwrap().get("amount"),
+            Some(&Tag::Int(4))
+        );
+        assert!(patch.get("!minecraft:custom_name").is_some());
+        assert!(patch.get("bundle_selected").is_none());
+        assert_eq!(view.bundle_selected, 3);
+    }
+
+    #[test]
+    fn empty_model_views_do_not_become_owned_stack_sentinels() {
+        prepare_stack_boundary_tests();
+        for count in [-1, 0] {
+            assert_eq!(
+                StackView::new("minecraft:stick", count).try_into_api(),
+                Err(StackReadError::Empty)
+            );
+        }
+        assert_eq!(
+            StackView::new("example:unknown", 1).try_into_api(),
+            Err(StackReadError::UnknownItem)
         );
     }
 }

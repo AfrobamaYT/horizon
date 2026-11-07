@@ -1,1 +1,1 @@
-pub use horizon_assets::item_model::{DisplayContext, StackView};
+pub use horizon_assets::item_model::DisplayContext;
