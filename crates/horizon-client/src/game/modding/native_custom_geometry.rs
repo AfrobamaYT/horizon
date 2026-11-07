@@ -444,12 +444,13 @@ mod tests {
             );
             let sibling = game.create_group(model, 16_384).unwrap();
             let third = game.create_group(model, 16_384).unwrap();
-            let fourth = game.create_group(model, 16_376).unwrap();
+            let fourth = game.create_group(model, 16_384).unwrap();
+            let fifth = game.create_group(model, 16_376).unwrap();
             assert_eq!(
                 game.create_group(model, 1),
                 Err(GroupError::CapacityExceeded)
             );
-            for handle in [sibling, third, fourth] {
+            for handle in [sibling, third, fourth, fifth] {
                 handle.destroy(game).unwrap();
             }
             group.destroy(game).unwrap();
