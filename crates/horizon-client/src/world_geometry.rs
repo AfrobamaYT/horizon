@@ -39,6 +39,8 @@ impl WorldGeometry {
             CAPACITY,
             self.quads.iter().map(|v| v.len() as u32 / 4).sum(),
             CAPACITY,
+            0,
+            0,
         )
     }
     /// Validate once at the submission boundary, before any output is appended.
