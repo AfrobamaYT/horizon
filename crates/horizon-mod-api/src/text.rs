@@ -237,6 +237,7 @@ pub const MAX_TEXT_FORM_DEPTH: usize = 100;
 
 /// A text form was too deeply nested or could not be serialized or parsed.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TextFormError {
     /// The form exceeds [`MAX_TEXT_FORM_DEPTH`] nested containers.
     TooDeep,
