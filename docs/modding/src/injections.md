@@ -10,7 +10,12 @@ compiled slot when available; an unlisted function or supported call requires a 
 The launcher generates the private horizon-mixins input; mods name a Rust `with` function,
 not a source payload file or expression selector.
 
-A `mod.wasm` uses the same declarations with `[wasm]` instead of native build pins.
+An API point injection names a crate-root `with` function and listens at an admitted head or return
+slot ([shape rules](#which-methods-are-points)). The prebuilt game fills those slots at load with the
+mods' listeners, without changing game source.
+
+A `mod.wasm` uses the same declarations with `[wasm]` instead of native build pins. The game fills
+its compiled slots at load without rebuilding the game or invoking the Rust compiler.
 Wasm supports compiled function slots, not source rebuilding or call-site injections
 ([Building a mod to `mod.wasm`](how-to/wasm-mods.md#listening-at-points)).
 
@@ -90,7 +95,7 @@ the event, and writes take `host`.
    and the point's record (`mod_points::<Point>Args`): the function's arguments with API types, and a
    `cancel` or `result` where the function returns `()` or an API value. It uses only `mod_api` types.
    Every `Game` method is a point on both routes: the prebuilt game was built with them all, and a source
-   build gets the same points, so a point injection always builds against the prebuilt game in seconds.
+   build gets the same points, so a point injection builds against the prebuilt game.
 3. **You truly need private internals:** declare their paths and fingerprints, then choose
    `access = "internals"`. The callback depends on that game build, not a stable API contract;
    it remains a hook request. A missing compiled slot requires a native source rebuild.
@@ -456,8 +461,8 @@ callback.
 
 - A point's methods are `<point>` (its head: the arguments it was called with) and `<point>_return` (after
   its body: the value it returns), in a crate-root `with` function. Its record is `mod_points::<Point>Args`.
-- Depend on `horizon-mod-points` only to listen at points. It holds one record per point, so a crate that
-  depends on it compiles a few seconds slower; a mod without point injections leaves it out.
+- Depend on `horizon-mod-points` only to listen at points. It holds one record per point;
+  a mod without point injections leaves this dependency out.
 - A listener's host is a `HostSide` on a function that takes `&mut self`, and `&dyn Host` on one that takes
   `&self`.
 - The game sets a point's slots once, after the mods are installed; a point no mod listens at costs one

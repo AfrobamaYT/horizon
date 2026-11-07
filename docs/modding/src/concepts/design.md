@@ -220,7 +220,7 @@ Compiling a native mod against a game already built is the route that makes nati
 rests on the one before:
 
 1. **The prebuilt game.** The game as a dylib with its metadata, built daily and published as prerelease
-   builds, so a native mod compiles against it in seconds instead of rebuilding the game.
+   builds, so a native mod compiles against it instead of rebuilding the game.
 2. **Slots.** Injection targets compiled into the prebuilt game, so a mixin does not force a rebuild. The
    generated slot points exist; filling them from a mod follows.
 3. **The internals tier.** A per-mod declared list of game internals the prebuilt game exposes. It is native

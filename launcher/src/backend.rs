@@ -4408,9 +4408,6 @@ pub struct Settings {
     /// Native mods are always on: an older file's `native_mods` switch is ignored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
-    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_profile: Option<crate::native_mods::Profile>,
     /// First-use native code permission for this launcher install, Unix seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_mods_allowed_at: Option<u64>,
@@ -4475,12 +4472,6 @@ impl Settings {
                 if fields.get(key).is_some_and(|v| !v.is_number()) {
                     fields.remove(key);
                 }
-            }
-            // A build mode this launcher doesn't know is the default one.
-            if fields.get("native_profile").is_some_and(|p| {
-                serde_json::from_value::<crate::native_mods::Profile>(p.clone()).is_err()
-            }) {
-                fields.remove("native_profile");
             }
             // A language this launcher doesn't have yet follows the system's.
             if fields.get("language").is_some_and(|l| {
