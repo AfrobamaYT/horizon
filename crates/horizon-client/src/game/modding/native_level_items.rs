@@ -160,8 +160,9 @@ mod tests {
             load_resources, spill,
         };
         use horizon_client::gamerules::Value as RuleValue;
+        use horizon_client::items::ItemStack;
         use horizon_core::random::RandomSource;
-        use mod_api::{ItemStack, LevelRef, NativeAuthority, NativeWorldEpoch};
+        use mod_api::{LevelRef, NativeAuthority, NativeWorldEpoch};
 
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
