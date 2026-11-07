@@ -179,7 +179,13 @@ impl SoundEngine {
                 if edited != original {
                     instance.apply_play_settings(edited);
                 }
-                instance.live_play_settings();
+                let mut cache = instance.live_play_settings().borrow_mut();
+                instance.write_play_settings(&mut cache.original);
+                if let Some(edited) = cache.edited.as_mut() {
+                    instance.write_play_settings(edited);
+                } else {
+                    cache.edited = Some(cache.original.clone());
+                }
                 true
             }
         }
@@ -398,7 +404,7 @@ mod tests {
                 event: &mut mod_api::PlaySoundEvent<'_>,
             ) {
                 let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                assert_eq!(event.starting, n == 0);
+                assert_eq!(event.starting, n == 0 || n == 3);
                 if n == 0 {
                     self.1
                         .store(event.instance, std::sync::atomic::Ordering::SeqCst);
@@ -435,6 +441,16 @@ mod tests {
             assert_eq!(engine.instance(id).unwrap().pitch, 1.0);
             engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
             assert!(engine.instance(id).unwrap().stopped);
+            engine.instance_mut(id).unwrap().stopped = false;
+            assert_eq!(
+                engine.play(id, &mut backend),
+                crate::sound_engine::PlayResult::Started
+            );
+            engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+            assert!(
+                !engine.instance(id).unwrap().stopped,
+                "a replay resets a cancelled live edit"
+            );
         });
     }
     #[test]
