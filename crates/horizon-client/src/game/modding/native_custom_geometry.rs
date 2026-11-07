@@ -422,7 +422,7 @@ mod tests {
                 .draw_model_instances(model, &[far, near])
                 .unwrap();
             let expected = render(game);
-            assert!(expected.chunks_exact(4).any(|p| p[..3] != [0; 3]));
+            assert!(expected.as_chunks::<4>().0.iter().any(|p| p[..3] != [0; 3]));
             game.prepared_model_draws.borrow_mut().clear();
             draw.reset([0.0; 3], Mat4::IDENTITY, [0.0; 2]);
             context(game, &mut draw).draw_instance_group(group).unwrap();
