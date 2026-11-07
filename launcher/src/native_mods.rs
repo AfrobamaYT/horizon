@@ -61,9 +61,9 @@ const STAGING: &str = "private-source-calls-v1";
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 
-/// What a native build is compiled for, as the player picks it on the Mods page. `Optimized`, the
-/// default, is the release profile the daily prebuilt game is built with (thin LTO, one codegen
-/// unit): mods that need nothing but the mod API compile against that download in seconds, and
+/// Native build modes: a visible picker starts at Balanced and remembers the instance's choice.
+/// Optimized is the daily prebuilt game's release profile (thin LTO, one codegen
+/// unit): mods that need nothing but the mod API compile against that download, and
 /// any other set builds the whole game from source with the same profile. `Balanced` is the
 /// workspace's `fast` (16 codegen units, incremental, thin-local LTO only), built on this computer:
 /// quicker to rebuild after a change, a game a little slower. `Developer`, for writing a mod, is
@@ -71,17 +71,27 @@ pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
 /// about twice as slow. `Balanced` and `Developer` share `native/target/fast/`: every other crate
 /// is built alike, so switching between them recompiles only `horizon-client`, and Cargo keeps
 /// both builds of it. Each profile has its own key, so their builds never mix.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Profile {
-    #[default]
     Optimized,
+    #[default]
     Balanced,
     Developer,
 }
 
 impl Profile {
-    /// The player's choices (the Mods page, `settings native-profile`).
+    /// The player's build-mode choices.
     pub const ALL: [Self; 3] = [Self::Optimized, Self::Balanced, Self::Developer];
 
     pub fn name(self) -> &'static str {
@@ -90,16 +100,6 @@ impl Profile {
             Self::Balanced => "balanced",
             Self::Developer => "developer",
         }
-    }
-
-    /// The profile named `text`.
-    pub fn parse(text: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.name() == text.trim())
-    }
-
-    /// The settings' profile, or the default when unset.
-    pub fn chosen(settings: &crate::backend::Settings) -> Self {
-        settings.native_profile.unwrap_or_default()
     }
 
     /// The Cargo profile it compiles with (its folder in `native/target/`), and what it sets over
@@ -282,12 +282,12 @@ impl Plan {
                 "Incremental rebuild: {changes}",
                 &[("changes", &changes.join("; "))],
             ),
-            Self::First => tr("First build: the whole game (several minutes)").into(),
-            Self::Prebuilt => tr("Prebuilt game: only the mods compile (seconds)").into(),
+            Self::First => tr("First build: the whole game").into(),
+            Self::Prebuilt => tr("Prebuilt game: only the mods compile").into(),
         }
     }
 
-    /// The word in "Built in 42 s (balanced, incremental)".
+    /// The plan's short name in a completed build's status.
     fn kind(&self) -> &'static str {
         match self {
             Self::UpToDate => "up to date",
@@ -470,15 +470,6 @@ fn log_text(line: &str) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join("\n"))
 }
 
-/// "1 min 5 s" style time, for the build's status.
-pub fn duration_label(secs: u64) -> String {
-    if secs >= 60 {
-        format!("{} min {} s", secs / 60, secs % 60)
-    } else {
-        format!("{secs} s")
-    }
-}
-
 /// Whether an installed version is a native-mods build.
 pub fn is_native(version: &str) -> bool {
     version.starts_with(PREFIX)
@@ -513,22 +504,24 @@ pub fn append_log(message: &str) -> Result<(), String> {
 }
 
 /// Records the whole attempt, including selection or export after compilation.
-fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn logged<T>(
+    build: impl FnOnce(Result<&crate::native_cache::Cache, &str>) -> Result<T, String>,
+) -> Result<T, String> {
     // Another build or a cleanup holds the lease on the same target/: refuse. Any other
-    // failure (a filesystem without file locks, a `native` folder linked to another drive)
-    // only stops the cleanup: the build goes ahead without the lease, as it did before.
-    let (cache, unavailable) = match crate::native_cache::Cache::acquire(&backend::build_dir()) {
-        Ok(cache) => (Some(cache), None),
+    // failure only stops cleanup for explicit builds. Automatic selection requires a held
+    // cache for its catalog and can refuse instead of accessing an unsafe tree.
+    let cache = match crate::native_cache::Cache::acquire(&backend::build_dir()) {
+        Ok(cache) => Ok(cache),
         Err(crate::native_cache::Error::Busy) => {
             return Err(cache_error(crate::native_cache::Error::Busy));
         }
-        Err(error) => (None, Some(cache_error(error))),
+        Err(error) => Err(cache_error(error)),
     };
     clear_log()?;
-    if let Some(warning) = &unavailable {
+    if let Err(warning) = &cache {
         log_warning(warning);
     }
-    let result = build();
+    let result = build(cache.as_ref().map_err(String::as_str));
     match &result {
         Ok(_) => {
             let _ = append_log("Build completed.");
@@ -539,7 +532,7 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     }
     // The installed binary and post-build programs have left target/ before trimming. Keep
     // this lease through installation/export, including failed builds, and never wait on Cargo.
-    let Some(cache) = cache else {
+    let Ok(cache) = cache else {
         return result;
     };
     let limit = backend::Settings::load()
@@ -1424,17 +1417,9 @@ impl Step {
             },
             Self::Install => tr("Installing the build").into(),
             Self::LeftOut(left) => left.label(),
-            Self::Done {
-                secs,
-                profile,
-                plan,
-            } => trf(
-                "Built in {duration} ({profile}, {plan})",
-                &[
-                    ("duration", &duration_label(*secs)),
-                    ("profile", profile.name()),
-                    ("plan", tr(plan.kind())),
-                ],
+            Self::Done { profile, plan, .. } => trf(
+                "Built ({profile}, {plan})",
+                &[("profile", profile.name()), ("plan", tr(plan.kind()))],
             ),
         }
     }
@@ -2568,17 +2553,34 @@ fn isolated(
     }
 }
 
+fn select_build_profile(
+    saved: Profile,
+    requested: Option<Profile>,
+    plan: impl FnOnce() -> Result<Routes, Failed>,
+) -> Result<Profile, String> {
+    check_cancelled()?;
+    match requested {
+        Some(profile) => Ok(profile),
+        None => {
+            let routes = plan();
+            check_cancelled()?;
+            Ok(saved.for_picker(&routes.map_err(String::from)?, false, false))
+        }
+    }
+}
+
 /// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
 /// and points `instance` at the build, the default one included. Returns the build's version; a
 /// build already made is used again. Mods pinning different revisions cannot build together:
 /// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update --horizon
 /// <commit>` in each mod's folder pins it to the installed game, then build again.
+/// `profile` is an explicit override; None applies the instance's choice only when needed.
 pub fn build(
     base: &str,
     folder: &Path,
     instance: &Instance,
-    profile: Profile,
+    profile: Option<Profile>,
     progress: impl Fn(Step),
 ) -> Result<String, Failed> {
     require_consent()?;
@@ -2586,7 +2588,14 @@ pub fn build(
     if let Some(error) = backend::native_mod_architecture_error() {
         return Err(Failed::Other(error));
     }
-    logged(|| {
+    logged(|cache| {
+        let profile = select_build_profile(instance.native_profile, profile, || {
+            planning::classify(
+                folder,
+                Some(base),
+                cache.map_err(|error| Failed::Other(error.into()))?,
+            )
+        })?;
         let built = isolated(
             |skip| {
                 pipeline(
@@ -2641,7 +2650,7 @@ pub fn build_server(
     progress: impl Fn(Step),
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
-    logged(|| {
+    logged(|_| {
         if output.symlink_metadata().is_ok() {
             return Err(trf(
                 "{path} already exists. Move it away, or build into another folder.",
@@ -4211,6 +4220,118 @@ mod tests {
     }
 
     #[test]
+    fn instance_profile_selection_keeps_automatic_builds_and_cancellation_exact() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let previous = CANCEL.swap(false, Ordering::Relaxed);
+        let structural = Routes {
+            mods: vec![(
+                "source".into(),
+                Route::Game {
+                    reason: SourceReason::BuildScript {
+                        mod_id: "source".into(),
+                    },
+                },
+            )],
+            unavailable: None,
+        };
+        assert_eq!(
+            select_build_profile(Profile::default(), None, || Ok(structural.clone())).unwrap(),
+            Profile::Balanced
+        );
+        assert_eq!(
+            Profile::Developer.for_picker(&structural, false, true),
+            Profile::Developer
+        );
+        assert_eq!(
+            select_build_profile(Profile::Developer, None, || Ok(structural)).unwrap(),
+            Profile::Balanced
+        );
+        assert_eq!(
+            select_build_profile(Profile::Developer, None, || Ok(Routes::default())).unwrap(),
+            Profile::Optimized
+        );
+        assert_eq!(
+            select_build_profile(Profile::Balanced, Some(Profile::Developer), || panic!(
+                "explicit overrides need no plan"
+            ))
+            .unwrap(),
+            Profile::Developer
+        );
+        for failed in [false, true] {
+            CANCEL.store(false, Ordering::Relaxed);
+            let result = select_build_profile(Profile::Balanced, None, || {
+                cancel();
+                if failed {
+                    Err(Failed::Other("download failed".into()))
+                } else {
+                    Ok(Routes::default())
+                }
+            });
+            assert_eq!(result.unwrap_err(), CANCELLED);
+        }
+        assert_eq!(
+            select_build_profile(Profile::Balanced, None, || panic!(
+                "cancelled before planning"
+            ))
+            .unwrap_err(),
+            CANCELLED
+        );
+        CANCEL.store(previous, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn automatic_build_does_not_save_its_effective_profile() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        backend::Settings::load().allow_native_mods().unwrap();
+        let file = backend::data_dir().join("instances.json");
+        let previous = fs::read(&file).ok();
+        let stored = br#"{"instances":{"horizon":{"native_profile":"balanced"}}}"#;
+        fs::write(&file, stored).unwrap();
+        let instance = instances::find("horizon").unwrap();
+        let folder = dir("automatic-profile");
+        let error = build("v2099.09.09", &folder, &instance, None, |_| {}).unwrap_err();
+        assert!(String::from(error).contains("is not prepared yet"));
+        assert_eq!(fs::read(&file).unwrap(), stored);
+        if let Some(previous) = previous {
+            fs::write(file, previous).unwrap();
+        } else {
+            fs::remove_file(file).unwrap();
+        }
+        fs::remove_dir_all(folder).unwrap();
+        original.save().unwrap();
+    }
+
+    #[test]
+    fn folder_planning_reuses_the_build_snapshot_without_restaging_packages() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        backend::Settings::load().allow_native_mods().unwrap();
+        let folder = dir("profile-snapshot");
+        write_bundle(&folder, "snapshot", "");
+        fs::write(
+            folder.join("Cargo.toml"),
+            "[package]\nname='snapshot'\nversion='0.1.0'\n[dependencies]\nhorizon-client='0.1'\n",
+        )
+        .unwrap();
+        let preview = root().join("installed.routes");
+        fs::create_dir_all(&preview).unwrap();
+        let sentinel = preview.join("snapshot-sentinel");
+        fs::write(&sentinel, b"retained").unwrap();
+        let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).unwrap();
+        let plan = planning::classify(&folder, None, &lease).unwrap();
+        assert_eq!(plan.mods.len(), 1);
+        assert_eq!(plan.mods[0].0, "snapshot");
+        assert!(
+            matches!(&plan.mods[0].1, Route::Invalid { reason } if reason.contains("E_GAME_DEPENDENCY"))
+        );
+        assert_eq!(fs::read(&sentinel).unwrap(), b"retained");
+        fs::remove_file(sentinel).unwrap();
+        fs::remove_dir_all(folder).unwrap();
+        original.save().unwrap();
+    }
+
+    #[test]
     fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
         use std::net::TcpListener;
         let _guard = TEST_STATE.lock().unwrap();
@@ -4228,13 +4349,9 @@ mod tests {
         let profile = Profile::Optimized;
         let base = "uninstalled";
         denied(build_server(base, &folder, &output, profile, false, |_| {}));
-        denied(build(
-            base,
-            &folder,
-            &instances::selected(),
-            profile,
-            |_| {},
-        ));
+        for choice in [Some(profile), None] {
+            denied(build(base, &folder, &instances::selected(), choice, |_| {}));
+        }
         denied(sync_internals(&folder));
         let preview = root().join("installed.routes");
         fs::create_dir_all(&preview).unwrap();
@@ -4261,20 +4378,6 @@ mod tests {
         assert!(backend::Settings::load().native_mods_allowed_at.is_some());
         require_consent().unwrap();
         original.save().unwrap();
-    }
-
-    #[test]
-    fn the_setting_picks_the_profile() {
-        let mut settings = crate::backend::Settings::default();
-        assert_eq!(Profile::chosen(&settings), Profile::Optimized);
-        settings.native_profile = Some(Profile::Developer);
-        assert_eq!(Profile::chosen(&settings), Profile::Developer);
-        assert_eq!(Profile::parse("balanced"), Some(Profile::Balanced));
-        assert_eq!(Profile::parse("fast"), None);
-        assert_eq!(Profile::parse(" optimized "), Some(Profile::Optimized));
-        assert_eq!(Profile::parse("release"), None);
-        let text = serde_json::to_string(&settings).unwrap();
-        assert!(text.contains("\"native_profile\":\"developer\""), "{text}");
     }
 
     /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early
@@ -4310,7 +4413,7 @@ mod tests {
         assert!(log.contains("is not prepared yet"), "{log}");
         assert!(!log.contains("the last build's output"), "{log}");
         // A failure after compiler output keeps those diagnostics and the final reason.
-        let failure: Result<(), String> = logged(|| {
+        let failure: Result<(), String> = logged(|_| {
             append_log("error[E0425]: cannot find value `missing` in this scope")?;
             Err("Could not export the engine".into())
         });
@@ -4322,7 +4425,7 @@ mod tests {
             "{log}"
         );
         assert!(!log.contains("Build completed."), "{log}");
-        let success: Result<(), String> = logged(|| Ok(()));
+        let success: Result<(), String> = logged(|_| Ok(()));
         success.unwrap();
         assert_eq!(
             fs::read_to_string(log_path()).unwrap(),
@@ -4346,10 +4449,7 @@ mod tests {
         let now = record("aaaaaaa1111", &[("zoom", "1"), ("keys", "1")]);
         assert_eq!(classify(true, None, &now), Plan::UpToDate);
         assert_eq!(classify(false, None, &now), Plan::First);
-        assert_eq!(
-            First_label(),
-            "First build: the whole game (several minutes)"
-        );
+        assert_eq!(First_label(), "First build: the whole game");
         let before = record("aaaaaaa1111", &[("zoom", "1"), ("keys", "0")]);
         assert_eq!(
             classify(false, Some(&before), &now),
@@ -4399,11 +4499,11 @@ mod tests {
         };
         assert_eq!(
             done(42, Profile::Balanced, Plan::Incremental(vec![])).label(),
-            "Built in 42 s (balanced, incremental)"
+            "Built (balanced, incremental)"
         );
         assert_eq!(
             done(125, Profile::Optimized, Plan::First).label(),
-            "Built in 2 min 5 s (optimized, first build)"
+            "Built (optimized, first build)"
         );
     }
 
