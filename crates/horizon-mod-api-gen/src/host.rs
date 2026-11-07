@@ -372,7 +372,18 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                 } else {
                     call
                 };
-                code.push_str(&format!("{sig} {{ mod_api::__private::check_access({name:?}, mod_api::__private::LoadAccess::{level}); {setup} {call} }}\n"));
+                let access = if result_error(&entry.sig.output)
+                    .is_some_and(|error| outer_type(error, "LevelReadError"))
+                {
+                    format!(
+                        "if !mod_api::__private::access_allowed({name:?}, mod_api::__private::LoadAccess::{level}) {{ return Err(mod_api::LevelReadError::Unavailable); }}"
+                    )
+                } else {
+                    format!(
+                        "mod_api::__private::check_access({name:?}, mod_api::__private::LoadAccess::{level});"
+                    )
+                };
+                code.push_str(&format!("{sig} {{ {access} {setup} {call} }}\n"));
             }
             code.push_str("}\n");
         }

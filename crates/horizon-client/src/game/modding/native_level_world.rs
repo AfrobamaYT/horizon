@@ -521,6 +521,15 @@ mod tests {
                 assert_eq!(handle.game_rules(game), Err(LevelReadError::Stale));
                 assert!(game.native_level_world(handle).is_none());
             }
+            {
+                let _scope =
+                    mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::Setup);
+                assert_eq!(
+                    level.game_rule(game, "keep_inventory"),
+                    Err(LevelReadError::Unavailable)
+                );
+                assert_eq!(level.game_rules(game), Err(LevelReadError::Unavailable));
+            }
             game.options.execution_role = ExecutionRole::Client;
             assert_eq!(
                 level.game_rule(game, "keep_inventory"),
