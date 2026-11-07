@@ -2111,24 +2111,24 @@ fn captured_text_content(
     if let Some(key) = fields.get("keybind").and_then(Value::as_str) {
         return C::Keybind(key.into());
     }
-    if let Some(score) = fields.get("score").and_then(Value::as_object) {
-        if let (Some(name), Some(objective)) = (
+    if let Some(score) = fields.get("score").and_then(Value::as_object)
+        && let (Some(name), Some(objective)) = (
             score.get("name").and_then(Value::as_str),
             score.get("objective").and_then(Value::as_str),
-        ) {
-            let extra: serde_json::Map<_, _> = score
-                .iter()
-                .filter(|(key, _)| !["name", "objective"].contains(&key.as_str()))
-                .map(|(key, value)| (key.clone(), value.clone()))
-                .collect();
-            if !extra.is_empty() {
-                metadata.insert("score".into(), Value::Object(extra));
-            }
-            return C::Score {
-                name: name.into(),
-                objective: objective.into(),
-            };
+        )
+    {
+        let extra: serde_json::Map<_, _> = score
+            .iter()
+            .filter(|(key, _)| !["name", "objective"].contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        if !extra.is_empty() {
+            metadata.insert("score".into(), Value::Object(extra));
         }
+        return C::Score {
+            name: name.into(),
+            objective: objective.into(),
+        };
     }
     if let Some(path) = fields.get("nbt").and_then(Value::as_str) {
         let source = [
