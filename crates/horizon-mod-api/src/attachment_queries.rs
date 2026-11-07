@@ -53,7 +53,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentQueryMut<'_, T> {
 
 /// A borrowed snapshot row with explicit journaled replacement/removal.
 #[non_exhaustive]
-pub struct AttachmentRowMut<'q, T> {
+pub struct AttachmentRowMut<'q, T: 'static> {
     row: runtime::AttachmentRowRef<'q, AttachmentHolder, T>,
     key: &'q AttachmentType<T>,
 }
