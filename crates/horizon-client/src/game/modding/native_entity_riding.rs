@@ -53,47 +53,11 @@ impl Game<'_> {
         }
         Some(root)
     }
-    /// The entities riding this one (`Entity.getPassengers`): its players
-    /// in the order they got in, then its mobs.
+    /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order.
     pub(super) fn entity_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>> {
         self.native_entity_target(entity)?;
-        let id = entity.id();
-        let acting = self.lan_acting.filter(|_| self.player.is_some());
-        let mut acting_listed = false;
-        let mut players: Vec<(u64, u32)> = self
-            .lan
-            .iter()
-            .flat_map(|h| h.hub.guests.iter())
-            .filter(|g| g.placed && g.dimension == self.dim.id())
-            .filter(|g| {
-                let vehicle = if acting == Some(g.conn) {
-                    acting_listed = true;
-                    self.riding
-                } else {
-                    g.vehicle
-                };
-                vehicle == Some(id)
-            })
-            .map(|g| (g.vehicle_order, g.entity_id as u32))
-            .collect();
-        players.sort_unstable();
-        // An acting player absent from the placed list still rides through
-        // `riding`; `addPassenger` puts that player first.
-        if let Some(me) = self.lan_acting_entity
-            && self.lan_acting_uuid.is_some()
-            && !acting_listed
-            && self.player.is_some()
-            && self.riding == Some(id)
-        {
-            players.insert(0, (0, me));
-        }
-        let mobs = self
-            .mobs
-            .iter()
-            .filter(|m| m.extra.mount == Some(id) && !m.removed && m.alive())
-            .map(|m| m.id);
-        let ids = players.into_iter().map(|(_, id)| id).chain(mobs);
-        Some(ids.filter_map(|id| self.entity(id)).collect())
+        let seats = self.seated_passengers(entity.id()).into_iter();
+        Some(seats.filter_map(|(_, id, _)| self.entity(id)).collect())
     }
     /// Whether anything rides the entity (`Entity.isVehicle`).
     pub(super) fn entity_is_vehicle(&self, entity: EntityRef) -> Option<bool> {
@@ -172,10 +136,6 @@ impl Game<'_> {
                         .native_player_controls(mob, rider)
                         .then(|| LivingRef::new(first));
                 }
-                // `extra.rider` is the mob that boarded first; `passengers` lists the level's order.
-                let first = passengers
-                    .into_iter()
-                    .find(|p| Some(p.id()) == mob.extra.rider)?;
                 let rider = self.mobs.iter().find(|m| m.id == first.id())?;
                 let tagged = self
                     .res
@@ -205,7 +165,7 @@ impl Game<'_> {
     /// for horses, `Animal` and the cart don't reach players. Nothing rides anything else, so
     /// there it is the top of the box. Reads only: no `mob_ride` or dismount veto is asked and
     /// the passenger's pose stays. `None` for a stale handle, a passenger other than a player
-    /// or a mob, or a player with no motion state.
+    /// or a mob, a player with no motion state, or a vehicle whose box Horizon does not keep.
     pub(super) fn entity_dismount_location(
         &self,
         vehicle: EntityRef,
@@ -486,9 +446,13 @@ impl Game<'_> {
                     _ => {}
                 }
                 self.riding = Some(vehicle_id);
+                self.seat_acting_player(vehicle_id);
                 self.trigger_player("minecraft:started_riding");
             }
-            Target::Mob(id) => horizon_client::mobs::riders::link(&mut self.mobs, id, vehicle_id),
+            Target::Mob(id) => {
+                horizon_client::mobs::riders::link(&mut self.mobs, id, vehicle_id);
+                self.seat_mob(id);
+            }
             _ => return false,
         }
         self.native_vehicle_id(rider) == Some(vehicle_id)
@@ -819,6 +783,107 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn passengers_keep_the_order_they_boarded_in_not_the_mob_list() {
+        use horizon_core::nbt::Tag;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let camel = add_mob(game, 80, "minecraft:camel", Vec3::ZERO);
+            let first = add_mob(game, 81, "minecraft:pig", Vec3::ZERO);
+            let second = add_mob(game, 82, "minecraft:pig", Vec3::ZERO);
+            let top = add_mob(game, 83, "minecraft:zombie", Vec3::ZERO);
+            for (rider, vehicle) in [(82, 80), (81, 80), (83, 81)] {
+                assert!(game.start_riding_target(Target::Mob(rider), Target::Mob(vehicle), true));
+            }
+            assert_eq!(camel.passengers(game), Some(vec![second, first]));
+            assert_eq!(
+                camel.indirect_passengers(game),
+                Some(vec![second, first, top])
+            );
+
+            // The first rider going leaves the next in line first, whatever the mob list says.
+            let driver = add_mob(game, 85, "minecraft:zombie", Vec3::ZERO);
+            let vehicle = add_mob(game, 86, "minecraft:camel", Vec3::ZERO);
+            let next = add_mob(game, 87, "minecraft:skeleton", Vec3::ZERO);
+            let last = add_mob(game, 88, "minecraft:husk", Vec3::ZERO);
+            for rider in [last, next, driver] {
+                assert!(game.entity_start_riding(rider, vehicle, true));
+            }
+            assert_eq!(vehicle.passengers(game), Some(vec![last, next, driver]));
+            // `Entity.saveWithoutId` writes `getPassengers`, so a reload keeps the order.
+            let index = game.mobs.iter().position(|m| m.id == 86).unwrap();
+            let saved = game.mob_tree_nbt(index);
+            let Some(Tag::List(riders)) = saved.get("Passengers") else {
+                panic!("no Passengers in {saved:?}");
+            };
+            let kinds: Vec<_> = riders.iter().map(|r| r.get("id").cloned()).collect();
+            let kind = |name: &str| Some(Tag::String(name.into()));
+            assert_eq!(
+                kinds,
+                [
+                    kind("minecraft:husk"),
+                    kind("minecraft:skeleton"),
+                    kind("minecraft:zombie")
+                ]
+            );
+            assert_eq!(
+                vehicle.controlling_passenger(game),
+                Some(LivingRef::new(last))
+            );
+            assert!(game.entity_stop_riding(last));
+            assert_eq!(game.mobs[index].extra.rider, Some(87));
+            assert_eq!(
+                vehicle.controlling_passenger(game),
+                Some(LivingRef::new(next))
+            );
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_player_boards_ahead_of_a_mob_and_behind_a_player_as_add_passenger_says() {
+        use horizon_client::motion::PlayerMotion;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            lay_floor(game);
+            let at = Vec3::new(0.5, 64.0, 0.5);
+            let one = super::super::native_player_death::tests::add_guest(game).entity();
+            let mut guest = super::super::native_player_death::tests::new_guest(2, 456);
+            guest.entity_id = 21;
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.guests.push(guest);
+            for conn in [1, 2] {
+                let motion = PlayerMotion::new(game.motion, at).unwrap();
+                let hub = &mut game.lan.as_mut().unwrap().hub;
+                hub.update_guest(conn, |g| g.motion = Some(Box::new(motion)))
+                    .unwrap();
+            }
+            let two = game.player(456).unwrap().entity();
+            let ghast = add_mob(game, 140, "minecraft:happy_ghast", at);
+            let cow = add_mob(game, 141, "minecraft:cow", at);
+            let pig = add_mob(game, 142, "minecraft:pig", at);
+
+            // Ahead of a mob, behind the mobs once a player is first: `[one, cow, pig, two]`.
+            assert!(game.entity_start_riding(cow, ghast, true));
+            assert!(game.entity_start_riding(one, ghast, true));
+            assert_eq!(ghast.passengers(game), Some(vec![one, cow]));
+            assert!(game.entity_start_riding(pig, ghast, true));
+            assert_eq!(ghast.passengers(game), Some(vec![one, cow, pig]));
+            // On its own turn too, before the turn's end writes the record back.
+            game.as_guest(2, |game| {
+                assert!(game.start_riding_target(Target::Player, Target::Mob(140), true));
+                assert_eq!(ghast.passengers(game), Some(vec![one, cow, pig, two]));
+            })
+            .unwrap();
+            assert_eq!(ghast.passengers(game), Some(vec![one, cow, pig, two]));
+
+            // The first player leaving leaves a mob first, and the next player goes ahead of it.
+            assert!(game.entity_stop_riding(one));
+            assert_eq!(ghast.passengers(game), Some(vec![cow, pig, two]));
+            assert!(game.entity_start_riding(one, ghast, true));
+            assert_eq!(ghast.passengers(game), Some(vec![one, cow, pig, two]));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn the_first_passenger_controls_only_what_it_can_steer() {
         use super::super::boats::Boat;
         use horizon_client::items::ItemStack;
@@ -919,6 +984,62 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn entity_drops_gates_a_dying_mobs_lead_in_the_tick_not_in_detach() {
+        use horizon_client::{
+            gamerules::Value,
+            mobs::{MobEvent, leash::Holder},
+            motion::PlayerMotion,
+        };
+        super::super::native_entity_refs::tests::with_game(|game| {
+            let at = Vec3::new(0.5, 64.0, 0.5);
+            let cow = add_mob(game, 160, "minecraft:cow", at);
+            let holder = add_mob(game, 161, "minecraft:sheep", at);
+            game.mobs[0].health = 0.0;
+            let tick_cleanup = |game: &mut Game<'_>| {
+                game.mobs[0].extra.leash = Some(Holder::Mob(161));
+                // What `leash::tick` sends for a mob that is not alive.
+                let event = MobEvent::LeashBreak {
+                    mob: 160,
+                    drop: true,
+                    sound: false,
+                };
+                game.handle_mob_events(vec![event]).unwrap();
+                assert_eq!(game.mobs[0].extra.leash, None);
+            };
+
+            // `tickLeash`: `removeLeash` with the rule off, `dropLeash` with it on.
+            game.ui.rules.set("entity_drops", Value::Bool(false));
+            tick_cleanup(game);
+            assert!(game.dropped.is_empty());
+            game.ui.rules.set("entity_drops", Value::Bool(true));
+            tick_cleanup(game);
+            take_one_lead(game, at);
+
+            // `Leashable.dropLeash` asks no rule: the lead falls as promised.
+            game.ui.rules.set("entity_drops", Value::Bool(false));
+            assert!(cow.leash_to(game, holder));
+            assert!(cow.detach_leash(game, true));
+            take_one_lead(game, at);
+
+            // Neither does `Entity.dropAllLeashConnections`, which calls it for a player's mobs.
+            let player = super::super::native_player_death::tests::add_guest(game).entity();
+            let motion = PlayerMotion::new(game.motion, at).unwrap();
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.update_guest(1, |g| {
+                g.motion = Some(Box::new(motion));
+                g.position = [at.x, at.y, at.z];
+            })
+            .unwrap();
+            assert!(cow.leash_to(game, player));
+            let dropped = game.as_guest(1, |game| game.drop_all_leash_connections());
+            assert_eq!(dropped, Some(true));
+            assert_eq!(game.mobs[0].extra.leash, None);
+            take_one_lead(game, at);
+        });
+    }
+
     /// Asks where `rider` gets off `vehicle`, on foot and riding, then has it really get off:
     /// all three must agree. Returns the spot.
     fn get_off(game: &mut Game<'_>, rider: EntityRef, vehicle: EntityRef) -> [f64; 3] {
@@ -929,6 +1050,15 @@ mod tests {
         assert!(game.entity_stop_riding(rider));
         assert_eq!(game.entity_position(rider), Some(asked));
         asked
+    }
+    /// The level holds exactly one dropped item, a single lead at `at`; takes it away.
+    fn take_one_lead(game: &mut Game<'_>, at: Vec3) {
+        assert_eq!(game.dropped.len(), 1);
+        let item = game.dropped.iter().next().unwrap();
+        assert_eq!(&*item.stack.item, "minecraft:lead");
+        assert_eq!(item.stack.count, 1);
+        assert_eq!(item.position, at);
+        game.dropped.clear();
     }
     fn assert_near(at: [f64; 3], expected: [f64; 3]) {
         let near = at.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-4);
@@ -1021,6 +1151,46 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_player_gets_off_along_their_own_yaw_on_their_turn_or_not() {
+        use super::super::boats::Boat;
+        use horizon_client::motion::PlayerMotion;
+        super::super::native_entity_refs::tests::with_game(|game| {
+            lay_floor(game);
+            let at = Vec3::new(0.5, 64.0, 0.5);
+            let player = super::super::native_player_death::tests::add_guest(game).entity();
+            let motion = PlayerMotion::new(game.motion, at).unwrap();
+            let hub = &mut game.lan.as_mut().unwrap().hub;
+            hub.update_guest(1, |g| {
+                g.motion = Some(Box::new(motion));
+                g.yaw = 45.0;
+            })
+            .unwrap();
+            // Boarding turns the player to the vehicle, so it faces the same way.
+            let mut boat = Boat::new(150, "oak".into(), at, 45.0);
+            boat.previous_yaw = 45.0;
+            game.boats.push(boat);
+            let boat = game.entity(150).unwrap();
+            let strider = add_mob(game, 151, "minecraft:strider", at);
+            game.mobs[0].yaw = 45.0;
+
+            // `getCollisionHorizontalEscapeVector` at 45 degrees: the longer axis reaches the
+            // distance, so both do, `(1.375 * sqrt 2 + 0.6 + 1e-5) / 2` out from a boat's centre.
+            let past_boat = [-0.77229, 64.0, 1.77229];
+            // `(0.9 + 0.6 + 1e-5) / 2` from a strider's: the centre of the block there.
+            let past_strider = [-0.5, 64.0, 1.5];
+            assert_near(get_off(game, player, boat), past_boat);
+            assert_near(get_off(game, player, strider), past_strider);
+            game.as_guest(1, |game| {
+                assert_eq!(game.native_entity_target(player), Some(Target::Player));
+                assert_near(get_off(game, player, boat), past_boat);
+                assert_near(get_off(game, player, strider), past_strider);
+            })
+            .unwrap();
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn dismount_location_answers_without_a_ride_or_a_live_handle() {
         super::super::native_entity_refs::tests::with_game(|game| {
             let at = Vec3::new(0.5, 64.0, 0.5);
@@ -1040,6 +1210,16 @@ mod tests {
             );
             // A player with no motion state has nothing to measure.
             assert_eq!(cow.dismount_location(game, LivingRef::new(player)), None);
+            // An entity Horizon doesn't simulate keeps no box to stand on.
+            game.others.push(super::super::commands::OtherEntity {
+                id: 132,
+                kind: "minecraft:marker".into(),
+                position: at,
+                yaw: 0.0,
+                pitch: 0.0,
+            });
+            let marker = game.entity(132).unwrap();
+            assert_eq!(marker.dismount_location(game, living), None);
         });
     }
 
@@ -1068,7 +1248,6 @@ mod tests {
                 let vehicle = add_mob(game, 112, "minecraft:pig", at);
                 game.boats.push(Boat::new(113, "oak".into(), at, 0.0));
                 let boat = game.entity(113).unwrap();
-                let items = |game: &Game<'_>| game.dropped.len();
 
                 // A mob's lead goes to a mob, and the leashed mob gets off its vehicle.
                 assert!(game.entity_start_riding(cow, vehicle, true));
@@ -1094,15 +1273,15 @@ mod tests {
                 assert_eq!(cow.leash_holder(game), Some(LeashHolder::Knot([2, 64, 2])));
 
                 // `removeLeash` leaves no item, `dropLeash` drops one; both tell `entity_unleash`.
-                let before = items(game);
                 assert!(cow.detach_leash(game, false));
-                assert_eq!(items(game), before);
+                assert!(game.dropped.is_empty());
                 assert_eq!(cow.leash_holder(game), Some(LeashHolder::Unleashed));
                 assert_eq!(*unleashed.lock().unwrap(), 1);
                 assert!(!cow.detach_leash(game, false));
                 assert!(cow.leash_to(game, holder));
                 assert!(cow.detach_leash(game, true));
-                assert_eq!(items(game), before + 1);
+                // At the cow's feet, on top of the pig it was taken off.
+                take_one_lead(game, Vec3::new(0.5, 64.0 + f64::from(0.9_f32), 0.5));
                 assert_eq!(*unleashed.lock().unwrap(), 2);
 
                 // A boat is leashable too, and a player is not.
@@ -1111,6 +1290,11 @@ mod tests {
                 assert_eq!(boat.leash_holder(game), Some(LeashHolder::Entity(holder)));
                 assert!(boat.detach_leash(game, false));
                 assert_eq!(boat.leash_holder(game), Some(LeashHolder::Unleashed));
+                assert!(game.dropped.is_empty());
+                assert!(boat.leash_to(game, holder));
+                assert!(boat.detach_leash(game, true));
+                assert_eq!(boat.leash_holder(game), Some(LeashHolder::Unleashed));
+                take_one_lead(game, at);
 
                 // A player holds it by UUID, whether in the hub's record or on their own turn.
                 let player = super::super::native_player_death::tests::add_guest(game).entity();

@@ -1395,6 +1395,9 @@ pub struct Extra {
     /// `getFirstPassenger`).
     pub mount: Option<u32>,
     pub rider: Option<u32>,
+    /// This rider's place in its vehicle's `getPassengers`, beside `Guest.vehicle_order`: the
+    /// lowest goes first. Passengers that load together keep 0 and their list order.
+    pub vehicle_order: i64,
     /// Where `positionRider` last seated this rider: its own vehicle
     /// attachment (`getPassengerRidingPosition(this).y` is its feet plus this)
     /// and the vehicle's box (`Mob.getAttackBoundingBox`, `getHitbox`).

@@ -233,8 +233,8 @@ pub trait EntitiesBackend {
     #[access(WorldOnly)]
     fn entity_root_vehicle(&self, entity: EntityRef) -> Option<EntityRef>;
     /// Side: server.
-    /// The entities riding this one (`Entity.getPassengers`): its players
-    /// in the order they got in, then its mobs.
+    /// The entities riding this one (`Entity.getPassengers`), in `addPassenger`'s order: each
+    /// behind those aboard, except that a player goes first when the first is no player.
     #[access(WorldOnly)]
     fn entity_passengers(&self, entity: EntityRef) -> Option<Vec<EntityRef>>;
     /// Side: server.
@@ -273,7 +273,7 @@ pub trait EntitiesBackend {
     /// for horses, `Animal` and the cart don't reach players. Nothing rides anything else, so
     /// there it is the top of the box. Reads only: no `mob_ride` or dismount veto is asked and
     /// the passenger's pose stays. `None` for a stale handle, a passenger other than a player
-    /// or a mob, or a player with no motion state.
+    /// or a mob, a player with no motion state, or a vehicle whose box Horizon does not keep.
     #[access(WorldOnly)]
     fn entity_dismount_location(
         &self,

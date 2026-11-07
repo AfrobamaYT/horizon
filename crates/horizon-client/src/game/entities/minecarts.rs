@@ -1775,6 +1775,7 @@ impl Game<'_> {
                     m.ai.nav.stop();
                     m.needs_sync = true;
                     occupied = true;
+                    self.seat_mob(mob);
                     self.break_leash(mob, true, false);
                     self.note_started_riding(id);
                 }

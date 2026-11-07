@@ -64,7 +64,7 @@ pub(in crate::game) mod tests {
     }
 
     /// A placed guest record.
-    fn new_guest(conn: u32, uuid: u128) -> horizon_client::lan::guest::Guest {
+    pub(in crate::game) fn new_guest(conn: u32, uuid: u128) -> horizon_client::lan::guest::Guest {
         use horizon_client::lan::{Joined, PlayerSender, guest::Guest};
         use horizon_protocol::packets::configuration::ClientInformation;
         use std::sync::{Arc, atomic::AtomicI32, mpsc};

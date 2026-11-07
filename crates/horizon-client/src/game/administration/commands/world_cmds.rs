@@ -1599,7 +1599,8 @@ impl Game<'_> {
         let remaining = self
             .mobs
             .iter()
-            .find(|m| m.extra.mount == Some(v))
+            .filter(|m| m.extra.mount == Some(v))
+            .min_by_key(|m| m.extra.vehicle_order)
             .map(|m| m.id);
         if let Some(vehicle) = self.mobs.iter_mut().find(|m| m.id == v) {
             vehicle.extra.rider = remaining;

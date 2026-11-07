@@ -198,6 +198,18 @@ impl Game<'_> {
     pub(super) fn break_leash(&mut self, id: u32, drop: bool, sound: bool) {
         self.drop_leash(id, drop, sound, false);
     }
+    /// `Leashable.tickLeash` ending a lead: a dying mob's falls as an item only under
+    /// `entity_drops`, else it is `removeLeash`.
+    pub(super) fn tick_break_leash(&mut self, id: u32, drop: bool, sound: bool) {
+        let dying = self.mobs.iter().any(|m| m.id == id && !m.alive());
+        let drop = drop
+            && (!dying
+                || self
+                    .ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS));
+        self.break_leash(id, drop, sound);
+    }
     /// `Entity.dropAllLeashConnections`: every mob and boat leashed to the
     /// acting player, inside the 32-block box around the player's centre,
     /// drops its lead. Then `GameEvent.SHEAR`. Whether anything dropped.
@@ -294,10 +306,9 @@ impl Game<'_> {
     }
     fn drop_leash(&mut self, id: u32, drop: bool, sound: bool, used: bool) {
         let killer = self.lead_killers.remove(&id).map(|(killer, _)| killer);
-        let Some((alive, at, kind)) = self.mobs.iter_mut().find(|m| m.id == id).and_then(|m| {
+        let Some((at, kind)) = self.mobs.iter_mut().find(|m| m.id == id).and_then(|m| {
             horizon_client::mobs::leash::remove(m)?;
             Some((
-                m.alive(),
                 [m.position.x, m.position.y, m.position.z],
                 super::native_hooks::mob_kind(m),
             ))
@@ -310,13 +321,6 @@ impl Game<'_> {
         {
             self.native_player_unleash_entity(player, &name, id);
         }
-        // Leashable.tickLeash gates a dying entity's lead drop on entity_drops.
-        let drop = drop
-            && (alive
-                || self
-                    .ui
-                    .rules
-                    .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS));
         if sound {
             self.lead_sound("break", at);
         }
