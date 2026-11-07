@@ -98,7 +98,7 @@ impl Game<'_> {
     }
 
     /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.
-    pub(super) fn native_level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
+    pub(super) fn level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
         let world = self.native_level_read_world(level)?;
         if level.dimension() == self.native_level_key() {
             return Some(self.sky_darken());

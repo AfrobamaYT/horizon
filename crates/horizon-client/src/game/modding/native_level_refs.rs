@@ -42,7 +42,7 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
 
 impl Game<'_> {
     /// `ServerLevel.findClosestBiome3d`, using the same generator query as `/locate biome`.
-    pub(super) fn native_level_find_closest_biome(
+    pub(super) fn level_find_closest_biome(
         &self,
         level: LevelRef,
         biome: &str,
@@ -98,7 +98,7 @@ impl Game<'_> {
     }
 
     /// The authoritative server's `LevelReader.getBiome`, including parked levels.
-    pub(super) fn native_level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+    pub(super) fn level_biome_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         if !self.is_logical_server() {
             return None;
         }
@@ -106,11 +106,7 @@ impl Game<'_> {
     }
 
     /// The client's current copy of `LevelReader.getBiome`, never an authoritative server read.
-    pub(super) fn native_level_client_biome(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<String> {
+    pub(super) fn level_client_biome(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
         if self.is_logical_server() {
             return None;
         }
@@ -118,13 +114,13 @@ impl Game<'_> {
     }
 
     /// `ServerLevel.getLogicalHeight`: the dimension's logical height, not its build height.
-    pub(super) fn native_level_logical_height(&self, level: LevelRef) -> Option<i32> {
+    pub(super) fn level_logical_height(&self, level: LevelRef) -> Option<i32> {
         Some(self.native_level_read_world(level)?.shape.logical_height)
     }
 
     /// `BlockGetter.getBlockFloorHeight` with an empty collision context.
     /// Uses the normal dynamic shapes, querying below only when this shape is empty.
-    pub(super) fn native_level_block_floor_height(
+    pub(super) fn level_block_floor_height(
         &self,
         level: LevelRef,
         [x, y, z]: [i32; 3],
