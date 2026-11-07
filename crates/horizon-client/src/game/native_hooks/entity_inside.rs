@@ -31,6 +31,7 @@ mod entity_inside_tests {
     #[ignore = "needs prepared resources"]
     fn landing_writes_apply_at_the_batch_end() {
         use horizon_client::block_contact::{landed, take_pending};
+        use horizon_world::level::LandingWrite;
         crate::game::native_entity_refs::tests::with_game(|game| {
             game.options.dedicated = Some(Vec::new());
             let state = |name| game.pack.assets.registry.default_state(name).unwrap();
@@ -47,8 +48,21 @@ mod entity_inside_tests {
             game.world.set(1, 64, 1, farmland).unwrap();
             game.world.set(2, 64, 1, farmland).unwrap();
             game.world.set(3, 64, 1, stone).unwrap();
+            game.world.set(4, 64, 1, dirt).unwrap();
+            game.world.set(5, 64, 1, dirt).unwrap();
+            let drops_before = game.dropped.len();
             let at = |x| BlockPos::new(x, 64, 1);
-            landed(farmland, at(1), vec![LandingWrite::SetBlock(dirt)]);
+            landed(
+                farmland,
+                at(1),
+                vec![LandingWrite::SetBlock(stone), LandingWrite::SetBlock(dirt)],
+            );
+            landed(dirt, at(4), vec![LandingWrite::DestroyBlock { drop: true }]);
+            landed(
+                dirt,
+                at(5),
+                vec![LandingWrite::DestroyBlock { drop: false }],
+            );
             // The block changed after the landing: dropped.
             landed(stone, at(2), vec![LandingWrite::SetBlock(dirt)]);
             landed(
@@ -68,6 +82,13 @@ mod entity_inside_tests {
             assert_eq!(game.world.block(1, 64, 1), dirt);
             assert_eq!(game.world.block(2, 64, 1), farmland);
             assert_eq!(game.world.block(3, 64, 1), air, "the stone is destroyed");
+            assert_eq!(game.world.block(4, 64, 1), air);
+            assert_eq!(game.world.block(5, 64, 1), air);
+            assert_eq!(
+                game.dropped.len(),
+                drops_before + 1,
+                "only drop=true creates dirt resources"
+            );
             // Both writes reach the clients (`setBlockAndUpdate` and `destroyBlock` are
             // flag 3); the dropped one sends nothing.
             let log = game.world.block_log.take().unwrap();
