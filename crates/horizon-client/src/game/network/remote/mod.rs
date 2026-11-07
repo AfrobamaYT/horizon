@@ -12302,6 +12302,115 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn transactional_bucket_hands_reach_the_owning_client() {
+        use super::super::{
+            native_entity_refs::tests::with_client_game, native_guest_turn_tests::with_guests,
+        };
+        use horizon_client::{
+            items::ItemStack,
+            lan::{Out, PlayerSender},
+        };
+        use horizon_protocol::{buf::Reader, packets::play::Clientbound as C};
+        use mod_api::{HostTransaction, ITEM_FLUIDS, ItemPlace, ServerHost, move_resources};
+
+        with_guests(|server| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            server.lan.as_mut().unwrap().hub.guests.update(0, |guest| {
+                guest.sender = PlayerSender::new(tx, std::sync::Arc::default());
+                guest.selected = 2;
+                guest.inventory[2] = Some(ItemStack::new("minecraft:bucket", 1));
+                guest.offhand = Some(ItemStack::new("minecraft:water_bucket", 1));
+            });
+            let main = ItemPlace::PlayerHand {
+                player: 12,
+                hand: horizon_client::first_person::Hand::Main,
+            };
+            let off = ItemPlace::PlayerHand {
+                player: 12,
+                hand: horizon_client::first_person::Hand::Off,
+            };
+            with_client_game(|client| {
+                let (_reader, _writer) = connect_menu_test(client);
+                spawn_menu_test(client);
+                client.selected = 2;
+                // Consume actual server packets through the client's ordinary handler.
+                let deliver = |client: &mut super::Game<'_>| {
+                    let mut slots = Vec::new();
+                    for out in rx.try_iter() {
+                        let bodies = match out {
+                            Out::Packet(body) => vec![body],
+                            Out::Packets(bodies) => bodies,
+                            Out::Disconnect(_) => panic!("owner disconnected"),
+                        };
+                        for body in bodies {
+                            let mut reader = Reader::new(&body);
+                            let id = reader.varint().unwrap();
+                            let packet = C::decode(id, reader.rest()).unwrap();
+                            // Other tick packets concern entity/chunk state, not this contract.
+                            if let C::ContainerSetSlot(ref slot) = packet {
+                                slots.push(slot.slot);
+                                client.handle_packet(packet).unwrap();
+                            }
+                        }
+                    }
+                    slots
+                };
+                server.tick_lan(true);
+                deliver(client);
+                assert_eq!(
+                    client.inventory[2],
+                    Some(ItemStack::new("minecraft:bucket", 1))
+                );
+                assert_eq!(
+                    client.offhand,
+                    Some(ItemStack::new("minecraft:water_bucket", 1))
+                );
+
+                for commit in [false, true] {
+                    let host: &mut dyn ServerHost = server;
+                    let result = host.transaction(|host, tx| {
+                        let source = off.capability(host, &ITEM_FLUIDS).unwrap();
+                        let target = main.capability(host, &ITEM_FLUIDS).unwrap();
+                        assert_eq!(
+                            move_resources(host, &source, &target, |_| true, 1000, tx).unwrap(),
+                            1000
+                        );
+                        if commit { Ok(()) } else { Err(()) }
+                    });
+                    assert_eq!(result.is_ok(), commit);
+                    server.tick_lan(true);
+                    let slots = deliver(client);
+                    if commit {
+                        assert!(slots.contains(&38), "selected hotbar slot published");
+                        assert!(slots.contains(&45), "offhand published");
+                    } else {
+                        assert!(slots.is_empty(), "abort publishes no tentative inventory");
+                    }
+                    let (held, other) = if commit {
+                        ("minecraft:water_bucket", "minecraft:bucket")
+                    } else {
+                        ("minecraft:bucket", "minecraft:water_bucket")
+                    };
+                    assert_eq!(
+                        client.inventory[client.selected],
+                        Some(ItemStack::new(held, 1))
+                    );
+                    assert_eq!(client.offhand, Some(ItemStack::new(other, 1)));
+                    let guest = &server.lan.as_ref().unwrap().hub.guests[0];
+                    assert_eq!(guest.inventory[2], client.inventory[2]);
+                    assert_eq!(guest.offhand, client.offhand);
+                }
+                server.tick_lan(true);
+                assert!(
+                    deliver(client).is_empty(),
+                    "settled slots are not sent twice"
+                );
+            });
+        });
+    }
+
     /// A client connecting through a local pipe and through configuration, as
     /// the client menu tests drive it: the server end's reader (what the
     /// client sends) and writer.
