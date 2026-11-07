@@ -733,7 +733,7 @@ impl Game<'_> {
         {
             use horizon_client::furnace::FurnaceCooking;
             let input = furnace.items[0].take();
-            furnace.set_input(recipes, input);
+            furnace.set_input(&self.loop_context, recipes, input);
         }
         if success && was_empty && view.kind == Kind::Hopper {
             let dest = view.parts[0].0;

@@ -7416,7 +7416,7 @@ impl Game<'_> {
                     if result.should_swing() {
                         // SUCCESS swings on the client too; the beds, light,
                         // respawn anchor and sign's own uses are SUCCESS_SERVER.
-                        if server_only_block_use(self.res.facts().get(cake), branch) {
+                        if server_only_block_use(self.res.facts().get(state), branch) {
                             self.swing_arm();
                         } else {
                             self.swing_arm_predicted();

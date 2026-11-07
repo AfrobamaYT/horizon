@@ -384,6 +384,12 @@ impl Game<'_> {
     /// moved too quickly or wrongly; then it stays, and the client is told
     /// where it is.
     pub(super) fn guest_move_vehicle(&mut self, conn: u32, p: &play::MoveVehicleRequest) {
+        let controls_vehicle = self
+            .lan
+            .as_ref()
+            .and_then(|host| host.hub.guest(conn))
+            .and_then(|g| g.vehicle)
+            .is_none_or(|v| self.guest_controls_vehicle(conn, v));
         let Some(host) = self.lan.as_mut() else {
             return;
         };
@@ -409,9 +415,7 @@ impl Game<'_> {
         }
         // Only the vehicle's controlling passenger moves it: the move of a
         // player in a boat's second seat is ignored (#11541).
-        if g.vehicle
-            .is_some_and(|v| !self.guest_controls_vehicle(conn, v))
-        {
+        if !controls_vehicle {
             return;
         }
         let owner = host.hub.singleplayer_owner == Some(g.uuid);
@@ -652,13 +656,14 @@ mod controller_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -675,7 +680,9 @@ mod controller_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
