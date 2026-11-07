@@ -12431,10 +12431,23 @@ impl Game<'_> {
             }
         }
     }
-    /// `Player.hurtArmor` -> `LivingEntity.doHurtEquipment`: each worn piece that
+    /// `Player.hurtArmor`: every armor slot wears.
+    fn hurt_armor(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
+        self.hurt_equipment(source, damage, 0..4);
+    }
+    /// `Player.hurtHelmet`: the head slot alone wears.
+    fn hurt_helmet(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
+        self.hurt_equipment(source, damage, 0..1);
+    }
+    /// `LivingEntity.doHurtEquipment` of the `slots` of `armor`: each worn piece that
     /// wears when its wearer is hurt loses max(1, damage / 4) durability, except
     /// to a fire source when the piece resists fire (`ItemStack.canBeHurtBy`).
-    fn hurt_armor(&mut self, source: horizon_world::damage_source::DamageTypeId, damage: f32) {
+    fn hurt_equipment(
+        &mut self,
+        source: horizon_world::damage_source::DamageTypeId,
+        damage: f32,
+        slots: std::ops::Range<usize>,
+    ) {
         if damage <= 0.0 {
             return;
         }
@@ -12453,7 +12466,7 @@ impl Game<'_> {
         let mut broken_items = Vec::new();
         // The pieces that may wear (`doHurtEquipment`'s checks).
         let mut eligible: [Option<ItemStack>; 4] = std::array::from_fn(|i| {
-            let stack = self.armor[i].clone()?;
+            let stack = self.armor[i].clone().filter(|_| slots.contains(&i))?;
             let info = world_items!(self).get(&stack.item)?;
             let component = |id| stack.data().and_then(|data| data.other(id));
             // ItemStack.isDamageableItem: component removal and

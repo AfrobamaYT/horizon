@@ -6,10 +6,11 @@ use crate::{
     damage_immunity::{self, ImmunityWorld},
     food::{Difficulty, FoodData},
     living_damage::DamageContainer,
-    living_hurt::{HurtState, HurtTag, HurtWorld},
+    living_hurt::{self, HurtState, HurtTag, HurtWorld, PendingHurt},
     player_health::PlayerFloatIds,
     player_hurt::{
         CausingEntity, PlayerHurtWorld, ServerPlayerHurtWorld, server_player_hurt_server,
+        server_player_hurt_until_helmet,
     },
     server_player_damage::{ServerDamageEnvironment, ServerDamageError, ServerPlayerDamage},
     synced_floats::{DataError, SyncedFloats},
@@ -54,6 +55,22 @@ impl<'a, A: HealthAttributes, E: CombatEnvironment<A>> ServerPlayerCombat<'a, E,
         damage: f32,
     ) -> Result<bool, ServerDamageError<Error<E>, A::Error>> {
         server_player_hurt_server(state, self, damage)
+    }
+    /// [`Self::hurt`] up to `hurtHelmet`; none for a hit refused on the way.
+    pub fn hurt_until_helmet(
+        &mut self,
+        state: &mut HurtState<E::Source>,
+        damage: f32,
+    ) -> Result<Option<PendingHurt<E::UseItem>>, ServerDamageError<Error<E>, A::Error>> {
+        server_player_hurt_until_helmet(state, self, damage)
+    }
+    /// The rest of a hit whose helmet the caller has worn.
+    pub fn hurt_after_helmet(
+        &mut self,
+        state: &mut HurtState<E::Source>,
+        hit: PendingHurt<E::UseItem>,
+    ) -> Result<bool, ServerDamageError<Error<E>, A::Error>> {
+        living_hurt::hurt_after_helmet(state, self, hit)
     }
 }
 impl<A: HealthAttributes, E: CombatEnvironment<A>> HurtWorld for ServerPlayerCombat<'_, E, A> {
