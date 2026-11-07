@@ -635,7 +635,7 @@ impl syn::parse::Parse for IfInstalled {
 
 /// Declares how a plain-data type crosses the generated wasm interface.
 ///
-/// `#[wasm(via = Form)]` on a type or its re-export checks `From<&Type> for Form`
+/// `#[wasm(via = Form)]` on a type or its re-export checks `TryFrom<&Type> for Form`
 /// and `TryFrom<Form> for Type`. Add `writeback = method` to apply a returned form
 /// through `Type::method(&mut self, Form)` instead of replacing the value. This keeps
 /// identity and native mutation bookkeeping under the type's control.
@@ -727,7 +727,7 @@ pub fn wasm(attribute: TokenStream, input: TokenStream) -> TokenStream {
             #writer
             fn crosses_as_its_form()
             where
-                #via: for<'a> ::core::convert::From<&'a #ty>,
+                #via: for<'a> ::core::convert::TryFrom<&'a #ty>,
                 #ty: ::core::convert::TryFrom<#via>,
             {
             }

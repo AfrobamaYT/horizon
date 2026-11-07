@@ -240,7 +240,7 @@ fn update(dir: &Path, horizon: Option<&str>) -> Result<(), String> {
             .ok_or_else(|| format!("Cargo.toml: no dependencies.{package}.rev"))?;
         internals::set_string(rev, &horizon);
     }
-    if !native.internals.is_empty() {
+    if !manifest.internals.is_empty() {
         let old = internals::load(dir, &native.horizon)?;
         let new = internals::load(dir, &horizon)?;
         print!("{}", internals::refresh(&manifest, &mut doc, &old, &new)?);

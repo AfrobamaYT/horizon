@@ -5,7 +5,6 @@ api = "0.2"
 side = "both"
 capabilities = ["registries"]
 
-[native]
 internals = [
   { path = "horizon_client::game::Game::f0", kind = "field", hash = "e54b1e10133fea1679f1a3f91c585a9e97974e539aa8f5182dc1196cc232479c" },
   { path = "horizon_client::game::Game::f1", kind = "field", hash = "0696bbc71bc79958334cef10ed59bcece2c6111058935d0ca775cf47a90f1d40" },

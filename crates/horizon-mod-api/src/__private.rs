@@ -85,6 +85,10 @@ pub mod built {
         env!("OUT_DIR"),
         "/mod_api_exports_private_built.rs"
     ));
+    /// Wrap a slot in the persistent instance group store.
+    pub fn instance_group_ref(generation: u64, slot: u32) -> crate::InstanceGroupRef {
+        crate::InstanceGroupRef::from_parts(generation, slot).expect("published group generation")
+    }
     /// Wrap a slot in the model store's published generation.
     pub fn model_ref(generation: u64, slot: u32) -> crate::ModelRef {
         crate::ModelRef(generation, slot)
