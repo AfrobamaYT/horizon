@@ -278,34 +278,36 @@ mod tests {
 
     #[test]
     fn discovery_refuses_private_source_listeners_before_facade_assembly() {
-        let root = super::super::tests::dir("discovery-source-listener");
-        let folder = root.join("mod");
-        super::super::tests::write_bundle(&folder, "example", "");
-        fs::write(
-            folder.join("Cargo.toml"),
-            "[package]\nname='example'\nversion='0.1.0'\n[dependencies]\nmod_api={package='horizon-mod-api',version='0.1'}\n",
-        )
-        .unwrap();
-        let manifest = folder.join(horizon_mod_package::manifest::MANIFEST);
-        let text = fs::read_to_string(&manifest).unwrap();
-        fs::write(manifest, format!("{text}\n[[inject]]\nid='value'\nat='game::run'\nkind='modify_value'\nwith='listen'\naccess='internals'\nhash='signature'\ncall='game::other'\nnth=0\nctx='statement'\n")).unwrap();
-        let bundle = super::super::bundle_in(&folder).unwrap().unwrap();
-        let game = root
-            .join(&bundle.manifest.native.as_ref().unwrap().horizon)
-            .join("game");
-        fs::create_dir_all(&game).unwrap();
-        fs::write(game.join(".discovery-ready"), "").unwrap();
-        fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
-        fs::write(game.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
-        fs::write(game.join("internals.json"), json!([{
-            "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false
-        }]).to_string()).unwrap();
-        let result = std::panic::catch_unwind(|| discover(&folder, &root));
-        assert!(
-            matches!(result, Ok(Err(Error::SourceInjection))),
-            "discovery must return the typed source refusal, not panic: {result:?}"
-        );
-        fs::remove_dir_all(root).unwrap();
+        for kind in ["before_call", "after_call", "modify_value"] {
+            let root = super::super::tests::dir("discovery-source-listener");
+            let folder = root.join("mod");
+            super::super::tests::write_bundle(&folder, "example", "");
+            fs::write(
+                folder.join("Cargo.toml"),
+                "[package]\nname='example'\nversion='0.1.0'\n[dependencies]\nmod_api={package='horizon-mod-api',version='0.1'}\n",
+            )
+            .unwrap();
+            let manifest = folder.join(horizon_mod_package::manifest::MANIFEST);
+            let text = fs::read_to_string(&manifest).unwrap();
+            fs::write(manifest, format!("{text}\n[[inject]]\nid='value'\nat='game::run'\nkind='{kind}'\nwith='listen'\naccess='internals'\nhash='signature'\ncall='game::other'\nnth=0\nctx='statement'\n")).unwrap();
+            let bundle = super::super::bundle_in(&folder).unwrap().unwrap();
+            let game = root
+                .join(&bundle.manifest.native.as_ref().unwrap().horizon)
+                .join("game");
+            fs::create_dir_all(&game).unwrap();
+            fs::write(game.join(".discovery-ready"), "").unwrap();
+            fs::write(game.join("Cargo.toml"), "[workspace]\nmembers=[]\n").unwrap();
+            fs::write(game.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
+            fs::write(game.join("internals.json"), json!([{
+                "path":"game::run", "kind":"fn", "signature":"fn run()", "hash":"signature", "cfg":"", "shape_only":false
+            }]).to_string()).unwrap();
+            let result = std::panic::catch_unwind(|| discover(&folder, &root));
+            assert!(
+                matches!(result, Ok(Err(Error::SourceInjection))),
+                "discovery must return the typed source refusal, not panic: {result:?}"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
