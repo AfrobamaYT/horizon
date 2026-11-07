@@ -1,9 +1,8 @@
 //! Per-dimension attachment indexes, retained independently of level swaps.
 
 use super::{Dim, Game};
-use horizon_world::attachments::{
-    AttachmentLifetime, Attachments, Holder, index::AttachmentIndex,
-    observer::IndexedAttachmentObserver,
+use horizon_mod_runtime::attachments::{
+    AttachmentLifetime, Holder, index::AttachmentIndex, observer::IndexedAttachmentObserver,
 };
 use mod_api::{AttachmentHolder, ChunkRef};
 use std::{
@@ -12,15 +11,6 @@ use std::{
 };
 
 pub(super) type Indexes = HashMap<Dim, Arc<Mutex<AttachmentIndex<AttachmentHolder>>>>;
-
-pub(super) fn bind_entity_map(
-    map: &mut Attachments,
-    index: &Arc<Mutex<AttachmentIndex<AttachmentHolder>>>,
-    entity: mod_api::EntityRef,
-    slot: &mut AttachmentLifetime,
-) {
-    *slot = AttachmentLifetime::new(map.bind_index(index, AttachmentHolder::Entity(entity)));
-}
 
 #[cfg(test)]
 mod painting_tests;
@@ -44,7 +34,11 @@ impl Game<'_> {
             return;
         };
         let index = self.attachment_indexes.entry(self.dim).or_default();
-        bind_entity_map(map, index, mod_api::EntityRef::new(level.epoch(), id), slot);
+        slot.bind(
+            map,
+            index,
+            AttachmentHolder::Entity(mod_api::EntityRef::new(level.epoch(), id)),
+        );
     }
 
     /// Publish the dimension's saved maps before listeners observe its load.
@@ -80,7 +74,7 @@ mod tests {
     use crate::game::native_entity_refs::tests::with_game;
     use {
         horizon_core::nbt::{Compound, Tag},
-        horizon_world::attachments::Attachments,
+        horizon_mod_runtime::attachments::Attachments,
     };
 
     fn saved() -> Attachments {
@@ -95,7 +89,7 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn chunk_residency_uses_the_owning_level_through_cow_and_swaps() {
         use horizon_client::chunk::{Chunk, ChunkExtras};
-        use horizon_world::attachments::{AttachmentError, AttachmentType, Holder};
+        use horizon_mod_runtime::attachments::{AttachmentError, AttachmentType, Holder};
         use mod_api::HostTransaction;
         static VALUE: AttachmentType<i32> = AttachmentType {
             namespace: "test",
