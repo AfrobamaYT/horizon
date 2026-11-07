@@ -94,7 +94,6 @@ pub(super) fn stage(
     root: &std::path::Path,
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
-    report: &dyn Fn(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     use horizon_mod_api_gen::points::source::{self, Point};
     use syn::parse::Parser;
@@ -154,10 +153,10 @@ pub(super) fn stage(
             )
             .map_err(|error| error.to_string())?
             .expect("source route");
-            report(&format!(
+            eprintln!(
                 "{}:{}: {} -> source (private slot, {}, {})",
                 manifest.id, adapter.inject.id, adapter.inject.at, adapter.kind, adapter.reason
-            ))?;
+            );
             points
                 .entry(super::internals::plain_path(&adapter.inject.at))
                 .or_insert(Point {
