@@ -141,6 +141,10 @@ macro_rules! impl_joined {
 /// let list = JoinList::<u32>::default();
 /// let _: Vec<u32> = list.into();
 /// ```
+/// Mutable access (`get_mut`, `IndexMut`, and edit callbacks) is state-only.
+/// Whole-value replacement silently changes membership without journal events.
+/// Bound owners must prohibit replacement or explicitly retire/install identities;
+/// Game bindings must audit and test every such call site before enabling emission.
 #[derive(Debug)]
 pub struct JoinList<T, const DIRECT: bool = true>(Vec<T>, Option<residency::Binding<T>>);
 impl<T: Clone, const DIRECT: bool> Clone for JoinList<T, DIRECT> {
@@ -286,7 +290,7 @@ impl<T: Joined> ResidentList<T> {
     pub fn clear(&mut self) {
         self.0.clear();
     }
-    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::IntoIter<T> {
         self.0.drain(range)
     }
     pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {
@@ -417,17 +421,14 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
         }
         entity
     }
-    /// Extract selected owners in list order, compacting survivors in place.
+    /// Extract selected owners eagerly in list order, compacting survivors in place.
     /// The predicate cannot replace an entity or change its identity.
-    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> impl Iterator<Item = T> {
-        let binding = &self.1;
-        self.0.extract_if(.., move |entity| {
-            let removed = take(entity);
-            if removed && let Some(binding) = binding {
-                binding.entity(entity, residency::Change::Remove);
-            }
-            removed
-        })
+    pub fn extract_if(&mut self, mut take: impl FnMut(&T) -> bool) -> std::vec::IntoIter<T> {
+        let extracted: Vec<_> = self.0.extract_if(.., |entity| take(entity)).collect();
+        if let Some(binding) = &self.1 {
+            binding.all(&extracted, residency::Change::Remove);
+        }
+        extracted.into_iter()
     }
     pub fn swap_remove(&mut self, index: usize) -> T {
         let entity = self.0.swap_remove(index);
@@ -466,12 +467,13 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
             retained
         });
     }
-    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::Drain<'_, T> {
-        let drained = self.0.drain(range);
+    /// Remove the range before returning, even if the owned iterator is forgotten.
+    pub fn drain(&mut self, range: impl RangeBounds<usize>) -> std::vec::IntoIter<T> {
+        let drained: Vec<_> = self.0.drain(range).collect();
         if let Some(binding) = &self.1 {
             binding.all(drained.as_slice(), residency::Change::Remove);
         }
-        drained
+        drained.into_iter()
     }
     pub fn swap(&mut self, a: usize, b: usize) {
         self.0.swap(a, b);
@@ -1118,6 +1120,28 @@ mod tests {
             });
             assert_eq!(changes(&journal), expected);
         }
+    }
+
+    #[test]
+    fn journal_forgotten_drain_preserves_the_undrained_owner() {
+        let (mut list, journal) = journal_list();
+        list.truncate(1);
+        let survivor = key(&list[0]);
+        changes(&journal);
+        std::mem::forget(list.drain(0..0));
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), [survivor]);
+        assert!(changes(&journal).is_empty());
+    }
+
+    #[test]
+    fn journal_forgotten_extract_if_preserves_the_unselected_owner() {
+        let (mut list, journal) = journal_list();
+        list.truncate(1);
+        let survivor = key(&list[0]);
+        changes(&journal);
+        std::mem::forget(list.extract_if(|_| false));
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), [survivor]);
+        assert!(changes(&journal).is_empty());
     }
 
     #[test]
