@@ -1,5 +1,12 @@
 //! Dense attachment membership with immutable, shared-entry snapshots.
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use std::{
+    collections::HashMap,
+    hash::Hash,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use super::{
     AttachmentEntry,
@@ -18,7 +25,7 @@ pub struct AttachmentRow<H> {
     pub holder: H,
     /// Shared with the holder's attachment map, never copied by snapshot acquisition.
     pub entry: Arc<AttachmentEntry>,
-    generation: Arc<()>,
+    generation: u64,
 }
 
 /// Authority to publish one registration's changes. Cloning or dropping this token has
@@ -27,7 +34,7 @@ pub struct AttachmentRow<H> {
 #[non_exhaustive]
 pub struct AttachmentOwner<H> {
     holder: H,
-    generation: Arc<()>,
+    generation: u64,
 }
 
 /// A mutation result and the displaced or rejected entries it keeps alive.
@@ -82,13 +89,13 @@ impl<H: Copy> AttachmentRow<H> {
     pub fn write_token(&self) -> AttachmentOwner<H> {
         AttachmentOwner {
             holder: self.holder,
-            generation: self.generation.clone(),
+            generation: self.generation,
         }
     }
 }
 
 struct Owner {
-    generation: Arc<()>,
+    generation: u64,
     slots: HashMap<Arc<AttachmentKey>, usize>,
 }
 
@@ -149,14 +156,18 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
             .owners
             .remove(&holder)
             .map_or_else(HashMap::new, |owner| owner.slots);
-        // A live stale token retains its identity, so generations cannot wrap or be
-        // reused, including across distinct indexes.
-        let generation = Arc::new(());
+        // Process-wide identity also refuses tokens against another dimension's index.
+        static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+        let generation = NEXT_GENERATION
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+            })
+            .expect("attachment residency generation exhausted");
         let token = AttachmentOwner { holder, generation };
         self.owners.insert(
             holder,
             Owner {
-                generation: token.generation.clone(),
+                generation: token.generation,
                 slots: omitted.clone(),
             },
         );
@@ -206,7 +217,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         if self
             .owners
             .get(&token.holder)
-            .is_some_and(|owner| Arc::ptr_eq(&owner.generation, &token.generation))
+            .is_some_and(|owner| owner.generation == token.generation)
         {
             Ok(())
         } else {
@@ -225,7 +236,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let Some(owner) = self
             .owners
             .get_mut(&token.holder)
-            .filter(|owner| Arc::ptr_eq(&owner.generation, &token.generation))
+            .filter(|owner| owner.generation == token.generation)
         else {
             let mut rejected = AttachmentChange::new(false);
             rejected.retire(entry);
@@ -235,12 +246,12 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let row = AttachmentRow {
             holder: token.holder,
             entry,
-            generation: token.generation.clone(),
+            generation: token.generation,
         };
         if let Some(&slot) = owner.slots.get(key) {
             let rows = self.buckets.get_mut(key as &dyn Lookup).unwrap();
             if !Arc::ptr_eq(&rows[slot].entry, &row.entry)
-                || !Arc::ptr_eq(&rows[slot].generation, &row.generation)
+                || rows[slot].generation != row.generation
             {
                 let old = std::mem::replace(&mut Arc::make_mut(rows)[slot], row);
                 change.retire(old.entry);
@@ -269,7 +280,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let Some(owner) = self
             .owners
             .get_mut(&token.holder)
-            .filter(|owner| Arc::ptr_eq(&owner.generation, &token.generation))
+            .filter(|owner| owner.generation == token.generation)
         else {
             return AttachmentChange::new(false);
         };
@@ -287,7 +298,7 @@ impl<H: Copy + Eq + Hash> AttachmentIndex<H> {
         let Some(owner) = self.owners.get(&token.holder) else {
             return AttachmentChange::new(false);
         };
-        if !Arc::ptr_eq(&owner.generation, &token.generation) {
+        if owner.generation != token.generation {
             return AttachmentChange::new(false);
         }
         self.unload(token.holder)
