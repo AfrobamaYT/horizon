@@ -369,8 +369,42 @@ fn writeback(types: &Types<'_>, method: &Method, sig: &Signature, names: &[Strin
     out
 }
 
+#[test]
+fn text_host_methods_have_fallible_signatures() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+    let mut included = vec![
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+        ("mod_api_host_areas.rs", generated.areas.as_str()),
+    ];
+    let providers = super::providers_code(
+        &super::key_shapes(&mut super::Index::new(&root, &included)).unwrap(),
+    );
+    included.push(("capability_providers_generated.rs", &providers));
+    let surface = super::surface(&root, &included).unwrap();
+    let unhandled: Vec<_> = surface
+        .methods
+        .iter()
+        .filter(|m| {
+            !super::exports().contains(&m.owner)
+                && !matches!(m.ret, Ty::Result(..))
+                && m.params
+                    .iter()
+                    .map(|(_, t)| t)
+                    .chain([&m.ret])
+                    .any(|t| contains_text(&surface.types, t, &mut BTreeSet::new()))
+        })
+        .map(|m| format!("{}::{}", m.owner, m.name))
+        .collect();
+    assert!(
+        unhandled.is_empty(),
+        "Text host methods need typed refusal results: {unhandled:?}"
+    );
+}
+
 /// Whether a type contains Text, including inside records, variants and containers.
-fn contains_text(types: &Types<'_>, ty: &Ty, seen: &mut BTreeSet<usize>) -> bool {
+pub(super) fn contains_text(types: &Types<'_>, ty: &Ty, seen: &mut BTreeSet<usize>) -> bool {
     match ty {
         Ty::Named(id) => {
             let def = &types.defs[*id];
