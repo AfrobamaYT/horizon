@@ -3637,7 +3637,11 @@ impl Game<'_> {
     }
     /// `LevelData.setRespawnData(RespawnData.of(..))`: the world's spawn (level.dat `spawn`)
     /// moves to `pos`, its yaw wrapped and its pitch clamped, and `spawn_change` fires.
-    pub(in crate::game) fn set_world_spawn(&mut self, pos: [i32; 3], [yaw, pitch]: [f32; 2]) {
+    pub(in crate::game) fn set_world_spawn(
+        &mut self,
+        pos: [i32; 3],
+        [yaw, pitch]: [f32; 2],
+    ) -> [f32; 2] {
         let rot = [wrap_degrees(yaw), pitch.clamp(-90.0, 90.0)];
         let old = self.level.world_spawn.replace(pos);
         self.level.world_spawn_angle = rot;
@@ -3653,6 +3657,7 @@ impl Game<'_> {
                 f64::from(pos[2]) + 0.5,
             ));
         }
+        rot
     }
     fn cmd_setworldspawn(&mut self, ctx: &Context) -> R<i32> {
         let pos = if ctx.get("pos").is_some() {
@@ -3669,13 +3674,13 @@ impl Game<'_> {
             Some(Arg::Coords(c)) => c.rotation(self.source_rotation()),
             _ => [0.0, 0.0],
         };
-        self.set_world_spawn(pos, rot);
+        let [yaw, pitch] = self.set_world_spawn(pos, rot);
         let args = [
             Text::literal(pos[0].to_string()),
             Text::literal(pos[1].to_string()),
             Text::literal(pos[2].to_string()),
-            Text::literal(java_float(f64::from(rot[0]))),
-            Text::literal(java_float(f64::from(rot[1]))),
+            Text::literal(java_float(f64::from(yaw))),
+            Text::literal(java_float(f64::from(pitch))),
             Text::literal(self.dim.id()),
         ];
         self.feedback(Text::translate("commands.setworldspawn.success", &args));
@@ -5125,6 +5130,35 @@ mod query_feedback_tests {
 
 #[cfg(test)]
 mod forced_respawn_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn setworldspawn_reports_normalized_rotation() {
+        use crate::game::native_entity_refs::tests::with_game;
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion, text::Text};
+        use horizon_core::geometry::Vec3;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(5.5, 64.0, 5.5)).unwrap());
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.chat_capture = Some(Vec::new());
+
+            assert!(game.run_command("setworldspawn 5 64 5 270 120"));
+            assert_eq!(game.level.world_spawn_angle, [-90.0, 90.0]);
+            let expected = Text::translate(
+                "commands.setworldspawn.success",
+                &["5", "64", "5", "-90.0", "90.0", "minecraft:overworld"].map(Text::literal),
+            );
+            let lines = game.chat_capture.take().unwrap();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].plain(), expected.plain());
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn overworld_spawnpoint_is_validated_at_both_player_blocks() {

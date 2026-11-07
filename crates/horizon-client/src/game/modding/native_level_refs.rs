@@ -995,6 +995,9 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn respawn_data_maps_and_ticks_write_through_the_handle_and_refuse_others() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
         with_game(|game| {
             let level = game.level("minecraft:overworld").unwrap();
             let stale = LevelRef::new(
@@ -1048,6 +1051,11 @@ mod tests {
 
             // Ticks run only in the level in place, at a loaded position inside its height.
             let height = level.height(game).unwrap();
+            assert!(!level.block_tick(game, [0, height.0, 0]));
+            assert!(!level.block_random_tick(game, [0, height.0, 0]));
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             assert!(level.block_tick(game, [0, height.0, 0]));
             assert!(level.block_random_tick(game, [0, height.0, 0]));
             assert!(
