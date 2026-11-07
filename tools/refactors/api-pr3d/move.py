@@ -12,6 +12,7 @@ EXPORT = "crates/horizon-mod-api/src/exports/render.rs"
 def replacements(lib):
     return {
         "mod_api::render::": f"{lib}::render::",
+        "crates/horizon-mod-api/src/render.rs": "crates/horizon-mod-render/src/render.rs",
         "mod_api::render as native_render": f"{lib}::render as native_render",
         "mod_api::__private::built::WorldDrawn": f"{lib}::render::built::WorldDrawn",
         "mod_api::__private::built::HandDrawn": f"{lib}::render::built::HandDrawn",
