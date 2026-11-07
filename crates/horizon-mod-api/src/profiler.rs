@@ -1,6 +1,6 @@
 //! Host-only Level 1 timings. Totals are inclusive: nested calls also contribute to their parent.
 //! No arguments or game data are retained. Start/stop must run outside mod calls; stop drains
-//! in-flight guards. Repeated start is a no-op; repeated stop returns an empty report.
+//! in-flight guards. Repeated start is a no-op; repeated stop preserves the last report.
 #[path = "profiler/firefox.rs"]
 mod firefox;
 use crate::crash::NativeModCall;
@@ -437,18 +437,62 @@ mod tests {
         assert!(!report.calls.contains_key(&("epoch", "stale", None)));
         assert_eq!(report.calls[&("epoch", "fresh", None)].count, 1);
     }
-    // Run capacity checks alone: unrelated crate tests also enter native guards and
-    // would otherwise consume some of the finite thread slots being measured.
-    fn capacity(threads: usize, calls: usize, name: &str) {
-        if std::env::var_os("HORIZON_PROFILER_CAPACITY_CHILD").is_none() {
+    // Isolate process-wide service tests from unrelated crate tests entering native guards.
+    fn isolated(name: &str) -> bool {
+        if std::env::var_os("HORIZON_PROFILER_TEST_CHILD").is_none() {
             assert!(
                 std::process::Command::new(std::env::current_exe().unwrap())
                     .args(["--exact", &format!("__private::profiler::tests::{name}")])
-                    .env("HORIZON_PROFILER_CAPACITY_CHILD", "1")
+                    .env("HORIZON_PROFILER_TEST_CHILD", "1")
                     .status()
                     .unwrap()
                     .success()
             );
+            return false;
+        }
+        true
+    }
+    #[test]
+    fn profiler_empty_session_replaces_previous_report() {
+        if !isolated("profiler_empty_session_replaces_previous_report") {
+            return;
+        }
+        let _serial = SERIAL.lock().unwrap();
+        *REPORT.lock().unwrap() = None;
+        assert!(firefox_profile().is_err());
+        assert!(super::start());
+        super::stop();
+        let empty = firefox_profile();
+        assert!(
+            empty.is_ok(),
+            "a completed zero-call session must be exportable"
+        );
+        let marker_count = || {
+            let json: serde_json::Value =
+                serde_json::from_slice(&firefox_profile().unwrap()).unwrap();
+            json["threads"][0]["markers"]["data"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        assert_eq!(marker_count(), 0);
+        assert!(super::start());
+        drop(enter_native_mod(call("replace", "old", None)));
+        super::stop();
+        assert_eq!(marker_count(), 1);
+        assert!(super::start());
+        super::stop();
+        assert_eq!(
+            marker_count(),
+            0,
+            "old rows must not survive an empty session"
+        );
+        let empty = firefox_profile().unwrap();
+        super::stop();
+        assert_eq!(firefox_profile().unwrap(), empty);
+    }
+    fn capacity(threads: usize, calls: usize, name: &str) {
+        if !isolated(name) {
             return;
         }
         assert!(start_with_clock(tick));

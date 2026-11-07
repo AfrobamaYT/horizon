@@ -125,7 +125,7 @@ mod tests {
         };
         for nanoseconds in [2, 8, 8] {
             report.record(Record {
-                mod_id: "a\"\\\n",
+                mod_id: "a\"\\\n\t\u{1}é",
                 hook: "tick",
                 part: Some("Energy"),
                 nanoseconds,
@@ -143,7 +143,13 @@ mod tests {
     }
     #[test]
     fn profiler_firefox_fixed_report() {
-        let profile: Value = serde_json::from_slice(&encode(&fixed_report()).unwrap()).unwrap();
+        let bytes = encode(&fixed_report()).unwrap();
+        let profile = serde_json::from_slice::<Value>(&bytes);
+        assert!(
+            profile.is_ok(),
+            "encoded names must remain valid JSON: {profile:?}"
+        );
+        let profile = profile.unwrap();
         assert_eq!(profile["meta"]["version"], 37);
         assert_eq!(profile["meta"]["startTime"], 0);
         assert_eq!(
@@ -191,7 +197,7 @@ mod tests {
         buckets[3] = 2;
         assert_eq!(
             rows[0][5],
-            json!({"type":"HorizonModAggregate", "mod":"a\"\\\n", "hook":"tick", "part":"Energy", "count":"3", "totalNs":"18", "minNs":"2", "maxNs":"8", "histogram":serde_json::to_string(&buckets).unwrap(), "droppedCalls":"3"})
+            json!({"type":"HorizonModAggregate", "mod":"a\"\\\n\t\u{1}é", "hook":"tick", "part":"Energy", "count":"3", "totalNs":"18", "minNs":"2", "maxNs":"8", "histogram":serde_json::to_string(&buckets).unwrap(), "droppedCalls":"3"})
         );
         assert_eq!(rows[1][5]["part"], "-");
         assert_eq!(rows[1][5]["totalNs"], "36893488147419103230");
