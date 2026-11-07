@@ -15,6 +15,9 @@ use std::{
     slice::SliceIndex,
 };
 
+#[path = "join_seq/residency.rs"]
+pub mod residency;
+
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
 /// When an entity joined: a number above every earlier join's. Zero means it
