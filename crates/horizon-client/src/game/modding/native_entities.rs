@@ -30,7 +30,7 @@ fn root_id(target: Option<Target>, first: u32, live: impl Fn(u32) -> bool) -> Op
 }
 
 /// The entity id a summoned stack's root is known by.
-fn target_id(t: Target) -> Option<u32> {
+pub(super) fn target_id(t: Target) -> Option<u32> {
     match t {
         Target::Mob(id)
         | Target::Item(id)
@@ -174,6 +174,9 @@ impl Game<'_> {
             let (kind, at) = self.slot_kind_and_position(slot);
             let mut canceled = false;
             let dimension = self.dim.id();
+            // `Entity.<init>` comes before `addFreshEntity`: an entity that started on a
+            // path that doesn't tell it (`entity_initialization.rs`) is told here.
+            self.initialize_entity(mod_api::Holder::Entity(id), &kind);
             self.native_entity_join_level(
                 dimension,
                 id,

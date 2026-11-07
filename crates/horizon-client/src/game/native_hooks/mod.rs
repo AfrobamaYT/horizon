@@ -76,7 +76,7 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement,
     UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey};
+use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, SoundPlay, SoundRef,
@@ -107,6 +107,7 @@ use {
 };
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
+pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;
