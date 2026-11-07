@@ -95,10 +95,14 @@ pub(super) fn stage(
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
 ) -> Result<(), String> {
-    use horizon_mod_api_gen::points::source::{self, Point};
+    use horizon_mod_api_gen::{
+        points::source::{self, Point},
+        sites::{source as call_source, Declaration},
+    };
     use syn::parse::Parser;
     let catalog = super::internals::Catalog::read(catalog_dir)?;
     let mut points = std::collections::BTreeMap::new();
+    let mut calls = std::collections::BTreeMap::new();
     let mut bundles = mods.iter().collect::<Vec<_>>();
     bundles.sort_by_key(|bundle| &bundle.manifest.id);
     for bundle in bundles {
@@ -109,6 +113,22 @@ pub(super) fn stage(
             .zip(super::slots::routes(&catalog, manifest).map_err(|error| error.to_string())?)
         {
             if !matches!(decision, Route::Source(_)) {
+                continue;
+            }
+            if let Some(call) = &inject.call {
+                let target = super::internals::plain_path(&inject.at);
+                let selector = call.clone();
+                let ordinal = inject.nth.expect("validated call ordinal");
+                let ctx = inject.ctx.clone().expect("validated statement identity");
+                calls
+                    .entry((target.clone(), selector.clone(), ordinal, ctx.clone()))
+                    .or_insert(Declaration {
+                        target,
+                        selector,
+                        ordinal: Some(ordinal),
+                        ctx,
+                        origin: format!("{}:{}", manifest.id, inject.id),
+                    });
                 continue;
             }
             let item = catalog
@@ -168,6 +188,21 @@ pub(super) fn stage(
                 });
         }
     }
+    let calls = calls.into_values().collect::<Vec<_>>();
+    let entries = if calls.is_empty() {
+        Vec::new()
+    } else {
+        horizon_mod_api_gen::internals_view::catalog(
+            &std::fs::read_to_string(catalog_dir.join(super::internals::INTERNALS))
+                .map_err(|error| error.to_string())?,
+        )?
+    };
+    call_source::stage(root, &entries, &calls)?;
+    std::fs::copy(
+        root.join(call_source::FILE),
+        catalog_dir.join(call_source::FILE),
+    )
+    .map_err(|error| error.to_string())?;
     let mut points = points.into_values().collect::<Vec<_>>();
     source::stage(root, &mut points)?;
     std::fs::copy(root.join(source::FILE), catalog_dir.join(source::FILE))
@@ -334,6 +369,114 @@ fn private_source_stage_exports_and_registers_priorities() {
     for registration in [".ordered(17, \"high\")", ".ordered(-3, \"low\")"] {
         assert!(main.contains(registration), "{main}");
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn private_calls_use_ctx_shared_ids_and_real_registration_priorities() {
+    use super::{api, internals::Catalog, Bundle};
+    use horizon_mod_api_gen::sites::{source as calls, Declaration};
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../target/source-call-wrapper-{}",
+        std::process::id()
+    ));
+    let file = root.join("crates/horizon-client/src/game.rs");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(root.join("crates/horizon-mod-api-gen/slots")).unwrap();
+    std::fs::create_dir_all(root.join("crates/horizon-mod-points")).unwrap();
+    std::fs::write(
+        root.join("crates/horizon-mod-points/Cargo.toml"),
+        "[package]\nname='horizon-mod-points'\n",
+    )
+    .unwrap();
+    let text = "pub struct Game; impl Game { #[inline(always)] fn run(&mut self) -> u32 { self.step(2) } #[inline(always)] fn step(&mut self, value: u32) -> u32 { value + 1 } }";
+    std::fs::write(&file, text).unwrap();
+    let target = "horizon_client::game::Game::run";
+    let callee = "horizon_client::game::Game::step";
+    let metadata = serde_json::json!([
+        {"path":"horizon_client::game::Game", "kind":"struct", "signature":"pub struct Game;", "hash":"game"},
+        {"path":target, "kind":"method", "signature":"impl Game { fn run(&mut self) -> u32 }", "hash":"fingerprint"},
+        {"path":callee, "kind":"method", "signature":"impl Game { fn step(&mut self, value: u32) -> u32 }", "hash":"step"}
+    ]).to_string();
+    let entries = horizon_mod_api_gen::internals_view::catalog(&metadata).unwrap();
+    let discovered = calls::stage(
+        &root,
+        &entries,
+        &[Declaration {
+            target: target.into(),
+            selector: callee.into(),
+            ordinal: Some(0),
+            ctx: String::new(),
+            origin: "discovery".into(),
+        }],
+    )
+    .unwrap()
+    .remove(0);
+    std::fs::write(&file, text).unwrap();
+    let dir = root.join("catalog");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("points.json"), r#"{"points":[],"sites":[]}"#).unwrap();
+    std::fs::write(dir.join("internals.json"), metadata).unwrap();
+    let mut manifest = declaration("one", "high", target, "head");
+    let inject = &mut manifest.inject[0];
+    inject.kind = Kind::ModifyValue;
+    inject.call = Some(callee.into());
+    inject.nth = Some(0);
+    inject.ctx = Some(discovered.ctx.clone());
+    inject.priority = 17;
+    let mut low = inject.clone();
+    low.id = "low".into();
+    low.priority = -3;
+    manifest.inject.push(low);
+    let bundle = Bundle {
+        manifest,
+        dir: root.clone(),
+        injections: vec![],
+    };
+    stage(&root, &dir, std::slice::from_ref(&bundle)).unwrap();
+    let catalog = Catalog::read(&dir).unwrap();
+    assert_eq!(catalog.sites.len(), 1);
+    assert!(catalog.sites[0].private);
+    assert_eq!(catalog.sites[0].ctx, discovered.ctx);
+    assert_ne!(catalog.sites[0].hash, discovered.ctx);
+    assert!(super::slots::routes(&catalog, &bundle.manifest)
+        .unwrap()
+        .iter()
+        .all(|route| matches!(route, Route::Source(_))));
+    let main = api::main_rs(
+        "/* MOD_SLOTS */",
+        &[&bundle.manifest],
+        &catalog.points,
+        &catalog.sites,
+    );
+    for registration in ["(\"one\", 17, \"high\",", "(\"one\", -3, \"low\","] {
+        assert!(main.contains(registration), "{main}");
+    }
+    assert_eq!(main.matches("mod_0::callback").count(), 2);
+    let mut bad = bundle;
+    for index in 0..2 {
+        bad.manifest
+            .inject
+            .iter_mut()
+            .for_each(|entry| entry.ctx = Some(discovered.ctx.clone()));
+        bad.manifest.inject[index].ctx = Some(discovered.hash.clone());
+        std::fs::write(&file, text).unwrap();
+        assert!(stage(&root, &dir, std::slice::from_ref(&bad))
+            .unwrap_err()
+            .contains("E_INJECT_LOST"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    }
+    let mut public = serde_json::to_value(&discovered).unwrap();
+    public["call"] = "different::callee".into();
+    std::fs::write(
+        dir.join("points.json"),
+        serde_json::json!({"points":[], "sites":[public]}).to_string(),
+    )
+    .unwrap();
+    assert!(Catalog::read(&dir)
+        .err()
+        .unwrap()
+        .contains("E_SOURCE_COLLISION"));
     std::fs::remove_dir_all(root).unwrap();
 }
 

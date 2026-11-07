@@ -48,13 +48,13 @@ pub use isolate::LeftOut;
 pub use picker::{needs_picker, Route, Routes};
 pub use prebuilt::{prebuilt_availability, SourceReason};
 
-// Settings and logs are shared by native-build tests and the toolchain HTTP fixture.
+// Settings and logs are shared by native-build and diagnostics tests.
 #[cfg(test)]
 pub(crate) static TEST_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const PREFIX: &str = "native-";
 // A staging change invalidates both installed builds and patched-source snapshots.
-const STAGING: &str = "private-source-points-v1";
+const STAGING: &str = "private-source-calls-v1";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
 const MIXINS_GIT: &str = "https://github.com/horizon-rust/horizon-mixins";
 pub const MIXINS_REV: &str = horizon_mod_package::index::native::MIXINS_REV;
@@ -636,6 +636,9 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
 /// Structural routes independent of the saved build mode. Invalid input is reported per mod.
 /// Prebuilt release availability is probed separately on a worker, never while drawing the UI.
 pub fn routes(home: &Path) -> Routes {
+    if require_consent().is_err() {
+        return Routes::default();
+    }
     let Ok(folder) = stage_installed(home, root().join("installed.routes")) else {
         return Routes::default();
     };
@@ -2379,6 +2382,7 @@ fn pipeline(
             inject::POINTS,
             internals::INTERNALS,
             horizon_mod_api_gen::points::source::FILE,
+            horizon_mod_api_gen::sites::source::FILE,
         ] {
             fs::rename(catalog_dir.join(name), real.join(name))
                 .map_err(|error| discard(&pending, &catalog_dir, error))?;
@@ -4253,6 +4257,17 @@ mod tests {
             |_| {},
         ));
         denied(sync_internals(&folder));
+        let preview = root().join("installed.routes");
+        fs::create_dir_all(&preview).unwrap();
+        let marker = preview.join("permission-sentinel");
+        fs::write(&marker, b"unchanged").unwrap();
+        routes(&folder);
+        assert_eq!(
+            fs::read(&marker).unwrap(),
+            b"unchanged",
+            "preview never stages before consent"
+        );
+        fs::remove_file(marker).unwrap();
         assert!(
             matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
             "zero HTTP requests"

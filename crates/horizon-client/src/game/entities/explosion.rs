@@ -15,7 +15,9 @@ use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
-use mod_api::{NativeBlockInteraction, NativeExplosionStart, NativeItemDrop};
+#[cfg(test)]
+use mod_api::NativeItemDrop;
+use mod_api::{NativeBlockInteraction, NativeExplosionStart};
 use std::{cmp::Ordering, io};
 use {
     horizon_core::java_hash_map::{JavaHashMap, JavaKey},
@@ -747,6 +749,11 @@ impl Game<'_> {
                             cause,
                             (amount, source),
                         );
+                        // Enderman.hurtServer teleports inside the hurt, before
+                        // the push (the mob order stays as it was).
+                        if let Err(e) = self.settle_hurt_teleports() {
+                            log::warn!("Horizon: explosion: enderman teleport: {e}");
+                        }
                     }
                     // `ItemEntity.hurtServer`: the damage comes off `Health`
                     // (5 to start) in f32 and the item is destroyed at zero, so
@@ -1121,17 +1128,18 @@ impl Game<'_> {
                 pos.map(|v| f64::from(v) + 0.5),
                 self.loot_block_entity(pos, &name),
             );
+            // `Explosion.getDirectSourceEntity`.
+            let entity = self
+                .combat
+                .explosion_direct
+                .or(self.combat.explosion_source);
             let mut drops = horizon_world::loot::with_native_loot_place(place, || {
-                world_items!(self).block_drops_exploded(
-                    self.pack.assets.registry,
-                    state,
-                    None,
-                    &dynamic,
-                    &mut self.world.random,
-                    Some((&mut self.rand_sequences, self.level.seed)),
-                    decay,
-                    false,
-                )
+                let roll = horizon_client::items::BlockLootRoll {
+                    dynamic: &dynamic,
+                    explosion: decay,
+                    ..Default::default()
+                };
+                self.roll_block_loot(pos, state, entity, roll)
             });
             self.native_block_loot(pos, state, None, None, Some(radius), &mut drops);
             let mut pieces: Vec<ExplosionDropPiece> = Vec::new();
@@ -1216,7 +1224,7 @@ impl Game<'_> {
                 .map(|(pos, stack)| level.block_drop_item(pos, stack))
                 .collect()
         });
-        let mut merged: Vec<Option<NativeItemDrop>> = vec![None; items.len()];
+        let mut merged: Vec<Option<super::spill::BlockItemDrop>> = vec![None; items.len()];
         let mut edited = Vec::new();
         for block in drops.blocks {
             let mut originals: Vec<_> = block
@@ -1322,7 +1330,13 @@ mod tests {
             event: &mut mod_api::LootDropsEvent<'_>,
         ) {
             if self.edit {
-                *event.drops = vec![ItemStack::new("minecraft:diamond", 1)];
+                *event.drops = vec![
+                    mod_api::ItemStack::new(
+                        mod_api::__private::item_key("minecraft:diamond").unwrap(),
+                        1,
+                    )
+                    .unwrap(),
+                ];
             }
         }
         fn block_drops(
@@ -1335,12 +1349,14 @@ mod tests {
             assert!(event.breaker.is_none() && event.tool.is_none());
             assert_eq!(event.drops.len(), 1);
             assert_eq!(
-                event.drops[0].stack.count, 1,
+                event.drops[0].stack.count(),
+                1,
                 "only this block's contribution"
             );
             if self.edit {
                 assert_eq!(
-                    &*event.drops[0].stack.item, "minecraft:diamond",
+                    mod_api::__private::item_key_id(event.drops[0].stack.item()).unwrap(),
+                    "minecraft:diamond",
                     "loot modifiers ran first"
                 );
                 event.experience = 5;
@@ -1348,7 +1364,11 @@ mod tests {
                     return mod_api::Flow::Cancel;
                 }
                 *event.drops = vec![NativeItemDrop::new(
-                    ItemStack::new("minecraft:emerald", 3),
+                    mod_api::ItemStack::new(
+                        mod_api::__private::item_key("minecraft:emerald").unwrap(),
+                        3,
+                    )
+                    .unwrap(),
                     [7.0, 80.0, 7.0],
                     [0.1, 0.2, 0.3],
                     42,
@@ -1448,6 +1468,7 @@ mod tests {
                         pos: [x, 64, 1],
                         drop: true,
                         by: None,
+                        breaker: None,
                     }])
                     .unwrap();
                     if x == 3 {
@@ -1466,6 +1487,7 @@ mod tests {
                     pos: [5, 64, 1],
                     drop: true,
                     by: None,
+                    breaker: None,
                 }])
                 .unwrap();
                 assert!(game.dropped.is_empty() && game.orbs.is_empty());

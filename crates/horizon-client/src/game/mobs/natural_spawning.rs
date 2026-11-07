@@ -425,7 +425,12 @@ impl GameLevel<'_, '_> {
         let kind = self.game.res.mob_types().get(r.entity)?.clone();
         let [x, y, z] = r.position;
         let mut mob = Mob::new(self.provisional_id(), kind, Vec3::new(x, y, z), r.yaw);
-        let (outcome, difficulty) = self.game.finalize_spawn_event(&mob, r.reason, None);
+        // No group data is threaded through the pack yet: each member starts
+        // without, and finalization reads what a listener leaves.
+        let mut group = None;
+        let (outcome, difficulty) = self
+            .game
+            .finalize_spawn_event(&mut mob, r.reason, None, &mut group);
         match outcome {
             Finalized::Cancelled => return None,
             Finalized::Skipped => {}
@@ -438,7 +443,7 @@ impl GameLevel<'_, '_> {
                     created: Vec::new(),
                     jockey_rider: None,
                 };
-                horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, r.reason, None);
+                horizon_client::mobs::finalize::finalize(&mut cx, &mut mob, r.reason, group);
                 for m in cx.created {
                     let bounds = m.bounds();
                     self.pending.borrow_mut().push(bounds);
