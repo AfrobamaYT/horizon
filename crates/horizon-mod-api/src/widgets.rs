@@ -187,7 +187,8 @@ impl TextField {
             max_length: self.edit.max_length,
             scroll: self.scroll,
             focused,
-            caret_shown: focused && (now.saturating_sub(self.moved_at) / BLINK_MS) % 2 == 0,
+            caret_shown: focused
+                && (now.saturating_sub(self.moved_at) / BLINK_MS).is_multiple_of(2),
             bordered: self.bordered,
             text_color: if self.active {
                 self.text_color
@@ -283,6 +284,7 @@ fn over([x, y, w, h]: [f32; 4], [px, py]: [f32; 2]) -> bool {
 
 /// The widgets of one screen in focus order, and which one has the keyboard focus.
 #[derive(Clone, Debug, Default, PartialEq)]
+// exhaustive: every field is private; mods build it with `Widgets::new`
 pub struct Widgets {
     widgets: Vec<Widget>,
     focus: Option<usize>,
