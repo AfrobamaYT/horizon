@@ -142,6 +142,17 @@ impl InstanceGroupRef {
     pub fn set_len(self, host: &dyn crate::ClientHost, len: u32) -> Result<(), GroupError> {
         host.instance_group_set_len(self, len)
     }
+    /// Atomically replace the row-major 3x4 group pose (identity by default).
+    /// World position = origin + group_transform * (copy_transform * local).
+    /// The origin stays in world space; transformed bounds are used for culling.
+    /// Non-finite components return [`GroupError::NonFinite`].
+    pub fn set_group_transform(
+        self,
+        host: &dyn crate::ClientHost,
+        transform: [f32; 12],
+    ) -> Result<(), GroupError> {
+        host.instance_group_set_transform(self, transform)
+    }
     /// Retire this handle and release its reserved copies.
     pub fn destroy(self, host: &dyn crate::ClientHost) -> Result<(), GroupError> {
         host.instance_group_destroy(self)
