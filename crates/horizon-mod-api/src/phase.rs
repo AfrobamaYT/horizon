@@ -174,10 +174,19 @@ pub fn current_phase() -> ModPhase {
 pub enum LoadAccess {
     /// No extra load access beyond the phase's metadata/settings exceptions.
     WorldOnly,
+    /// Registry and immutable metadata available in setup and reload.
+    Metadata,
     /// The existing client setup reads, not general reload permissions.
     ClientSetup,
     /// Published asset/data facts, including resource-cache queries.
     PublishedResources,
+}
+
+/// The default body of a host method: a test double that does not implement it gets the access
+/// check, then a panic naming the method.
+pub(crate) fn unprovided(method: &'static str, operation: &'static str, access: LoadAccess) -> ! {
+    check_access(operation, access);
+    unimplemented!("{}", method)
 }
 
 /// One cell read at the generated API boundary, not a tick scan or registry lookup.
@@ -188,31 +197,7 @@ pub fn check_access(operation: &str, access: LoadAccess) {
     if phase == ModPhase::World {
         return;
     }
-    let metadata = matches!(
-        operation,
-        "on" | "is_loaded"
-            | "block_key_id"
-            | "item_key_id"
-            | "effect_key_id"
-            | "block_states_of"
-            | "block_item"
-            | "block_in_tag"
-            | "max_stack_size"
-            | "item_stack_in_tag"
-            | "item_crafting_remainder"
-            | "item_default_component"
-            | "item_burn_time"
-            | "item_compost_chance"
-            | "item_cooldown_group"
-            | "entity_type_in_tag"
-            | "tag_members"
-            | "state_outline"
-            | "state_fluid_state"
-            | "fluid_in_tag"
-            | "fluid_is_same"
-            | "fluid_bucket"
-            | "fluid_pickup_sound"
-    ) || operation.starts_with("block_state_");
+    let metadata = access == LoadAccess::Metadata;
     let settings = operation == "setting";
     let allowed = match phase {
         ModPhase::World => true,
@@ -250,7 +235,7 @@ pub struct PackageInfo {
     pub(crate) id: String,
     pub(crate) version: String,
     pub(crate) kind: PackageKind,
-    pub(crate) side: horizon_mods::Side,
+    pub(crate) side: horizon_mod_package::Side,
     /// Its own namespace, then the others it declares.
     pub(crate) namespaces: Vec<String>,
     /// The ids it declares dependencies on.
@@ -258,7 +243,7 @@ pub struct PackageInfo {
 }
 
 impl PackageInfo {
-    fn new(kind: PackageKind, manifest: &horizon_mods::Manifest) -> Self {
+    fn new(kind: PackageKind, manifest: &horizon_mod_package::Manifest) -> Self {
         Self {
             id: manifest.id.clone(),
             version: manifest.version.clone(),
@@ -284,7 +269,7 @@ impl PackageInfo {
         self.kind
     }
     /// The package's declared side.
-    pub fn side(&self) -> horizon_mods::Side {
+    pub fn side(&self) -> horizon_mod_package::Side {
         self.side
     }
     /// The package's own namespace followed by any additional namespaces.
@@ -309,7 +294,7 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
     let packages: Vec<_> = ids
         .iter()
         .map(|id| {
-            let manifest = horizon_mods::Manifest::parse(&format!(
+            let manifest = horizon_mod_package::Manifest::parse(&format!(
                 "id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n"
             ))
             .unwrap();
@@ -323,8 +308,8 @@ pub fn with_test_packages<R>(ids: &[&str], f: impl FnOnce() -> R) -> R {
 }
 
 fn inventory(
-    native: &[horizon_mods::packages::AdjacentManifest],
-    content: &[horizon_mods::selection::SelectedPackage],
+    native: &[horizon_mod_package::packages::AdjacentManifest],
+    content: &[horizon_mod_package::selection::SelectedPackage],
 ) -> Vec<PackageInfo> {
     let mut packages: Vec<_> = native
         .iter()
@@ -354,8 +339,8 @@ fn inventory(
 
 /// Records the package inventory once at startup; a second call panics.
 pub fn install_packages(
-    native: &[horizon_mods::packages::AdjacentManifest],
-    content: &[horizon_mods::selection::SelectedPackage],
+    native: &[horizon_mod_package::packages::AdjacentManifest],
+    content: &[horizon_mod_package::selection::SelectedPackage],
 ) {
     assert!(
         PACKAGES.set(inventory(native, content).into()).is_ok(),
@@ -407,8 +392,8 @@ impl LoadedMods {
 /// ```
 ///
 /// ```compile_fail
-/// use mod_api::{Host, RegistrationContext};
-/// fn registration(context: &RegistrationContext) { let _ = Host::entity(context, 1); }
+/// use mod_api::{prelude::EntitiesHost, RegistrationContext};
+/// fn registration(context: &RegistrationContext) { let _ = EntitiesHost::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
@@ -445,8 +430,8 @@ impl RegistrationContext {
 /// ```
 ///
 /// ```compile_fail
-/// use mod_api::{DataLoadContext, Host};
-/// fn load(context: &dyn DataLoadContext) { let _ = Host::entity(context, 1); }
+/// use mod_api::{prelude::EntitiesHost, DataLoadContext};
+/// fn load(context: &dyn DataLoadContext) { let _ = EntitiesHost::entity(context, 1); }
 /// ```
 ///
 /// ```compile_fail
@@ -590,7 +575,7 @@ mod tests {
     #[test]
     fn resolved_dispatch_slice_keeps_order_in_registration_config_and_reload() {
         use crate::*;
-        use horizon_mods::dependencies;
+        use horizon_mod_package::dependencies;
         use std::sync::Mutex;
         struct Trace {
             id: &'static str,
@@ -617,10 +602,12 @@ mod tests {
         }
         struct Server;
         impl Host for Server {}
+        mod_api::impl_host_areas!(Server);
         impl ServerHost for Server {}
+        mod_api::impl_server_host_areas!(Server);
         let declarations: Vec<_> = ["z", "lib", "a"].into_iter().map(|id| {
             let deps = if id == "lib" { "" } else { "[dependencies]\nlib='^1'" };
-            horizon_mods::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
+            horizon_mod_package::Manifest::parse(&format!("id='{id}'\nname='{id}'\nversion='1'\napi='0.2'\ncapabilities=['registries']\n{deps}")).unwrap()
         }).collect();
         let declared: Vec<_> = declarations
             .iter()
@@ -745,7 +732,7 @@ mod tests {
                 let _ = std::panic::catch_unwind(|| {
                     let _reload = owner.reloading().unwrap();
                     assert_eq!(current_phase(), Reloading);
-                    check_access("block_state_default", LoadAccess::WorldOnly);
+                    check_access("block_state_default", LoadAccess::Metadata);
                     panic!("failed prepare");
                 });
                 assert_eq!(current_phase(), World);
@@ -759,11 +746,27 @@ mod tests {
     }
 
     #[test]
+    fn fluid_state_facts_follow_metadata_access() {
+        use ModPhase::*;
+        for phase in [Packages, Registration, Setup, Config, Reloading, World] {
+            let _owner = PhaseOwner::new(phase);
+            for operation in ["fluid_state_definition", "fluid_state_validate"] {
+                let result = std::panic::catch_unwind(|| {
+                    check_access(operation, LoadAccess::Metadata);
+                });
+                assert_eq!(result.is_ok(), matches!(phase, Setup | Reloading | World));
+            }
+        }
+    }
+
+    #[test]
     fn early_world_handle_and_transaction_calls_panic_naming_the_phase() {
-        use crate::{Host, HostTransaction, ServerHost};
+        use crate::{Host, HostTransaction, ServerHost, prelude::*};
         struct HostDouble;
         impl Host for HostDouble {}
+        mod_api::impl_host_areas!(HostDouble);
         impl ServerHost for HostDouble {}
+        mod_api::impl_server_host_areas!(HostDouble);
         for phase in [
             ModPhase::Registration,
             ModPhase::Config,
@@ -806,20 +809,20 @@ mod tests {
 
     #[test]
     fn inventory_keeps_first_content_package_after_code_mods() {
-        let native = [horizon_mods::packages::AdjacentManifest {
+        let native = [horizon_mod_package::packages::AdjacentManifest {
             path: Default::default(),
-            manifest: horizon_mods::Manifest::parse(
+            manifest: horizon_mod_package::Manifest::parse(
                 "id='runtime'\nname='Runtime'\nversion='3'\napi='0.2'\ncapabilities=['registries']\n",
             )
             .unwrap(),
         }];
         let package = |version: &str| {
-            let manifest = horizon_mods::Manifest::parse(&format!(
+            let manifest = horizon_mod_package::Manifest::parse(&format!(
                 "id='plain'\nname='Plain'\nversion='{version}'\napi='0.2'\ncapabilities=['registries']\n"
             )).unwrap();
-            horizon_mods::selection::SelectedPackage {
+            horizon_mod_package::selection::SelectedPackage {
                 path: Default::default(),
-                package: horizon_mods::Package {
+                package: horizon_mod_package::Package {
                     manifest,
                     icon: None,
                 },
@@ -833,11 +836,11 @@ mod tests {
         let runtime = view.get("runtime").unwrap();
         assert_eq!(runtime.kind(), PackageKind::Code);
         assert_eq!(runtime.version(), "3");
-        assert_eq!(runtime.side(), horizon_mods::Side::Client);
+        assert_eq!(runtime.side(), horizon_mod_package::Side::Client);
         let plain = view.get("plain").unwrap();
         assert_eq!(plain.kind(), PackageKind::Content);
         assert_eq!(plain.version(), "1");
-        assert_eq!(plain.side(), horizon_mods::Side::Client);
+        assert_eq!(plain.side(), horizon_mod_package::Side::Client);
         assert_eq!(plain.namespaces().collect::<Vec<_>>(), ["plain"]);
         assert!(!plain.depends_on("runtime"));
         assert!(view.get("missing").is_none());

@@ -266,6 +266,10 @@ impl Game<'_> {
             self.lan_log_event(horizon_client::lan::hub::HostEvent::Warn(line));
             return Err(ActionRefused::OutOfReach);
         }
+        let spectator = self
+            .lan
+            .as_ref()
+            .is_some_and(|host| host.hub.guests[gi].spectator());
         let face = hit.face;
         // handleUseItemOn: above or below the world nothing is used and
         // the player is told the limit (the blocks are not resent);
@@ -290,6 +294,9 @@ impl Game<'_> {
             .border
             .contains(f64::from(hit.pos[0]), f64::from(hit.pos[2]))
         {
+            if spectator && self.spectator_use_portal(conn, gi, hit.pos) {
+                return Ok(true);
+            }
             let logged = self.world.block_log.as_ref().map_or(0, Vec::len);
             let heard = self.audio.capture.as_ref().map_or(0, Vec::len);
             let used = self
@@ -299,6 +306,7 @@ impl Game<'_> {
                     g.forced_hit = Some(hit);
                     g.guest_use = Some(GuestUse::OnBlock(hand));
                     let swings = g.swings_started;
+                    let predicted = g.predicted_swings;
                     let consumed = matches!(g.use_item(), Ok(Some(_)));
                     // handleUseItemOn: a consuming useItemOn triggers
                     // ANY_BLOCK_USE with the hand's stack as it now is.
@@ -311,7 +319,12 @@ impl Game<'_> {
                         });
                     }
                     (g.forced_hit, g.guest_use) = saved;
-                    (g.swings_started != swings, consumed, attempt)
+                    reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
+                    (
+                        g.swings_started != swings && g.predicted_swings == predicted,
+                        consumed,
+                        attempt,
+                    )
                 })
                 .ok();
             consumed = used.is_some_and(|u| u.1);
@@ -413,6 +426,7 @@ impl Game<'_> {
                 let swings = g.swings_started;
                 let consumed = matches!(g.use_item(), Ok(Some(_)));
                 g.guest_use = saved;
+                reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                 (g.swings_started != swings, horn, consumed)
             })
             .ok();
@@ -454,6 +468,7 @@ impl Game<'_> {
                 .as_guest_at(gi, conn, |g| {
                     let swings = g.swings_started;
                     let consumed = g.with_hand(hand, |g| g.use_knot(knot, true));
+                    reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                     (g.swings_started != swings, consumed)
                 })
                 .ok();
@@ -477,6 +492,7 @@ impl Game<'_> {
                 let consumed = matches!(g.use_item(), Ok(Some(_))) && !g.use_failed;
                 g.guest_use = saved;
                 g.use_failed = failed;
+                reset_use_attack_strength(&mut g.attack_ticks, swings, g.swings_started);
                 (g.swings_started != swings, consumed)
             })
             .ok();

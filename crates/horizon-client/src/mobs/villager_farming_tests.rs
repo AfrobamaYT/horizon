@@ -42,10 +42,10 @@ fn resources() -> &'static std::path::Path {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
-        let package = horizon_mods::Package::read(&dir).unwrap();
-        let content = horizon_mods::Content::read(&dir, &package.manifest).unwrap();
+        let package = horizon_mod_package::Package::read(&dir).unwrap();
+        let content = horizon_mod_package::Content::read(&dir, &package.manifest).unwrap();
         let out = scratch.join("resources");
-        crate::mod_content::build(&base, std::path::Path::new(""), &[ContentMod { id: "fieldtest".into(), content, jars: Vec::new() }], &out, &horizon_mods::enabled::EnabledMods::new([("fieldtest".into(), horizon_mods::Side::Both)]))
+        crate::mod_content::build(&base, std::path::Path::new(""), &[ContentMod { id: "fieldtest".into(), content, jars: Vec::new() }], &out, &horizon_mod_package::enabled::EnabledMods::new([("fieldtest".into(), horizon_mod_package::Side::Both)]))
             .unwrap();
         out
     })
@@ -370,4 +370,58 @@ fn vanilla_farming_classification_matches_the_oracle() {
             }
         }
     ));
+}
+
+#[test]
+fn planting_posts_block_place_with_villager_and_crop_state() {
+    let ran = super::super::world::with_built_test_world(
+        &[],
+        |world, reg| {
+            put(
+                world,
+                0,
+                0,
+                reg.default_state("minecraft:farmland").unwrap(),
+            );
+        },
+        |w, types| {
+            let mut m = farmer(types);
+            super::super::villager::ext_mut(&mut m).inventory =
+                vec![ItemStack::new("minecraft:wheat_seeds", 1)];
+            let mut test_level = crate::health::TestLevel::new(13);
+            let mut events = Vec::new();
+            harvest_tick(
+                &mut m,
+                &mut Bx {
+                    w,
+                    level: &mut test_level.level(),
+                    events: &mut events,
+                    now: 1000,
+                    refresh: false,
+                },
+                &mut 0,
+                &mut Some([0, 1, 0]),
+                &mut Vec::new(),
+            );
+            let wheat = w.registry.default_state("minecraft:wheat").unwrap();
+            let posted: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::GameEvent {
+                        event,
+                        at,
+                        source,
+                        state,
+                    } => Some((*event, *at, *source, *state)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                posted,
+                vec![("minecraft:block_place", [0.5, 1.5, 0.5], 1, wheat)]
+            );
+        },
+    );
+    // Without the vanilla data under .local/horizon-client the world cannot be built: the test has nothing to check.
+    let _ = ran;
 }

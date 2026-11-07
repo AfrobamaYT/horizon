@@ -21,7 +21,11 @@ its full id. On the overlay, its group comes after vanilla's groups.
 Its lines are asked for each frame the overlay draws it, and only while it is on:
 `Hooks::debug_entry_lines` receives the entry's id and a `&mut Vec<String>` to push lines to,
 with legacy colour codes (§) working. A disabled entry, or one with no lines, costs nothing.
-Nothing is uploaded or recorded: the lines are drawn on the local screen only."#]
+Nothing is uploaded or recorded: the lines are drawn on the local screen only.
+
+An entry in `DebugGroup::Renderer` is vanilla's `DebugEntryNoop`: it has no lines, and is listed
+in the renderer section instead. It is the switch of the `DebugRenderer` with its id, see
+[debug renderers](#debug-renderers)."#]
     #[hook(
         side = "client",
         contract = "collect",

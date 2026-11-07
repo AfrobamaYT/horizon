@@ -4,7 +4,7 @@
 //! `sendParticles` send them. They return false on a client, for a handle of
 //! an earlier open, or for arguments the network can't carry.
 use super::native_hooks::{mod_particles_ok, mod_sound_ok};
-use super::{Dim, Game, creatures::NativeSound, lan_particles::QueuedParticle};
+use super::{Game, creatures::NativeSound, lan_particles::QueuedParticle};
 use horizon_world::registry::BlockStateId;
 use mod_api::{LevelRef, ParticleOptions, SoundSource};
 
@@ -12,10 +12,7 @@ impl Game<'_> {
     /// The level's dimension id, for a handle of this open on the server.
     fn native_level_dimension(&self, level: LevelRef) -> Option<&'static str> {
         self.native_level_world(level)?;
-        [Dim::Overworld, Dim::Nether, Dim::End]
-            .into_iter()
-            .map(Dim::id)
-            .find(|id| *id == level.dimension())
+        Some(level.dimension_id())
     }
     /// Plays sound event `sound` at `at` for the players in this level
     /// within range (16 blocks, times the volume above 1), as
@@ -23,7 +20,7 @@ impl Game<'_> {
     /// slider. A `minecraft:` event must be registered; a mod's goes by name
     /// and is heard where its resources define it. True means queued, not
     /// heard.
-    pub(super) fn native_level_play_sound(
+    pub(super) fn level_play_sound(
         &mut self,
         level: LevelRef,
         sound: &str,
@@ -35,7 +32,7 @@ impl Game<'_> {
         self.native_queue_sound(level, sound, at, source, volume, pitch, None)
             .is_some()
     }
-    /// `native_level_play_sound`, leaving out the player on connection
+    /// `level_play_sound`, leaving out the player on connection
     /// `except` (`Level.playSound(except, ...)`): the queued sound, None
     /// when it can't be sent.
     pub(super) fn native_queue_sound(
@@ -74,7 +71,7 @@ impl Game<'_> {
     /// count sends one particle moving along `spread`). Block particle types
     /// need `state`; item, trail and vibration particles aren't supported.
     /// True means queued, not drawn.
-    pub(super) fn native_level_send_particles(
+    pub(super) fn level_send_particles(
         &mut self,
         level: LevelRef,
         options: &ParticleOptions,

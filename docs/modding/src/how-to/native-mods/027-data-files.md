@@ -27,5 +27,5 @@ They are not runtime pack resources and do not participate in resource reloads.
 anything else refuses the archive ([the manifest](../../reference/manifest.md)).
 
 **One `.hmod` for content and code.** Without root `Cargo.toml`, nothing compiles. With it and `[native]`,
-the launcher builds the code and the game loads the same package's content through `horizon_mods::Content`.
+the launcher builds the code and the game loads the same package's content through `horizon_mod_package::Content`.
 Both kinds use `horizon-mod.toml` for their identity. Executable `mod.wasm` files are unsupported.

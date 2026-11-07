@@ -11,7 +11,10 @@ pub struct Counter {
 }
 
 impl mod_api::Host for Counter {}
+
+mod_api::impl_host_areas!(Counter);
 impl ServerHost for Counter {}
+mod_api::impl_server_host_areas!(Counter);
 
 /// A type off `Game`: its points have no host.
 pub struct Pen {
@@ -93,20 +96,47 @@ mod mod_points {
         DoubleReturn,
     }
 
-    /// The listener the test installs: its own `Points`.
-    pub trait Points: Sync {
-        fn add(&self, _: &mut dyn ServerHost, _: &mut AddArgs) {}
-        fn add_return(&self, _: &mut dyn ServerHost, _: &mut AddArgs) {}
-        fn reset(&self, _: &mut dyn ServerHost, _: &mut ResetArgs) {}
-        fn reset_return(&self, _: &mut dyn ServerHost, _: &mut ResetArgs) {}
-        fn slot(&self, _: &mut dyn ServerHost, _: &mut SlotArgs) {}
-        fn pen_label(&self, _: &mut PenLabelArgs<'_>) {}
-        fn pen_label_return(&self, _: &mut PenLabelArgs<'_>) {}
-        fn double(&self, _: &mut DoubleArgs) {}
-        fn double_return(&self, _: &mut DoubleArgs) {}
+    pub mod dispatch {
+        use super::*;
+        fn heard(name: &'static str) {
+            HEARD.lock().unwrap().push(name);
+        }
+        pub fn add(_: &mut dyn ServerHost, args: &mut AddArgs) {
+            heard("add");
+            match args.step {
+                100 => args.result = Some(7),
+                _ => args.step *= 2,
+            }
+        }
+        pub fn add_return(_: &mut dyn ServerHost, args: &mut AddArgs) {
+            heard("add_return");
+            args.result = args.result.map(|value| value + 1000);
+        }
+        pub fn reset(_: &mut dyn ServerHost, args: &mut ResetArgs) {
+            heard("reset");
+            args.cancel = true;
+        }
+        pub fn reset_return(_: &mut dyn ServerHost, _: &mut ResetArgs) {
+            heard("reset_return");
+        }
+        pub fn slot(_: &mut dyn ServerHost, _: &mut SlotArgs) {
+            heard("slot");
+        }
+        pub fn pen_label(args: &mut PenLabelArgs<'_>) {
+            heard("pen_label");
+            args.name = format!("{}!", args.name).into();
+        }
+        pub fn pen_label_return(_: &mut PenLabelArgs<'_>) {
+            heard("pen_label_return");
+        }
+        pub fn double(_: &mut DoubleArgs) {
+            heard("double");
+        }
+        pub fn double_return(_: &mut DoubleArgs) {
+            heard("double_return");
+        }
     }
 
-    pub static LISTENER: Mutex<Option<&'static dyn Points>> = Mutex::new(None);
     pub static RAW: Mutex<Vec<(PointId, __private::RawKind)>> = Mutex::new(Vec::new());
     pub static HEARD: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
@@ -115,12 +145,6 @@ mod mod_points {
         pub use ::mod_points::__private::RawKind;
 
         pub static POINTS: [AtomicBool; 10] = [const { AtomicBool::new(false) }; 10];
-
-        pub fn fire(_: PointId, name: &'static str, call: &mut dyn FnMut(&'static dyn Points)) {
-            HEARD.lock().unwrap().push(name);
-            let listener = *LISTENER.lock().unwrap();
-            listener.into_iter().for_each(call);
-        }
 
         pub fn fire_raw(place: PointId, name: &'static str, call: &mut dyn FnMut(RawKind)) {
             let functions: Vec<_> = RAW
@@ -141,6 +165,22 @@ mod mod_points {
 }
 
 impl Counter {
+    #[point(side = "server", name = "add", raw_only)]
+    fn add_raw_only(&mut self, step: usize) -> usize {
+        self.total += step;
+        self.total
+    }
+
+    #[point(side = "server", name = "reset", raw_only)]
+    fn reset_raw_only(&mut self) {
+        self.total = 0;
+    }
+
+    #[point(side = "server", name = "slot", raw_only)]
+    fn slot_raw_only(&mut self) -> &mut usize {
+        &mut self.total
+    }
+
     #[point(side = "server", raw)]
     fn add(&mut self, step: usize) -> usize {
         self.total += step;
@@ -165,6 +205,11 @@ pub struct __AddRaw<'r, T0, R> {
     pub result: &'r mut Option<R>,
 }
 pub type __AddListener = for<'r> fn(&'r mut Counter, &'r mut __AddRaw<'r, usize, usize>);
+pub struct __ResetRaw<'r> {
+    pub cancel: &'r mut bool,
+}
+pub type __ResetListener = for<'r> fn(&'r mut Counter, &'r mut __ResetRaw<'r>);
+pub type __ResetReturnListener = fn(&mut Counter);
 pub struct __SlotRaw {}
 pub type __AddReturnListener = for<'r> fn(&'r mut Counter, &'r mut usize);
 pub type __SlotListener = for<'r> fn(&'r mut Counter, &'r mut __SlotRaw);
@@ -196,6 +241,11 @@ fn double(x: i64) -> i64 {
     x * 2
 }
 
+#[point(name = "double", raw_only, free)]
+fn double_raw_only(x: i64) -> i64 {
+    x * 2
+}
+
 // What the staging pass declares after `fn double`.
 pub struct __DoubleRaw<'r, T0, R> {
     pub x: &'r mut T0,
@@ -203,27 +253,6 @@ pub struct __DoubleRaw<'r, T0, R> {
 }
 pub type __DoubleListener = for<'r> fn(&'r mut __DoubleRaw<'r, i64, i64>);
 pub type __DoubleReturnListener = for<'r> fn(&'r mut i64);
-
-struct Listener;
-
-impl mod_points::Points for Listener {
-    // Doubles the step, or answers 7 for a step of 100.
-    fn add(&self, _: &mut dyn ServerHost, args: &mut mod_points::AddArgs) {
-        match args.step {
-            100 => args.result = Some(7),
-            _ => args.step *= 2,
-        }
-    }
-    fn add_return(&self, _: &mut dyn ServerHost, args: &mut mod_points::AddArgs) {
-        args.result = args.result.map(|value| value + 1000);
-    }
-    fn reset(&self, _: &mut dyn ServerHost, args: &mut mod_points::ResetArgs) {
-        args.cancel = true;
-    }
-    fn pen_label(&self, args: &mut mod_points::PenLabelArgs<'_>) {
-        args.name = format!("{}!", args.name).into();
-    }
-}
 
 /// A raw listener after the API one: it sees the API's change and reads the receiver.
 fn raw_add(counter: &mut Counter, raw: &mut __AddRaw<'_, usize, usize>) {
@@ -319,7 +348,7 @@ unsafe fn erased_double(place: usize, receiver: *mut (), raw: *mut ()) {
 #[test]
 fn slots_change_arguments_stop_the_function_and_change_its_value() {
     use mod_points::__private::{POINTS, RawKind};
-    use mod_points::{HEARD, LISTENER, PointId, RAW};
+    use mod_points::{HEARD, PointId, RAW};
     let mut counter = Counter { total: 0 };
     let pen = Pen {
         tags: vec!["own".into()],
@@ -333,7 +362,6 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
     assert!(HEARD.lock().unwrap().is_empty());
 
     counter.total = 2;
-    *LISTENER.lock().unwrap() = Some(&Listener);
     // As the generated `main` registers raw listeners: a typed `let`, then erased.
     let add: __AddListener = raw_add;
     let add_return: __AddReturnListener = raw_add_return;
@@ -412,6 +440,46 @@ fn slots_change_arguments_stop_the_function_and_change_its_value() {
             "double",
             "double",
             "double",
+        ]
+    );
+    // Private source points use these same raw paths, without API projection or dispatch.
+    RAW.lock().unwrap().clear();
+    HEARD.lock().unwrap().clear();
+    RAW.lock().unwrap().extend([
+        (PointId::Add, RawKind::Typed(add as *const ())),
+        (PointId::AddReturn, RawKind::Typed(add_return as *const ())),
+        (PointId::SlotReturn, RawKind::Typed(slot as *const ())),
+    ]);
+    counter.total = 2;
+    assert_eq!(counter.add_raw_only(3), 17);
+    assert_eq!(counter.total, 7);
+    let stop: __AddListener = |_, raw| *raw.result = Some(42);
+    RAW.lock().unwrap()[0].1 = RawKind::Typed(stop as *const ());
+    assert_eq!(counter.add_raw_only(100), 42);
+    assert_eq!(counter.total, 7);
+    let cancel: __ResetListener = |_, raw| *raw.cancel = true;
+    RAW.lock()
+        .unwrap()
+        .push((PointId::Reset, RawKind::Typed(cancel as *const ())));
+    counter.reset_raw_only();
+    assert_eq!(counter.total, 7);
+    *counter.slot_raw_only() += 1;
+    assert_eq!(counter.total, 58);
+    RAW.lock()
+        .unwrap()
+        .push((PointId::Double, RawKind::Typed(head as *const ())));
+    assert_eq!(double_raw_only(-5), 0);
+    assert_eq!(double_raw_only(3), 6);
+    assert_eq!(
+        *HEARD.lock().unwrap(),
+        [
+            "add",
+            "add_return",
+            "add",
+            "reset",
+            "slot_return",
+            "double",
+            "double"
         ]
     );
 }

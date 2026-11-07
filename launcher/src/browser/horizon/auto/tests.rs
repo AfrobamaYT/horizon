@@ -21,7 +21,7 @@ fn ruby(dir: &Path, version: &str, blocks: &[&str], items: &[&str]) -> PathBuf {
         .collect();
     let files: Vec<(&str, &[u8])> = names.iter().map(|(n, b)| (n.as_str(), *b)).collect();
     let manifest = format!("{MANIFEST}version = \"{version}\"\n");
-    let bytes = horizon_mods::Package::write_files(&manifest, &files).unwrap();
+    let bytes = horizon_mod_package::Package::write_files(&manifest, &files).unwrap();
     let path = dir.join(format!("ruby-{version}.hmod"));
     fs::write(&path, bytes).unwrap();
     path
@@ -36,8 +36,8 @@ fn index_of(versions: &[(&str, &str, &Path)]) -> Index {
         .map(|(version, game, path)| index::Version {
             version: (*version).into(),
             api: "0.2".into(),
-            side: Some(horizon_mods::Side::Both),
-            capabilities: vec![horizon_mods::Capability::Registries],
+            side: Some(horizon_mod_package::Side::Both),
+            capabilities: vec![horizon_mod_package::Capability::Registries],
             game: (*game).into(),
             requires: Vec::new(),
             file: index::File {
@@ -252,12 +252,12 @@ fn wasm_update_waits_for_the_player() {
     let module = b"\0asm\x01\0\0\0";
     let manifest = format!(
         "{MANIFEST}version = \"1.1.0\"\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"1.99.1\"\nbuilt_with = \"test\"\n",
-        horizon_mods::manifest::sha512_of(module)
+        horizon_mod_package::manifest::sha512_of(module)
     );
     let new = dir.join("ruby-1.1.0.hmod");
     fs::write(
         &new,
-        horizon_mods::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap(),
+        horizon_mod_package::Package::write_files(&manifest, &[("mod.wasm", module)]).unwrap(),
     )
     .unwrap();
     let first = index_of(&[("1.0.0", GAME, &old)]);
@@ -410,6 +410,53 @@ fn the_report_says_what_changed_and_nothing_otherwise() {
     assert_eq!(
         r.lines(),
         ["Updated automatically: Ruby 1.1.0, Glow 2.0.", "held"]
+    );
+}
+
+/// Turning a mod off in the Mods page is the player's choice, and an automatic update replaces
+/// the file without undoing it (#10071). A new install and the player's own install turn it on.
+#[test]
+fn an_automatic_update_keeps_a_disabled_mod_off() {
+    use crate::browser::horizon::install_version;
+    use crate::browser::java;
+    let dir = scratch("auto-disabled");
+    let home = dir.join("home");
+    let v1 = ruby(&dir, "1.0.0", &["lamp"], &[]);
+    let v2 = ruby(&dir, "1.1.0", &["lamp", "ore"], &[]);
+    let v3 = ruby(&dir, "1.2.0", &["lamp", "ore", "brick"], &[]);
+    let first = index_of(&[("1.0.0", GAME, &v1)]);
+    let p = first.project("ruby").unwrap();
+    install_version(&first, true, p, &p.versions[0], &home, &|_, _| {}).unwrap();
+    assert!(java::is_enabled(&home, "ruby"), "a new install is on");
+
+    // The player turns it off; the automatic update replaces its file and leaves it off.
+    java::set_enabled(&home, "ruby", false).unwrap();
+    let index = index_of(&[("1.1.0", GAME, &v2), ("1.0.0", GAME, &v1)]);
+    let report = run_with(&index, true, &home, &PLAY, &|_, _| {});
+    assert_eq!(report.updated, ["Ruby 1.1.0"], "{report:?}");
+    assert!(!java::is_enabled(&home, "ruby"), "the update kept it off");
+    assert_eq!(
+        installed_ruby(&home),
+        ("1.1.0".into(), fs::read(&v2).unwrap())
+    );
+
+    // Turned back on, the next automatic update leaves it on.
+    java::set_enabled(&home, "ruby", true).unwrap();
+    let index = index_of(&[("1.2.0", GAME, &v3), ("1.1.0", GAME, &v2)]);
+    let report = run_with(&index, true, &home, &PLAY, &|_, _| {});
+    assert_eq!(report.updated, ["Ruby 1.2.0"], "{report:?}");
+    assert!(java::is_enabled(&home, "ruby"));
+
+    // The player's own install of the installed, disabled mod turns it on again.
+    java::set_enabled(&home, "ruby", false).unwrap();
+    let v4 = ruby(&dir, "1.3.0", &["lamp"], &[]);
+    let index = index_of(&[("1.3.0", GAME, &v4), ("1.2.0", GAME, &v3)]);
+    let p = index.project("ruby").unwrap();
+    install_version(&index, true, p, &p.versions[0], &home, &|_, _| {}).unwrap();
+    assert!(java::is_enabled(&home, "ruby"), "an explicit install is on");
+    assert_eq!(
+        installed_ruby(&home),
+        ("1.3.0".into(), fs::read(&v4).unwrap())
     );
 }
 

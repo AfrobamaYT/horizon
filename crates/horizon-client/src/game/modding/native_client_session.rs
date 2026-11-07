@@ -1,6 +1,8 @@
 //! Read-only projections of the connected client's existing state.
 
 use super::{Game, remote::Remote};
+#[cfg(test)]
+use mod_api::prelude::*;
 use mod_api::{BlockBreakingState, BlockPos, ClientFrameStats, ClientServer, PlayerRef};
 
 impl Game<'_> {
@@ -50,15 +52,12 @@ impl Game<'_> {
 
     fn native_local_status(&self, player: PlayerRef) -> Option<()> {
         self.native_session()?;
-        (self.native_local_player()? == player).then_some(())
+        (self.local_player()? == player).then_some(())
     }
 
     /// The local player's predicted breaking state, including Idle. None for
     /// stale, nonlocal or fake handles and outside a logged-in client world.
-    pub(super) fn native_player_block_breaking(
-        &self,
-        player: PlayerRef,
-    ) -> Option<BlockBreakingState> {
+    pub(super) fn player_block_breaking(&self, player: PlayerRef) -> Option<BlockBreakingState> {
         self.native_local_status(player)?;
         Some(
             self.mining
@@ -75,7 +74,7 @@ impl Game<'_> {
 
     /// The local player's existing cave ambience mood, normally 0 through 1.
     /// None for stale, nonlocal or fake handles and outside a client world.
-    pub(super) fn native_player_ambient_mood(&self, player: PlayerRef) -> Option<f32> {
+    pub(super) fn player_ambient_mood(&self, player: PlayerRef) -> Option<f32> {
         self.native_local_status(player)?;
         Some(self.ambience.moodiness)
     }
@@ -85,7 +84,6 @@ impl Game<'_> {
 pub(super) mod tests {
     use super::super::native_entity_refs::tests::with_client_game;
     use super::*;
-    use mod_api::ClientHost;
 
     pub(in crate::game) fn logged_client(
         game: &mut Game<'_>,

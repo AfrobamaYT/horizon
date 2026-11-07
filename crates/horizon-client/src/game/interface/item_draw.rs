@@ -3,13 +3,14 @@
 //! dropped items (`ItemEntityRenderer`) and items posed in the world (hands,
 //! frames, armour stands). This binds the resolver's host services
 //! (`ItemEnv`) and the special renderers' registries to the game.
-use super::{Dim, Game};
+use super::{Dim, Game, entity_culling::EntityCullDecision};
 use horizon_assets::item_model::{
     Components, DisplayContext, GlobalPos, ItemEnv, LevelState, OwnerState, StackView,
 };
 use horizon_client::{
     block_entity_render::{diffuse_lights, vertex_light},
     cit::{Hand as CitHand, Kind as CitKind},
+    graphics::EntityCullingMode,
     hud::{HudBatch, Rect},
     item_render::{self, ItemRenderState, SpecialHost, WorldSink},
     items::ItemStack,
@@ -57,6 +58,15 @@ impl ItemEnv for Env<'_, '_> {
         self.game
             .native_item_model_select_property(property, stack, &mut value);
         value
+    }
+    fn item_tint_source(&self, source: &str, config: &Value, stack: &StackView) -> i32 {
+        if !mod_api::__private::listened(mod_api::HookId::ItemTintSource) {
+            return -1;
+        }
+        let mut color = u32::MAX;
+        self.game
+            .native_item_tint_source(source, config, stack, &mut color);
+        color as i32
     }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
@@ -253,11 +263,7 @@ impl Game<'_> {
     /// The client level as item models read it: worked out once a frame (a
     /// screen of items read the same level, its sky sampled once).
     pub(super) fn item_level(&self) -> LevelState {
-        let dimension = match self.dim {
-            Dim::Overworld => "minecraft:overworld",
-            Dim::Nether => "minecraft:the_nether",
-            Dim::End => "minecraft:the_end",
-        };
+        let dimension = self.dim.id();
         let key = (
             self.frames,
             self.world.game_time,
@@ -345,7 +351,7 @@ impl Game<'_> {
             .enchantments
             .props
             .get(&*stack.item)
-            .is_some_and(|p| p.glint);
+            .and_then(|p| p.glint);
         stack.has_foil(item_glint)
     }
     /// [`Self::resolve_item`] of a stack held in `hand`, which OptiFine CIT rules can test
@@ -650,10 +656,7 @@ impl Game<'_> {
             // EntityRenderer.shouldRender: the item's 0.25 box, grown by 0.5,
             // in the view frustum. Checked before its model is resolved.
             if entity && let Some(view) = &self.view_frustum {
-                let feet = (glam::DVec3::new(q.x, q.y, q.z) - camera).as_vec3();
-                let half = glam::Vec3::new(0.125 + 0.5, 0.5, 0.125 + 0.5);
-                let lo = feet - half;
-                let hi = feet + glam::Vec3::new(half.x, 0.25 + 0.5, half.z);
+                let (lo, hi) = dropped_item_cull_box(glam::DVec3::from_array(at), camera);
                 if !view.intersects(lo, hi) {
                     continue;
                 }
@@ -670,7 +673,7 @@ impl Game<'_> {
                 continue;
             }
             let age = item.age as f32 + partial;
-            let (lo, _) = state.bounding_box();
+            let (lo, hi) = state.bounding_box();
             let min_offset_y = -lo.y + 0.0625;
             let bob = (age / 10.0 + item.bob_offset).sin() * 0.1 + 0.1;
             let spin = item_render::item_spin(age, item.bob_offset);
@@ -702,16 +705,21 @@ impl Game<'_> {
             };
             let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
                 + i64::from(item.stack.damage);
-            let copies = item_render::cluster_poses(
-                &state,
+            let copies = item_render::cluster_poses_with_depth(
                 pose,
                 item_render::rendered_amount(item.stack.count),
                 seed,
+                hi.z - lo.z,
             );
             // Use the same animated, spun, clustered transforms as the draw.
             // ItemEntity's collision box is only 0.25 blocks and cannot prove
             // that this larger rendered model stays behind an occluder.
             let culling = entity.then(|| {
+                // The posed envelope walks every model point in every copy;
+                // with culling off the decision is `Bypass` whatever it holds.
+                if self.settings.horizon.entity_culling == EntityCullingMode::Off {
+                    return EntityCullDecision::Bypass;
+                }
                 state
                     .posed_bounds(&copies)
                     .map(|(lo, hi)| {
@@ -759,6 +767,21 @@ impl Game<'_> {
             }
         }
     }
+}
+
+/// `EntityRenderer.shouldRender`'s box for a dropped item, in camera space:
+/// `EntityRenderer.getBoundingBoxForCulling(entity, partialTick)` is
+/// `Entity.getInterpolatedBoundingBox(partialTick)` - the item's 0.25 box at
+/// the position the frame draws, `ItemEntity` overriding neither - grown by 0.5
+/// all round before the frustum test. `position` is the already-extracted f64
+/// frame position, shared with drawing and lighting.
+fn dropped_item_cull_box(position: glam::DVec3, camera: glam::DVec3) -> (glam::Vec3, glam::Vec3) {
+    let feet = (position - camera).as_vec3();
+    let half = glam::Vec3::new(0.125 + 0.5, 0.5, 0.125 + 0.5);
+    (
+        feet - half,
+        feet + glam::Vec3::new(half.x, 0.25 + 0.5, half.z),
+    )
 }
 
 /// The packed light of an item (sky low, block above it: `vertex_light`, entity.wgsl), its block
@@ -956,6 +979,100 @@ mod tests {
                 let env = Env { game };
                 let one = StackView::new("minecraft:stick", 1);
                 assert_eq!(env.item_model_select_property("example:mode", &one), None);
+            });
+        });
+    }
+
+    /// `EntityRenderer.shouldRender` culls with `getBoundingBoxForCulling(entity,
+    /// partialTick)`, which is `Entity.getInterpolatedBoundingBox(partialTick)`:
+    /// an item's 0.25 box at the position the frame draws, grown by 0.5. The box
+    /// was built from the tick's own position, so an item crossing the frustum
+    /// edge mid-tick disappeared for the frames before it got there.
+    #[test]
+    fn a_dropped_item_is_culled_at_the_frame_s_position() {
+        let camera = glam::DVec3::ZERO;
+        let previous = glam::DVec3::new(0.0, 64.0, 0.0);
+        let position = glam::DVec3::new(1.0, 64.0, 0.0);
+        let bounds = |alpha: f64| {
+            let (lo, hi) = dropped_item_cull_box(previous.lerp(position, alpha), camera);
+            (lo.to_array(), hi.to_array())
+        };
+        // The frame's start: the box stands at the item's previous position.
+        assert_eq!(bounds(0.0), ([-0.625, 63.5, -0.625], [0.625, 64.75, 0.625]));
+        // Halfway through the tick the box has travelled half the block.
+        assert_eq!(bounds(0.5), ([-0.125, 63.5, -0.625], [1.125, 64.75, 0.625]));
+        // And at its end it is where the old code put it on every frame.
+        assert_eq!(bounds(1.0), ([0.375, 63.5, -0.625], [1.625, 64.75, 0.625]));
+        // A falling item moves in y the same way: halfway down a 66 -> 65 drop
+        // the box's floor is at 65.0, where the old code had the tick's 64.5.
+        let (lo, hi) = dropped_item_cull_box(
+            glam::DVec3::new(0.0, 66.0, 0.0).lerp(glam::DVec3::new(0.0, 65.0, 0.0), 0.5),
+            camera,
+        );
+        assert!((lo.y - 65.0).abs() < 1e-6);
+        assert!((hi.y - 66.25).abs() < 1e-6);
+    }
+
+    struct Charge;
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Charge {
+        fn register_item_tint_sources(
+            &self,
+            _: &mod_api::RegistrationContext,
+            event: &mut mod_api::RegisterItemTintSourcesEvent<'_>,
+        ) {
+            event.sources.push("example:charge".into());
+        }
+        fn item_tint_source(
+            &self,
+            _: &dyn ClientHost,
+            event: &mut mod_api::ItemTintSourceEvent<'_>,
+        ) {
+            if event.source == "example:charge" {
+                event.color = match event.stack.count {
+                    1 => event.config["low"].as_i64().unwrap_or(0) as u32,
+                    _ => 0xFF11_2233,
+                };
+            }
+        }
+    }
+
+    /// A mod registers its item tint source once at start.
+    #[test]
+    fn a_mod_registers_its_item_tint_source() {
+        use mod_api::__private::game::*;
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("charge", Box::new(Charge))].into();
+        mod_api::testing::with_mods(mods, || {
+            let mut sources = Vec::new();
+            Game::native_register_item_tint_sources(
+                &mod_api::RegistrationContext::new(),
+                &mut sources,
+            );
+            assert_eq!(sources, ["example:charge"]);
+        });
+    }
+
+    /// The resolver reads a mod's colour per stack, white for another's or with no mod.
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn item_tint_source_reads_the_mods_colour() {
+        let config = serde_json::json!({"type": "example:charge", "low": 0xFFAA_BBCC_u32});
+        let one = StackView::new("minecraft:stick", 1);
+        let two = StackView::new("minecraft:stick", 2);
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new("charge", Box::new(Charge))].into();
+        mod_api::testing::with_mods(mods, || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                let color = |source, stack| env.item_tint_source(source, &config, stack) as u32;
+                assert_eq!(color("example:charge", &one), 0xFFAA_BBCC);
+                assert_eq!(color("example:charge", &two), 0xFF11_2233);
+                assert_eq!(color("other:charge", &one), 0xFFFF_FFFF);
+            });
+        });
+        mod_api::testing::with_mods(Vec::new().into(), || {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                let env = Env { game };
+                assert_eq!(env.item_tint_source("example:charge", &config, &one), -1);
             });
         });
     }

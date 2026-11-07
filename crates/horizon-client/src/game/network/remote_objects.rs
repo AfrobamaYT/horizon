@@ -60,11 +60,11 @@ impl Game<'_> {
                     m.extra.leash = Some(Holder::Knot(block));
                 }
             }
-            for b in &mut self.boats {
+            self.boats.for_each_mut(|b| {
                 if b.leash == Some(Holder::Mob(id)) {
                     b.leash = Some(Holder::Knot(block));
                 }
-            }
+            });
         } else if let Some(shows) = match kind {
             "minecraft:text_display" => Some(super::text_displays::Shows::Text),
             "minecraft:block_display" => Some(super::text_displays::Shows::Block),
@@ -195,11 +195,11 @@ impl Game<'_> {
                 && self.ominous_spawners.iter().any(|s| s.id == id)
             {
                 // OminousItemSpawner.DATA_ITEM.
-                if let (Some(item), Some(s)) = (
+                if let (Some(item), Some(i)) = (
                     self.to_stack(stack),
-                    self.ominous_spawners.iter_mut().find(|s| s.id == id),
+                    self.ominous_spawners.iter().position(|s| s.id == id),
                 ) {
-                    s.item = item;
+                    self.ominous_spawners.update(i, |s| s.item = item);
                 }
             } else if self.item_frames.iter().any(|f| f.id == id) {
                 // HangingEntity.DATA_DIRECTION, ItemFrame.DATA_ITEM and DATA_ROTATION.
@@ -259,21 +259,23 @@ impl Game<'_> {
                 if let (8, Value::Id(color)) = (index, value) {
                     c.color = (*color).clamp(0, 15) as u8;
                 }
-            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                // VehicleEntity's hurt, direction and damage; the paddles and
-                // the bubble time.
-                match (index, value) {
-                    (8, Value::Int(v)) => b.hurt_time = *v,
-                    (9, Value::Int(v)) => b.hurt_dir = *v,
-                    (10, Value::Float(v)) => b.damage = *v,
-                    (11, Value::Bool(v)) => b.paddling[0] = *v,
-                    (12, Value::Bool(v)) => b.paddling[1] = *v,
-                    // AbstractBoat.DATA_ID_BUBBLE_TIME.
-                    (13, Value::Int(v)) => b.bubble_time = *v,
-                    _ => {}
-                }
-            } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                match (index, value) {
+            } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                self.boats.update(i, |b| {
+                    // VehicleEntity's hurt, direction and damage; the paddles and
+                    // the bubble time.
+                    match (index, value) {
+                        (8, Value::Int(v)) => b.hurt_time = *v,
+                        (9, Value::Int(v)) => b.hurt_dir = *v,
+                        (10, Value::Float(v)) => b.damage = *v,
+                        (11, Value::Bool(v)) => b.paddling[0] = *v,
+                        (12, Value::Bool(v)) => b.paddling[1] = *v,
+                        // AbstractBoat.DATA_ID_BUBBLE_TIME.
+                        (13, Value::Int(v)) => b.bubble_time = *v,
+                        _ => {}
+                    }
+                });
+            } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                self.carts.update(i, |c| match (index, value) {
                     (8, Value::Int(v)) => c.hurt_time = *v,
                     (9, Value::Int(v)) => c.hurt_dir = *v,
                     (10, Value::Float(v)) => c.damage = *v,
@@ -306,7 +308,7 @@ impl Game<'_> {
                         ));
                     }
                     _ => {}
-                }
+                });
             }
         }
     }
@@ -337,30 +339,32 @@ impl Game<'_> {
         let id = id as u32;
         // The boat the player drives turns here (isLocalInstanceAuthoritative).
         let driven = self.riding.filter(|&id| self.controls_boat(id));
-        if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-            if Some(id) == driven {
-                return;
-            }
-            // AbstractBoat keeps a LinearInterpolationHandler: the new yaw is
-            // the target of the three-tick lerp (`tick_remote_objects`), not
-            // the boat's yaw at once.
-            let _ = yaw;
-            b.on_ground = on_ground;
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id)
+        if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+            self.boats.update(i, |b| {
+                if Some(id) == driven {
+                    return;
+                }
+                // AbstractBoat keeps a LinearInterpolationHandler: the new yaw is
+                // the target of the three-tick lerp (`tick_remote_objects`), not
+                // the boat's yaw at once.
+                let _ = yaw;
+                b.on_ground = on_ground;
+            });
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id)
             && let Some(yaw) = yaw
         {
-            c.yaw = yaw;
+            self.carts.update(i, |c| c.yaw = yaw);
         }
     }
 
     /// `MinecartTNT.handleEntityEvent(70)`: the client's fuse starts at 80.
     pub(super) fn remote_cart_primed(&mut self, id: u32) {
-        if let Some(c) = self
+        if let Some(i) = self
             .carts
-            .iter_mut()
-            .find(|c| c.id == id && c.kind == super::minecarts::CartKind::Tnt)
+            .iter()
+            .position(|c| c.id == id && c.kind == super::minecarts::CartKind::Tnt)
         {
-            c.fuse = 80;
+            self.carts.update(i, |c| c.fuse = 80);
         }
     }
 
@@ -374,7 +378,7 @@ impl Game<'_> {
         mut turn: impl FnMut(u32, f32) -> f32,
         mut lerp_cart: impl FnMut(&mut super::minecarts::Minecart) -> bool,
     ) {
-        for c in &mut self.carts {
+        self.carts.for_each_mut(|c| {
             c.previous = c.position;
             c.previous_yaw = c.yaw;
             c.previous_pitch = c.pitch;
@@ -412,12 +416,12 @@ impl Game<'_> {
                     [0.0; 3],
                 );
             }
-        }
+        });
         // The boat the player drives moves here, not where the server says.
         let driven = self.riding.filter(|&id| self.controls_boat(id));
-        for b in &mut self.boats {
+        self.boats.for_each_mut(|b| {
             if Some(b.id) == driven {
-                continue;
+                return;
             }
             b.previous = b.position;
             b.previous_yaw = b.yaw;
@@ -425,7 +429,7 @@ impl Game<'_> {
             // step toward the server's with the position.
             b.yaw = turn(b.id, b.yaw);
             b.position = step(b.id, b.position);
-        }
+        });
         for a in &mut self.armor_stands {
             a.position = step(a.id, a.position);
         }

@@ -178,13 +178,10 @@ pub struct Guest {
     pub input: u8,
     /// The boat or minecart the player rides (`Entity.getVehicle`).
     pub vehicle: Option<u32>,
-    /// `Entity.boardingCooldown`: ticks before it may board a vehicle again.
-    pub boarding_cooldown: i32,
-    /// When the player last got into its vehicle, from `Hub.seat_order`:
-    /// `Entity.addPassenger` seats a rider behind the players already in the
-    /// vehicle, so the smallest order on a boat is its controlling rider
-    /// (`getControllingPassenger`).
-    pub vehicle_order: u64,
+    /// The player's place in its vehicle's `getPassengers`, from `Game::boarding_order`, beside
+    /// the mobs' `vehicle_order`: the lowest goes first, so the smallest among a boat's players
+    /// is its controlling rider (`getControllingPassenger`).
+    pub vehicle_order: i64,
     /// `ServerGamePacketListenerImpl.lastGoodX/Y/Z` of the vehicle it controls.
     pub vehicle_good: Option<[f64; 3]>,
     pub sprinting: bool,
@@ -317,6 +314,9 @@ pub struct Guest {
     /// The 36 inventory slots (hotbar first), armor (head..feet) and off hand.
     pub inventory: Vec<Option<ItemStack>>,
     pub armor: [Option<ItemStack>; 4],
+    /// Armor as of this player's last `collectEquipmentChanges` look; swapped
+    /// with `armor` so each player compares against their own snapshot.
+    pub location_armor: [Option<ItemStack>; 4],
     pub offhand: Option<ItemStack>,
     /// `EquipmentSlot.BODY` and `SADDLE`, kept and saved like `Game::equipment`.
     pub equipment: horizon_items::equipment::Equipment,
@@ -343,6 +343,9 @@ pub struct Guest {
     pub xp_seed: i32,
     /// Active status effects (`LivingEntity.activeEffects`).
     pub effects: crate::effects::PlayerEffects,
+    /// The swirls of `effects` as the native mods left them
+    /// (`effect_particle_modification`), while one listens.
+    pub modified_effect_particles: Option<crate::effects::ModifiedEffectParticles>,
     /// What the client was told of each effect: id, amplifier, flags, and
     /// the duration and `effects.tick_count` at the time, so a duration that
     /// only counted down is not sent again (`ServerPlayer.onEffectUpdated`).
@@ -443,7 +446,7 @@ pub struct Guest {
     /// The compound this player was loaded from, for fields Horizon does not model.
     pub saved: Option<horizon_core::nbt::Tag>,
     /// Server-owned attachment data for this player.
-    pub attachments: horizon_world::attachments::Attachments,
+    pub attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     /// `ServerPlayer.seenCredits`: the end poem has been shown.
     pub seen_credits: bool,
     /// `ServerPlayer.postEffects` and `postEffectsDirty`.
@@ -594,7 +597,6 @@ impl Guest {
             sneaking: false,
             input: 0,
             vehicle: None,
-            boarding_cooldown: 0,
             vehicle_order: 0,
             vehicle_good: None,
             sprinting: false,
@@ -653,6 +655,7 @@ impl Guest {
             logs_kept: None,
             inventory: vec![None; 36],
             armor: [None, None, None, None],
+            location_armor: [None, None, None, None],
             offhand: None,
             equipment: Default::default(),
             selected: 0,
@@ -670,6 +673,7 @@ impl Guest {
             xp_total: 0,
             xp_seed: 0,
             effects: Default::default(),
+            modified_effect_particles: None,
             sent_effects: Vec::new(),
             menu_sent: vec![None; 46],
             menu_state: 0,
@@ -849,6 +853,11 @@ impl Guest {
     }
     pub fn spectator(&self) -> bool {
         self.game_mode == SPECTATOR
+    }
+    /// Its client's `minecraft:brand` is Horizon's: it reads the protocol's
+    /// extensions, such as a native mod's particle (`Particle::horizon_only`).
+    pub fn is_horizon(&self) -> bool {
+        self.brand == "horizon"
     }
     /// `Player.getDesiredPose`: sleeping, gliding, then the body's own pose
     /// (swimming, crawling, crouching) once its server tick has run.

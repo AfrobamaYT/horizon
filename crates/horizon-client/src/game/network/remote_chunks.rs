@@ -10,12 +10,12 @@ use horizon_client::{
     streaming::Streaming,
 };
 use horizon_core::paletted::{PalettedContainer, Strategy};
+use horizon_mod_runtime::attachments::Holder;
 use horizon_protocol::{
     chunk::{LightData, Paletted, SectionLight},
     packets::play::{self, Clientbound as C},
     registry::DimensionType,
 };
-use horizon_world::attachments::Holder;
 use std::sync::{
     Arc,
     mpsc::{self, TryRecvError},

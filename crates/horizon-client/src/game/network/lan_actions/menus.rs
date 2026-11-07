@@ -46,7 +46,7 @@ impl Game<'_> {
             // The click is spent, but no menu took ownership of the use's opener.
             self.container_openers_changed(pos, false);
         }
-        !matches!(opened, MenuOpen::Refused)
+        !matches!(opened, MenuOpen::Refused | MenuOpen::Stale)
     }
 
     pub(in crate::game) fn open_block_menu(&mut self, conn: u32, pos: (i32, i32, i32)) -> MenuOpen {
@@ -61,6 +61,7 @@ impl Game<'_> {
         pos: (i32, i32, i32),
         opener_started: bool,
     ) -> MenuOpen {
+        let generation = self.world.block_entities.generation(&pos);
         let name = &self
             .res
             .facts()
@@ -126,7 +127,7 @@ impl Game<'_> {
                 };
                 horizon_client::containers::display_name(custom(k), &key)
             }
-            // Opened by a mod (`native_open_menu`), never here.
+            // Opened by a mod (`open_menu`), never here.
             Slots::Native => return MenuOpen::Refused,
         };
         let Some(host) = self.lan.as_ref() else {
@@ -218,6 +219,9 @@ impl Game<'_> {
             return MenuOpen::Refused;
         }
         // ServerPlayer.openMenu closes the menu that was open.
+        let previous_window = self.lan.as_ref().and_then(|host| {
+            super::super::native_menus::open_menu_of(host, conn).map(|(window, ..)| window)
+        });
         self.guest_close_all(conn);
         // A hand-off from `open_menu` must not count one player twice. A direct
         // handle open has no earlier `startOpen`; only it starts the block's lid.
@@ -244,6 +248,16 @@ impl Game<'_> {
             }
             _ => None,
         };
+        if self.world.block_entities.generation(&pos) != generation {
+            if let Some(container) = previous_window
+                && let Some(host) = self.lan.as_mut()
+                && super::super::native_menus::open_menu_of(host, conn).is_none()
+            {
+                host.hub
+                    .send_to(conn, &C::ContainerClose(play::ContainerClose { container }));
+            }
+            return MenuOpen::Stale;
+        }
         let Some(host) = self.lan.as_mut() else {
             return MenuOpen::Refused;
         };
@@ -414,14 +428,16 @@ impl Game<'_> {
             b.position.y.floor() as i32,
             b.position.z.floor() as i32,
         );
-        crate::structure_blocks::roll_container(
-            &mut self.boats[i].items,
-            loot.as_deref(),
-            table.clone(),
-            seed,
-            pos,
-            &biome,
-        );
+        self.boats.update(i, |b| {
+            crate::structure_blocks::roll_container(
+                &mut b.items,
+                loot.as_deref(),
+                table.clone(),
+                seed,
+                pos,
+                &biome,
+            )
+        });
         self.trigger_loot_table(&table);
     }
 

@@ -86,6 +86,30 @@ impl LevelAccess for RainView<'_> {
 }
 
 impl Game<'_> {
+    /// `Level.getSkyDarken`: the same dimension, time and weather calculation used by gameplay.
+    pub(super) fn sky_darken_in(&self, world: &World, dimension: Dim) -> i32 {
+        let environment = match dimension {
+            Dim::Overworld | Dim::Extra(_) => self.res.environment(),
+            Dim::Nether => self.res.nether_environment(),
+            Dim::End => self.res.end_environment(),
+        };
+        let (rain, thunder) = weather_for_level(
+            world.shape,
+            dimension == Dim::End,
+            self.world.weather.levels(1.0),
+        );
+        horizon_client::environment::sky_darken(environment, self.world.day_time, rain, thunder)
+    }
+
+    /// `Level.getSkyDarken` for an active or parked level, without switching dimensions.
+    pub(super) fn level_get_sky_darken(&self, level: LevelRef) -> Option<i32> {
+        let world = self.native_level_read_world(level)?;
+        if level.dimension() == self.native_level_key() {
+            return Some(self.sky_darken());
+        }
+        Some(self.sky_darken_in(world, Dim::from_id(level.dimension_id())))
+    }
+
     /// The enabled feature flags as this side knows them: a client's are the server's, sent at
     /// join; a server's are its world's `enabled_features`.
     pub(super) fn enabled_feature_ids(&self) -> &Arc<[String]> {
@@ -94,10 +118,7 @@ impl Game<'_> {
             .map_or(&self.level.enabled_features, |remote| &remote.features)
     }
     /// Dimension shape of a loaded server level, including parked levels.
-    pub(super) fn native_level_dimension_shape(
-        &self,
-        level: LevelRef,
-    ) -> Option<LevelDimensionShape> {
+    pub(super) fn level_dimension_shape(&self, level: LevelRef) -> Option<LevelDimensionShape> {
         let shape = self.native_level_world(level)?.shape;
         Some(LevelDimensionShape::new(
             shape.min_y,
@@ -109,18 +130,18 @@ impl Game<'_> {
     }
 
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
-    pub(super) fn native_level_seed(&self, level: LevelRef) -> Option<i64> {
+    pub(super) fn level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;
         Some(self.level.seed)
     }
     /// The difficulty (`Level.getDifficulty`): `peaceful`, `easy`, `normal`
     /// or `hard`, as `/difficulty` names it.
-    pub(super) fn native_level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
+    pub(super) fn level_difficulty(&self, level: LevelRef) -> Option<&'static str> {
         self.native_level_world(level)?;
         DIFFICULTIES.get(usize::from(self.ui.difficulty)).copied()
     }
     /// Read a registered boolean game rule.
-    pub(super) fn native_level_game_rule_bool(
+    pub(super) fn level_game_rule_bool(
         &self,
         level: LevelRef,
         key: BoolGameRuleKey,
@@ -132,21 +153,14 @@ impl Game<'_> {
     }
     /// Game rule `rule` (`minecraft:keep_inventory` or `keep_inventory`), as
     /// `/gamerule` queries it: None for an unknown rule.
-    pub(super) fn native_level_game_rule(
-        &self,
-        level: LevelRef,
-        rule: &str,
-    ) -> Option<GameRuleValue> {
+    pub(super) fn level_game_rule(&self, level: LevelRef, rule: &str) -> Option<GameRuleValue> {
         self.native_level_world(level)?;
         self.ui.rules.get(rule)
     }
     /// Every game rule the world has (`GameRules`) with its current value, by `minecraft:` id
     /// (`max_minecart_speed` only with minecart improvements): None for a stale handle and on
     /// a client.
-    pub(super) fn native_level_game_rules(
-        &self,
-        level: LevelRef,
-    ) -> Option<Vec<(String, GameRuleValue)>> {
+    pub(super) fn level_game_rules(&self, level: LevelRef) -> Option<Vec<(String, GameRuleValue)>> {
         self.native_level_world(level)?;
         let rules = &self.ui.rules;
         Some(
@@ -160,24 +174,29 @@ impl Game<'_> {
     /// `getThunderLevel` at partial tick 1.0): both 0 in a level with no weather.
     /// Reads any open server level or the client's current synchronized level;
     /// None for a stale handle, an unavailable level or a client not logged in.
-    pub(super) fn native_level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
+    pub(super) fn level_weather(&self, level: LevelRef) -> Option<(f32, f32)> {
         let world = self.native_level_read_world(level)?;
-        Some(weather_for_world(world, level.dimension() == Dim::End.id()))
+        Some(weather_for_world(
+            world,
+            level.dimension() == Dim::End.key(),
+        ))
     }
     /// Whether it rains (`Level.isRaining`: a rain level above 0.2).
-    pub(super) fn native_level_is_raining(&self, level: LevelRef) -> Option<bool> {
+    pub(super) fn level_is_raining(&self, level: LevelRef) -> Option<bool> {
         let world = self.native_level_world(level)?;
-        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).0)
+        Some(
+            weather_flags(weather_for_world(
+                world,
+                level.dimension() == Dim::End.key(),
+            ))
+            .0,
+        )
     }
     /// `Level.isRainingAt(pos)` in the level a handle names, the one in place or a parked one:
     /// it rains there and `pos` is under open sky in a biome that rains. None for a stale
     /// handle, on a client, and where `pos` is not loaded or outside the world's height; a
     /// read never loads a chunk.
-    pub(super) fn native_level_is_raining_at(
-        &self,
-        level: LevelRef,
-        pos: [i32; 3],
-    ) -> Option<bool> {
+    pub(super) fn level_is_raining_at(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool> {
         let world = self.native_level_world(level)?;
         if !world.is_loaded_at(pos[0], pos[1], pos[2]) {
             return None;
@@ -186,8 +205,8 @@ impl Game<'_> {
             world,
             facts: self.res.facts(),
             biomes: world_biomes!(self),
-            dimension: Dim::from_id(level.dimension()).level(),
-            raining: self.native_level_is_raining(level)?,
+            dimension: Dim::from_id(level.dimension_id()).level(),
+            raining: self.level_is_raining(level)?,
             random: LegacyRandom::new(0),
         };
         Some(
@@ -198,14 +217,20 @@ impl Game<'_> {
     }
     /// `LevelReader.enabledFeatures` of the level a handle names. Every level of a world shares
     /// the world's flags. None for a stale handle and on a client.
-    pub(super) fn native_level_enabled_features(&self, level: LevelRef) -> Option<FeatureFlags> {
+    pub(super) fn level_enabled_features(&self, level: LevelRef) -> Option<FeatureFlags> {
         self.native_level_world(level)?;
         Some(FeatureFlags::new(self.enabled_feature_ids().clone()))
     }
     /// Whether it thunders (`Level.isThundering`: a thunder level above 0.9).
-    pub(super) fn native_level_is_thundering(&self, level: LevelRef) -> Option<bool> {
+    pub(super) fn level_is_thundering(&self, level: LevelRef) -> Option<bool> {
         let world = self.native_level_world(level)?;
-        Some(weather_flags(weather_for_world(world, level.dimension() == Dim::End.id())).1)
+        Some(
+            weather_flags(weather_for_world(
+                world,
+                level.dimension() == Dim::End.key(),
+            ))
+            .1,
+        )
     }
 }
 
@@ -282,7 +307,7 @@ mod tests {
                 .default_state("minecraft:stone")
                 .unwrap();
             game.world.set(3, 100, 3, stone).unwrap();
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             let chunks = game.world.chunks.len();
             let plains = [1, 70, 1];
             let roofed = [3, 70, 3];
@@ -297,14 +322,10 @@ mod tests {
                 (desert, false),
                 (snowy, false),
             ] {
-                assert_eq!(
-                    game.native_level_is_raining_at(level, pos),
-                    Some(rains),
-                    "{pos:?}"
-                );
+                assert_eq!(game.level_is_raining_at(level, pos), Some(rains), "{pos:?}");
             }
-            assert_eq!(game.native_level_is_raining_at(level, unloaded), None);
-            assert_eq!(game.native_level_is_raining_at(level, [1, 4000, 1]), None);
+            assert_eq!(game.level_is_raining_at(level, unloaded), None);
+            assert_eq!(game.level_is_raining_at(level, [1, 4000, 1]), None);
             game.with_level(|_, host, _| {
                 assert!(host.is_raining_at(plains));
                 assert!(!host.is_raining_at(roofed));
@@ -314,7 +335,7 @@ mod tests {
             });
 
             game.world.weather.rain_level = (0.0, 0.0);
-            assert_eq!(game.native_level_is_raining_at(level, plains), Some(false));
+            assert_eq!(game.level_is_raining_at(level, plains), Some(false));
             game.with_level(|_, host, _| assert!(!host.is_raining_at(plains)));
             assert_eq!(game.world.chunks.len(), chunks, "nothing was loaded");
         });
@@ -324,8 +345,8 @@ mod tests {
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn enabled_features_default_to_vanilla_and_follow_the_world() {
         with_game(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
-            let flags = game.native_level_enabled_features(level).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
+            let flags = game.level_enabled_features(level).unwrap();
             assert!(flags.contains("minecraft:vanilla"));
             assert!(flags.contains("vanilla"));
             assert!(!flags.contains("minecraft:redstone_experiments"));
@@ -334,7 +355,7 @@ mod tests {
                 "minecraft:redstone_experiments".to_string(),
             ]
             .into();
-            let flags = game.native_level_enabled_features(level).unwrap();
+            let flags = game.level_enabled_features(level).unwrap();
             assert!(flags.contains("minecraft:redstone_experiments"));
             assert_eq!(flags.iter().count(), 2);
             assert_eq!(
@@ -374,7 +395,7 @@ mod tests {
                 let registry = Arc::new(mod_api::__private::game_rule_registry());
                 game.level.rule_registry = registry.clone();
                 game.ui.rules = gamerules::GameRules::with_registry(registry, &[]);
-                let level = game.native_level("minecraft:overworld").unwrap();
+                let level = game.level("minecraft:overworld").unwrap();
                 assert_eq!(level.game_rule_bool(game, *KEY.get().unwrap()), Some(true));
             })
         });
@@ -457,7 +478,7 @@ mod tests {
         use mod_api::{LevelRef, NativeWorldEpoch};
 
         with_game(|game| {
-            let level = game.native_level(game.dim.id()).unwrap();
+            let level = game.level(game.dim.id()).unwrap();
             game.world.weather.rain_level = (0.0, 0.5);
             game.world.weather.thunder_level = (0.0, 0.75);
             assert_eq!(level.weather(game), Some((0.5, 0.375)));
@@ -466,7 +487,10 @@ mod tests {
                 level.dimension(),
             );
             assert_eq!(stale.weather(game), None);
-            let absent = LevelRef::new(level.epoch(), "missing:level");
+            let absent = LevelRef::new(
+                level.epoch(),
+                mod_api::__private::dimension_key("missing:level"),
+            );
             assert_eq!(absent.weather(game), None);
             // The current world's dimension type, not its id alone, gates weather.
             game.world.shape.has_ceiling = true;
@@ -480,7 +504,7 @@ mod tests {
             game.world.weather.rain_level = (0.0, 0.5);
             game.world.weather.thunder_level = (0.0, 0.75);
             assert_eq!(level.weather(game), Some((0.5, 0.375)));
-            let other = LevelRef::new(level.epoch(), "minecraft:the_nether");
+            let other = LevelRef::new(level.epoch(), mod_api::DimensionKey::NETHER);
             assert_eq!(
                 other.weather(game),
                 None,
@@ -488,8 +512,8 @@ mod tests {
             );
             assert_eq!(stale.weather(game), None);
             // Only the weather pair is a both-side read; the server queries keep their guard.
-            assert_eq!(game.native_level_is_raining(level), None);
-            assert_eq!(game.native_level_is_thundering(level), None);
+            assert_eq!(game.level_is_raining(level), None);
+            assert_eq!(game.level_is_thundering(level), None);
         });
     }
 

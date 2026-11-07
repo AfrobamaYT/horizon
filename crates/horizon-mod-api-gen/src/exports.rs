@@ -41,6 +41,11 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
                 let path = root
                     .join("crates/horizon-mod-api/src")
                     .join(format!("{}.rs", module.ident));
+                let path = if path.is_file() {
+                    path
+                } else {
+                    path.with_extension("").join("mod.rs")
+                };
                 let path = path.to_string_lossy();
                 module.attrs.push(syn::parse_quote!(#[path = #path]));
             } else if !matches!(item, Item::Use(_)) {
@@ -64,11 +69,18 @@ pub(crate) fn sources(root: &Path) -> Result<BTreeMap<String, String>, String> {
     .map(|scope| (scope.to_owned(), String::new()))
     .into_iter()
     .collect();
+    let mut has_parts = false;
     for area in Catalog::modules(&dir).map_err(|e| e.to_string())? {
         let path = dir.join(format!("{area}.rs"));
         let source = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let file = syn::parse_file(&source).map_err(|e| format!("{}: {e}", path.display()))?;
+        has_parts |= file.items.iter().any(|item| matches!(item, Item::Mod(module) if module.ident == "parts" && module.content.is_none()));
         collect(root, "root", file.items, &mut out)?;
+    }
+    if has_parts {
+        out.get_mut("root")
+            .unwrap()
+            .push_str(&super::parts::trait_exports(root)?);
     }
     Ok(out
         .into_iter()
@@ -99,21 +111,14 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
         }
         Ok(out)
     }
-    let parts = source.contains(super::part_table::OUTPUT);
+    let parts = source.contains(super::parts::OUTPUT);
     if !source.contains(PREFIX) && !parts {
         return Ok(source.to_owned());
     }
     let mut file = syn::parse_file(source).map_err(|e| e.to_string())?;
-    let mut generated = if source.contains(PREFIX) {
-        sources(root)?
-    } else {
-        BTreeMap::new()
-    };
+    let mut generated = sources(root)?;
     if parts {
-        generated.insert(
-            super::part_table::OUTPUT.to_owned(),
-            super::part_table::source(root)?,
-        );
+        generated.insert(super::parts::OUTPUT.to_owned(), super::parts::source(root)?);
     }
     file.items = items(file.items, &generated)?;
     Ok(file.to_token_stream().to_string())
@@ -122,6 +127,42 @@ pub(crate) fn expand(root: &Path, source: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_modules_support_file_and_directory_roots() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../target/export-module-roots-{}",
+            std::process::id()
+        ));
+        let api = root.join("crates/horizon-mod-api/src");
+        fs::create_dir_all(api.join("exports")).unwrap();
+        fs::create_dir_all(api.join("parts")).unwrap();
+        fs::write(
+            api.join("parts/unions.rs.in"),
+            "pub trait Registrar {} pub trait CapabilityProviders {}\n",
+        )
+        .unwrap();
+        fs::write(api.join("exports/parts.rs"), "mod parts;").unwrap();
+        for expected in [api.join("parts/mod.rs"), api.join("parts.rs")] {
+            fs::write(&expected, "").unwrap();
+            let generated = sources(&root).unwrap();
+            let file = syn::parse_file(&generated["mod_api_exports_root.rs"]).unwrap();
+            let Item::Mod(module) = &file.items[0] else {
+                panic!("export lost its module")
+            };
+            let syn::Meta::NameValue(path) = &module.attrs[0].meta else {
+                panic!("module has no path")
+            };
+            let syn::Expr::Lit(value) = &path.value else {
+                panic!("module path is not a literal")
+            };
+            let syn::Lit::Str(value) = &value.lit else {
+                panic!("module path is not a string")
+            };
+            assert_eq!(Path::new(&value.value()), expected);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn a_new_area_is_discovered_without_a_shared_list() {

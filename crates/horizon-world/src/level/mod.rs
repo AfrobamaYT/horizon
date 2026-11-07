@@ -754,6 +754,12 @@ pub trait LevelAccess {
     /// block entity at `pos`: recounts its openers and returns the previous
     /// and new counts (the caller plays open/close effects when they change),
     /// or None when there is no such block entity.
+    /// `ContainerOpenersCounter.getEntitiesWithContainerOpen` is not empty for
+    /// the container at `pos`: someone has it open (a double chest's menu
+    /// counts for both halves).
+    fn container_open(&self, _pos: BlockPos) -> bool {
+        false
+    }
     fn recheck_container_openers(&mut self, _pos: BlockPos) -> Option<(i32, i32)> {
         None
     }
@@ -954,6 +960,7 @@ pub struct Behaviours {
     shapes: Vec<VoxelShape>,
     shape_info: Vec<data::ShapeInfo>,
     pub fluid_tags: data::FluidTags,
+    fluid_definitions: HashMap<String, crate::fluid_definitions::FluidDefinition>,
     blocks: Vec<BlockData>,
     items: HashMap<String, ItemBinding>,
     potted_by_content: HashMap<BlockId, BlockId>,
@@ -965,6 +972,11 @@ pub struct Behaviours {
 }
 
 impl Behaviours {
+    /// Registered fluid state definitions from the prepared behavior data.
+    pub fn fluid_definitions(&self) -> &HashMap<String, crate::fluid_definitions::FluidDefinition> {
+        &self.fluid_definitions
+    }
+
     /// Load from a prepared client resource directory (`.local/horizon-client/<version>`).
     pub fn load(registry: &BlockRegistry, resources_dir: &Path) -> io::Result<Self> {
         data::load(registry, resources_dir)

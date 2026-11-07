@@ -8,6 +8,7 @@ pub use mod_api::render::Vertex;
 mod fluid;
 mod leaf_culling;
 mod lighting;
+mod mod_tint;
 pub mod packed;
 mod sides;
 use crate::connected::{Pick, TileLayer};
@@ -29,6 +30,8 @@ use horizon_world::{
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
+use mod_tint::ModLayer;
+pub use mod_tint::register_block_tint_sources;
 #[cfg(test)]
 pub(crate) use sides::sort_tinted;
 pub use sides::{Part, Sides, group_parts};
@@ -74,6 +77,11 @@ fn round_to_u16(v: f32) -> u16 {
 }
 /// Fixed-point steps per unit of `TerrainVertex` UVs, which span `[0, 2)`.
 pub const UV_STEPS: f32 = 32768.0;
+/// A model quad's own UVs in `TerrainVertex` fixed point, the packing
+/// `TerrainVertex::new` does, baked once per face (`BakedFace::uv_fixed`).
+pub(crate) fn baked_uv(uv: [[f32; 2]; 4]) -> [[u16; 2]; 4] {
+    uv.map(|uv| uv.map(|v| round_to_u16(v * UV_STEPS)))
+}
 /// Fixed-point steps per block of distant-terrain UVs (`TerrainVertex::tiled`),
 /// which span `[0, 2048)`: merged faces repeat their sprite once per block.
 pub const TILED_UV_STEPS: f32 = 32.0;
@@ -82,6 +90,23 @@ impl TerrainVertex {
         Self {
             pos,
             uv: uv.map(|v| round_to_u16(v * UV_STEPS)),
+            layer,
+            light,
+            color,
+        }
+    }
+    /// A vertex whose UV is already in `UV_STEPS` fixed point (a model face's
+    /// own UVs, baked in `BakedFace::uv_fixed`).
+    pub(crate) fn packed_uv(
+        pos: [f32; 3],
+        uv: [u16; 2],
+        layer: u16,
+        color: u32,
+        light: u16,
+    ) -> Self {
+        Self {
+            pos,
+            uv,
             layer,
             light,
             color,
@@ -106,6 +131,63 @@ impl TerrainVertex {
 #[cfg(test)]
 mod vertex_tests {
     use super::TerrainVertex;
+
+    #[test]
+    fn baked_face_keeps_shape_bounds_and_fixed_point_uvs() {
+        use crate::models::catalog::BakedFace;
+        use horizon_assets::{
+            bake::ModelQuad,
+            model::{Direction, Material},
+        };
+
+        let face = BakedFace::new(
+            ModelQuad {
+                positions: [
+                    [-0.25, 0.5, 0.125],
+                    [-0.25, 0.5, 0.875],
+                    [0.625, 0.5, 0.875],
+                    [0.625, 0.5, 0.125],
+                ],
+                uv: [
+                    [-0.25, f32::NAN],
+                    [1.0 / 65536.0, 3.0 / 65536.0],
+                    [1.5, 2.0],
+                    [f32::INFINITY, f32::NEG_INFINITY],
+                ],
+                facing: Direction::Up,
+                cull: None,
+                material: Material {
+                    sprite: "test:face".into(),
+                    force_translucent: false,
+                },
+                tint_index: -1,
+                shade_direction_override: None,
+                light_emission: 0,
+                light: [0; 2],
+                color: None,
+                ambient_occlusion: None,
+                render_type: None,
+                shade: true,
+            },
+            0,
+            true,
+            false,
+            None,
+        );
+        // Literal expectations: axis-ordered extrema and complements, plus
+        // clamping and half-step rounding in 1/32768 UV units.
+        let bounds: [f32; 12] = [
+            0.5, 0.5, 0.125, 0.875, -0.25, 0.625, 0.5, 0.5, 0.875, 0.125, 1.25, 0.375,
+        ];
+        for shape in face.shapes {
+            assert_eq!(shape.bounds.map(f32::to_bits), bounds.map(f32::to_bits));
+            assert!(shape.partial);
+        }
+        assert!(!face.shapes[0].cubic);
+        assert!(face.shapes[1].cubic);
+        assert_eq!(face.uv_fixed, [[0, 0], [1, 2], [49152, 65535], [65535, 0]]);
+    }
+
     #[test]
     fn model_uvs_pack_exactly() {
         for i in 0..=32 {
@@ -385,6 +467,7 @@ fn visibility(pad: &Padded, info: &[Info]) -> u64 {
 }
 /// The section's cells that are not `isSolidRender`, by row (`y << 4 | z`, bit
 /// x), from the padded rows of `MeshScratch::solid_rows`.
+#[cfg(test)]
 fn open_rows(solid: &[u32]) -> [u16; 256] {
     std::array::from_fn(|r| {
         let (y, z) = ((r >> 4) as i32, (r & 15) as i32);
@@ -489,6 +572,8 @@ fn visibility_rows(open: &[u16; 256]) -> u64 {
     result
 }
 #[cfg(test)]
+mod mod_tint_tests;
+#[cfg(test)]
 mod particle_tests;
 #[cfg(test)]
 mod visibility_tests;
@@ -507,6 +592,9 @@ enum Tint {
     Constant(u32),
     Redstone(u8),
     Stem(u8),
+    /// A block a mod registered tint sources for: its state's layers, by slot in
+    /// `MeshTables::mod_tints`.
+    Mod(u32),
 }
 /// Per-state data the mesher needs on every block, flattened for speed.
 #[derive(Clone, Copy)]
@@ -582,10 +670,8 @@ pub struct MeshTables {
     lava_still: u16,
     lava_flow: u16,
     animated_layers: Vec<bool>,
-}
-fn stem_color(age: u8) -> u32 {
-    let a = u32::from(age);
-    (a * 32) << 16 | (255 - a * 8) << 8 | (a * 4)
+    /// The layers of the states mods colour (`register_block_tint_sources`).
+    mod_tints: mod_tint::ModTints,
 }
 fn redstone_color(power: u8) -> u32 {
     // RedstoneWireBlock.COLORS
@@ -594,6 +680,56 @@ fn redstone_color(power: u8) -> u32 {
     let g = (f * f * 0.7 - 0.5).clamp(0.0, 1.0);
     let b = (f * f * 0.6 - 0.7).clamp(0.0, 1.0);
     ((r * 255.0) as u32) << 16 | ((g * 255.0) as u32) << 8 | (b * 255.0) as u32
+}
+
+fn stem_color(age: u8) -> u32 {
+    let a = u32::from(age);
+    (a * 32) << 16 | (255 - a * 8) << 8 | (a * 4)
+}
+/// `BlockTintSource.color(state)` of a vanilla tint: `grass` is `GrassColor.getDefaultColor()`.
+fn default_color(tint: Tint, grass: u32) -> Option<u32> {
+    Some(match tint {
+        Tint::None | Tint::SugarCane | Tint::Water | Tint::Mod(_) => return None,
+        Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper => grass & 0xFF_FFFF,
+        Tint::Foliage => 0x48_B518,
+        Tint::DryFoliage => 0x5C_3C32,
+        Tint::LilyPad => 0x71_C35C,
+        Tint::Constant(c) => c,
+        Tint::Redstone(p) => redstone_color(p),
+        Tint::Stem(age) => stem_color(age),
+    })
+}
+/// The [`TintSource`] a vanilla tint colours a face with in the world.
+fn source_of(tint: Tint) -> Option<TintSource> {
+    Some(match tint {
+        Tint::None | Tint::Mod(_) => return None,
+        Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper | Tint::SugarCane => {
+            TintSource::Grass
+        }
+        Tint::Foliage => TintSource::Foliage,
+        Tint::DryFoliage => TintSource::DryFoliage,
+        Tint::Water => TintSource::Water,
+        Tint::LilyPad => TintSource::Fixed(0x20_8030),
+        Tint::Constant(c) => TintSource::Fixed(c),
+        Tint::Redstone(p) => TintSource::Fixed(redstone_color(p)),
+        Tint::Stem(age) => TintSource::Fixed(stem_color(age)),
+    })
+}
+/// `BlockTintSource.colorInWorld` of a vanilla tint at section-local `[x, y, z]`, or `None`
+/// for an untinted (-1) layer.
+fn world_tint(tint: Tint, tints: &mut Tints, [x, y, z]: [i32; 3]) -> Option<u32> {
+    Some(match tint {
+        Tint::None | Tint::Mod(_) => return None,
+        Tint::Grass | Tint::GrassBlock | Tint::SugarCane => tints.get(Resolver::Grass, x, y, z),
+        Tint::TallGrassUpper => tints.get(Resolver::Grass, x, y, z),
+        Tint::Foliage => tints.get(Resolver::Foliage, x, y, z),
+        Tint::DryFoliage => tints.get(Resolver::Dry, x, y, z),
+        Tint::Water => tints.get(Resolver::Water, x, y, z),
+        Tint::Constant(c) => c,
+        Tint::LilyPad => 0x20_8030,
+        Tint::Redstone(p) => redstone_color(p),
+        Tint::Stem(age) => stem_color(age),
+    })
 }
 impl MeshTables {
     pub fn new(
@@ -742,7 +878,7 @@ impl MeshTables {
                 cover,
             });
         }
-        Ok(Self {
+        let mut tables = Self {
             solid: info.iter().map(|i| i.solid).collect(),
             full_faces: info
                 .iter()
@@ -756,7 +892,12 @@ impl MeshTables {
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
             animated_layers,
-        })
+            mod_tints: mod_tint::ModTints::default(),
+        };
+        if let Some(registered) = mod_tint::registered() {
+            tables.apply_tint_layers(assets.registry, registered);
+        }
+        Ok(tables)
     }
     /// Whether a terrain sprite layer has an animated clip.
     pub fn is_animated(&self, layer: u16) -> bool {
@@ -799,44 +940,46 @@ impl MeshTables {
         if index < 0 || index >= i32::from(info.tint_count) {
             return None;
         }
-        Some(match info.tints[index as usize] {
-            Tint::None | Tint::SugarCane | Tint::Water => return None,
-            Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper => grass & 0xFF_FFFF,
-            Tint::Foliage => 0x48_B518,
-            Tint::DryFoliage => 0x5C_3C32,
-            Tint::LilyPad => 0x71_C35C,
-            Tint::Constant(c) => c,
-            Tint::Redstone(p) => redstone_color(p),
-            Tint::Stem(age) => stem_color(age),
-        })
+        let Tint::Mod(slot) = info.tints[0] else {
+            return default_color(info.tints[index as usize], grass);
+        };
+        match &self.mod_tints.layers[slot as usize][index as usize] {
+            ModLayer::Tint(tint) => default_color(*tint, grass),
+            ModLayer::Split { hand, .. } => Some(*hand),
+            ModLayer::WaterParticles => None,
+            ModLayer::Source(source) => {
+                Some(source.color(&self.mod_tints.states[state.0 as usize]) & 0xFF_FFFF)
+            }
+        }
     }
     /// What tint source `index` (a face's `tintindex`) of `state` colours a face with in the
     /// world, for drawing the block elsewhere ([`crate::block_sprites`]): `None` for an untinted
     /// face. Grass blocks, tall grass and sugar cane are `Grass`; redstone and stems are their
-    /// colour at the state's power and age.
+    /// colour at the state's power and age. A mod's own source has no position here: its
+    /// `color(state)`.
     pub fn tint_source(&self, state: BlockStateId, index: i32) -> Option<TintSource> {
         let info = self.info.get(state.0 as usize)?;
         if index < 0 || index >= i32::from(info.tint_count) {
             return None;
         }
-        Some(match info.tints[index as usize] {
-            Tint::None => return None,
-            Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper | Tint::SugarCane => {
-                TintSource::Grass
-            }
-            Tint::Foliage => TintSource::Foliage,
-            Tint::DryFoliage => TintSource::DryFoliage,
-            Tint::Water => TintSource::Water,
-            Tint::LilyPad => TintSource::Fixed(0x20_8030),
-            Tint::Constant(c) => TintSource::Fixed(c),
-            Tint::Redstone(p) => TintSource::Fixed(redstone_color(p)),
-            Tint::Stem(age) => TintSource::Fixed(stem_color(age)),
-        })
+        let Tint::Mod(slot) = info.tints[0] else {
+            return source_of(info.tints[index as usize]);
+        };
+        match &self.mod_tints.layers[slot as usize][index as usize] {
+            ModLayer::Tint(tint) => source_of(*tint),
+            ModLayer::Split { world, .. } => Some(TintSource::Fixed(*world)),
+            ModLayer::WaterParticles => None,
+            ModLayer::Source(source) => Some(TintSource::Fixed(
+                source.color(&self.mod_tints.states[state.0 as usize]) & 0xFF_FFFF,
+            )),
+        }
     }
     /// `TerrainParticle`'s colour: tint source 0's `colorAsTerrainParticle`,
     /// which is the in-world (biome-blended) colour except on grass blocks,
     /// whose dirt crumbs stay untinted. `None` when the state has no source.
-    /// `region[dz][dx]` are the chunks around `pos`'s chunk (centre 1,1).
+    /// `region[dz][dx]` are the chunks around `pos`'s chunk (centre 1,1); `nether_shading` is
+    /// the level's `CardinalLighting.NETHER`, for a mod's source that reads it.
+    #[allow(clippy::too_many_arguments)]
     pub fn terrain_particle_tint(
         &self,
         state: BlockStateId,
@@ -845,19 +988,21 @@ impl MeshTables {
         biomes: &Biomes,
         zoom: BiomeZoom,
         blend_radius: i32,
+        nether_shading: bool,
     ) -> Option<u32> {
         let info = self.info.get(state.0 as usize)?;
-        if info.tints[0] == Tint::GrassBlock {
-            return None;
-        }
         let [x, y, z] = pos;
         let origin = [x >> 4, z >> 4, y & !15];
         let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin);
-        Mesher::tint(info, 0, &mut tints, [x & 15, y & 15, z & 15])
+        let local = [x & 15, y & 15, z & 15];
+        let tinted = (state.0, info);
+        self.tint_at(tinted, 0, &mut tints, local, nether_shading, true)
     }
     /// `BlockColors` for each of the state's tint indices at `pos`, as the
     /// chunk mesher tints them (grass blocks included): `None` for an
-    /// untinted (-1) layer. For block models drawn outside the chunk mesh.
+    /// untinted (-1) layer. For block models drawn outside the chunk mesh; `nether_shading` as
+    /// for [`MeshTables::terrain_particle_tint`].
+    #[allow(clippy::too_many_arguments)]
     pub fn block_tints(
         &self,
         state: BlockStateId,
@@ -866,21 +1011,72 @@ impl MeshTables {
         biomes: &Biomes,
         zoom: BiomeZoom,
         blend_radius: i32,
+        nether_shading: bool,
     ) -> impl Fn(i32) -> Option<u32> + use<> {
-        let sources = self.info.get(state.0 as usize).map(|info| {
-            let [x, y, z] = pos;
-            let origin = [x >> 4, z >> 4, y & !15];
-            let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin);
-            let local = [x & 15, y & 15, z & 15];
-            let colors = [0, 1].map(|i| Mesher::tint(info, i, &mut tints, local));
-            (colors, i32::from(info.tint_count))
-        });
+        let colors: Vec<Option<u32>> =
+            self.info
+                .get(state.0 as usize)
+                .map_or_else(Vec::new, |info| {
+                    let [x, y, z] = pos;
+                    let origin = [x >> 4, z >> 4, y & !15];
+                    let mut tints = Tints::new(region, biomes, zoom, blend_radius, origin);
+                    let local = [x & 15, y & 15, z & 15];
+                    (0..i32::from(info.tint_count))
+                        .map(|i| {
+                            self.tint_at(
+                                (state.0, info),
+                                i,
+                                &mut tints,
+                                local,
+                                nether_shading,
+                                false,
+                            )
+                        })
+                        .collect()
+                });
         move |index| {
-            let (colors, count) = sources?;
-            if index < 0 || index >= count {
+            usize::try_from(index)
+                .ok()
+                .and_then(|i| colors.get(i).copied().flatten())
+        }
+    }
+    /// Tint source `index` of a state (its id and info) at section-local `pos` of `tints`'
+    /// section: its `colorInWorld`, or with `particle` its `colorAsTerrainParticle`; `None` for
+    /// an untinted (-1) layer. `nether` is the level's `CardinalLighting.NETHER`.
+    fn tint_at(
+        &self,
+        (id, info): (u32, &Info),
+        index: i32,
+        tints: &mut Tints,
+        pos @ [x, y, z]: [i32; 3],
+        nether: bool,
+        particle: bool,
+    ) -> Option<u32> {
+        if index < 0 || index >= i32::from(info.tint_count) {
+            return None;
+        }
+        let Tint::Mod(slot) = info.tints[0] else {
+            let tint = info.tints[(index as usize).min(1)];
+            if particle && tint == Tint::GrassBlock {
                 return None;
             }
-            colors[(index as usize).min(1)]
+            return world_tint(tint, tints, pos);
+        };
+        match &self.mod_tints.layers[slot as usize][index as usize] {
+            ModLayer::Tint(Tint::GrassBlock) if particle => None,
+            ModLayer::Tint(tint) => world_tint(*tint, tints, pos),
+            ModLayer::Split { world, .. } => Some(*world),
+            ModLayer::WaterParticles if particle => Some(tints.get(Resolver::Water, x, y, z)),
+            ModLayer::WaterParticles => None,
+            ModLayer::Source(source) => Some(mod_tint::ask(
+                self,
+                &**source,
+                (id, index),
+                tints,
+                pos,
+                nether,
+                particle,
+            )),
         }
     }
     /// `ModelBlockRenderer.tesselateFlat`'s light coords (`LightCoordsUtil`
@@ -929,6 +1125,12 @@ const P: usize = 16 + 2 * B as usize;
 fn pi(x: i32, y: i32, z: i32) -> usize {
     ((y + B) as usize * P + (z + B) as usize) * P + (x + B) as usize
 }
+/// `pi`'s index offset of a step `n`: `pi(p + n) - pi(p)`, so the samples
+/// around a cell are `base + step_index(n)` rather than another `pi`.
+#[inline]
+const fn step_index(n: [i32; 3]) -> isize {
+    (n[0] + P as i32 * n[2] + (P * P) as i32 * n[1]) as isize
+}
 /// Blocks and light of one section plus a `B`-block border.
 #[derive(Default)]
 struct Padded {
@@ -950,10 +1152,11 @@ impl Padded {
         // The section itself is unpacked in one pass and copied row by row;
         // the border cells of the neighbouring sections are read in runs, from
         // sections found once per layer.
-        own.fill(0);
         let center = region[1][1];
         if let Some(c) = center {
             c.sections[sy as usize].unpack(own);
+        } else {
+            own.fill(0);
         }
         for y in -B..16 + B {
             let wy = base_y + y;
@@ -1038,6 +1241,29 @@ fn fill_run(
         },
     }
 }
+// Direction order is the same as Direction::ALL; all values are evaluated at compile time.
+const DIRECTIONS: [(Direction, [i32; 3], u8); 6] = [
+    direction_info(Direction::Down),
+    direction_info(Direction::Up),
+    direction_info(Direction::North),
+    direction_info(Direction::South),
+    direction_info(Direction::West),
+    direction_info(Direction::East),
+];
+const fn direction_info(d: Direction) -> (Direction, [i32; 3], u8) {
+    (d, d.normal(), d.opposite() as u8)
+}
+/// `step_index` of each direction's normal, indexed like `DIRECTIONS`: the
+/// padded index of a block's neighbour is its own plus one of these.
+const OFFSETS: [isize; 6] = {
+    let mut out = [0isize; 6];
+    let mut i = 0;
+    while i < 6 {
+        out[i] = step_index(DIRECTIONS[i].1);
+        i += 1;
+    }
+    out
+};
 /// Per-worker temporary arrays. They never hold resource-pack references or
 /// geometry still owned by the renderer, and total about 150 KiB per worker
 /// (the leaf mask adds 8,000 cells, depths and a queue).
@@ -1053,21 +1279,63 @@ pub struct MeshScratch {
 /// Fills `rows` with the padded section's `isSolidRender` blocks, one bit each (`MeshScratch::solid_rows`).
 fn solid_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
     rows.clear();
-    rows.extend(pad.blocks.as_chunks::<P>().0.iter().map(|row| {
-        row.iter().enumerate().fold(0u32, |bits, (x, &id)| {
-            bits | u32::from(solid[id as usize]) << x
-        })
-    }));
+    for row in pad.blocks.as_chunks::<P>().0 {
+        let mut bits = 0;
+        for (x, &id) in row.iter().enumerate() {
+            bits |= u32::from(solid[id as usize]) << x;
+        }
+        rows.push(bits);
+    }
 }
-/// Whether the block at `(x, y, z)` (section-local) and its six neighbours
-/// are all `isSolidRender`: none of its faces can show.
-#[inline]
-fn hidden(rows: &[u32], x: i32, y: i32, z: i32) -> bool {
-    let row = |y: i32, z: i32| rows[((y + B) as usize) * P + (z + B) as usize];
-    let r = row(y, z);
-    let around =
-        r & r << 1 & r >> 1 & row(y - 1, z) & row(y + 1, z) & row(y, z - 1) & row(y, z + 1);
-    around >> (x + B) & 1 != 0
+/// Open and fully surrounded cells in each inner row.
+fn row_masks(rows: &[u32]) -> ([u16; 256], [u16; 256]) {
+    let mut open = [0; 256];
+    let mut hidden = [0; 256];
+    for y in 0..16 {
+        for z in 0..16 {
+            let i = (y + B as usize) * P + z + B as usize;
+            let r = rows[i];
+            let around =
+                r & r << 1 & r >> 1 & rows[i - P] & rows[i + P] & rows[i - 1] & rows[i + 1];
+            open[y * 16 + z] = !(r >> B) as u16;
+            hidden[y * 16 + z] = (around >> B) as u16;
+        }
+    }
+    (open, hidden)
+}
+#[cfg(test)]
+#[test]
+fn row_masks_match_cell_definition() {
+    let mut seed = 42u32;
+    for _ in 0..100 {
+        let rows: Vec<u32> = (0..P * P)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed & ((1 << P) - 1)
+            })
+            .collect();
+        let (open, hidden) = row_masks(&rows);
+        for y in 0..16 {
+            for z in 0..16 {
+                let cell = |x: usize, y: usize, z: usize| (rows[y * P + z] >> x) & 1 != 0;
+                for x in 0..16 {
+                    let (x, py, pz) = (x + B as usize, y + B as usize, z + B as usize);
+                    let occupied = cell(x, py, pz);
+                    let enclosed = occupied
+                        && cell(x - 1, py, pz)
+                        && cell(x + 1, py, pz)
+                        && cell(x, py - 1, pz)
+                        && cell(x, py + 1, pz)
+                        && cell(x, py, pz - 1)
+                        && cell(x, py, pz + 1);
+                    assert_eq!((open[y * 16 + z] >> (x - B as usize)) & 1 != 0, !occupied);
+                    assert_eq!((hidden[y * 16 + z] >> (x - B as usize)) & 1 != 0, enclosed);
+                }
+            }
+        }
+    }
 }
 #[cfg(test)]
 mod leaf_culling_tests;
@@ -1189,6 +1457,11 @@ struct Tints<'a> {
     layers: [Option<Box<Layer>>; 16],
     /// `uniform_biome`, once computed.
     uniform: Option<Option<u16>>,
+    /// The block a mod's own source last coloured (section-local position and state) and its
+    /// colours by tint index: vanilla asks a source once per block and index while it meshes
+    /// (`ModelBlockRenderer.computeTintColor`).
+    asked: Option<([i32; 3], u32)>,
+    asked_colors: Vec<(i32, u32)>,
 }
 impl<'a> Tints<'a> {
     fn new(
@@ -1207,6 +1480,8 @@ impl<'a> Tints<'a> {
             origin,
             layers: Default::default(),
             uniform: None,
+            asked: None,
+            asked_colors: Vec::new(),
         }
     }
     /// The biome of block `(x, y, z)` (section-local x/z, y in 0..16), as `BiomeManager.getBiome`
@@ -1447,7 +1722,8 @@ impl Mesher<'_> {
         let pad = &scratch.padded;
         solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
         let opaque = &scratch.solid_rows;
-        out.visibility = visibility_rows(&open_rows(opaque));
+        let (open, hidden) = row_masks(opaque);
+        out.visibility = visibility_rows(&open);
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
             scratch
@@ -1467,8 +1743,12 @@ impl Mesher<'_> {
         let mut models = Vec::new();
         for y in 0..16 {
             for z in 0..16 {
+                // The padded index of the row's x = 0 cell: `pi(x, y, z)` is
+                // `row + x` and a neighbour adds `OFFSETS[d]`.
+                let row = pi(0, y, z);
                 for x in 0..16 {
-                    let id = pad.blocks[pi(x, y, z)];
+                    let cell = row + x as usize;
+                    let id = pad.blocks[cell];
                     if id == 0 {
                         continue;
                     }
@@ -1481,7 +1761,7 @@ impl Mesher<'_> {
                         out.lights
                             .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
                     }
-                    if hidden(opaque, x, y, z) {
+                    if hidden[(y * 16 + z) as usize] >> x & 1 != 0 {
                         continue;
                     }
                     if state.fluid.kind() != FluidKind::Empty {
@@ -1522,12 +1802,11 @@ impl Mesher<'_> {
                     let interior_leaf = state.leaves
                         && self.leaf_culling.is_interior()
                         && scratch.leaf.interior(self.leaf_culling, x, y, z);
-                    for d in Direction::ALL {
-                        let [dx, dy, dz] = d.normal();
-                        let neighbor = pad.blocks[pi(x + dx, y + dy, z + dz)];
+                    for (d, [dx, dy, dz], opposite) in DIRECTIONS {
+                        let neighbor = pad.blocks[(cell as isize + OFFSETS[d as usize]) as usize];
                         // `should_render_face`'s first test, without its lookups: a
                         // full occlusion face toward this block hides the face.
-                        if full_faces[neighbor as usize] >> d.opposite() as u8 & 1 != 0 {
+                        if full_faces[neighbor as usize] >> opposite & 1 != 0 {
                             continue;
                         }
                         let other = &info[neighbor as usize];
@@ -1584,7 +1863,8 @@ impl Mesher<'_> {
                                 let on_edge = p.iter().all(|v| (v[1] - plane).abs() < 1e-4);
                                 let centre =
                                     [0, 2].map(|k| p.iter().map(|v| v[k]).sum::<f32>() / 4.0);
-                                let other = pad.blocks[pi(x, y + dy, z)];
+                                let other =
+                                    pad.blocks[(cell as isize + step_index([0, dy, 0])) as usize];
                                 if on_edge && connected.stacked_pane_hides(id, other, centre) {
                                     continue;
                                 }
@@ -1594,6 +1874,7 @@ impl Mesher<'_> {
                                 &mut tints,
                                 &mut out,
                                 [x, y, z],
+                                cell,
                                 origin,
                                 face,
                                 ao,
@@ -1609,24 +1890,6 @@ impl Mesher<'_> {
         out.finish_sprite_layers();
         out
     }
-    /// `BlockColors` tint source `index`, or `None` for an untinted (-1) layer.
-    fn tint(state: &Info, index: i32, tints: &mut Tints, [x, y, z]: [i32; 3]) -> Option<u32> {
-        if index < 0 || index >= i32::from(state.tint_count) {
-            return None;
-        }
-        Some(match state.tints[(index as usize).min(1)] {
-            Tint::None => return None,
-            Tint::Grass | Tint::GrassBlock | Tint::SugarCane => tints.get(Resolver::Grass, x, y, z),
-            Tint::TallGrassUpper => tints.get(Resolver::Grass, x, y, z),
-            Tint::Foliage => tints.get(Resolver::Foliage, x, y, z),
-            Tint::DryFoliage => tints.get(Resolver::Dry, x, y, z),
-            Tint::Water => tints.get(Resolver::Water, x, y, z),
-            Tint::Constant(c) => c,
-            Tint::LilyPad => 0x20_8030,
-            Tint::Redstone(p) => redstone_color(p),
-            Tint::Stem(age) => stem_color(age),
-        })
-    }
     #[allow(clippy::too_many_arguments)]
     fn face(
         &self,
@@ -1634,6 +1897,7 @@ impl Mesher<'_> {
         tints: &mut Tints,
         out: &mut SectionMesh,
         pos: [i32; 3],
+        cell: usize,
         origin: [f32; 3],
         face: &BakedFace,
         ao: bool,
@@ -1658,11 +1922,14 @@ impl Mesher<'_> {
         } else {
             lighting::cardinal(self.nether_shading, shade_face)
         };
+        // The quad's shape (bounds, partial, cubic), baked per face for full and
+        // non-full blocks: a pure function of the quad and the block's `full`.
+        let shape = &face.shapes[usize::from(state.full)];
         // Grey level per vertex before tinting, vanilla light coords, and ambient occlusion factor.
         let (gray, coords, ao_factor) = if ao {
             let info = &self.tables.info;
             let (brightness, coords) =
-                lighting::ambient_occlusion(pad, info, state, pos, &q.positions, q.facing);
+                lighting::ambient_occlusion(pad, info, state, pos, shape, q.facing);
             let gray = if self.separate_ao {
                 [lighting::gray(directional); 4]
             } else {
@@ -1672,11 +1939,18 @@ impl Mesher<'_> {
         } else {
             let coords = match q.cull {
                 Some(d) => lighting::coords(pad, state, lighting::step(pos, d)),
-                None => lighting::flat(pad, state, pos, &q.positions, q.facing),
+                None => lighting::flat_shaped(pad, state, pos, q.facing, shape),
             };
             ([lighting::gray(directional); 4], [coords; 4], [1.0f32; 4])
         };
-        let tint = Self::tint(state, q.tint_index, tints, pos);
+        let tint = self.tables.tint_at(
+            (id, state),
+            q.tint_index,
+            tints,
+            pos,
+            self.nether_shading,
+            false,
+        );
         let tint = match q.color {
             Some(c) => {
                 let t = tint.unwrap_or(0xFF_FFFF);
@@ -1696,8 +1970,7 @@ impl Mesher<'_> {
                 count += 1;
             }
         };
-        let neighbour =
-            |[dx, dy, dz]: [i32; 3]| pad.blocks[pi(pos[0] + dx, pos[1] + dy, pos[2] + dz)];
+        let neighbour = |n: [i32; 3]| pad.blocks[(cell as isize + step_index(n)) as usize];
         let fused = face.fusion.and_then(|rule| {
             fusion.pick(
                 rule,
@@ -1738,44 +2011,41 @@ impl Mesher<'_> {
                 &mut push,
             )
         };
+        let vertex = |tint: Option<u32>, i: usize, uv: [u16; 2]| {
+            let g = gray[i] as u32;
+            let rgb = match tint {
+                Some(t) => [16, 8, 0].map(|shift| g * (t >> shift & 255) / 255),
+                None => [g; 3],
+            };
+            let p = q.positions[i];
+            let color = if self.separate_ao {
+                let ao_byte = (ao_factor[i] * 255.0).round().clamp(0.0, 255.0) as u32;
+                ao_byte << 24 | (pack_rgb(rgb) & 0x00FF_FFFF)
+            } else {
+                emitting(pack_rgb(rgb), tier)
+            };
+            TerrainVertex::packed_uv(
+                [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
+                uv,
+                0,
+                color,
+                pack_coords(lighting::with_min(coords[i], q.light)),
+            )
+        };
         let vertices = |tint: Option<u32>, uv: [[f32; 2]; 4]| {
-            std::array::from_fn::<_, 4, _>(|i| {
-                let g = gray[i] as u32;
-                let rgb = match tint {
-                    Some(t) => [16, 8, 0].map(|shift| g * (t >> shift & 255) / 255),
-                    None => [g; 3],
-                };
-                let p = q.positions[i];
-                let color = if self.separate_ao {
-                    let ao_byte = (ao_factor[i] * 255.0).round().clamp(0.0, 255.0) as u32;
-                    ao_byte << 24 | (pack_rgb(rgb) & 0x00FF_FFFF)
-                } else {
-                    emitting(pack_rgb(rgb), tier)
-                };
-                (
-                    TerrainVertex::new(
-                        [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
-                        uv[i],
-                        0,
-                        color,
-                        pack_coords(lighting::with_min(coords[i], q.light)),
-                    ),
-                    uv[i],
-                )
-            })
+            let fixed = uv.map(|uv| uv.map(|v| round_to_u16(v * UV_STEPS)));
+            std::array::from_fn::<_, 4, _>(|i| (vertex(tint, i, fixed[i]), uv[i]))
         };
         // Vanilla's pane models mirror some faces' textures; OptiFine's don't, so a tile's borders
         // land where the neighbours are: on a pane, tiles take the cube's own UVs.
         let standard = || q.positions.map(|p| standard_uv(q.facing, p));
         let tiled = !matches!(pick, Pick::Keep);
-        let corners = vertices(
-            tint,
-            if state.pane && tiled {
-                standard()
-            } else {
-                q.uv
-            },
-        );
+        let corners = if state.pane && tiled {
+            vertices(tint, standard())
+        } else {
+            // The face's own UVs, already packed: no per-vertex rounding.
+            std::array::from_fn(|i| (vertex(tint, i, face.uv_fixed[i]), q.uv[i]))
+        };
         // Opaque leaves (forceOpaque) and leaves a leaf-culling mode proved internal draw in the
         // solid layer whatever their sprite.
         let solid_leaves = !self.cutout_leaves && state.leaves || interior_leaf;
@@ -1837,10 +2107,11 @@ impl Mesher<'_> {
         };
         for overlay in overlays[..count].iter().flatten().copied() {
             let tint = overlay.tint.and_then(|(index, block)| {
-                let info = block
-                    .and_then(|b| self.tables.info.get(b as usize))
-                    .unwrap_or(state);
-                Self::tint(info, index, tints, pos)
+                let tinted = block
+                    .and_then(|b| self.tables.info.get(b as usize).map(|info| (b, info)))
+                    .unwrap_or((id, state));
+                self.tables
+                    .tint_at(tinted, index, tints, pos, self.nether_shading, false)
             });
             let tile = TileLayer::Layer {
                 layer: overlay.layer,

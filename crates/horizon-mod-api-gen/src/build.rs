@@ -1,5 +1,5 @@
 //! Cargo-facing generation: the mod API's and the game's generated files.
-use super::{Catalog, Target, free_function_source, native_hook_files, sources};
+use super::{Catalog, Target, free_function_source, host, native_hook_files, sources};
 use quote::ToTokens;
 use std::{fs, path::Path};
 
@@ -21,7 +21,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
                     &root.join("crates/horizon-client/src/game/network/lan_actions"),
                 )?,
             ),
-            ("mod_api_host_generated.rs", generated.implementation),
+            ("game_host_modules.rs", game_host_modules(root)?),
             ("mod_api_fire_generated.rs", generated.fire),
             // The mob tick's goal read view (#1077), included beside the
             // engine's `GoalCx` in `mobs/part_goals.rs`.
@@ -29,8 +29,8 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         ],
         Target::Api => {
             fs::write(
-                out_dir.join(super::part_table::OUTPUT),
-                super::part_table::source(root)?,
+                out_dir.join(super::parts::OUTPUT),
+                super::parts::source(root)?,
             )
             .map_err(|e| e.to_string())?;
             for (name, code) in super::exports::sources(root)? {
@@ -38,6 +38,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             }
             let hooks = generated.hooks;
             let included = [
+                (host::AREAS_OUTPUT, generated.areas.as_str()),
                 ("mod_api_generated.rs", hooks.as_str()),
                 ("mod_api_generated_host.rs", generated.host.as_str()),
                 ("native_render_generated.rs", generated.render.as_str()),
@@ -56,6 +57,7 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
             }
             fs::write(out_dir.join("mod-api.wit"), &wasm.wit).map_err(|e| e.to_string())?;
             vec![
+                (host::AREAS_OUTPUT, generated.areas),
                 ("mod_api_generated.rs", hooks),
                 ("mod_api_generated_host.rs", generated.host),
                 ("native_render_generated.rs", generated.render),
@@ -89,7 +91,22 @@ pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
     Ok(modules)
 }
 
-/// `horizon-mod-points`' generated file: each point's record, `PointId` and the `Points` trait,
+/// The game's side of the host traits: one module for each area file of `game/host/`.
+pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
+    let dir = root.join("crates/horizon-client/src/game/host");
+    let mut modules = String::new();
+    for stem in ["draw", "services"] {
+        let path = fs::canonicalize(dir.join(format!("{stem}.rs"))).map_err(|e| e.to_string())?;
+        modules.push_str(&format!("#[path = {path:?}] pub(crate) mod {stem};\n"));
+    }
+    modules.push_str(&format!(
+        "mod generated {{\n{}\n}}\n",
+        host::game_forwarders(root)?
+    ));
+    Ok(modules)
+}
+
+/// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");
@@ -101,7 +118,8 @@ pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    let code = super::points::records(&super::points::game_points(root)?)
+    let private = super::points::source::build_input(root)?;
+    let code = super::points::records(&super::points::game_points(root)?, &private)
         + &super::sites::ids(root).map_err(|e| e.to_string())?;
     let generated = syn::parse_file(&code).map_err(|e| format!("generated Rust: points: {e}"))?;
     // A single multi-megabyte line makes Clippy's source lookups prohibitively slow.
@@ -141,7 +159,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
-    directory(&root.join(super::part_table::DIRECTORY), "rs", false)?;
+    directory(&root.join("crates/horizon-mod-api/src/parts"), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

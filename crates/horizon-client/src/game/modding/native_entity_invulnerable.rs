@@ -36,7 +36,7 @@ impl Game<'_> {
     /// keeps no such field yet), the other kinds in the saved `Invulnerable`
     /// tag of their entity data (#916) — the tag the item damage path
     /// already refuses by.
-    pub(super) fn native_entity_permanently_invulnerable(&self, entity: EntityRef) -> Option<bool> {
+    pub(super) fn entity_permanently_invulnerable(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_flag),
             t @ (Target::Player | Target::Guest(_)) => {
@@ -50,10 +50,10 @@ impl Game<'_> {
         }
     }
     /// `Entity.setInvulnerable`: the write side of
-    /// [`native_entity_permanently_invulnerable`](Self::native_entity_permanently_invulnerable):
+    /// [`entity_permanently_invulnerable`](Self::entity_permanently_invulnerable):
     /// a mob's flag (saved with it), a player's body, the saved tag for the
     /// other kinds. False where the entity is gone.
-    pub(super) fn native_entity_set_invulnerable(
+    pub(super) fn entity_set_invulnerable(
         &mut self,
         entity: EntityRef,
         invulnerable: bool,
@@ -110,7 +110,7 @@ impl Game<'_> {
     /// cooldown — and the saved `invulnerable_time` tag for the other kinds.
     /// Counted down by the base tick; `isTemporarilyInvulnerable` is it above
     /// zero. None for a stale handle or a kind that keeps none.
-    pub(super) fn native_entity_invulnerable_time(&self, entity: EntityRef) -> Option<i32> {
+    pub(super) fn entity_invulnerable_time(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_time),
             t @ (Target::Player | Target::Guest(_)) => {
@@ -122,7 +122,7 @@ impl Game<'_> {
     /// `Entity.setInvulnerableTime` (#916): the write side of
     /// [`native_entity_invulnerable_time`](Self::native_entity_invulnerable_time).
     /// False where the entity is gone or keeps no such field.
-    pub(super) fn native_entity_set_invulnerable_time(
+    pub(super) fn entity_set_invulnerable_time(
         &mut self,
         entity: EntityRef,
         ticks: i32,
@@ -230,7 +230,7 @@ impl Game<'_> {
     /// `LivingEntity.damageCooldownTime`: 20 after a hit, counting down;
     /// while it is above 10 a hit does only what it deals beyond the last
     /// one. Mobs and players.
-    pub(super) fn native_entity_damage_cooldown_time(&self, entity: EntityRef) -> Option<i32> {
+    pub(super) fn entity_damage_cooldown_time(&self, entity: EntityRef) -> Option<i32> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable),
             t => Some(self.native_player_body(t)?.health.hurt.cooldown),
@@ -238,7 +238,7 @@ impl Game<'_> {
     }
     /// Sets `LivingEntity.damageCooldownTime`, as mods do to let rapid hits
     /// through (0). Mobs and players.
-    pub(super) fn native_entity_set_damage_cooldown_time(
+    pub(super) fn entity_set_damage_cooldown_time(
         &mut self,
         entity: EntityRef,
         ticks: i32,
@@ -282,27 +282,21 @@ mod tests {
                 .get("minecraft:zombie")
                 .unwrap()
                 .clone();
-            game.mobs
-                .push(Mob::new(12, zombie, Vec3::new(0.5, 64.0, 0.5), 0.0));
-            game.mobs[0].persistent = true;
-            floor(game);
-            let mob = game.native_entity(12).unwrap();
-            assert_eq!(
-                game.native_entity_permanently_invulnerable(mob),
-                Some(false)
-            );
-            assert!(game.native_entity_set_invulnerable(mob, true));
-            assert_eq!(game.native_entity_permanently_invulnerable(mob), Some(true));
+            game.mobs.push(Mob::new(12, zombie, Vec3::ZERO, 0.0));
+            let mob = game.entity(12).unwrap();
+            assert_eq!(game.entity_permanently_invulnerable(mob), Some(false));
+            assert!(game.entity_set_invulnerable(mob, true));
+            assert_eq!(game.entity_permanently_invulnerable(mob), Some(true));
             assert!(game.mobs[0].invulnerable_flag);
-            assert_eq!(game.native_entity_damage_cooldown_time(mob), Some(0));
-            assert!(game.native_entity_set_damage_cooldown_time(mob, 20));
+            assert_eq!(game.entity_damage_cooldown_time(mob), Some(0));
+            assert!(game.entity_set_damage_cooldown_time(mob, 20));
             assert_eq!(game.mobs[0].invulnerable, 20);
-            assert_eq!(game.native_entity_damage_cooldown_time(mob), Some(20));
+            assert_eq!(game.entity_damage_cooldown_time(mob), Some(20));
             let stale = EntityRef::new(NativeWorldEpoch::new(mob.epoch().get() + 1), 12);
-            assert_eq!(game.native_entity_permanently_invulnerable(stale), None);
-            assert!(!game.native_entity_set_invulnerable(stale, false));
-            assert_eq!(game.native_entity_damage_cooldown_time(stale), None);
-            assert!(!game.native_entity_set_damage_cooldown_time(stale, 0));
+            assert_eq!(game.entity_permanently_invulnerable(stale), None);
+            assert!(!game.entity_set_invulnerable(stale, false));
+            assert_eq!(game.entity_damage_cooldown_time(stale), None);
+            assert!(!game.entity_set_damage_cooldown_time(stale, 0));
             assert!(game.mobs[0].invulnerable_flag);
         });
     }
@@ -317,20 +311,20 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
-            let player = game.native_entity(20).unwrap();
+            let player = game.entity(20).unwrap();
             game.armor_stands
                 .push(horizon_client::entities::ArmorStand::new(14, Vec3::ZERO, 0.0));
-            let stand = game.native_entity(14).unwrap();
+            let stand = game.entity(14).unwrap();
 
             // A player's flag, on their body, refusing their damage — and
             // `#bypasses_invulnerability` still getting past.
             assert_eq!(
-                game.native_entity_permanently_invulnerable(player),
+                game.entity_permanently_invulnerable(player),
                 Some(false)
             );
-            assert!(game.native_entity_set_invulnerable(player, true));
+            assert!(game.entity_set_invulnerable(player, true));
             assert_eq!(
-                game.native_entity_permanently_invulnerable(player),
+                game.entity_permanently_invulnerable(player),
                 Some(true)
             );
             game.hurt_player_by("minecraft:generic", 5.0);
@@ -348,16 +342,16 @@ mod tests {
             // A stand without saved data reads false, and the write lands in
             // the saved `Invulnerable` tag the item damage path refuses by.
             assert_eq!(
-                game.native_entity_permanently_invulnerable(stand),
+                game.entity_permanently_invulnerable(stand),
                 Some(false)
             );
-            assert!(game.native_entity_set_invulnerable(stand, true));
-            assert_eq!(game.native_entity_permanently_invulnerable(stand), Some(true));
+            assert!(game.entity_set_invulnerable(stand, true));
+            assert_eq!(game.entity_permanently_invulnerable(stand), Some(true));
             let raw = game.persist.raw.get(&14).cloned().unwrap();
             assert!(horizon_client::entity_nbt::flag(&raw, "Invulnerable"));
             // The timer tag rides along the same compound.
-            assert!(game.native_entity_set_invulnerable_time(stand, 12));
-            assert_eq!(game.native_entity_invulnerable_time(stand), Some(12));
+            assert!(game.entity_set_invulnerable_time(stand, 12));
+            assert_eq!(game.entity_invulnerable_time(stand), Some(12));
             let raw = game.persist.raw.get(&14).cloned().unwrap();
             assert!(matches!(
                 raw.get("invulnerable_time"),
@@ -409,29 +403,29 @@ mod tests {
             game.mobs
                 .push(Mob::new(13, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
             floor(game);
-            let mob = game.native_entity(12).unwrap();
-            let mob_ref = game.native_mob_ref(game.native_entity(12).unwrap()).unwrap();
+            let mob = game.entity(12).unwrap();
+            let mob_ref = game.native_mob_ref(game.entity(12).unwrap()).unwrap();
             assert!(mob_ref.set_persistence_required(game));
             assert!(mob_ref.set_no_action_time(game, 650));
 
             // Different fields, counted down side by side by the base tick.
-            assert!(game.native_entity_set_damage_cooldown_time(mob, 15));
-            assert!(game.native_entity_set_invulnerable_time(mob, 5));
+            assert!(game.entity_set_damage_cooldown_time(mob, 15));
+            assert!(game.entity_set_invulnerable_time(mob, 5));
             game.tick_mobs().unwrap();
-            assert_eq!(game.native_entity_damage_cooldown_time(mob), Some(14));
-            assert_eq!(game.native_entity_invulnerable_time(mob), Some(4));
+            assert_eq!(game.entity_damage_cooldown_time(mob), Some(14));
+            assert_eq!(game.entity_invulnerable_time(mob), Some(4));
             game.mobs.clear();
 
             // The player's two, on the same clock.
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
-            let player = game.native_entity(20).unwrap();
-            assert!(game.native_entity_set_damage_cooldown_time(player, 7));
-            assert!(game.native_entity_set_invulnerable_time(player, 3));
+            let player = game.entity(20).unwrap();
+            assert!(game.entity_set_damage_cooldown_time(player, 7));
+            assert!(game.entity_set_invulnerable_time(player, 3));
             game.player.as_mut().unwrap().health.advance_clock();
-            assert_eq!(game.native_entity_damage_cooldown_time(player), Some(6));
-            assert_eq!(game.native_entity_invulnerable_time(player), Some(2));
+            assert_eq!(game.entity_damage_cooldown_time(player), Some(6));
+            assert_eq!(game.entity_invulnerable_time(player), Some(2));
 
             // A mob's flag and timer survive a save and a load, as vanilla
             // writes them (`Invulnerable`, `invulnerable_time`).
@@ -481,10 +475,10 @@ mod tests {
             game.mobs
                 .push(Mob::new(13, zombie, Vec3::new(5.5, 64.0, 0.5), 0.0));
             floor(game);
-            let victim = game.native_entity(12).unwrap();
-            let enemy = game.native_entity(13).unwrap();
+            let victim = game.entity(12).unwrap();
+            let enemy = game.entity(13).unwrap();
             let keep = |game: &mut super::Game<'_>| {
-                let m = game.native_mob_ref(game.native_entity(12).unwrap()).unwrap();
+                let m = game.native_mob_ref(game.entity(12).unwrap()).unwrap();
                 m.set_persistence_required(game);
                 m.set_no_action_time(game, 650);
             };
@@ -492,7 +486,7 @@ mod tests {
 
             // The window refuses a hit nothing-bypassing; the void goes
             // through (`Entity.isInvulnerableToBase`).
-            assert!(game.native_entity_set_invulnerable_time(victim, 60));
+            assert!(game.entity_set_invulnerable_time(victim, 60));
             let before = game.mobs[0].health;
             assert!(!game.mobs[0].damage(
                 crate::game::entity::damage_level_of!(game),
@@ -537,11 +531,11 @@ mod tests {
             game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
             game.lan_acting_uuid = Some(123);
             game.lan_acting_entity = Some(20);
-            let player = game.native_entity(20).unwrap();
+            let player = game.entity(20).unwrap();
 
             // The window refuses an ordinary hit; a creative player's
             // `player_attack` passes it (`DamageSource.isCreativePlayer`).
-            assert!(game.native_entity_set_invulnerable_time(player, 60));
+            assert!(game.entity_set_invulnerable_time(player, 60));
             game.mob_hits_player(5.0, [0.0; 3], "minecraft:player_attack");
             assert_eq!(
                 game.player.as_ref().unwrap().health.health(),
@@ -562,7 +556,7 @@ mod tests {
 
             // The permanent flag is not the abilities: set_invulnerable
             // leaves `Abilities.invulnerable` alone.
-            assert!(game.native_entity_set_invulnerable(player, true));
+            assert!(game.entity_set_invulnerable(player, true));
             assert!(
                 !game.player.as_ref().unwrap().invulnerable,
                 "the abilities are untouched"
@@ -604,17 +598,17 @@ mod tests {
         super::super::native_entity_refs::tests::with_game(|game| {
             game.armor_stands
                 .push(ArmorStand::new(14, Vec3::new(0.5, 64.0, 0.5), 0.0));
-            let stand = game.native_entity(14).unwrap();
-            assert!(game.native_entity_set_invulnerable_time(stand, 20));
+            let stand = game.entity(14).unwrap();
+            assert!(game.entity_set_invulnerable_time(stand, 20));
             // Entity.baseTick, over the saved tag.
             game.tick_saved_invulnerable_time(14);
             game.tick_saved_invulnerable_time(14);
-            assert_eq!(game.native_entity_invulnerable_time(stand), Some(18));
+            assert_eq!(game.entity_invulnerable_time(stand), Some(18));
             // Down to zero it stays, and reads as no window.
             for _ in 0..18 {
                 game.tick_saved_invulnerable_time(14);
             }
-            assert_eq!(game.native_entity_invulnerable_time(stand), Some(0));
+            assert_eq!(game.entity_invulnerable_time(stand), Some(0));
         });
     }
 
@@ -630,8 +624,8 @@ mod tests {
             let mut dragon = Dragon::new(Vec3::ZERO, 0.0, 0);
             dragon.id = 15;
             game.dragon = Some(dragon);
-            let entity = game.native_entity(15).unwrap();
-            assert!(game.native_entity_set_invulnerable(entity, true));
+            let entity = game.entity(15).unwrap();
+            assert!(game.entity_set_invulnerable(entity, true));
 
             // A survival player's blow: refused.
             game.creative = false;

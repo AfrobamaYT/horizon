@@ -32,7 +32,7 @@ pub(super) fn heart_signal(world: &horizon_client::world::World, pos: BlockPos) 
 
 /// The game's mobs as a heart sees them, taken out of the game for the tick.
 struct Host<'a> {
-    mobs: &'a mut Vec<Mob>,
+    mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     added: Vec<Mob>,
     uuids: &'a mut HashMap<u32, [i32; 4]>,
     creaking: Option<Arc<MobType>>,

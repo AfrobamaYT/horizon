@@ -10,6 +10,7 @@ description = "Downloads, prepares and starts Horizon builds"
 [dependencies]
 # The catalog and mod-owned trait injections share their generation rules.
 horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
+horizon-mod-point-shape = { path = "../crates/horizon-mod-point-shape" }
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
 # its own name. wgpu renders on Linux, not blade (#3812).
 gpui = { package = "gpui-fast", version = "0.1.13" }
@@ -52,7 +53,9 @@ horizon-bench = { path = "../crates/horizon-bench" }
 # Import modpack: the porting pipeline, run on the player's own files (docs/modpacks.md).
 horizon-port-pack = { path = "../crates/horizon-port-pack" }
 # Horizon's mod registry: its index and the checks a download passes before install.
-horizon-mods = { path = "../crates/horizon-mods", features = ["index"] }
+horizon-mod-package = { path = "../crates/horizon-mod-package", features = ["index"] }
+# Use the game's manifest validation for native shader identities.
+horizon-shader-api = { path = "../crates/horizon-shader-api" }
 # Signed updates: archives are checked against the release's signed checksums (docs/security.md).
 horizon-release-sign = { path = "../crates/horizon-release-sign" }
 # Hardware probes and the scrubber for local bug reports (nothing is sent, docs/telemetry.md).
@@ -73,6 +76,8 @@ getrandom = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 # Screenshots read a row at a time and shrunk as they come (`pictures`): the version `image` uses.
 png = "0.18"
+cap-std = "3"
+cap-fs-ext = "3"
 
 # Native builds at low priority (rust_toolchain::low_priority); already in the lockfile.
 [target.'cfg(unix)'.dependencies]
@@ -109,6 +114,7 @@ winreg = "0.56"
 winresource = "0.1"
 
 [dev-dependencies]
+tempfile = "3"
 # Tokenize source strings for the translation completeness test, including multiline calls.
 syn = "2"
 

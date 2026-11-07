@@ -24,7 +24,7 @@ pub(super) struct Raiding {
     patrol: PatrolSpawner,
     siege: Siege,
     /// The raids of the dimension the player is in, and that dimension.
-    raids: Raids,
+    pub(super) raids: Raids,
     loaded: Option<Dim>,
     /// `ServerPlayer.raidOmenPosition` (`raid_omen_position`), read from the
     /// player data on first use.
@@ -123,8 +123,10 @@ impl RaidLevel for Lvl<'_, '_> {
     fn surface_height(&self, x: i32, z: i32) -> i32 {
         self.game.surface_height(x, z)
     }
+    /// `ServerLevel.isPositionEntityTicking`: a loaded chunk whose entities
+    /// tick (`canPositionTick`) in entity ticking range, not merely loaded.
     fn is_position_entity_ticking(&self, p: [i32; 3]) -> bool {
-        self.has_chunk_at(p)
+        self.has_chunk_at(p) && self.game.tickets.levels().entity_ticking_at(p[0], p[2])
     }
     fn ravager_can_spawn(&self, [x, y, z]: [i32; 3]) -> bool {
         let g = self.game;
@@ -446,11 +448,15 @@ impl Game<'_> {
             _ => OmenTick::Continue,
         }
     }
-    /// The Raid Omen sound when the effect is first added.
+    /// The Raid Omen sound when the effect is first added
+    /// (`MobEffect.onEffectAdded`: at the player's feet).
     pub(super) fn raid_omen_added(&mut self) {
-        let eye = self.eye_position().unwrap_or_default();
+        let Some(p) = self.player.as_ref() else {
+            return;
+        };
+        let at = [p.position.x, p.position.y, p.position.z];
         self.audio
-            .play("minecraft:event.mob_effect.raid_omen", Some(eye), 1.0, 1.0);
+            .play("minecraft:event.mob_effect.raid_omen", Some(at), 1.0, 1.0);
     }
     /// `Raids.createOrExtendRaid`: not for spectators, with the `raids` rule
     /// and where raids may start; the raid centres on the occupied village
@@ -480,7 +486,7 @@ impl Game<'_> {
         if triggered {
             self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
-            if let Some(level) = self.native_level(self.dim.id()) {
+            if let Some(level) = self.level(self.dim.id()) {
                 self.native_raid_state_change(
                     mod_api::RaidRef::new(level, id),
                     center,
@@ -498,9 +504,6 @@ impl Game<'_> {
     pub(super) fn raiding_nearby(&self, at: [i32; 3]) -> Option<i32> {
         self.raiding.raids.nearby(at).map(|(id, _)| id)
     }
-    pub(super) fn raid_started(&self, id: i32) -> bool {
-        self.raiding.raids.get(id).is_some_and(|r| r.started)
-    }
     /// `/raid start`: a raid in the local village at the given omen level.
     pub(super) fn raid_command_create(&mut self, at: [i32; 3], omen_level: i32) -> bool {
         self.load_raids();
@@ -515,7 +518,7 @@ impl Game<'_> {
     }
     pub(super) fn raid_command_stop(&mut self, id: i32) {
         if let Some(center) = self.raiding.raids.stop(id)
-            && let Some(level) = self.native_level(self.dim.id())
+            && let Some(level) = self.level(self.dim.id())
         {
             self.native_raid_state_change(mod_api::RaidRef::new(level, id), center, "stopped");
         }
@@ -537,13 +540,14 @@ impl Game<'_> {
         };
         let members: Vec<&Mob> = self.raid_members(id).collect();
         let health: f32 = members.iter().fold(0.0, |a, m| a + m.health);
+        // Java's string concatenation of the floats: `20.0`, not `20`.
         format!(
             "Num groups spawned: {} Raid omen level: {} Num mobs: {} Raid health: {} / {}",
             r.groups_spawned,
             r.omen_level,
             members.len(),
-            health,
-            r.total_health
+            horizon_client::snbt::java_float(health),
+            horizon_client::snbt::java_float(r.total_health)
         )
     }
     /// A raid's members (`groupRaiderMap`): the living raiders it counts.
@@ -551,7 +555,7 @@ impl Game<'_> {
         members(&self.mobs, id)
     }
     /// `getHealthOfLivingRaiders`, leaving out one raider.
-    fn raid_living_health(&self, id: i32, except: Option<u32>) -> f32 {
+    fn remaining_raider_health(&self, id: i32, except: Option<u32>) -> f32 {
         self.raid_members(id)
             .filter(|m| Some(m.id) != except)
             .fold(0.0, |a, m| a + m.health)
@@ -568,7 +572,7 @@ impl Game<'_> {
         let Some((seq, mob, before)) = last else {
             return;
         };
-        let living = self.raid_living_health(id, Some(mob)) + before;
+        let living = self.remaining_raider_health(id, Some(mob)) + before;
         if let Some(r) = self.raiding.raids.get_mut(id) {
             r.update_bossbar(living);
         }
@@ -616,7 +620,7 @@ impl Game<'_> {
             })
             .collect();
         for (mob, id, wave, health, leader) in pending {
-            let living = self.raid_living_health(id, None);
+            let living = self.remaining_raider_health(id, None);
             let known = match self.raiding.raids.get_mut(id) {
                 Some(r) => {
                     r.add_wave_mob(health, false, living);
@@ -681,7 +685,7 @@ impl Game<'_> {
         for (id, (old, _)) in old_states {
             if let Some(r) = self.raiding.raids.get(id)
                 && r.status != old
-                && let Some(level) = self.native_level(self.dim.id())
+                && let Some(level) = self.level(self.dim.id())
             {
                 self.native_raid_state_change(
                     mod_api::RaidRef::new(level, id),
@@ -1089,7 +1093,7 @@ impl Game<'_> {
         s.can_join_raid = true;
         s.ticks_outside_raid = 0;
         s.registered = true;
-        let living = self.raid_living_health(id, None);
+        let living = self.remaining_raider_health(id, None);
         if let Some(r) = self.raiding.raids.get_mut(id) {
             r.add_wave_mob(health, true, living);
         }
@@ -1162,7 +1166,7 @@ impl Game<'_> {
         };
         let (leader, wave) = (s.patrol_leader, s.wave);
         self.flush_raid_bar(id);
-        let living = self.raid_living_health(id, Some(m.id));
+        let living = self.remaining_raider_health(id, Some(m.id));
         let uuid = self.player_uuid_of(killer);
         if let Some(r) = self.raiding.raids.get_mut(id) {
             if leader {
@@ -1533,10 +1537,12 @@ impl Game<'_> {
         let new = self.potions.effects.get("bad_omen").is_none();
         self.potions.effects.add(effect);
         let eye = self.eye_position().unwrap_or_default();
-        // MobEffect.onEffectAdded: Bad Omen's sound when it is new.
-        if new {
+        // MobEffect.onEffectAdded: Bad Omen's sound when it is new, at the
+        // player's feet.
+        if new && let Some(p) = self.player.as_ref() {
+            let at = [p.position.x, p.position.y, p.position.z];
             self.audio
-                .play("minecraft:event.mob_effect.bad_omen", Some(eye), 1.0, 1.0);
+                .play("minecraft:event.mob_effect.bad_omen", Some(at), 1.0, 1.0);
         }
         self.audio
             .play("minecraft:item.ominous_bottle.dispose", Some(eye), 1.0, 1.0);
@@ -1688,3 +1694,44 @@ impl Game<'_> {
 #[cfg(test)]
 #[path = "tests/bed_loss.rs"]
 mod bed_loss_tests;
+
+#[cfg(test)]
+mod entity_ticking_tests {
+    use super::{Lvl, RaidLevel};
+    use crate::game::native_entity_refs::tests::with_game;
+    use horizon_client::{chunk::Chunk, ticket_levels::Sources};
+    use std::{collections::HashSet, sync::Arc};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_wave_spawns_only_where_entities_tick() {
+        with_game(|game| {
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.world
+                .chunks
+                .insert((6, 0), Arc::new(Chunk::empty(6, 0)));
+            // A player in chunk (0, 0) with a simulation distance of 5: chunk
+            // (6, 0) is loaded but its entities do not tick.
+            game.tickets.update(Some(Sources {
+                players: vec![(0, 0)],
+                view_distance: 10,
+                simulation_distance: 5,
+                ..Sources::default()
+            }));
+            let centers = HashSet::new();
+            let level = Lvl {
+                game,
+                difficulty: 2,
+                centers: &centers,
+            };
+            assert!(level.is_position_entity_ticking([8, 64, 8]));
+            assert!(!level.is_position_entity_ticking([6 * 16 + 8, 64, 8]));
+            assert!(
+                !level.is_position_entity_ticking([-40, 64, 8]),
+                "not loaded"
+            );
+        });
+    }
+}

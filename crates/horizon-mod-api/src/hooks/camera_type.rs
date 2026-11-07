@@ -17,14 +17,3 @@ pub trait Hooks {
     )]
     fn camera_type_cycle();
 }
-
-pub trait Helpers {
-    /// The window's camera type (`Options.getCameraType`). Client-side.
-    #[helper(side = "client")]
-    fn camera_type();
-    /// Sets the window's camera type (`Options.setCameraType`) as F5 does, without cycling and
-    /// without `camera_type_cycle`: a freelook mod switches to third person while its key is held
-    /// and back after. Client-side.
-    #[helper(side = "client")]
-    fn set_camera_type();
-}

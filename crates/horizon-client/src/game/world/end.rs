@@ -310,7 +310,7 @@ impl Game<'_> {
     /// The environment attributes of the current dimension.
     pub(super) fn dim_environment(&self) -> &Environment {
         match self.dim {
-            Dim::Overworld => self.res.environment(),
+            Dim::Overworld | Dim::Extra(_) => self.res.environment(),
             Dim::Nether => self.res.nether_environment(),
             Dim::End => self.res.end_environment(),
         }
@@ -1210,6 +1210,12 @@ impl Game<'_> {
         };
         let survive = self.world.random.next_int_bound(5).unwrap_or(0) > 0;
         let at = [p.position.x, p.position.y, p.position.z];
+        let ctx = self.player_context(None);
+        self.post_game_event(
+            "minecraft:projectile_shoot",
+            [start.x, start.y, start.z],
+            ctx,
+        );
         let id = self.take_entity_id();
         self.end.eyes.push(EyeOfEnder {
             id,
@@ -1365,7 +1371,7 @@ impl Game<'_> {
         let mobs: Vec<(u32, Vec3, f32, f32)> = self
             .mobs
             .iter()
-            .filter(|m| self.mob_can_use_portal(m))
+            .filter(|m| self.mob_portal_eligible(m))
             .map(|m| (m.id, m.position, m.width(), m.height()))
             .chain(
                 self.boats
@@ -1462,7 +1468,11 @@ impl Game<'_> {
             .dropped
             .iter()
             .map(|e| (e.id, true))
-            .chain(self.mobs.iter().map(|m| (m.id, self.mob_can_use_portal(m))))
+            .chain(
+                self.mobs
+                    .iter()
+                    .map(|m| (m.id, self.mob_portal_eligible(m))),
+            )
             .chain(
                 self.boats
                     .iter()
@@ -1758,7 +1768,7 @@ mod tests {
                 None,
             ));
             let id = game.creatures.projectiles[0].id;
-            let pearl = game.native_entity(id).unwrap();
+            let pearl = game.entity(id).unwrap();
             assert_eq!(pearl.portal_cooldown(game), Some(0));
             let traveller = game.end.gateways.entry(id).or_default();
             traveller.enter(BlockPos::new(0, 64, 0));

@@ -7,7 +7,7 @@ use horizon_client::{
     lang,
     mod_list::{self, Installed},
 };
-use horizon_mods::manifest::{MissingJar, collect_jar_requirements, missing_jars};
+use horizon_mod_package::manifest::{MissingJar, collect_jar_requirements, missing_jars};
 use horizon_world::{
     item_defaults::ItemData,
     native_load_context::{LoadContext, LoadInputs},
@@ -37,8 +37,8 @@ pub(super) struct ModsState {
     pub(super) content_base: Arc<std::sync::OnceLock<PathBuf>>,
     /// `--dev-mod PATH`: content mods always on.
     pub(super) dev: Vec<PathBuf>,
-    pub(super) native: std::sync::Arc<horizon_mods::runtime::Runtime>,
-    pub(super) selected: std::sync::Arc<[horizon_mods::selection::SelectedPackage]>,
+    pub(super) native: std::sync::Arc<horizon_mod_package::runtime::Runtime>,
+    pub(super) selected: std::sync::Arc<[horizon_mod_package::selection::SelectedPackage]>,
     /// The content mods the loaded resources were built with: a switch the
     /// game can apply live moves it to the player's choice (`switch_mods`).
     pub(super) applied: Option<std::collections::BTreeSet<String>>,
@@ -82,7 +82,7 @@ impl ModsState {
     fn enabled_inventory(
         &self,
         accepted_content: impl Fn(&str) -> bool,
-    ) -> horizon_mods::enabled::EnabledMods {
+    ) -> horizon_mod_package::enabled::EnabledMods {
         let native = self
             .native
             .packages()
@@ -94,7 +94,7 @@ impl ModsState {
                 selected.package.manifest.wasm.is_some(),
             )
         });
-        horizon_mods::enabled::EnabledMods::new(native.chain(selected).filter_map(
+        horizon_mod_package::enabled::EnabledMods::new(native.chain(selected).filter_map(
             |(manifest, code)| {
                 let enabled = if code {
                     let initially_disabled = self.code_switches.as_ref().is_some_and(|switches| {
@@ -117,16 +117,17 @@ impl ModsState {
         game_dir: &std::path::Path,
         enabled: &std::collections::BTreeSet<String>,
     ) {
-        self.selected = horizon_mods::selection::content_packages(game_dir, enabled, &self.dev)
-            .filter(|selected| {
-                let id = &selected.package.manifest.id;
-                // A refused wasm mod's content stays out with its code.
-                !self.native.built().iter().any(|built| built.id == *id)
-                    && !horizon_mod_wasm::refused()
-                        .iter()
-                        .any(|(refused, _)| refused == id)
-            })
-            .collect();
+        self.selected =
+            horizon_mod_package::selection::content_packages(game_dir, enabled, &self.dev)
+                .filter(|selected| {
+                    let id = &selected.package.manifest.id;
+                    // A refused wasm mod's content stays out with its code.
+                    !self.native.built().iter().any(|built| built.id == *id)
+                        && !horizon_mod_wasm::refused()
+                            .iter()
+                            .any(|(refused, _)| refused == id)
+                })
+                .collect();
         self.refused = Default::default();
     }
 
@@ -162,7 +163,7 @@ pub(super) fn load_item_data(root: &Path, role: ExecutionRole) -> horizon_client
         types.extend(horizon_protocol::item::custom::entries().map(|(_, name)| name.to_owned()));
     }
     let inputs = LoadInputs::new(registries, Game::mod_data_root());
-    let inventory = horizon_mods::enabled::EnabledMods::read(root)?;
+    let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
     let ids: Vec<_> = if role.is_logical_server() {
         inventory.server_ids().collect()
     } else {
@@ -205,9 +206,9 @@ pub(super) fn freeze_declarations() {
 }
 
 struct NativeDeclared {
-    blocks: Vec<horizon_mods::content::Block>,
-    items: Vec<horizon_mods::content::Item>,
-    types: Vec<horizon_mods::content::BlockEntityType>,
+    blocks: Vec<horizon_mod_package::content::Block>,
+    items: Vec<horizon_mod_package::content::Item>,
+    types: Vec<horizon_mod_package::content::BlockEntityType>,
 }
 
 /// The same native declarations serve startup and every pack reload.
@@ -249,7 +250,7 @@ pub(super) fn collect_key_mappings<'declared>(
 }
 
 /// The native mods' entity model layers (`native_layer_definitions`), kept
-/// once at start for `native_bake_layer`.
+/// once at start for `bake_layer`.
 pub(super) fn register_layer_definitions(role: ExecutionRole) {
     if !role.is_client() {
         return;
@@ -266,6 +267,15 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     let mut entries = Vec::new();
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
+}
+/// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
+/// refresh of the list (`Game::refresh_debug_renderers`).
+pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
+    let mut renderers = Vec::new();
+    if role.is_client() {
+        Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+    }
+    renderers
 }
 /// The native mods' numeric item model properties
 /// (`native_register_range_select_item_model_property`), kept once at start, before
@@ -291,6 +301,26 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     let mut properties = Vec::new();
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
+}
+/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
+/// start, before resources load, so `tints` entries on them read the mod's colour.
+pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut sources = Vec::new();
+    Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
+    horizon_assets::item_model::register_tint_sources(sources);
+}
+/// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
+/// start, before resources load; every resource load applies them to its mesh tables.
+pub(super) fn register_block_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut registry = mod_api::BlockTintRegistry::default();
+    Game::native_register_block_tint_sources(&RegistrationContext::new(), &mut registry);
+    horizon_client::mesher::register_block_tint_sources(registry.into_layers());
 }
 
 /// `root` with the content mods that are on layered over it
@@ -321,7 +351,7 @@ pub(super) fn content_overlay(
     jar_store: &std::path::Path,
 ) -> horizon_client::Result<ContentOverlay> {
     use horizon_client::mod_content::{self, ContentMod};
-    use horizon_mods::Content;
+    use horizon_mod_package::Content;
     let here = std::env::current_dir().unwrap_or_default();
     let original_base = root.to_owned();
 
@@ -360,7 +390,7 @@ pub(super) fn content_overlay(
     };
     struct PackageSource<'a> {
         path: &'a std::path::Path,
-        manifest: &'a horizon_mods::Manifest,
+        manifest: &'a horizon_mod_package::Manifest,
         content_only: bool,
     }
     let native = sources.native.packages().iter().map(|p| PackageSource {
@@ -385,19 +415,23 @@ pub(super) fn content_overlay(
         .collect();
     let dependencies: Vec<_> = packages
         .iter()
-        .map(|source| horizon_mods::dependencies::from_manifest(&source.manifest.dependencies))
+        .map(|source| {
+            horizon_mod_package::dependencies::from_manifest(&source.manifest.dependencies)
+        })
         .collect();
     let inputs: Vec<_> = packages
         .iter()
         .zip(&dependencies)
-        .map(|(source, dependencies)| horizon_mods::dependencies::Mod {
-            id: &source.manifest.id,
-            version: &source.manifest.version,
-            has_api: false,
-            dependencies,
-        })
+        .map(
+            |(source, dependencies)| horizon_mod_package::dependencies::Mod {
+                id: &source.manifest.id,
+                version: &source.manifest.version,
+                has_api: false,
+                dependencies,
+            },
+        )
         .collect();
-    let order = horizon_mods::dependencies::resolve_content(&inputs)
+    let order = horizon_mod_package::dependencies::resolve_content(&inputs)
         .map_err(|error| error.to_string())?
         .order;
     for index in order {
@@ -473,7 +507,8 @@ pub(super) fn content_overlay(
                     .any(|native| native.id == package.id)
         })
         .collect();
-    horizon_mods::dependencies::resolve_content(&loaded).map_err(|error| error.to_string())?;
+    horizon_mod_package::dependencies::resolve_content(&loaded)
+        .map_err(|error| error.to_string())?;
     let cache = here.join(".horizon-cache");
     // Content admission and the live code-dispatch boundary jointly determine
     // what loaded. Namespaces and raw startup metadata cannot answer this.
@@ -510,7 +545,12 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
-    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
@@ -555,7 +595,8 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+        .map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -564,9 +605,9 @@ fn register_block_entity_types(
 fn announced_entry(
     id: &str,
     version: &str,
-    side: horizon_mods::Side,
+    side: horizon_mod_package::Side,
 ) -> horizon_protocol::mod_list::Entry {
-    use horizon_mods::Side;
+    use horizon_mod_package::Side;
     use horizon_protocol::mod_list;
     mod_list::Entry {
         id: id.to_owned(),
@@ -585,7 +626,7 @@ fn announced_entry(
 /// mob effects reads the same empty list either way.
 fn register_mob_effects(mods: &[horizon_client::mod_content::ContentMod]) {
     use horizon_client::brewing::{self, Category};
-    use horizon_mods::content::EffectCategory;
+    use horizon_mod_package::content::EffectCategory;
     let effects = horizon_client::mod_content::mob_effects(mods);
     if effects.is_empty() {
         return;
@@ -651,7 +692,7 @@ fn register_menu_types(mods: &[horizon_client::mod_content::ContentMod]) {
 }
 
 /// The embedded inventory, formatted for the crash report.
-fn native_mods_detail(built: &[horizon_mods::runtime::BuiltMod]) -> Option<String> {
+fn native_mods_detail(built: &[horizon_mod_package::runtime::BuiltMod]) -> Option<String> {
     let list = built
         .iter()
         .map(|m| format!("{} {}", m.id, m.version))
@@ -664,7 +705,7 @@ fn native_mods_detail(built: &[horizon_mods::runtime::BuiltMod]) -> Option<Strin
 /// open (`mod_content::live_switch`).
 fn live_switch_of(
     path: &std::path::Path,
-    package: &horizon_mods::Package,
+    package: &horizon_mod_package::Package,
     content_ids: &mut std::collections::BTreeSet<String>,
     live_ids: &mut std::collections::BTreeSet<String>,
 ) {
@@ -673,7 +714,7 @@ fn live_switch_of(
     }
     let id = &package.manifest.id;
     content_ids.insert(id.clone());
-    let content = horizon_mods::Content::read(path, &package.manifest);
+    let content = horizon_mod_package::Content::read(path, &package.manifest);
     match content
         .as_ref()
         .map(horizon_client::mod_content::live_switch)
@@ -690,7 +731,7 @@ fn live_switch_of(
 /// Installed native mods not compiled into this executable get an explanatory row.
 fn not_built(
     dir: &std::path::Path,
-    built: &[horizon_mods::runtime::BuiltMod],
+    built: &[horizon_mod_package::runtime::BuiltMod],
     rows: &[Installed],
 ) -> Vec<Installed> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -700,7 +741,7 @@ fn not_built(
     paths.sort();
     let mut out: Vec<Installed> = Vec::new();
     for path in paths {
-        let Ok(bundle) = horizon_mods::index::native::Bundle::read(&path) else {
+        let Ok(bundle) = horizon_mod_package::index::native::Bundle::read(&path) else {
             continue;
         };
         let m = bundle.manifest;
@@ -740,7 +781,7 @@ impl Game<'_> {
         resources: &std::path::Path,
     ) -> horizon_client::Result<PreparedLoopContext> {
         let side = self.options.execution_role.loop_side();
-        let inventory = horizon_mods::enabled::EnabledMods::read(resources)?;
+        let inventory = horizon_mod_package::enabled::EnabledMods::read(resources)?;
         let ids: Vec<_> = if self.is_logical_server() {
             inventory.server_ids().collect()
         } else {
@@ -773,7 +814,7 @@ impl Game<'_> {
     pub(super) fn stage_enabled_inventory(
         &self,
     ) -> horizon_client::Result<Option<horizon_assets::resource_source::ResourceRoot>> {
-        let previous = horizon_mods::enabled::EnabledMods::read(&self.options.resources)?;
+        let previous = horizon_mod_package::enabled::EnabledMods::read(&self.options.resources)?;
         let next = self
             .mods
             .enabled_inventory(|id| previous.client_ids().any(|loaded| loaded == id));
@@ -795,7 +836,7 @@ impl Game<'_> {
     /// files get the same unreadable-file row as any other invalid package.
     pub(super) fn start_mods(&mut self) {
         let dir = Self::game_dir().join(mod_list::DIR);
-        let mut paths = horizon_mods::find(&dir);
+        let mut paths = horizon_mod_package::find(&dir);
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
         let (mut content_ids, mut live_ids) = Default::default();
@@ -803,7 +844,7 @@ impl Game<'_> {
             .iter()
             .map(|path| {
                 let file = path.file_name().unwrap_or_default().to_string_lossy();
-                let package = match horizon_mods::Package::read(path) {
+                let package = match horizon_mod_package::Package::read(path) {
                     Ok(package) => package,
                     Err(e) => {
                         return Installed {
@@ -1014,7 +1055,7 @@ pub(super) fn living_mod_types()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_mods::runtime::{BuiltMod, Runtime};
+    use horizon_mod_package::runtime::{BuiltMod, Runtime};
 
     #[test]
     fn only_clients_collect_registered_keys() {
@@ -1040,7 +1081,7 @@ mod tests {
     const BUILT: &[BuiltMod] = &[BuiltMod {
         id: "machine_sample",
         version: "0.3.0",
-        side: horizon_mods::Side::Both,
+        side: horizon_mod_package::Side::Both,
     }];
 
     struct Fixture(PathBuf);
@@ -1066,6 +1107,25 @@ mod tests {
         fn drop(&mut self) {
             std::fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    /// Runs `test` again in a child process whose working directory is its own
+    /// empty folder: the overlay's `.horizon-cache` lives under the working
+    /// directory, so children sharing one (the temp dir) race on that cache.
+    fn run_in_child(test: &str, mode: &str) {
+        let cwd = std::env::temp_dir().join(format!(
+            "horizon-game-mods-cwd-{}-{mode}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .current_dir(&cwd)
+            .args(["--exact", test, "--nocapture"])
+            .env(mode, "1")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
+        assert!(status.success());
     }
 
     /// A content mod's living type is a mob of its template's species under
@@ -1129,6 +1189,123 @@ mod tests {
         assert_eq!(
             death_loot_table(&zombie, true).as_deref(),
             Some("minecraft:entities/zombie")
+        );
+    }
+
+    /// A mod's declared attribute set (#845, `EntityAttributeCreationEvent`)
+    /// reaches everything a mob of the type is: the fields it spawns with,
+    /// the finalize defaults and the live attribute map's catalog row —
+    /// built from the template's, so the reads of #1469 and #1493 answer the
+    /// declared values with no second copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_entity_attributes_reach_spawn_and_the_live_map() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let declared = [
+            ("minecraft:max_health".to_string(), 55.0),
+            ("minecraft:movement_speed".to_string(), 0.4),
+        ];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let base = |catalog: &Catalog, entity: &str, name: &str| {
+            catalog.default_base(entity, catalog.id(name).unwrap())
+        };
+        // The declared values, and the template's row under them.
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:max_health"),
+            Some(55.0)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:movement_speed"),
+            Some(0.4)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:attack_damage"),
+            base(&catalog, "minecraft:zombie", "minecraft:attack_damage")
+        );
+        // The live map builds for the type and answers the declared values.
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged.clone()),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(55.0)
+        );
+        // The type's fields spawn with them: the merged row takes the type's
+        // attribute map and fields (`take_attribute_row`).
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(ghoul.health, 55.0, "the spawn's health");
+        assert_eq!(ghoul.attrs.max_health, 55.0);
+        assert_eq!(ghoul.attrs.speed, 0.4);
+        assert_eq!(
+            ghoul.kind.attributes.get("minecraft:max_health"),
+            Some(&55.0),
+            "the finalize defaults read the declared value"
+        );
+    }
+
+    /// A declared set's merged row — the template's with the declared set on
+    /// top — is the type's one record: a content row's own value (the
+    /// ghoul's 40 health) gives way to the template's, so a mob of the type
+    /// spawns with what the live attribute map answers (#845, review).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_declared_type_spawns_with_its_merged_row_not_its_content_row() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        // Only the speed is declared: the merged row keeps the template's
+        // health (a zombie's 20), not the content row's 40.
+        let declared = [("minecraft:movement_speed".to_string(), 0.4)];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        assert_eq!(ghoul.max_health, 40.0, "the content row's own value");
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(
+            ghoul.health, 20.0,
+            "the template's health through the merged row"
+        );
+        assert_eq!(ghoul.attrs.max_health, 20.0);
+        assert_eq!(ghoul.attrs.speed, 0.4, "the declared speed");
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(20.0),
+            "the live map answers the same row"
         );
     }
 
@@ -1232,7 +1409,7 @@ mod tests {
             ),
             ("src/lib.rs", b"pub fn hooks() {}"),
         ];
-        let bytes = horizon_mods::Package::write_files(&manifest, files).unwrap();
+        let bytes = horizon_mod_package::Package::write_files(&manifest, files).unwrap();
         std::fs::write(dir.join(format!("{id}.hmod")), bytes).unwrap();
     }
 
@@ -1240,16 +1417,10 @@ mod tests {
     fn content_overlay_validates_dependencies_and_orders_layers() {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
-                    "--nocapture",
-                ])
-                .env(MODE, "1")
-                .status()
-                .unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("content-dependencies");
@@ -1322,6 +1493,7 @@ mod tests {
             // Inventory and content registries are process-wide, as in a real startup.
             for mode in ["compiled", "vanilla"] {
                 let status = std::process::Command::new(std::env::current_exe().unwrap())
+                    .current_dir(std::env::temp_dir())
                     .args(["--exact", "game::mods::tests::native_content_follows_the_build_and_misplaced_content_follows_its_selection", "--nocapture"])
                     .env(MODE, mode).status().unwrap();
                 assert!(status.success());
@@ -1340,7 +1512,7 @@ mod tests {
         std::fs::create_dir_all(&misplaced).unwrap();
         hmod(&misplaced, "machine_sample");
         let manifest = "id='plain'\nname='Plain'\nversion='1.0.0'\napi='0.2'\nside='both'\ncapabilities=['registries']\n";
-        let plain = horizon_mods::Package::write_files(manifest, &[]).unwrap();
+        let plain = horizon_mod_package::Package::write_files(manifest, &[]).unwrap();
         std::fs::write(misplaced.join("plain.hmod"), plain).unwrap();
         let base = f.0.join("resources");
         std::fs::create_dir_all(&base).unwrap();
@@ -1362,7 +1534,7 @@ mod tests {
         let generated = content_root(&base, &sources).unwrap();
         assert_ne!(generated.prepared(), base);
         assert_eq!(
-            horizon_mods::enabled::EnabledMods::read(generated.prepared())
+            horizon_mod_package::enabled::EnabledMods::read(generated.prepared())
                 .unwrap()
                 .server_ids()
                 .collect::<Vec<_>>(),
@@ -1385,16 +1557,19 @@ mod tests {
         const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
         if std::env::var_os(MODE).is_none() {
             // Native declarations, like the real startup, belong to one process.
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
-                .env(MODE, "1").status().unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("shared-jar-refusal");
-        let jar =
-            horizon_mods::manifest::JarRef::new("original".into(), "1".into(), "9".repeat(128))
-                .unwrap();
+        let jar = horizon_mod_package::manifest::JarRef::new(
+            "original".into(),
+            "1".into(),
+            "9".repeat(128),
+        )
+        .unwrap();
         for id in ["machine_sample", "alpha", "beta", "gamma"] {
             let native = id == "machine_sample";
             let mut text = format!(
@@ -1423,20 +1598,21 @@ mod tests {
             };
             std::fs::write(
                 f.0.join(format!("{id}.hmod")),
-                horizon_mods::Package::write_files(&text, code).unwrap(),
+                horizon_mod_package::Package::write_files(&text, code).unwrap(),
             )
             .unwrap();
         }
-        let selected: Arc<[horizon_mods::selection::SelectedPackage]> = ["alpha", "beta", "gamma"]
-            .into_iter()
-            .map(|id| {
-                let path = f.0.join(format!("{id}.hmod"));
-                horizon_mods::selection::SelectedPackage {
-                    package: horizon_mods::Package::read(&path).unwrap(),
-                    path,
-                }
-            })
-            .collect();
+        let selected: Arc<[horizon_mod_package::selection::SelectedPackage]> =
+            ["alpha", "beta", "gamma"]
+                .into_iter()
+                .map(|id| {
+                    let path = f.0.join(format!("{id}.hmod"));
+                    horizon_mod_package::selection::SelectedPackage {
+                        package: horizon_mod_package::Package::read(&path).unwrap(),
+                        path,
+                    }
+                })
+                .collect();
         let native = ModsState {
             native: Arc::new(f.runtime()),
             selected: selected.clone(),
@@ -1460,7 +1636,7 @@ mod tests {
         let overlay = content_overlay(&base, &content, &store).unwrap();
         assert_ne!(overlay.root.prepared(), base);
         assert_eq!(
-            horizon_mods::enabled::EnabledMods::read(overlay.root.prepared())
+            horizon_mod_package::enabled::EnabledMods::read(overlay.root.prepared())
                 .unwrap()
                 .server_ids()
                 .collect::<Vec<_>>(),
@@ -1501,7 +1677,7 @@ mod tests {
             BuiltMod {
                 id: "pipes",
                 version: "2.0",
-                side: horizon_mods::Side::Client,
+                side: horizon_mod_package::Side::Client,
             },
         ];
         assert_eq!(
@@ -1550,10 +1726,10 @@ mod tests {
             "id = 'plain'\nname = 'plain'\nversion = '1.0'\napi = '0.2'\ncapabilities = ['registries']\n",
         )
         .unwrap();
-        let package = horizon_mods::Package::read(&f.0).unwrap();
+        let package = horizon_mod_package::Package::read(&f.0).unwrap();
         let plain = ContentMod {
             id: "plain".into(),
-            content: horizon_mods::content::Content::read(&f.0, &package.manifest).unwrap(),
+            content: horizon_mod_package::content::Content::read(&f.0, &package.manifest).unwrap(),
             jars: Vec::new(),
         };
         register_mob_effects(&[plain]);

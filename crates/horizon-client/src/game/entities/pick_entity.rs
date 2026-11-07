@@ -65,8 +65,8 @@ impl Game<'_> {
     /// The ordinary block-or-entity pick (Minecraft.hitResult), using the
     /// game's targeting ray, reach and occlusion. None without a client world
     /// or on a miss. Entity hits carry this client level's epoch. Unlike
-    /// native_view_hit, this never traces distant terrain.
-    pub(super) fn native_crosshair_target(&self) -> Option<NativeCrosshairTarget> {
+    /// view_hit, this never traces distant terrain.
+    pub(super) fn crosshair_target(&self) -> Option<NativeCrosshairTarget> {
         if !self.native_window() || self.title.is_some() {
             return None;
         }
@@ -89,9 +89,12 @@ impl Game<'_> {
     /// The entity the crosshair hits before any block, as `Entity.getId`; an
     /// entity with nothing to pick (a projectile, a player, the dragon) is
     /// `Some(None)`. `None` when the view hits a block or nothing.
-    pub(super) fn pick_entity_hit(&self) -> Option<Option<i32>> {
+    pub(super) fn pick_entity_hit_at(&self) -> Option<(f64, Option<i32>)> {
         self.crosshair_entity_hit()
-            .map(|hit| hit.pickable.then_some(hit.id))
+            .map(|hit| (hit.distance, hit.pickable.then_some(hit.id)))
+    }
+    pub(super) fn pick_entity_hit(&self) -> Option<Option<i32>> {
+        self.pick_entity_hit_at().map(|hit| hit.1)
     }
 
     /// `ClientSuggestionProvider.getSelectedEntities`: the UUID

@@ -20,14 +20,16 @@ use std::sync::Arc;
 /// full stacks with their components compared, as the tick's pass and a write
 /// both run it. The map is taken out so the seed can read the mob.
 fn collect_equipment(catalog: &Arc<Catalog>, items: &Items, m: &mut Mob) {
+    horizon_client::mobs::armor::prepare(m, catalog);
     let mut live = std::mem::take(&mut m.extra.live);
+    let seed = || {
+        horizon_client::entity_nbt::attribute_entries(m)
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    };
     let changed =
-        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, || {
-            horizon_client::entity_nbt::attribute_entries(m)
-                .into_iter()
-                .map(|(_, e)| e)
-                .collect()
-        });
+        live.collect_equipment_changes(catalog, &m.kind.id, &m.extra.equipment, items, seed);
     warn_failed(m.id, &m.kind.id, changed);
     m.extra.live = live;
 }
@@ -419,11 +421,11 @@ mod tests {
         game.armor_stands.push(ArmorStand::new(13, Vec3::ZERO, 0.0));
         let mut dragon = crate::game::dragon::Dragon::new(Vec3::ZERO, 0.0, 0);
         dragon.id = 14;
-        game.dragon = Some(dragon);
+        game.dragon.replace(dragon);
     }
 
     fn read(game: &Game<'_>, id: u32, name: &str) -> (Option<f64>, Option<f64>) {
-        let living = game.native_living(game.native_entity(id).unwrap()).unwrap();
+        let living = game.living(game.entity(id).unwrap()).unwrap();
         (
             living.attribute_value(game, name),
             living.attribute_base(game, name),
@@ -460,17 +462,17 @@ mod tests {
                 ])])),
             );
             assert!(
-                game.native_living_set_equipment(zombie, EquipmentSlot::MainHand, Some(own)),
+                game.living_set_equipment(zombie, EquipmentSlot::MainHand, Some(own)),
                 "the write takes"
             );
             assert_eq!(attack(game), 4.0, "the stack's own +1, not the sword's +6");
-            assert!(game.native_living_set_equipment(
+            assert!(game.living_set_equipment(
                 zombie,
                 EquipmentSlot::MainHand,
                 stack("minecraft:diamond_sword")
             ));
             assert_eq!(attack(game), 9.0, "the plain sword's own +6");
-            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::MainHand, None));
+            assert!(game.living_set_equipment(zombie, EquipmentSlot::MainHand, None));
             assert_eq!(attack(game), 3.0);
         });
     }
@@ -498,7 +500,7 @@ mod tests {
                     ("slot", Tag::String("chest".into())),
                 ])])),
             );
-            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
+            assert!(game.living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
             // A finalize write, whose rebuild keeps the equipment's rows.
             assert!(zombie.set_attribute_base(game, "minecraft:max_health", 25.0));
             let mut synced = Vec::new();
@@ -541,6 +543,74 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_base_write_preserves_covered_for_damage_and_attribute_sync() {
+        with_game(|game| {
+            let kind = game
+                .res
+                .mob_types()
+                .get("minecraft:shulker")
+                .unwrap()
+                .clone();
+            game.mobs.push(Mob::new(12, kind, Vec3::ZERO, 0.0));
+            let catalog = game.motion.attributes.clone();
+            let m = &mut game.mobs[0];
+            // The permanent row installed by Shulker.setRawPeekAmount(0).
+            m.extra
+                .live
+                .edit(
+                    &catalog,
+                    &m.kind.id,
+                    "minecraft:armor",
+                    true,
+                    Vec::new,
+                    |value, observer| {
+                        value.add_permanent(
+                            Modifier::new("minecraft:covered", 20.0, Operation::AddValue).unwrap(),
+                            observer,
+                        )
+                    },
+                )
+                .unwrap();
+            let saved =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
+            let loaded_id = game.load_mob(saved.clone(), None).unwrap();
+            let loaded = game.mobs.iter().find(|m| m.id == loaded_id).unwrap();
+            assert_eq!(horizon_client::mobs::armor::values(loaded), (20.0, 0.0));
+            game.apply_entity_nbt(Target::Mob(12), saved).unwrap();
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let shulker = living(game, 12);
+            assert!(shulker.set_attribute_base(game, "minecraft:max_health", 40.0));
+            // No handle read in between: damage must not need a read to restore the map.
+            assert_eq!(
+                horizon_client::mobs::armor::values(&game.mobs[0]),
+                (20.0, 0.0)
+            );
+            let mut synced = Vec::new();
+            let m = game.mobs[0].clone();
+            game.mob_attributes(
+                &m,
+                &mut crate::game::lan_attributes::SpeedByType::default(),
+                &mut synced,
+            );
+            let armor_id = catalog.id("minecraft:armor").unwrap().registry_id();
+            let armor = synced.iter().find(|row| row.attribute == armor_id).unwrap();
+            assert_eq!(armor.base, 0.0);
+            assert_eq!(
+                armor.modifiers,
+                [horizon_protocol::packets::play::AttributeModifier {
+                    id: "minecraft:covered".into(),
+                    amount: 20.0,
+                    operation: 0,
+                }]
+            );
+        });
+    }
+
     /// The armor a hit reads follows the live map at once (#941): a stack a
     /// mod or `/item` changed protects by its own `attribute_modifiers`, a
     /// `/attribute` write takes effect without a tick, a horse's body piece
@@ -561,7 +631,7 @@ mod tests {
             let zombie = living(game, 12);
             // The zombie's own armor is 2, the diamond chestplate's 8 and 2
             // toughness: the write through the handle collects at once.
-            assert!(game.native_living_set_equipment(
+            assert!(game.living_set_equipment(
                 zombie,
                 EquipmentSlot::Chest,
                 stack("minecraft:diamond_chestplate")
@@ -580,7 +650,7 @@ mod tests {
                     ("slot", Tag::String("chest".into())),
                 ])])),
             );
-            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
+            assert!(game.living_set_equipment(zombie, EquipmentSlot::Chest, Some(own)));
             assert_eq!(values(game), (6.0, 0.0));
             // A `/attribute` base write lands at once, on top of the stack's.
             assert!(zombie.set_attribute_base(game, "minecraft:armor", 5.0));
@@ -593,7 +663,7 @@ mod tests {
                 modifier("test:plated", 3.0, AddValue),
                 Permanent
             ));
-            assert!(game.native_living_set_equipment(zombie, EquipmentSlot::Chest, None));
+            assert!(game.living_set_equipment(zombie, EquipmentSlot::Chest, None));
             assert_eq!(values(game), (8.0, 0.0));
             let level = crate::game::entity::damage_level_of!(game);
             let m = game.mobs.iter_mut().find(|m| m.id == 12).unwrap();
@@ -616,7 +686,7 @@ mod tests {
             let horse_kind = game.res.mob_types().get("minecraft:horse").unwrap().clone();
             game.mobs.push(Mob::new(15, horse_kind, Vec3::ZERO, 0.0));
             let horse = living(game, 15);
-            assert!(game.native_living_set_equipment(
+            assert!(game.living_set_equipment(
                 horse,
                 EquipmentSlot::Body,
                 stack("minecraft:diamond_horse_armor")
@@ -727,7 +797,7 @@ mod tests {
     fn a_stale_handle_reads_none() {
         with_game(|game| {
             spawn(game);
-            let living = game.native_living(game.native_entity(12).unwrap()).unwrap();
+            let living = game.living(game.entity(12).unwrap()).unwrap();
             assert_eq!(
                 living.attribute_value(game, "minecraft:max_health"),
                 Some(20.0)
@@ -844,7 +914,7 @@ mod tests {
     }
 
     fn living(game: &Game<'_>, id: u32) -> mod_api::LivingRef {
-        game.native_living(game.native_entity(id).unwrap()).unwrap()
+        game.living(game.entity(id).unwrap()).unwrap()
     }
 
     /// The ids of the modifiers a saved `attributes` list holds.

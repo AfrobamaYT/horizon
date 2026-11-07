@@ -7,7 +7,6 @@ use super::Game;
 use std::sync::Arc;
 
 // Native mods call it; nothing in Horizon does.
-#[allow(dead_code)]
 impl Game<'_> {
     /// Asks `native_biome_colors` again for every biome and, when the colours
     /// differ from those in use, rebuilds every loaded section and the far
@@ -15,7 +14,7 @@ impl Game<'_> {
     /// does). Call it when your colours change (a new season, a new day of a
     /// slow fade) and once when the player joins, not every frame: a rebuild
     /// takes the workers a few seconds.
-    pub(super) fn native_refresh_biome_colors(&mut self) {
+    pub(super) fn refresh_biome_colors(&mut self) {
         // A world's own table is asked from the biome files' colours each
         // time, so a mod's colours do not stack; a plain world's is the pack's.
         if let (Some(base), Some(current)) = (&self.world_biomes_base, &self.world_biomes) {
