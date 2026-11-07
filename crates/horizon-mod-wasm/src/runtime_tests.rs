@@ -147,7 +147,7 @@ fn import_reply_retry_survives_a_nested_callback() {
                 + 1
         }
     }
-    let id = crate::boundary::IMPORT_STRUCTURE_RANDOM_NEXT_LONG;
+    let id = crate::boundary::import_id("StructureRandom", "next_long").unwrap();
     let module = module(&format!(
         r#"
         local.get 0 i32.const 1 i32.eq

@@ -100,6 +100,13 @@ pub struct WasmHandler {
     pub index: Id,
     pub module: WasmMod,
 }
+impl std::fmt::Debug for WasmHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmHandler")
+            .field("index", &self.index)
+            .finish_non_exhaustive()
+    }
+}
 impl WasmHandler {
     pub fn subscriptions(&self, owner: &'static str, export_id: u32) -> &'static [Option<HookId>] {
         if let Some(value) = self
@@ -236,7 +243,7 @@ fn host(
             .held
             .remove(id)
             .map(|_| ())
-            .map_err(|e| wasmtime::Error::msg(e.to_string()))
+            .map_err(|e| wasmtime::Error::msg(format!("{e:?}")))
     } else {
         // SAFETY: Cx is boxed and stable; serve must release its frame borrows before
         // invoking native code that can synchronously reenter the guest.
