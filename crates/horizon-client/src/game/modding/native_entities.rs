@@ -389,6 +389,15 @@ mod tests {
     use super::*;
     use mod_api::ServerHost;
 
+    // NBT loads assign ids; reinstall an unbound payload as a pending owner.
+    macro_rules! pending {
+        ($list:expr) => {{
+            let mut owner = $list.pop().unwrap();
+            owner.id = 0;
+            $list.push(owner);
+        }};
+    }
+
     #[test]
     #[ignore = "needs prepared resources"]
     fn pending_ids_keep_counter_order_and_assign_zero_only_once() {
@@ -404,15 +413,6 @@ mod tests {
                 ("minecraft:firework_rocket", "{LifeTime:20}"),
             ] {
                 game.summon_with_nbt(kind, [1.0, 70.0, 1.0], nbt).unwrap();
-            }
-            // NBT loading assigns ids already. Reinstall unbound values as
-            // the zero-id owners that the pending pass receives from ticks.
-            macro_rules! pending {
-                ($list:expr) => {{
-                    let mut owner = $list.pop().unwrap();
-                    owner.id = 0;
-                    $list.push(owner);
-                }};
             }
             pending!(game.tnts);
             pending!(game.falling);
@@ -476,6 +476,12 @@ mod tests {
                 game.world
                     .chunks
                     .insert((0, 0), std::sync::Arc::new(Chunk::empty(0, 0)));
+                game.summon_with_nbt(kind, [2.0, 70.0, 1.0], nbt).unwrap();
+                match kind {
+                    "minecraft:tnt" => pending!(game.tnts),
+                    "minecraft:falling_block" => pending!(game.falling),
+                    _ => pending!(game.rockets),
+                }
                 let base = game.next_entity;
                 let (Tag::Compound(tag), _) = horizon_core::nbt::parse_snbt(nbt).unwrap() else {
                     unreachable!()
@@ -486,6 +492,12 @@ mod tests {
                 assert_eq!(id, base + 1);
                 assert_eq!(game.next_entity, base + 1);
                 assert!(game.entity(id).is_some());
+                let waiting = match kind {
+                    "minecraft:tnt" => game.tnts[0].id,
+                    "minecraft:falling_block" => game.falling[0].id,
+                    _ => game.rockets[0].id,
+                };
+                assert_eq!(waiting, 0);
                 if kind == "minecraft:falling_block" {
                     let (Tag::Compound(invalid), _) = horizon_core::nbt::parse_snbt(
                         "{BlockState:{Name:\"test:missing\"},Time:1}",
@@ -498,7 +510,7 @@ mod tests {
                             .is_none()
                     );
                     assert_eq!(game.next_entity, base + 1);
-                    assert_eq!(game.falling.len(), 1);
+                    assert_eq!(game.falling.len(), 2);
                 }
             });
         }
@@ -564,32 +576,42 @@ mod tests {
             copy_on_death: false,
             sync: false,
         };
-        super::super::native_entity_refs::tests::with_game(|game| {
-            game.summon_with_nbt(
+        for (kind, nbt) in [
+            (
                 "minecraft:falling_block",
-                [1.0, 70.0, 1.0],
                 "{BlockState:{Name:\"minecraft:sand\"},Time:1}",
-            )
-            .unwrap();
-            let mut owner = game.falling.pop().unwrap();
-            owner.id = 0;
-            let mut values = Attachments::default();
-            VALUE.set(&mut values, Holder::Entity(0), 7).unwrap();
-            let index = Arc::new(Mutex::new(AttachmentIndex::default()));
-            owner.attachment_lifetime.bind(
-                &mut values,
-                &index,
-                mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 0),
-            );
-            game.falling.push(owner);
-            let before = game.next_entity;
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                game.assign_pending_join_ids()
-            }));
-            assert!(result.is_err());
-            assert_eq!(game.next_entity, before);
-            assert_eq!(game.falling[0].id, 0);
-        });
+            ),
+            ("minecraft:arrow", "{}"),
+        ] {
+            super::super::native_entity_refs::tests::with_game(|game| {
+                game.summon_with_nbt(kind, [1.0, 70.0, 1.0], nbt).unwrap();
+                let mut values = Attachments::default();
+                VALUE.set(&mut values, Holder::Entity(0), 7).unwrap();
+                let index = Arc::new(Mutex::new(AttachmentIndex::default()));
+                let holder = mod_api::EntityRef::new(game.native_lifecycle.epoch().unwrap(), 0);
+                macro_rules! bind_zero {
+                    ($list:expr) => {{
+                        let mut owner = $list.pop().unwrap();
+                        owner.id = 0;
+                        owner.attachment_lifetime.bind(&mut values, &index, holder);
+                        $list.push(owner);
+                    }};
+                }
+                if kind == "minecraft:arrow" {
+                    bind_zero!(game.creatures.projectiles);
+                } else {
+                    bind_zero!(game.falling);
+                }
+                let before = game.next_entity;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.assign_pending_join_ids()
+                }));
+                assert!(result.is_err());
+                assert_eq!(game.next_entity, before);
+                assert!(game.falling.iter().all(|owner| owner.id == 0));
+                assert!(game.creatures.projectiles.iter().all(|owner| owner.id == 0));
+            });
+        }
     }
 
     #[test]
