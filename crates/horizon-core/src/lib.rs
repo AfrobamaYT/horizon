@@ -18,6 +18,7 @@ pub mod game_mode;
 pub mod geometry;
 pub mod identifier;
 pub mod java_hash_map;
+pub mod java_number;
 pub mod jmath;
 pub mod json_nbt;
 pub mod level_id;
