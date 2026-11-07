@@ -1,5 +1,5 @@
 use super::*;
-use std::{collections::BTreeSet, fs, process::Command};
+use std::{fs, process::Command};
 
 #[test]
 fn generated_text_refusals_are_typed_on_both_sides() {
