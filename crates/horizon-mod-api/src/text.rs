@@ -242,6 +242,7 @@ pub struct TextNode {
     pub data: String,
 }
 /// Node relation. Case order is append-only because it is part of the wasm link contract.
+/// Unknown discriminants are rejected by generated bindings before `Text::try_from`; inconsistent tables return `Malformed`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TextRelation {
