@@ -769,6 +769,8 @@ pub(super) mod tests {
     /// Resolve a fixture after registration or a late Parts reinstall from its loaded table.
     pub(in crate::game) fn resolve_parts(game: &super::Game<'_>) -> Result<(), String> {
         crate::game::api_values::resolve_block_definitions(game.pack.assets.registry)?;
+        mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
+            .map_err(|errors| format!("fixture item keys refused: {errors:?}"))?;
         game.resolve_parts().map_err(|error| error.to_string())
     }
     use mod_api::__private::game::*;
@@ -918,8 +920,6 @@ pub(super) mod tests {
             })
             .collect();
         crate::game::api_values::register_game_keys(ids);
-        mod_api::__private::resolve_items(game.items().registry_order.iter().map(|id| &**id))
-            .expect("fixture item keys resolve against its loaded catalog");
 
         // A game that opened its world resolves its parts; the harness stops
         // short of the open, so do it here for the by-state part table.
