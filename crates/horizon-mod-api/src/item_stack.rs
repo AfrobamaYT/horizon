@@ -91,6 +91,8 @@ impl std::error::Error for StackError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum StackWriteError {
+    /// The host has no game backend for this operation.
+    Unavailable,
     /// The process-local key is not present in this game's item registry.
     UnknownItem,
     /// The count is above the effective stack limit.
@@ -107,6 +109,12 @@ pub enum StackWriteError {
     InvalidMaximum,
     /// An engine result contained a zero-count stack instead of an empty slot.
     EmptyEngineStack,
+}
+
+impl crate::NoBackend for StackWriteError {
+    fn no_backend() -> Self {
+        Self::Unavailable
+    }
 }
 
 /// The two nonempty portions of a consuming split. Either portion can be absent.

@@ -1,7 +1,7 @@
 //! Read-only block, tag and fluid queries for native mods.
 use super::{Dim, Game};
 use horizon_client::{
-    items::{ItemStack, Items},
+    items::{ItemStack, Items, TagRegistry},
     world::World,
 };
 use horizon_world::{
@@ -11,7 +11,7 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use mod_api::BlockKey;
-use mod_api::{FluidState, LevelRef, NativeLifecycleContext, TagRegistry, UnresolvedFluid};
+use mod_api::{FluidState, LevelRef, NativeLifecycleContext, UnresolvedFluid};
 
 /// Why a server block cannot be read.
 #[allow(dead_code)]

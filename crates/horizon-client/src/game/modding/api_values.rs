@@ -113,6 +113,17 @@ impl<T: TryIntoEngine> TryIntoEngine for Option<T> {
             .transpose()
     }
 }
+impl<T: TryIntoApi, E: Clone> TryIntoApi for Result<T, E> {
+    type Api = Result<T::Api, E>;
+    type Error = T::Error;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        match self {
+            Ok(value) => value.try_into_api().map(Ok),
+            Err(error) => Ok(Err(error.clone())),
+        }
+    }
+}
+
 impl<T: TryIntoApi> TryIntoApi for Vec<T> {
     type Api = Vec<T::Api>;
     type Error = T::Error;

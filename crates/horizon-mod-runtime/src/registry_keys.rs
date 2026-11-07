@@ -39,14 +39,36 @@ impl Names {
         };
         let identifier = horizon_core::identifier::Identifier::parse_namespaced(&id)
             .ok_or_else(|| format!("mod {mod_id}: invalid registry key {id:?}"))?;
-        let slot = *self.slots.entry(id.clone()).or_insert_with(|| {
-            let slot = u32::try_from(self.entries.len()).expect("registry key slots exhausted");
+        self.request_parsed(mod_id, id, identifier)
+    }
+
+    /// Request a name already validated by the owning identifier boundary.
+    pub fn request_identifier(
+        &mut self,
+        mod_id: &'static str,
+        identifier: &horizon_core::identifier::Identifier,
+    ) -> Result<u32, String> {
+        self.request_parsed(mod_id, identifier.to_string(), identifier.clone())
+    }
+
+    fn request_parsed(
+        &mut self,
+        mod_id: &'static str,
+        id: String,
+        identifier: horizon_core::identifier::Identifier,
+    ) -> Result<u32, String> {
+        let slot = if let Some(slot) = self.slots.get(&id) {
+            *slot
+        } else {
+            let slot = u32::try_from(self.entries.len())
+                .map_err(|_| "registry key slots exhausted".to_owned())?;
+            self.slots.insert(id.clone(), slot);
             self.entries.push(Request {
                 id,
                 mods: Vec::new(),
             });
             slot
-        });
+        };
         self.identifiers.insert(identifier, slot);
         let mods = &mut self.entries[slot as usize].mods;
         if !mods.contains(&mod_id) {
@@ -79,6 +101,31 @@ impl Names {
         } else {
             Err(errors)
         }
+    }
+}
+
+// Tag names are process-lifetime identities; only membership belongs to reloadable data.
+// Reuse the same slot and identifier tables as registered keys, without a per-world cache.
+static TAG_NAMES: LazyLock<RwLock<Names>> = LazyLock::new(RwLock::default);
+
+/// Resolve a validated tag name once. Unknown membership does not prevent naming a tag.
+/// An unavailable table or exhausted index space refuses resolution without panicking.
+pub fn tag_slot(id: &horizon_core::identifier::Identifier) -> Option<u32> {
+    if let Some(slot) = TAG_NAMES.read().ok()?.identifiers.get(id) {
+        return Some(*slot);
+    }
+    TAG_NAMES
+        .write()
+        .ok()?
+        .request_identifier("horizon", id)
+        .ok()
+}
+
+/// Borrow a retained tag name while its table is read-locked. No string is allocated.
+pub fn with_tag_name<R>(slot: u32, read: impl FnOnce(Option<&str>) -> R) -> R {
+    match TAG_NAMES.read() {
+        Ok(names) => read(names.id(slot)),
+        Err(_) => read(None),
     }
 }
 

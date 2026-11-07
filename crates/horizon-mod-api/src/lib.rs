@@ -4442,10 +4442,10 @@ pub trait LevelHost {
     fn block_in_tag(&self, _block: BlockKey, _tag: &str) -> Option<bool> {
         unimplemented!("LevelHost::block_in_tag")
     }
-    /// `ItemStack.is(TagKey)`: `stack` is in the item tag `tag`, as `block_in_tag` reads
-    /// a tag. An empty stack tests `minecraft:air`.
-    fn item_stack_in_tag(&self, _stack: &ItemStack, _tag: &str) -> Option<bool> {
-        unimplemented!("LevelHost::item_stack_in_tag")
+    /// The merged-tag service for this level's owning-thread context.
+    /// Not on wasm: a frame resource; its methods are the imports.
+    fn tags(&self) -> &dyn Tags {
+        unimplemented!("LevelHost::tags")
     }
     /// `BlockGetter.getFluidState`: the fluid at `pos`, the empty fluid where there is none.
     /// None where the position is not loaded or outside the build height; it never loads a chunk.
