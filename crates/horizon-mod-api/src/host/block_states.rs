@@ -85,14 +85,16 @@ pub trait BlockStatesServerHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait BlockStatesBackend {
-    /// Side: both. Borrow an immutable property through the block metadata resource.
+    /// Side: both.
+    /// Borrow an immutable property through the block metadata resource.
     #[access(Metadata)]
     fn block_metadata_property(
         &self,
         state: BlockStateRecord,
         name: &str,
     ) -> Result<Option<&str>, BlockStateError>;
-    /// Side: both. Change a property through the block metadata resource.
+    /// Side: both.
+    /// Change a property through the block metadata resource.
     #[access(Metadata)]
     fn block_metadata_with(
         &self,
@@ -100,7 +102,8 @@ pub trait BlockStatesBackend {
         name: &str,
         value: &str,
     ) -> Result<BlockStateRecord, BlockStateError>;
-    /// Side: both. Apply partial properties through the block metadata resource.
+    /// Side: both.
+    /// Apply partial properties through the block metadata resource.
     #[access(Metadata)]
     fn block_metadata_of(
         &self,

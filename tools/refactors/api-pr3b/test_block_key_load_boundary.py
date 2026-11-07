@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 
 root = Path(__file__).resolve().parents[3]
 game = (root / "crates/horizon-client/src/game.rs").read_text()
@@ -25,5 +26,6 @@ for name in ("horizon-world", "horizon-mod-runtime", "horizon-mod-api"):
     features = ', features=["testing"]' if name == "horizon-mod-api" else ""
     manifest += f'{key} = {{ package={json.dumps(name)}, path={json.dumps(str(root / "crates" / name))}{features} }}\n'
 (scratch / "Cargo.toml").write_text(manifest)
-subprocess.run(["cargo", "test", "--manifest-path", str(scratch / "Cargo.toml"), "--test", "load"],
-               env=dict(os.environ, CARGO_TARGET_DIR=str(root / "target")), check=True)
+shutil.copyfile(root / "Cargo.lock", scratch / "Cargo.lock")
+subprocess.run(["cargo", "test", "--offline", "--manifest-path", str(scratch / "Cargo.toml"), "--test", "load"],
+               env=dict(os.environ, CARGO_TARGET_DIR=os.environ.get("CARGO_TARGET_DIR", str(root / "target"))), check=True)

@@ -76,6 +76,91 @@ pub trait BlockMetadata {
         properties: &[StateConstraint],
     ) -> Result<BlockStateRecord, BlockStateError>;
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Backend, BackendRef, Host, HostBlockStates};
+    struct MetadataHost(&'static horizon_mod_runtime::block_definitions::Blocks);
+    impl Backend for MetadataHost {}
+    crate::impl_backend_areas!(MetadataHost, except(block_states));
+    impl crate::prelude::BlockStatesBackend for MetadataHost {
+        fn block_metadata_property(
+            &self,
+            state: BlockStateRecord,
+            name: &str,
+        ) -> Result<Option<&str>, BlockStateError> {
+            self.0.property(state, name)
+        }
+        fn block_metadata_with(
+            &self,
+            state: BlockStateRecord,
+            name: &str,
+            value: &str,
+        ) -> Result<BlockStateRecord, BlockStateError> {
+            self.0.with(state, name, value)
+        }
+        fn block_metadata_of(
+            &self,
+            block: BlockKey,
+            properties: &[StateConstraint],
+        ) -> Result<BlockStateRecord, BlockStateError> {
+            self.0.of(block, properties)
+        }
+    }
+    impl Host for MetadataHost {
+        fn backend(&self) -> Option<BackendRef<'_>> {
+            Some(BackendRef::of(self))
+        }
+    }
+    crate::impl_host_areas!(MetadataHost);
+    struct Empty;
+    impl Host for Empty {}
+    crate::impl_host_areas!(Empty);
+
+    #[test]
+    fn metadata_service_reads_edits_and_refuses_invalid_transport() {
+        crate::install_parts(&[]).unwrap();
+        let states = [
+            std::collections::BTreeMap::from([("lit".into(), "false".into())]),
+            std::collections::BTreeMap::from([("lit".into(), "true".into())]),
+        ];
+        crate::__private::resolve_block_keys(["probe:lamp"], |_| {
+            horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                &[&states[0], &states[1]],
+                0,
+            )
+            .map_err(|e| format!("{e:?}"))
+        })
+        .unwrap();
+        let host = MetadataHost(crate::__private::block_definitions().unwrap());
+        let metadata = host.block_states();
+        let block = crate::__private::block_key("probe:lamp").unwrap();
+        let off = metadata.of(block, &[]).unwrap();
+        assert_eq!(off.state, 0);
+        let on = metadata.with(off, "lit", "true").unwrap();
+        assert_eq!(on.state, 1);
+        assert_eq!(metadata.property(on, "lit"), Ok(Some("true")));
+        assert_eq!(metadata.property(off, "lit"), Ok(Some("false")));
+        assert_eq!(metadata.property(off, "missing"), Ok(None));
+        assert_eq!(
+            metadata.with(off, "lit", "bad"),
+            Err(BlockStateError::InvalidValue(0))
+        );
+        assert_eq!(
+            metadata.property(BlockStateRecord::new(block, 2), "lit"),
+            Err(BlockStateError::UnknownState)
+        );
+        assert_eq!(
+            metadata.property(BlockStateRecord::new(BlockKey(999), 0), "lit"),
+            Err(BlockStateError::UnknownBlock)
+        );
+        assert_eq!(
+            Empty.block_states().property(off, "lit"),
+            Err(BlockStateError::Unavailable)
+        );
+    }
+}
+
 impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
     fn property(
         &self,
@@ -106,15 +191,15 @@ impl BlockMetadata for horizon_mod_runtime::block_definitions::Blocks {
         block: BlockKey,
         properties: &[StateConstraint],
     ) -> Result<BlockStateRecord, BlockStateError> {
+        let definition = self
+            .definitions
+            .get(block.0 as usize)
+            .ok_or(BlockStateError::UnknownBlock)?;
         let constraints: Vec<_> = properties
             .iter()
             .map(|p| (p.name.as_str(), p.value.as_str()))
             .collect();
-        let ordinal = self
-            .definitions
-            .get(block.0 as usize)
-            .ok_or(BlockStateError::UnknownBlock)?
-            .of(&constraints)?;
+        let ordinal = definition.of(&constraints)?;
         Ok(BlockStateRecord::new(block, ordinal))
     }
 }

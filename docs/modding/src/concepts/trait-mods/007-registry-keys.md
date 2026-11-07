@@ -23,6 +23,10 @@ names before mesh tables are constructed. Workers share read-only definitions; p
 reads allocate nothing. Pack reload does not mutate definitions or identities. The world's
 numeric mappings and tag membership remain separate reloadable data.
 
+Metadata contexts are read-only and borrow the same table on the host and on workers.
+Wire transport records are internal, not saved block values. Persist canonical identifiers
+and property strings rather than slots or state ordinals.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.

@@ -516,15 +516,20 @@ fn wire_type(types: &Types<'_>, ty: &Ty) -> String {
 
 /// The guest's value for an import's result: owned, or kept for the call where the trait
 /// method returns a borrow.
-fn guest_ret(types: &Types<'_>, ty: &Ty, e: &str) -> String {
+pub(super) fn guest_ret(types: &Types<'_>, ty: &Ty, e: &str) -> String {
     match ty {
         Ty::Str(Str::Borrowed) => format!("super::intern({e})"),
-        Ty::Option(inner) if matches!(**inner, Ty::Str(Str::Borrowed)) => {
+        Ty::Option(inner) => {
             format!(
                 "match {e} {{ Some(x) => Some({}), None => None }}",
                 guest_ret(types, inner, "x")
             )
         }
+        Ty::Result(ok, error) => format!(
+            "match {e} {{ Ok(x) => Ok({}), Err(x) => Err({}) }}",
+            guest_ret(types, ok, "x"),
+            guest_ret(types, error, "x")
+        ),
         ty => lift(types, ty, e),
     }
 }
