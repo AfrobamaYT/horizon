@@ -351,6 +351,16 @@ pub trait PlayersBackend {
         )
     }
     /// Side: both.
+    /// The recipes in the player's recipe book (`ServerRecipeBook.recipes`), as qualified ids in
+    /// order (`minecraft:oak_planks`). None for a player it can't reach.
+    fn player_discovered_recipes(&self, player: PlayerRef) -> Option<Vec<String>> {
+        crate::phase::unprovided(
+            "Backend::player_discovered_recipes",
+            "player_discovered_recipes",
+            crate::phase::LoadAccess::WorldOnly,
+        )
+    }
+    /// Side: both.
     /// The brand the player's client announced when it connected (`ServerPlayer.clientBrand`),
     /// empty when it sent none. Displaced connected players keep theirs; an acting player with
     /// no known connection has an empty one. None for a stale or unavailable player.
