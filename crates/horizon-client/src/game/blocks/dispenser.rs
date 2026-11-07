@@ -9,7 +9,7 @@ use horizon_client::{
     Result,
     collisions::SceneCollisions,
     containers::BlockEntity,
-    items::ItemStack,
+    items::{ItemStack, Items},
     mobs::{Mob, Species, sulfur_cube},
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
@@ -104,8 +104,9 @@ fn shrink(mut stack: ItemStack) -> Option<ItemStack> {
 type Dispensed = (Option<ItemStack>, i32);
 
 /// None keeps vanilla's behaviour; an explicit empty remainder consumes the stack.
-fn mod_dispensed(answer: Option<NativeDispensed>) -> Option<Dispensed> {
-    answer.map(|(left, event)| (left.filter(|stack| stack.count > 0), event))
+fn mod_dispensed(answer: Option<NativeDispensed>, items: &Items) -> Option<Dispensed> {
+    use super::api_values::TryIntoEngine;
+    answer.and_then(|answer| answer.try_into_engine(items).ok())
 }
 
 thread_local! {
@@ -610,7 +611,7 @@ impl Game<'_> {
                 &mut answer,
             );
         }
-        if let Some((left, event)) = mod_dispensed(answer) {
+        if let Some((left, event)) = mod_dispensed(answer, self.items()) {
             if event == FAIL {
                 self.native_block_failed_dispense(
                     self.dim.id(),

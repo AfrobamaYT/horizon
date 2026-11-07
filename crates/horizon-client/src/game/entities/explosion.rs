@@ -15,7 +15,9 @@ use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
-use mod_api::{NativeBlockInteraction, NativeExplosionStart, NativeItemDrop};
+#[cfg(test)]
+use mod_api::NativeItemDrop;
+use mod_api::{NativeBlockInteraction, NativeExplosionStart};
 use std::{cmp::Ordering, io};
 use {
     horizon_core::java_hash_map::{JavaHashMap, JavaKey},
@@ -1216,7 +1218,7 @@ impl Game<'_> {
                 .map(|(pos, stack)| level.block_drop_item(pos, stack))
                 .collect()
         });
-        let mut merged: Vec<Option<NativeItemDrop>> = vec![None; items.len()];
+        let mut merged: Vec<Option<super::spill::BlockItemDrop>> = vec![None; items.len()];
         let mut edited = Vec::new();
         for block in drops.blocks {
             let mut originals: Vec<_> = block

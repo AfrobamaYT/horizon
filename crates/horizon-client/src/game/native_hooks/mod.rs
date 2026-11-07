@@ -20,7 +20,6 @@ use super::{
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
-use horizon_assets::item_model::StackView;
 use horizon_client::block_contact::Pending;
 use horizon_client::creative::Creative;
 use horizon_client::{
