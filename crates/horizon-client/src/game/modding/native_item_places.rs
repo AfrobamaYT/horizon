@@ -55,7 +55,7 @@ impl Game<'_> {
             return Some(edit(&mut m.extra.items[..size], at(&m.position)));
         };
         if self.carts.iter().any(container) {
-            return Some(edit(self.cart_slots(id)?, position));
+            return self.edit_cart_slots(id, |slots| edit(slots, position));
         }
         if let Some(super::BlockEntity::Chest(open)) = self.world.block_entities.get_mut(&key) {
             return Some(edit(open, position));

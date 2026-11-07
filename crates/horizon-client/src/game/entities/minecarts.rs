@@ -2166,16 +2166,20 @@ impl Game<'_> {
     /// `setChestVehicleItem` first unpack its loot table with no player, so
     /// no `player_generates_container_loot` fires later. While its menu is
     /// open the live slots are the placeholder copy (`open_cart_container`).
-    pub(super) fn cart_slots(&mut self, id: u32) -> Option<&mut Vec<Option<ItemStack>>> {
-        let c = self.carts.iter_mut().find(|c| c.id == id)?;
-        c.loot = None;
+    pub(super) fn edit_cart_slots<R>(
+        &mut self,
+        id: u32,
+        edit: impl FnOnce(&mut Vec<Option<ItemStack>>) -> R,
+    ) -> Option<R> {
+        let i = self.carts.iter().position(|c| c.id == id)?;
+        self.carts.update(i, |c| c.loot = None);
         match self
             .world
             .block_entities
             .get_mut(&(i32::MAX - 15, CART_KEY_Y, id as i32))
         {
-            Some(BlockEntity::Chest(open)) => Some(open),
-            _ => Some(&mut c.items),
+            Some(BlockEntity::Chest(open)) => Some(edit(open)),
+            _ => Some(self.carts.update(i, |c| edit(&mut c.items))),
         }
     }
     /// `ContainerEntity.unpackChestVehicleLootTable` for a player who opens a

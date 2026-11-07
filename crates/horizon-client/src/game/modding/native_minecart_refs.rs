@@ -33,7 +33,7 @@ impl Game<'_> {
         if kind.is_some_and(|kind| self.carts[index].kind != kind) {
             return false;
         }
-        edit(&mut self.carts[index]);
+        self.carts.update(index, edit);
         true
     }
 
