@@ -440,6 +440,8 @@ pub mod tests {
             "minecraft:iron_helmet",
             "minecraft:iron_sword",
             "minecraft:diamond",
+            "minecraft:emerald",
+            "minecraft:potion",
             "minecraft:stone",
             "minecraft:apple",
             "minecraft:bread",
@@ -1685,7 +1687,7 @@ pub mod tests {
         let plain = place.resource(host).unwrap();
         let damage = ComponentId::new("minecraft:damage").unwrap();
         assert_eq!(plain.component(&damage), None);
-        let worn = plain.with_component(host, &damage, Tag::Int(5));
+        let worn = plain.with_component(host, &damage, Tag::Int(5)).unwrap();
         assert_eq!(worn.component(&damage), Some(Tag::Int(5)));
         // Aborted, nothing changed; committed, one sword of the two is worn and splits off.
         let aborted = host.transaction(|host, tx| {
@@ -1726,29 +1728,43 @@ pub mod tests {
         assert_ne!(unbreakable, sword);
         assert_eq!(unbreakable.component(&max_damage), None);
         // Set again, the removal goes and the value is the patch's own.
-        let set = unbreakable.with_component(host, &max_damage, Tag::Int(10));
+        let set = unbreakable
+            .with_component(host, &max_damage, Tag::Int(10))
+            .unwrap();
         assert_eq!(patch(&set), ["minecraft:max_damage"]);
         assert_eq!(set.component(&max_damage), Some(Tag::Int(10)));
         // A component the item hasn't by default only loses the stack's own value.
         let data = ComponentId::new("minecraft:custom_data").unwrap();
-        let tagged = sword.with_component(host, &data, Tag::Compound(Compound::new()));
+        let tagged = sword
+            .with_component(host, &data, Tag::Compound(Compound::new()))
+            .unwrap();
         assert_ne!(tagged, sword);
         assert_eq!(tagged.without_component(host, &data), sword);
         // Set to the item's default, a component keeps no value of the stack's own, as vanilla's
         // `set` drops it: the stack is the plain item, whatever NBT type the mod wrote.
-        assert_eq!(set.with_component(host, &max_damage, Tag::Int(250)), sword);
         assert_eq!(
-            unbreakable.with_component(host, &max_damage, Tag::Short(250)),
+            set.with_component(host, &max_damage, Tag::Int(250))
+                .unwrap(),
+            sword
+        );
+        assert_eq!(
+            unbreakable
+                .with_component(host, &max_damage, Tag::Short(250))
+                .unwrap(),
             sword
         );
         let enchantable = ComponentId::new("minecraft:enchantable").unwrap();
         let value = |v| Tag::Compound([("value".into(), v)].into_iter().collect());
         assert_eq!(
-            sword.with_component(host, &enchantable, value(Tag::Byte(14))),
+            sword
+                .with_component(host, &enchantable, value(Tag::Byte(14)))
+                .unwrap(),
             sword
         );
         assert_ne!(
-            sword.with_component(host, &enchantable, value(Tag::Int(15))),
+            sword
+                .with_component(host, &enchantable, value(Tag::Int(15)))
+                .unwrap(),
             sword
         );
     }
@@ -1773,7 +1789,10 @@ pub mod tests {
         let stick = ItemResource::of(&stick());
         let set = |id, value: Tag| {
             let id = ComponentId::new(id).unwrap();
-            stick.with_component(&Report, &id, value).component(&id)
+            stick
+                .with_component(&Report, &id, value)
+                .unwrap()
+                .component(&id)
         };
         // `custom_data` is kept as the NBT given (`CustomData.equals`): a byte where the report
         // has an int is a change, while the same int is the default.

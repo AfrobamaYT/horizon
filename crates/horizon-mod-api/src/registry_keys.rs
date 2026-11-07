@@ -389,6 +389,18 @@ pub fn effect_key(index: usize) -> Option<EffectKey> {
         .map(EffectKey)
 }
 
+impl crate::BoolGameRuleKey {
+    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
+        crate::parts::with_registering_keys(|keys| {
+            keys.unwrap_or(crate::parts::requested_keys())
+                .game_rules
+                .id(slot)
+                .ok_or("unknown bool rule slot")?;
+            Ok(Self(slot))
+        })
+    }
+}
+
 #[cfg(test)]
 mod item_tests {
     use super::*;
@@ -418,17 +430,5 @@ mod item_tests {
         assert_eq!(ItemKey::from_slot(apple.0), Ok(apple));
         assert_eq!(item_id(apple), Some("minecraft:apple"));
         assert!(ItemKey::from_slot(3).is_err());
-    }
-}
-
-impl crate::BoolGameRuleKey {
-    pub(crate) fn from_slot(slot: u32) -> Result<Self, &'static str> {
-        crate::parts::with_registering_keys(|keys| {
-            keys.unwrap_or(crate::parts::requested_keys())
-                .game_rules
-                .id(slot)
-                .ok_or("unknown bool rule slot")?;
-            Ok(Self(slot))
-        })
     }
 }
