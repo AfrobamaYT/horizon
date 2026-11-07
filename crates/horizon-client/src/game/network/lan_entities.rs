@@ -1112,7 +1112,7 @@ mod tests {
                         .summon_with_nbt($kind, [1.0, 70.0, 1.0], $nbt)
                         .unwrap();
                     pending!($list);
-                    let taken = $list.take();
+                    let taken = $list.lift();
                     $game
                         .summon_with_nbt($kind, [2.0, 70.0, 1.0], $nbt)
                         .unwrap();
@@ -1121,7 +1121,10 @@ mod tests {
                     $game.lan_assign_ids();
                     assert_eq!(taken[0].id, 0);
                     assert_eq!($list[0].id, base + 1);
-                    $list.restore(taken);
+                    $list.restore(
+                        taken,
+                        horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+                    );
                     $game.lan_assign_ids();
                     assert_eq!(
                         $list.iter().map(|p| p.id).collect::<Vec<_>>(),

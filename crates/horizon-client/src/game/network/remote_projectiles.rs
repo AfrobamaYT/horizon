@@ -631,7 +631,7 @@ impl Game<'_> {
         {
             return;
         }
-        let mut rockets = std::mem::take(&mut self.rockets);
+        let mut rockets = self.rockets.lift();
         for r in rockets.iter_mut().filter(|r| r.attached_to == Some(me)) {
             self.follow_own_player(r);
             self.rocket_spark(r);
@@ -680,7 +680,7 @@ impl Game<'_> {
         // FallingBlockEntity.tick runs on a client too: the block falls by
         // itself between the server's updates (every 20 ticks), then waits
         // where it lands for the server to place it and remove it.
-        let mut falling = std::mem::take(&mut self.falling);
+        let mut falling = self.falling.lift();
         falling.for_each_mut(|f| {
             if let Ok(FallStep::Landed(_)) = self.fall_step(f, false, &[]) {
                 // Block.updateEntityMovementAfterFallOn, then the air drag.
@@ -691,12 +691,12 @@ impl Game<'_> {
         // Projectiles tick on the client too and fly on between the tracker's
         // updates (10 to 20 ticks apart); a block stops them there, and only
         // the server decides what they hit.
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
         let bubbles: Vec<_> = projectiles
             .iter()
             .filter_map(Projectile::water_bubbles)
             .collect();
-        let mut tridents = std::mem::take(&mut self.tridents);
+        let mut tridents = self.tridents.lift();
         let mut arrow_events = Vec::new();
         let rain = self.arrow_rain();
         let arrow_scene = self.arrow_scene(&rain);
@@ -753,7 +753,7 @@ impl Game<'_> {
         // follows it, and every rocket leaves its spark trail on a client. One
         // boosting this client's own player ticks after it (`tick_own_rockets`).
         let me = self.remote_player_id();
-        let mut rockets = std::mem::take(&mut self.rockets);
+        let mut rockets = self.rockets.lift();
         for r in &mut rockets {
             r.remote_step(&mut SceneCollisions {
                 world: &self.world,
