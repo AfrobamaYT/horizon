@@ -3063,8 +3063,8 @@ impl Game<'_> {
                         p.yaw = yaw;
                         p.pitch = pitch;
                     }
-                    return;
                 });
+                return;
             }
             if path.is_some()
                 && (self.potions.move_remote_thrown(
