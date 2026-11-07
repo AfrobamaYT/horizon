@@ -118,6 +118,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn export_modules_support_file_and_directory_roots() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../../target/export-module-roots-{}",
+            std::process::id()
+        ));
+        let api = root.join("crates/horizon-mod-api/src");
+        fs::create_dir_all(api.join("exports")).unwrap();
+        fs::create_dir_all(api.join("parts")).unwrap();
+        fs::write(api.join("exports/parts.rs"), "mod parts;").unwrap();
+        for expected in [api.join("parts/mod.rs"), api.join("parts.rs")] {
+            fs::write(&expected, "").unwrap();
+            let generated = sources(&root).unwrap();
+            let file = syn::parse_file(&generated["mod_api_exports_root.rs"]).unwrap();
+            let Item::Mod(module) = &file.items[0] else {
+                panic!("export lost its module")
+            };
+            let syn::Meta::NameValue(path) = &module.attrs[0].meta else {
+                panic!("module has no path")
+            };
+            let syn::Expr::Lit(value) = &path.value else {
+                panic!("module path is not a literal")
+            };
+            let syn::Lit::Str(value) = &value.lit else {
+                panic!("module path is not a string")
+            };
+            assert_eq!(Path::new(&value.value()), expected);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_new_area_is_discovered_without_a_shared_list() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../target/export-discovery-{}",
