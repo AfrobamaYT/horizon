@@ -27,8 +27,7 @@ toolchain = "1.99.1 <commit>"     # every mod linked together needs the same one
 my_library = "…"
 ```
 
-A mod carries native code or wasm code, not both. A wasm mod keeps `internals` and
-`[[inject]]` declarations at the manifest root, with no `[native]` table.
+A mod carries native code or wasm code, not both. A wasm mod has no `[native]` table.
 
 ## Dependencies
 
