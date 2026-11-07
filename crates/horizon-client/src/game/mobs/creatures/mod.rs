@@ -10638,7 +10638,11 @@ mod living_drops_tests {
                 let items: Vec<_> = event
                     .drops
                     .iter()
-                    .map(|d| d.stack.item.to_string())
+                    .map(|d| {
+                        mod_api::__private::item_key_id(d.stack.item())
+                            .unwrap()
+                            .to_string()
+                    })
                     .collect();
                 self.0.lock().unwrap().push(format!(
                     "{} {:?} {} {}",
@@ -10718,6 +10722,7 @@ mod living_drops_tests {
 #[cfg(test)]
 mod armor_destroy_tests {
     use super::MobEvent;
+    use horizon_client::items::ItemStack;
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
@@ -10777,12 +10782,16 @@ mod armor_destroy_tests {
         });
     }
     use crate::game::{answered_wear, durability_damage, native_entity_refs::tests::with_game};
-    use mod_api::{EquipmentSlot, ItemStack, NativeArmorHurt};
+    use mod_api::{EquipmentSlot, NativeArmorHurt};
 
     fn entry(slot: EquipmentSlot, new_damage: f32) -> NativeArmorHurt {
         NativeArmorHurt {
             slot,
-            stack: ItemStack::new("minecraft:diamond_helmet", 1),
+            stack: mod_api::ItemStack::new(
+                mod_api::__private::item_key("minecraft:diamond_helmet").unwrap(),
+                1,
+            )
+            .unwrap(),
             damage: 2.0,
             new_damage,
         }
