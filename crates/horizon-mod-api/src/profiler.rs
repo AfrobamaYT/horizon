@@ -1,6 +1,8 @@
 //! Host-only Level 1 timings. Totals are inclusive: nested calls also contribute to their parent.
 //! No arguments or game data are retained. Start/stop must run outside mod calls; stop drains
 //! in-flight guards. Repeated start is a no-op; repeated stop returns an empty report.
+#[path = "profiler/firefox.rs"]
+mod firefox;
 use crate::crash::NativeModCall;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::BTreeMap;
@@ -174,6 +176,18 @@ pub fn summary() -> String {
         .as_ref()
         .map_or_else(String::new, Report::summary)
 }
+/// Export the last stopped session as raw Gecko/Firefox profile JSON, format version 37.
+/// Output is limited to 8 MiB; missing reports or oversized output return an error,
+/// never an empty or truncated file. Counters remain exact decimal strings. Markers
+/// are aggregate snapshots, not sampled execution or an invocation timeline.
+pub fn firefox_profile() -> Result<Vec<u8>, String> {
+    let report = REPORT.lock().unwrap_or_else(|e| e.into_inner());
+    firefox::encode(
+        report
+            .as_ref()
+            .ok_or("No stopped mod profiler session is available")?,
+    )
+}
 /// Disable, drain active calls, and merge every thread. Call outside any profiled guard.
 pub(crate) fn stop_report() -> Report {
     let _control = CONTROL.lock().unwrap_or_else(|e| e.into_inner());
@@ -297,6 +311,8 @@ mod tests {
     fn profiler_guards_and_threads() {
         let _serial = SERIAL.lock().unwrap();
         stop();
+        *REPORT.lock().unwrap() = None;
+        assert!(firefox_profile().unwrap_err().contains("No stopped"));
         TIME.with(|t| t.set(0));
         CLOCK_READS.store(0, SeqCst);
         drop(enter_native_mod(call("off", "off", None)));
@@ -344,7 +360,17 @@ mod tests {
         drop(enter_native_mod(call("fresh", "epoch", None)));
         super::stop();
         assert!(super::summary().contains("fresh:"));
+        let profile = firefox_profile().unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&profile).unwrap();
+        assert!(
+            json["threads"][0]["markers"]["data"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row[5]["mod"] == "fresh")
+        );
         super::stop();
+        assert_eq!(firefox_profile().unwrap(), profile);
         assert!(super::summary().contains("fresh:"));
     }
     #[test]
