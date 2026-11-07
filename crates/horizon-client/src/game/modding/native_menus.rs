@@ -63,7 +63,7 @@ pub(super) fn fit(
 
 /// Server menus, for server mods. The players are named by UUID;
 /// none of these runs while a player's state is swapped in (inside
-/// `native_perform_command`, the menus can be opened and filled).
+/// `native_run_mod_command`, the menus can be opened and filled).
 #[allow(dead_code)]
 impl Game<'_> {
     fn native_conn(&self, uuid: u128) -> Option<u32> {
