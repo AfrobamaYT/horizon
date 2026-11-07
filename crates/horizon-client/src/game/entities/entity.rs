@@ -618,8 +618,9 @@ impl Game<'_> {
             let position = item.position;
             let mut discarded = false;
             if mod_api::__private::listened(mod_api::HookId::ItemAfterVerticalCollision)
-                && let Ok(mut stack) = item.stack.try_into_api()
+                && let Ok(snapshot) = item.stack.try_into_api()
             {
+                let mut stack = Some(snapshot);
                 self.native_item_after_vertical_collision(
                     mod_api::__private::ItemAfterVerticalCollisionCall {
                         dimension: self.dim.id(),
@@ -632,10 +633,10 @@ impl Game<'_> {
                         discard: &mut discarded,
                     },
                 );
-                if let Ok(stack) = stack.try_into_engine(self.items()) {
-                    item.stack = stack;
-                } else {
-                    discarded = false;
+                match stack.try_into_engine(self.items()) {
+                    Ok(Some(stack)) => item.stack = stack,
+                    Ok(None) => discarded = true,
+                    Err(_) => discarded = false,
                 }
             }
             if discarded || item.stack.count == 0 {

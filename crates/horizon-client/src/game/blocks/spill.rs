@@ -912,11 +912,9 @@ mod tests {
             _: &dyn mod_api::LevelHost,
             event: &mut mod_api::BlockDropsEvent<'_>,
         ) -> mod_api::Flow {
-            if event
-                .drops
-                .iter()
-                .any(|d| &*d.stack.item == "minecraft:dirt")
-            {
+            if event.drops.iter().any(|d| {
+                mod_api::__private::item_key_id(d.stack.item()).unwrap() == "minecraft:dirt"
+            }) {
                 return mod_api::Flow::Cancel;
             }
             event.experience += 2;
