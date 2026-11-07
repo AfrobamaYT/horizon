@@ -52,6 +52,24 @@ component-overridden maximum return `BlockEntityItemError`, never a partial writ
 or silent count clamp. A stale handle refuses a replacement rather than accessing
 its container; acquire a new handle for the replacement.
 
+## One-shot client effects
+
+To tell clients about something that happened once, such as a burst of particles, queue
+fields instead of writing them to the saved `nbt`. In `block_entity_tick`, or another
+event with a mutable entity, native and wasm mods alike call
+`event.entity.set_client_update_fields(fields)`, then `host.block_entity_sync(event.pos)`.
+A later call replaces the batch; an empty compound clears it.
+
+The next block change that reaches a viewer puts the fields over what
+`block_entity_update_tag` gives, or sends them alone without one, in one packet for every
+current viewer, and the batch is gone. A change nobody sees leaves it waiting, and neither a
+chunk sent to a player nor a resend of the blocks under a single player takes it. Removing
+or unloading the block entity drops it. It is never saved, cloned or compared, and it does
+not change the entity's revision.
+
+A client merges the fields into its copy's `nbt` as any update field, and they stay there
+until sent again: put a counter in them to tell one effect from the next.
+
 ## Retaining a handle
 
 A `BlockEntityRef` names one live entity, not every entity later placed at its position. Removal,

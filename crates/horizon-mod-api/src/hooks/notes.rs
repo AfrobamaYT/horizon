@@ -3043,6 +3043,12 @@ registration path.
   copy's `nbt`. A saved chunk sent past the view distance asks it on its own thread, so read only `entity`. Keep it to what clients show (a machine running, its facing, a tank's level), not a menu's progress:
   menus have their own data slots.
 
+- One-shot fields ride that tag. `entity.set_client_update_fields(fields)` on a `ModBlockEntityView` queues them in
+  the runtime under the entity's identity, for native and wasm mods alike; they are not part of the plain-data entity,
+  so saves, clones and comparisons never see them and its revision stays. Once a block change (`block_entity_sync`)
+  reaches viewers, the game builds one tag, puts the fields over `native_block_entity_update_tag`'s and sends it to
+  them all. A change nobody sees, a chunk send and a single player's resend leave them waiting; removal or unload drops them.
+
 - `native_affect_neighbors_after_removal` is a mod block's `Block.affectNeighborsAfterRemoval`: the block was
   removed from `pos` (`moved`: a piston pushed it) with `UPDATE_NEIGHBORS` or the piston flag. There is no bus
   event for it, so it is a `BlockPart` method only. The block's own class has already run its updates, as an
