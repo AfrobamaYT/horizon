@@ -626,13 +626,20 @@ impl Game<'_> {
     }
 
     /// A saved llama spit or shulker bullet.
-    pub(super) fn load_spit_or_bullet(&mut self, tag: Tag, player_uuid: Option<[i32; 4]>) {
+    pub(super) fn load_spit_or_bullet(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
         let target = self.bullet_target(&tag);
         if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid, target) {
             self.claim_owner(&mut p);
             self.next_entity += 1;
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
