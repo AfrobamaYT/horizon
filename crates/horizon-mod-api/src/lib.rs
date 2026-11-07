@@ -3910,7 +3910,7 @@ impl ScopedActionResult {
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
 /// action ran.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActionRefused {
     /// The handle is a real player's.
@@ -4852,8 +4852,10 @@ mod tests {
         let host: &mut dyn ServerHost = &mut server;
         assert!(host.commands().run_command("list"));
         assert!(!host.commands().run_command("missing"));
-        host.commands().feedback(Text::literal("answer"));
-        host.messages().broadcast(Text::literal("everyone"));
+        host.commands().feedback(Text::literal("answer")).unwrap();
+        host.messages()
+            .broadcast(Text::literal("everyone"))
+            .unwrap();
         assert_eq!(host.messages().text_allowed("blocked"), Some(false));
         let player = host.players().acting_player().unwrap();
         assert_eq!(host.players().server_players(), [player]);
@@ -4958,7 +4960,9 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
-            player.action_bar(host, Text::literal(block.clone()));
+            player
+                .action_bar(host, Text::literal(block.clone()))
+                .unwrap();
             if block == "minecraft:stone" {
                 Flow::Cancel
             } else {

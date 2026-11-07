@@ -68,7 +68,8 @@ pub trait DrawContext {
         unimplemented!("DrawContext::item_stack")
     }
     /// Paint GUI extraction calls through this window's atlas, including player faces.
-    fn gui_paint(&mut self, draws: &[GuiDraw]) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn gui_paint(&mut self, draws: &[GuiDraw]) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::gui_paint")
     }
     /// Vanilla's nine-slice widget rendering. `color` is ARGB, as `fill` uses.
@@ -76,7 +77,8 @@ pub trait DrawContext {
         unimplemented!("DrawContext::gui_nine_slice")
     }
     /// A vanilla tooltip at the cursor, in GUI pixels.
-    fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn gui_tooltip(&mut self, lines: &[Text], at: [f32; 2]) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::gui_tooltip")
     }
     /// The width of `text` in GUI pixels, as `native_text` draws it on `draw` (`Font.width`).
@@ -127,7 +129,14 @@ pub trait DrawContext {
     /// grey when not `active`), scrolling when it doesn't fit, and recorded for the narrator and
     /// a controller's focus. `rect` is `[x, y, w, h]` in GUI pixels. What
     /// [`crate::widgets::Widgets`] draws its buttons with.
-    fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn widget_button(
+        &mut self,
+        rect: [f32; 4],
+        label: &Text,
+        active: bool,
+        highlighted: bool,
+    ) -> Result<(), TextFormError> {
         unimplemented!("DrawContext::widget_button")
     }
     /// A text field as the game's screens draw one (`EditBox`): its text from the first
@@ -272,7 +281,15 @@ pub trait BlockEntityDrawContext {
     /// `draw.light`; a nonzero 0xRRGGBB `outline` rings each glyph, as glowing
     /// sign text's. Returns the width drawn, in font pixels: centre a line
     /// by starting it at minus half its width. API @API:draw_text@.
-    fn text(&mut self, text: &Text, at: [f32; 2], color: u32, glowing: bool, outline: u32) -> f32 {
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn text(
+        &mut self,
+        text: &Text,
+        at: [f32; 2],
+        color: u32,
+        glowing: bool,
+        outline: u32,
+    ) -> Result<f32, TextFormError> {
         unimplemented!("BlockEntityDrawContext::draw_text")
     }
     /// The width of `text` in font pixels, as `draw_text` draws it, to centre a

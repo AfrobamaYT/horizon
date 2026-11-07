@@ -71,7 +71,8 @@ pub trait DisplaysBackend {
     /// Side: server.
     /// `TextDisplay.getText`; None for another kind of display.
     #[access(WorldOnly)]
-    fn display_text(&self, display: DisplayRef) -> Option<Text>;
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn display_text(&self, display: DisplayRef) -> Result<Option<Text>, TextFormError>;
     /// Side: server.
     /// `TextDisplay.getLineWidth`.
     #[access(WorldOnly)]
@@ -180,7 +181,8 @@ pub trait DisplaysBackendMut {
     /// Side: server.
     /// `TextDisplay.setText`; false for another kind of display.
     #[access(WorldOnly)]
-    fn display_set_text(&mut self, display: DisplayRef, text: Text) -> bool;
+    /// Refuses text deeper than 512 component nodes before applying any changes.
+    fn display_set_text(&mut self, display: DisplayRef, text: Text) -> Result<bool, TextFormError>;
     /// Side: server.
     /// `TextDisplay.setLineWidth`; false for another kind of display.
     #[access(WorldOnly)]
