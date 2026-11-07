@@ -88,7 +88,12 @@ impl Game<'_> {
         };
         let [qx, qy, qz] = streaming.biome_zoom.quart_at_block(block_pos(pos));
         let chunk = world.chunks.get(&(qx >> 2, qz >> 2))?;
-        let biome = chunk.biome(qx << 2, qy << 2, qz << 2);
+        // Noise-biome storage clamps the quart Y before block-coordinate conversion.
+        // Clamping first also preserves queries near the signed block-coordinate limits.
+        let min_qy = chunk.min_y() >> 2;
+        let max_qy = min_qy + chunk.sections.len() as i32 * 4 - 1;
+        let y = qy.clamp(min_qy, max_qy) << 2;
+        let biome = chunk.biome(qx << 2, y, qz << 2);
         Some(world_biomes!(self).get(biome).name.clone())
     }
 
