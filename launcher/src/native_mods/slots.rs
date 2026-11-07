@@ -120,7 +120,13 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
             (_, Kind::ModifyCallArg, _) => Some(NoSlotReason::SourcePending),
             (
                 Route::Source(_),
-                Kind::Head | Kind::Return | Kind::BeforeCall | Kind::AfterCall | Kind::ModifyValue,
+                Kind::Head
+                | Kind::Return
+                | Kind::BeforeCall
+                | Kind::AfterCall
+                | Kind::ModifyValue
+                | Kind::WrapCall
+                | Kind::WrapIf,
                 Access::Internals,
             ) => None,
             (Route::Source(_), _, _) => Some(NoSlotReason::SourcePending),
@@ -137,10 +143,7 @@ pub(super) fn routes(catalog: &Catalog, manifest: &Manifest) -> Result<Vec<Route
         }
         decisions.push(route);
         if inject.kind == Kind::WrapIf
-            && selected(&catalog.sites, inject)
-                .expect("site checked")
-                .output
-                != "()"
+            && selected(&catalog.sites, inject).is_some_and(|site| site.output != "()")
         {
             return Err(InjectError::Invalid {
                 id: format!("{}:{}", manifest.id, inject.id),
