@@ -4,18 +4,45 @@ use super::*;
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES (prepared 26.3), Rust, Python and a real game build"]
 fn dedicated_function_slots_keep_order_and_write_back() {
-    run(false, false);
+    run(Proof::Sites, false);
 }
 
 #[test]
 #[ignore = "requires HORIZON_TEST_RESOURCES (prepared 26.3), Rust, Python and two real game builds"]
 fn identical_callbacks_use_listed_and_source_routes() {
     for private in [false, true] {
-        run(true, private);
+        run(Proof::Functions, private);
     }
 }
 
-fn run(functions: bool, private: bool) {
+#[test]
+#[ignore = "requires prepared 26.3 and two real game builds"]
+fn identical_call_callbacks_use_listed_and_source_routes() {
+    for private in [false, true] {
+        run(Proof::Calls, private);
+    }
+}
+
+#[test]
+#[ignore = "requires prepared 26.3 and two real game builds"]
+fn identical_wrap_callbacks_use_listed_and_source_routes() {
+    for private in [false, true] {
+        run(Proof::Wrapping, private);
+    }
+}
+
+#[derive(Debug)]
+enum Proof {
+    Sites,
+    Functions,
+    Calls,
+    Wrapping,
+}
+
+fn run(proof: Proof, private: bool) {
+    let functions = matches!(proof, Proof::Functions);
+    let calls = matches!(proof, Proof::Calls | Proof::Wrapping);
+    let wrapping = matches!(proof, Proof::Wrapping);
     let resources = PathBuf::from(
         std::env::var_os("HORIZON_TEST_RESOURCES")
             .expect("set HORIZON_TEST_RESOURCES to prepared 26.3"),
@@ -23,7 +50,7 @@ fn run(functions: bool, private: bool) {
     assert!(resources.join("asset-index.json").is_file());
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let scratch = repo.join("target").join(format!(
-        "source-server-{}-{functions}-{private}",
+        "source-server-{}-{proof:?}-{private}",
         std::process::id()
     ));
     fs::create_dir_all(&scratch).unwrap();
@@ -36,7 +63,7 @@ fn run(functions: bool, private: bool) {
         .stdout(fs::File::create(&archive).unwrap());
     checked(git);
     let mut tar = Command::new("tar");
-    tar.arg("-xf").arg(archive).arg("-C").arg(&source);
+    tar.arg("-xf").arg(&archive).arg("-C").arg(&source);
     checked(tar);
     if private {
         let slots = source.join("crates/horizon-mod-api-gen/slots/horizon.txt");
@@ -45,11 +72,13 @@ fn run(functions: bool, private: bool) {
             .lines()
             .filter(|line| {
                 !line.contains("::next_autosave_interval |")
-                    && !line.contains("::on_tick_rate_changed |")
+                    && (calls || !line.contains("::on_tick_rate_changed |"))
             })
             .map(|line| format!("{line}\n"))
             .collect::<String>();
         fs::write(slots, text).unwrap();
+    }
+    if private && !calls {
         let game = source.join("crates/horizon-client/src/game.rs");
         let text = fs::read_to_string(&game).unwrap();
         fs::write(
@@ -75,6 +104,34 @@ fn run(functions: bool, private: bool) {
     )
     .unwrap();
     let catalog = internals::Catalog::read(&catalog_dir).unwrap();
+    let discovered_call = if calls {
+        let discovery = scratch.join("discovery");
+        fs::create_dir(&discovery).unwrap();
+        let mut tar = Command::new("tar");
+        tar.arg("-xf").arg(&archive).arg("-C").arg(&discovery);
+        checked(tar);
+        let entries = horizon_mod_api_gen::internals_view::catalog(
+            &fs::read_to_string(catalog_dir.join("internals.json")).unwrap(),
+        )
+        .unwrap();
+        Some(
+            horizon_mod_api_gen::sites::source::stage(
+                &discovery,
+                &entries,
+                &[horizon_mod_api_gen::sites::Declaration {
+                    target: "horizon_client::game::Game::next_autosave_interval".into(),
+                    selector: "horizon_client::game::autosave_interval".into(),
+                    ordinal: Some(0),
+                    ctx: String::new(),
+                    origin: "discovery".into(),
+                }],
+            )
+            .unwrap()
+            .remove(0),
+        )
+    } else {
+        None
+    };
     let fixture = repo.join("tools/fixtures/native-slot-order");
     let mut bundle = bundle_in(&fixture).unwrap().unwrap();
     let copied = scratch.join("mod");
@@ -99,6 +156,39 @@ fn run(functions: bool, private: bool) {
         )
         .unwrap();
     }
+    if calls {
+        bundle
+            .manifest
+            .inject
+            .retain(|entry| ["head", "high", "low", "value"].contains(&entry.id.as_str()));
+        let value = bundle
+            .manifest
+            .inject
+            .iter_mut()
+            .find(|entry| entry.id == "value")
+            .unwrap();
+        value.with = if wrapping { "wrap_value" } else { "call_value" }.into();
+        if wrapping {
+            value.kind = horizon_mod_package::manifest::inject::Kind::WrapCall;
+        }
+        value.priority = 7;
+        let mut before = value.clone();
+        before.id = "before".into();
+        before.kind = horizon_mod_package::manifest::inject::Kind::BeforeCall;
+        before.with = "before".into();
+        before.priority = 17;
+        let mut after = value.clone();
+        after.id = "after".into();
+        after.kind = horizon_mod_package::manifest::inject::Kind::AfterCall;
+        after.with = "after".into();
+        after.priority = -3;
+        bundle.manifest.inject.extend([before, after]);
+        fs::write(
+            bundle.dir.join("src/lib.rs"),
+            include_str!("../../../tools/fixtures/native-slot-order/src/calls.rs"),
+        )
+        .unwrap();
+    }
     let native = bundle.manifest.native.as_mut().unwrap();
     for entry in &mut native.internals {
         entry.hash = catalog
@@ -118,16 +208,21 @@ fn run(functions: bool, private: bool) {
             .hash
             .clone();
         if let Some(call) = &entry.call {
-            let site = catalog
-                .sites
-                .iter()
-                .find(|site| {
-                    internals::plain_path(&site.target) == internals::plain_path(&entry.at)
-                        && &site.selector == call
-                        && Some(site.ordinal) == entry.nth
-                })
-                .unwrap();
-            entry.ctx = Some(site.hash.clone());
+            let site = if let Some(site) = &discovered_call {
+                sites::Site::from(site.clone())
+            } else {
+                catalog
+                    .sites
+                    .iter()
+                    .find(|site| {
+                        internals::plain_path(&site.target) == internals::plain_path(&entry.at)
+                            && &site.call == call
+                            && Some(site.ordinal) == entry.nth
+                    })
+                    .unwrap()
+                    .clone()
+            };
+            entry.ctx = Some(site.ctx.clone());
         }
     }
     let manifest_path = bundle.dir.join("horizon-mod.toml");
@@ -158,7 +253,13 @@ fn run(functions: bool, private: bool) {
         horizon_mod_api_gen::points::source::read(&source)
             .unwrap()
             .len(),
-        if private { 2 } else { 0 }
+        if private && !calls { 2 } else { 0 }
+    );
+    assert_eq!(
+        horizon_mod_api_gen::sites::source::read(&source)
+            .unwrap()
+            .len(),
+        usize::from(private && calls)
     );
     let catalog = internals::Catalog::read(&catalog_dir).unwrap();
     catalog.check(&bundle.manifest).unwrap();
@@ -206,6 +307,12 @@ fn run(functions: bool, private: bool) {
         .arg(scratch);
     if functions {
         driver.arg("--functions");
+    }
+    if calls {
+        driver.arg("--calls");
+    }
+    if wrapping {
+        driver.arg("--wrapping");
     }
     checked(driver);
 }

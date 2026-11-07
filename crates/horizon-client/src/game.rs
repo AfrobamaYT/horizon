@@ -10,7 +10,7 @@ use mod_api::__private::game::PartsLookup;
 macro_rules! world_items {
     ($s:ident) => {
         match (&$s.server_items, &$s.world_tables) {
-            (Some(items), _) => items,
+            (Some(items), _) => &**items,
             (None, Some(t)) => &t.items,
             (None, None) => $s.res.items(),
         }
@@ -814,6 +814,8 @@ struct GameLevel<'w> {
     /// The tool a mod's machine breaks blocks with (`native_machine_destroy_block`):
     /// `Block.dropResources` rolls the loot with it instead of with none.
     drop_tool: Option<ItemStack>,
+    /// The entity `destroyBlock` names (`LootContextParams.THIS_ENTITY`).
+    drop_entity: Option<mod_api::EntityRef>,
     /// Where `Block.dropResources` puts the drops instead of popping them,
     /// while a mod's machine breaks a block (`native_machine_destroy_block`).
     drop_into: Option<Vec<ItemStack>>,
@@ -2788,6 +2790,9 @@ struct Game<'a> {
     debug_renderers: Vec<String>,
     /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
     debug_renderers_version: Option<u64>,
+    /// The next place in the HUD's layer order (`gui_layers::order`) whose mod layers are not
+    /// drawn yet this frame; `None` while the HUD is hidden or outside its pass.
+    hud_layer_next: Option<usize>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -3028,7 +3033,7 @@ struct Game<'a> {
     world_tables: Option<WorldTables>,
     /// Server-owned loot and item snapshots, independent of client preloads.
     server_loot: horizon_client::structure_blocks::LootSnapshot,
-    server_items: Option<Items>,
+    server_items: Option<Arc<Items>>,
     /// The world is superflat (`ServerLevel.isFlat`, for every dimension).
     world_flat: bool,
     /// The world is the Debug preset (`Level.isDebug`, for every dimension): its blocks
@@ -3240,6 +3245,9 @@ struct Game<'a> {
     native_input: native_claimed_items::ModInput,
     /// The native lifecycle bookkeeping.
     native_lifecycle: native_lifecycle::NativeLifecycle,
+    /// The mobs lent to the hook calls running now, before they join a level
+    /// (game/modding/native_unspawned_mob.rs).
+    lent_mobs: RefCell<native_unspawned_mob::LentMobs>,
     /// Entities whose copies are held out of storage; their handles refuse until stored back.
     held_out: Vec<u32>,
     /// Native mods' config files this game loaded (game/modding/native_configs.rs).
@@ -3291,6 +3299,7 @@ struct Game<'a> {
     /// Missing profession IDs already reported for this world session.
     missing_professions: HashSet<String>,
     entity_attachments: HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    entity_initialization: entity_initialization::EntityInitialization,
     /// Typed per-level membership follows dimensions, not the temporary world swap.
     attachment_indexes: attachment_index::Indexes,
     /// Connected to a server: the world comes from the network (game/network/remote/mod.rs).
@@ -4536,26 +4545,18 @@ impl Game<'_> {
         held: Option<&ItemStack>,
         block_entity: Option<horizon_core::nbt::Tag>,
     ) -> Vec<ItemStack> {
-        let registry = self.pack.assets.registry;
         let dynamic = self.pending.dynamic(pos);
         let place = self.loot_place_at(pos.map(|v| f64::from(v) + 0.5), block_entity);
-        let mut drops =
-            horizon_world::loot::with_native_loot_place(place, || {
-                match world_items!(self).block_loot_sequence(registry, state) {
-                    Some(sequence) => {
-                        let random = self.rand_sequences.get(&sequence, self.level.seed);
-                        world_items!(self)
-                            .block_drops_by_player(registry, state, held, &dynamic, random)
-                    }
-                    None => world_items!(self).block_drops_by_player(
-                        registry,
-                        state,
-                        held,
-                        &dynamic,
-                        &mut self.world.random,
-                    ),
-                }
-            });
+        let (_, entity) = self.native_clicker();
+        let mut drops = horizon_world::loot::with_native_loot_place(place, || {
+            let roll = horizon_client::items::BlockLootRoll {
+                held,
+                dynamic: &dynamic,
+                breaker: true,
+                ..Default::default()
+            };
+            self.roll_block_loot(pos, state, Some(entity as u32), roll)
+        });
         let player = self.native_acting_id();
         self.native_block_loot(pos, state, Some(player), held, None, &mut drops);
         drops
@@ -4623,14 +4624,24 @@ impl Game<'_> {
     /// `Player.drop(stack, false)`, as `ItemUtils.createFilledResult` drops what no longer fits
     /// in the inventory: thrown from the eyes, with no thrower, statistic or drop hook.
     pub(super) fn drop_plain(&mut self, stack: ItemStack) -> Option<u32> {
+        self.drop_stack_from_eyes(stack, false)
+    }
+    /// `Player.drop(stack, false, thrown_from_hand)`: the stack thrown from the eyes along the
+    /// view, the main hand swinging for every drop (`LivingEntity.drop`; `PREDICTED` only keeps
+    /// the swing from being sent back to the player who made it). `thrown_from_hand` names the
+    /// player as the thrower, as the drop key does. The item's id, none for an empty stack or a
+    /// toss a mod canceled.
+    pub(super) fn drop_stack_from_eyes(
+        &mut self,
+        stack: ItemStack,
+        thrown_from_hand: bool,
+    ) -> Option<u32> {
         if stack.count == 0 {
             return None;
         }
-        // LivingEntity.drop swings the main hand for every drop (`PREDICTED` only keeps the
-        // swing from being sent back to the player who made it).
         self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
         let eye = self.eye_position()?;
-        self.throw_from_eyes(stack, eye, false, false)
+        self.throw_from_eyes(stack, eye, false, thrown_from_hand)
     }
     /// `Player.createItemStackToDrop`: an item entity thrown from the eyes
     /// along the view direction. `thrown_from_hand` (`drop(stack, true)`, the
@@ -5203,6 +5214,7 @@ impl Game<'_> {
             native_particles: &mut self.creatures.lan_particles,
             sound_seeds: self.lan.as_ref().map(|host| &host.hub),
             drop_tool: None,
+            drop_entity: None,
             drop_into: None,
         };
         let result = f(self.res.behaviours(), &mut level, &mut self.block_ticks);
@@ -9799,6 +9811,8 @@ impl Game<'_> {
         }
         // RenderGuiEvent.Pre: a mod's cancel hides the HUD as F1 does.
         let show_hud = !self.ui.hide_gui && !gui_canceled && self.studio_replay.is_none();
+        // The mods' layers (`register_gui_layers`) draw among vanilla's while the HUD shows.
+        self.hud_layer_next = show_hud.then_some(0);
         if show_hud {
             self.draw_spyglass(&mut batch);
             // Hud.extractCrosshair / extractItemHotbar / extractPlayerHealth /
@@ -10030,6 +10044,8 @@ impl Game<'_> {
         }
         // The chat screen draws the focused chat itself; F1 hides the rest.
         if self.screen == Screen::Chat {
+            // The mod layers under the chat stay under the focused chat.
+            self.draw_mod_gui_layers(Some("minecraft:chat"), &mut batch);
             self.draw_chat(&mut batch);
         } else if show_hud {
             self.gui_layer("minecraft:chat", &mut batch, |g, batch| g.draw_chat(batch));
@@ -10037,6 +10053,9 @@ impl Game<'_> {
                 g.draw_tab_list(batch);
             });
         }
+        // The mod layers above the last vanilla layer drawn.
+        self.draw_mod_gui_layers(None, &mut batch);
+        self.hud_layer_next = None;
         // Screen.extractBlurredBackground blurs the world and HUD, while the
         // screen's background, widgets, toasts and debug overlay stay sharp.
         batch.blur_at = batch.vertices.len() as u32;
@@ -10088,6 +10107,7 @@ impl Game<'_> {
             }
             Screen::Creative => {
                 self.draw_creative(&mut batch);
+                self.draw_mod_browser(&mut batch);
             }
             Screen::Chat => self.draw_chat_screen(&mut batch),
             Screen::Playing | Screen::Options | Screen::Win => {}
@@ -15959,17 +15979,18 @@ impl Game<'_> {
     fn hand_geometry(&mut self, alpha: f64) -> (Vec<Vertex>, Vec<(u32, i32)>) {
         let mut out = Vec::new();
         let mut runs = Vec::new();
-        // GameRenderer.renderItemInHand: F1 hides the hand with the HUD.
-        if self.spectator()
-            || self.ui.hide_gui
-            || self.sleeping.is_some()
-            || !self.camera_type.is_first_person()
-            || self.studio_replay.is_some()
-            || self
-                .player
-                .as_ref()
-                .is_none_or(|p| p.health.dead_or_dying())
-            || self.screen == Screen::Dead
+        // F1 hides both; a native HUD mode may keep the hands visible. A
+        // studio replay never draws them.
+        if self.studio_replay.is_some()
+            || !self.ui.hands_drawn(
+                self.spectator(),
+                self.sleeping.is_some(),
+                self.camera_type.is_first_person(),
+                self.player
+                    .as_ref()
+                    .is_some_and(|p| !p.health.dead_or_dying()),
+                self.screen == Screen::Dead,
+            )
         {
             return (out, runs);
         }
@@ -17222,6 +17243,9 @@ impl Game<'_> {
         );
     }
     fn click_creative(&mut self, right: bool) {
+        if self.mod_browser_press(right) {
+            return;
+        }
         let Some(size) = self
             .renderer
             .as_ref()
@@ -18664,6 +18688,9 @@ impl Game<'_> {
         {
             return Ok(());
         }
+        if key == KeyCode::Escape && self.mod_browser_back() {
+            return Ok(());
+        }
         if self.remote.is_some() && self.remote_key(key)? {
             return Ok(());
         }
@@ -18682,6 +18709,7 @@ impl Game<'_> {
                 }
                 Screen::Creative => {
                     self.pad_clear_focus();
+                    self.mod_browser_closed();
                     self.carried = None;
                     self.set_screen(Screen::Playing);
                     self.capture(true);
@@ -20735,6 +20763,7 @@ impl Game<'_> {
                 WindowEvent::KeyboardInput { event, .. }
                     if self.screen == Screen::Creative
                         && self.creative_screen.tab().search
+                        && !self.mod_browser_typing()
                         && event.state == ElementState::Pressed
                         && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                 {
@@ -21614,6 +21643,7 @@ impl<'a> Game<'a> {
             world_geometry: Some(Default::default()),
             debug_renderers: Vec::new(),
             debug_renderers_version: None,
+            hud_layer_next: None,
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
@@ -21889,6 +21919,7 @@ impl<'a> Game<'a> {
             native_shaders: Default::default(),
             native_input: Default::default(),
             native_lifecycle: Default::default(),
+            lent_mobs: Default::default(),
             held_out: Vec::with_capacity(4),
             native_configs: Default::default(),
             mod_phase,
@@ -21901,6 +21932,7 @@ impl<'a> Game<'a> {
             persist: Default::default(),
             missing_professions: Default::default(),
             entity_attachments: Default::default(),
+            entity_initialization: Default::default(),
             attachment_indexes: Default::default(),
             remote: None,
             studio_replay: None,
@@ -22571,7 +22603,7 @@ impl Game<'_> {
         {
             let mut items = self.items().clone();
             items.set_loot_tables(loot.tables().clone());
-            self.server_items = Some(items);
+            self.server_items = Some(Arc::new(items));
         }
         self.server_loot.set(loot);
     }
@@ -23535,6 +23567,14 @@ fn load_world_rest(
     // Independent tables load together, within the worker budget the settings
     // allow. Only the recipes and the stations read another table: the items.
     let load_items = || -> Result<_> {
+        mod_api::__private::resolve_block_keys((0..registry.len()).map(|index| {
+            registry
+                .state(BlockStateId(index as u32))
+                .expect("registry index is in bounds")
+                .name
+                .as_str()
+        }))
+        .map_err(|errors| errors.join("\n"))?;
         let items = startup::time("rest.items", || {
             Items::load(root, registry, facts, overlay, resources.item_defaults())
         })?;
@@ -24914,6 +24954,7 @@ pub fn run_with(
     mods::register_standalone_models(options.execution_role);
     mods::register_layer_definitions(options.execution_role);
     mods::register_debug_entries(options.execution_role);
+    mods::register_gui_layers(options.execution_role);
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::register_item_tint_sources(options.execution_role);

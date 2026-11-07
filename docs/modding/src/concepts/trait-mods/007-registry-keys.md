@@ -13,6 +13,12 @@ uses `minecraft:`), deduplicated across mods and checked after every mod's conte
 An unknown entry refuses the load with the requesting mod and canonical id, even if the
 key was never attached to a Part. A later mod may supply the requested entry.
 
+The completed block identity table includes every vanilla and mod block, even blocks no mod
+requested. Completion preserves requested slots and appends the remaining canonical names in
+sorted order. Names belong to the installed mod registry; world load and reload prepare a
+separate numeric mapping for every retained key before publishing it. A missing requested
+block refuses completion without publishing a partial table.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.
