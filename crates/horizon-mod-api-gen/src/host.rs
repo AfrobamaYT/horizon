@@ -358,7 +358,18 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                         format!("{call}.try_into_api().unwrap_or_else(|error| Err(error.into()))")
                     }
                 } else if text_result {
-                    format!("Ok({call})")
+                    // Writes with converted Text arguments call an infallible engine
+                    // body. A read returning an API-owned aggregate already converts
+                    // its fields in the backend and therefore already returns Result.
+                    let text_input =
+                        entry.sig.inputs.iter().any(
+                            |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
+                        );
+                    if text_input {
+                        format!("Ok({call})")
+                    } else {
+                        call
+                    }
                 } else if checked_write {
                     if crosses_output {
                         format!("call_stack_write(|| {call})")
