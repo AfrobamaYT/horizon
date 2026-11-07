@@ -6,12 +6,11 @@ use mod_api::{
     ItemPart, LootTableLoadEvent, Registrar, RegistrationContext, ServerChatEvent, ServerHost,
     Text, UseItemEvent,
 };
-use mod_points::{Points, TickArgs};
+use mod_points::TickArgs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
 pub struct Mod {
-    ticks: AtomicU64,
     stone: std::sync::OnceLock<BlockKey>,
     speed: std::sync::OnceLock<EffectKey>,
 }
@@ -70,19 +69,18 @@ impl Hooks for Mod {
     }
 }
 
+static TICKS: AtomicU64 = AtomicU64::new(0);
+
 /// Listens at the game's tick, a point its `horizon-mod.toml` names: every 200 server ticks it
 /// says so in chat.
-#[mod_api::horizon_mod]
-impl Points for Mod {
-    fn tick(&self, host: HostSide<'_>, _args: &mut TickArgs) {
-        let HostSide::Server(host) = host else {
-            return;
-        };
-        let ticks = self.ticks.fetch_add(1, Ordering::Relaxed) + 1;
-        if ticks % 200 == 0 {
-            host.messages()
-                .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
-        }
+pub fn tick(host: HostSide<'_>, _args: &mut TickArgs) {
+    let HostSide::Server(host) = host else { return };
+    let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    if ticks % 200 == 0 {
+        host.messages()
+            .broadcast(Text::literal(format!("hello_wasm: {ticks} server ticks")));
     }
 }
+#[cfg(target_arch = "wasm32")]
+include!(concat!(env!("OUT_DIR"), "/guest_injects.rs"));
 // ANCHOR_END: mod

@@ -7,8 +7,9 @@ side = "both"
 capabilities = ["registries"]
 
 # The mod listens at the game's tick, filled by its mod.wasm: no game rebuild.
-[[native.injection]]
+[[inject]]
 id = "count_ticks"
-target = "horizon_client::game::Game<'_>::tick"
-kind = "HEAD"
-trait_method = "tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "tick"
+hash = "98019f886ec32cc7"

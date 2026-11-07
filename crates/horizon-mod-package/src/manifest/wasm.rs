@@ -13,10 +13,9 @@ pub struct Wasm {
     toolchain: String,
     linked: std::collections::BTreeMap<String, String>,
     built_with: Option<String>,
-    /// The injection points its `mod.wasm` listens at: the package's `[[native.injection]]`,
-    /// which a wasm mod writes like a native one, without `[native]`'s pins (it builds nothing).
+    /// Legacy raw declarations, retained until the source-injection tier is removed.
     #[serde(skip)]
-    pub(crate) points: Vec<super::Injection>,
+    pub(crate) raw_injections: Vec<super::Injection>,
     /// The same fingerprinted internals declaration used by a native mod.
     #[serde(skip)]
     pub(crate) internals: Vec<super::Internal>,
@@ -51,7 +50,7 @@ impl TryFrom<Fields> for Wasm {
             toolchain: fields.toolchain,
             linked: fields.linked,
             built_with: fields.built_with,
-            points: Vec::new(),
+            raw_injections: Vec::new(),
             internals: Vec::new(),
         })
     }
@@ -120,9 +119,9 @@ impl std::fmt::Display for WasmError {
 impl std::error::Error for WasmError {}
 
 impl Wasm {
-    /// The points its `mod.wasm` listens at, each a `trait_method` at a point's head or return.
-    pub fn points(&self) -> &[super::Injection] {
-        &self.points
+    /// Legacy raw declarations using the call-scoped internals view.
+    pub fn raw_injections(&self) -> &[super::Injection] {
+        &self.raw_injections
     }
 
     /// The internals the package declares, checked against the game's generated table at load.

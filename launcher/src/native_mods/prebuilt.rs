@@ -147,20 +147,6 @@ pub(super) fn project_refusal(project: &api::Project<'_>) -> Option<SourceReason
     }
 }
 
-/// Checks `injections` against the prebuilt `game`'s points. A target that isn't a point is an
-/// error on any route, as is a method that isn't its point's: the source route stages the same
-/// points.
-pub(super) fn serves_points(
-    game: &Path,
-    injections: &[inject::PointInjection],
-) -> Result<(), String> {
-    if injections.is_empty() {
-        return Ok(());
-    }
-    let points = inject::listed(&game.join(inject::POINTS))?;
-    inject::check(injections, &points).map_err(|error| error.to_string())
-}
-
 /// The prebuilt game for `revision` and `target`, downloaded and checked once, then kept in the
 /// launcher's data (`downloading` is told before a download starts); `Err(reason)` inside when
 /// there is none to use, or its download failed. An archive that arrives must match the release's
@@ -515,6 +501,8 @@ pub(super) fn compile(
         .arg(format!("horizon_client={}", game_library.display()))
         .arg("--extern")
         .arg(format!("mod_api={}", api_library.display()))
+        .arg("--extern")
+        .arg(format!("mod_points={}", libraries["mod_points"].display()))
         .arg("--extern")
         .arg(format!(
             "horizon_mod_package={}",

@@ -2136,10 +2136,6 @@ fn pipeline(
             ))?;
         }
     }
-    let point_injections: Vec<_> = ordered
-        .iter()
-        .flat_map(|bundle| inject::of(&bundle.manifest))
-        .collect();
     let revision = match &built_on {
         Some(about) => about.horizon.clone(),
         None => revision_of(base)?,
@@ -2207,10 +2203,7 @@ fn pipeline(
             None => match prebuilt::fetch(&revision, target, || {
                 progress(Step::PrebuiltGame(revision.clone()))
             })? {
-                Ok(game) => {
-                    prebuilt::serves_points(&game, &point_injections)?;
-                    Ok(game)
-                }
+                Ok(game) => Ok(game),
                 Err(reason) => Err(reason),
             },
         };
@@ -2394,12 +2387,6 @@ fn pipeline(
         mods.iter()
             .try_for_each(|bundle| catalog.check(&bundle.manifest))
             .map_err(|error| discard(&pending, &catalog_dir, error))?;
-        inject::check(
-            &point_injections,
-            &inject::listed(&catalog_dir.join(inject::POINTS))
-                .map_err(|error| discard(&pending, &catalog_dir, error))?,
-        )
-        .map_err(|error| discard(&pending, &catalog_dir, error))?;
         let _ = fs::remove_dir_all(&fresh);
         fs::rename(&pending, &fresh).map_err(|error| discard(&pending, &catalog_dir, error))?;
         fs::rename(catalog_dir.join(inject::POINTS), &listed)

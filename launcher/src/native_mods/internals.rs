@@ -298,7 +298,7 @@ impl Catalog {
                 .and_then(|name| name.strip_suffix("Listener"))
                 .expect("generated listener name");
             constructors.insert(format!(
-                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::RawListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::RawListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
+                "    /// Registers a function of this place's exact listener type.\n    pub const fn {constructor}(id: &'static str, f: {name}) -> mod_points::__private::SlotListener {{\n        // SAFETY: `f` has this place's listener type, checked by the signature.\n        unsafe {{ mod_points::__private::SlotListener::new(id, mod_points::PointId::{variant}, f as *const ()) }}\n    }}\n"
             ));
         }
         for injection in sites::of(manifest) {
@@ -509,7 +509,7 @@ mod tests {
         assert!(!source.contains("pub use lower;"));
         assert!(!source.contains("pub use lower::Shape;"));
         assert!(source.contains("pub use horizon_client::game::__TickListener;"));
-        assert!(source.contains("mod_points::__private::RawListener::new"));
+        assert!(source.contains("mod_points::__private::SlotListener::new"));
         assert!(!normal.contains("pub use horizon_client::*;"));
         assert_eq!(catalog.facade(&bundle.manifest).unwrap().source, normal);
         fs::remove_dir_all(dir).unwrap();
@@ -532,9 +532,9 @@ pub mod raw {
     pub use horizon_client::game::__TickListener;
     pub use horizon_client::game::__TickRaw;
     /// Registers a function of this place's exact listener type.
-    pub const fn tick(id: &'static str, f: __TickListener) -> mod_points::__private::RawListener {
+    pub const fn tick(id: &'static str, f: __TickListener) -> mod_points::__private::SlotListener {
         // SAFETY: `f` has this place's listener type, checked by the signature.
-        unsafe { mod_points::__private::RawListener::new(id, mod_points::PointId::Tick, f as *const ()) }
+        unsafe { mod_points::__private::SlotListener::new(id, mod_points::PointId::Tick, f as *const ()) }
     }
 }
 "#

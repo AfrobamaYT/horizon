@@ -103,7 +103,7 @@ pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
     Ok(modules)
 }
 
-/// `horizon-mod-points`' generated file: each point's record, `PointId` and the `Points` trait,
+/// `horizon-mod-points`' generated file: each point's record, `PointId` and typed function constructors,
 /// from the game's source, tracking the game module's files.
 pub fn generate_points(root: &Path, out_dir: &Path) -> Result<(), String> {
     let src = root.join("crates/horizon-client/src");

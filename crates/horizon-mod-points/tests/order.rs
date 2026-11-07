@@ -1,5 +1,6 @@
+use mod_points::register;
 use mod_points::{
-    __private::{RawKind, RawListener, fire_raw, register_raw, seal},
+    __private::{RawKind, SlotListener, fire_raw, seal},
     PointId,
 };
 
@@ -47,12 +48,12 @@ fn point_priority_preserves_dependency_order_and_orders_injects_within_a_mod() {
             // SAFETY: these synthetic slots inspect kind and identity; they never invoke the pointers.
             let listener = unsafe {
                 if index % 2 == 0 {
-                    RawListener::new(owner, row.place, native as *const ())
+                    SlotListener::new(owner, row.place, native as *const ())
                 } else {
-                    RawListener::erased(owner, row.place, wasm)
+                    SlotListener::erased(owner, row.place, wasm)
                 }
             };
-            register_raw(&listener.ordered(row.priorities[index], inject)).unwrap();
+            register(&listener.ordered(row.priorities[index], inject)).unwrap();
         }
     }
     seal();
