@@ -97,6 +97,25 @@ fn a_bound_cart_commits_valid_nbt_and_refuses_an_invalid_load() {
     });
 }
 
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn a_bound_cart_survives_the_parked_level_swap() {
+    bound_cart_case(CartKind::Rideable, |game| {
+        game.enter_level(super::super::Dim::Nether).unwrap();
+        assert!(game.carts.is_empty());
+        assert_eq!(
+            game.levels
+                .parked_mut(super::super::Dim::Overworld)
+                .unwrap()
+                .carts[0]
+                .id,
+            71
+        );
+        game.enter_level(super::super::Dim::Overworld).unwrap();
+        assert_eq!(game.carts[0].id, 71);
+    });
+}
+
 fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
     super::super::native_entity_refs::tests::with_game(|game| {
         game.tickets.update(None);
@@ -125,12 +144,45 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
         assert_eq!(VALUE.get(&mut values, Holder::Entity(71)), Ok(10));
         let taken = game.take_entities();
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
+        game.next_entity = game.next_entity.max(72);
+        game.summon_with_nbt("minecraft:minecart", [8.5, 70.0, 0.5], "{}")
+            .unwrap();
+        let spawned = game.carts[0].id;
+        assert_ne!(spawned, 71);
+        let spawned_holder = game.entity(spawned).unwrap();
+        let mut spawned_values = Attachments::default();
+        VALUE
+            .set(&mut spawned_values, Holder::Entity(spawned), 40)
+            .unwrap();
+        let spawned_registration = game.carts.update(0, |cart| {
+            cart.attachment_lifetime()
+                .bind(&mut spawned_values, &index, spawned_holder);
+            cart.attachment_lifetime().registration().unwrap()
+        });
         game.restore_entities(taken);
+        assert_eq!(game.carts.last().unwrap().id, spawned);
+        for (i, expected) in [(0, original), (game.carts.len() - 1, spawned_registration)] {
+            let actual = game
+                .carts
+                .update(i, |cart| cart.attachment_lifetime().registration().unwrap());
+            assert!(expected.same_registration(&actual));
+        }
         VALUE.set(&mut values, Holder::Entity(71), 20).unwrap();
         let after = index.lock().unwrap().snapshot(&key);
-        assert_eq!(after.len(), 1);
-        assert_eq!(after[0].holder, holder);
-        assert_eq!(after[0].entry.read(&VALUE), Ok(&20));
+        assert_eq!(after.len(), 2);
+        assert_eq!(
+            after
+                .iter()
+                .find(|row| row.holder == holder)
+                .unwrap()
+                .entry
+                .read(&VALUE),
+            Ok(&20)
+        );
+        assert_eq!(
+            VALUE.get(&mut spawned_values, Holder::Entity(spawned)),
+            Ok(40)
+        );
         game.persist
             .removals
             .push(super::super::commands::Target::Cart(71));
@@ -138,10 +190,36 @@ fn bound_cart_case(kind: CartKind, action: impl FnOnce(&mut Game<'_>)) {
         assert!(!game.store_cart_back(0, clone));
         game.native_removals_flush();
         assert!(!game.carts.iter().any(|cart| cart.id == 71));
-        assert!(index.lock().unwrap().snapshot(&key).is_empty());
+        assert_eq!(index.lock().unwrap().snapshot(&key).len(), 1);
         VALUE.set(&mut values, Holder::Entity(71), 30).unwrap();
+        let surviving = index.lock().unwrap().snapshot(&key);
+        assert_eq!(surviving.len(), 1);
+        assert_eq!(surviving[0].holder, spawned_holder);
+        let i = game
+            .carts
+            .iter()
+            .position(|cart| cart.id == spawned)
+            .unwrap();
+        drop(game.carts.remove(i));
         assert!(index.lock().unwrap().snapshot(&key).is_empty());
         assert_eq!(before[0].entry.read(&VALUE), Ok(&10));
-        assert_eq!(after[0].entry.read(&VALUE), Ok(&20));
+        assert_eq!(
+            after
+                .iter()
+                .find(|row| row.holder == holder)
+                .unwrap()
+                .entry
+                .read(&VALUE),
+            Ok(&20)
+        );
+        assert_eq!(
+            after
+                .iter()
+                .find(|row| row.holder == spawned_holder)
+                .unwrap()
+                .entry
+                .read(&VALUE),
+            Ok(&40)
+        );
     });
 }
