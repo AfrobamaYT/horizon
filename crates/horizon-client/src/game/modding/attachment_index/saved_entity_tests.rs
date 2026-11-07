@@ -34,7 +34,7 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
         {
             let uuid = [31, 32, 33, n as i32];
             let tag = Tag::compound([
-                ("id", Tag::String(format!("minecraft:{kind}"))),
+                ("id", Tag::String(format!("minecraft:{kind}").into())),
                 ("UUID", Tag::IntArray(uuid.to_vec())),
                 (
                     "Pos",
@@ -56,7 +56,10 @@ fn saved_entity_loaders_publish_and_retire_the_authoritative_owner() {
                     horizon_mod_runtime::attachments::ATTACHMENTS_KEY,
                     Tag::compound([(
                         "saved_entity",
-                        Tag::compound([("value", Tag::compound([("value", Tag::compound([]))]))]),
+                        Tag::compound([(
+                            "value",
+                            Tag::compound([("value", Tag::Compound(Default::default()))]),
+                        )]),
                     )]),
                 ),
             ]);
