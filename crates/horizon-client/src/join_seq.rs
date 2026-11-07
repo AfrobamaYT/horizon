@@ -590,6 +590,55 @@ mod tests {
         assert_eq!(list.locate(join), Some(3));
     }
 
+    #[test]
+    fn locate_keeps_binary_hit_selection_for_duplicate_joins() {
+        let mut list: JoinList<_> = (0..16).map(entity).collect();
+        let duplicate = list[13].clone();
+        list[14] = duplicate;
+        // Preserve the old helper's binary hit, not the linear first match.
+        assert_eq!(list.locate(list[13].join), Some(14));
+    }
+
+    #[test]
+    fn store_back_uses_its_supplied_slot_without_searching() {
+        use horizon_mod_runtime::attachments::{AttachmentLifetime, HasAttachmentLifetime};
+        use std::cell::Cell;
+        #[derive(Clone, Default)]
+        struct Counted {
+            join: JoinSeq,
+            reads: Cell<usize>,
+            lifetime: AttachmentLifetime,
+        }
+        impl Joined for Counted {
+            fn join_seq(&self) -> JoinSeq {
+                self.reads.set(self.reads.get() + 1);
+                self.join
+            }
+            fn set_join_seq(&mut self, join: JoinSeq) {
+                self.join = join;
+            }
+        }
+        impl HasAttachmentLifetime for Counted {
+            fn attachment_lifetime(&mut self) -> &mut AttachmentLifetime {
+                &mut self.lifetime
+            }
+        }
+        let mut list: JoinList<_, false> = (0..16).map(|_| Counted::default()).collect();
+        for owner in &list {
+            owner.reads.set(0);
+        }
+        let clone = list[7].clone();
+        assert!(list.store_back(7, clone));
+        // The clone's key is read once. The direct candidate is checked once;
+        // replacement stores the clone's count, and no peers are consulted.
+        assert_eq!(list[7].reads.get(), 1);
+        assert!(
+            list.iter()
+                .enumerate()
+                .all(|(i, owner)| i == 7 || owner.reads.get() == 0)
+        );
+    }
+
     #[derive(Clone)]
     struct Bound {
         join: JoinSeq,

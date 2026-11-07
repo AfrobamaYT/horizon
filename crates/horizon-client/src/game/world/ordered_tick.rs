@@ -246,3 +246,47 @@ impl Game<'_> {
         self.run_ordered_ticks(cut, false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use horizon_client::chunk::Chunk;
+    use horizon_core::position::ChunkPos;
+    use std::sync::Arc;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dispatch_ticks_both_owners_of_each_located_kind() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            for x in [4, 12] {
+                assert!(game.run_command(&format!("summon tnt {x} 70 4 {{fuse:80}}")));
+                assert!(game.run_command(&format!(
+                    "summon falling_block {x} 70 8 {{BlockState:{{Name:\"minecraft:sand\"}},Time:1}}"
+                )));
+                assert!(game.run_command(&format!("summon experience_orb {x} 70 12 {{Value:1}}")));
+            }
+            // Existing residents whose spawn packets were already announced.
+            game.ordered.announced = horizon_client::join_seq::JoinSeq::MAX;
+            game.tickets.update(None);
+            game.begin_ordered_ticks();
+            game.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, false)
+                .unwrap();
+            assert_eq!(
+                game.tnts.iter().map(|t| t.fuse).collect::<Vec<_>>(),
+                [79, 79]
+            );
+            assert_eq!(
+                game.falling.iter().map(|f| f.age).collect::<Vec<_>>(),
+                [2, 2]
+            );
+            assert_eq!(game.orbs.iter().map(|o| o.age).collect::<Vec<_>>(), [1, 1]);
+        });
+    }
+}

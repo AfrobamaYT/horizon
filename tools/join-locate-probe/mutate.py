@@ -8,6 +8,10 @@ SOURCE = ROOT / "crates/horizon-client/src/join_seq.rs"
 original = SOURCE.read_text()
 # Exact source anchors are unique; no test edits are made.
 faults = [
+    ("duplicate selection", "Ok(i) => Some(i),",
+     "Ok(_) => self.0.iter().position(|entity| entity.join_seq() == join),"),
+    ("store_back direct candidate", ".filter(|&i| self.0.get(i).is_some_and(|old| old.join_seq() == join))",
+     ".filter(|_| false)"),
     ("locate hit", "Ok(i) => Some(i),", "Ok(i) => Some(i + 1),"),
     ("locate fallback", "Err(_) => self.0.iter().position(|entity| entity.join_seq() == join)",
      "Err(_) => None"),
