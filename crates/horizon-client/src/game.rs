@@ -2756,6 +2756,10 @@ struct Game<'a> {
     /// Prepared block-entity copies for this frame, in entity-stream order.
     prepared_model_draws: std::cell::RefCell<Vec<horizon_client::gfx::PreparedModelDraw>>,
     world_geometry: Option<horizon_client::world_geometry::WorldGeometry>,
+    /// `DebugRenderer.renderers`: the ids `debug_renderer_draw` is asked about.
+    debug_renderers: Vec<String>,
+    /// `DebugRenderer.lastDebugEntriesVersion`: none before the first view of a world.
+    debug_renderers_version: Option<u64>,
     /// The mod block entities' view distances, asked of the parts once (`native_block_entity_draw`).
     mod_view_distances: std::cell::OnceCell<native_block_entity_draw::ViewDistances>,
     /// `item_level` for one frame, game time, day time and dimension.
@@ -17936,20 +17940,7 @@ impl Game<'_> {
             self.client_particle_geometry(camera, alpha, fov_degrees, &mut entities);
         }
         let mut world_geometry = self.world_geometry.take().expect("view storage");
-        let white = self.gui.atlas.sprites["horizon/white"];
-        world_geometry.reset(
-            camera.to_array(),
-            view,
-            [(white.u0 + white.u1) * 0.5, (white.v0 + white.v1) * 0.5],
-        );
-        if !title {
-            let view = mod_api::WorldRenderView::new(
-                camera.to_array(),
-                alpha as f32,
-                self.world.game_time,
-            );
-            self.native_submit_custom_geometry(&view, &mut world_geometry);
-        }
+        self.fill_world_geometry(title, camera.to_array(), view, alpha, &mut world_geometry);
         let colored_lights = if self.title.is_none() {
             visuals.finish(self, camera)
         } else {
@@ -21279,6 +21270,8 @@ impl<'a> Game<'a> {
             kept_block_entities: Default::default(),
             prepared_model_draws: Default::default(),
             world_geometry: Some(Default::default()),
+            debug_renderers: Vec::new(),
+            debug_renderers_version: None,
             mod_view_distances: Default::default(),
             item_level_cache: Default::default(),
             world_frames: 0,
@@ -22768,7 +22761,28 @@ fn gameplay_tables(
         let motion = startup::time("core.motion", || {
             let inventory = horizon_mod_package::enabled::EnabledMods::read(root)?;
             let conditions = horizon_world::conditions::LoadConditions::new(inventory.server_ids());
-            MotionResources::load_with_conditions(root, assets, &facts, &conditions)
+            let mut motion =
+                MotionResources::load_with_conditions(root, assets, &facts, &conditions)?;
+            // #845: a mod's declared attribute sets
+            // (`EntityAttributeCreationEvent`) become their entity types' rows
+            // in the live attribute map's catalog — the one record the mob
+            // logic and the attribute sync read (#1493) — built from the
+            // template's row, as the type's content row is.
+            for declaration in mod_api::__private::entity_attribute_declarations() {
+                motion.attributes = std::sync::Arc::new(
+                    motion
+                        .attributes
+                        .with_entity_row(
+                            &declaration.id,
+                            &declaration.template,
+                            &declaration.attributes,
+                        )
+                        .map_err(|error| {
+                            format!("mod entity attributes of {}: {error}", declaration.id)
+                        })?,
+                );
+            }
+            Ok::<_, Box<dyn std::error::Error>>(motion)
         })
         .map_err(|e| e.to_string());
         (light.join(), motion)
@@ -23222,18 +23236,43 @@ fn load_world_rest(
     };
     let load_mobs = || -> Result<_> {
         let _step = startup::step("rest.mobs");
-        let mob_types: HashMap<_, _> = if draws {
+        let mut types = if draws {
             match entity_models {
                 Some(document) => MobTypes::load_with_document(root, document)?,
                 None => MobTypes::load(root)?,
             }
         } else {
             MobTypes::load_for_server(root)?
+        };
+        // #845: the declared sets take their types' rows — the merged rows
+        // the live attribute map's catalog took in core (the template's with
+        // the declared set on top) — as their attribute map and spawn
+        // fields, so a mob of the type spawns with what the map answers.
+        for declaration in mod_api::__private::entity_attribute_declarations() {
+            let row = resources
+                .motion()
+                .attributes
+                .entity_row(&declaration.id)
+                .map(std::sync::Arc::new);
+            match (types.types.get_mut(&declaration.id), row) {
+                (Some(kind), Some(row)) => {
+                    kind.take_attribute_row(row, &resources.motion().attributes)
+                }
+                (Some(_), None) => log::warn!(
+                    "Horizon: mod entity attributes of {} never reached the catalog; ignored",
+                    declaration.id
+                ),
+                (None, _) => log::warn!(
+                    "Horizon: mod entity attributes of {} name no loaded entity type; ignored",
+                    declaration.id
+                ),
+            }
         }
-        .types
-        .into_iter()
-        .map(|(k, v)| (k, Arc::new(v)))
-        .collect();
+        let mob_types: HashMap<_, _> = types
+            .types
+            .into_iter()
+            .map(|(k, v)| (k, Arc::new(v)))
+            .collect();
         let mut mob_data = horizon_client::mobs::MobData::load(resource_root, facts);
         mob_data.cem = std::sync::RwLock::new(Arc::new(if draws {
             horizon_client::mobs::cem::CemModels::load(resource_root.source(), &mob_types)
@@ -23637,6 +23676,8 @@ fn start_game<'a>(
         )?),
     };
     let mut game = Game::new(res, pack, gui, options, settings, audio, prepared)?;
+    // `new DebugRenderer()` refreshes its list.
+    game.refresh_debug_renderers();
     game.rest_loader = rest_loader;
     game.ui.vanilla_root = vanilla_root;
     if pack_error.is_some() {

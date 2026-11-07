@@ -116,20 +116,10 @@ pub trait Hooks {
     #[hook(side = "server", contract = "listen", fabric = ["ServerTickEvents.START_SERVER_TICK", "ServerTickEvents.END_SERVER_TICK"], neoforge = "ServerTickEvent.Pre, ServerTickEvent.Post")]
     fn server_tick();
     /// Before an authoritative server level's tick pass. `dimension` is its ID.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.START_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Pre"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Pre")]
     fn level_tick_pre();
     /// After a successful authoritative server level tick pass.
-    #[hook(
-        side = "server",
-        contract = "listen",
-        fabric = "ServerTickEvents.END_LEVEL_TICK",
-        neoforge = "LevelTickEvent.Post"
-    )]
+    #[hook(side = "server", contract = "listen", neoforge = "LevelTickEvent.Post")]
     fn level_tick_post();
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.

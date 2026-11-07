@@ -115,25 +115,28 @@ impl Game<'_> {
         };
         // What an open menu edited goes back to the vehicle first.
         self.release_vehicle_container(id);
+        let take = |at, items: &mut Vec<_>| {
+            if items.iter().all(Option::is_none) {
+                None
+            } else {
+                Some((at, std::mem::take(items)))
+            }
+        };
         let held = match t {
             Target::Cart(_) => self
                 .carts
                 .iter_mut()
                 .find(|c| c.id == id)
-                .map(|c| (c.position, &mut c.items)),
+                .and_then(|c| take(c.position, &mut c.items)),
             _ => self
                 .boats
-                .iter_mut()
-                .find(|b| b.id == id)
-                .map(|b| (b.position, &mut b.items)),
+                .iter()
+                .position(|b| b.id == id)
+                .and_then(|i| self.boats.update(i, |b| take(b.position, &mut b.items))),
         };
         let Some((at, items)) = held else {
             return;
         };
-        if items.iter().all(Option::is_none) {
-            return;
-        }
-        let items = std::mem::take(items);
         let at = BlockPos {
             x: at.x.floor() as i32,
             y: at.y.floor() as i32,
