@@ -2572,6 +2572,47 @@ mod tests {
 
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn helmet_wear_reports_the_old_stack_and_the_unclamped_damage() {
+        const ID: &str = "testmod:wear";
+        let scratch = std::env::temp_dir().join(format!("helmet-wear-{}", std::process::id()));
+        let dir = scratch.join("data/testmod/advancement");
+        std::fs::create_dir_all(&dir).unwrap();
+        // An iron helmet has 165 points. At 164, a hit of 8 takes 2: damage 166, one past the
+        // maximum, so durability -1, and a delta of -2 from the damage the stack had.
+        std::fs::write(
+            dir.join("wear.json"),
+            r#"{
+            "criteria": {
+                "worn": {
+                    "trigger": "minecraft:item_durability_changed",
+                    "conditions": {
+                        "durability": {"min": -1, "max": -1},
+                        "delta": {"min": -2, "max": -2}
+                    }
+                }
+            },
+            "requirements": [["worn"]]
+        }"#,
+        )
+        .unwrap();
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.adv.tree = Arc::new(Tree::load(&scratch.join("data")));
+            let origin = horizon_core::geometry::Vec3::ZERO;
+            game.player =
+                Some(horizon_client::motion::PlayerMotion::new(game.motion, origin).unwrap());
+            let mut helmet = ItemStack::new("minecraft:iron_helmet", 1);
+            helmet.damage = 164;
+            game.armor[0] = Some(helmet);
+            let source = game.motion.health.damage.id("minecraft:falling_anvil");
+            game.hurt_helmet(source.unwrap(), 8.0);
+            assert_eq!(game.armor[0], None);
+            assert!(game.adv.progress.has(ID, "worn"));
+        });
+        std::fs::remove_dir_all(scratch).unwrap();
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn toast_admission_cancels_edits_and_preserves_queue_behavior() {
         use mod_api::{ClientHost, Flow, Hooks, ModEntry, ToastAddEvent, ToastKind};
         struct Listener;

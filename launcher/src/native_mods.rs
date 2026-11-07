@@ -27,6 +27,8 @@ use std::sync::Arc;
 use horizon_mod_package::dependencies;
 
 mod api;
+mod planning;
+pub use planning::routes;
 mod crates;
 mod diagnostics;
 mod inject;
@@ -597,11 +599,16 @@ pub const INSTALLED: &str = horizon_mod_package::mod_list::NATIVE_DIR;
 /// The native mods turned on in the game folder `home`, unpacked into a folder [`build`] takes.
 /// Each flat `.hmod` passes the registry's shared package boundary; no code is run.
 pub fn installed_mods(home: &Path) -> Result<PathBuf, String> {
-    stage_installed(home, root().join("installed.incoming"))
+    stage_installed(home, root().join("installed.incoming"))?.ok_or_else(|| {
+        format!(
+            "No native mod is turned on in {}: install one from the Mods page first.",
+            home.join(INSTALLED).display()
+        )
+    })
 }
 
 /// [`installed_mods`] into `out`, which it empties first.
-fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
+fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String> {
     let _ = fs::remove_dir_all(&out);
     let mut paths: Vec<PathBuf> = fs::read_dir(home.join(INSTALLED))
         .map(|dir| dir.flatten().map(|e| e.path()).collect())
@@ -624,44 +631,10 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<PathBuf, String> {
         count += 1;
     }
     if count == 0 && wasm_internals::installed(Some(home))?.is_empty() {
-        return Err(format!(
-            "No native mod is turned on in {}: install one from the Mods page first.",
-            home.join(INSTALLED).display()
-        ));
+        return Ok(None);
     }
     fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    Ok(out)
-}
-
-/// Structural routes independent of the saved build mode. Invalid input is reported per mod.
-/// Prebuilt release availability is probed separately on a worker, never while drawing the UI.
-pub fn routes(home: &Path) -> Routes {
-    if require_consent().is_err() {
-        return Routes::default();
-    }
-    let Ok(folder) = stage_installed(home, root().join("installed.routes")) else {
-        return Routes::default();
-    };
-    let Ok(found) = bundles(&folder) else {
-        return Routes::default();
-    };
-    let mods = found
-        .iter()
-        .map(|bundle| {
-            let route = match api::Project::read(bundle) {
-                Ok(project) => prebuilt::project_refusal(&project)
-                    .map_or(Route::Prebuilt, |reason| Route::Game { reason }),
-                Err(error) => Route::Invalid {
-                    reason: error.to_string(),
-                },
-            };
-            (bundle.manifest.id.clone(), route)
-        })
-        .collect();
-    Routes {
-        mods,
-        unavailable: None,
-    }
+    Ok(Some(out))
 }
 
 /// A validated flat mod project. The package manifest owns identity and build pins.
@@ -1094,6 +1067,14 @@ fn mismatch(mods: &[Bundle], revision: &str) -> Option<String> {
     })
 }
 
+fn build_revision(base: &str, built_on: Option<&About>) -> Result<String, String> {
+    built_on.map_or_else(|| revision_of(base), |about| Ok(about.horizon.clone()))
+}
+
+fn mismatch_error(list: &str) -> String {
+    format!("{MISMATCH}{list}; rebuild against this game.")
+}
+
 /// The Horizon commit `version` (an installed release or Nightly) was built from, from GitHub.
 pub fn revision_of(version: &str) -> Result<String, String> {
     let reference = match version.strip_prefix("nightly-") {
@@ -1128,10 +1109,17 @@ pub struct About {
 
 /// What installed native build `version` was made from; None for any other version.
 pub fn about(version: &str) -> Option<About> {
+    checked_about(version).ok().flatten()
+}
+
+fn checked_about(version: &str) -> Result<Option<About>, String> {
     if !is_native(version) {
-        return None;
+        return Ok(None);
     }
-    about_in(&backend::version_dir(version))
+    about_in(&backend::version_dir(version)).map(Some).ok_or_else(|| trf(
+        "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
+        &[("version", version)],
+    ))
 }
 
 /// The build record (`native-mods.json`) in version folder `dir`, if it parses.
@@ -2024,13 +2012,7 @@ fn pipeline(
     progress: &impl Fn(Step),
 ) -> Result<Built, Failed> {
     let started = std::time::Instant::now();
-    let built_on = about(base);
-    if is_native(base) && built_on.is_none() {
-        return Err(trf(
-            "Native build {version} has a missing or invalid native-mods.json record. Rebuild it from an installed Horizon version.",
-            &[("version", base)],
-        ).into());
-    }
+    let built_on = checked_about(base)?;
     backend::need_prepared(base)?;
     let platform = platform_for_game(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
@@ -2121,13 +2103,10 @@ fn pipeline(
             ))?;
         }
     }
-    let revision = match &built_on {
-        Some(about) => about.horizon.clone(),
-        None => revision_of(base)?,
-    };
+    let revision = build_revision(base, built_on.as_ref())?;
     let other = mismatch(&mods, &revision);
     if let Some(list) = &other {
-        return Err(format!("{MISMATCH}{list}; rebuild against this game.").into());
+        return Err(mismatch_error(list).into());
     }
     if target == Target::Server {
         let jars = horizon_mod_package::manifest::collect_jar_requirements(
@@ -4261,7 +4240,7 @@ mod tests {
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");
         fs::write(&marker, b"unchanged").unwrap();
-        routes(&folder);
+        denied(routes(&folder, None));
         assert_eq!(
             fs::read(&marker).unwrap(),
             b"unchanged",

@@ -1263,6 +1263,9 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
+        // commands, a player's interaction), before the ticks move by them.
+        self.native_mob_sizes();
         // LivingEntity.die runs when the killing blow lands: mobs killed
         // since the last tick (by the player, explosions...) die first.
         let killed: Vec<Mob> = self
@@ -1695,6 +1698,8 @@ impl Game<'_> {
         // The enderman teleports those hurts asked for (`Enderman.hurtServer`).
         self.settle_hurt_teleports()?;
         laps.lap("creature_outbox");
+        // And for the sizes the ticks changed (a pose, a baby grown, a scale).
+        self.native_mob_sizes();
         Ok(())
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
@@ -4419,6 +4424,7 @@ impl Game<'_> {
             None => self.current_attack(),
         };
         attack.projectile = self.combat.attack().projectile;
+        attack.direct = self.combat.attack().direct;
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -4655,6 +4661,8 @@ impl Game<'_> {
         // Player.hasInfiniteMaterials.
         let creative = self.creative;
         let mut projectiles = self.creatures.projectiles.lift();
+        #[cfg(test)]
+        super::entity::taken_pass_tests::after_take(self);
         let mut picked = Vec::new();
         projectiles.retain(|shot| {
             let Some(a) = shot.arrow.as_ref().filter(|a| !a.removed) else {
@@ -4687,7 +4695,10 @@ impl Game<'_> {
             }
             !taken
         });
-        self.creatures.projectiles = projectiles;
+        self.creatures.projectiles.restore(
+            projectiles,
+            horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+        );
         for shot in picked {
             self.add_pickup(
                 super::pickups::Taken::Arrow(Box::new(shot)),
@@ -4696,7 +4707,7 @@ impl Game<'_> {
         }
     }
 
-    fn tick_projectiles(&mut self) -> Result<()> {
+    pub(super) fn tick_projectiles(&mut self) -> Result<()> {
         if self.creatures.projectiles.is_empty() {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();

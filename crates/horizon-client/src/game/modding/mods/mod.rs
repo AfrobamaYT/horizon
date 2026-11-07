@@ -1017,6 +1017,9 @@ impl Game<'_> {
     }
     /// Apply the player's switches at the canonical native and wasm dispatch boundary.
     pub(super) fn sync_native_switches(&self) {
+        self.instance_groups
+            .borrow_mut()
+            .retire_disabled(&self.settings.mods.disabled);
         self.mods.apply_code_switches(&self.settings.mods.disabled);
     }
 }
