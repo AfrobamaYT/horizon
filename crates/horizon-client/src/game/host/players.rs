@@ -290,7 +290,11 @@ impl PlayersBackendMut for Game<'_> {
         mod_api::__private::check_access("player_hide", mod_api::__private::LoadAccess::WorldOnly);
         self.native_player_hide(player, level)
     }
-    fn player_open_menu(&mut self, player: PlayerRef, entity: BlockEntityRef) -> bool {
+    fn player_open_menu(
+        &mut self,
+        player: PlayerRef,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "player_open_menu",
             mod_api::__private::LoadAccess::WorldOnly,
