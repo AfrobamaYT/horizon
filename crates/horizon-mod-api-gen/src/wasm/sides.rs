@@ -4,11 +4,11 @@ use super::glue::{
     InPlace, conversions, flat_element, flat_method, lift, lower, lower_owned, prepare_value,
     rust_path, unpack,
 };
-use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
+use super::ty::{Kind, List, Payload, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
 use super::{Method, exports};
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use std::fmt::Write;
+use std::{collections::BTreeSet, fmt::Write};
 
 /// `ty` as Rust names it in a trait method's signature.
 pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
@@ -369,8 +369,55 @@ fn writeback(types: &Types<'_>, method: &Method, sig: &Signature, names: &[Strin
     out
 }
 
+/// Whether a type contains Text, including inside records, variants and containers.
+fn contains_text(types: &Types<'_>, ty: &Ty, seen: &mut BTreeSet<usize>) -> bool {
+    match ty {
+        Ty::Named(id) => {
+            let def = &types.defs[*id];
+            if def.rust == "mod_api::Text" {
+                return true;
+            }
+            if !seen.insert(*id) {
+                return false;
+            }
+            match &def.kind {
+                Kind::Record(fields) => fields.iter().any(|f| contains_text(types, &f.ty, seen)),
+                Kind::TupleRecord(items) => items.iter().any(|t| contains_text(types, t, seen)),
+                Kind::Variant(cases) => cases.iter().any(|c| match &c.payload {
+                    Payload::Tuple(items) => items.iter().any(|t| contains_text(types, t, seen)),
+                    Payload::Record(_, fields) => {
+                        fields.iter().any(|f| contains_text(types, &f.ty, seen))
+                    }
+                    Payload::None => false,
+                }),
+                Kind::Via(t) | Kind::Chain { frame: t, .. } => contains_text(types, t, seen),
+                _ => false,
+            }
+        }
+        Ty::Ref(t, _)
+        | Ty::Boxed(t)
+        | Ty::Shared(t)
+        | Ty::List(t, _)
+        | Ty::Option(t)
+        | Ty::Array(t, _) => contains_text(types, t, seen),
+        Ty::Result(a, b) => contains_text(types, a, seen) || contains_text(types, b, seen),
+        Ty::Tuple(items) => items.iter().any(|t| contains_text(types, t, seen)),
+        _ => false,
+    }
+}
+
+fn typed_text_refusal(types: &Types<'_>, method: &Method) -> bool {
+    matches!(method.ret, Ty::Result(..))
+        && method
+            .params
+            .iter()
+            .map(|(_, t)| t)
+            .chain([&method.ret])
+            .any(|t| contains_text(types, t, &mut BTreeSet::new()))
+}
+
 /// A guest method calling import `callee` (with `lead`, the held object's index, first).
-fn guest_call(
+pub(super) fn guest_call(
     types: &Types<'_>,
     method: &Method,
     callee: &str,
@@ -411,10 +458,20 @@ fn guest_call(
     if let Some(lead) = lead {
         args.insert(0, lead.to_string());
     }
-    Ok(format!(
-        "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ super::expect((|| -> Result<_, Refused> {{ {prep} let {pattern} = {callee}({}); {prepare} let value = {value}; {apply} Ok(value) }})()) }}\n",
-        rust_sig(types, method),
+    let call = format!(
+        "(|| -> Result<_, Refused> {{ {prep} let {pattern} = {callee}({}); {prepare} let value = {value}; {apply} Ok(value) }})()",
         args.join(", ")
+    );
+    let answer = if typed_text_refusal(types, method) {
+        format!(
+            "match {call} {{ Err(Refused::Text(why)) => Err(why.into()), other => super::expect(other) }}"
+        )
+    } else {
+        format!("super::expect({call})")
+    };
+    Ok(format!(
+        "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ {answer} }}\n",
+        rust_sig(types, method)
     ))
 }
 
@@ -817,7 +874,7 @@ fn guest_import_call(types: &Types<'_>, method: &Method) -> Result<String, Strin
 
 /// The game's side of an import: `method` called on `receiver` (taking the held object's index
 /// first when `held`).
-fn host_import(
+pub(super) fn host_import(
     types: &Types<'_>,
     method: &Method,
     receiver: &str,
@@ -876,12 +933,25 @@ fn host_import_body(
         }
     }
     let result = results(types, method, &sig, "r", &mut_locals);
-    let body = format!(
+    let mut body = format!(
         "{out} let r = <_ as {}>::{}({receiver}, {}); Ok({result})",
         trait_path(method.via.as_deref().unwrap_or(method.owner)),
         method.name,
         call_args.join(", ")
     );
+    if typed_text_refusal(types, method) {
+        if sig.results.len() != 1 {
+            return Err(format!(
+                "Text refusal with write-back outputs is not supported: {}",
+                method.name
+            ));
+        }
+        let ret = rust_ty(types, &method.ret, false);
+        let refused = super::glue::lower_owned(types, &method.ret, "r");
+        body = format!(
+            "match (|| -> wasmtime::Result<_> {{ {body} }})() {{ Err(why) => match why.downcast::<Refused>() {{ Ok(Refused::Text(why)) => {{ let r: {ret} = Err(why.into()); Ok({refused}) }}, Ok(why) => Err(why.into()), Err(why) => Err(why) }}, answer => answer }}"
+        );
+    }
     Ok((params, results_type(types, method, &sig, &mut_locals), body))
 }
 
