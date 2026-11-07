@@ -147,7 +147,7 @@ impl ItemResource {
         self.value_id(host, "minecraft:repairable")
             .is_some_and(|component| {
                 horizon_items::properties::repairable(&component, material.item(), |tag| {
-                    host.item_stack_in_tag(&material.0, tag)
+                    host.item_stack_in_tag(&material.0, tag).unwrap_or(false)
                 })
             })
     }

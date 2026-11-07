@@ -268,3 +268,92 @@ mod enchantment_conflict_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod item_resource_property_tests {
+    use serde_json::Value;
+    mod support {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixture_support/item_resource_properties.rs"
+        ));
+    }
+    /// All seven reads and their game consumers, with independently recorded vanilla outcomes.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn effective_resource_properties_match_vanilla() {
+        let inputs = std::env::var("HORIZON_ITEM_PROPERTIES_CASES")
+            .map(|path| std::fs::read_to_string(path).unwrap())
+            .unwrap_or_else(|_| {
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../tests/fixtures/item_resource_properties.jsonl"
+                ))
+                .into()
+            });
+        let expected = std::env::var("HORIZON_ITEM_PROPERTIES_EXPECTED")
+            .map(|path| std::fs::read_to_string(path).unwrap())
+            .unwrap_or_else(|_| {
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../tests/fixtures/item_resource_properties_expected.jsonl"
+                ))
+                .into()
+            });
+        let rows = |text: &str| {
+            text.lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let (inputs, expected) = (rows(&inputs), rows(&expected));
+        assert!(inputs.len() >= 41);
+        assert_eq!(inputs.len(), expected.len());
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            // Authoritative tag reads are available only while a world is owned.
+            game.session_lock =
+                Some(horizon_client::save::SessionLock::acquire(&game.save.root).unwrap());
+            for (input, expected) in inputs.iter().zip(&expected) {
+                assert_eq!(input["name"], expected["name"]);
+                let support::Outcome {
+                    item,
+                    material,
+                    values,
+                } = support::evaluate(game, input);
+                assert_eq!(&values, expected, "{}", input["name"]);
+                let stack = item.to_stack(1);
+                let definitions = &game.items().enchantments;
+                let props = definitions.props(&stack.item);
+                assert_eq!(
+                    game.use_duration(&stack),
+                    expected["use_duration"].as_i64().unwrap() as i32
+                );
+                assert_eq!(
+                    horizon_client::stations::is_damageable(game.items(), &stack),
+                    item.damageable(game)
+                );
+                assert_eq!(
+                    stack.has_foil(props.is_some_and(|value| value.glint)),
+                    item.foil(game)
+                );
+                assert_eq!(
+                    horizon_client::item_tooltip::rarity(
+                        &stack,
+                        props.map_or("common", |value| value.rarity.as_str())
+                    ),
+                    item.rarity(game).as_str()
+                );
+                assert_eq!(
+                    horizon_client::stations::is_valid_repair_item(
+                        definitions,
+                        game.items(),
+                        &stack,
+                        &material.to_stack(1)
+                    ),
+                    item.repairable(game, &material)
+                );
+            }
+            game.session_lock = None;
+        });
+    }
+}
