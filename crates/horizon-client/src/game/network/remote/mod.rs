@@ -8091,7 +8091,7 @@ impl Game<'_> {
     }
 
     /// MultiPlayerGameMode.startDestroyBlock / continueDestroyBlock.
-    fn remote_mining(&mut self, start: bool) {
+    fn remote_mining(&mut self, start: bool) -> bool {
         let debug_stick = self
             .held()
             .is_some_and(|stack| &*stack.item == "minecraft:debug_stick");
@@ -8102,30 +8102,33 @@ impl Game<'_> {
         {
             self.stop_remote_mining();
             self.mining = None;
-            return;
+            return true;
         }
         let Some(r) = self.remote.as_mut() else {
-            return;
+            return true;
         };
         if !start && r.destroy_delay > 0 {
             r.destroy_delay -= 1;
-            return;
+            return true;
         }
         let Some(hit) = self.pick() else {
             self.mining = None;
-            return;
+            return true;
         };
         let face = face_direction(hit.face);
         let state = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
         if self.res.facts().is_air(state) {
-            return;
+            return true;
         }
         // startDestroyBlock refuses a restricted break before predicting it.
         if self.remote_break_restricted() {
             self.mining = None;
-            return;
+            return true;
         }
         if self.creative {
+            if self.veto_mining_prediction(hit.pos, hit.face, true, 1.0) {
+                return false;
+            }
             let seq = self.next_sequence();
             // DebugStickItem.canDestroyBlock never lets the client break the
             // block; the server only selects the property on this START.
@@ -8141,7 +8144,7 @@ impl Game<'_> {
             if let Some(r) = self.remote.as_mut() {
                 r.destroy_delay = 5;
             }
-            return;
+            return true;
         }
         // sameDestroyTarget: the same block and still the item the break began with.
         let held = self.main_hand_key();
@@ -8154,13 +8157,17 @@ impl Game<'_> {
         // one keeps the clock (#4124).
         let running = self.remote.as_ref().is_some_and(|r| r.is_destroying);
         if start && same && running {
-            return;
+            return true;
         }
         // The server's own getDestroyProgress: under water, off the ground,
         // with haste, fatigue and efficiency, so the client stops digging
         // when the server is done too (#1254).
         let progress = self.destroy_progress(hit.pos);
         if !same || start {
+            let proposed = if progress >= 1.0 { 1.0 } else { 0.0 };
+            if self.veto_mining_prediction(hit.pos, hit.face, true, proposed) {
+                return false;
+            }
             // startDestroyBlock aborts only a break that is running; a target left by a stop that
             // ended one is just replaced by the START below.
             let aborted = self.remote.as_mut().and_then(|r| {
@@ -8195,7 +8202,7 @@ impl Game<'_> {
                 if !debug_stick {
                     self.predict_break(hit.pos, state, seq);
                 }
-                return;
+                return true;
             }
             if let Some(r) = self.remote.as_mut() {
                 r.destroying = Some((hit.pos, face, 0.0));
@@ -8210,12 +8217,15 @@ impl Game<'_> {
                 progress: 0.0,
                 ticks: 0,
             });
-            return;
+            return true;
         }
         let Some((pos, last_face, done)) = self.remote.as_ref().and_then(|r| r.destroying) else {
-            return;
+            return true;
         };
         let done = done + progress;
+        if self.veto_mining_prediction(pos, hit.face, false, done) {
+            return false;
+        }
         self.tutorial_destroy(state, done.clamp(0.0, 1.0));
         let ticks = self.mining.as_ref().map_or(0, |m| m.ticks) + 1;
         if done >= 1.0 {
@@ -8258,6 +8268,30 @@ impl Game<'_> {
                 ticks,
             });
         }
+        true
+    }
+
+    fn veto_mining_prediction(
+        &self,
+        pos: [i32; 3],
+        face: [i32; 3],
+        starting: bool,
+        progress: f32,
+    ) -> bool {
+        if !mod_api::__private::listened(mod_api::HookId::ClientMiningPredict) {
+            return false;
+        }
+        let mut canceled = false;
+        self.native_client_mining_predict(
+            mod_api::ClientMiningPrediction {
+                pos,
+                face,
+                starting,
+                progress: progress.clamp(0.0, 1.0),
+            },
+            &mut canceled,
+        );
+        canceled
     }
     /// MultiPlayerGameMode.destroyBlock: the predicted break.
     fn predict_break(&mut self, pos: [i32; 3], state: BlockStateId, sequence: i32) {
@@ -8314,7 +8348,7 @@ impl Game<'_> {
                     .is_some_and(|p| WirePatch::adds(&p, CAN_BREAK)))
     }
     /// Minecraft.startUseItem: use one crosshair target, then the item itself.
-    fn remote_use(&mut self) {
+    fn remote_use(&mut self, attempt: mod_api::InteractionAttempt) {
         // Minecraft.startUseItem returns before resetting rightClickDelay
         // while a survival block break is active.
         if self.remote.as_ref().is_some_and(|r| r.is_destroying) {
@@ -8327,7 +8361,7 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered for the main hand: a cancel
         // ends the whole click, the off hand gets no turn.
-        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Main, attempt) {
             if swing {
                 self.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
             }
@@ -8340,7 +8374,10 @@ impl Game<'_> {
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
         let entity = self.remote_use_targets_entity();
-        horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
+        horizon_client::interaction_input::use_on_target(
+            &mut RemoteUseWorld(self, attempt),
+            entity,
+        );
     }
 
     /// `Minecraft.startUseItem`'s entity turn for `hand`: Interact goes to
@@ -9546,7 +9583,7 @@ impl Game<'_> {
     /// The rest of Minecraft.startUseItem once the main hand's target passed:
     /// the main hand's item, then the off hand's turn (its block, its item).
     /// The server does each packet's part with that packet's hand only.
-    fn remote_use_hands(&mut self) {
+    fn remote_use_hands(&mut self, attempt: mod_api::InteractionAttempt) {
         // Nothing in the crosshair: an empty hand's click is heard, by mods only.
         let miss = mod_api::__private::listened(mod_api::HookId::RightClickEmpty)
             && !self.entity_targeted()
@@ -9560,7 +9597,7 @@ impl Game<'_> {
             return;
         }
         // The off hand's turn: the event again, then the entity or the block.
-        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off) {
+        if let Some(swing) = self.native_interaction(InteractionKey::Use, Hand::Off, attempt) {
             if swing {
                 self.swing_hand(Hand::Off, SwingAnimation::DEFAULT);
             }
@@ -9874,7 +9911,11 @@ impl Game<'_> {
         }
         // InputEvent.InteractionKeyMappingTriggered, after the checks that stop
         // an attack: a cancel ends it there, swinging unless the mod said not to.
-        if let Some(swing) = self.native_interaction(InteractionKey::Attack, Hand::Main) {
+        if let Some(swing) = self.native_interaction(
+            InteractionKey::Attack,
+            Hand::Main,
+            mod_api::InteractionAttempt::Press,
+        ) {
             if swing {
                 let animation = spear.map_or(SwingAnimation::DEFAULT, |k| k.attack_animation());
                 self.swing_hand(Hand::Main, animation);
@@ -9955,7 +9996,9 @@ impl Game<'_> {
             {
                 self.native_left_click_empty();
             }
-            self.remote_mining(true);
+            if !self.remote_mining(true) {
+                return false;
+            }
             instant = self
                 .res
                 .facts()
@@ -10114,7 +10157,11 @@ impl Game<'_> {
             let canceled = if air {
                 None
             } else {
-                self.native_interaction(InteractionKey::Attack, Hand::Main)
+                self.native_interaction(
+                    InteractionKey::Attack,
+                    Hand::Main,
+                    mod_api::InteractionAttempt::Held,
+                )
             };
             if canceled.is_none() && !air {
                 // MultiPlayerGameMode.continueDestroyBlock starts with ensureHasSentCarriedItem.
@@ -10128,9 +10175,10 @@ impl Game<'_> {
             } else if self.remote_break_restricted() {
                 // continueDestroyBlock returned false: no swing.
             } else if !air {
-                self.remote_mining(false);
-                self.swing_arm();
-                self.send(S::Punch(Empty));
+                if self.remote_mining(false) {
+                    self.swing_arm();
+                    self.send(S::Punch(Empty));
+                }
             } else {
                 if let Some(r) = self.remote.as_mut() {
                     r.destroying = None;
@@ -11718,7 +11766,7 @@ fn synced_local_use(
 /// The game as the tick's input sees it.
 struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>);
 
-struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>);
+struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>, mod_api::InteractionAttempt);
 
 impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_> {
     fn use_entity(&mut self) -> bool {
@@ -11728,7 +11776,7 @@ impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
         self.0.remote_use_block(Hand::Main)
     }
     fn use_item(&mut self) {
-        self.0.remote_use_hands();
+        self.0.remote_use_hands(self.1);
     }
 }
 
@@ -11753,8 +11801,13 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
     fn start_attack(&mut self) -> bool {
         self.0.remote_start_attack()
     }
-    fn start_use(&mut self) {
-        self.0.remote_use();
+    fn start_use(&mut self, held: bool) {
+        let attempt = if held {
+            mod_api::InteractionAttempt::Held
+        } else {
+            mod_api::InteractionAttempt::Press
+        };
+        self.0.remote_use(attempt);
     }
     fn pick(&mut self) {
         // Minecraft.pickBlockOrEntity: an entity before the block is asked
@@ -11763,7 +11816,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
             if let Some(id) = entity {
                 if self
                     .0
-                    .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                    .native_interaction(
+                        InteractionKey::PickBlock,
+                        Hand::Main,
+                        mod_api::InteractionAttempt::Press,
+                    )
                     .is_some()
                 {
                     return;
@@ -11776,7 +11833,11 @@ impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_
         } else if let Some(hit) = self.0.pick() {
             if self
                 .0
-                .native_interaction(InteractionKey::PickBlock, Hand::Main)
+                .native_interaction(
+                    InteractionKey::PickBlock,
+                    Hand::Main,
+                    mod_api::InteractionAttempt::Press,
+                )
                 .is_some()
             {
                 return;
@@ -12100,6 +12161,71 @@ mod attachment_query_tests;
 #[cfg(test)]
 mod tests {
     use super::super::api_values::TryIntoApi;
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stopping_a_retained_client_dig_aborts_only_once() {
+        use crate::game::native_entity_refs::tests::with_client_game;
+        use horizon_protocol::connection::Pipe;
+        use mod_api::{
+            ClientHost, ClientMiningPredictEvent, ClientPacketSendEvent, Flow, Hooks, ModEntry,
+            testing::with_mods,
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        struct CountActions(Arc<AtomicUsize>);
+        #[mod_api::__subscriptions]
+        impl Hooks for CountActions {
+            fn client_mining_predict(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ClientMiningPredictEvent<'_>,
+            ) -> Flow {
+                assert!(!event.prediction.starting);
+                assert_eq!(event.prediction.progress, 0.75);
+                Flow::Cancel
+            }
+
+            fn client_packet_send(
+                &self,
+                _: &dyn ClientHost,
+                event: &mut ClientPacketSendEvent<'_>,
+            ) -> Flow {
+                if event.packet.id.path() == "player_action" {
+                    self.0.fetch_add(1, Ordering::Relaxed);
+                }
+                Flow::Continue
+            }
+        }
+        let count = Arc::new(AtomicUsize::new(0));
+        let mods = vec![ModEntry::new(
+            "count_actions",
+            Box::new(CountActions(count.clone())),
+        )]
+        .into();
+        with_mods(mods, || {
+            with_client_game(|game| {
+                let (client, _server) = Pipe::pair();
+                game.connect_local(client, "MiningTest").unwrap();
+                let remote = game.remote.as_mut().unwrap();
+                let pos = [0, 64, 0];
+                remote.destroying = Some((pos, 1, 0.5));
+                remote.is_destroying = true;
+                assert!(game.veto_mining_prediction(pos, [0, 1, 0], false, 0.75));
+                assert_eq!(count.load(Ordering::Relaxed), 0);
+                assert!(game.stop_remote_mining());
+                assert!(!game.stop_remote_mining());
+                assert_eq!(
+                    game.remote.as_ref().unwrap().destroying,
+                    Some((pos, 1, 0.0))
+                );
+            })
+        });
+        assert_eq!(count.load(Ordering::Relaxed), 1);
+    }
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

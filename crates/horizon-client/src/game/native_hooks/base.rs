@@ -895,10 +895,11 @@ impl Game<'_> {
         &mut self,
         key: InteractionKey,
         hand: Hand,
+        attempt: InteractionAttempt,
         swing_hand: &mut bool,
         canceled: &mut bool,
     ) {
-        self.fire_interaction_key_mapping_triggered(key, hand, swing_hand, canceled);
+        self.fire_interaction_key_mapping_triggered(key, hand, attempt, swing_hand, canceled);
     }
     /// A command typed or clicked in chat, without its slash, before the
     /// server and Horizon's commands see it: set `ran` when the mod ran it.
@@ -5241,15 +5242,19 @@ mod screen_open_tests {
             crate::game::native_entity_refs::tests::with_game(|game| {
                 let hand = Hand::Main;
                 assert_eq!(
-                    game.native_interaction(InteractionKey::Attack, hand),
+                    game.native_interaction(InteractionKey::Attack, hand, InteractionAttempt::Held),
                     Some(false)
                 );
                 assert_eq!(
-                    game.native_interaction(InteractionKey::Use, hand),
+                    game.native_interaction(InteractionKey::Use, hand, InteractionAttempt::Press),
                     Some(true)
                 );
                 assert_eq!(
-                    game.native_interaction(InteractionKey::PickBlock, hand),
+                    game.native_interaction(
+                        InteractionKey::PickBlock,
+                        hand,
+                        InteractionAttempt::Press
+                    ),
                     None
                 );
             });

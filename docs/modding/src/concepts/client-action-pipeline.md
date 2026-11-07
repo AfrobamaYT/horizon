@@ -37,13 +37,12 @@ crosshair query while the tick's target is pinned.
 | Use press or repeat | The existing main- and off-hand use events, with the same reason propagated through both hands | Keep the current hand and fallback rules, including cancelling the entire use at the main-hand event. |
 | Pick press | The existing pick event, before the target packet | Preserve the existing packet veto. |
 
-Add a client mining decision at the distinct prediction boundary inside
+`client_mining_predict` runs at the distinct prediction boundary inside
 `remote_mining`, after target, restriction and delay checks. It describes the block
 position, face, whether the accepted attempt starts or advances a dig, and the
-proposed progress. Use a typed snapshot with no renderer, packet or mutable world
-objects. Run it after the interaction mapping event so tool selection can settle
-before progress is computed. Re-read or refuse the action if a listener changes the
-selected stack or target after the decision. The server still independently validates
+proposed progress. Its typed snapshot and client host are read-only. It runs after
+the interaction mapping event, so tool selection can settle before progress is
+computed. The server still independently validates
 the held item, position, reach and break progression.
 
 A mining veto skips prediction, crack updates and the new action packet. For a
