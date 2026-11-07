@@ -13,6 +13,12 @@ uses `minecraft:`), deduplicated across mods and checked after every mod's conte
 An unknown entry refuses the load with the requesting mod and canonical id, even if the
 key was never attached to a Part. A later mod may supply the requested entry.
 
+The completed block identity table includes every vanilla and mod block, even blocks no mod
+requested. Completion preserves requested slots and appends the remaining canonical names in
+sorted order. Names belong to the installed mod registry; world load and reload prepare a
+separate numeric mapping for every retained key before publishing it. A missing requested
+block refuses completion without publishing a partial table.
+
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.
@@ -46,6 +52,28 @@ uses a key requested through `r.effect_key("minecraft:speed")`. Beacon-selection
 carry `Option<EffectKey>` for each power; `None` is no selection. Enchantment effect-component
 names (for example `minecraft:damage` in `has_enchantment_effect`) are a different registry
 and remain strings, as do labels and tags.
+
+### API-owned values: migration table
+
+| Previous engine value | API-owned value | Mod changes |
+| --- | --- | --- |
+| Package manifest `Side` | `mod_api::Side` | Match `Client` and `Both` on the package metadata snapshot. This is not `HostSide` or the executing logical side. |
+| Command `Suggestion` | `mod_api::Suggestion` | Construct with `Suggestion::new((start, end), text)`; optional `tooltip` and `int_value` remain writable. Offsets are byte offsets. |
+| Package block entity type storage | `mod_api::BlockEntityTypeDecl` | Existing `r.block_entity_type(...).build()` registration is unchanged. The declaration snapshot no longer exposes the package parser's model; the game converts it once when declarations freeze. |
+
+The API's `GameRuleDecl` records a mod's boolean rule name, category and default.
+Its internal `RuleSchema` input describes vanilla categories and dense rule positions
+through read-only lookups rather than a copied vanilla list or fixed slot numbers.
+Schema validation resolves category references after all mods have declared them and
+returns either all declaration slots or every refusal; it never installs a partial table.
+The game supplies this schema at Parts installation, then builds each world's engine
+rule registry from the installed `GameRuleDecl` snapshots. Existing rule registrar calls
+are unchanged; engine registry construction is no longer exposed through the API.
+
+The game owns package and completion conversion. Mods do not import package-loader or
+client-core types for these values. Completion edits are copied back after subscribed
+listeners run; no listener means no snapshot allocation. Package metadata is copied once
+at startup, retaining declared namespaces and dependencies.
 
 ### Item values and tag names
 

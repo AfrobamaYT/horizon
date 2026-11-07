@@ -1099,7 +1099,7 @@ pub(crate) fn download(
 
 /// Saves `reader` as `to` once all of it has arrived and its SHA-256 is `sha256`: until then it
 /// has a temporary name beside `to`, so `to` is never a partial or unchecked file.
-fn save_checked(
+pub(crate) fn save_checked(
     reader: impl Read,
     size: u64,
     name: &str,
@@ -4165,7 +4165,7 @@ pub enum Msg {
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String, crate::native_mods::Progress),
     /// The native-mods build ended: the version built, or why not.
-    Native(Result<String, String>),
+    Native(Result<String, crate::native_mods::Failed>),
     /// An imported game build is installed (`build_import::import`): its version, or why not.
     Imported(Result<String, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
@@ -4411,6 +4411,9 @@ pub struct Settings {
     /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_profile: Option<crate::native_mods::Profile>,
+    /// First-use native code permission for this launcher install, Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_mods_allowed_at: Option<u64>,
     /// Combined fast/release compilation cache limit in GiB. Unset is 30; zero disables
     /// automatic cleanup. Installed native versions and player data are not this cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4424,6 +4427,17 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Remember an explicit approval; merely finding an installed toolchain never grants it.
+    pub fn allow_native_mods(&mut self) -> Result<(), String> {
+        self.native_mods_allowed_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_secs(),
+        );
+        self.save()
+    }
+
     pub fn load() -> Self {
         Self::parse(&fs::read_to_string(data_dir().join("settings.json")).unwrap_or_default())
     }

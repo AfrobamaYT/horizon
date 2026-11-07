@@ -3038,6 +3038,19 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
+/// `ProjectileUtil.getEntityHitResult` tests for each candidate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct EntityRayHit {
+    /// The entity hit, a handle of the level the ray ran in.
+    pub entity: EntityRef,
+    /// Where the ray enters the entity's box, grown by the ray's margin, in blocks.
+    pub location: [f64; 3],
+    /// How far `location` is from the ray's start, in blocks.
+    pub distance: f64,
+}
+
 /// The client's ordinary crosshair hit (`Minecraft.hitResult`), within the
 /// current interaction ranges. Entity handles belong to the current client
 /// level's epoch, including dragon parts; a replacement level invalidates them.
@@ -4932,7 +4945,7 @@ mod tests {
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
     }
 
     /// Claims a use on stone, after telling the player what the block is.
@@ -5322,7 +5335,7 @@ mod tests {
         mark_game_thread();
         let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
         install(mods.clone());
-        install_parts(&mods).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mut claimed = false;
         dispatch_use_on(
@@ -5561,6 +5574,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
+        install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
         let mut host = FakeHost::new();
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("cod-keeper", Box::new(CodKeeper)),
