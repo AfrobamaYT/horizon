@@ -370,13 +370,11 @@ pub mod tests {
         ) {
             if event.entity.data == [1] {
                 let level = host.level("minecraft:overworld").unwrap();
-                let state = host.block_state_default(self.0).unwrap();
-                assert!(level.set_block(
-                    host,
-                    event.pos,
-                    state,
-                    NativeBlockUpdateFlags::KNOWN_SHAPE
-                ));
+                let state = BlockState::of(&host.block_states(), self.0, &[]).unwrap();
+                assert_eq!(
+                    level.set_block(host, event.pos, state, NativeBlockUpdateFlags::KNOWN_SHAPE),
+                    Ok(true)
+                );
             }
         }
         fn pre_remove_side_effects(
