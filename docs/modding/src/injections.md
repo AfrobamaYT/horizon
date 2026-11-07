@@ -41,9 +41,17 @@ facade. `head` and `return` use function slots. If no compiled slot exists, nati
 listeners use a private source point and rebuild the game; the callback and its facade record path
 stay unchanged. The log says `source (private slot, reason)` and private rows are never published
 in `points.json`. Targets below `mod_points` are refused because dispatch would create a Cargo cycle.
-`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
-`nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
-`mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
+`before_call`, `after_call`, `modify_value`, `wrap_call` and `wrap_if` also use private source calls
+when the canonical callee is absent from every slot list. The launcher validates their exact identity
+against the staged SDK before any game build; missing, moved or ambiguous calls refuse. Listed stale
+calls never fall back to source. `wrap_call` controls whether and how often to invoke the original;
+`wrap_if` runs it only when its condition returns true and requires unit output. The unit check runs
+once the private site's metadata exists, before game compilation. For all call kinds, use the catalog's
+canonical `call`, `nth` and statement `ctx`, not its place fingerprint `hash`.
+The generated `Listener`, `Receiver`, `Args` and `Output` facade names derive from that canonical callee
+and are identical on listed and source routes; physical IDs and dispatch remain distinct. The same
+`with` function therefore compiles on either route without an alias or compatibility export.
+The build log prints `mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
 hash or missing target is refused, not silently redirected. Points order by descending priority,
 then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
 and inject id order. `modify_arg` and `modify_call_arg` remain typed refusals until their operand

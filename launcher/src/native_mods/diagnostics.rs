@@ -320,7 +320,7 @@ mod tests {
 
         // The actual process reader and attempt logger keep both the owner and rustc's message.
         {
-            let _guard = super::super::tests::LOG_TEST.lock().unwrap();
+            let _guard = super::super::TEST_STATE.lock().unwrap();
             let mut command = Command::new(env!("CARGO"));
             command
                 .args(["check", "--offline", "--message-format=json"])
