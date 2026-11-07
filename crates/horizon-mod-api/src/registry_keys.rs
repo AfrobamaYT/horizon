@@ -184,10 +184,7 @@ pub fn fluid_key(id: &str) -> Option<FluidKey> {
 /// Resolve an NBT UTF-16 fluid name without allocating.
 pub fn fluid_key_utf16(id: &[u16]) -> Option<FluidKey> {
     Some(FluidKey(
-        *crate::parts::resolved_fluids()
-            .get()?
-            .utf16_slots
-            .get(id)?,
+        *crate::parts::resolved_fluids().get()?.utf16_slots.get(id)?,
     ))
 }
 

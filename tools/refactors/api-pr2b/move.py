@@ -101,6 +101,8 @@ def main():
         subprocess.run(['git', 'rm', '-f', str(API / 'part_table.rs')], check=True)
         old.rmdir()
     # Replayable even after another structural PR updates a file.
+    formatted = set(new.glob('*.rs'))
+    formatted.add(API / 'registry_keys.rs')
     for folder in ('crates', 'tests', 'docs', '.github'):
         for path in (ROOT / folder).rglob('*'):
             if path.suffix not in ('.rs', '.py', '.md', '.yml') or not path.is_file():
@@ -114,10 +116,12 @@ def main():
                 changed = changed.replace('`part_table.rs`', '`parts/`')
             if changed != text:
                 path.write_text(changed)
+                if path.suffix == '.rs':
+                    formatted.add(path)
     from finish import finish
     if moved:
         finish(API)
-    subprocess.run(['rustfmt', '--edition', '2024', *map(str, new.glob('*.rs'))], check=True)
+    subprocess.run(['rustfmt', '--edition', '2024', '--config', 'skip_children=true', *map(str, sorted(formatted))], check=True)
 
 
 if __name__ == '__main__':
