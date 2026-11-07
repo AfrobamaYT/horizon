@@ -279,6 +279,31 @@ mod tests {
             group.converted_bytes,
             3 * std::mem::size_of::<PreparedModelInstance>()
         );
+        // A quarter turn after scale(2, 4, 8): inverse-transpose columns
+        // are (0, 1/2, 0), (-1/4, 0, 0), (0, 0, 1/8).
+        group.transform =
+            row_major_3x4([0.0, -4.0, 0.0, 3.0, 2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 8.0, 5.0]);
+        group.rewrite(0..1);
+        assert_eq!(
+            group.records[0].normal,
+            [
+                [0.0, 0.5, 0.0, 0.0],
+                [-0.25, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.125, 0.0]
+            ]
+        );
+        // Reflect the first scaled axis: only the first normal column changes sign.
+        group.transform =
+            row_major_3x4([0.0, -4.0, 0.0, 3.0, -2.0, 0.0, 0.0, 4.0, 0.0, 0.0, 8.0, 5.0]);
+        group.rewrite(0..1);
+        assert_eq!(
+            group.records[0].normal,
+            [
+                [0.0, -0.5, 0.0, 0.0],
+                [-0.25, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.125, 0.0]
+            ]
+        );
         let handle = mod_api::__private::built::instance_group_ref(1, 0);
         let mut storage = InstanceGroupStorage {
             next: 1,
