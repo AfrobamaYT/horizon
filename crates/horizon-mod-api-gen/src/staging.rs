@@ -1,4 +1,5 @@
 //! One source staging pass for the launcher and `horizon-stage`.
+pub use crate::sites::identity::{CallIdentity, Selection, select};
 use crate::{internals, points, sites};
 use std::path::Path;
 
@@ -27,10 +28,13 @@ pub fn stage(
     internals_json: &Path,
     mode: Mode,
 ) -> Result<Staged, String> {
-    let internals = match mode {
+    let mut internals = match mode {
         Mode::Build => internals::widen(root)?,
         Mode::Discovery => internals::discover(root)?,
     };
+    internals
+        .entries
+        .extend(crate::crossing::foreign_internals());
     write(internals_json, &internals.entries)?;
     let sites = sites::stage(root, &internals.entries).map_err(|e| e.to_string())?;
     let points = points::stage(root)?;

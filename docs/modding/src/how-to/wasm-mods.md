@@ -88,6 +88,11 @@ are declared only through `[[inject]]`. `cargo horizon-mod build --wasm` fetches
 `internals.json` and generates `mod_internals::view` for exactly those declarations and the
 types they reach. The generated code stays in Cargo's build directory. Opaque types and
 functions that cannot cross the sandbox are refused at build, naming the declaration.
+GPU, window, input-device and audio types (`wgpu`, `winit`, `gilrs`, `cpal`, `rodio`, `glyphon`)
+are opaque, except these `winit` key and mouse types, which cross by copy: `keyboard::KeyCode`,
+`PhysicalKey`, `NativeKeyCode`, `KeyLocation` and `ModifiersState` (as its `u32` bits), and
+`event::ElementState` and `MouseButton`. `KeyCode` is `#[non_exhaustive]`, so it, `PhysicalKey`
+and anything holding them are read-only.
 
 Call `mod_internals::raw_listeners!(first, second, ...)` once, listing the functions in the
 manifest's raw-injection order. Each takes its generated raw record and an optional receiver:

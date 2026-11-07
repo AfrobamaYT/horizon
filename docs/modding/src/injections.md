@@ -47,6 +47,30 @@ and inject id order. API call sites, source injects, `replace`, locals and exten
 refused until their corresponding implementations land. API head/return functions also load from wasm;
 its remaining routing and full hash checks follow separately.
 
+## Unified native slot declarations
+
+Native internals listeners can use `[[inject]]` with a crate-root function instead of a trait method:
+
+```toml
+[[inject]]
+id = "before_tick"
+at = "horizon_client::game::Game<'_>::tick"
+kind = "head"
+with = "before_tick"
+access = "internals"
+hash = "<the function hash in internals.json>"
+```
+
+The function takes the slot's exact receiver and raw record types from the generated internals
+facade. `head`, `return` and `modify_arg` use function slots. `before_call`, `after_call`,
+`modify_call_arg`, `modify_value`, `wrap_call` and `wrap_if` use listed call slots; specify `call`,
+`nth` and `ctx` from the pinned catalog (`ctx` is currently the site's hash). The build log prints
+`mod:inject: target -> slot (head/return/site, internals)` for each accepted declaration. A changed
+hash or missing target is refused, not silently redirected. Points order by descending priority,
+then registration (dependency) order; ties within a mod use inject id. Sites retain priority, mod id
+and inject id order. API listeners, source injects, `replace`, locals and extension fields are explicitly
+refused until their corresponding implementations land. These declarations are native-only for now.
+
 ## For agents
 
 Apply these rules in order and stop at the first that fits.
@@ -400,15 +424,27 @@ build routes use the same `points.json` object: `points` lists function points a
 call sites. Only reviewed call entries in `crates/horizon-mod-api-gen/slots/<mod_id>.txt` become sites:
 
 ```text
-horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 |
+horizon_client::game::Game<'_>::next_autosave_interval | autosave_interval | 0 | <ctx from points.json>
 ```
 
 Each slot list accepts a function path, `at | call | nth | ctx`, or `type <path>` (reserved for extension
-fields; not consumed yet). `ctx` is carried but may be empty until context identity is implemented.
-Files support `#` comments; identical declarations merge, and conflicting contexts name both files.
-The stage reads their sorted union, evaluates the receiver once,
-and rewrites only the selected call expression in its copy of the game. Ordinals count matching
-runtime calls in source order; constant contexts and nested item bodies are not selected.
+fields; not consumed yet). Files support `#` comments; identical declarations merge, and conflicting
+contexts name both files. The stage reads their sorted union, evaluates the receiver once, and rewrites
+only the selected call expression in its copy of the game.
+
+Call identity uses the resolved callee path, not its spelling: aliases and different receivers of the
+same type share one ordinal sequence. Ordinals count runtime calls in source order; constant contexts
+and nested item bodies are not selected. `points.json` publishes each site's resolved `call`, `ctx`,
+and `hash`. The fingerprint includes the callee path and signatures. `ctx` hashes the containing
+statement's tokens and its block/if/match-arm path, ignoring source formatting. Empty contexts are
+for tool discovery only; copy the generated context when listing a slot, never invent one.
+
+A unique matching context at another ordinal refuses with `E_INJECT_MOVED`, naming the new `nth`.
+A changed or missing context refuses with `E_INJECT_LOST`. Two calls to the same callee with identical
+contexts are also lost, even when `nth` still matches: the tool cannot prove which identical statement
+was intended. Refresh a moved ordinal with `inject update`; reselect a lost call with `inject add`.
+Function signature changes and missing functions use `E_INJECT_CHANGED` and `E_INJECT_MISSING` at the
+unified routing boundary. Freshness errors never silently select a different call.
 
 ```toml
 [[native.injection]]
@@ -418,7 +454,7 @@ selector = "autosave_interval"
 ordinal = 0                    # omitted means 0
 kind = "MODIFY_EXPRESSION_VALUE"
 raw = "autosave"
-fingerprint = "5873182907d67cea" # this seeded site's hash in points.json
+fingerprint = "b27c99081cbd928c" # this seeded site's hash in points.json
 ```
 
 The facade's `internals::raw` module exports this site's exact `Args`, `Receiver`, `Output` and

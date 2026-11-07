@@ -1633,26 +1633,19 @@ impl Game<'_> {
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
     /// chat box then completes them as vanilla's, within their level. A
-    /// name vanilla has is left out.
+    /// name vanilla has is left out. Asked again after a mod calls
+    /// `native_refresh_commands`. API 8.
     pub(in crate::game) fn native_register_commands(&mut self, commands: &mut Vec<NativeCommand>) {
         self.fire_register_commands(commands);
     }
-    /// A player's command on the server (`Commands.performCommand`),
-    /// parsed into `command` with typed, source-resolved arguments, for a command
-    /// a mod registered and the player's level allows: set `ran` when it is yours.
-    /// Missing optional arguments are absent; parsing or resolution failures never
-    /// reach listeners. The player's state is
-    /// swapped in for the call, so `native_player` and the other helpers
-    /// read that player; `native_feedback` answers them. A single player's
-    /// owner console (`horizon-ctl command`) reaches it too, as the owner at
-    /// level 4.
-    pub(in crate::game) fn native_perform_command(
+    /// Execute a parsed mod command with its origin and effective permission.
+    pub(in crate::game) fn native_run_mod_command(
         &mut self,
-        player: &NativeServerPlayer,
+        source: &CommandSource,
         command: &CommandInvocation,
         ran: &mut bool,
     ) {
-        self.fire_perform_command(player, command, ran);
+        self.fire_run_mod_command(source, command, ran);
     }
     /// A player takes an item from an armor stand or puts one on it
     /// (`ArmorStand.interactAt`, after the stand's disabled-slot checks and
@@ -1680,7 +1673,7 @@ impl Game<'_> {
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
     /// server player, whose state is then swapped in (as for
-    /// `native_perform_command`: `native_acting_player`, `native_tell` and
+    /// `native_run_mod_command`: `native_acting_player`, `native_tell` and
     /// the item helpers reach them; `player` is their UUID), and for one a
     /// server player rode and left, until it has stood still for ten
     /// seconds (`player` is none, nobody is swapped in). It only hears.
@@ -1708,7 +1701,7 @@ impl Game<'_> {
     /// spectator) and before the menu that was open closes. Set `cancel` and
     /// nothing opens: the open menu stays as it was and the click is spent.
     /// The player's state is swapped in for the call, as for
-    /// `native_perform_command`, so `native_acting_player`, `native_tell` and
+    /// `native_run_mod_command`, so `native_acting_player`, `native_tell` and
     /// the item helpers reach them. Not heard: a menu a mod opens
     /// (`native_open_menu`), the inventory screen, and the editors (sign,
     /// book, command block). Server-side, for every player of the world.
@@ -1731,7 +1724,7 @@ impl Game<'_> {
     /// packet passed vanilla's checks (a creative player, a real slot, a valid
     /// stack) and before the slot changes or the stack drops. Set `cancel`
     /// and the packet is ignored. The player's state is swapped in for the
-    /// call, as for `native_perform_command`, so `native_acting_player`,
+    /// call, as for `native_run_mod_command`, so `native_acting_player`,
     /// `native_tell` and the item helpers reach them. Not heard: stacks a
     /// creative player gets other ways (middle-click pick block, `/give`).
     /// Server-side, for every player of the world.
@@ -1776,7 +1769,7 @@ impl Game<'_> {
     /// death's is placed for good (a bed or anchor, or the world spawn's
     /// free column, after the fallback when a respawn block was gone). The
     /// level of `to` is the one in place, and the player's state is swapped
-    /// in, as for `native_perform_command`: `native_acting_player`,
+    /// in, as for `native_run_mod_command`: `native_acting_player`,
     /// `native_tell`, the item helpers and the rest reach them. Heard for:
     /// Nether and End portals (also riding a vehicle, and leaving the End as
     /// its winner), `/execute in ... run tp` and any other command that
@@ -1865,24 +1858,6 @@ impl Game<'_> {
         replies: &mut Vec<Text>,
     ) {
         self.fire_player_command(player, name, command, canceled, replies);
-    }
-    /// A command a mod registered, typed on the dedicated server's console
-    /// or sent through `horizon-server console`
-    /// (`DedicatedServer.handleConsoleInputs`), parsed once into `command` with
-    /// typed arguments: set `ran` when it is yours. Relative coordinates and
-    /// selectors use the console at the Overworld spawn, with zero rotation.
-    /// Missing optional arguments are absent; invalid input never reaches listeners.
-    /// There is no player: the source is the console, at
-    /// permission level 4, so `native_acting_player` is None and the
-    /// player-only helpers give nothing; `native_feedback` answers on the
-    /// console. A name no mod registered goes to vanilla's dispatcher as
-    /// before.
-    pub(in crate::game) fn native_perform_console_command(
-        &mut self,
-        command: &CommandInvocation,
-        ran: &mut bool,
-    ) {
-        self.fire_perform_console_command(command, ran);
     }
     /// A server player's ender pearl landed and is about to teleport them
     /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
@@ -4765,15 +4740,19 @@ impl Game<'_> {
     /// `after` ticks counted from then (0 to 1200, a minute; `SoundEngine.playDelayed`). `SoundPlay::ui` plays it at the listener as an interface sound
     /// (`SimpleSoundInstance.forUI`); `SoundPlay::at` at a position in the client's level,
     /// fading with distance (`volume` past 1 carries farther, 16 blocks times the volume), as
-    /// thunder heard after the flash or a blast heard when its shock wave arrives. False,
-    /// with nothing played, on a server or for a value out of range; an event the resources
-    /// don't have plays nothing, as vanilla's.
-    pub(in crate::game) fn native_play_local_sound(&self, sound: &SoundPlay, after: u32) -> bool {
+    /// thunder heard after the flash or a blast heard when its shock wave arrives. Its
+    /// `SoundRef` follows and controls this play: `state`, `stop` and `fade`. None, with nothing
+    /// played, on a server or for a value out of range; an event the resources don't have plays
+    /// nothing, as vanilla's, and its handle reads `Stopped` once the update has tried it.
+    pub(in crate::game) fn native_play_local_sound(
+        &self,
+        sound: &SoundPlay,
+        after: u32,
+    ) -> Option<SoundRef> {
         if !self.native_window() || !local_sound_ok(sound, after) {
-            return false;
+            return None;
         }
-        self.mod_sounds.borrow_mut().push((sound.clone(), after));
-        true
+        Some(self.mod_sounds.queue(sound, after))
     }
     /// The particles alive in the client's level (`ParticleEngine.countParticles`): 0 once
     /// a clear is asked, and on a server.
@@ -5836,5 +5815,82 @@ mod text_tests {
             // RGB alone, as the API took before, is fully transparent now.
             assert!(drawn(0x00FF_FFFF).is_empty());
         });
+    }
+}
+
+#[cfg(test)]
+mod held_break_slot_tests {
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn held_durability_retains_the_stack_hand_and_explicit_break_slot() {
+        use crate::game::{Audio, Game, Hand, Options, Progress, Settings, load_resources};
+        use horizon_client::{items::ItemStack, motion::PlayerMotion};
+        use horizon_core::equipment_slot::EquipmentSlot;
+        use horizon_core::geometry::Vec3;
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.0, 70.0, 0.0)).unwrap());
+        game.set_mode_id(0);
+        // Stage an acting guest: break events are queued instead of rendering local crumbs.
+        game.lan_acting = Some(1);
+        game.hand = Hand::Off;
+        let main = ItemStack::new("minecraft:stick", 3);
+        game.inventory[game.selected] = Some(main.clone());
+        let max = game
+            .items()
+            .get("minecraft:flint_and_steel")
+            .unwrap()
+            .max_damage;
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 1);
+        assert!(game.guest_equipment_breaks.is_empty());
+        for (explicit, event) in [(true, 48), (false, 47)] {
+            let mut tool = ItemStack::new("minecraft:flint_and_steel", 1);
+            tool.damage = max - 1;
+            game.offhand = Some(tool);
+            if explicit {
+                game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+            } else {
+                game.damage_held(1);
+            }
+            assert!(game.offhand.is_none());
+            assert_eq!(game.inventory[game.selected], Some(main.clone()));
+            assert_eq!(*game.guest_equipment_breaks.last().unwrap(), event);
+        }
+        game.set_mode_id(1);
+        game.offhand = Some(ItemStack::new("minecraft:flint_and_steel", 1));
+        game.damage_held_in_slot(1, EquipmentSlot::OffHand);
+        assert_eq!(game.offhand.as_ref().unwrap().damage, 0);
     }
 }

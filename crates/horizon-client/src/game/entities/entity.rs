@@ -583,92 +583,76 @@ macro_rules! stored_motion {
 /// the `Entity` defaults every kind shares: fluids, move, column, settle,
 /// fluids again. Returns false when the item should be removed. A server's tick
 /// runs the halves itself, with the landing's `Block.fallOn` between them.
-pub(super) fn tick_item(
-    item: &mut ItemEntity,
-    world: &horizon_client::world::World,
-    registry: &horizon_world::registry::BlockRegistry,
-    facts: &horizon_client::blocks::BlockFacts,
-    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
-    fluids: &horizon_client::motion::FluidResources,
-    context: &horizon_world::native_load_context::LoopContext,
-    no_physics: bool,
-    entity_boxes: &[Aabb],
-    border: Option<&horizon_core::geometry::border::BorderGeometry>,
-    blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
-    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
-) -> bool {
-    let step = tick_item_move(
-        item,
-        world,
-        registry,
-        facts,
-        collision,
-        fluids,
-        context,
-        no_physics,
-        entity_boxes,
-        border,
-        blocks,
-        splash,
-    );
-    tick_item_settle(
-        item, world, facts, fluids, context, no_physics, step, splash,
-    )
-}
-
-/// `ItemEntity.tick` through the move and the bubble column's push: the fluid push, the
-/// splash on entering water, the move (`Entity.move`, whose `checkFallDamage` the step's
-/// [`landed`](horizon_client::entities::ItemStep::landed) reports), then the column.
-pub(super) fn tick_item_move(
-    item: &mut ItemEntity,
-    world: &horizon_client::world::World,
-    registry: &horizon_world::registry::BlockRegistry,
-    facts: &horizon_client::blocks::BlockFacts,
-    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
-    fluids: &horizon_client::motion::FluidResources,
-    context: &horizon_world::native_load_context::LoopContext,
-    no_physics: bool,
-    entity_boxes: &[Aabb],
-    border: Option<&horizon_core::geometry::border::BorderGeometry>,
-    blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
-    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
-) -> horizon_client::entities::ItemStep {
-    let (water, _lava) = item.push_by_fluid(world, fluids, context);
-    // `Entity.baseTick` splashes before the item moves. The first tick does not.
-    item.water_entry(water > 0.0, item.ticks == 0, splash);
-    let step = item.tick_move(
-        world,
-        facts,
-        collision,
-        no_physics,
-        (water, _lava),
-        entity_boxes,
-        border,
-        blocks,
-        context,
-    );
-    item.push_by_bubble_column(world, registry, facts, collision);
-    step
-}
-
-/// The rest of `ItemEntity.tick` after [`tick_item_move`]: the blocks' contact, drag and
-/// age, then the fluid push again. Returns false when the item should be removed.
-pub(super) fn tick_item_settle(
-    item: &mut ItemEntity,
-    world: &horizon_client::world::World,
-    facts: &horizon_client::blocks::BlockFacts,
-    fluids: &horizon_client::motion::FluidResources,
-    context: &horizon_world::native_load_context::LoopContext,
-    no_physics: bool,
-    step: horizon_client::entities::ItemStep,
-    splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
-) -> bool {
-    let alive = item.tick_settle(world, facts, no_physics, step);
-    // `ItemEntity.tick` refreshes immersion after moving and splashes if that
-    // move is what entered the water.
-    let (water, _) = item.push_by_fluid(world, fluids, context);
-    item.water_entry(water > 0.0, false, splash);
-    alive
+impl Game<'_> {
+    /// Tick an item owned by the caller. The two results are ordinary survival
+    /// and explicit consumption by a block-contact handler.
+    pub(super) fn tick_item_with_block_contacts(
+        &mut self,
+        item: &mut ItemEntity,
+        no_physics: bool,
+        entity_boxes: &[Aabb],
+        client: bool,
+        splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
+    ) -> (bool, bool) {
+        let heights =
+            item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
+        // Entity.baseTick splashes before moving, except on the first tick.
+        item.water_entry(heights.0 > 0.0, item.ticks == 0, splash);
+        let step = item.tick_move_before_block_effects(
+            &self.world,
+            self.res.facts(),
+            self.collision,
+            no_physics,
+            heights,
+            entity_boxes,
+            Some(self.border.geometry()),
+        );
+        if !client && let Some((on, distance)) = step.landed() {
+            self.item_fall_on(item.id, on, distance);
+        }
+        if let Some(pos) =
+            item.vertical_contact(&self.world, self.collision, &self.res.motion().blocks, step)
+        {
+            let state = self.world.block(pos.x, pos.y, pos.z);
+            let position = item.position;
+            let mut discarded = false;
+            self.native_item_after_vertical_collision(
+                mod_api::__private::ItemAfterVerticalCollisionCall {
+                    dimension: self.dim.id(),
+                    client,
+                    entity: item.id,
+                    state,
+                    block_pos: [pos.x, pos.y, pos.z],
+                    item_pos: [position.x, position.y, position.z],
+                    stack: &mut item.stack,
+                    discard: &mut discarded,
+                },
+            );
+            if discarded || item.stack.count == 0 {
+                return (false, true);
+            }
+        }
+        item.finish_move_block_effects(
+            &self.world,
+            self.res.facts(),
+            no_physics,
+            Some(&self.res.motion().blocks),
+            step,
+            &self.loop_context,
+        );
+        item.push_by_bubble_column(
+            &self.world,
+            self.pack.assets.registry,
+            self.res.facts(),
+            self.collision,
+        );
+        let alive = item.tick_settle(&self.world, self.res.facts(), no_physics, step);
+        // ItemEntity.tick refreshes immersion and splashes on water entry.
+        let (water, _) =
+            item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
+        item.water_entry(water > 0.0, false, splash);
+        (alive, false)
+    }
 }
 
 /// The game's lists of entities, in the order systems walk them. Hands them to
@@ -841,23 +825,23 @@ fn merge_in_join_order<const N: usize>(
 entity_lists!(define_entity_handles,);
 horizon_client::impl_joined!(FallingBlock);
 
-macro_rules! entity_borrow {
-    (shared, $place:expr) => {
-        &$place
-    };
-    (exclusive, $place:expr) => {
-        &mut $place
+macro_rules! entity_access {
+    (shared, $list:expr, $index:expr, $entity:ident, $body:expr) => {{
+        let $entity = &$list[$index];
+        $body
+    }};
+    (exclusive, $list:expr, $index:expr, $entity:ident, $body:expr) => {
+        $list.update($index, |$entity| $body)
     };
 }
-pub(crate) use entity_borrow;
+pub(crate) use entity_access;
 
 macro_rules! match_entity {
     (($borrow:ident, $entity:ident, $game:expr, $handle:expr, $body:expr)
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         match $handle {
             $($crate::game::entity::EntityHandle::$kind(i) => {
-                let $entity = $crate::game::entity::entity_borrow!($borrow, $game$(.$list)+[i]);
-                $body
+                $crate::game::entity::entity_access!($borrow, $game$(.$list)+, i, $entity, $body)
             })*
         }
     };
@@ -948,7 +932,7 @@ pub(super) use for_each_entity;
 macro_rules! walk_lists_mut {
     (($lists:expr, $entity:ident, $body:block)
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
-        $(for $entity in $lists.$field.iter_mut() $body)*
+        $($lists.$field.for_each_mut(|$entity| $body);)*
     };
 }
 pub(crate) use walk_lists_mut;
@@ -1134,8 +1118,10 @@ impl Entity for Mob {
     fn can_use_portal(&self, game: &Game<'_>) -> bool {
         game.mob_can_use_portal(self)
     }
+    /// `PersistentEntitySectionManager.Callback.onRemove`: discard stops
+    /// section enumeration immediately, before the entity list is swept.
     fn selector_target(&self) -> Option<Target> {
-        (self.death_time == 0).then_some(Target::Mob(self.id))
+        (!self.removed && self.death_time == 0).then_some(Target::Mob(self.id))
     }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
@@ -1770,7 +1756,8 @@ impl Entity for Projectile {
             "minecraft:fireball"
             | "minecraft:small_fireball"
             | "minecraft:wind_charge"
-            | "minecraft:breeze_wind_charge" => game.load_fireball(tag, uuid, player_uuid),
+            | "minecraft:breeze_wind_charge"
+            | "minecraft:wither_skull" => game.load_fireball(tag, uuid, player_uuid),
             id if horizon_client::entity_nbt::throwable_kind(id).is_some() => {
                 game.load_throwable(tag, uuid, player_uuid)
             }
@@ -2207,7 +2194,8 @@ mod join_order_tests {
         lists.tridents.swap(0, 1);
         assert!(matches!(lists.walk(), Err(JoinOrderError::OutOfOrder(_))));
         let (mut lists, _) = mixed();
-        Vec::push(&mut lists.stands, ArmorStand::new(9, at(), 0.0));
+        lists.stands.push(ArmorStand::new(9, at(), 0.0));
+        lists.stands[2].join = horizon_client::join_seq::JoinSeq::UNJOINED;
         assert_eq!(
             lists.walk(),
             Err(JoinOrderError::Unjoined(EntityHandle::ArmorStand(2)))
@@ -2244,5 +2232,57 @@ mod set_rotation_tests {
         assert_eq!(orb.rotation(), [90.0, 10.0]);
         orb.set_rotation([0.0, 200.0]);
         assert_eq!(orb.rotation(), [0.0, 90.0]);
+    }
+}
+
+#[cfg(test)]
+mod scoped_edit_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_walk_skips_only_one_entity_and_keeps_later_kinds() {
+        let mut lists = TakenEntities {
+            mobs: Default::default(),
+            dropped: Default::default(),
+            boats: Default::default(),
+            carts: Default::default(),
+            armor_stands: Default::default(),
+            tnts: Default::default(),
+            falling: Default::default(),
+            orbs: Default::default(),
+            projectiles: Default::default(),
+            rockets: Default::default(),
+            tridents: Default::default(),
+        };
+        lists
+            .boats
+            .push(Boat::new(1, "oak".into(), Vec3::ZERO, 0.0));
+        lists
+            .boats
+            .push(Boat::new(2, "oak".into(), Vec3::ZERO, 0.0));
+        lists.carts.push(Minecart::new(
+            3,
+            super::super::minecarts::CartKind::Rideable,
+            Vec3::ZERO,
+        ));
+        let mut visited = Vec::new();
+        for_each_entity_mut!(lists, entity => {
+            if entity.id() == 1 {
+                return;
+            }
+            visited.push(entity.id());
+            entity.velocity_mut().x = 4.0;
+        });
+        assert_eq!(visited, [2, 3]);
+        assert_eq!(lists.boats[0].velocity.x, 0.0);
+        assert_eq!(lists.boats[1].velocity.x, 4.0);
+        assert_eq!(lists.carts[0].velocity.x, 4.0);
+        let previous = entity_access!(exclusive, lists.boats, 1, boat, {
+            let previous = boat.velocity.x;
+            boat.velocity.x = 7.0;
+            previous
+        });
+        assert_eq!(previous, 4.0);
+        assert_eq!(lists.boats[1].velocity.x, 7.0);
     }
 }

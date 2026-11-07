@@ -1438,7 +1438,8 @@ impl Game<'_> {
         let mut items = if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
             std::mem::take(&mut c.items)
         } else {
-            std::mem::take(&mut self.boats.iter_mut().find(|b| b.id == id)?.items)
+            let i = self.boats.iter().position(|b| b.id == id)?;
+            self.boats.update(i, |b| std::mem::take(&mut b.items))
         };
         let key = (i32::MAX - 15, super::minecarts::CART_KEY_Y, id as i32);
         let (view, open) = self.lend_items(key, &mut items);
@@ -1446,8 +1447,8 @@ impl Game<'_> {
         self.reclaim_items(key, open, &mut items);
         if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
             c.items = items;
-        } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-            b.items = items;
+        } else if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+            self.boats.update(i, |b| b.items = items);
         }
         Some(result)
     }

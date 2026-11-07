@@ -857,27 +857,50 @@ fn cards_changed(seen: Option<&str>, cards: Option<&str>) -> bool {
     }
 }
 
+/// The buffer size to request for `open_device`. On Linux the ALSA backend's
+/// `BufferSize::Default` means a ~100 ms buffer, so sound effects come out
+/// about 100 ms late: request a short fixed buffer (1024 frames) by default.
+/// An environment override `HORIZON_AUDIO_BUFFER` can specify `default` or a
+/// custom frame count (e.g. 2048) when the default short buffer underruns
+/// (e.g. PipeWire min-quantum >= 1024).
+#[cfg(feature = "audio")]
+fn target_buffer_size(
+    range: (u32, u32),
+    var: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> Option<cpal::BufferSize> {
+    if let Some(val) = var("HORIZON_AUDIO_BUFFER").and_then(|v| v.into_string().ok()) {
+        if val == "default" {
+            return Some(cpal::BufferSize::Default);
+        }
+        if let Ok(frames) = val.parse::<u32>() {
+            return Some(cpal::BufferSize::Fixed(frames.clamp(range.0, range.1)));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Some(cpal::BufferSize::Fixed(1024u32.clamp(range.0, range.1)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
 /// The cpal `StreamConfig` to open an output stream with. On Linux the ALSA
 /// backend's `BufferSize::Default` means a ~100 ms buffer, so sound effects
 /// come out about 100 ms late: request a short fixed buffer there. Other
 /// platforms keep cpal's default behaviour.
 #[cfg(feature = "audio")]
 fn audio_stream_config(config: &cpal::SupportedStreamConfig) -> cpal::StreamConfig {
-    #[cfg(target_os = "linux")]
-    {
-        let range = match config.buffer_size() {
-            cpal::SupportedBufferSize::Range { min, max } => (*min, *max),
-            cpal::SupportedBufferSize::Unknown => (256, 4096),
-        };
-        let target = 1024u32.clamp(range.0, range.1);
-        let mut sc = config.config();
-        sc.buffer_size = cpal::BufferSize::Fixed(target);
-        sc
+    let mut sc = config.config();
+    let range = match config.buffer_size() {
+        cpal::SupportedBufferSize::Range { min, max } => (*min, *max),
+        cpal::SupportedBufferSize::Unknown => (256, 4096),
+    };
+    if let Some(bs) = target_buffer_size(range, |name| std::env::var_os(name)) {
+        sc.buffer_size = bs;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        config.config()
-    }
+    sc
 }
 
 #[cfg(feature = "audio")]
@@ -1398,7 +1421,7 @@ impl Audio {
     }
     /// A client mod's sound (`ClientHost::play_local_sound`), as its `SoundPlay` gives it,
     /// starting `after` sound-engine ticks from now (`SoundEngine.playDelayed`) or at once.
-    pub fn play_mod_sound(&mut self, sound: &mod_api::SoundPlay, after: u32) {
+    pub fn play_mod_sound(&mut self, sound: &mod_api::SoundPlay, after: u32) -> InstanceId {
         let seed = self.random.next_long();
         if let Some(capture) = self.capture.as_mut().filter(|_| !sound.relative) {
             capture.push(CapturedSound {
@@ -1414,12 +1437,31 @@ impl Audio {
         *self.heard.entry(sound.identifier.clone()).or_default() += 1;
         let mut instance = SoundInstance::from_play(sound, LegacyRandom::new(seed));
         instance.identifier = crate::sound_events::normalize(&sound.identifier);
+        // Tickable, so the engine applies a fade's volume each tick it plays.
+        instance.ticking = crate::sound_engine::Ticking::Mod { fade: None };
         if after == 0 {
-            self.play_instance(instance, false);
+            self.play_instance(instance, false).0
         } else {
             self.sync_volumes();
             let id = self.engine.add(instance, false);
             self.engine.play_delayed(id, after as i32);
+            id
+        }
+    }
+    /// Where a client mod's sound (`SoundRef`) is.
+    pub fn mod_sound_state(&self, id: InstanceId) -> mod_api::SoundState {
+        self.engine.mod_sound_state(id)
+    }
+    /// A client mod's `SoundRef::stop`.
+    pub fn stop_mod_sound(&mut self, id: InstanceId) {
+        self.engine.stop_for_good(id, &mut self.backend);
+    }
+    /// A client mod's `SoundRef::fade`; a fade to 0 at once stops it as `stop_mod_sound` does.
+    pub fn fade_mod_sound(&mut self, id: InstanceId, volume: f32, ticks: u32) {
+        if ticks == 0 && volume <= 0.0 {
+            self.stop_mod_sound(id);
+        } else if let Some(instance) = self.engine.instance_mut(id) {
+            instance.fade_to(volume, ticks);
         }
     }
     /// `play` for this client only: a sound a packet's handler plays
@@ -2006,6 +2048,42 @@ mod tests {
         );
     }
     #[test]
+    #[cfg(feature = "audio")]
+    fn buffer_size_override_and_defaults() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| std::ffi::OsString::from(*v))
+            }
+        };
+        let range = (256, 4096);
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "default")])),
+            Some(cpal::BufferSize::Default)
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "2048")])),
+            Some(cpal::BufferSize::Fixed(2048))
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "100")])),
+            Some(cpal::BufferSize::Fixed(256))
+        );
+        assert_eq!(
+            target_buffer_size(range, env(&[("HORIZON_AUDIO_BUFFER", "10000")])),
+            Some(cpal::BufferSize::Fixed(4096))
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            target_buffer_size(range, env(&[])),
+            Some(cpal::BufferSize::Fixed(1024))
+        );
+        #[cfg(not(target_os = "linux"))]
+        assert_eq!(target_buffer_size(range, env(&[])), None);
+    }
+    #[test]
     fn linear_attenuation_reaches_zero_at_the_max_distance() {
         assert_eq!(distance_gain(None, 100.0), 1.0);
         assert_eq!(distance_gain(Some(16.0), 0.0), 1.0);
@@ -2346,5 +2424,92 @@ mod tests {
         // The same cards list the same devices; a card added or removed does not.
         assert!(!cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]")));
         assert!(cards_changed(Some("0 [PCH ]"), Some("0 [PCH ]\n 1 [USB ]")));
+    }
+
+    /// The mixer live without an output device, and the button click's event: a sound
+    /// holds a channel, and a stopped channel is let go at the next update.
+    fn live_audio() -> Audio {
+        let mut audio = Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            (Path::new("/nonexistent/horizon-test-assets")).to_path_buf(),
+        ));
+        audio.engine.registry.add_file(
+            "minecraft",
+            br#"{"ui.button.click":{"sounds":["gui/button"]}}"#,
+            &|_, _| true,
+        );
+        audio.engine.loaded = true;
+        audio.backend.live = true;
+        audio
+    }
+
+    #[test]
+    fn a_mod_sound_waits_out_its_delay_plays_and_stops_for_good() {
+        use mod_api::SoundState::*;
+        let mut audio = live_audio();
+        let ctx = TickContext::default();
+        let click = mod_api::SoundPlay::ui("minecraft:ui.button.click");
+        let sound = audio.play_mod_sound(&click, 2);
+        assert_eq!(audio.mod_sound_state(sound), Waiting);
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Waiting, "one tick of two");
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        audio.stop_mod_sound(sound);
+        audio.tick(false, &ctx);
+        audio.tick(false, &ctx);
+        assert_eq!(audio.mod_sound_state(sound), Stopped);
+        // Stopped while it waits, it never starts; a looping one never repeats.
+        let never = audio.play_mod_sound(&click.clone().looping(0), 3);
+        audio.stop_mod_sound(never);
+        assert_eq!(audio.mod_sound_state(never), Stopped);
+        for _ in 0..5 {
+            audio.tick(false, &ctx);
+            assert_eq!(audio.mod_sound_state(never), Stopped);
+        }
+    }
+
+    #[test]
+    fn a_mod_sound_fades_to_its_volume_and_a_fade_to_zero_stops_it() {
+        use mod_api::SoundState::*;
+        let mut audio = live_audio();
+        let ctx = TickContext::default();
+        let sound = audio.play_mod_sound(&mod_api::SoundPlay::ui("minecraft:ui.button.click"), 0);
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        let volume = |audio: &Audio| audio.engine.instance(sound).map(|i| i.volume);
+        audio.fade_mod_sound(sound, 0.5, 2);
+        let mut volumes = Vec::new();
+        for _ in 0..3 {
+            audio.tick(false, &ctx);
+            volumes.push(volume(&audio));
+        }
+        assert_eq!(
+            volumes,
+            [Some(0.75), Some(0.5), Some(0.5)],
+            "two equal steps, then held"
+        );
+        // Paused, a fade waits.
+        audio.fade_mod_sound(sound, 0.0, 2);
+        audio.tick(true, &ctx);
+        assert_eq!(volume(&audio), Some(0.5));
+        audio.tick(false, &ctx);
+        assert_eq!(volume(&audio), Some(0.25));
+        assert_eq!(audio.mod_sound_state(sound), Playing);
+        for _ in 0..4 {
+            audio.tick(false, &ctx);
+        }
+        assert_eq!(audio.mod_sound_state(sound), Stopped, "faded out");
+        // A fade at once: to a volume sets it, to 0 stops it.
+        let other = audio.play_mod_sound(&mod_api::SoundPlay::ui("minecraft:ui.button.click"), 0);
+        audio.fade_mod_sound(other, 0.3, 0);
+        assert_eq!(volume_of(&audio, other), Some(0.3));
+        audio.fade_mod_sound(other, 0.0, 0);
+        for _ in 0..2 {
+            audio.tick(false, &ctx);
+        }
+        assert_eq!(audio.mod_sound_state(other), Stopped);
+    }
+
+    fn volume_of(audio: &Audio, id: InstanceId) -> Option<f32> {
+        audio.engine.instance(id).map(|i| i.volume)
     }
 }

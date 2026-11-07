@@ -561,6 +561,30 @@ mod tests {
     }
 
     #[test]
+    fn only_the_exact_build_of_the_prebuilt_game_is_accepted() {
+        let dir = super::super::tests::dir("prebuilt-exact-build");
+        let check = |commit: &str, rustc: &str, target: &str, side: &str| {
+            let identity = serde_json::json!({
+                "commit": commit, "rustc": rustc, "target": target, "side": side, "link_args": [],
+            });
+            fs::write(dir.join(IDENTITY), identity.to_string()).unwrap();
+            check_identity(&dir, "abc123", "x86_64-pc-windows-gnu", Target::Client)
+        };
+        let rustc = format!("rustc x\nrelease: {}\nhost: y", rust_toolchain::VERSION);
+        let host = "x86_64-pc-windows-gnu";
+        assert_eq!(check("abc123", &rustc, host, "client"), Ok(()));
+        assert!(check("abc124", &rustc, host, "client").is_err());
+        assert!(check("abc123", &rustc, "x86_64-unknown-linux-gnu", "client").is_err());
+        assert!(check("abc123", &rustc, host, "server").is_err());
+        assert!(check("abc123", "rustc x\nrelease: 0.0.1", host, "client").is_err());
+        let longer = format!("release: {}.1", rust_toolchain::VERSION);
+        assert!(check("abc123", &longer, host, "client").is_err());
+        fs::remove_file(dir.join(IDENTITY)).unwrap();
+        assert!(check_identity(&dir, "abc123", host, Target::Client).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn runtime_dylib_is_found_for_installation() {
         let dir = super::super::tests::dir("prebuilt-runtime-dylib");
         let stale = dir.join("libhorizon_mod_wasm-old.rmeta");

@@ -2,7 +2,9 @@ use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use horizon_client::{chunk::Chunk, containers::BlockEntity};
 use horizon_core::nbt::Tag;
-use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType, Attachments};
+use horizon_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+};
 use mod_api::HostTransaction;
 
 static VALUE: AttachmentType<i32> = AttachmentType {
@@ -95,10 +97,10 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
         let other = nether.lock().unwrap().snapshot(&key);
         assert_eq!(
             other[0].holder,
-            AttachmentHolder::BlockEntity(mod_api::__private::game::block_entity_ref(
-                nether_level,
-                [1, 64, 1]
-            ))
+            AttachmentHolder::BlockEntity(
+                game.native_block_entity_ref(nether_level, [1, 64, 1])
+                    .unwrap()
+            )
         );
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 2);

@@ -344,6 +344,47 @@ impl Game<'_> {
         self.server_destroy_block_progress(breaker, pos, progress);
         true
     }
+    /// Apply bone meal to the block at `pos` as a dispenser does (`BoneMealItem.growCrop`, then
+    /// `growWaterPlant`): the mods' `bonemeal` hook first, level event 1505 when something grew.
+    /// False for a refused write, a stale or parked handle, a client, and a block that did not
+    /// grow.
+    pub(super) fn native_level_bone_meal(&mut self, level: LevelRef, pos: [i32; 3]) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+        let mut stack = horizon_client::items::ItemStack::new("minecraft:bone_meal", 1);
+        let ask = self.bonemeal(at, false, &mut stack);
+        let grown = self.with_level(|b, level, ticks| {
+            ask.crop
+                .unwrap_or_else(|| b.grow_crop(level, ticks, at, ask.check))
+                || b.grow_water_plant(level, ticks, at, None)
+        });
+        if grown {
+            self.level_events
+                .push(horizon_world::level::LevelEvent::LevelEvent {
+                    id: 1505,
+                    pos: at,
+                    data: 15,
+                    source: None,
+                });
+        }
+        let _ = self.process_level_events();
+        grown
+    }
+    /// Set the biome of the cell holding `pos` to `biome` (`/fillbiome` for one cell). False for a
+    /// refused write, a stale or parked handle, a client, an unknown biome and an unchanged cell.
+    pub(super) fn native_level_set_biome(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        biome: &str,
+    ) -> bool {
+        if !self.native_level_write_allowed(level, pos) || self.dim.key() != level.dimension() {
+            return false;
+        }
+        self.set_biome_at(pos, biome)
+    }
     fn native_level_write_allowed(&self, level: LevelRef, pos: [i32; 3]) -> bool {
         self.is_logical_server()
             && self.native_lifecycle.epoch() == Some(level.epoch())
@@ -844,6 +885,52 @@ pub(super) mod tests {
             let level = game.native_level(game.dim.id()).unwrap();
             assert_eq!(level.best_neighbor_signal(game, [4, 64, 5]), Some(0));
             assert_eq!(level.signal(game, [5, 64, 5], West), Some(0));
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_level_bone_meals_a_block_and_sets_a_biome_cell() {
+        use horizon_client::chunk::Chunk;
+        use std::sync::Arc;
+
+        with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            let registry = game.pack.assets.registry;
+            let farmland = registry.default_state("minecraft:farmland").unwrap();
+            let wheat = registry.default_state("minecraft:wheat").unwrap();
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            game.world.set(0, 63, 0, farmland).unwrap();
+            game.world.set(0, 64, 0, wheat).unwrap();
+            game.world.set(5, 64, 5, stone).unwrap();
+            let level = game.native_level(game.dim.id()).unwrap();
+            assert!(game.native_level_bone_meal(level, [0, 64, 0]));
+            assert_ne!(game.world.block(0, 64, 0), wheat, "the crop grew");
+            assert!(!game.native_level_bone_meal(level, [5, 64, 5]), "stone");
+            assert!(
+                !game.native_level_bone_meal(level, [100_000, 64, 0]),
+                "unloaded"
+            );
+
+            let current = usize::from(game.world.chunks[&(0, 0)].biome(0, 64, 0));
+            let target = usize::from(current == 0);
+            let name = world_biomes!(game).list[target].name.clone();
+            assert!(game.native_level_set_biome(level, [0, 64, 0], &name));
+            assert_eq!(
+                usize::from(game.world.chunks[&(0, 0)].biome(3, 67, 3)),
+                target,
+                "the whole 4x4x4 cell changed"
+            );
+            assert!(game.world.modified.contains(&(0, 0)));
+            assert!(
+                !game.native_level_set_biome(level, [0, 64, 0], &name),
+                "already set"
+            );
+            assert!(!game.native_level_set_biome(level, [0, 64, 0], "minecraft:nope"));
+            assert!(!game.native_level_set_biome(level, [100_000, 64, 0], &name));
         });
     }
 
@@ -2098,7 +2185,7 @@ pub(super) mod tests {
             .unwrap();
             assert!(game.native_player_remove_fake(replacement));
             let overworld_actor = game.native_fake_player(level, 2345, "parked").unwrap();
-            let attachment = horizon_world::attachments::AttachmentType {
+            let attachment = horizon_mod_runtime::attachments::AttachmentType {
                 namespace: "test",
                 name: "identity",
                 default: || 0i32,
@@ -2106,14 +2193,14 @@ pub(super) mod tests {
                 copy_on_death: false,
                 sync: false,
             };
-            let holder = horizon_world::attachments::Holder::Player(2345);
+            let holder = horizon_mod_runtime::attachments::Holder::Player(2345);
             game.options.dedicated = Some(Vec::new());
-            let real_holder = horizon_world::attachments::Holder::Player(1);
+            let real_holder = horizon_mod_runtime::attachments::Holder::Player(1);
             attachment
                 .set(
                     game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     17,
                 )
                 .unwrap();
@@ -2121,7 +2208,7 @@ pub(super) mod tests {
                 .set(
                     game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     3,
                 )
                 .unwrap();
@@ -2136,7 +2223,7 @@ pub(super) mod tests {
                 .set(
                     game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                         .unwrap(),
-                    horizon_world::attachments::Holder::Level,
+                    horizon_mod_runtime::attachments::Holder::Level,
                     8,
                 )
                 .unwrap();
@@ -2145,7 +2232,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8
@@ -2162,7 +2249,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8
@@ -2225,7 +2312,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 3
@@ -2236,7 +2323,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(real_holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 17
@@ -2247,7 +2334,7 @@ pub(super) mod tests {
                     .get(
                         game.attachment_map_quiet(holder, mod_api::AttachmentAccess::Existing)
                             .unwrap(),
-                        horizon_world::attachments::Holder::Level
+                        horizon_mod_runtime::attachments::Holder::Level
                     )
                     .unwrap(),
                 8

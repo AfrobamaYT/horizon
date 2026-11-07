@@ -9,9 +9,6 @@ use horizon_client::{
 };
 use horizon_core::{position::ChunkPos, random::RandomSource};
 
-/// How long `/forceload add` waits for its chunks, as the game tests' loads do.
-const FORCED_CHUNK_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
-
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
 }
@@ -45,23 +42,7 @@ impl Game<'_> {
         let p = self.resolve_coords(&c);
         Ok([p[0].floor() as i32, p[2].floor() as i32])
     }
-    /// `ServerLevel.setChunkForced`'s `getChunk`: a command right after
-    /// `/forceload add` (`/place`, `/setblock`) finds the chunks loaded.
-    fn wait_for_forced_chunks(&mut self, min: [i32; 2], max: [i32; 2]) {
-        let missing = |g: &Self| {
-            (min[0]..=max[0])
-                .any(|x| (min[1]..=max[1]).any(|z| !g.world.chunks.contains_key(&(x, z))))
-        };
-        let deadline = std::time::Instant::now() + FORCED_CHUNK_WAIT;
-        while missing(self) {
-            if std::time::Instant::now() >= deadline {
-                log::warn!("Horizon: /forceload: chunks {min:?}..{max:?} are not loaded yet");
-                return;
-            }
-            let _ = self.streaming.update(&mut self.world);
-            self.streaming.wait(std::time::Duration::from_millis(5));
-        }
-    }
+    /// `ForceLoadCommand.changeForceLoad`: update and load each newly forced column in order.
     pub(super) fn cmd_forceload(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let dim = Text::literal(self.dim.id());
         match id {
@@ -137,12 +118,11 @@ impl Game<'_> {
                     return Err(err("commands.forceload.toobig", &[&256, &count]));
                 }
                 let mut tracker = Tracker::default();
-                self.streaming
-                    .set_forced_area((cx0, cz0), (cx1, cz1), add, |x, z, changed| {
+                for x in cx0..=cx1 {
+                    for z in cz0..=cz1 {
+                        let changed = self.streaming.set_forced_loaded(&mut self.world, x, z, add);
                         tracker.track(&holder(chunk_text(x, z)), i32::from(changed));
-                    });
-                if add {
-                    self.wait_for_forced_chunks([cx0, cz0], [cx1, cz1]);
+                    }
                 }
                 let (lo, hi) = (chunk_text(cx0, cz0), chunk_text(cx1, cz1));
                 let verb = if add { "added" } else { "removed" };
@@ -255,22 +235,11 @@ impl Game<'_> {
         if changed == 0 {
             return Err(err("commands.fillbiome.no_changes", &[]));
         }
-        for key in &touched {
-            self.world.modified.insert(*key);
-            for sy in 0..self.world.layout().sections() as i32 {
-                self.world.dirty_sections.insert((key.0, sy, key.1));
-            }
-        }
-        // ChunkMap.resendBiomesForChunks: the players who see the changed
-        // columns are sent their new biomes, in the order the columns were
-        // gathered (z, then x).
-        if let Some(host) = self.lan.as_mut() {
-            let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
-                .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
-                .filter(|key| touched.contains(key))
-                .collect();
-            host.hub.resend_biomes(&self.world, &columns);
-        }
+        let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
+            .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
+            .filter(|key| touched.contains(key))
+            .collect();
+        self.commit_biome_columns(&touched, &columns);
         self.feedback(Text::translate(
             "commands.fillbiome.success.count",
             &[
@@ -286,6 +255,56 @@ impl Game<'_> {
         Ok(changed)
     }
 
+    /// The tail of a biome change: the columns in `touched` are saved and re-meshed, and the
+    /// players who see `columns` are sent their new biomes (`ChunkMap.resendBiomesForChunks`), in
+    /// the order the columns were gathered (z, then x). Shared by `/fillbiome` and
+    /// `native_level_set_biome`.
+    pub(in crate::game) fn commit_biome_columns(
+        &mut self,
+        touched: &std::collections::HashSet<(i32, i32)>,
+        columns: &[(i32, i32)],
+    ) {
+        for key in touched {
+            self.world.modified.insert(*key);
+            for sy in 0..self.world.layout().sections() as i32 {
+                self.world.dirty_sections.insert((key.0, sy, key.1));
+            }
+        }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.resend_biomes(&self.world, columns);
+        }
+    }
+    /// Set the biome cell holding `pos` (a 4x4x4 cell, `QuartPos`) to the biome named `biome`
+    /// (`minecraft:plains`), as `/fillbiome` does for one cell: the chunk is saved, re-meshed and
+    /// resent. False for an unknown biome, an unloaded or out-of-height position, or a cell that
+    /// already has it.
+    pub(in crate::game) fn set_biome_at(&mut self, pos: [i32; 3], biome: &str) -> bool {
+        let Some(target) = world_biomes!(self)
+            .list
+            .iter()
+            .position(|b| b.name == biome)
+        else {
+            return false;
+        };
+        let key = (pos[0] >> 4, pos[2] >> 4);
+        let Some(chunk) = self.world.chunks.get(&key) else {
+            return false;
+        };
+        if !self.world.shape.contains_y(pos[1])
+            || usize::from(chunk.biome(pos[0], pos[1], pos[2])) == target
+        {
+            return false;
+        }
+        let qy =
+            ((pos[1] - self.world.bottom_y()) >> 2).clamp(0, self.world.layout().height() / 4 - 1);
+        if let Some(chunk) = self.world.chunks.get_mut(&key) {
+            let chunk = std::sync::Arc::make_mut(chunk);
+            chunk.set_biome_cell((pos[0] & 15) >> 2, qy, (pos[2] & 15) >> 2, target as u16);
+        }
+        self.commit_biome_columns(&std::collections::HashSet::from([key]), &[key]);
+        true
+    }
+
     // ---- /worldborder -----------------------------------------------------------------------
 
     /// Every tick: the size change, the wall the player cannot pass and
@@ -299,7 +318,8 @@ impl Game<'_> {
         let now = horizon_client::lan::border::Sent::of(&self.border);
         if let Some(sent) = host.border_sent.replace(now) {
             for packet in sent.changes(&self.border) {
-                host.hub.broadcast(&packet);
+                // PlayerList$1: only the players of the border's own level.
+                host.hub.broadcast_level(&packet);
             }
         }
     }
@@ -527,6 +547,8 @@ impl Game<'_> {
             .first()
             .and_then(|s| self.slot_get(s)))
     }
+    /// `LootCommand.dropBlockLoot`: copy the actual block entity's components
+    /// into the mine result without removing the source block or its contents.
     pub(super) fn cmd_loot(&mut self, id: &str, ctx: &Context) -> R<i32> {
         // The drops.
         let (drops, table): (Vec<ItemStack>, Option<String>) = match id {
@@ -632,7 +654,18 @@ impl Game<'_> {
                     return Err(err("commands.drop.no_loot_table.block", &[&name]));
                 };
                 let tool = self.tool_stack(ctx)?;
-                let drops = match world_items!(self).loot_sequence(&table) {
+                let mut pending = crate::game::spill::Pending::default();
+                let key = (p[0], p[1], p[2]);
+                let has_block_entity = if let Some(entity) = self.world.block_entities.get(&key) {
+                    pending.record(p, entity, &name, self.world.block_names.get(&key).cloned());
+                    true
+                } else if let Some(saved) = self.block_entity_nbt(p) {
+                    pending.record_saved(p, &saved);
+                    true
+                } else {
+                    false
+                };
+                let mut drops = match world_items!(self).loot_sequence(&table) {
                     Some(seq) => {
                         let random = self.rand_sequences.get(&seq, self.level.seed);
                         world_items!(self).block_drops(
@@ -649,6 +682,11 @@ impl Game<'_> {
                         &mut self.world.random,
                     ),
                 };
+                if has_block_entity {
+                    for drop in &mut drops {
+                        pending.attach(p, drop);
+                    }
+                }
                 (drops, Some(table))
             }
         };
@@ -835,5 +873,215 @@ mod tests {
     fn the_too_big_message_names_the_limit_as_vanilla_prints_it() {
         assert_eq!(super::MAX_SIZE, 5.9999968E7);
         assert_eq!(super::size_limit_text(), "5.9999968E7");
+    }
+}
+
+#[cfg(test)]
+mod loot_mine_component_tests {
+    use super::*;
+    use crate::game::{Audio, Options, Progress, Settings, load_resources};
+    use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
+    use horizon_core::nbt::{Compound, Tag};
+    use std::sync::Arc;
+
+    fn slot(game: &Game<'_>, index: usize) -> ItemStack {
+        let Some(BlockEntity::Chest(items)) = game.world.block_entities.get(&(12, 200, 4)) else {
+            panic!("actual command-created chest required");
+        };
+        items[index]
+            .clone()
+            .expect("actual inventory slot must be occupied")
+    }
+
+    fn decorations(stack: &ItemStack) -> Option<Tag> {
+        save::item_to_nbt(stack)
+            .get("components")?
+            .get("minecraft:pot_decorations")
+            .cloned()
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    fn loot_mine_copies_actual_empty_and_right_pot_components_into_the_chest() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+        assert!(game.run_command(
+            "setblock 12 200 4 chest[facing=north,type=single,waterlogged=false] strict"
+        ));
+        assert!(
+            game.run_command("item replace block 12 200 4 container.26 with minecraft:diamond 7")
+        );
+        assert!(game.run_command("item replace block 12 200 4 container.2 with minecraft:decorated_pot[minecraft:pot_decorations={}] 1"));
+        let empty = Tag::Compound(Compound::new());
+        assert_eq!(
+            (&*slot(&game, 26).item, slot(&game, 26).count),
+            ("minecraft:diamond", 7)
+        );
+        assert_eq!(
+            decorations(&slot(&game, 2)),
+            Some(empty.clone()),
+            "direct-item parser/encoder positive control"
+        );
+        assert!(
+            slot(&game, 2)
+                .extra
+                .as_ref()
+                .unwrap()
+                .pot_decorations
+                .is_some()
+        );
+        let start = game.world.game_time;
+        let right = "minecraft:angler_pottery_sherd";
+        let mut failures = Vec::new();
+        for (x, nbt, decorated) in [
+            (4, "", false),
+            (
+                7,
+                r#"{sherds:{right:{id:"minecraft:angler_pottery_sherd"}}}"#,
+                true,
+            ),
+        ] {
+            assert!(game.run_command(&format!(
+                "setblock {x} 200 4 decorated_pot[facing=north,cracked=false,waterlogged=false]{nbt} strict"
+            )));
+            let pos = [x, 200, 4];
+            let state = game.world.block(x, 200, 4);
+            let actual = game.pack.assets.registry.state(state).unwrap();
+            assert_eq!(&*actual.name, "minecraft:decorated_pot");
+            assert_eq!(
+                actual.properties.get("cracked").map(String::as_str),
+                Some("false")
+            );
+            assert_eq!(
+                game.world.block(x, 199, 4),
+                game.pack
+                    .assets
+                    .registry
+                    .default_state("minecraft:stone")
+                    .unwrap()
+            );
+            let before = game.pot_data(pos).expect("actual source block entity read");
+            assert_eq!(
+                before.get("id"),
+                Some(&Tag::String("minecraft:decorated_pot".into()))
+            );
+            for (key, value) in [("x", x), ("y", 200), ("z", 4)] {
+                assert_eq!(before.get(key), Some(&Tag::Int(value)));
+            }
+            if decorated {
+                assert_eq!(
+                    before
+                        .get("sherds")
+                        .and_then(|t| t.get("right"))
+                        .and_then(|t| t.get("id")),
+                    Some(&Tag::String(right.into())),
+                    "actual admitted source sherd"
+                );
+            } else {
+                assert!(before.get("sherds").is_none());
+            }
+            assert!(before.get("item").is_none() && before.get("LootTable").is_none());
+            assert!(
+                game.run_command("item replace block 12 200 4 container.0 with minecraft:stone 3")
+            );
+            let initial = slot(&game, 0);
+            assert_eq!((&*initial.item, initial.count), ("minecraft:stone", 3));
+            assert!(game.run_command(&format!(
+                "loot replace block 12 200 4 container.0 1 mine {x} 200 4"
+            )));
+            let out = slot(&game, 0);
+            assert_eq!(
+                (&*out.item, out.count),
+                ("minecraft:decorated_pot", 1),
+                "inventory is the count authority"
+            );
+            let expected = if decorated {
+                Tag::compound([("right", Tag::compound([("id", Tag::String(right.into()))]))])
+            } else {
+                empty.clone()
+            };
+            if decorations(&out) != Some(expected) {
+                failures.push(format!(
+                    "source {x}: actual saved output pot_decorations missing/wrong"
+                ));
+            }
+            let modeled = out.extra.as_ref().and_then(|d| d.pot_decorations.as_ref());
+            if modeled.is_none_or(|sides| {
+                sides.iter().enumerate().any(|(i, item)| {
+                    if decorated && i == 2 {
+                        item.as_ref()
+                            .is_none_or(|s| &*s.item != right || s.count != 1)
+                    } else {
+                        item.is_some()
+                    }
+                })
+            }) {
+                failures.push(format!(
+                    "source {x}: actual output component state missing/wrong"
+                ));
+            }
+            assert_eq!(
+                game.pot_data(pos),
+                Some(before),
+                "mine leaves the actual source unchanged"
+            );
+            assert_eq!(game.world.block(x, 200, 4), state);
+            assert_eq!(
+                (&*slot(&game, 26).item, slot(&game, 26).count),
+                ("minecraft:diamond", 7)
+            );
+            assert_eq!(decorations(&slot(&game, 2)), Some(empty.clone()));
+            assert_eq!(game.world.game_time, start);
+        }
+        assert!(game.run_command("setblock 10 200 4 dirt strict"));
+        assert!(game.run_command("loot replace block 12 200 4 container.0 1 mine 10 200 4"));
+        let plain = slot(&game, 0);
+        assert_eq!((&*plain.item, plain.count), ("minecraft:dirt", 1));
+        assert!(decorations(&plain).is_none());
+        assert_eq!(game.world.game_time, start);
+        assert!(
+            failures.is_empty(),
+            "actual loot-mine component-copy failures: {failures:#?}"
+        );
     }
 }

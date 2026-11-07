@@ -1691,7 +1691,10 @@ impl<'a> Plan<'a> {
                 map.set(
                     &i.rename.to,
                     J::Obj(vec![
-                        ("class".into(), J::Arr(vec![J::Str("BlockItem".into())])),
+                        (
+                            "class".into(),
+                            J::Arr(vec![J::Str("BlockItem".into()), J::Str("Item".into())]),
+                        ),
                         (
                             "fields".into(),
                             J::Obj(vec![("block".into(), J::Str(block.clone()))]),

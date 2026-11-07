@@ -43,7 +43,9 @@ impl mod_api::prelude::EntitiesHost for World {
 }
 impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-        Some(mod_api::__private::game::block_entity_ref(level, position))
+        Some(mod_api::__private::game::block_entity_ref(
+            level, position, 1,
+        ))
     }
 }
 impl Host for World {
@@ -145,12 +147,13 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
             .categories()
             .contains(&"alpha:machines".to_owned())
     );
-    mod_api::__private::resolve_block_entity_types(
-        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+    {
+        let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(
             Default::default(),
             vec!["test:counter_box".into()],
-        ),
-    )
+        );
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+    }
     .unwrap();
     let mut answers: Vec<String> = loaded
         .mods

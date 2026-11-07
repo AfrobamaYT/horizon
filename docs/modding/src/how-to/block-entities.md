@@ -23,15 +23,15 @@ handle cannot reach a writable mod holder in the server level currently in place
 ## Update individual values
 
 After sizing, call `entity.set_data_slot(host, index, value)` for scalar updates.
-This method does not resize: an absent index returns false. Both methods use the
+This method does not resize: an absent index returns `Ok(false)`. Both methods use the
 same write target, journal and `setChanged` path. Nested transactions retain their
 ordinary behavior; an aborted outer transaction restores the vector that existed
 before its first write, including writes committed by children. The normal menu
 broadcast delivers committed changes to viewers.
 
-The public handle still resolves a level and position. Removal makes it
-unavailable; replacement at that position is followed, as with the other handle
-methods. This is not an instance-token or borrowed-payload API.
+The public handle resolves one entity's lifecycle generation as well as its level
+and position. Removal, replacement and chunk reload make it stale; in-place data
+edits preserve it. It is not a borrowed-payload API.
 
 ## Internal items versus automation
 
@@ -49,5 +49,21 @@ return `Ok(false)`, and real changes send Changed at root commit. Nested abort
 restores ordinary before-images, including committed-child writes. Invalid
 indices, unknown/air/zero-count stacks and counts above the registered or
 component-overridden maximum return `BlockEntityItemError`, never a partial write
-or silent count clamp. A positional handle follows a replacement and validates
-its current container; this is distinct from an identity-strict automatic restore.
+or silent count clamp. A stale handle refuses a replacement rather than accessing
+its container; acquire a new handle for the replacement.
+
+## Retaining a handle
+
+A `BlockEntityRef` names one live entity, not every entity later placed at its position. Removal,
+replacement and chunk reload invalidate it; reacquire with `host.block_entity(level, position)`.
+In-place data edits and temporary tick storage preserve identity. Option reads return `None` for
+stale handles; writes return their error's `Stale` variant, never writing to a replacement.
+`set_lock`, `set_name`, `merge_data`, `replace_data`, `set_changed` and `set_data_slot`
+return `Result<bool, BlockEntityError>`: handle `Err(BlockEntityError::Stale)` by dropping
+or reacquiring the handle. `Ok(false)` means unchanged data or an unsupported operation,
+not a stale identity. Existing item and data-vector methods retain their specialized errors.
+
+`player.open_menu(host, entity)` also returns `Result<bool, BlockEntityError>`:
+`Ok(true)` means opened, `Ok(false)` means a non-provider, cancelled open or
+unconnected/wrong-level player, and `Err(BlockEntityError::Stale)` means the entity
+no longer resolves. It never opens a replacement through an old handle.

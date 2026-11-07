@@ -44,6 +44,45 @@ fn listing(manifest: &Manifest, injection: &str) -> Manifest {
 #[derive(Default)]
 struct Server(Mutex<Vec<String>>);
 
+impl mod_api::prelude::BlockStatesBackend for Server {
+    fn fluid_state_definition(&self, key: mod_api::FluidKey) -> Option<mod_api::FluidDefinition> {
+        if mod_api::__private::fluid_id(key)? != "minecraft:water" {
+            return Some(mod_api::FluidDefinition::TankOnly);
+        }
+        Some(mod_api::FluidDefinition::World {
+            default: mod_api::__private::engine_fluid_state(
+                key,
+                horizon_world::fluid::FluidState::new(
+                    horizon_world::fluid::FluidKind::Water,
+                    8,
+                    true,
+                ),
+            ),
+            properties: vec![mod_api::StateProperty::new(
+                "falling".into(),
+                vec!["true".into(), "false".into()],
+            )],
+        })
+    }
+    fn fluid_state_validate(
+        &self,
+        key: mod_api::FluidKey,
+        constraints: &[mod_api::StateConstraint],
+    ) -> Result<(), mod_api::FluidStateError> {
+        // Distinct canned results exercise real guest lifting, not game validation logic.
+        if mod_api::__private::fluid_id(key) != Some("minecraft:water") {
+            return Err(mod_api::FluidStateError::NoWorldState);
+        }
+        match constraints {
+            [] => Ok(()),
+            [c] if c.name == "level" && c.value == "8" => {
+                Err(mod_api::FluidStateError::UnknownProperty(0))
+            }
+            [a, b] if a.name == "falling" && a == b => Err(mod_api::FluidStateError::Duplicate(1)),
+            _ => panic!("unexpected guest validation input"),
+        }
+    }
+}
 impl mod_api::prelude::KeysBackend for Server {
     fn block_key_id(&self, key: mod_api::BlockKey) -> String {
         mod_api::__private::block_key_id(key)
@@ -57,7 +96,7 @@ impl mod_api::prelude::KeysBackend for Server {
     }
 }
 impl mod_api::Backend for Server {}
-mod_api::impl_backend_areas!(Server, except(keys));
+mod_api::impl_backend_areas!(Server, except(block_states, keys));
 impl mod_api::prelude::BlockStatesHost for Server {
     fn block_state_default(&self, key: mod_api::BlockKey) -> Option<mod_api::BlockStateId> {
         Some(mod_api::__private::resolved_block(key)?.default)
@@ -138,7 +177,12 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
     );
     // Its `register` runs in the mod and attaches a part to sticks, which listens to use_item.
     mod_api::__private::install_parts(&loaded.mods).unwrap();
-    mod_api::__private::resolve_effects().unwrap();
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .unwrap();
     mod_api::__private::resolve_fluids(&["minecraft:empty", "minecraft:water", "minecraft:lava"])
         .unwrap();
     let load = horizon_world::native_load_context::LoadContext::new(

@@ -524,7 +524,7 @@ pub(crate) struct StructureTypeInfo {
 /// the executable installs them into the engine.
 pub fn installed_structure_types()
 -> horizon_world::worldgen::structure::mod_types::ModStructureTypes {
-    super::part_table::installed_structure_type_list()
+    super::parts::installed_structure_type_list()
         .iter()
         .map(|info| (info.id.to_string(), info.ty.clone()))
         .collect()

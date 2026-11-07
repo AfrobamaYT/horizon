@@ -268,6 +268,15 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
+/// The native mods' debug renderers now (`native_register_debug_renderers`), asked at each
+/// refresh of the list (`Game::refresh_debug_renderers`).
+pub(super) fn debug_renderers(role: ExecutionRole) -> Vec<mod_api::DebugRenderer> {
+    let mut renderers = Vec::new();
+    if role.is_client() {
+        Game::native_register_debug_renderers(&RegistrationContext::new(), &mut renderers);
+    }
+    renderers
+}
 /// The native mods' numeric item model properties
 /// (`native_register_range_select_item_model_property`), kept once at start, before
 /// resources load, so `range_dispatch` models on them read the mod's number.
@@ -292,6 +301,16 @@ pub(super) fn register_select_item_model_properties(role: ExecutionRole) {
     let mut properties = Vec::new();
     Game::native_register_select_item_model_property(&RegistrationContext::new(), &mut properties);
     horizon_assets::item_model::register_select_properties(properties);
+}
+/// The native mods' item tint sources (`native_register_item_tint_sources`), kept once at
+/// start, before resources load, so `tints` entries on them read the mod's colour.
+pub(super) fn register_item_tint_sources(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut sources = Vec::new();
+    Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
+    horizon_assets::item_model::register_tint_sources(sources);
 }
 
 /// `root` with the content mods that are on layered over it
@@ -516,7 +535,12 @@ pub(super) fn content_root(
         );
     }
     register_mob_effects(&overlay.mods);
-    mod_api::__private::resolve_effects().map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_effects(
+        horizon_client_core::potions::all_effects()
+            .map(|def| horizon_client_core::potions::namespaced(def.id)),
+        |id| horizon_client_core::potions::effect(id).map(|def| def.index),
+    )
+    .map_err(|errors| errors.join("\n"))?;
     let behavior: serde_json::Value =
         horizon_world::json_file::read(&overlay.root.prepared().join("block-behaviours.json"))?;
     let fluids = behavior["fluids"]
@@ -561,7 +585,8 @@ fn register_block_entity_types(
         })
         .collect();
     let types = BlockEntityTypes::new(membership, names.clone());
-    mod_api::__private::resolve_block_entity_types(&types).map_err(|errors| errors.join("\n"))?;
+    mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+        .map_err(|errors| errors.join("\n"))?;
     block_entity_types::install(types)?;
     Ok(())
 }
@@ -1074,6 +1099,25 @@ mod tests {
         }
     }
 
+    /// Runs `test` again in a child process whose working directory is its own
+    /// empty folder: the overlay's `.horizon-cache` lives under the working
+    /// directory, so children sharing one (the temp dir) race on that cache.
+    fn run_in_child(test: &str, mode: &str) {
+        let cwd = std::env::temp_dir().join(format!(
+            "horizon-game-mods-cwd-{}-{mode}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&cwd).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .current_dir(&cwd)
+            .args(["--exact", test, "--nocapture"])
+            .env(mode, "1")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
+        assert!(status.success());
+    }
+
     /// A content mod's living type is a mob of its template's species under
     /// its own id, with its own attributes: it saves its id with every field
     /// its template's class saves, loads back as itself, and rolls its own
@@ -1135,6 +1179,123 @@ mod tests {
         assert_eq!(
             death_loot_table(&zombie, true).as_deref(),
             Some("minecraft:entities/zombie")
+        );
+    }
+
+    /// A mod's declared attribute set (#845, `EntityAttributeCreationEvent`)
+    /// reaches everything a mob of the type is: the fields it spawns with,
+    /// the finalize defaults and the live attribute map's catalog row —
+    /// built from the template's, so the reads of #1469 and #1493 answer the
+    /// declared values with no second copy.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mods_declared_entity_attributes_reach_spawn_and_the_live_map() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        let declared = [
+            ("minecraft:max_health".to_string(), 55.0),
+            ("minecraft:movement_speed".to_string(), 0.4),
+        ];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let base = |catalog: &Catalog, entity: &str, name: &str| {
+            catalog.default_base(entity, catalog.id(name).unwrap())
+        };
+        // The declared values, and the template's row under them.
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:max_health"),
+            Some(55.0)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:movement_speed"),
+            Some(0.4)
+        );
+        assert_eq!(
+            base(&merged, "ruby:ghoul", "minecraft:attack_damage"),
+            base(&catalog, "minecraft:zombie", "minecraft:attack_damage")
+        );
+        // The live map builds for the type and answers the declared values.
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged.clone()),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(55.0)
+        );
+        // The type's fields spawn with them: the merged row takes the type's
+        // attribute map and fields (`take_attribute_row`).
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(ghoul.health, 55.0, "the spawn's health");
+        assert_eq!(ghoul.attrs.max_health, 55.0);
+        assert_eq!(ghoul.attrs.speed, 0.4);
+        assert_eq!(
+            ghoul.kind.attributes.get("minecraft:max_health"),
+            Some(&55.0),
+            "the finalize defaults read the declared value"
+        );
+    }
+
+    /// A declared set's merged row — the template's with the declared set on
+    /// top — is the type's one record: a content row's own value (the
+    /// ghoul's 40 health) gives way to the template's, so a mob of the type
+    /// spawns with what the live attribute map answers (#845, review).
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_declared_type_spawns_with_its_merged_row_not_its_content_row() {
+        use horizon_client::mobs::Mob;
+        use horizon_core::geometry::Vec3;
+        use horizon_world::attributes::entity::Catalog;
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let catalog = Catalog::from_json(
+            &horizon_world::json_file::read(&root.join("attributes.json")).unwrap(),
+        )
+        .unwrap();
+        // Only the speed is declared: the merged row keeps the template's
+        // health (a zombie's 20), not the content row's 40.
+        let declared = [("minecraft:movement_speed".to_string(), 0.4)];
+        let merged = catalog
+            .with_entity_row("ruby:ghoul", "minecraft:zombie", &declared)
+            .unwrap();
+        let mut types = living_mod_types();
+        let ghoul = types.get_mut("ruby:ghoul").unwrap();
+        assert_eq!(ghoul.max_health, 40.0, "the content row's own value");
+        Arc::make_mut(ghoul)
+            .take_attribute_row(Arc::new(merged.entity_row("ruby:ghoul").unwrap()), &merged);
+        let ghoul = Mob::new(7, types["ruby:ghoul"].clone(), Vec3::ZERO, 0.0);
+        assert_eq!(
+            ghoul.health, 20.0,
+            "the template's health through the merged row"
+        );
+        assert_eq!(ghoul.attrs.max_health, 20.0);
+        assert_eq!(ghoul.attrs.speed, 0.4, "the declared speed");
+        let live = horizon_client::living_attributes::LivingAttributes::default();
+        assert_eq!(
+            live.read(
+                &std::sync::Arc::new(merged),
+                "ruby:ghoul",
+                "minecraft:max_health",
+                horizon_world::attribute_map::ValueKind::Computed,
+                Vec::new
+            ),
+            Some(20.0),
+            "the live map answers the same row"
         );
     }
 
@@ -1246,17 +1407,10 @@ mod tests {
     fn content_overlay_validates_dependencies_and_orders_layers() {
         const MODE: &str = "HORIZON_CONTENT_DEPENDENCY_TEST";
         if std::env::var_os(MODE).is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args([
-                    "--exact",
-                    "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
-                    "--nocapture",
-                ])
-                .env(MODE, "1")
-                .status()
-                .unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::content_overlay_validates_dependencies_and_orders_layers",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("content-dependencies");
@@ -1393,11 +1547,10 @@ mod tests {
         const MODE: &str = "HORIZON_JAR_REFUSAL_TEST";
         if std::env::var_os(MODE).is_none() {
             // Native declarations, like the real startup, belong to one process.
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .current_dir(std::env::temp_dir())
-                .args(["--exact", "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row", "--nocapture"])
-                .env(MODE, "1").status().unwrap();
-            assert!(status.success());
+            run_in_child(
+                "game::mods::tests::a_shared_missing_jar_stops_native_load_and_refuses_each_content_mod_row",
+                MODE,
+            );
             return;
         }
         let f = Fixture::new("shared-jar-refusal");

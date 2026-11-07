@@ -89,9 +89,12 @@ impl Game<'_> {
     /// The entity the crosshair hits before any block, as `Entity.getId`; an
     /// entity with nothing to pick (a projectile, a player, the dragon) is
     /// `Some(None)`. `None` when the view hits a block or nothing.
-    pub(super) fn pick_entity_hit(&self) -> Option<Option<i32>> {
+    pub(super) fn pick_entity_hit_at(&self) -> Option<(f64, Option<i32>)> {
         self.crosshair_entity_hit()
-            .map(|hit| hit.pickable.then_some(hit.id))
+            .map(|hit| (hit.distance, hit.pickable.then_some(hit.id)))
+    }
+    pub(super) fn pick_entity_hit(&self) -> Option<Option<i32>> {
+        self.pick_entity_hit_at().map(|hit| hit.1)
     }
 
     /// `ClientSuggestionProvider.getSelectedEntities`: the UUID

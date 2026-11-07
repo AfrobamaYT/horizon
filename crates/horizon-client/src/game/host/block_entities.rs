@@ -86,35 +86,54 @@ impl BlockEntitiesBackend for Game<'_> {
     }
 }
 impl BlockEntitiesBackendMut for Game<'_> {
-    fn block_entity_set_lock(&mut self, entity: BlockEntityRef, lock: Option<Compound>) -> bool {
+    fn block_entity_set_lock(
+        &mut self,
+        entity: BlockEntityRef,
+        lock: Option<Compound>,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_set_lock",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_set_lock(entity, lock)
     }
-    fn block_entity_merge_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
+    fn block_entity_merge_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_merge_data",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_merge_data(entity, data)
     }
-    fn block_entity_replace_data(&mut self, entity: BlockEntityRef, data: Compound) -> bool {
+    fn block_entity_replace_data(
+        &mut self,
+        entity: BlockEntityRef,
+        data: Compound,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_replace_data",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_replace_data(entity, data)
     }
-    fn block_entity_set_changed(&mut self, entity: BlockEntityRef) -> bool {
+    fn block_entity_set_changed(
+        &mut self,
+        entity: BlockEntityRef,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_set_changed",
             mod_api::__private::LoadAccess::WorldOnly,
         );
         self.native_block_entity_set_changed(entity)
     }
-    fn block_entity_set_name(&mut self, entity: BlockEntityRef, name: Option<&str>) -> bool {
+    fn block_entity_set_name(
+        &mut self,
+        entity: BlockEntityRef,
+        name: Option<&str>,
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_set_name",
             mod_api::__private::LoadAccess::WorldOnly,
@@ -126,7 +145,7 @@ impl BlockEntitiesBackendMut for Game<'_> {
         entity: BlockEntityRef,
         slot: u32,
         value: i32,
-    ) -> bool {
+    ) -> Result<bool, BlockEntityError> {
         mod_api::__private::check_access(
             "block_entity_set_data_slot",
             mod_api::__private::LoadAccess::WorldOnly,

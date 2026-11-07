@@ -1,24 +1,32 @@
-//! The item model properties native mods register (NeoForge's
-//! `RegisterRangeSelectItemModelPropertyEvent` and `RegisterSelectItemModelPropertyEvent`).
-//! A `range_dispatch` or `select` on a registered property reads its value from the host
-//! per stack; one nobody registered stays a foreign property (`foreign.rs`).
+//! The item model properties and tint sources native mods register (NeoForge's
+//! `RegisterRangeSelectItemModelPropertyEvent`, `RegisterSelectItemModelPropertyEvent` and
+//! `RegisterColorHandlersEvent.ItemTintSources`). A `range_dispatch` or `select` on a
+//! registered property and a tint of a registered source read their value from the host
+//! per stack; one nobody registered stays foreign (`foreign.rs`).
 use super::identifier;
 use std::{collections::BTreeSet, sync::RwLock};
 
 static RANGE: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
 static SELECT: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
+static TINT: RwLock<BTreeSet<String>> = RwLock::new(BTreeSet::new());
 
 /// Keeps the numeric `range_dispatch` properties native mods registered, before
 /// resources load. An id that is not `<namespace>:<path>` in a namespace other than
 /// vanilla's is logged and left out. Returns the ids kept, in registration order.
 pub fn register_range_properties(ids: Vec<String>) -> Vec<String> {
-    register(&RANGE, "range select", ids)
+    register(&RANGE, "range select item model property", ids)
 }
 
 /// Keeps the categorical `select` properties native mods registered, before resources
 /// load, checked as [`register_range_properties`] checks its ids.
 pub fn register_select_properties(ids: Vec<String>) -> Vec<String> {
-    register(&SELECT, "select", ids)
+    register(&SELECT, "select item model property", ids)
+}
+
+/// Keeps the item tint sources native mods registered, before resources load, checked as
+/// [`register_range_properties`] checks its ids.
+pub fn register_tint_sources(ids: Vec<String>) -> Vec<String> {
+    register(&TINT, "item tint source", ids)
 }
 
 fn register(table: &RwLock<BTreeSet<String>>, kind: &str, ids: Vec<String>) -> Vec<String> {
@@ -27,11 +35,9 @@ fn register(table: &RwLock<BTreeSet<String>>, kind: &str, ids: Vec<String>) -> V
     for id in ids {
         let own = identifier(&id).is_ok_and(|parsed| parsed == id) && !id.starts_with("minecraft:");
         if !own {
-            log::warn!(
-                "{kind} item model property {id:?} is not <namespace>:<path> in a mod's namespace"
-            );
+            log::warn!("{kind} {id:?} is not <namespace>:<path> in a mod's namespace");
         } else if !set.insert(id.clone()) {
-            log::warn!("{kind} item model property {id} is registered twice");
+            log::warn!("{kind} {id} is registered twice");
         } else {
             kept.push(id);
         }
@@ -50,4 +56,9 @@ pub fn is_select_property(id: &str) -> bool {
         .read()
         .unwrap_or_else(|e| e.into_inner())
         .contains(id)
+}
+
+/// Whether a native mod registered `id` as an item tint source.
+pub fn is_tint_source(id: &str) -> bool {
+    TINT.read().unwrap_or_else(|e| e.into_inner()).contains(id)
 }

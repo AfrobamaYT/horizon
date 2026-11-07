@@ -458,32 +458,52 @@ impl Mob {
         }
     }
     /// Entity dimensions: the type's, a class's BABY_DIMENSIONS, or the
-    /// slime size scaling.
+    /// slime size scaling, in the mob's current pose.
     /// `EntityDimensions` (float width, height and eye height) widened to double.
     pub fn dims(&self) -> (f64, f64, f64) {
-        // LivingEntity.SLEEPING_DIMENSIONS.
+        self.dims_in_pose(self.pose())
+    }
+    /// The pose this mob is in (`Entity.getPose`): the stance its species
+    /// keeps in its own fields — a villager's bed, a camel's sit flag, an
+    /// avatar's stance — else the synced pose id.
+    pub fn pose(&self) -> mod_api::Pose {
         if super::villager::sleeping(self) {
-            return (f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32));
+            return mod_api::Pose::Sleeping;
         }
-        self.awake_dims()
+        if super::camel::is_camel(self.kind.species) && super::camel::sitting(self) {
+            return mod_api::Pose::Sitting;
+        }
+        if matches!(&*self.kind.id, "minecraft:player" | "minecraft:mannequin") {
+            return self.extra.avatar_pose.into();
+        }
+        mod_api::Pose::from_id(i32::from(self.extra.pose))
     }
     /// `dims` without the sleeping box: a sleeping villager's
     /// `getDimensions(Pose.STANDING)`, whose eye height lays it in the bed
     /// (`LivingEntityRenderer.submit`).
     pub fn awake_dims(&self) -> (f64, f64, f64) {
-        self.awake_dims_in(self.extra.pose == super::sync::LONG_JUMPING)
+        self.dims_in_pose(match self.pose() {
+            mod_api::Pose::Sleeping => mod_api::Pose::Standing,
+            pose => pose,
+        })
     }
-    /// `Entity.getDimensions(Pose)` of the standing pose, or of
-    /// `Pose.LONG_JUMPING` (what `LongJumpUtil` checks an arc with).
-    pub fn awake_dims_in(&self, long_jumping: bool) -> (f64, f64, f64) {
+    /// `Entity.getDimensions(Pose)` of the pose asked for: the species' box
+    /// (a player's or mannequin's follows the pose, `Avatar.POSES`; a goat
+    /// long-jumping and a camel sitting read it from the pose; the sniffer
+    /// digging, the warden emerging, the baby, the slime size, the puffer
+    /// fish, the shulker's lid, the salmon's variant and the polar bear's
+    /// rear-up read the mob's own state, as their `getDefaultDimensions`
+    /// do) times its `minecraft:scale` (`getScale`), width, height and eye
+    /// height alike — except fixed boxes: sleeping, dying avatars and
+    /// digging/emerging wardens (`EntityDimensions.fixed`).
+    pub fn dims_in_pose(&self, pose: mod_api::Pose) -> (f64, f64, f64) {
+        if pose == mod_api::Pose::Sleeping {
+            return (f64::from(0.2_f32), f64::from(0.2_f32), f64::from(0.2_f32));
+        }
         let k = &self.kind;
-        // `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
-        // getScale())` on every living entity: the species' box (a player's or
-        // mannequin's follows its pose, Avatar.POSES) times its
-        // `minecraft:scale` (`getScale`), width, height and eye height alike.
         let scale = self.model_scale();
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
-            let d = self.extra.avatar_pose.dimensions(scale);
+            let d = crate::pose::Dimensions::avatar(pose, scale);
             return (
                 f64::from(d.width),
                 f64::from(d.height),
@@ -508,17 +528,17 @@ impl Mob {
             }
         }
         // Goat.getDefaultDimensions: a long jump scales the box by 0.7.
-        if long_jumping && k.species == super::Species::Goat {
+        if pose == mod_api::Pose::LongJumping && k.species == super::Species::Goat {
             (w, h, e) = (w * 0.7_f32, h * 0.7_f32, e * 0.7_f32);
         }
         // Camel.getDefaultDimensions: a sitting camel is lower.
-        if super::camel::is_camel(k.species) && super::camel::sitting(self) {
+        if super::camel::is_camel(k.species) && pose == mod_api::Pose::Sitting {
             (w, h, e) = super::camel::sitting_dims(self.is_baby());
         }
-        // Warden.getDefaultDimensions: a metre tall while digging or emerging.
-        if self.kind.species == super::Species::Warden && super::warden::digging_or_emerging(self) {
-            h = 1.0;
-            e = 0.85;
+        // Warden.getDefaultDimensions returns fixed dimensions while digging
+        // or emerging: EntityDimensions.scale leaves every component alone.
+        if k.species == super::Species::Warden && super::warden::digging_or_emerging(self) {
+            return (f64::from(w), 1.0, f64::from(0.85_f32));
         }
         if self.kind.species == super::Species::Pufferfish {
             let s = super::aquatic::puff_scale(self.extra.size) as f32;
@@ -1223,10 +1243,11 @@ impl Mob {
             self.fall_to_passengers(distance, modifier, events);
         }
         if damage > 0.0 {
-            // Llama.causeFallDamage: only a fall of six blocks or more hurts the
-            // llama and its riders.
+            // Llama.causeFallDamage: shorter damaging falls play the block
+            // sound but do not hurt the llama or its riders.
             if super::llama::is_llama(self.species()) && distance < 6.0 {
-                return false;
+                self.block_fall_sound(contact, events);
+                return true;
             }
             let at = [self.position.x, self.position.y, self.position.z];
             // Monster.getFallSounds: the hostile pair.
@@ -1240,14 +1261,38 @@ impl Mob {
             // Horses thud and llamas make no generic fall sound.
             if !horse {
                 events.push(MobEvent::Sound(sound, at, 1.0, 1.0));
+                self.block_fall_sound(contact, events);
             }
             self.damage(level, damage as f32, super::Damage::of(source));
             if horse {
                 self.fall_to_passengers(distance, modifier, events);
+                self.block_fall_sound(contact, events);
             }
             return true;
         }
         false
+    }
+    /// `LivingEntity.playBlockFallSound`: the block 0.2 below the feet plays
+    /// its fall sound at half its volume and three quarters of its pitch,
+    /// unless the mob is silent or the block is air.
+    fn block_fall_sound(&self, contact: Option<(&MobWorld, [i32; 3])>, events: &mut Vec<MobEvent>) {
+        if self.silent {
+            return;
+        }
+        if let Some((w, _)) = contact {
+            let pos = self.on_pos(0.2);
+            let state = w.world.block(pos[0], pos[1], pos[2]);
+            if !w.facts.is_air(state) {
+                let sounds = &w.facts.get(state).sounds;
+                let at = [self.position.x, self.position.y, self.position.z];
+                events.push(MobEvent::SoundId(
+                    sounds.fall.to_string(),
+                    at,
+                    sounds.volume * 0.5,
+                    sounds.pitch * 0.75,
+                ));
+            }
+        }
     }
     /// `Entity.propagateFallToPassengers`: the game gives the fall to each
     /// passenger (`causeFallDamage`), a mob or a player, for this mob is
@@ -2869,6 +2914,47 @@ mod tests {
             }
         });
     }
+    #[test]
+    fn damaging_mob_fall_plays_block_fall_sound() {
+        let ran = crate::mobs::world::with_built_test_world(
+            &[],
+            |world, registry| {
+                world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                );
+                for (x, block) in [(0, "minecraft:stone"), (1, "minecraft:oak_planks")] {
+                    world
+                        .set(x, 0, 0, registry.default_state(block).unwrap())
+                        .unwrap();
+                }
+            },
+            |w, types| {
+                for (x, block_sound) in [
+                    (0.5, "minecraft:block.stone.fall"),
+                    (1.5, "minecraft:block.wood.fall"),
+                ] {
+                    let kind = std::sync::Arc::new(types.types["minecraft:zombie"].clone());
+                    let mut mob = Mob::new(1, kind, Vec3::new(x, 1.0, 0.5), 0.0);
+                    mob.fall_distance = 5.0;
+                    let mut events = Vec::new();
+                    mob.fall_on_block(
+                        w,
+                        &mut crate::health::TestLevel::new(0).level(),
+                        &mut events,
+                    );
+                    assert!(
+                        matches!(events.as_slice(), [MobEvent::Sound("entity.hostile.small_fall", _, 1.0, 1.0), MobEvent::SoundId(id, _, 0.5, 0.75), ..] if id == block_sound),
+                        "{events:?}"
+                    );
+                }
+            },
+        );
+        // Without the vanilla data under .local/horizon-client the world
+        // cannot be built: the test has nothing to check.
+        let _ = ran;
+    }
+
     /// `Entity.applyMovementEmissionAndPlaySound` asks `getMovementEmission`:
     /// a squid, a glow squid and a bat answer `EVENTS`, so a beached squid
     /// flopping across stone sends the `minecraft:step` game event and no

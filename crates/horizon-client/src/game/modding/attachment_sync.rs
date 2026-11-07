@@ -6,8 +6,8 @@ use crate::lan::{
     guest::Guest,
     hub::{AttachmentSnapshot, Hub},
 };
+use horizon_mod_runtime::attachments::{Attachments, Holder};
 use horizon_protocol::attachment_sync::{self, Message};
-use horizon_world::attachments::{Attachments, Holder};
 
 /// The guests `holder`'s changes go to: those in the level in place who see it,
 /// and a player's own wherever they are.
