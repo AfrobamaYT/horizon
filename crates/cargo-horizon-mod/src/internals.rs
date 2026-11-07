@@ -2,14 +2,12 @@
 use horizon_mod_package::{
     Manifest,
     index::native,
-    internals::{self, ListedInternal},
+    internals::{self, ListedInternal, cache_catalogs},
     manifest::MANIFEST,
 };
-use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::{Read, Write},
     path::{Path, PathBuf},
 };
 use toml_edit::{DocumentMut, Item, Value};
@@ -17,8 +15,6 @@ use toml_edit::{DocumentMut, Item, Value};
 const USAGE: &str =
     "usage: cargo horizon-mod internals sync [--repo <path>] | add <path>… [--kind <kind>]";
 const CATALOG: &str = "internals.json";
-const CATALOG_LIMIT: u64 = 64 << 20;
-const ARCHIVE_LIMIT: u64 = 4 << 30;
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let Some((command, args)) = args.split_first() else {
@@ -445,97 +441,16 @@ pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
         })
         .ok_or_else(|| format!("{release}/SHA256SUMS: no checksum for {name}"))?;
     println!("Reading internals from the prebuilt game at {revision}");
-    cache_catalog(&cache, &name, get(&name)?.into_reader(), expected)
-}
-
-/// Verify the whole archive before trusting any catalog bytes; never unpack its other files.
-fn cache_catalog(
-    cache: &Path,
-    name: &str,
-    body: impl Read,
-    expected: &str,
-) -> Result<Vec<ListedInternal>, String> {
-    fs::create_dir_all(cache).map_err(|e| format!("{}: {e}", cache.display()))?;
-    let path = cache.join(CATALOG);
-    let archive = cache.join(format!("{name}.{}.partial", std::process::id()));
-    let result = (|| {
-        let mut body = body.take(ARCHIVE_LIMIT + 1);
-        let mut file = fs::File::create(&archive).map_err(|e| e.to_string())?;
-        let mut hash = Sha256::new();
-        let mut size = 0;
-        let mut buffer = [0; 65536];
-        loop {
-            let read = body.read(&mut buffer).map_err(|e| e.to_string())?;
-            if read == 0 {
-                break;
-            }
-            size += read as u64;
-            if size > ARCHIVE_LIMIT {
-                return Err(format!("{name}: prebuilt archive exceeds 4 GiB"));
-            }
-            hash.update(&buffer[..read]);
-            file.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
-        }
-        drop(file);
-        if format!("{:x}", hash.finalize()) != expected {
-            return Err(format!(
-                "The prebuilt game {name} doesn't match its release's checksum. Try again."
-            ));
-        }
-        let file = fs::File::open(&archive).map_err(|e| e.to_string())?;
-        let text = catalog_from_archive(file)?;
-        let entries = serde_json::from_str(&text).map_err(|e| format!("{CATALOG}: {e}"))?;
-        let partial = path.with_extension(format!("json.{}.partial", std::process::id()));
-        fs::write(&partial, text).map_err(|e| format!("{}: {e}", partial.display()))?;
-        fs::rename(&partial, &path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(entries)
-    })();
-    let _ = fs::remove_file(&archive);
-    result
-}
-
-fn catalog_from_archive(reader: impl Read) -> Result<String, String> {
-    let reader = flate2::read::GzDecoder::new(reader).take(8 << 30);
-    let mut archive = tar::Archive::new(reader);
-    for entry in archive.entries().map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path().map_err(|e| e.to_string())?;
-        if path != Path::new(CATALOG) && path != Path::new("./internals.json") {
-            continue;
-        }
-        if !entry.header().entry_type().is_file() {
-            return Err(format!("{CATALOG}: not a file in the prebuilt archive"));
-        }
-        let mut text = String::new();
-        entry
-            .take(CATALOG_LIMIT + 1)
-            .read_to_string(&mut text)
-            .map_err(|e| e.to_string())?;
-        if text.len() as u64 > CATALOG_LIMIT {
-            return Err(format!("{CATALOG}: catalog exceeds 64 MiB"));
-        }
-        return Ok(text);
-    }
-    Err(format!("prebuilt archive has no {CATALOG}"))
+    fs::create_dir_all(&cache).map_err(|e| format!("{}: {e}", cache.display()))?;
+    let directory = cap_std::fs::Dir::open_ambient_dir(&cache, cap_std::ambient_authority())
+        .map_err(|e| format!("{}: {e}", cache.display()))?;
+    cache_catalogs(&directory, &name, get(&name)?.into_reader(), expected)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn archive(path: &str, kind: tar::EntryType, contents: &str) -> Vec<u8> {
-        let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-        let mut archive = tar::Builder::new(gzip);
-        let mut header = tar::Header::new_gnu();
-        header.set_size(contents.len() as u64);
-        header.set_mode(0o644);
-        header.set_entry_type(kind);
-        header.set_cksum();
-        archive
-            .append_data(&mut header, path, contents.as_bytes())
-            .unwrap();
-        archive.into_inner().unwrap().finish().unwrap()
-    }
 
     #[test]
     fn sync_replaces_declarations_and_preserves_retained_formatting_for_both_array_forms() {
@@ -577,49 +492,6 @@ mod tests {
         assert_eq!(manifest.internals.len(), 1);
         assert_eq!(manifest.internals[0].hash, "new");
         assert_eq!(manifest.internals[0].kind.as_deref(), Some("struct"));
-    }
-
-    #[test]
-    fn reads_only_the_root_catalog_from_the_prebuilt_archive() {
-        let catalog = include_str!("../tests/fixtures/internals-old.json");
-        let bytes = archive("./internals.json", tar::EntryType::Regular, catalog);
-        assert_eq!(catalog_from_archive(bytes.as_slice()).unwrap(), catalog);
-        let bytes = archive("deps/internals.json", tar::EntryType::Regular, catalog);
-        assert_eq!(
-            catalog_from_archive(bytes.as_slice()).unwrap_err(),
-            "prebuilt archive has no internals.json"
-        );
-        let bytes = archive("internals.json", tar::EntryType::Symlink, "");
-        assert!(
-            catalog_from_archive(bytes.as_slice())
-                .unwrap_err()
-                .contains("not a file")
-        );
-    }
-
-    #[test]
-    fn downloaded_catalog_is_cached_only_after_checksum_and_json_checks() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/i3-d/tests")
-            .join(format!("archive-cache-{}", std::process::id()));
-        let catalog = include_str!("../tests/fixtures/internals-old.json");
-        let bytes = archive("./internals.json", tar::EntryType::Regular, catalog);
-        let error = cache_catalog(&dir, "game.tar.gz", bytes.as_slice(), "wrong").unwrap_err();
-        assert!(error.contains("doesn't match its release's checksum"));
-        assert!(!dir.join(CATALOG).exists());
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
-
-        let invalid = archive("./internals.json", tar::EntryType::Regular, "not JSON");
-        let hash = format!("{:x}", Sha256::digest(&invalid));
-        assert!(cache_catalog(&dir, "game.tar.gz", invalid.as_slice(), &hash).is_err());
-        assert!(!dir.join(CATALOG).exists());
-
-        let hash = format!("{:x}", Sha256::digest(&bytes));
-        let entries = cache_catalog(&dir, "game.tar.gz", bytes.as_slice(), &hash).unwrap();
-        assert_eq!(entries[0].path, "horizon_client::game::Game");
-        assert_eq!(fs::read_to_string(dir.join(CATALOG)).unwrap(), catalog);
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
