@@ -797,21 +797,42 @@ impl Game<'_> {
         *out = draw.vertices;
     }
 
-    /// Keep, spin, or a missing upload bakes the model into the vertex span.
-    /// Otherwise the copy is drawn from the prepared buffer at the same cut.
+    fn prepared_copy_room(&self, already: u64, incoming: usize) -> Option<usize> {
+        let room = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.prepared_instance_room(already, incoming));
+        #[cfg(test)]
+        let room = room.or_else(|| horizon_client::gfx::capped_prepared_room(already, incoming));
+        room
+    }
+
+    /// Keep, spin, or no renderer bakes every copy into the vertex span.
+    /// Otherwise copies that fit the instance buffer are staged, and the rest are
+    /// baked at their own cut so they stay after the instanced prefix.
     fn finish_prepared_draw(&self, draw: &mut BlockEntityDraw, origin: DVec3, camera: DVec3) {
         if draw.records.is_empty() {
             return;
         }
-        let count = self.prepared_model_draws.borrow().len() as u64 + draw.records.len() as u64;
-        let fits = self
-            .renderer
-            .as_ref()
-            .is_some_and(|renderer| renderer.prepared_instances_fit(count));
-        if draw.kept || !draw.spins.is_empty() || !fits {
+        if draw.kept || !draw.spins.is_empty() {
             draw.bake_recorded(&self.standalone_geometry.slots);
-        } else {
-            draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());
+            return;
+        }
+        let already = self.prepared_model_draws.borrow().len() as u64;
+        let incoming = draw.records.len();
+        let Some(room) = self.prepared_copy_room(already, incoming) else {
+            draw.bake_recorded(&self.standalone_geometry.slots);
+            return;
+        };
+        if room == 0 {
+            draw.bake_recorded(&self.standalone_geometry.slots);
+            return;
+        }
+        let overflow = (room < draw.records.len()).then(|| draw.records.split_off(room));
+        draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());
+        if let Some(overflow) = overflow {
+            draw.records = overflow;
+            draw.bake_recorded(&self.standalone_geometry.slots);
         }
     }
 }
@@ -1112,7 +1133,7 @@ impl Game<'_> {
     /// for a layer neither has. A vanilla layer no mob has (a player's, a
     /// chest's) is read from the resources each call, so slow. API
     /// @API:model_layers@.
-    pub(super) fn native_bake_layer(&self, layer: &str) -> Option<ModelPart> {
+    pub(super) fn bake_layer(&self, layer: &str) -> Option<ModelPart> {
         if let Some(definition) = model_layers::registered(layer) {
             return Some(definition.bake_root());
         }
@@ -1162,11 +1183,7 @@ impl Game<'_> {
     /// Property `key` of block state `state` (a machine's `facing`, from the
     /// `state` `native_block_entity_submit` gets), if it has one: no lookup in
     /// the world, so cheap each frame.
-    pub(super) fn native_block_state_property(
-        &self,
-        state: BlockStateId,
-        key: &str,
-    ) -> Option<&str> {
+    pub(super) fn block_state_property(&self, state: BlockStateId, key: &str) -> Option<&str> {
         self.pack
             .assets
             .registry
@@ -1484,6 +1501,116 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_full_instance_buffer_bakes_the_tail_after_the_cut() {
+        use super::super::minecarts::PreparedModelFace;
+        use horizon_client::gfx::cap_prepared_instance_slots;
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                cap_prepared_instance_slots(u64::MAX);
+            }
+        }
+        let _reset = Reset;
+        let mut quad = bake_flat_face(
+            [0.0; 3],
+            [0.0; 3],
+            [0.0; 4],
+            Direction::South,
+            Material {
+                sprite: String::new(),
+                force_translucent: false,
+            },
+            0,
+        )
+        .unwrap();
+        quad.positions = [[0.0; 3]; 4];
+        let face = PreparedModelFace::new(&quad, sprite());
+        // kind 0 is an ordinary quad at x; kind 1 is a prepared copy (x, tint, light).
+        let scene = [
+            (0, 1.0, 0, 0),              // A
+            (1, 10.0, 0x010203, 0x1110), // B
+            (1, 20.0, 0x040506, 0x2220), // C, same cut as B
+            (0, 2.0, 0, 0),              // D
+            (1, 30.0, 0x070809, 0x3330), // E
+            (0, 3.0, 0, 0),              // F
+        ];
+        let split = [
+            (0, 1.0, 0, 0),
+            (1, 10.0, 0x010203, 0x1110),
+            (1, 20.0, 0x040506, 0x2220),
+            (1, 40.0, 0x0a0b0c, 0x4440),
+            (0, 2.0, 0, 0),
+        ];
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            game.standalone_geometry.slots = vec![Some(vec![face])];
+            let play = |cap, steps: &[_]| {
+                cap_prepared_instance_slots(cap);
+                let mut draw = draw();
+                draw.prepared = true;
+                for (kind, x, tint, light) in steps {
+                    if *kind == 0 {
+                        draw.vertices.extend(std::iter::repeat_n(marker(*x), 4));
+                    } else {
+                        draw.light = *light;
+                        draw.poses = vec![Mat4::from_translation(Vec3::new(*x, 0.0, 0.0))];
+                        assert!(draw.defer_model(0, 1, *tint));
+                    }
+                }
+                game.prepared_model_draws.borrow_mut().clear();
+                game.finish_prepared_draw(&mut draw, DVec3::ZERO, DVec3::ZERO);
+                assert!(draw.records.is_empty());
+                draw
+            };
+            let xs = |d: &BlockEntityDraw| {
+                d.vertices
+                    .iter()
+                    .step_by(4)
+                    .map(|v| v.pos[0])
+                    .collect::<Vec<_>>()
+            };
+            let paint = |d: &BlockEntityDraw, i: usize, color: u32, light: u32| {
+                assert_eq!((d.vertices[i].color, d.vertices[i].light), (color, light));
+            };
+            let cuts = |game: &Game| {
+                game.prepared_model_draws
+                    .borrow()
+                    .iter()
+                    .map(|c| c.cpu_vertices)
+                    .collect::<Vec<_>>()
+            };
+            let same = |got: Vec<f32>, want: &[f32]| assert_eq!(got.as_slice(), want);
+            let staged = |game: &Game, want: &[u32]| assert_eq!(cuts(game).as_slice(), want);
+            let draw = play(1, &scene);
+            same(xs(&draw), &[1.0, 20.0, 2.0, 30.0, 3.0]);
+            paint(&draw, 4, 0xFF06_0504, 0x2220);
+            paint(&draw, 12, 0xFF09_0807, 0x3330);
+            staged(game, &[4]);
+            assert_eq!(
+                game.prepared_model_draws.borrow()[0]
+                    .instance
+                    .matrix()
+                    .w_axis
+                    .x,
+                10.0
+            );
+            same(xs(&play(0, &scene)), &[1.0, 10.0, 20.0, 2.0, 30.0, 3.0]);
+            assert!(cuts(game).is_empty());
+            same(xs(&play(3, &scene)), &[1.0, 2.0, 3.0]);
+            staged(game, &[4, 4, 8]);
+            let over = play(2, &scene);
+            same(xs(&over), &[1.0, 2.0, 30.0, 3.0]);
+            paint(&over, 8, 0xFF09_0807, 0x3330);
+            staged(game, &[4, 4]);
+            let tail = play(1, &split);
+            same(xs(&tail), &[1.0, 20.0, 40.0, 2.0]);
+            paint(&tail, 4, 0xFF06_0504, 0x2220);
+            paint(&tail, 8, 0xFF0C_0B0A, 0x4440);
+            staged(game, &[4]);
+        });
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and software Vulkan"]
     fn prepared_instance_matches_cpu_pixels() {
         use glam::DVec3;
@@ -1568,7 +1695,9 @@ mod tests {
                         uploaded,
                         requested,
                         slot,
-                        instance: &instance,
+                        instances: std::slice::from_ref(&instance),
+                        per_copy: false,
+                        hdr: true,
                         atlas_size: [atlas.width, atlas.height],
                         atlas: &pixels,
                         view_proj: view,
@@ -1581,11 +1710,13 @@ mod tests {
                 worst = worst.max(cpu.abs_diff(*gpu));
             }
             assert!(worst <= 2, "cpu and instance pixels differed by {worst}");
+            // The HDR mark uses bias 0 on both routes, so it does not land on the
+            // colour pass's biased depth. Coverage is the colour, not a mid alpha.
             assert!(
                 cpu.as_chunks::<4>()
                     .0
                     .iter()
-                    .any(|pixel| pixel[3] != 255 && pixel[3] != 0)
+                    .any(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
             );
             fail_next_prepared_upload();
             assert!(

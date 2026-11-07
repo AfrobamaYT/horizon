@@ -1,5 +1,5 @@
 //! The item panel beside container screens: the items a recipe viewer mod
-//! lists (a native mod's `native_panel_items`, or WIT `interface browser`
+//! lists (a native mod's `panel_items`, or WIT `interface browser`
 //! of a WebAssembly mod, docs/modding/src/how-to/content-mods.md), drawn as the game's own item slots
 //! in pages right of the screen's window, with a search box under them. The
 //! mod says what the panel holds; the game pages it and tells the mod what
@@ -65,6 +65,8 @@ pub(super) struct Panel {
     search: Option<EditBox>,
     /// The search text the mod last heard.
     sent: String,
+    /// Only while dispatching Search: an empty reply still needs an editable field.
+    searching: bool,
     /// The recipes shown instead of the items.
     pub(super) recipes: Option<super::native_panel_recipes::Pages>,
 }
@@ -74,19 +76,20 @@ impl Panel {
     pub(super) fn shown(&self, on: impl Fn(&str) -> bool) -> Option<&Shown> {
         self.native.as_ref().filter(|s| on(s.owner.native_id()))
     }
-    /// `native_panel_items`.
+    /// `panel_items`.
     pub(super) fn show_items(&mut self, mod_id: &str, mut items: Vec<BrowserStack>) {
         items.truncate(ITEMS);
         if let Some(shown) = self.native_of(mod_id, !items.is_empty()) {
             shown.items = items;
-            self.native_changed();
+            // An empty search result must leave a field to edit the query.
+            self.native_changed(self.searching && !self.sent.is_empty());
         }
     }
     /// `native_panel_recipes`.
     pub(super) fn show_recipes(&mut self, mod_id: &str, page: Option<RecipePage>) {
         if let Some(shown) = self.native_of(mod_id, page.is_some()) {
             shown.recipes = page;
-            self.native_changed();
+            self.native_changed(false);
         }
     }
     /// Mod `mod_id`'s panel, made when it shows something on another's;
@@ -110,12 +113,12 @@ impl Panel {
         self.native.as_mut()
     }
     /// A native panel changed: a new version, and no panel once it shows
-    /// nothing.
-    fn native_changed(&mut self) {
+    /// nothing, except while filtering the item list with a non-empty query.
+    fn native_changed(&mut self, keep_search: bool) {
         self.versions += 1;
         if let Some(shown) = self.native.as_mut() {
             shown.version = self.versions;
-            if shown.items.is_empty() && shown.recipes.is_none() {
+            if shown.items.is_empty() && shown.recipes.is_none() && !keep_search {
                 self.native = None;
             }
         }
@@ -284,8 +287,8 @@ impl Game<'_> {
         let cursor = self.cursor;
         if pages > 1 {
             let labels = [
-                self.translate("gui.recipebook.previous_page", "Previous Page"),
-                self.translate("gui.recipebook.next_page", "Next Page"),
+                self.translate_with_fallback("gui.recipebook.previous_page", "Previous Page"),
+                self.translate_with_fallback("gui.recipebook.next_page", "Next Page"),
             ];
             let shown = [page > 0, page + 1 < pages];
             let atlas = &self.gui.atlas;
@@ -358,7 +361,7 @@ impl Game<'_> {
         } else {
             self.draw_browser_items(batch, &layout);
         }
-        let hint = self.translate("gui.recipebook.search_hint", "Search...");
+        let hint = self.translate_with_fallback("gui.recipebook.search_hint", "Search...");
         let search = self.browser_search(&layout);
         // The hint shows in an empty box without focus, as the recipe book's.
         search.suggestion = (search.value.is_empty() && !search.focused).then_some(hint);
@@ -491,8 +494,10 @@ impl Game<'_> {
         if search.value != self.panel.sent {
             let (owner, value) = (owner.clone(), search.value.clone());
             self.panel.sent.clone_from(&value);
+            self.panel.searching = true;
             self.panel.page = 0;
             self.panel_event(&owner, BrowserEvent::Search(value));
+            self.panel.searching = false;
         }
     }
     /// The container screen closed: the search box lets go of the keys.
@@ -646,5 +651,38 @@ mod tests {
         assert_eq!((shown.items.len(), shown.recipes.is_none()), (2, true));
         panel.show_items("recipes", Vec::new());
         assert!(panel.shown(|_| true).is_none());
+    }
+
+    #[test]
+    fn empty_search_can_be_edited_and_an_explicit_clear_still_hides_the_panel() {
+        let mut panel = Panel::default();
+        let items = vec![stack("recipe_pilot:pressed_fragment")];
+        panel.show_items("recipes", items.clone());
+        panel.sent = "no_such_item".into();
+        panel.searching = true;
+        panel.show_items("recipes", Vec::new());
+        panel.searching = false;
+        let empty = panel
+            .shown(|_| true)
+            .expect("keep the search field's owner");
+        assert_eq!(empty.owner, Owner::Native("recipes".into()));
+        assert!(empty.items.is_empty());
+        assert!(panel.shown(|id| id != "recipes").is_none());
+
+        panel.show_items("other", Vec::new());
+        panel.sent = "pressed_fragment".into();
+        panel.show_items("recipes", items.clone());
+        assert_eq!(panel.shown(|_| true).unwrap().items, items);
+
+        // Outside Search, clearing the page then items still closes the viewer,
+        // even though the last query was non-empty.
+        panel.show_recipes("recipes", None);
+        panel.show_items("recipes", Vec::new());
+        assert!(panel.shown(|_| true).is_none());
+        panel.show_items("other", Vec::new());
+        assert!(
+            panel.shown(|_| true).is_none(),
+            "an empty list cannot take ownership"
+        );
     }
 }

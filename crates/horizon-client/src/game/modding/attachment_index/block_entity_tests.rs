@@ -2,7 +2,9 @@ use super::*;
 use crate::game::native_entity_refs::tests::with_game;
 use horizon_client::{chunk::Chunk, containers::BlockEntity};
 use horizon_core::nbt::Tag;
-use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType, Attachments};
+use horizon_mod_runtime::attachments::{
+    AttachmentCodec, AttachmentError, AttachmentType, Attachments,
+};
 use mod_api::HostTransaction;
 
 static VALUE: AttachmentType<i32> = AttachmentType {
@@ -31,7 +33,7 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
     with_game(|game| {
         game.options.dedicated = Some(Vec::new());
         game.native_level_opened(Dim::Overworld);
-        let level = game.native_level(Dim::Overworld.id()).unwrap();
+        let level = game.level(Dim::Overworld.id()).unwrap();
         let index = game.attachment_indexes[&Dim::Overworld].clone();
         let key = ("be_test".into(), "value".into());
         let p = (1, 64, 1);
@@ -60,7 +62,7 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
         }
         let old = index.lock().unwrap().snapshot(&key);
         assert_eq!(old.len(), 2);
-        let handle = game.native_block_entity_ref(level, [1, 64, 1]).unwrap();
+        let handle = game.block_entity(level, [1, 64, 1]).unwrap();
         assert_eq!(old[0].holder, AttachmentHolder::BlockEntity(handle));
         assert!(Arc::ptr_eq(
             &old[0].entry,
@@ -84,7 +86,7 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
         assert_eq!(restored[0].entry.read(&VALUE), Ok(&7));
         game.enter_level(Dim::Nether).unwrap();
         let nether = game.attachment_indexes[&Dim::Nether].clone();
-        let nether_level = game.native_level(Dim::Nether.id()).unwrap();
+        let nether_level = game.level(Dim::Nether.id()).unwrap();
         game.world
             .chunks
             .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -95,10 +97,7 @@ fn block_entity_rows_follow_load_restore_replacement_and_chunk_unload_in_their_d
         let other = nether.lock().unwrap().snapshot(&key);
         assert_eq!(
             other[0].holder,
-            AttachmentHolder::BlockEntity(mod_api::__private::game::block_entity_ref(
-                nether_level,
-                [1, 64, 1]
-            ))
+            AttachmentHolder::BlockEntity(game.block_entity(nether_level, [1, 64, 1]).unwrap())
         );
         game.enter_level(Dim::Overworld).unwrap();
         assert_eq!(index.lock().unwrap().snapshot(&key).len(), 2);

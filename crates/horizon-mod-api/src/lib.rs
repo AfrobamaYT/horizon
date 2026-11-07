@@ -66,6 +66,22 @@ pub enum GameRuleError {
     Duplicate,
 }
 
+/// Why an entity type's attribute declaration was refused
+/// ([`Registrar::declare_entity_attributes`](crate::Registrar)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EntityAttributeError {
+    /// The entity type's id is invalid, empty, or in a namespace the declaring
+    /// mod does not own.
+    InvalidId,
+    /// The set declares the same attribute twice.
+    DuplicateAttribute,
+    /// A base value is not finite.
+    NotFinite,
+    /// Another declaration already covers the entity type.
+    Duplicate,
+}
+
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
@@ -233,6 +249,17 @@ impl FluidState {
     /// Whether the engine identifies this state as a source.
     pub fn is_source(self) -> bool {
         self.source
+    }
+    /// Match carried vanilla properties locally. Unknown names or noncanonical values
+    /// do not match. Validate against `host.fluid_states()` separately for indexed errors.
+    pub fn matches(self, constraints: &[StateConstraint]) -> bool {
+        constraints.iter().all(|c| match c.name.as_str() {
+            "falling" if !self.is_empty() => c.value == if self.falling { "true" } else { "false" },
+            "level" if !self.is_empty() && !self.source => {
+                (1..=8).contains(&self.amount) && c.value.as_bytes() == [b'0' + self.amount]
+            }
+            _ => false,
+        })
     }
 }
 
@@ -1114,7 +1141,7 @@ pub struct NativeScreenView<'a> {
     /// the inventory menu's). Counted, not listed.
     pub slots: usize,
     /// The pointer in GUI pixels (`Screen.mouseX`, `mouseY`, from the
-    /// window's top left), as `native_cursor` gives it: for hover highlights.
+    /// window's top left), as `cursor` gives it: for hover highlights.
     pub mouse: [f32; 2],
     /// This frame's partial tick (`getGameTimeDeltaPartialTick(false)`, 0 to
     /// 1): what the screen draws animation against.
@@ -1209,7 +1236,7 @@ pub struct NativeScreen {
     pub own_background: bool,
 }
 
-/// An item the panel shows (`native_panel_items`): its id
+/// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1228,7 +1255,7 @@ pub struct NativeStack {
 #[non_exhaustive]
 pub enum NativePanelEvent {
     /// A click on an item of the panel, by its index in
-    /// `native_panel_items`' list.
+    /// `panel_items`' list.
     Clicked {
         /// The item's index in the panel's list.
         index: u32,
@@ -3138,6 +3165,31 @@ impl BossBarOverlay {
     }
 }
 
+/// One boss bar the client shows (vanilla's `LerpingBossEvent`), as
+/// `customize_boss_event_progress` reads it. Any bar the server sends: mob,
+/// raid and `/bossbar` ones alike.
+#[derive(Clone, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct ClientBossBar {
+    /// The bar's UUID, as the server's boss event packets name it.
+    pub uuid: u128,
+    /// The title drawn above the bar.
+    pub name: Text,
+    /// The fill drawn this frame, 0 to 1 (`getProgress`, eased toward the
+    /// server's value).
+    pub progress: f32,
+    /// The bar's color.
+    pub color: BossBarColor,
+    /// The notches drawn over it.
+    pub overlay: BossBarOverlay,
+    /// Whether it darkens the sky (`shouldDarkenScreen`).
+    pub darken_screen: bool,
+    /// Whether it plays the boss music (`shouldPlayBossMusic`).
+    pub play_boss_music: bool,
+    /// Whether it thickens the fog (`shouldCreateWorldFog`).
+    pub create_world_fog: bool,
+}
+
 /// One player's open menu, invalidated on close, replacement or reconnect.
 /// Client menu handles are also invalidated on respawn.
 ///
@@ -3253,14 +3305,30 @@ pub struct NativePlayerAbilities {
     pub walk_speed: f32,
 }
 
-/// A block entity at a position in an open level. A replacement at the same
-/// position resolves to the new entity, unlike vanilla's object identity.
-/// A removed entity or a handle from an earlier world open reads as `None`.
+/// One block entity in an open level, identified by its lifecycle generation.
+/// Removal, replacement or chunk reload invalidates the handle, even at the same
+/// position. In-place data edits and temporary tick take/put preserve identity.
+/// Stale handles read as `None`; Result-returning methods report `Stale`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct BlockEntityRef {
     pub(crate) level: LevelRef,
     pub(crate) position: [i32; 3],
+    pub(crate) generation: u64,
+}
+
+/// Why a block-entity operation could not resolve its target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BlockEntityError {
+    /// The entity was removed, replaced, unloaded or belongs to another level epoch.
+    Stale,
+}
+
+impl NoBackend for BlockEntityError {
+    fn no_backend() -> Self {
+        Self::Stale
+    }
 }
 
 /// Non-paused authoritative server ticks since open (not game or frame time).
@@ -3479,7 +3547,7 @@ pub mod testing {
             }
         }
         let controllers: &'static [_] =
-            Box::leak(super::part_table::registered_controllers(&mods).into_boxed_slice());
+            Box::leak(super::parts::registered_controllers(&mods).into_boxed_slice());
         let installed = Box::leak(Box::new(Installed::new(mods)));
         let _restore = Restore(TEST_MODS.replace(Some(installed)));
         let _controllers = RestoreControllers(TEST_CONTROLLERS.replace(Some(controllers)));
@@ -4624,6 +4692,14 @@ mod tests {
     #[test]
     fn dimension_keys_name_one_dimension_each() {
         use crate::registry_keys::{dimension_id, dimension_key};
+        assert_eq!(
+            dimension_key("minecraft:overworld"),
+            DimensionKey::OVERWORLD
+        );
+        assert_eq!(
+            dimension_id(DimensionKey::OVERWORLD),
+            Some("minecraft:overworld")
+        );
         assert_eq!(dimension_key("minecraft:the_nether"), DimensionKey::NETHER);
         assert_eq!(dimension_id(DimensionKey::END), Some("minecraft:the_end"));
         let first = dimension_key("test:first");

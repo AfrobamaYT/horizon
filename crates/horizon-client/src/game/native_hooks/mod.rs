@@ -60,6 +60,7 @@ use horizon_core::{
 };
 use horizon_world::level::{BonemealCheck, PlaceContext};
 use mod_api::__private::game::IngredientTest;
+use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
@@ -67,9 +68,9 @@ use mod_api::{
     ClientGuiOptions, ClientInputOptions, ClientModifiers, ClientReloadListeners,
     CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor, InteractionKey, LayerDefinition,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
-    NativeLifecycleContext, NativeNoteBlockChange, NativeServerPlayer, PathComputationType,
-    Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage,
-    ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, GameRuleValue, LandingWrite, LevelRef,
@@ -77,10 +78,10 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, Suggestion,
     TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, EffectKey};
+use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey};
 use mod_api::{
-    CameraType, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck, NativeSpawnReason,
-    Recipe, SoundPlay, SoundRef,
+    CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
+    NativeSpawnReason, Recipe, SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,

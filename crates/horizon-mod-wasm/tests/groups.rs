@@ -43,7 +43,9 @@ impl mod_api::prelude::EntitiesHost for World {
 }
 impl mod_api::prelude::BlockEntitiesHost for World {
     fn block_entity(&self, level: LevelRef, position: [i32; 3]) -> Option<BlockEntityRef> {
-        Some(mod_api::__private::game::block_entity_ref(level, position))
+        Some(mod_api::__private::game::block_entity_ref(
+            level, position, 1,
+        ))
     }
 }
 impl Host for World {
@@ -76,14 +78,19 @@ fn built() -> ([horizon_mod_wasm::WasmPackage; 4], Vec<u8>) {
 #[test]
 #[ignore = "needs the group mods built to mod.wasm (CI's wasm-mods job)"]
 fn a_library_refused_over_a_point_takes_its_dependents_with_it() {
+    assert_refused_library_point("gone", "no such point");
+    assert_refused_library_point("tick", "no guest export");
+}
+
+fn assert_refused_library_point(method: &str, reason: &str) {
     let (mut packages, std_member) = built();
-    // The library lists a point this game doesn't have.
+    // Both a missing place and a missing guest export refuse the library and its dependents.
     let wasm = packages[0].manifest.wasm.as_ref().unwrap();
     packages[0].manifest = horizon_mod_package::manifest::Manifest::parse(&format!(
         "id = \"counter_lib\"\nname = \"Counter library\"\nversion = \"1.0.0\"\napi = \"0.2\"\n\
          capabilities = [\"registries\"]\n\n[wasm]\nsha512 = \"{}\"\ntoolchain = \"{}\"\n\n\
-         [[native.injection]]\nid = \"gone\"\ntarget = \"horizon_client::game::Game<'_>::gone\"\n\
-         kind = \"HEAD\"\ntrait_method = \"gone\"\n",
+         [[inject]]\nid = \"gone\"\nat = \"horizon_client::game::Game<'_>::{method}\"\n\
+         kind = \"head\"\nwith = \"gone\"\nhash = \"signature\"\n",
         wasm.sha512(),
         wasm.toolchain()
     ))
@@ -99,6 +106,9 @@ fn a_library_refused_over_a_point_takes_its_dependents_with_it() {
         .map(|(id, why)| {
             let why = match why {
                 horizon_mod_wasm::Refusal::NoSuchPoint { .. } => "no such point".to_owned(),
+                horizon_mod_wasm::Refusal::UnfilledPoint { point } if point == "tick" => {
+                    "no guest export".to_owned()
+                }
                 horizon_mod_wasm::Refusal::DependencyRefused { dependency } => {
                     format!("needs {dependency}")
                 }
@@ -113,7 +123,7 @@ fn a_library_refused_over_a_point_takes_its_dependents_with_it() {
         [
             ("alpha", "needs counter_lib".to_owned()),
             ("beta", "needs counter_lib".to_owned()),
-            ("counter_lib", "no such point".to_owned()),
+            ("counter_lib", reason.to_owned()),
         ]
     );
     // Only gamma, of the other group, is installed, and nothing listens at points.
@@ -137,12 +147,13 @@ fn a_library_capability_is_answered_in_its_group_and_nowhere_else() {
             .categories()
             .contains(&"alpha:machines".to_owned())
     );
-    mod_api::__private::resolve_block_entity_types(
-        &horizon_client_core::block_entity_types::BlockEntityTypes::new(
+    {
+        let types = &horizon_client_core::block_entity_types::BlockEntityTypes::new(
             Default::default(),
             vec!["test:counter_box".into()],
-        ),
-    )
+        );
+        mod_api::__private::resolve_block_entity_types(types.names(), |id| types.key(id))
+    }
     .unwrap();
     let mut answers: Vec<String> = loaded
         .mods

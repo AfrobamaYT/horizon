@@ -67,7 +67,11 @@ impl Game<'_> {
                     .filter(|v| !v.is_empty())
                     .ok_or("options-set KEY VALUE: missing the value")?;
                 let narrator = self.settings.narrator();
+                let reduced = self.settings.reduced_debug_info;
                 self.settings = self.settings.with_option(key, value)?;
+                if self.settings.reduced_debug_info != reduced {
+                    self.debug_entries.invalidate();
+                }
                 // As the options screen applies a change (OptionInstance.set
                 // runs the narrator's onValueUpdate for a new value only).
                 let mut events = vec![Event::Changed];
@@ -222,7 +226,13 @@ impl Game<'_> {
             (true, None) => {
                 let was = window.fullscreen().is_some();
                 if !was {
-                    window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                    if window.is_maximized() {
+                        window.set_maximized(false);
+                    }
+                    let monitor = window
+                        .current_monitor()
+                        .or_else(|| window.primary_monitor());
+                    window.set_fullscreen(Some(Fullscreen::Borderless(monitor)));
                 }
                 self.ui.options.calibration_fullscreen = Some(was);
             }
@@ -294,7 +304,7 @@ impl Game<'_> {
         self.ui.options.size = size;
         self.ui.options.framebuffer = framebuffer;
         let mut ui = std::mem::take(&mut self.ui.options);
-        ui.modifiers = self.native_modifiers().bits;
+        ui.modifiers = self.modifiers().bits;
         let events = ui.key_modifiers(&mut self.settings, &self.gui.atlas, key, text, shift);
         self.ui.options = ui;
         self.handle_option_events(events)
@@ -338,7 +348,7 @@ impl Game<'_> {
         self.ui.options.selected_key.is_some()
     }
     pub(super) fn options_bind_mouse(&mut self, button: MouseButton) -> Result<()> {
-        self.ui.options.modifiers = self.native_modifiers().bits;
+        self.ui.options.modifiers = self.modifiers().bits;
         let events = self.ui.options.bind_mouse(&mut self.settings, button);
         self.handle_option_events(events)
     }
@@ -346,6 +356,7 @@ impl Game<'_> {
         for e in events {
             match e {
                 Event::ButtonClick => self.audio.play_button_click(),
+                Event::DebugEntriesChanged => self.debug_entries.invalidate(),
                 Event::Changed => {
                     self.settings.save(&Self::options_path());
                     self.apply_settings();
@@ -444,6 +455,14 @@ impl Game<'_> {
                 // The website, through ConfirmLinkScreen as other links.
                 Event::OpenModPage(url) => self.confirm_trusted_link(&url, Screen::Options),
                 Event::ListShaderPacks => {
+                    let (key, _) = horizon_client::shader_pack_list::resolve(
+                        &Self::shader_packs_dir(),
+                        &self.settings.horizon.shader_pack,
+                    );
+                    if key != self.settings.horizon.shader_pack {
+                        self.settings.horizon.shader_pack = key;
+                        self.settings.save(&Self::options_path());
+                    }
                     self.settings.shader_packs =
                         horizon_client::shader_pack_list::scan(&Self::shader_packs_dir());
                 }
@@ -655,7 +674,11 @@ impl Game<'_> {
             }
             if let Some(w) = &self.window {
                 let on = w.fullscreen().is_none();
-                w.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+                if on && w.is_maximized() {
+                    w.set_maximized(false);
+                }
+                let monitor = w.current_monitor().or_else(|| w.primary_monitor());
+                w.set_fullscreen(on.then_some(Fullscreen::Borderless(monitor)));
                 if !on {
                     windowed_again(w);
                 }

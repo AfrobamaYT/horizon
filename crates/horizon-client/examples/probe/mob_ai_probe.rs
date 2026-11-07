@@ -12,6 +12,7 @@ use horizon_client::{
     collisions,
     containers::{BlockEntity, CreakingHeart},
     items::{ItemStack, Items},
+    join_seq::JoinList,
     light::{LightTables, apply_lighting, light_chunk},
     mobs::{
         Damage, MobType, creaking,
@@ -329,7 +330,7 @@ fn spawn_seed(index: usize) -> i64 {
 /// draws from the level's random and joins the scenario's mobs next tick,
 /// seeded as the oracle seeds what a tick spawned.
 fn summon_golem(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     a: usize,
     needed: usize,
     w: &MobWorld,
@@ -369,7 +370,7 @@ fn summon_golem(
 /// Villager events that act at once in vanilla (`TradeWithVillager` and
 /// `VillagerMakeLove` write the other villager directly).
 fn villager_events(
-    mobs: &mut [Mob],
+    mobs: &mut JoinList<Mob>,
     events: &mut Vec<MobEvent>,
     from: usize,
     w: &MobWorld,
@@ -452,7 +453,7 @@ fn seen(m: &Mob) -> Seen {
 /// The probe's mobs as a creaking heart sees them: creakings it creates take
 /// the n-th seed from 1000, as the oracle's do.
 struct Host<'a> {
-    mobs: &'a mut Vec<Mob>,
+    mobs: &'a mut JoinList<Mob>,
     added: Vec<Mob>,
     types: &'a MobTypes,
     created: &'a mut i64,
@@ -604,7 +605,12 @@ fn player_damage(e: &MobEvent) -> f32 {
         | MobEvent::CubeHurtPlayer { amount, .. }
         | MobEvent::StingPlayer { amount, .. }
         | MobEvent::AttackPlayerWithEffect { amount, .. }
-        | MobEvent::DamagePlayer { amount, .. } => *amount,
+        | MobEvent::DamagePlayer { amount, .. }
+        | MobEvent::IronGolemHit {
+            target: Who::Player,
+            amount,
+            ..
+        } => *amount,
         MobEvent::SonicBoom {
             target: Who::Player,
             ..
@@ -623,7 +629,12 @@ fn player_hurt(player: Option<&PlayerView>, e: &MobEvent) -> bool {
         | MobEvent::CubeHurtPlayer { amount, .. }
         | MobEvent::StingPlayer { amount, .. }
         | MobEvent::AttackPlayerWithEffect { amount, .. }
-        | MobEvent::DamagePlayer { amount, .. } => *amount > 0.0,
+        | MobEvent::DamagePlayer { amount, .. }
+        | MobEvent::IronGolemHit {
+            target: Who::Player,
+            amount,
+            ..
+        } => *amount > 0.0,
         MobEvent::SonicBoom {
             target: Who::Player,
             ..
@@ -1008,7 +1019,7 @@ pub fn main() -> horizon_client::Result<()> {
         }
         world.day_time = s.time;
         world.game_time = 1000;
-        let mut mobs: Vec<Mob> = Vec::new();
+        let mut mobs = JoinList::<Mob>::default();
         for (i, spec) in s.mobs.iter().enumerate() {
             let kind = types
                 .types
@@ -1410,14 +1421,28 @@ pub fn main() -> horizon_client::Result<()> {
                 // (LivingEntity.hurtServer), with the sounds they raise.
                 let mut k = from;
                 while k < events.len() {
-                    if let MobEvent::AttackMob {
-                        target,
-                        amount,
-                        source,
-                    } = events[k]
+                    let (hit, toss) = match events[k] {
+                        MobEvent::AttackMob {
+                            target,
+                            amount,
+                            source,
+                        } => (Some((target, amount, source)), false),
+                        // IronGolem.doHurtTarget: thrown up only if the hit landed.
+                        MobEvent::IronGolemHit {
+                            target: Who::Mob(target),
+                            amount,
+                            source,
+                        } => (Some((target, amount, source)), true),
+                        _ => (None, false),
+                    };
+                    if let Some((target, amount, source)) = hit
                         && let Some(t) = mobs.iter_mut().find(|m| m.id == target)
                         && t.damage(&mut test_level.level(), amount, source)
                     {
+                        if toss {
+                            t.velocity.y +=
+                                f64::from(0.4f32) * (1.0 - t.knockback_resistance()).max(0.0);
+                        }
                         let raised = std::mem::take(&mut t.outbox);
                         let n = raised.len();
                         events.splice(k + 1..k + 1, raised);
@@ -1616,8 +1641,8 @@ pub fn main() -> horizon_client::Result<()> {
                     }
                 }
             }
-            mobs.append(&mut born);
-            mobs.append(&mut added);
+            mobs.extend(born);
+            mobs.extend(added);
             for e in &heart_events {
                 match e {
                     HeartEvent::SetBlock(at, st) => world.set(at[0], at[1], at[2], *st)?,

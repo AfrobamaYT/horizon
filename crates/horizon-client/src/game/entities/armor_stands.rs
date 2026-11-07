@@ -295,7 +295,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.is_some_and(|s| s.has_foil(item_glint)) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {
@@ -518,6 +518,27 @@ impl Game<'_> {
         let drop = self.drop_offset_from(0.5, 1.975, (pos[0], pos[1], pos[2]), true);
         stand.position.y = f64::from(pos[1]) + drop;
         stand.previous = stand.position;
+        // `EntityType.createDefaultStackConfig`: the item's `custom_data`, then its
+        // `entity_data` merged over the stand; `ArmorStandItem.useOn` then snaps it
+        // to the placement yaw with pitch 0.
+        let own = horizon_client::entity_nbt::armor_stand_to_nbt(&stand, [0; 4], None);
+        let mut raw = horizon_client::block_entity_item::stack_configured_entity(
+            stack,
+            "minecraft:armor_stand",
+            &own,
+        );
+        if let Some(mut loaded) = horizon_client::entity_nbt::armor_stand_from_nbt(&raw, stand.id) {
+            loaded.first_tick = stand.first_tick;
+            loaded.yaw = stand.yaw;
+            loaded.previous_yaw = stand.previous_yaw;
+            loaded.pitch = 0.0;
+            loaded.previous = loaded.position;
+            stand = loaded;
+        }
+        if let horizon_core::nbt::Tag::Compound(map) = &mut raw {
+            map.remove(&"UUID".into());
+        }
+        self.persist.raw.insert(stand.id, raw);
         let foot = stand.position;
         // EntityType.create's spawn yaw, `level.getRandom().nextFloat() * 360`, before
         // ArmorStandItem.useOn turns the stand to face the player.
@@ -1173,7 +1194,7 @@ impl Game<'_> {
                 self.armor_stand_vertices(a, base, packed, None, out);
                 None
             };
-            if !self.entity_glowing(a.id) {
+            if !self.tracked_entity_glowing(a.id) {
                 self.cull_skinned(out, entity_start, skinned);
             }
         }
@@ -1302,7 +1323,7 @@ impl Game<'_> {
                 .enchantments
                 .props
                 .get(&stack.item)
-                .is_some_and(|p| p.glint);
+                .and_then(|p| p.glint);
             let overlay = if stack.has_foil(item_glint) {
                 horizon_client::mobs::render::ARMOR_GLINT
             } else {
@@ -1558,7 +1579,7 @@ impl Game<'_> {
         // Inventory.add, else Player.drop (in creative a full inventory
         // takes it anyway: hasInfiniteMaterials empties the stack).
         if let Some(old) = swap.to_inventory
-            && let Some(rest) = self.give(old)
+            && let Some(rest) = self.add_stack_to_inventory(old)
             && !self.creative
             // Player.drop is the server's on a client: it spawns the item.
             && self.remote.is_none()

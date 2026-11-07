@@ -2306,7 +2306,7 @@ impl Game<'_> {
             e.vertical_collision = d.vertical_collision;
             e.horizontal_collision = d.horizontal_collision;
             // Entity.DATA_SHARED_FLAGS_ID: glowing 0x40 (the Glowing tag).
-            if self.entity_glowing(d.id) {
+            if self.tracked_entity_glowing(d.id) {
                 e.meta.push((0, serializer::BYTE, Value::Byte(0x40)));
             }
             e.meta.push((8, serializer::ITEM_STACK, Value::Item(stack)));
@@ -2797,6 +2797,9 @@ impl Game<'_> {
                     {
                         self.run_guest_commands();
                     }
+                }
+                HostEvent::Jump { conn, from, yaw } => {
+                    self.guest_jump(conn, from, yaw);
                 }
             }
         }
@@ -3461,6 +3464,7 @@ impl Game<'_> {
             return;
         };
         host.hub.place_new_player(conn, &mut ctx);
+        self.bind_player_attachments(conn, false);
         if elsewhere && let Err(e) = self.enter_level(back) {
             log::error!("could not reopen {}: {e}", back.id());
         }
@@ -3947,6 +3951,7 @@ fn event_kind(event: &HostEvent) -> EventKind {
         HostEvent::ClientInformation(c, _, _) => ("client settings", Some(*c), None),
         HostEvent::ChatSubmitted { .. } => ("chat submitted", None, None),
         HostEvent::ChatSessionStarted(_) => ("chat session", None, None),
+        HostEvent::Jump { conn, .. } => ("jump", Some(*conn), None),
         HostEvent::PlayerLoaded(c) => ("loaded", Some(*c), None),
         HostEvent::RecipeBookSettings { conn, .. } => ("recipe book", Some(*conn), None),
         HostEvent::Sneak { conn, .. } => ("sneak", Some(*conn), None),
@@ -4595,7 +4600,7 @@ mod tests {
                 .clone();
             let at = horizon_core::geometry::Vec3::new(0.5, 70.0, 0.5);
             game.mobs.push(Mob::new(12, kind, at, 0.0));
-            let mob = game.native_entity(12).unwrap();
+            let mob = game.entity(12).unwrap();
             let hub = meta_hub("CustomNameMetaTest");
             let meta_of = |game: &super::super::Game<'_>| {
                 let m = game.mobs.iter().find(|m| m.id == 12).unwrap();

@@ -12,6 +12,13 @@ currently stores only the remainder item id, not a template's count or component
 `host.block_item(stone)` returns its item registry name; an unavailable block mapping
 returns `None`, while a known block with no item returns `Some("minecraft:air")`.
 Both reads are available on either side.
+
+For engine contributors, every area method declares its load access once with `#[access(...)]`.
+`Metadata` admits registry facts during setup and reload; `WorldOnly`, `ClientSetup` and
+`PublishedResources` retain their phase-specific contracts. The area's `host_area` attribute
+builds the test-double defaults, and the API generator emits every game forwarder at build time.
+Implement only the inherent `Game` function with the same name, not a hand-written forwarder.
+Static implementations use `#[static_call]`; service accessors use `#[service]`.
 A helper's `receiver` also exposes it on that handle. Receivers come from public
 `*Ref` structs in `mod_api.rs`: `BlockEntityRef` gives `block_entity`, for example.
 Adding a handle requires no separate generator registration.
@@ -33,7 +40,7 @@ the wasm runtime's current same-group callback limitation.
 
 The following catalog hooks are not in the trait:
 
-- `player_command`, `perform_console_command`, `item_decorations`,
+- `player_command`, `item_decorations`,
   `client_resources_reloaded`, `camera_shake`, `screen_key_pressed_pre`, `screen_char_typed_pre`,
   `screen_mouse_scrolled_pre`, `use_duration`, `use_animation`, `can_eat`,
   `living_entity_use_item_start`, `living_entity_use_item_finish`, `render_hand`, `shader_params`
@@ -42,4 +49,4 @@ The following catalog hooks are not in the trait:
   `data_pack_files`, `mob_submit`, `mouse_button_pre`, `mouse_button_post`, `player_respawned`
   and `server_data_loaded`.
 
-The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.
+The client `render_tooltip_texture` hook (NeoForge's `RenderTooltipEvent.Texture`) picks a tooltip box's look. Setting `texture` to a tooltip style `<namespace>:<name>` draws the GUI sprites `<namespace>:tooltip/<name>_background` and `_frame` from the resource packs, nine-sliced by their `gui.scaling` metadata or stretched without it, as vanilla draws an item's `tooltip_style`; the atlas a resource reload restitches is the one drawn. Left `None`, the box keeps Horizon's solid fills, whose background and top and bottom border gradient colours it changes as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered.

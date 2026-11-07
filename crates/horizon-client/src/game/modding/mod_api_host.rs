@@ -1,9 +1,9 @@
 use super::{BlockStateId, Game};
-use horizon_world::{
-    attachments::{ATTACHMENTS_KEY, attachment_compound},
-    level::Ticks,
-};
 use mod_api::{AttachmentAccess, BlockPos, Direction};
+use {
+    horizon_mod_runtime::attachments::{ATTACHMENTS_KEY, attachment_compound},
+    horizon_world::level::Ticks,
+};
 
 fn world_attachments(
     world: &mut horizon_client::world::World,
@@ -140,17 +140,19 @@ impl Game<'_> {
             {
                 return Err(AttachmentError::MissingHolder);
             }
-            let level = painting.and_then(|_| self.native_level(self.dim.id()));
+            let level = painting.and_then(|_| self.level(self.dim.id()));
             let uuid = self.uuid_for(id);
             let map = self.entity_attachments.entry(uuid).or_default();
             if let Some(i) = painting {
                 let level = level.ok_or(AttachmentError::MissingHolder)?;
                 if !self.paintings[i].attachment_lifetime.is_bound() {
-                    super::attachment_index::bind_entity_map(
+                    self.paintings[i].attachment_lifetime.bind(
                         map,
                         self.attachment_indexes.entry(self.dim).or_default(),
-                        mod_api::EntityRef::new(level.epoch(), id),
-                        &mut self.paintings[i].attachment_lifetime,
+                        mod_api::AttachmentHolder::Entity(mod_api::EntityRef::new(
+                            level.epoch(),
+                            id,
+                        )),
                     );
                 }
             }
@@ -158,6 +160,11 @@ impl Game<'_> {
         }
         if let mod_api::Holder::Player(uuid) = holder {
             if self.lan_acting_uuid == Some(uuid) {
+                if access == AttachmentAccess::Store
+                    && let Some(conn) = self.lan_acting
+                {
+                    self.bind_player_attachments(conn, true);
+                }
                 return Ok(&mut self.player_attachments);
             }
             let conn = self
@@ -168,6 +175,9 @@ impl Game<'_> {
                 .ok_or(AttachmentError::MissingHolder)?;
             if self.lan_guest_swaps.contains(&conn) {
                 return Err(AttachmentError::MissingHolder);
+            }
+            if access == AttachmentAccess::Store {
+                self.bind_player_attachments(conn, true);
             }
             return Ok(self
                 .lan

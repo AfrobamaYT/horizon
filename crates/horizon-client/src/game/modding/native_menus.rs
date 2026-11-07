@@ -63,7 +63,7 @@ pub(super) fn fit(
 
 /// Server menus, for server mods. The players are named by UUID;
 /// none of these runs while a player's state is swapped in (inside
-/// `native_perform_command`, the menus can be opened and filled).
+/// `native_run_mod_command`, the menus can be opened and filled).
 #[allow(dead_code)]
 impl Game<'_> {
     fn native_conn(&self, uuid: u128) -> Option<u32> {
@@ -78,7 +78,7 @@ impl Game<'_> {
     /// Opens a chest menu of `rows` rows (1 to 6) titled `title` for the
     /// player, showing `items` (by slot, padded with empty ones), in place of
     /// the menu they had open: its window id.
-    pub(super) fn native_open_menu(
+    pub(super) fn open_menu(
         &mut self,
         uuid: u128,
         rows: u8,
@@ -96,7 +96,7 @@ impl Game<'_> {
         )
     }
     /// Closes the player's native menu (a `native_menu_closed` follows).
-    pub(super) fn native_close_menu(&mut self, uuid: u128) {
+    pub(super) fn close_menu(&mut self, uuid: u128) {
         if let Some(conn) = self.native_conn(uuid)
             && let Some(host) = self.lan.as_mut()
             && host
@@ -129,7 +129,7 @@ const MOUNT_MENU: &str = "horizon:mount_inventory";
 /// The menu `conn` has open, whichever way the game keeps it: a block's
 /// container, a trade, a crafting table, a workstation, a lectern or a
 /// mount's inventory. Not the player's own inventory menu.
-fn open_menu_of(host: &LanHost, conn: u32) -> Option<(i32, &str, Option<[i32; 3]>)> {
+pub(super) fn open_menu_of(host: &LanHost, conn: u32) -> Option<(i32, &str, Option<[i32; 3]>)> {
     let g = host.hub.guest(conn)?;
     let play = host.play.get(&conn);
     if let Some(m) = &g.menu {

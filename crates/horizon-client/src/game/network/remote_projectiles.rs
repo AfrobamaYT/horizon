@@ -113,7 +113,7 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
 /// tracker's updates (10 to 20 ticks apart) with its own gravity and drag,
 /// and a block stops it there; only the server decides what it hits.
 pub(super) fn remote_projectile_tick(p: &mut Projectile, w: &impl ProjectileWorld) {
-    if !matches!(p.tick(w).1, Hit::None) {
+    if !matches!(p.tick_remote(w).1, Hit::None) {
         p.velocity = Vec3::ZERO;
     }
 }
@@ -132,9 +132,13 @@ fn shulker_bullet_trail_at(at: Vec3, random: &mut impl RandomSource) -> [f64; 3]
 /// `ClientPacketListener.handleSetEntityData`'s `Fireball.DATA_ITEM_STACK`:
 /// the item the guest draws the fireball as, through `Fireball.setItem`;
 /// a kind that is no `Fireball` has none.
-pub(super) fn remote_projectile_item(projectiles: &mut [Projectile], id: u32, stack: ItemStack) {
+pub(super) fn remote_projectile_item<'a>(
+    projectiles: impl IntoIterator<Item = &'a mut Projectile>,
+    id: u32,
+    stack: ItemStack,
+) {
     if let Some(p) = projectiles
-        .iter_mut()
+        .into_iter()
         .find(|p| p.id == id && p.kind.is_item_fireball())
     {
         p.set_item(stack);
@@ -144,8 +148,12 @@ pub(super) fn remote_projectile_item(projectiles: &mut [Projectile], id: u32, st
 /// `ClientPacketListener.handleProjectilePowerPacket`: the power a hurting
 /// projectile (`AbstractHurtingProjectile`) accelerates by, found by id;
 /// anything else is ignored.
-pub(super) fn remote_projectile_power(projectiles: &mut [Projectile], id: i32, power: f64) {
-    if let Some(p) = projectiles.iter_mut().find(|p| p.id == id as u32)
+pub(super) fn remote_projectile_power<'a>(
+    projectiles: impl IntoIterator<Item = &'a mut Projectile>,
+    id: i32,
+    power: f64,
+) {
+    if let Some(p) = projectiles.into_iter().find(|p| p.id == id as u32)
         && matches!(
             p.kind,
             ProjectileKind::SmallFireball

@@ -220,7 +220,7 @@ pub fn drop_motion(
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -391,13 +391,12 @@ impl crate::entity_rules::EntityRules for ArmorStand {
 #[derive(Clone, Copy)]
 pub struct ItemStep {
     old_velocity: Vec3,
-    moved: bool,
     landed: Option<(BlockPos, f64)>,
+    movement: Option<Vec3>,
+    clipped_vertical: bool,
 }
 impl ItemStep {
-    /// `Entity.checkFallDamage`'s landing: the block the item came down on
-    /// (`getOnPosLegacy`) and how far it fell, for its `Block.fallOn`. None when the move
-    /// didn't end a fall.
+    /// The landing position and accumulated fall distance, before block contact.
     pub fn landed(&self) -> Option<(BlockPos, f64)> {
         self.landed
     }
@@ -619,11 +618,36 @@ impl ItemEntity {
         facts: &BlockFacts,
         collision: &BlockCollisionRegistry<'_>,
         no_physics: bool,
-        (water_height, lava_height): (f64, f64),
+        heights: (f64, f64),
         entity_boxes: &[Aabb],
         border: Option<&BorderGeometry>,
         blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
         context: &horizon_world::native_load_context::LoopContext,
+    ) -> ItemStep {
+        let step = self.tick_move_before_block_effects(
+            world,
+            facts,
+            collision,
+            no_physics,
+            heights,
+            entity_boxes,
+            border,
+        );
+        self.finish_move_block_effects(world, facts, no_physics, blocks, step, context);
+        step
+    }
+
+    /// Resolve the item's move before the owner handles block contact and
+    /// resumes the normal block effects.
+    pub fn tick_move_before_block_effects(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        no_physics: bool,
+        (water_height, lava_height): (f64, f64),
+        entity_boxes: &[Aabb],
+        border: Option<&BorderGeometry>,
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
@@ -679,7 +703,7 @@ impl ItemEntity {
                 wanted
             } else {
                 // `Entity.collide`: the entities that `canBeCollidedWith` the item stop it
-                // too (a boat, a minecart, a shulker, a happy ghast held still), and
+                // too (a boat, a shulker, a happy ghast held still; not a minecart), and
                 // so does the world border (`Entity.collectColliders`).
                 crate::collisions::EntityCollisions {
                     blocks: scene,
@@ -739,9 +763,74 @@ impl ItemEntity {
                     slime,
                 );
             }
-            // Entity.move's last step: soul sand and honey slow the item's
-            // horizontal speed. A move through blocks (noPhysics) returns
-            // before it. `blocks` is None only for the isolated unit tests.
+            return ItemStep {
+                old_velocity,
+                movement: Some(moved),
+                clipped_vertical: !no_physics && moved.y != wanted.y,
+                landed,
+            };
+        }
+        // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
+        if !no_physics {
+            self.slime_step_on(world, facts);
+        }
+        ItemStep {
+            old_velocity,
+            landed: None,
+            movement: None,
+            clipped_vertical: false,
+        }
+    }
+
+    /// The block at `Entity.getOnPosLegacy` for this tick's clipped move.
+    /// Idle ticks retain the entity's collision flags but have no contact.
+    pub fn vertical_contact(
+        &self,
+        world: &World,
+        collision: &BlockCollisionRegistry<'_>,
+        blocks: &horizon_world::movement_properties::BoundMovementProperties,
+        step: ItemStep,
+    ) -> Option<BlockPos> {
+        if !step.clipped_vertical {
+            return None;
+        }
+        let mut scene = SceneCollisions {
+            world,
+            binding: collision,
+            subject: None,
+        };
+        let mut ground = horizon_world::ground_support::GroundState::default();
+        ground
+            .check_support(self.on_ground, self.bounds(), step.movement, |bounds| {
+                horizon_world::ground_support::find_supporting_block(
+                    &mut scene,
+                    horizon_world::collision_context::CollisionContext::empty(false),
+                    self.position,
+                    bounds,
+                    1_000_000,
+                )
+            })
+            .ok()?;
+        Some(crate::motion::legacy_block_support_at(
+            world,
+            blocks,
+            self.position,
+            ground.supporting_block,
+        ))
+    }
+
+    /// Resume the normal block effects after the collision response.
+    pub fn finish_move_block_effects(
+        &mut self,
+        world: &World,
+        facts: &BlockFacts,
+        no_physics: bool,
+        blocks: Option<&horizon_world::movement_properties::BoundMovementProperties>,
+        step: ItemStep,
+        context: &horizon_world::native_load_context::LoopContext,
+    ) {
+        if step.movement.is_some() {
+            // Entity.move applies the block's speed factor before block effects.
             if !no_physics && let Some(blocks) = blocks {
                 let factor = crate::motion::block_speed_factor_at(
                     world,
@@ -753,24 +842,8 @@ impl ItemEntity {
                 self.velocity =
                     horizon_world::entity_move::scale_by_block_speed(self.velocity, factor);
             }
-            // Entity.move -> applyEffectsFromBlocks: honey then bubble columns
-            // (before air drag), matching ItemEntity.tick.
             self.apply_honey_slide(world, facts);
             self.stuck = self.stuck_multiplier(world, facts).unwrap_or(Vec3::ZERO);
-            return ItemStep {
-                old_velocity,
-                moved: true,
-                landed,
-            };
-        }
-        // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
-        if !no_physics {
-            self.slime_step_on(world, facts);
-        }
-        ItemStep {
-            old_velocity,
-            moved: false,
-            landed: None,
         }
     }
     /// The rest of `ItemEntity.tick`, after the bubble column's push: slime,
@@ -784,7 +857,7 @@ impl ItemEntity {
         no_physics: bool,
         step: ItemStep,
     ) -> bool {
-        if step.moved {
+        if step.movement.is_some() {
             // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn, with the
             // vertical speed the bounce just left (before the air drag).
             if !no_physics {
@@ -1080,13 +1153,15 @@ impl ItemCells {
 /// stack or gives it its own, the smaller into the larger
 /// (`ItemEntity.tryToMerge`), until this item is used up. An emptied item is
 /// marked in `removed`.
-pub fn merge_with_neighbours(
-    items: &mut [ItemEntity],
+pub fn merge_with_neighbours<I>(
+    items: &mut I,
     removed: &mut [bool],
     cells: &mut ItemCells,
     i: usize,
     max_stack: &dyn Fn(&ItemStack) -> u32,
-) {
+) where
+    I: AsRef<[ItemEntity]> + std::ops::IndexMut<usize, Output = ItemEntity> + ?Sized,
+{
     let age = |items: &[ItemEntity], j: usize| {
         if j == i && items[j].age != i16::MIN as i32 {
             items[j].age - 1
@@ -1094,7 +1169,7 @@ pub fn merge_with_neighbours(
             items[j].age
         }
     };
-    if removed[i] || !items[i].mergeable(age(items, i), max_stack(&items[i].stack)) {
+    if removed[i] || !items[i].mergeable(age(items.as_ref(), i), max_stack(&items[i].stack)) {
         return;
     }
     let area = items[i].bounds().inflate(Vec3::new(0.5, 0.0, 0.5));
@@ -1105,7 +1180,7 @@ pub fn merge_with_neighbours(
         if j == i
             || removed[j]
             || !items[j].bounds().intersects(area)
-            || !items[j].mergeable(age(items, j), max_stack(&items[j].stack))
+            || !items[j].mergeable(age(items.as_ref(), j), max_stack(&items[j].stack))
         {
             continue;
         }
@@ -1130,8 +1205,11 @@ pub fn merge_with_neighbours(
         let moved = room.min(i64::from(items[from].stack.count));
         items[to].stack.count = (i64::from(items[to].stack.count) + moved) as u32;
         items[from].stack.count = (i64::from(items[from].stack.count) - moved) as u32;
-        let (delay, from_age, to_age) =
-            (items[from].pickup_delay, age(items, from), age(items, to));
+        let (delay, from_age, to_age) = (
+            items[from].pickup_delay,
+            age(items.as_ref(), from),
+            age(items.as_ref(), to),
+        );
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
         // This item's age goes up once its tick ends.
@@ -1156,7 +1234,7 @@ pub const ORB_QUAD_SCALE: f32 = 0.3;
 #[derive(Clone, Debug)]
 pub struct ExperienceOrb {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.yRot` and `xRot` (`/tp`, `/data get ... Rotation`).
     pub rotation: [f32; 2],
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -1640,7 +1718,7 @@ mod level_up_sound {
 #[derive(Clone, Debug)]
 pub struct Painting {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
@@ -1705,7 +1783,7 @@ pub fn dye_index(name: &str) -> u8 {
 #[derive(Clone, Debug)]
 pub struct Cushion {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     /// `Entity.position`: the bottom centre of the cushion.
@@ -1761,7 +1839,7 @@ impl Cushion {
 #[derive(Clone, Debug)]
 pub struct ItemFrame {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub pos: [i32; 3],
@@ -1826,7 +1904,7 @@ impl ItemFrame {
 #[derive(Clone, Debug)]
 pub struct ArmorStand {
     /// Entity-owned registration metadata; content clones are detached.
-    pub attachment_lifetime: horizon_world::attachments::AttachmentLifetime,
+    pub attachment_lifetime: horizon_mod_runtime::attachments::AttachmentLifetime,
     /// `Entity.xRot`: kept for `/tp` and `Rotation`; the kind turns only in yaw.
     pub pitch: f32,
     /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
@@ -2976,6 +3054,31 @@ mod merge_tests {
             .zip(removed)
             .map(|(item, gone)| (!gone).then_some(item.stack.count))
             .collect()
+    }
+
+    #[test]
+    fn merging_a_joined_batch_preserves_survivor_joins_and_order() {
+        let mut items: crate::join_seq::JoinList<_> = [
+            item("minecraft:sand", 3, 0.5, 41),
+            item("minecraft:sand", 5, 1.2, 7),
+            item("minecraft:gravel", 1, 8.0, 1),
+        ]
+        .into_iter()
+        .collect();
+        let joins: Vec<_> = items.iter().map(|item| item.join).collect();
+        let mut removed = [false; 3];
+        let mut cells = ItemCells::new(&items);
+        merge_with_neighbours(&mut items, &mut removed, &mut cells, 0, &max_stack);
+        let mut removed = removed.into_iter();
+        items.retain(|_| !removed.next().unwrap());
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].stack.count, items[0].age), (8, 7));
+        assert_eq!(&*items[1].stack.item, "minecraft:gravel");
+        assert_eq!(items[1].stack.count, 1);
+        assert_eq!(
+            items.iter().map(|item| item.join).collect::<Vec<_>>(),
+            joins[1..]
+        );
     }
 
     #[test]
@@ -4786,7 +4889,7 @@ crate::impl_joined!(
     Cushion,
     ItemFrame
 );
-horizon_world::impl_attachment_lifetime!(
+horizon_mod_runtime::impl_attachment_lifetime!(
     ItemEntity,
     ExperienceOrb,
     ArmorStand,
