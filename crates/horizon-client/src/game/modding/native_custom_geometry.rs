@@ -167,12 +167,17 @@ impl Game<'_> {
             );
             let shift = (DVec3::from(copy.origin) - camera).as_vec3();
             let alpha = copy.tint >> 24;
-            for vertex in &mut entities[start..] {
-                vertex.pos = (Vec3::from(vertex.pos) + shift).to_array();
-                vertex.layer = copy.overlay;
-                if alpha != 255 {
-                    let scaled = (vertex.color >> 24) * alpha / 255;
-                    vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
+            let (quads, _) = entities[start..].as_chunks_mut::<4>();
+            for (face, quad) in faces.iter().zip(quads) {
+                for vertex in quad.iter_mut() {
+                    vertex.pos = (Vec3::from(vertex.pos) + shift).to_array();
+                    vertex.layer = copy.overlay;
+                }
+                if alpha != 255 && face.tint_index >= 0 {
+                    for vertex in quad.iter_mut() {
+                        let scaled = (vertex.color >> 24) * alpha / 255;
+                        vertex.color = vertex.color & 0x00FF_FFFF | scaled << 24;
+                    }
                 }
             }
         }

@@ -87,6 +87,9 @@ impl WorldGeometry {
         if instances.is_empty() {
             return Ok(());
         }
+        if instances.len() > INSTANCE_CAPACITY as usize {
+            return Err(InstanceError::CapacityExceeded);
+        }
         if batch.translucent {
             return Err(InstanceError::Translucent);
         }
