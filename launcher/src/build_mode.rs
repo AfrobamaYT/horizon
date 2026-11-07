@@ -523,8 +523,7 @@ impl Launcher {
         });
         drop(memo);
         let work = cx.background_executor().spawn(async move {
-            native_mods::routes(native_mods::PlanInput::Installed(&home), base.as_deref())
-                .map_err(String::from)
+            native_mods::routes(&home, base.as_deref()).map_err(String::from)
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;

@@ -1,28 +1,23 @@
 //! Read-only classification of a native mod set, without executing mod or game code.
 use super::*;
 
-/// The inputs owned by a preview or an actual build attempt.
-pub enum PlanInput<'a> {
-    /// Snapshot the enabled packages of this game home.
-    Installed(&'a Path),
-    /// Reuse an already-staged input folder, or a CLI project folder.
-    Folder(&'a Path),
-}
-
-/// Plan native mods against their game. Worker-only filesystem and release reads.
-pub fn routes(input: PlanInput<'_>, base: Option<&str>) -> Result<Routes, Failed> {
+/// Plan enabled native mods for an instance. Worker-only filesystem and release reads.
+pub fn routes(home: &Path, base: Option<&str>) -> Result<Routes, Failed> {
     require_consent()?;
     let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).map_err(cache_error)?;
-    let folder = match input {
-        PlanInput::Installed(home) => {
-            let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
-                return Ok(Routes::default());
-            };
-            folder
-        }
-        PlanInput::Folder(folder) => folder.to_owned(),
+    let Some(folder) = stage_installed(home, root().join("installed.routes"))? else {
+        return Ok(Routes::default());
     };
-    let found = scan_bundles(&folder)?;
+    classify(&folder, base, &lease)
+}
+
+/// Share classification with an actual build under its existing cache lease.
+pub(super) fn classify(
+    folder: &Path,
+    base: Option<&str>,
+    lease: &crate::native_cache::Cache,
+) -> Result<Routes, Failed> {
+    let found = scan_bundles(folder)?;
     let mut result = Routes::default();
     let mut projects = Vec::new();
     for bundle in &found {
@@ -54,7 +49,7 @@ pub fn routes(input: PlanInput<'_>, base: Option<&str>) -> Result<Routes, Failed
     {
         result.unavailable = prebuilt::prebuilt_availability(&revision, Target::Client);
     } else {
-        match prebuilt::planning_catalog(&lease, &revision) {
+        match prebuilt::planning_catalog(lease, &revision) {
             Ok(catalog) => {
                 for (id, route) in prebuilt::slot_routes(&catalog, &projects) {
                     if route != Route::Prebuilt {

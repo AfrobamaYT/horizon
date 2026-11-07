@@ -28,7 +28,7 @@ use horizon_mod_package::dependencies;
 
 mod api;
 mod planning;
-pub use planning::{routes, PlanInput};
+pub use planning::routes;
 mod crates;
 mod diagnostics;
 mod inject;
@@ -513,22 +513,24 @@ pub fn append_log(message: &str) -> Result<(), String> {
 }
 
 /// Records the whole attempt, including selection or export after compilation.
-fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+fn logged<T>(
+    build: impl FnOnce(Result<&crate::native_cache::Cache, &str>) -> Result<T, String>,
+) -> Result<T, String> {
     // Another build or a cleanup holds the lease on the same target/: refuse. Any other
-    // failure (a filesystem without file locks, a `native` folder linked to another drive)
-    // only stops the cleanup: the build goes ahead without the lease, as it did before.
-    let (cache, unavailable) = match crate::native_cache::Cache::acquire(&backend::build_dir()) {
-        Ok(cache) => (Some(cache), None),
+    // failure only stops cleanup for explicit builds. Automatic selection requires a held
+    // cache for its catalog and can refuse instead of accessing an unsafe tree.
+    let cache = match crate::native_cache::Cache::acquire(&backend::build_dir()) {
+        Ok(cache) => Ok(cache),
         Err(crate::native_cache::Error::Busy) => {
             return Err(cache_error(crate::native_cache::Error::Busy));
         }
-        Err(error) => (None, Some(cache_error(error))),
+        Err(error) => Err(cache_error(error)),
     };
     clear_log()?;
-    if let Some(warning) = &unavailable {
+    if let Err(warning) = &cache {
         log_warning(warning);
     }
-    let result = build();
+    let result = build(cache.as_ref().map_err(String::as_str));
     match &result {
         Ok(_) => {
             let _ = append_log("Build completed.");
@@ -539,7 +541,7 @@ fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     }
     // The installed binary and post-build programs have left target/ before trimming. Keep
     // this lease through installation/export, including failed builds, and never wait on Cargo.
-    let Some(cache) = cache else {
+    let Ok(cache) = cache else {
         return result;
     };
     let limit = backend::Settings::load()
@@ -2568,17 +2570,34 @@ fn isolated(
     }
 }
 
+fn select_build_profile(
+    saved: Profile,
+    requested: Option<Profile>,
+    plan: impl FnOnce() -> Result<Routes, Failed>,
+) -> Result<Profile, String> {
+    check_cancelled()?;
+    match requested {
+        Some(profile) => Ok(profile),
+        None => {
+            let routes = plan();
+            check_cancelled()?;
+            Ok(saved.for_picker(&routes.map_err(String::from)?, false, false))
+        }
+    }
+}
+
 /// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
 /// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
 /// and points `instance` at the build, the default one included. Returns the build's version; a
 /// build already made is used again. Mods pinning different revisions cannot build together:
 /// the error starts with [`MISMATCH`] and names them; `cargo horizon-mod update --horizon
 /// <commit>` in each mod's folder pins it to the installed game, then build again.
+/// `profile` is an explicit override; None applies the instance's choice only when needed.
 pub fn build(
     base: &str,
     folder: &Path,
     instance: &Instance,
-    profile: Profile,
+    profile: Option<Profile>,
     progress: impl Fn(Step),
 ) -> Result<String, Failed> {
     require_consent()?;
@@ -2586,7 +2605,14 @@ pub fn build(
     if let Some(error) = backend::native_mod_architecture_error() {
         return Err(Failed::Other(error));
     }
-    logged(|| {
+    logged(|cache| {
+        let profile = select_build_profile(instance.native_profile, profile, || {
+            planning::classify(
+                folder,
+                Some(base),
+                cache.map_err(|error| Failed::Other(error.into()))?,
+            )
+        })?;
         let built = isolated(
             |skip| {
                 pipeline(
@@ -2641,7 +2667,7 @@ pub fn build_server(
     progress: impl Fn(Step),
 ) -> Result<PathBuf, Failed> {
     require_consent()?;
-    logged(|| {
+    logged(|_| {
         if output.symlink_metadata().is_ok() {
             return Err(trf(
                 "{path} already exists. Move it away, or build into another folder.",
@@ -4211,6 +4237,91 @@ mod tests {
     }
 
     #[test]
+    fn instance_profile_selection_keeps_automatic_builds_and_cancellation_exact() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let previous = CANCEL.swap(false, Ordering::Relaxed);
+        let structural = Routes {
+            mods: vec![(
+                "source".into(),
+                Route::Game {
+                    reason: SourceReason::BuildScript {
+                        mod_id: "source".into(),
+                    },
+                },
+            )],
+            unavailable: None,
+        };
+        assert_eq!(
+            select_build_profile(Profile::Balanced, None, || Ok(structural.clone())).unwrap(),
+            Profile::Balanced
+        );
+        assert_eq!(
+            select_build_profile(Profile::Developer, None, || Ok(structural)).unwrap(),
+            Profile::Developer
+        );
+        assert_eq!(
+            select_build_profile(Profile::Developer, None, || Ok(Routes::default())).unwrap(),
+            Profile::Optimized
+        );
+        assert_eq!(
+            select_build_profile(Profile::Balanced, Some(Profile::Developer), || panic!(
+                "explicit overrides need no plan"
+            ))
+            .unwrap(),
+            Profile::Developer
+        );
+        for failed in [false, true] {
+            CANCEL.store(false, Ordering::Relaxed);
+            let result = select_build_profile(Profile::Balanced, None, || {
+                cancel();
+                if failed {
+                    Err(Failed::Other("download failed".into()))
+                } else {
+                    Ok(Routes::default())
+                }
+            });
+            assert_eq!(result.unwrap_err(), CANCELLED);
+        }
+        assert_eq!(
+            select_build_profile(Profile::Balanced, None, || panic!(
+                "cancelled before planning"
+            ))
+            .unwrap_err(),
+            CANCELLED
+        );
+        CANCEL.store(previous, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn folder_planning_reuses_the_build_snapshot_without_restaging_packages() {
+        let _guard = TEST_STATE.lock().unwrap();
+        let original = backend::Settings::load();
+        backend::Settings::load().allow_native_mods().unwrap();
+        let folder = dir("profile-snapshot");
+        write_bundle(&folder, "snapshot", "");
+        fs::write(
+            folder.join("Cargo.toml"),
+            "[package]\nname='snapshot'\nversion='0.1.0'\n[dependencies]\nhorizon-client='0.1'\n",
+        )
+        .unwrap();
+        let preview = root().join("installed.routes");
+        fs::create_dir_all(&preview).unwrap();
+        let sentinel = preview.join("snapshot-sentinel");
+        fs::write(&sentinel, b"retained").unwrap();
+        let lease = crate::native_cache::Cache::acquire(&backend::build_dir()).unwrap();
+        let plan = planning::classify(&folder, None, &lease).unwrap();
+        assert_eq!(plan.mods.len(), 1);
+        assert_eq!(plan.mods[0].0, "snapshot");
+        assert!(
+            matches!(&plan.mods[0].1, Route::Invalid { reason } if reason.contains("E_GAME_DEPENDENCY"))
+        );
+        assert_eq!(fs::read(&sentinel).unwrap(), b"retained");
+        fs::remove_file(sentinel).unwrap();
+        fs::remove_dir_all(folder).unwrap();
+        original.save().unwrap();
+    }
+
+    #[test]
     fn missing_consent_blocks_all_build_routes_before_http_or_staging() {
         use std::net::TcpListener;
         let _guard = TEST_STATE.lock().unwrap();
@@ -4228,20 +4339,15 @@ mod tests {
         let profile = Profile::Optimized;
         let base = "uninstalled";
         denied(build_server(base, &folder, &output, profile, false, |_| {}));
-        denied(build(
-            base,
-            &folder,
-            &instances::selected(),
-            profile,
-            |_| {},
-        ));
+        for choice in [Some(profile), None] {
+            denied(build(base, &folder, &instances::selected(), choice, |_| {}));
+        }
         denied(sync_internals(&folder));
         let preview = root().join("installed.routes");
         fs::create_dir_all(&preview).unwrap();
         let marker = preview.join("permission-sentinel");
         fs::write(&marker, b"unchanged").unwrap();
-        denied(routes(PlanInput::Installed(&folder), None));
-        denied(routes(PlanInput::Folder(&folder), None));
+        denied(routes(&folder, None));
         assert_eq!(
             fs::read(&marker).unwrap(),
             b"unchanged",
@@ -4297,7 +4403,7 @@ mod tests {
         assert!(log.contains("is not prepared yet"), "{log}");
         assert!(!log.contains("the last build's output"), "{log}");
         // A failure after compiler output keeps those diagnostics and the final reason.
-        let failure: Result<(), String> = logged(|| {
+        let failure: Result<(), String> = logged(|_| {
             append_log("error[E0425]: cannot find value `missing` in this scope")?;
             Err("Could not export the engine".into())
         });
@@ -4309,7 +4415,7 @@ mod tests {
             "{log}"
         );
         assert!(!log.contains("Build completed."), "{log}");
-        let success: Result<(), String> = logged(|| Ok(()));
+        let success: Result<(), String> = logged(|_| Ok(()));
         success.unwrap();
         assert_eq!(
             fs::read_to_string(log_path()).unwrap(),

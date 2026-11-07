@@ -1378,9 +1378,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 Some(folder) => folder,
                 None => native_mods::installed_mods(&target.home)?,
             };
-            let routes = native_mods::routes(native_mods::PlanInput::Folder(&folder), Some(&base))
-                .map_err(String::from)?;
-            let profile = target.native_profile.for_picker(&routes, explicit, false);
+            let profile = explicit.then_some(target.native_profile);
             let built =
                 native_mods::build(&base, &folder, &target, profile, steps).map_err(|error| {
                     let error = String::from(error);
