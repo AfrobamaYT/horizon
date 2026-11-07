@@ -26,7 +26,9 @@ pub trait LevelsBackend {
     /// The result follows vanilla's sampled spiral and vertical order; it is not a search
     /// through edited biome cells. Does not load resident chunks or switch parked levels.
     /// None for no match, a stale/unavailable level, an unavailable generator, a negative
-    /// radius or nonpositive sampling steps.
+    /// radius, nonpositive sampling steps, or a potential sample count above
+    /// [`BiomeSearch::MAX_SAMPLES`] (see [`BiomeSearch::new`] for the work formula).
+    /// Positive vertical steps larger than the build height sample only the clamped origin.
     #[access(WorldOnly)]
     fn level_find_closest_biome(
         &self,
