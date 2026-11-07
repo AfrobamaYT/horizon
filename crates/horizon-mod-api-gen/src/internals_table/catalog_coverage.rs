@@ -166,7 +166,7 @@ fn prepare(stage: &Path, build: &Path) {
     let catalog = stage.join("internals.json");
     println!("staging real game catalog");
     let mut staged = staging::stage(
-        &stage,
+        stage,
         &stage.join("points.json"),
         &catalog,
         staging::Mode::Build,
@@ -184,7 +184,7 @@ fn prepare(stage: &Path, build: &Path) {
         .filter(|i| i.cfg.is_empty())
         .map(|i| i.path.clone())
         .collect();
-    let game_points = points::game_points(&stage).unwrap();
+    let game_points = points::game_points(stage).unwrap();
     println!("selecting universal bindings");
     let rule = Rule::new(entries);
     let hashes = entries
@@ -351,7 +351,8 @@ fn sync_tree(source: &Path, dest: &Path) {
     fs::create_dir_all(dest).unwrap();
     for entry in fs::read_dir(dest).unwrap() {
         let path = entry.unwrap().path();
-        if !source.join(path.file_name().unwrap()).exists() {
+        let original = source.join(path.file_name().unwrap());
+        if !original.exists() || original.is_dir() != path.is_dir() {
             if path.is_dir() {
                 fs::remove_dir_all(path).unwrap();
             } else {
