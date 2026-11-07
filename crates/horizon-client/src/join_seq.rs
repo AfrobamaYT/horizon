@@ -1196,6 +1196,26 @@ mod tests {
     }
 
     #[test]
+    fn journal_epoch_rebind_reinstalls_live_members_and_updates_the_producer() {
+        use residency::Change::Install;
+        let (mut list, mut journal) = journal_list();
+        let stale = journal.clone();
+        journal.reset_epoch();
+        list.push(entity(4));
+        assert!(changes(&journal).is_empty());
+        assert!(changes(&stale).is_empty());
+        let keys: Vec<_> = list.iter().map(key).collect();
+        list.bind_residency(&journal, journal_owner(), |e| (e.value, e.join));
+        assert_eq!(
+            changes(&journal),
+            keys.into_iter().map(Install).collect::<Vec<_>>()
+        );
+        assert!(changes(&stale).is_empty());
+        list.push(entity(5));
+        assert_eq!(changes(&journal), [Install(key(&list[4]))]);
+    }
+
+    #[test]
     fn journal_same_owner_transfer_between_games_updates_both_sinks() {
         use residency::Change::{Install, Remove};
         let (mut source, old_journal) = journal_list();
