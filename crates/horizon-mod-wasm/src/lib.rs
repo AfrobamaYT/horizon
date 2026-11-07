@@ -3,6 +3,28 @@
 //! versions, one library copy shared by its dependents). Every refusal names its reason for the
 //! Mods page.
 pub mod link;
+mod runtime;
+pub use runtime::{CallClass, WasmHandler, WasmMod};
+
+pub(crate) trait NoAnswer {
+    fn no_answer() -> Self;
+}
+impl<T: Default> NoAnswer for T {
+    fn no_answer() -> Self {
+        T::default()
+    }
+}
+impl NoAnswer for mod_api::Flow {
+    fn no_answer() -> Self {
+        Self::Continue
+    }
+}
+pub(crate) fn refused<E: From<(mod_api::Identifier, String)>>() -> E {
+    E::from((
+        mod_api::Identifier::parse("horizon:wasm_mod").expect("valid constant identifier"),
+        "the mod's call didn't run".into(),
+    ))
+}
 
 use horizon_mod_package::dependencies;
 use horizon_mod_package::manifest::Manifest;
@@ -31,9 +53,12 @@ pub enum Refusal {
     DependencyRefused { dependency: String },
     /// The package's `mod.wasm` failed its checks.
     Package(String),
-    /// This game build has no wasm mod boundary: the one that was here is gone and its
-    /// replacement is not built yet.
-    NoBoundary,
+    /// The group could not instantiate, initialize or run.
+    Runtime(String),
+    /// The mod was compiled against another generated boundary.
+    Layout { built: u64, game: u64 },
+    /// The game has no shared Rust standard library beside its executable.
+    NoStd,
 }
 
 impl std::fmt::Display for Refusal {
@@ -56,7 +81,9 @@ impl std::fmt::Display for Refusal {
                 write!(f, "its dependency {dependency} didn't load")
             }
             Self::Package(why) => write!(f, "{why}"),
-            Self::NoBoundary => write!(f, "this game build has no wasm mod boundary yet"),
+            Self::Runtime(why) => write!(f, "{why}"),
+            Self::Layout { .. } => write!(f, "built for another version of the mod API"),
+            Self::NoStd => write!(f, "this game has no wasm standard library member"),
         }
     }
 }
@@ -257,9 +284,7 @@ pub fn refused() -> &'static [(String, Refusal)] {
 /// Loads the wasm mods the player turned on in `game_dir` (and every `dev` package), once at
 /// startup: the same selection as content mods (`horizon_mod_package::selection`), so a wasm mod's
 /// `assets/` and `data/` load as content beside its code. Refusals are kept for [`refused`].
-/// Until the shared-memory boundary exists, a mod whose dependencies resolve is refused with
-/// [`Refusal::NoBoundary`].
-pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) {
+pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) -> Loaded {
     let enabled = horizon_mod_package::mod_list::ModList::load(game_dir).enabled;
     let mut refused = Vec::new();
     let packages: Vec<WasmPackage> =
@@ -278,18 +303,136 @@ pub fn load_installed(game_dir: &Path, dev: &[PathBuf]) {
                 },
             )
             .collect();
-    let (groups, grouped) = groups(&packages);
-    refused.extend(grouped);
-    refused.extend(
-        groups
-            .into_iter()
-            .flatten()
-            .map(|i| (packages[i].manifest.id.clone(), Refusal::NoBoundary)),
-    );
+    let mut loaded = match std::env::current_exe()
+        .ok()
+        .and_then(|exe| std::fs::read(exe.with_file_name("horizon-wasm-std.wasm")).ok())
+    {
+        Some(std) => load(&std, packages),
+        None => Loaded {
+            mods: Vec::new(),
+            manifests: Vec::new(),
+            refused: packages
+                .into_iter()
+                .map(|p| (p.manifest.id, Refusal::NoStd))
+                .collect(),
+        },
+    };
+    refused.append(&mut loaded.refused);
     for (id, why) in &refused {
         log::warn!("wasm mod {id} refused: {why}");
     }
-    let _ = REFUSED.set(refused);
+    let _ = REFUSED.set(refused.clone());
+    loaded.refused = refused;
+    loaded
+}
+
+/// Loaded wasm entries are installed in the same dispatch list as native entries.
+#[derive(Default)]
+pub struct Loaded {
+    pub mods: Vec<mod_api::ModEntry>,
+    pub manifests: Vec<Manifest>,
+    pub refused: Vec<(String, Refusal)>,
+}
+
+pub fn load(std_member: &[u8], packages: Vec<WasmPackage>) -> Loaded {
+    use mod_api::wire::Reader;
+    let (groups, refused) = groups(&packages);
+    let mut loaded = Loaded {
+        refused,
+        ..Loaded::default()
+    };
+    let engine = match runtime::engine() {
+        Ok(engine) => engine,
+        Err(error) => {
+            loaded.refused.extend(
+                packages
+                    .iter()
+                    .map(|p| (p.manifest.id.clone(), Refusal::Runtime(error.to_string()))),
+            );
+            return loaded;
+        }
+    };
+    let inventory: Vec<_> = packages
+        .iter()
+        .map(|p| {
+            let m = &p.manifest;
+            mod_api::PackageInfo::new(
+                m.id.clone(),
+                m.version.clone(),
+                mod_api::PackageKind::Code,
+                match m.side {
+                    horizon_mod_package::manifest::Side::Both => mod_api::Side::Both,
+                    horizon_mod_package::manifest::Side::Client => mod_api::Side::Client,
+                    horizon_mod_package::manifest::Side::Server => mod_api::Side::Server,
+                },
+                m.owned_namespaces().map(str::to_owned).collect(),
+                m.dependencies.keys().cloned().collect(),
+            )
+        })
+        .collect();
+    for indices in groups {
+        let mut members = vec![link::Member {
+            name: "libstd.so",
+            module: std_member,
+        }];
+        let names: Vec<_> = indices
+            .iter()
+            .map(|&i| format!("lib{}.so", packages[i].manifest.id))
+            .collect();
+        members.extend(indices.iter().zip(&names).map(|(&i, name)| link::Member {
+            name,
+            module: &packages[i].module,
+        }));
+        let result = WasmMod::instantiate(&engine, &members).and_then(|mods| {
+            if mods.len() != indices.len() {
+                return Err(Refusal::Runtime("missing mod boundary exports".into()));
+            }
+            let mut checked = Vec::new();
+            for mut module in mods {
+                module
+                    .call(
+                        CallClass::Load,
+                        boundary::Frame::default(),
+                        mod_api::wire::INIT,
+                        None,
+                        |w| w.put(&inventory),
+                        |_| Ok(()),
+                    )
+                    .ok_or_else(|| Refusal::Runtime("initialization failed".into()))?;
+                let names: Vec<String> = module
+                    .call(
+                        CallClass::Load,
+                        boundary::Frame::default(),
+                        boundary::SUBSCRIBED,
+                        None,
+                        |_| {},
+                        Reader::take,
+                    )
+                    .ok_or_else(|| Refusal::Runtime("subscriptions failed".into()))?;
+                module.subscribed = boundary::subscriptions_of("wasm mod", names);
+                checked.push(module);
+            }
+            Ok(checked)
+        });
+        match result {
+            Ok(mods) => {
+                for (module, i) in mods.into_iter().zip(indices) {
+                    let manifest = packages[i].manifest.clone();
+                    let id = Box::leak(manifest.id.clone().into_boxed_str());
+                    loaded
+                        .mods
+                        .push(mod_api::ModEntry::new(id, Box::new(module)));
+                    loaded.manifests.push(manifest);
+                }
+            }
+            Err(why) => loaded.refused.extend(
+                indices
+                    .into_iter()
+                    .map(|i| (packages[i].manifest.id.clone(), why.clone())),
+            ),
+        }
+    }
+    loaded
 }
 
 #[cfg(test)]
