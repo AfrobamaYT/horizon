@@ -101,12 +101,11 @@ MCP: `server`, `server_command`, `server_log`, `server_stop`.
 
 ## `horizon-launcher storage`
 
-Show disposable storage by category as JSON. Builds must be idle. Worlds, settings, mod packages and builds any instance plays are never cleanup targets; running instances' caches are skipped.
+Show disposable storage by category as JSON. Builds must be idle.
 
     horizon-launcher storage
-    horizon-launcher storage --clear build-files
 
-- `--clear ROW`: Clear `build-files`, `prebuilt-games`, `spare-game-builds`, `rust-compiler`, `other-caches`, or `all`. Cleared compiler outputs rebuild next time; cleared downloads are fetched again. The result includes allocated bytes and freed bytes per category.
+- `--clear`: Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all
 
 MCP: `storage`.
 
