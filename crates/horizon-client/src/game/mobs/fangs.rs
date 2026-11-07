@@ -139,7 +139,7 @@ impl Game<'_> {
 
     /// `EvokerFangs.tick`.
     pub(super) fn tick_fangs(&mut self) {
-        let mut list = self.fangs.list.take();
+        let mut list = self.fangs.list.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         list.retain_mut(|f| {

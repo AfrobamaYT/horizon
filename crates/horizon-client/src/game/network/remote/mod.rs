@@ -7661,7 +7661,7 @@ impl Game<'_> {
             .retain(|_, (_, steps)| *steps > 0);
         let mut entered = Vec::new();
         if running {
-            let mut items = std::mem::take(&mut self.dropped);
+            let mut items = self.dropped.lift();
             items.retain_mut(|item| {
                 // The server decides entity collisions. This copy predicts block movement.
                 let (_, discarded) =

@@ -1754,7 +1754,7 @@ impl Game<'_> {
             .into_iter()
             .filter(|p| p.alive)
             .collect();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| c.potion.is_none() || self.tick_potion_cloud(c, &players));

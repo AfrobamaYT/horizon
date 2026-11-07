@@ -3158,7 +3158,7 @@ impl Game<'_> {
         let mut harmed: Vec<(FightWho, f32)> = Vec::new();
         self.end_dragon_flame();
         let mut harmed_mobs: Vec<(u32, i32, [f64; 3])> = Vec::new();
-        let mut clouds = self.breath_clouds.take();
+        let mut clouds = self.breath_clouds.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         clouds.retain_mut(|c| {

@@ -274,8 +274,8 @@ impl<T: Joined> ResidentList<T> {
         self.0.0.iter_mut().for_each(edit);
     }
     /// Take the owners for a pass, leaving a spawn buffer in their place.
-    pub fn take(&mut self) -> Self {
-        std::mem::take(self)
+    pub fn lift(&mut self) -> Self {
+        Self(self.0.lift())
     }
     /// Restore survivors before entities spawned while the pass was lifted.
     pub fn restore(&mut self, mut taken: Self) {
@@ -312,6 +312,10 @@ impl<T, const DIRECT: bool> Default for JoinList<T, DIRECT> {
 }
 
 impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
+    /// Lift a whole pass, leaving an empty spawn buffer behind.
+    pub fn lift(&mut self) -> Self {
+        std::mem::take(self)
+    }
     pub fn with_capacity(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
     }
@@ -885,6 +889,31 @@ mod resident_tests {
     use std::{cell::Cell, rc::Rc};
 
     #[test]
+    fn joined_lift_leaves_a_spawn_buffer_and_keeps_the_original_numbers() {
+        fn check<const DIRECT: bool>() {
+            let mut owners: super::JoinList<_, DIRECT> = (1..=2).map(Numbered::new).collect();
+            let joins: Vec<_> = owners.iter().map(Joined::join_seq).collect();
+            let mut taken = owners.lift();
+            assert!(owners.is_empty());
+            assert_eq!(taken.iter().map(|e| e.value).collect::<Vec<_>>(), [1, 2]);
+            owners.push(Numbered::new(3));
+            let spawned = owners[0].join;
+            assert!(spawned > joins[1]);
+            taken.append(&mut owners);
+            owners = taken;
+            assert_eq!(
+                owners.iter().map(|e| e.value).collect::<Vec<_>>(),
+                [1, 2, 3]
+            );
+            for (index, join) in joins.into_iter().chain([spawned]).enumerate() {
+                assert_eq!(owners.locate(join), Some(index));
+            }
+        }
+        check::<true>();
+        check::<false>();
+    }
+
+    #[test]
     fn extraction_keeps_identity_and_restores_the_original_position() {
         let mut list: super::JoinList<_> = (1..=3).map(Numbered::new).collect();
         let joins: Vec<_> = list.iter().map(Joined::join_seq).collect();
@@ -930,7 +959,7 @@ mod resident_tests {
         list.retain(|entity| entity.value != 2);
         assert_eq!(list.locate(joins[1]), None);
         assert_eq!(list.locate(joins[2]), Some(0));
-        let taken = list.take();
+        let taken = list.lift();
         list.push(Numbered::new(4));
         let spawned = list[0].join;
         assert!(spawned > joins[2]);
@@ -974,7 +1003,7 @@ mod resident_tests {
             list.push(Numbered::new(value));
         }
         let snapshot = list.to_vec();
-        let mut taken = list.take();
+        let mut taken = list.lift();
         list.push(Numbered::new(4));
         taken.retain_mut(|value| {
             value.value *= 10;
@@ -997,7 +1026,7 @@ mod resident_tests {
     #[test]
     fn resident_append_preserves_spawn_buffer_before_survivors() {
         let mut list: ResidentList<_> = [1, 2].into_iter().map(Numbered::new).collect();
-        let mut taken = list.take();
+        let mut taken = list.lift();
         list.push(Numbered::new(3));
         taken.retain(|e| e.value != 1);
         list.append(&mut taken);
@@ -1026,7 +1055,7 @@ mod resident_tests {
         for _ in 0..3 {
             list.push(Owner(dropped.clone(), JoinSeq::UNJOINED));
         }
-        let taken = list.take();
+        let taken = list.lift();
         list.push(Owner(dropped.clone(), JoinSeq::UNJOINED));
         assert_eq!(dropped.get(), 0);
         list.restore(taken);

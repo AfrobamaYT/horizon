@@ -500,7 +500,7 @@ pub(super) mod tests {
             assert_eq!(stale.offers(game), None);
             assert!(!stale.set_xp(game, 1));
             assert!(!stale.add_offer(game, offer("minecraft:wheat", "minecraft:emerald")));
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert_eq!(villager.level(game), None);
             game.mobs = taken;
         });

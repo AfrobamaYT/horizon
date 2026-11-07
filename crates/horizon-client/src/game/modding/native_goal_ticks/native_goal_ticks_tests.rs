@@ -142,7 +142,7 @@ fn tick_goals_as(
 ) {
     // The native-authoritative side, whose mob tick builds the goal host.
     game.options.dedicated = Some(Vec::new());
-    let mut mobs = std::mem::take(&mut game.mobs);
+    let mut mobs = game.mobs.lift();
     let snapshot: Vec<_> = mobs
         .iter()
         .map(|m| creatures::seen(m, game.level.player_uuid))
@@ -950,7 +950,7 @@ fn mod_goal_tick_cost() {
         install_game_mods();
         game.resolve_parts().unwrap();
         zombie(game, 60, [3.5, 65.0, 3.5]);
-        let mut mobs = std::mem::take(&mut game.mobs);
+        let mut mobs = game.mobs.lift();
         let snapshot: Vec<_> = mobs
             .iter()
             .map(|m| creatures::seen(m, game.level.player_uuid))

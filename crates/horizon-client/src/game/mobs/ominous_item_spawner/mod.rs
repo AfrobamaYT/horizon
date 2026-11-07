@@ -112,7 +112,7 @@ impl Game<'_> {
     /// warning sound, then the item) and `tickClient` (particles every 5
     /// game ticks).
     pub(super) fn tick_ominous_item_spawners(&mut self) {
-        let mut spawners = self.ominous_spawners.take();
+        let mut spawners = self.ominous_spawners.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
         spawners.retain_mut(|s| {

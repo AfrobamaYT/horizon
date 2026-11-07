@@ -1253,7 +1253,7 @@ impl Game<'_> {
         let mut snapshot = std::mem::take(&mut self.creatures.seen_buf);
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = Vec::new();
-        let mut mobs = std::mem::take(&mut self.mobs);
+        let mut mobs = self.mobs.lift();
         let mut dead = Vec::new();
         let mut corpses = Vec::new();
         let mut died = std::mem::take(&mut self.died);
@@ -4577,7 +4577,7 @@ impl Game<'_> {
         .inflate(Vec3::new(1.0, 0.5, 1.0));
         // Player.hasInfiniteMaterials.
         let creative = self.creative;
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
         let mut picked = Vec::new();
         projectiles.retain(|shot| {
             let Some(a) = shot.arrow.as_ref().filter(|a| !a.removed) else {
@@ -4624,7 +4624,7 @@ impl Game<'_> {
             self.flush_lan_explosions();
             return self.flush_wind_bursts();
         }
-        let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let mut projectiles = self.creatures.projectiles.lift();
         let mut hits = Vec::new();
         // The breezes that deflected a projectile, and where.
         let mut deflections: Vec<(u32, [f64; 3])> = Vec::new();

@@ -768,7 +768,7 @@ macro_rules! define_entity_handles {
             /// Moves every list out; give it back with `restore_entities`.
             pub(super) fn take_entities(&mut self) -> TakenEntities {
                 TakenEntities {
-                    $($field: std::mem::take(&mut self$(.$list)+),)*
+                    $($field: self$(.$list)+.lift(),)*
                 }
             }
             pub(super) fn restore_entities(&mut self, mut taken: TakenEntities) {
@@ -2212,7 +2212,7 @@ mod join_order_tests {
     #[test]
     fn an_entity_put_back_keeps_its_join_number() {
         let (mut lists, joined) = mixed();
-        let taken = std::mem::take(&mut lists.tridents);
+        let taken = lists.tridents.lift();
         let before: Vec<_> = taken
             .iter()
             .map(horizon_client::join_seq::Joined::join_seq)

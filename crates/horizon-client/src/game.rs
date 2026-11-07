@@ -4749,7 +4749,7 @@ impl Game<'_> {
         lent.give_back(&mut self.world);
     }
     fn tick_dropped_items(&mut self, round: &mut native_ticks::TickRound) {
-        let mut items = std::mem::take(&mut self.dropped);
+        let mut items = self.dropped.lift();
         // ServerLevel.tick: only entities in entity-ticking chunks tick.
         let ticking = self.entity_ticking_area();
         let mut removed = vec![false; items.len()];
@@ -15693,7 +15693,7 @@ impl Game<'_> {
         if self.remote.is_none() {
             self.merge_orbs();
         }
-        let mut orbs = std::mem::take(&mut self.orbs);
+        let mut orbs = self.orbs.lift();
         let mut gained = 0;
         let mut taken = Vec::new();
         if let Some((min, max)) = bounds {

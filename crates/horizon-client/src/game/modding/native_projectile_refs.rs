@@ -515,7 +515,7 @@ mod tests {
             assert_eq!(stale.owner(game), None);
             assert!(!stale.set_pickup(game, NativeArrowPickup::Allowed));
             assert!(!stale.deflect(game, NativeDeflection::Reverse, None, None, false, [1.0; 3]));
-            let taken = std::mem::take(&mut game.creatures.projectiles);
+            let taken = game.creatures.projectiles.lift();
             assert!(handle.base_damage(game).is_none());
             game.creatures.projectiles = taken;
         });
