@@ -3212,6 +3212,7 @@ pub fn apply_brain_events(
                     attacker: mob as i32,
                     // Pufferfish.touch uses DamageSources.sting: the fish, no projectile.
                     projectile: None,
+                    direct: None,
                     held: [held, None],
                     player_uuid: None,
                 };

@@ -1452,6 +1452,7 @@ impl Game<'_> {
             attacker,
             held,
             projectile: None,
+            direct: None,
             player_uuid,
         }
     }
@@ -1601,7 +1602,9 @@ fn mob_source(damage: &Damage, attack: &Attack) -> HurtSource<'static> {
     HurtSource {
         damage_type,
         causing,
-        direct: if melee {
+        direct: if let Some(direct) = attack.direct {
+            direct
+        } else if melee {
             causing
         } else {
             attack.projectile_direct(damage_type)
@@ -4980,6 +4983,7 @@ mod tests {
                 &Attack {
                     attacker: 7,
                     projectile: None,
+                    direct: None,
                     player_uuid: None,
                     held: Default::default(),
                 },
@@ -5001,6 +5005,7 @@ mod tests {
                 &Attack {
                     attacker: 7,
                     projectile: Some(912),
+                    direct: None,
                     player_uuid: None,
                     held: Default::default(),
                 },

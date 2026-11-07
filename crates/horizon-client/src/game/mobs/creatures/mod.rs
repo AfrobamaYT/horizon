@@ -4334,6 +4334,7 @@ impl Game<'_> {
             None => self.current_attack(),
         };
         attack.projectile = self.combat.attack().projectile;
+        attack.direct = self.combat.attack().direct;
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }

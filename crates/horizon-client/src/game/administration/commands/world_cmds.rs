@@ -228,6 +228,23 @@ impl Game<'_> {
         cause: Option<Target>,
         from: Option<[f64; 3]>,
     ) -> bool {
+        let attacker = cause.or(by).and_then(|t| self.network_entity_id(t));
+        let mut attack = self.attack_of(attacker.unwrap_or(0));
+        attack.direct = Some(by.and_then(|t| self.network_entity_id(t)).unwrap_or(0));
+        self.with_attack(attack, |g| {
+            g.hurt_target_from_source(target, amount, ty, by, cause, from)
+        })
+    }
+
+    fn hurt_target_from_source(
+        &mut self,
+        target: Target,
+        amount: f32,
+        ty: &str,
+        by: Option<Target>,
+        cause: Option<Target>,
+        from: Option<[f64; 3]>,
+    ) -> bool {
         match target {
             // The causing mob is the one the hit is credited to and thorns
             // answer; the source position gives the knockback its direction.
@@ -252,18 +269,21 @@ impl Game<'_> {
                 .and_then(|conn| self.command_guest(conn))
                 .map(|g| crate::game::combat::PlayerCredit(g.uuid));
                 let now = self.world.game_time;
+                let attack = self.current_attack();
                 self.for_player(target, |g| {
-                    if g.spectator() {
-                        return false;
-                    }
-                    if let Some(name) = named {
-                        g.note_direct_entity(ty, name);
-                    }
-                    let hurt = g.hurt_player_from(amount, from, ty, attacker);
-                    if hurt && let Some(credit) = by_player {
-                        g.combat.note_hurt_by_player(credit, now);
-                    }
-                    hurt
+                    g.with_attack(attack, |g| {
+                        if g.spectator() {
+                            return false;
+                        }
+                        if let Some(name) = named {
+                            g.note_direct_entity(ty, name);
+                        }
+                        let hurt = g.hurt_player_from(amount, from, ty, attacker);
+                        if hurt && let Some(credit) = by_player {
+                            g.combat.note_hurt_by_player(credit, now);
+                        }
+                        hurt
+                    })
                 })
                 .unwrap_or(false)
             }
@@ -290,8 +310,11 @@ impl Game<'_> {
                     _ => None,
                 };
                 if let Some(conn) = guest {
+                    let attack = self.current_attack();
                     let hurt = self
-                        .as_guest(conn, |g| g.command_damage_mob(id, amount, damage))
+                        .as_guest(conn, |g| {
+                            g.with_attack(attack, |g| g.command_damage_mob(id, amount, damage))
+                        })
                         .unwrap_or(false);
                     if hurt && let Some(host) = self.lan.as_mut() {
                         host.mob_players.insert(id, conn);
@@ -316,7 +339,9 @@ impl Game<'_> {
                     from.map(|[x, y, z]| horizon_core::geometry::Vec3::new(x, y, z)),
                 ),
             ),
-            Target::Crystal(id) => self.command_damage_crystal(id, ty, Self::damage_kind(ty), cause.or(by)),
+            Target::Crystal(id) => {
+                self.command_damage_crystal(id, ty, Self::damage_kind(ty), cause.or(by))
+            }
             _ => false,
         }
     }
@@ -473,7 +498,8 @@ impl Game<'_> {
     /// `Zombie.hurtServer`'s reinforcement requests before the command returns.
     /// Health-changing hits also raise their damage vibration before return.
     fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
-        let attack = self.attack_of_who(damage.attacker);
+        let mut attack = self.attack_of_who(damage.attacker);
+        attack.direct = self.combat.attack().direct;
         let mut reinforcements = Vec::new();
         let mut health_changed = false;
         let hurt = self.mobs.iter_mut().find(|m| m.id == id).is_some_and(|m| {

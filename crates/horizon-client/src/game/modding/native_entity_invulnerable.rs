@@ -136,10 +136,7 @@ impl Game<'_> {
     /// `Invulnerable` flag; the temporary window `Entity.invulnerableTime`
     /// opens does not exist yet (#916), so no hit answers through it. None
     /// for a stale handle or a kind without the flag.
-    pub(super) fn entity_invulnerable_to_piercing_weapon(
-        &self,
-        entity: EntityRef,
-    ) -> Option<bool> {
+    pub(super) fn entity_invulnerable_to_piercing_weapon(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_flag),
             _ => None,
@@ -191,6 +188,68 @@ mod tests {
     use horizon_core::geometry::Vec3;
     use mod_api::{EntityRef, NativeWorldEpoch};
 
+    struct SourceProbe(std::sync::Arc<std::sync::Mutex<Vec<(i32, i32)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for SourceProbe {
+        fn living_incoming_damage(
+            &self,
+            _: &mut dyn mod_api::LevelRandomHost,
+            event: &mut mod_api::LivingIncomingDamageEvent<'_>,
+        ) -> mod_api::Flow {
+            self.0
+                .lock()
+                .unwrap()
+                .push((event.source.direct, event.source.causing));
+            mod_api::Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn review_direct_entity_preserved() {
+        let heard = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![mod_api::ModEntry::new(
+            "probe",
+            Box::new(SourceProbe(heard.clone())),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+                for id in 300001..=300003 {
+                    game.mobs.push(Mob::new(id, pig.clone(), Vec3::ZERO, 0.0));
+                }
+                let victim = game.entity(300001).unwrap();
+                let direct = game.entity(300002).unwrap();
+                let causing = game.entity(300003).unwrap();
+                for damage_type in [
+                    "minecraft:arrow",
+                    "minecraft:mob_attack",
+                    "minecraft:generic",
+                ] {
+                    assert!(game.entity_set_damage_cooldown_time(victim, 0));
+                    assert_eq!(
+                        victim.hurt(game, damage_type, 1.0, Some(direct), Some(causing)),
+                        Some(true)
+                    );
+                }
+                let mut player =
+                    horizon_client::motion::PlayerMotion::new(game.motion, Vec3::ZERO).unwrap();
+                player.entity_id = 7;
+                game.player = Some(player);
+                game.lan_acting_uuid = Some(1);
+                game.lan_acting_entity = Some(7);
+                game.set_game_mode(horizon_client::command::args::GameMode::Survival);
+                let victim = game.entity(7).unwrap();
+                assert_eq!(
+                    victim.hurt(game, "minecraft:arrow", 1.0, Some(direct), Some(causing)),
+                    Some(true)
+                );
+            })
+        });
+        assert_eq!(*heard.lock().unwrap(), vec![(300002, 300003); 4]);
+    }
+
     /// A listening probe counting the incoming-damage hooks a hit fires.
     struct Probe(std::sync::Arc<std::sync::Mutex<Vec<u32>>>);
     #[mod_api::__subscriptions]
@@ -216,12 +275,7 @@ mod tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
-                let pig = game
-                    .res
-                    .mob_types()
-                    .get("minecraft:pig")
-                    .unwrap()
-                    .clone();
+                let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
                 game.mobs.push(Mob::new(300001, pig, Vec3::ZERO, 0.0));
                 let victim = game.entity(300001).unwrap();
                 // An accepted hit: taken, the health drops, the damage hooks
@@ -230,7 +284,10 @@ mod tests {
                     victim.hurt(game, "minecraft:generic", 5.0, None, None),
                     Some(true)
                 );
-                assert_eq!(game.mobs[0].health, 5.0, "the pig took it (10 max health, no armor)");
+                assert_eq!(
+                    game.mobs[0].health, 5.0,
+                    "the pig took it (10 max health, no armor)"
+                );
                 // The cooldown: a weaker hit inside the window is refused
                 // (`LivingEntity.hurtServer`'s `damageCooldownTime` rule).
                 assert_eq!(
@@ -265,7 +322,10 @@ mod tests {
                 // A stale handle reads None and hurts nothing.
                 let stale = EntityRef::new(NativeWorldEpoch::new(victim.epoch().get() + 1), 300001);
                 assert_eq!(stale.hurt(game, "minecraft:generic", 5.0, None, None), None);
-                assert_eq!(stale.invulnerable_to_damage(game, "minecraft:generic"), None);
+                assert_eq!(
+                    stale.invulnerable_to_damage(game, "minecraft:generic"),
+                    None
+                );
                 assert_eq!(stale.invulnerable_to_piercing_weapon(game), None);
             });
         });
@@ -286,7 +346,8 @@ mod tests {
                 .get("minecraft:zombie")
                 .unwrap()
                 .clone();
-            game.mobs.push(Mob::new(300001, zombie.clone(), Vec3::ZERO, 0.0));
+            game.mobs
+                .push(Mob::new(300001, zombie.clone(), Vec3::ZERO, 0.0));
             game.mobs.push(Mob::new(300002, zombie, Vec3::ZERO, 0.0));
             let a = game.entity(300001).unwrap();
             let b = game.entity(300002).unwrap();
