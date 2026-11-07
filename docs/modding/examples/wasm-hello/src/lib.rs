@@ -24,9 +24,7 @@ struct Stick;
 #[mod_api::horizon_part]
 impl ItemPart for Stick {
     fn use_item(&self, host: &mut dyn ServerHost, event: &mut UseItemEvent<'_>) -> Flow {
-        let Some(item) = event.stack.item().id(host) else {
-            return Flow::Continue;
-        };
+        let item = event.stack.item().id(host);
         host.messages()
             .broadcast(Text::literal(format!("a {item} was used")));
         Flow::Continue

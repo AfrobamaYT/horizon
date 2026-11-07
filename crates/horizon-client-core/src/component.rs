@@ -518,6 +518,20 @@ pub fn inline_object(
     let fallback = object
         .get("fallback")
         .map(|value| to_text_with(value, resolve, contents).plain());
+    inline_object_with_fallback(object, kind, fallback)
+}
+
+/// Decode object identity/defaults without rendering its recursive fallback.
+/// Structured component capture retains the fallback as a component instead.
+pub fn inline_object_fields(object: &serde_json::Map<String, Value>) -> Option<InlineObject> {
+    inline_object_with_fallback(object, object.get("object").and_then(Value::as_str), None)
+}
+
+fn inline_object_with_fallback(
+    object: &serde_json::Map<String, Value>,
+    kind: Option<&str>,
+    fallback: Option<String>,
+) -> Option<InlineObject> {
     match kind {
         Some("player") | None if object.contains_key("player") => {
             let profile = object.get("player")?.clone();

@@ -877,7 +877,8 @@ pub trait Hooks {
     /// other source with no direct entity, even during that projectile's impact), and
     /// where it comes from (`getSourcePosition`). `victim` is where the entity stands and
     /// looks, and `weapon` the direct entity's weapon (`getWeaponItem`) when it is known.
-    /// `container` holds the damage before any reduction: change its `new_damage`, or the
+    /// `container` is an API-owned scalar snapshot before any reduction; engine sequencing
+    /// remains game-owned. Change its `new_damage`, or the
     /// invulnerability ticks a fresh hit leaves (vanilla's 20), or set `canceled` and nothing
     /// of `hurtServer` happens (no damage, hurt sound, knockback, cooldown, statistics or
     /// criteria); a canceled hit on the ender dragon still counts as landed (`EnderDragon.hurt`
@@ -3380,7 +3381,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     fn hopper_pickup_item();
     /// A recipe ingredient of a mod's own kind: the entry named a type in a
     /// namespace outside `minecraft:`, and the loader kept it for this call.
-    /// The kind and the JSON the file wrote are here; fill `items` with the
+    /// The kind and the converted NBT compound the file wrote are here; fill `items` with the
     /// item ids the ingredient matches (item ids only: components are not
     /// checked here; a match-time hook follows separately). Duplicates are
     /// removed keeping first-seen order. The hook is called once per

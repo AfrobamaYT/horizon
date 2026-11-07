@@ -5094,16 +5094,18 @@ impl Game<'_> {
     /// world.
     pub(in crate::game) fn recipe_ingredient(
         &self,
-        json: &serde_json::Value,
-    ) -> Option<Ingredient> {
+        json: &str,
+    ) -> Result<Option<Ingredient>, mod_api::RecipeJsonError> {
         if self.outside_world() {
-            return None;
+            return Ok(None);
         }
+        let json: serde_json::Value =
+            serde_json::from_str(json).map_err(|_| mod_api::RecipeJsonError::InvalidJson)?;
         let qualify = |s: &str| match s.strip_prefix('#') {
             Some(tag) => String::from("#") + &qualified(tag),
             None => qualified(s),
         };
-        let json = match json {
+        let json = match &json {
             serde_json::Value::String(s) => serde_json::Value::String(qualify(s)),
             serde_json::Value::Array(a) => serde_json::Value::Array(
                 a.iter()
@@ -5111,29 +5113,38 @@ impl Game<'_> {
                     .map(|s| serde_json::Value::String(qualify(s)))
                     .collect(),
             ),
-            _ => return None,
+            _ => return Ok(None),
         };
         let items = self.items();
-        let known: Vec<String> = Ingredient::parse(&json, items)?
+        let Some(ingredient) = Ingredient::parse(&json, items) else {
+            return Ok(None);
+        };
+        let known: Vec<String> = ingredient
             .order
             .into_iter()
             .filter(|item| items.get(item).is_some())
             .collect();
-        (!known.is_empty()).then(|| Ingredient::of(known))
+        Ok((!known.is_empty()).then(|| Ingredient::of(known)))
     }
     /// A stack as a recipe's `result` names it: `id` (a bare one as
     /// `minecraft:`), `count` (1 by default, up to 99) and `components`. None
     /// without an `id`, for an item the game doesn't know or a count outside
     /// that, and outside a world.
-    pub(in crate::game) fn recipe_result(&self, json: &serde_json::Value) -> Option<ItemStack> {
+    pub(in crate::game) fn recipe_result(
+        &self,
+        json: &str,
+    ) -> Result<Option<ItemStack>, mod_api::RecipeJsonError> {
         if self.outside_world() {
-            return None;
+            return Ok(None);
         }
-        let mut json = json.clone();
-        if let Some(id) = json["id"].as_str() {
+        let mut json: serde_json::Value =
+            serde_json::from_str(json).map_err(|_| mod_api::RecipeJsonError::InvalidJson)?;
+        if let Some(id) = json.as_str() {
+            json = qualified(id).into();
+        } else if let Some(id) = json["id"].as_str() {
             json["id"] = qualified(id).into();
         }
-        recipe_result(&json).filter(|s| self.items().get(&s.item).is_some())
+        Ok(recipe_result(&json).filter(|s| self.items().get(&s.item).is_some()))
     }
     /// The `book_id`s of the recipes the player's recipe book holds now
     /// (the server's book on a server); empty outside a world.

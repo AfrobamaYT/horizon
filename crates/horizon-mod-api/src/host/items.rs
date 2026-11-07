@@ -95,6 +95,16 @@ pub trait ItemsClientHost {
 #[doc(hidden)]
 #[horizon_mod_api_macros::host_area]
 pub trait ItemsBackend {
+    /// Side: both. Effective damageability after defaults and the stack patch.
+    #[access(Metadata)]
+    fn item_resource_damageable(&self, stack: &ItemStack) -> bool;
+    /// Side: both. Effective glint, including overrides and item-specific foil.
+    #[access(Metadata)]
+    fn item_resource_foil(&self, stack: &ItemStack) -> bool;
+    /// Side: both. Effective repair ingredient membership, including item tags.
+    #[access(Metadata)]
+    fn item_resource_repairable(&self, stack: &ItemStack, material: ItemKey) -> bool;
+
     /// Side: both. ItemResource's effective use duration, including its Part.
     #[access(WorldOnly)]
     fn item_resource_use_duration(&self, stack: &ItemStack) -> Option<i32>;

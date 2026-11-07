@@ -1005,11 +1005,18 @@ pub(super) mod interact_vibration_tests {
         assert!(interact_vibrations(&rod, Some(true)));
         rod.data_mut().set_loot_component(
             "minecraft:use_effects",
-            &serde_json::json!({"interact_vibrations": false}),
+            &Some(
+                horizon_core::json_nbt::json_to_tag(
+                    &serde_json::json!({"interact_vibrations": false}),
+                )
+                .unwrap(),
+            ),
         );
         assert!(!interact_vibrations(&rod, Some(true)));
-        rod.data_mut()
-            .set_loot_component("minecraft:use_effects", &serde_json::json!({}));
+        rod.data_mut().set_loot_component(
+            "minecraft:use_effects",
+            &Some(horizon_core::nbt::Tag::Compound(Default::default())),
+        );
         assert!(interact_vibrations(&rod, Some(false)));
         rod.data_mut().set_other("minecraft:use_effects", None);
         rod.data_mut().set_other(
@@ -1048,7 +1055,12 @@ pub(super) mod interact_vibration_tests {
             let mut silent = rod.clone();
             silent.data_mut().set_loot_component(
                 "minecraft:use_effects",
-                &serde_json::json!({"interact_vibrations": false}),
+                &Some(
+                    horizon_core::json_nbt::json_to_tag(
+                        &serde_json::json!({"interact_vibrations": false}),
+                    )
+                    .unwrap(),
+                ),
             );
             *game.held_mut() = Some(silent.clone());
             EVENTS.with(|events| events.borrow_mut().clear());

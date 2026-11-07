@@ -418,10 +418,13 @@ mod content_tests {
             context: &dyn mod_api::DataLoadContext,
             event: &mut mod_api::IngredientEvent<'_>,
         ) {
-            self.0
-                .lock()
-                .unwrap()
-                .push((context.origin(), event.data["aspect"].to_string()));
+            self.0.lock().unwrap().push((
+                context.origin(),
+                match event.data.get(&"aspect".into()).unwrap() {
+                    horizon_core::nbt::Tag::String(s) => format!("\"{}\"", s.to_string().unwrap()),
+                    other => panic!("expected aspect string, got {other:?}"),
+                },
+            ));
             event.items.push("minecraft:emerald".into());
         }
     }

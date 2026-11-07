@@ -7,8 +7,6 @@ pub use horizon_client_lib::*;
 #[doc(hidden)]
 pub mod __internals;
 pub mod entry;
-/// Game-owned conversion of JSON metadata into the API's shared NBT values.
-pub mod json_nbt;
 
 // The game's allocator lives in the library, not the executable: the prebuilt game (#589) is this crate as a
 // dylib, and the allocator must be the one its code and the mods' executable share.

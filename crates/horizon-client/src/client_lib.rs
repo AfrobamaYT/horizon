@@ -86,6 +86,8 @@ pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
 pub mod join_seq;
+/// Game-owned JSON metadata conversion, shared by recipe and API adapters.
+pub use horizon_core::json_nbt;
 pub mod lan;
 pub mod landing;
 pub mod legacy_combat;
@@ -170,6 +172,7 @@ pub use horizon_client_core::text;
 pub use horizon_client_input::actions;
 pub use horizon_client_input::clipboard;
 pub use horizon_client_input::gamepad;
+pub use horizon_client_input::gameplay_guide;
 pub use horizon_client_input::held;
 pub use horizon_client_input::input;
 pub use horizon_client_input::interaction_input;

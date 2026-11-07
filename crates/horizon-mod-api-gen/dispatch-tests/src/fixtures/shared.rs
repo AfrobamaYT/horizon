@@ -482,7 +482,7 @@ mod stubs {
         pub(super) position: [f64; 3],
         pub(super) view: [f64; 3],
     }
-    pub(super) struct DamageContainer(pub(super) f32);
+    pub(super) use crate::tests::mod_api::mod_api::DamageContainer;
     #[derive(Default)]
     pub(super) struct ModBlockEntity {
         id: String,
@@ -564,6 +564,7 @@ mod stubs {
 }
 
 mod api {
+    pub struct DamageContainer(pub f32);
     pub mod camera {
         pub struct CameraEntity;
         pub struct FovPlayer;

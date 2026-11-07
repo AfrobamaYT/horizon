@@ -16,6 +16,17 @@ Compiler-guided repairs:
 
 Proof: `cargo check --workspace --tests --examples` passed on the complete combined tree after the repairs. No workspace tests or clippy suite were run. The initial check against the incomplete chain was stopped when the corrected input arrived; the first corrected-tree check exposed Text seam errors and was not counted as passing. Existing API future-incompatibility warning remains.
 
-Focused runtime tests are being run separately: block keys, immutable definitions, metadata service/worker, the verify-discovered production load probe, flat Text and the game Text/rule-getter regressions. Their results will be appended; compilation is not claimed as execution of those tests.
+Focused runtime execution passed on this integration tree:
+
+- Completed block keys: 1 test.
+- Runtime immutable definitions/refusals/worker allocations: 3 tests.
+- Table-backed metadata service and borrowed backend result: 1 test.
+- Explicit worker metadata and zero-allocation read loop: 1 test.
+- Flat Text forms, malformed trees and depth/order/style: 7 tests.
+- Verify-discovered Python load/report tests: 2 tests, including 2 compiled production importer/load cases.
+- Actual game Text capture/encoding: 11 tests.
+- Actual ignored game rule getter unknown/stale/unavailable/value regression: 1 test, explicitly enabled and executed using prepared resources.
+
+The game test executable ran from a fresh scratch working directory with isolated Horizon, launcher and XDG homes and audio disabled. No tests above were merely discovered, ignored or compiled without execution. Logs are local development outputs, not public artifacts.
 
 No in-game launch or rendering proof is claimed. These are API merge seams, not new firing points, rendering behavior or network behavior.
