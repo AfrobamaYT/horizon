@@ -232,7 +232,7 @@ mod tests {
     /// one put back out of order, and after the entity left.
     #[test]
     fn find_join_finds_by_number_in_or_out_of_order() {
-        let mut list = JoinList::default();
+        let mut list = JoinList::<E>::default();
         for _ in 0..5 {
             list.push(E {
                 join: JoinSeq::UNJOINED,
