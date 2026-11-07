@@ -47,6 +47,7 @@ impl BlockStateRange {
     }
 }
 /// Resolve a block's immutable definition span without a world-number mapping.
+// hidden: engine metadata service implementation, re-exported only through __private.
 #[doc(hidden)]
 pub fn block_state_range(block: BlockKey) -> Result<BlockStateRange, BlockStateError> {
     let blocks = crate::registry_keys::block_definitions().ok_or(BlockStateError::Unavailable)?;

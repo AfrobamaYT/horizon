@@ -96,6 +96,7 @@ fn is_custom(kind: &str) -> bool {
 }
 
 /// Takes the answer `resolve` left out of `data`.
+// hidden: the game-owned ingredient adapter reads the answer a mod's `resolve` left, not a mod-facing call.
 #[doc(hidden)]
 pub fn resolved_items(data: &mut horizon_core::nbt::Compound) -> Option<Vec<String>> {
     let answer = data.remove(&RESOLVED_ITEMS.into())?;
@@ -146,6 +147,7 @@ pub struct WalkedIngredient {
 #[doc(hidden)]
 pub type CustomIds<'a> = &'a dyn Fn(&mut horizon_core::nbt::Compound) -> Option<Vec<String>>;
 /// Game-owned JSON-to-NBT boundary for the hidden recipe parser.
+// hidden: supplied by the game's ingredient adapter to the parser, not a mod-facing type.
 #[doc(hidden)]
 pub type IngredientData<'a> =
     &'a dyn Fn(&serde_json::Map<String, Value>) -> Option<horizon_core::nbt::Compound>;
@@ -331,6 +333,7 @@ impl Ingredient {
             children: None,
         }
     }
+    // hidden: the game's recipe loader calls this with its own converter, not mod code.
     #[doc(hidden)]
     pub fn parse(v: &Value, items: &Items, convert: IngredientData<'_>) -> Option<Self> {
         // A mod's own kind: `resolve` asked the hook once at load and left
