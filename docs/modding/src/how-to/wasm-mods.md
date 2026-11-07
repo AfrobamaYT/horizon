@@ -58,32 +58,34 @@ hooks this game doesn't have, or has with another type, names the first such imp
 
 ## Listening at points
 
-A wasm mod listens at the game's [points](../injections.md) as a native mod does: the same
-`#[mod_api::horizon_mod] impl mod_points::Points`, and one `[[native.injection]]` per place in
-`horizon-mod.toml`, with no `game` or commit pins beside `[wasm]`. The sample listens at the tick:
+API function slots use `[[inject]]`, with a crate-root function named by `with`, rather than
+`impl Points`. The [chat fixture's manifest](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/horizon-mod.toml)
+and [listener](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/chat_tail/src/lib.rs) are compiled examples.
+The function takes the point's host and API record (only the record for a hostless point).
 
-```toml
-[[native.injection]]
-id = "count_ticks"
-target = "horizon_client::game::Game<'_>::tick"
-kind = "HEAD"
-trait_method = "tick"
-```
+A build script parses the manifest once, projects its validated declarations into
+`horizon_mod_api_gen::points::GuestInject`, and calls `guest_exports` with the pinned game's root.
+This generates the one generic listeners export, including its subscriptions and record shapes.
+The [shared fixture build script](https://github.com/arismoko/horizon/blob/main/crates/horizon-mod-wasm/tests/points/build.rs) shows the
+complete path; the generator itself has no manifest-crate dependency. Include its output in the guest
+bootstrap, not one hand-written wasm adapter per point.
 
-At load the game checks each place the `mod.wasm` fills against this list and against its own points:
-a place the list doesn't name, a listed place the mod doesn't fill, a `target` this game has no point
-at, or a point whose record changed since the mod was built refuses the mod and names the place. A
-listener changes its record's fields (`cancel`, `result`, the arguments) as a native one does, and the
-game takes them back when it returns. API-typed points use `trait_method`; a raw point uses the
-generated internals view below. A `helper` needs a native mod. A point call costs about as much as a hook call (a few hundred nanoseconds on a
-release build), and a place nobody listens at costs nothing.
+The initial loader supports API `head` and `return`, priority 0, with one declaration per place.
+Other access forms, kinds, nonzero priorities and duplicate places are explicitly refused while the
+function registry and the remaining wasm routing land. The loader checks the export's subscriptions
+and record shapes against the declarations; missing, undeclared and changed records refuse the mod.
+Full route/hash checks and the rest of the wasm inject kinds follow separately.
+
+A listener changes its record's fields (`cancel`, `result`, the arguments), and the game takes them
+back when it returns. Internals use the view below. Source mixins require a native mod.
 
 ## Declared internals at raw points
 
 For internals that the typed API does not yet cover, add `horizon-mod-internals` (library name
 `mod_internals`) to the mod's Cargo dependencies. Declare each internal with
-`cargo horizon-mod internals add <path>` and use `raw = "<function>"` instead of `trait_method`
-on its injection. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
+`cargo horizon-mod internals add <path>` and use `raw = "<function>"` on its internals declaration.
+Its raw-only schema accepts `id`, `target`, `kind` (`HEAD` or `RETURN`) and `raw`; API functions
+are declared only through `[[inject]]`. `cargo horizon-mod build --wasm` fetches the newest prebuilt game's
 `internals.json` and generates `mod_internals::view` for exactly those declarations and the
 types they reach. The generated code stays in Cargo's build directory. Opaque types and
 functions that cannot cross the sandbox are refused at build, naming the declaration.
