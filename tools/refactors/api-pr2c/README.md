@@ -1,7 +1,8 @@
 # API PR 2c scripts
 
 Part of #1608. Initial base: `cb01ae304c7136f1598f97650c63ccfc1da47b90`.
-The single main merge brought in `57f0b36960`; final comparisons use that commit.
+The first main merge brought in `57f0b36960`. The final replay after the host-method
+pause uses main `5d27928c5ce0ca8c041b0856ef56bfe5430bb6fc` as its comparison base.
 
 ## Generated boundary
 
@@ -49,6 +50,12 @@ log are the declared rename edits.
    random/block-property methods, the `native_mod_screen` field and the
    `native_living_effects` module. Follow with compiler-guided span rewrites.
 7. Format each touched Rust file with rustfmt, edition 2024, skip_children=true.
+8. Remove only the unused prelude imports diagnosed by rustc. The general
+   `drop_unused_imports.py` can apply fix-its, but rustc supplies none for these
+   globs; `drop_unused_preludes.py CHECK_JSON` handles their primary spans and
+   records the exact removed import/attribute blocks in `unused-import-edits.json`.
+   The moved-lines proof lists and accounts for those seven declared removals.
+   `add_method.py` retains and uses the DESCRIPTION data shared by the regroup tool.
 
 After the one main merge, its new declaration/signature changes were retained
 and `declare_access.py` was rerun on the four affected areas. `merge_targets.py`
@@ -56,6 +63,13 @@ converts the three additional, collision-free Game targets. Missing old-name
 calls are again rewritten from compiler spans; `merge_error_receivers.py`
 handles five newly merged internal callers whose type errors point at a returned
 field or argument rather than at the method identifier. No wrappers are merged.
+
+For the final paused-main replay, `rename.py --base origin/main --apply` reads the
+old forwarders from the main tree, retains already-converted targets and extends
+the declared table with the two additions. The merged `open_chat` API target
+collides with the existing screen-initialisation method, so the latter becomes
+`begin_chat_screen` first; its callers are compiler-span rewrites, not a blanket
+rename. The target table now has 682 rows and the internal table has 27 rows.
 
 The handwritten changes are the generator, proc macro, phase policy, docs,
 contributor helper and proof scripts. The declarations, target renames, internal

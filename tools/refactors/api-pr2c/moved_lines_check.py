@@ -8,6 +8,7 @@ claimed as pure moves. All alias names are canonicalised in both trees, includin
 unchanged homonyms; compiler-edits.jsonl records the internal caller span edits.
 """
 import collections
+import json
 import re
 import runpy
 import subprocess
@@ -45,6 +46,10 @@ def canonical(source):
     return collections.Counter(line for line in output.splitlines() if line.strip())
 
 
+import_edits = json.loads((HERE / 'unused-import-edits.json').read_text())
+print(f'Declared rustc unused-import removals: {len(import_edits)}')
+for record in import_edits:
+    print('  ' + record['path'] + ': ' + repr(record['old']))
 checked = 0
 for name in subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=M', BASE, '--', '*.rs'], text=True).splitlines():
     if name.startswith(('crates/horizon-mod-api-gen/', 'crates/horizon-mod-api-macros/', 'crates/horizon-mod-api/src/host/', 'crates/horizon-mod-api/src/hooks/')) or name in {
@@ -59,7 +64,12 @@ for name in subprocess.check_output(['git', 'diff', '--name-only', '--diff-filte
                 edits.append((impl.start(), offset + len(body) + 1))
         for start, end in reversed(edits):
             source = source[:start] + source[end:]
-    old, new = canonical(source), canonical(Path(name).read_text())
+    current = Path(name).read_text()
+    for record in import_edits:
+        if record['path'] == name:
+            assert source.count(record['old']) == 1 and record['old'] not in current, name
+            source = source.replace(record['old'], '')
+    old, new = canonical(source), canonical(current)
     if old != new:
         print(f'FAILED {name}:')
         print('removed:', old-new)

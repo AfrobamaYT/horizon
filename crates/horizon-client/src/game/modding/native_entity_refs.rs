@@ -626,7 +626,6 @@ fn uuid_from_words(words: [i32; 4]) -> u128 {
 #[cfg(test)]
 pub(super) mod tests {
     use mod_api::__private::game::*;
-    use mod_api::prelude::*;
     /// Isolate declarations and frozen registries without changing another test's resources.
     pub(in crate::game) fn run_fresh_cases(name: &str, flag: &str, cases: &[&str]) -> bool {
         if std::env::var_os(flag).is_some() {

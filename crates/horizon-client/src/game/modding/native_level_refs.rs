@@ -507,7 +507,6 @@ fn horizontal_in_bounds(pos: [i32; 3]) -> bool {
 mod tests {
     use super::super::{Dim, native_entity_refs::tests::with_game};
     use horizon_core::position::BlockPos;
-    use mod_api::prelude::*;
     use mod_api::{ChunkRef, LevelRef, LightLayer, NativeWorldEpoch};
 
     /// A logical server with its worker queue running rather than the

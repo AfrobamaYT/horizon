@@ -12,6 +12,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 API = ROOT / 'crates/horizon-mod-api/src/host'
+DESCRIPTION = {
+    "Host": "The host's methods both sides share of the `{a}` area, implemented by the game and reached through [`Host`].",
+    "ServerHost": "The server host's methods of the `{a}` area, implemented by the game and reached through [`ServerHost`].",
+    "ClientHost": "The client host's methods of the `{a}` area, implemented by the game and reached through [`ClientHost`].",
+    "Backend": "The handles' reads of the `{a}` area, implemented by the game and reached through [`Backend`].",
+    "ClientBackend": "The handles' client reads of the `{a}` area, implemented by the game and reached through [`Backend`].",
+    "BackendMut": "The handles' writes of the `{a}` area, implemented by the game and reached through [`BackendMut`].",
+    "ClientBackendMut": "The handles' client writes of the `{a}` area, implemented by the game and reached through [`ClientBackendMut`].",
+}
 TIERS = {'Host', 'ServerHost', 'ClientHost', 'Backend', 'ClientBackend', 'BackendMut', 'ClientBackendMut'}
 
 
@@ -46,7 +55,7 @@ def main():
         source = source[:end] + method + source[end:]
     else:
         hidden = '// hidden: handle backend, reached through the union\n#[doc(hidden)]\n' if 'Backend' in tier else ''
-        source += f'/// Host methods of the `{area}` area.\n{hidden}#[horizon_mod_api_macros::host_area]\n{marker}{method}}}\n'
+        source += f'/// {DESCRIPTION[tier].format(a=area)}\n{hidden}#[horizon_mod_api_macros::host_area]\n{marker}{method}}}\n'
     game_source = game.read_text() if game.exists() else 'use crate::game::Game;\n'
     path.write_text(source)
     game.write_text(game_source + '\n' + body)
