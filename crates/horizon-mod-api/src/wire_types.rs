@@ -5,6 +5,142 @@ use crate::{
     TagKey, UnresolvedFluid,
 };
 
+impl Wire for crate::Transaction {
+    const MIN: usize = 0;
+    fn put(&self, _: &mut Writer) {}
+    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self(()))
+    }
+}
+impl Wire for crate::TransactionSeal {
+    const MIN: usize = 0;
+    fn put(&self, _: &mut Writer) {}
+    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self(()))
+    }
+}
+impl Wire for crate::LoadedMods {
+    const MIN: usize = 0;
+    fn put(&self, _: &mut Writer) {}
+    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new())
+    }
+}
+impl Wire for crate::RegistrationContext {
+    const MIN: usize = 0;
+    fn put(&self, _: &mut Writer) {}
+    fn take(_: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new())
+    }
+}
+impl Wire for crate::PackageKind {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(
+            &(match self {
+                Self::Code => 0u32,
+                Self::Content => 1,
+            }),
+        );
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        match input.take()? {
+            0u32 => Ok(Self::Code),
+            1 => Ok(Self::Content),
+            _ => Err(WireError::Invalid("invalid package kind")),
+        }
+    }
+}
+impl Wire for crate::Side {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
+        out.put(
+            &(match self {
+                Self::Client => 0u32,
+                Self::Both => 1,
+            }),
+        );
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        match input.take()? {
+            0u32 => Ok(Self::Client),
+            1 => Ok(Self::Both),
+            _ => Err(WireError::Invalid("invalid package side")),
+        }
+    }
+}
+impl Wire for crate::PackageInfo {
+    const MIN: usize = 24;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.id);
+        out.put(&self.version);
+        out.put(&self.kind);
+        out.put(&self.side);
+        out.put(&self.namespaces);
+        out.put(&self.dependencies);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::new(
+            input.take()?,
+            input.take()?,
+            input.take()?,
+            input.take()?,
+            input.take()?,
+            input.take()?,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod resource_wire_tests {
+    use super::*;
+
+    #[test]
+    fn wire_tokens_and_package_inventory() {
+        let mut out = Writer::new();
+        out.put(&crate::Transaction(()));
+        out.put(&crate::TransactionSeal(()));
+        assert!(out.bytes().is_empty());
+        let mut input = Reader::new(out.bytes());
+        let _: crate::Transaction = input.take().unwrap();
+        let _: crate::TransactionSeal = input.take().unwrap();
+        crate::phase::with_test_packages(&["test_mod"], || {
+            let mods: crate::LoadedMods = input.take().unwrap();
+            let context: crate::RegistrationContext = input.take().unwrap();
+            assert_eq!(mods.ids().collect::<Vec<_>>(), ["test_mod"]);
+            assert_eq!(context.mods().ids().collect::<Vec<_>>(), ["test_mod"]);
+        });
+        let package = crate::PackageInfo::new(
+            "test".into(),
+            "2".into(),
+            crate::PackageKind::Content,
+            crate::Side::Both,
+            vec!["test".into()],
+            vec!["other".into()],
+        );
+        out.put(&package);
+        let decoded: crate::PackageInfo = Reader::new(out.bytes()).take().unwrap();
+        assert_eq!(decoded.id(), "test");
+        assert_eq!(decoded.version(), "2");
+        assert_eq!(decoded.kind(), crate::PackageKind::Content);
+        assert_eq!(decoded.side(), crate::Side::Both);
+        assert!(decoded.depends_on("other"));
+        for end in 0..out.bytes().len() {
+            assert!(
+                Reader::new(&out.bytes()[..end])
+                    .take::<crate::PackageInfo>()
+                    .is_err()
+            );
+        }
+        assert!(Reader::new(&[2, 0, 0, 0]).take::<crate::Side>().is_err());
+        assert!(
+            Reader::new(&[2, 0, 0, 0])
+                .take::<crate::PackageKind>()
+                .is_err()
+        );
+    }
+}
+
 macro_rules! slot_keys {
     ($width:ty; $($key:ty),+ $(,)?) => {$ (
         impl Wire for $key {
