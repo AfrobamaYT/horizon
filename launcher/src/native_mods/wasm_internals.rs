@@ -134,7 +134,9 @@ mod tests {
             "\n[[internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
         );
         fs::write(root.join(mod_list::FILE), "mod.wasm_only:true\n").unwrap();
-        let native = super::super::stage_installed(&root, native).unwrap();
+        let native = super::super::stage_installed(&root, native)
+            .unwrap()
+            .unwrap();
         let (bundles, declared) = super::super::build_inputs(&native, Some(&root))
             .map_err(String::from)
             .unwrap();

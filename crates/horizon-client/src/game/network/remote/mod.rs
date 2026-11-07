@@ -6692,6 +6692,8 @@ impl Game<'_> {
             self.native_player_tick_pre(mod_api::__private::PlayerTickPreCall { player });
         }
         let result = self.tick_local_player(entity_collisions, pushed, sprint_window);
+        // `EntityEvent.Size` for the pose the tick set.
+        self.native_local_player_size();
         if let Some(player) = player {
             self.native_player_tick_post(mod_api::__private::PlayerTickPostCall { player });
         }
