@@ -4804,7 +4804,7 @@ mod tests {
         let code = source.split("#[cfg(test)]").next().unwrap_or_default();
         for head in [
             "    pub(in crate::game) fn native_set_block_property(\n        &mut self,\n        ticks:",
-            "    pub(in crate::game) fn native_set_block_property_with(",
+            "    pub(in crate::game) fn set_block_property_with(",
         ] {
             let body = code.split(head).nth(1).expect(head);
             let body = &body[..body.find("\n    }\n").expect(head)];

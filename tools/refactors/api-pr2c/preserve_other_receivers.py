@@ -37,6 +37,8 @@ for name in paths:
         for before, after in zip(a[i:j], b[x:y]):
             if before[0] not in OVERLAPS or after[0] != before[0][7:]:
                 continue
+            if before[0] == 'native_set_block_property_with' and name.endswith('/native_hooks/shared.rs'):
+                continue  # The source-contract test names Game's renamed method, not another receiver.
             line = new.count('\n', 0, after.start()) + 1
             if (name, line, after[0]) not in keep:
                 edits.append((after.start(), after.end(), before[0]))
