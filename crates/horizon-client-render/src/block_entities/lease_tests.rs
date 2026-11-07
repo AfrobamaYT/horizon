@@ -1,5 +1,5 @@
 use super::*;
-use horizon_world::attachments::{AttachmentType, Holder};
+use horizon_mod_runtime::attachments::{AttachmentType, Holder};
 
 static VALUE: AttachmentType<i32> = AttachmentType {
     namespace: "lease_test",

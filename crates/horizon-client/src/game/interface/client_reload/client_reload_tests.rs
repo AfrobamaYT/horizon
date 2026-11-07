@@ -867,7 +867,7 @@ fn client_completion_reads_published_resources_without_world_access() {
     .into();
     mod_api::testing::with_mods(mods, || {
         with_client_game(|game| {
-            let version = game.native_block_sprites_version();
+            let version = game.block_sprites_version();
             for entering in [ModPhase::Setup, ModPhase::World] {
                 game.mod_phase = PhaseOwner::new(entering);
                 game.native_client_resources_reloaded();
@@ -968,6 +968,7 @@ fn client_startup_finishes_configs_before_the_first_runtime_callback() {
                     Some(game.settings.clone()),
                     None,
                     Vec::new(),
+                    None,
                 )
                 .unwrap()
                 .unwrap();

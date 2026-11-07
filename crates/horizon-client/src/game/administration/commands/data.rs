@@ -29,7 +29,7 @@ fn set_key(tag: &mut Tag, key: &str, value: Tag) {
     }
 }
 /// `EntityType.loadEntityRecursive` snaps every entity of the stack,
-/// passengers included, to the position (`/summon`, `native_summon`).
+/// passengers included, to the position (`/summon`, `summon`).
 pub(in crate::game) fn place_summoned(tag: &mut Tag, pos: [f64; 3]) {
     let p = pos.map(|v| Tag::Double(v.to_bits()));
     set_key(tag, "Pos", Tag::List(p.to_vec()));
@@ -63,7 +63,7 @@ impl Game<'_> {
 
     /// `NbtPredicate.getEntityTagToCompare`: the entity as saved. An entity
     /// in another level is read in the level that holds it.
-    pub(in crate::game) fn entity_nbt(&mut self, t: Target) -> Option<Tag> {
+    pub(in crate::game) fn command_target_nbt(&mut self, t: Target) -> Option<Tag> {
         self.in_target_level(t, |g| g.entity_nbt_in_level(t))
             .flatten()
     }
@@ -104,7 +104,7 @@ impl Game<'_> {
         Some(match t {
             Target::Guest(_) => {
                 return self
-                    .for_player(t, |g| g.entity_nbt(Target::Player))
+                    .for_player(t, |g| g.command_target_nbt(Target::Player))
                     .flatten();
             }
             Target::Player => return self.player_nbt(),
@@ -328,6 +328,7 @@ impl Game<'_> {
                 return Err(err("commands.data.entity.invalid", &[]));
             }
             Target::Mob(id) => {
+                Self::normalize_loaded_mob_tags(&mut tag);
                 let uuid = self.uuid_for(id);
                 let kind = self
                     .mobs
@@ -453,6 +454,77 @@ impl Game<'_> {
                     self.item_frames[i] = new;
                 }
             }
+            Target::Boat(id) => {
+                // AbstractBoat.readAdditionalSaveData over Entity.load: the
+                // position, rotation, motion, NoGravity and a chest boat's items.
+                let (position, velocity, yaw) =
+                    entity_nbt::boat_from_nbt(&tag).ok_or_else(stale)?;
+                let uuid = self.uuid_for(id);
+                let i = self
+                    .boats
+                    .iter()
+                    .position(|b| b.id == id)
+                    .ok_or_else(stale)?;
+                self.boats.update(i, |b| {
+                    b.position = position;
+                    b.previous = position;
+                    b.velocity = velocity;
+                    b.yaw = yaw;
+                    b.previous_yaw = yaw;
+                    b.pitch = entity_nbt::rotation(&tag)[1];
+                    b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+                    if b.chest {
+                        b.items =
+                            save::decode_items(tag.get("Items"), crate::game::boats::CHEST_SLOTS);
+                    }
+                });
+                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
+            }
+            Target::Tnt(id) => {
+                // Entity.load and PrimedTnt.readAdditionalSaveData mutate the
+                // resident instance; load_tnt would allocate another id/join.
+                let position = entity_nbt::position(&tag).ok_or_else(stale)?;
+                let uuid = self.uuid_for(id);
+                let block_state = tag
+                    .get("block_state")
+                    .and_then(|v| entity_nbt::state_from_nbt(self.pack.assets.registry, v));
+                let tnt = self
+                    .tnts
+                    .iter_mut()
+                    .find(|tnt| tnt.id == id)
+                    .ok_or_else(stale)?;
+                tnt.position = position;
+                tnt.previous = position;
+                tnt.velocity = entity_nbt::motion(&tag);
+                tnt.rotation = entity_nbt::rotation(&tag);
+                // Keep the existing loaded-fuse conversion policy (H090 is separate).
+                tnt.fuse = match tag.get("fuse") {
+                    Some(Tag::Short(fuse)) => i32::from(*fuse),
+                    _ => 80,
+                };
+                tnt.on_ground = matches!(tag.get("OnGround"), Some(Tag::Byte(1)));
+                tnt.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+                tnt.power = entity_nbt::tnt_power(&tag);
+                tnt.block_state = block_state;
+                // Runtime id/join, owner binding and guest attribution stay live.
+                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
+            }
+            Target::Cart(id) => {
+                let uuid = self.uuid_for(id);
+                let i = self
+                    .carts
+                    .iter()
+                    .position(|c| c.id == id)
+                    .ok_or_else(stale)?;
+                let mut cart = self.carts[i].clone();
+                cart.load(&tag).ok_or_else(stale)?;
+                crate::game::minecarts::forget_unreadable_display(&mut cart, |t| {
+                    self.state_from_nbt(t).is_some()
+                });
+                self.roll_cart_loot(&mut cart, &tag);
+                self.carts[i] = cart;
+                set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
+            }
             _ => return Err(stale()),
         }
         if let Target::Mob(id)
@@ -461,6 +533,7 @@ impl Game<'_> {
         | Target::Frame(id)
         | Target::Boat(id)
         | Target::Cart(id)
+        | Target::Tnt(id)
         | Target::Other(id)
         | Target::Fangs(id) = t
         {
@@ -620,7 +693,7 @@ impl Game<'_> {
             // EntityDataAccessor.getData: Entity.saveWithoutId.
             DataRef::Entity(t) => {
                 let mut tag = self
-                    .entity_nbt(*t)
+                    .command_target_nbt(*t)
                     .ok_or_else(|| err("argument.entity.notfound.entity", &[]))?;
                 if let Tag::Compound(c) = &mut tag {
                     c.remove(&"id".into());
@@ -1754,7 +1827,7 @@ mod arrow_owner_tests {
                 } else {
                     game.persist.raw.remove(&id);
                 }
-                let saved = game.entity_nbt(Target::Projectile(id)).unwrap();
+                let saved = game.command_target_nbt(Target::Projectile(id)).unwrap();
                 assert_eq!(saved.get("Owner"), expected.as_ref());
                 assert_eq!(saved.get("UUID"), Some(&Tag::IntArray(uuid.to_vec())));
                 if let Some(raw) = &raw {

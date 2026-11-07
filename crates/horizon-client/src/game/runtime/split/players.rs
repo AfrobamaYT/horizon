@@ -478,6 +478,7 @@ impl Split<'_> {
                 // The split guest shares P1's already-applied client reload
                 // listeners; it stages none of its own.
                 Vec::new(),
+                None,
             )
         })?;
         guest.renderer = Some(build_renderer(

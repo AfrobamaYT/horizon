@@ -9,9 +9,6 @@ use horizon_client::{
 };
 use horizon_core::{position::ChunkPos, random::RandomSource};
 
-/// How long `/forceload add` waits for its chunks, as the game tests' loads do.
-const FORCED_CHUNK_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
-
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
 }
@@ -45,23 +42,7 @@ impl Game<'_> {
         let p = self.resolve_coords(&c);
         Ok([p[0].floor() as i32, p[2].floor() as i32])
     }
-    /// `ServerLevel.setChunkForced`'s `getChunk`: a command right after
-    /// `/forceload add` (`/place`, `/setblock`) finds the chunks loaded.
-    fn wait_for_forced_chunks(&mut self, min: [i32; 2], max: [i32; 2]) {
-        let missing = |g: &Self| {
-            (min[0]..=max[0])
-                .any(|x| (min[1]..=max[1]).any(|z| !g.world.chunks.contains_key(&(x, z))))
-        };
-        let deadline = std::time::Instant::now() + FORCED_CHUNK_WAIT;
-        while missing(self) {
-            if std::time::Instant::now() >= deadline {
-                log::warn!("Horizon: /forceload: chunks {min:?}..{max:?} are not loaded yet");
-                return;
-            }
-            let _ = self.streaming.update(&mut self.world);
-            self.streaming.wait(std::time::Duration::from_millis(5));
-        }
-    }
+    /// `ForceLoadCommand.changeForceLoad`: update and load each newly forced column in order.
     pub(super) fn cmd_forceload(&mut self, id: &str, ctx: &Context) -> R<i32> {
         let dim = Text::literal(self.dim.id());
         match id {
@@ -137,12 +118,11 @@ impl Game<'_> {
                     return Err(err("commands.forceload.toobig", &[&256, &count]));
                 }
                 let mut tracker = Tracker::default();
-                self.streaming
-                    .set_forced_area((cx0, cz0), (cx1, cz1), add, |x, z, changed| {
+                for x in cx0..=cx1 {
+                    for z in cz0..=cz1 {
+                        let changed = self.streaming.set_forced_loaded(&mut self.world, x, z, add);
                         tracker.track(&holder(chunk_text(x, z)), i32::from(changed));
-                    });
-                if add {
-                    self.wait_for_forced_chunks([cx0, cz0], [cx1, cz1]);
+                    }
                 }
                 let (lo, hi) = (chunk_text(cx0, cz0), chunk_text(cx1, cz1));
                 let verb = if add { "added" } else { "removed" };
@@ -255,22 +235,11 @@ impl Game<'_> {
         if changed == 0 {
             return Err(err("commands.fillbiome.no_changes", &[]));
         }
-        for key in &touched {
-            self.world.modified.insert(*key);
-            for sy in 0..self.world.layout().sections() as i32 {
-                self.world.dirty_sections.insert((key.0, sy, key.1));
-            }
-        }
-        // ChunkMap.resendBiomesForChunks: the players who see the changed
-        // columns are sent their new biomes, in the order the columns were
-        // gathered (z, then x).
-        if let Some(host) = self.lan.as_mut() {
-            let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
-                .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
-                .filter(|key| touched.contains(key))
-                .collect();
-            host.hub.resend_biomes(&self.world, &columns);
-        }
+        let columns: Vec<(i32, i32)> = ((lo[2] >> 4)..=(hi[2] >> 4))
+            .flat_map(|cz| ((lo[0] >> 4)..=(hi[0] >> 4)).map(move |cx| (cx, cz)))
+            .filter(|key| touched.contains(key))
+            .collect();
+        self.commit_biome_columns(&touched, &columns);
         self.feedback(Text::translate(
             "commands.fillbiome.success.count",
             &[
@@ -286,6 +255,56 @@ impl Game<'_> {
         Ok(changed)
     }
 
+    /// The tail of a biome change: the columns in `touched` are saved and re-meshed, and the
+    /// players who see `columns` are sent their new biomes (`ChunkMap.resendBiomesForChunks`), in
+    /// the order the columns were gathered (z, then x). Shared by `/fillbiome` and
+    /// `level_set_biome`.
+    pub(in crate::game) fn commit_biome_columns(
+        &mut self,
+        touched: &std::collections::HashSet<(i32, i32)>,
+        columns: &[(i32, i32)],
+    ) {
+        for key in touched {
+            self.world.modified.insert(*key);
+            for sy in 0..self.world.layout().sections() as i32 {
+                self.world.dirty_sections.insert((key.0, sy, key.1));
+            }
+        }
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.resend_biomes(&self.world, columns);
+        }
+    }
+    /// Set the biome cell holding `pos` (a 4x4x4 cell, `QuartPos`) to the biome named `biome`
+    /// (`minecraft:plains`), as `/fillbiome` does for one cell: the chunk is saved, re-meshed and
+    /// resent. False for an unknown biome, an unloaded or out-of-height position, or a cell that
+    /// already has it.
+    pub(in crate::game) fn set_biome_at(&mut self, pos: [i32; 3], biome: &str) -> bool {
+        let Some(target) = world_biomes!(self)
+            .list
+            .iter()
+            .position(|b| b.name == biome)
+        else {
+            return false;
+        };
+        let key = (pos[0] >> 4, pos[2] >> 4);
+        let Some(chunk) = self.world.chunks.get(&key) else {
+            return false;
+        };
+        if !self.world.shape.contains_y(pos[1])
+            || usize::from(chunk.biome(pos[0], pos[1], pos[2])) == target
+        {
+            return false;
+        }
+        let qy =
+            ((pos[1] - self.world.bottom_y()) >> 2).clamp(0, self.world.layout().height() / 4 - 1);
+        if let Some(chunk) = self.world.chunks.get_mut(&key) {
+            let chunk = std::sync::Arc::make_mut(chunk);
+            chunk.set_biome_cell((pos[0] & 15) >> 2, qy, (pos[2] & 15) >> 2, target as u16);
+        }
+        self.commit_biome_columns(&std::collections::HashSet::from([key]), &[key]);
+        true
+    }
+
     // ---- /worldborder -----------------------------------------------------------------------
 
     /// Every tick: the size change, the wall the player cannot pass and
@@ -299,7 +318,8 @@ impl Game<'_> {
         let now = horizon_client::lan::border::Sent::of(&self.border);
         if let Some(sent) = host.border_sent.replace(now) {
             for packet in sent.changes(&self.border) {
-                host.hub.broadcast(&packet);
+                // PlayerList$1: only the players of the border's own level.
+                host.hub.broadcast_level(&packet);
             }
         }
     }
@@ -680,7 +700,7 @@ impl Game<'_> {
                     if t != Target::Player {
                         continue;
                     }
-                    if let Some(rest) = self.give(d.clone()) {
+                    if let Some(rest) = self.add_stack_to_inventory(d.clone()) {
                         let p = self.source_position();
                         self.spawn_item(rest, [p[0], p[1] + 1.32, p[2]], [0.0; 3], 0);
                     }

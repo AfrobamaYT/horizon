@@ -656,6 +656,12 @@ impl Game<'_> {
 
     /// `Level.gameEvent`: tell the listeners within reach.
     pub(super) fn post_game_event(&mut self, event: &'static str, pos: [f64; 3], ctx: Context) {
+        #[cfg(test)]
+        super::item_use::interact_vibration_tests::record_event(
+            event,
+            pos,
+            ctx.source.and_then(|source| source.actor()),
+        );
         self.post_game_event_with(event, pos, |_| ctx);
     }
     /// [`Self::post_game_event`] with the context worked out only when some
@@ -2455,8 +2461,8 @@ mod tests {
                 0,
             );
             let id = game.dropped[0].id;
-            let entity = game.native_entity(id).unwrap();
-            assert!(game.native_entity_game_event(entity, "minecraft:step"));
+            let entity = game.entity(id).unwrap();
+            assert!(game.entity_game_event(entity, "minecraft:step"));
             assert!(
                 game.sculk_entity((1, 64, 1))
                     .unwrap()
@@ -2466,7 +2472,7 @@ mod tests {
                     .is_none()
             );
             game.dropped[0].stack = ItemStack::new("minecraft:stone", 1);
-            assert!(game.native_entity_game_event(entity, "minecraft:step"));
+            assert!(game.entity_game_event(entity, "minecraft:step"));
             let (info, _) = game
                 .sculk_entity((1, 64, 1))
                 .unwrap()

@@ -572,6 +572,25 @@ impl Game<'_> {
         self.ui.registries.permission = level;
         out
     }
+    /// Active enchantment registry snapshot for command codecs and completions.
+    /// Replace both ID views; keep the existing registry tags intact.
+    pub(super) fn sync_enchantment_registries(&mut self) {
+        let mut ids: Vec<String> = self
+            .active_enchantment_definitions()
+            .list
+            .iter()
+            .map(|entry| entry.id.to_string())
+            .collect();
+        ids.sort();
+        ids.dedup();
+        self.ui.registries.enchantments = ids.clone();
+        self.ui
+            .registries
+            .by_registry
+            .entry("minecraft:enchantment".into())
+            .or_default()
+            .ids = ids;
+    }
     /// Registry contents for argument parsing (built when a world opens).
     pub(super) fn build_registries(&mut self) {
         let permission = owner_permission(self.allow_commands());
@@ -703,6 +722,7 @@ impl Game<'_> {
             .filter(|(_, m)| m.show)
             .map(|(k, _)| k.clone())
             .collect();
+        self.sync_enchantment_registries();
     }
     /// The block the player is looking at, for coordinate suggestions, and
     /// the entity, for entity arguments (ClientSuggestionProvider).
@@ -738,10 +758,10 @@ impl Game<'_> {
             .as_ref()
             .filter(|d| !command || d.command)
             .map(|d| d.text.clone());
-        self.open_chat(draft.as_deref().unwrap_or(prefix));
+        self.begin_chat_screen(draft.as_deref().unwrap_or(prefix));
         self.ui.chat_draft_shown = draft.is_some() && self.ui.chat_screen.is_some();
     }
-    pub(super) fn open_chat(&mut self, initial: &str) {
+    pub(super) fn begin_chat_screen(&mut self, initial: &str) {
         if self.player.is_none() {
             return;
         }
@@ -854,11 +874,11 @@ impl Game<'_> {
                     .map_or_else(String::new, |s| s.value().to_owned());
                 self.close_chat(ChatExit::Interrupted);
                 if !text.is_empty() {
-                    self.open_chat(&text);
+                    self.begin_chat_screen(&text);
                 }
             }
         } else if self.sleeping.is_some() && self.screen == Screen::Playing {
-            self.open_chat("");
+            self.begin_chat_screen("");
             self.ui.in_bed_chat = self.screen == Screen::Chat;
         }
     }
@@ -1412,14 +1432,14 @@ impl Game<'_> {
             Text::translate("gui.entity_tooltip.type", &[kind]),
             u32::MAX,
         ));
-        if let Some(uuid) = entity.get("uuid").and_then(Self::entity_uuid) {
+        if let Some(uuid) = entity.get("uuid").and_then(Self::hover_event_entity_uuid) {
             lines.push((Text::literal(uuid), u32::MAX));
         }
         lines
     }
     /// The UUID of a ShowEntity event: its string, or the int array
     /// `UUIDUtil.CODEC` writes (most significant word first).
-    fn entity_uuid(v: &serde_json::Value) -> Option<String> {
+    fn hover_event_entity_uuid(v: &serde_json::Value) -> Option<String> {
         if let Some(s) = v.as_str() {
             return Some(s.to_owned());
         }
@@ -1624,6 +1644,7 @@ impl Game<'_> {
                 &self.level.enabled_features,
             ),
         ));
+        self.restore_native_commands();
         self.ui.clock = WorldClock::default();
         self.ui.command_clocks.clear();
         // PrimaryLevelData: the difficulty comes back from level.dat's difficulty_settings.
@@ -2340,5 +2361,146 @@ mod tests {
             |from: [f32; 4], button| focus_step_strict(from, button, &rects).map(|i| targets[i]);
         assert_eq!(step(field.rect, Button::DPadUp), Some(bed));
         assert_eq!(step(bed.rect, Button::DPadDown), Some(field));
+    }
+}
+
+#[cfg(test)]
+mod enchantment_snapshot_tests {
+    use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn synchronized_definitions_refresh_existing_enchantment_views() {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+
+        let dir =
+            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap()).join("h024-model");
+        let pack = dir.join("datapacks/model");
+        let tags = pack.join("data/h024/tags/enchantment");
+        std::fs::create_dir_all(&tags).unwrap();
+        std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+        std::fs::write(tags.join("empty.json"), r#"{"values":[]}"#).unwrap();
+        std::fs::write(
+            dir.join("datapacks.json"),
+            r#"{"enabled":["file/model"],"disabled":[]}"#,
+        )
+        .unwrap();
+        game.world_root = dir;
+        let stack = game.reload_datapacks(false, &[]).unwrap();
+        let root = game.options.resources.clone();
+        game.world_tables = game
+            .build_world_tables(&stack, false, &root, game.mods.data_switched)
+            .unwrap()
+            .0;
+        assert!(
+            game.world_tables.is_some(),
+            "the real active table container must be available"
+        );
+        let base = game.stations().enchantments.clone();
+        assert!(base.get("minecraft:sharpness").is_some());
+        // Same definition independently admitted by fresh Java. This is controlled
+        // synchronized model input, NOT a world-pack or packet-delivery claim.
+        let definition = serde_json::json!({"description":"H024 audit","supported_items":"minecraft:diamond_sword",
+            "weight":1,"max_level":1,"min_cost":{"base":1,"per_level_above_first":0},
+            "max_cost":{"base":1,"per_level_above_first":0},"anvil_cost":1,"slots":["mainhand"],"effects":{}});
+        let synced = std::sync::Arc::new(base.with_entries([("h024:audit", &definition)]).unwrap());
+        game.world_tables.as_mut().unwrap().stations.enchantments = synced.clone();
+        game.world_tables.as_mut().unwrap().items.enchantments = synced;
+        assert!(
+            game.active_enchantment_definitions()
+                .get("h024:audit")
+                .is_some(),
+            "actual authority adopts the definition first"
+        );
+        let tags = vec!["h024:retained_tag".to_owned()];
+        game.ui
+            .registries
+            .by_registry
+            .entry("minecraft:enchantment".into())
+            .or_default()
+            .tags = tags.clone();
+        let item_ids = game.ui.registries.ids("minecraft:item").to_vec();
+        let effects = game.ui.registries.effects.clone();
+        game.sync_function_registries(&stack);
+        for phase in [0, 1] {
+            if phase == 1 {
+                game.build_registries();
+            }
+            let reg = &game.ui.registries;
+            assert!(
+                reg.ids("minecraft:enchantment")
+                    .contains(&"h024:audit".to_owned()),
+                "active custom ID reaches actual Game sync/build snapshot"
+            );
+            assert!(
+                reg.ids("minecraft:enchantment")
+                    .contains(&"minecraft:sharpness".to_owned())
+            );
+            assert!(
+                !reg.ids("minecraft:enchantment")
+                    .contains(&"h024:missing".to_owned())
+            );
+            assert_eq!(
+                reg.ids("minecraft:enchantment"),
+                reg.enchantments.as_slice()
+            );
+            assert_eq!(reg.by_registry["minecraft:enchantment"].tags, tags);
+            assert_eq!(reg.ids("minecraft:item"), item_ids);
+            assert_eq!(reg.effects, effects);
+        }
+        game.world_tables.as_mut().unwrap().stations.enchantments = base.clone();
+        game.world_tables.as_mut().unwrap().items.enchantments = base;
+        assert!(
+            game.active_enchantment_definitions()
+                .get("h024:audit")
+                .is_none()
+        );
+        game.sync_function_registries(&stack);
+        assert!(
+            !game
+                .ui
+                .registries
+                .ids("minecraft:enchantment")
+                .contains(&"h024:audit".to_owned()),
+            "refresh replaces rather than accumulating stale IDs"
+        );
+        assert_eq!(
+            game.ui.registries.ids("minecraft:enchantment"),
+            game.ui.registries.enchantments.as_slice()
+        );
+        assert_eq!(
+            game.ui.registries.by_registry["minecraft:enchantment"].tags,
+            tags
+        );
     }
 }

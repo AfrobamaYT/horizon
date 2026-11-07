@@ -94,3 +94,7 @@ optional server-side persistence, player-respawn option and `sync` with a `Strea
 `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its holder-aware supplier,
 custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `AttachmentSyncHandler` partial updates or a wire codec apart from the disk codec.
+
+The API owns these public names. Their engine-independent storage and query index
+live in `horizon-mod-runtime`, which depends only on the shared vocabulary in
+`horizon-core`; world and game storage use the same implementation.

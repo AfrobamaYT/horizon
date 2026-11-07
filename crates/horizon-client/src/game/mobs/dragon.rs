@@ -2705,15 +2705,17 @@ impl Game<'_> {
     pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
         let d = self.dragon.as_ref().filter(|d| d.alive())?;
         let p = d.position;
+        let bounds = Aabb::new(
+            Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+            Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+        );
         Some((
             d.id,
             horizon_client::mobs::TargetInfo {
                 position: p,
                 eye_y: p.y + 6.8,
-                bounds: Aabb::new(
-                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
-                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
-                ),
+                bounds,
+                hitbox: bounds,
                 alive: true,
                 can_be_seen_as_enemy: true,
                 is_player: false,
@@ -3270,16 +3272,33 @@ impl Game<'_> {
     /// `BossHealthOverlay.extractRenderState`: whatever `publish_boss_bars`
     /// (or a server's packets) put on this client's overlay.
     pub(super) fn draw_boss_bars(&self, batch: &mut HudBatch) {
-        let bars = self
-            .boss_overlay
-            .bars(horizon_client::boss_overlay::now_millis());
-        let draws = hud_overlays::boss_overlay(
-            batch.width as i32,
-            batch.height as i32,
-            &bars,
-            &self.gui.atlas.font,
-        );
+        let draws = self.boss_bar_draws(batch.width as i32, batch.height as i32);
         hud_layout::paint(batch, &self.gui.atlas, &draws);
+    }
+    /// The boss bars' draws on a `w` x `h` GUI.
+    pub(super) fn boss_bar_draws(&self, w: i32, h: i32) -> Vec<hud_layout::GuiDraw> {
+        let now = horizon_client::boss_overlay::now_millis();
+        let bars = self.boss_overlay.bars(now);
+        // NeoForge's `CustomizeGuiOverlayEvent.BossEventProgress`, asked per
+        // bar only while a mod listens.
+        let customized = mod_api::__private::listened(mod_api::HookId::CustomizeBossEventProgress);
+        hud_overlays::boss_overlay(w, h, &bars, &self.gui.atlas.font, |index, at| {
+            let Some(bar) = customized
+                .then(|| self.boss_overlay.mod_bar(index, now))
+                .flatten()
+            else {
+                return true;
+            };
+            let mut cancel = false;
+            self.native_customize_boss_event_progress(
+                &bar,
+                &mut at.x,
+                &mut at.y,
+                &mut at.increment,
+                &mut cancel,
+            );
+            !cancel
+        })
     }
     /// The dragon fight's bar for a player at `at`
     /// (`EnderDragonFight.dragonEvent`, visible while the fight is not won

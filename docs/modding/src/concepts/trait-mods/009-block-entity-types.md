@@ -33,7 +33,8 @@ restart. Use a type ID, not a block ID (`minecraft:shulker_box`, not `minecraft:
 
 `block_entity.replace_data(host, data)` replaces its saved payload, clearing omitted fields while retaining
 identity and position. Like `merge_data`, it loads transactionally and synchronizes the change; it returns
-false for a missing or stale block entity, data the entity cannot load, or an unchanged result.
+`Err(BlockEntityError::Stale)` for an invalidated handle, or `Ok(false)` for data the entity cannot
+load or an unchanged result.
 Lookup keys may answer capabilities for vanilla and native types. `block_entity_part` accepts only
 native types and returns `BlockEntityPartError::VanillaType` immediately for a vanilla key. Native
 Parts are expanded after every mod has registered, so a Part can target a type declared later.

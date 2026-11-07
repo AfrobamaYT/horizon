@@ -15,7 +15,7 @@ use std::{
     },
 };
 
-use horizon_world::attachments::{
+use horizon_mod_runtime::attachments::{
     ATTACHMENTS_KEY, AttachmentError, Attachments, Holder, attachment_compound,
     observer::AttachmentObserver,
 };
@@ -282,7 +282,7 @@ impl crate::light::LightWorld for ChunkMap {
 mod tests {
     use super::*;
     use horizon_core::nbt::Tag;
-    use horizon_world::attachments::{
+    use horizon_mod_runtime::attachments::{
         AttachmentCodec, AttachmentType, index::AttachmentIndex,
         observer::IndexedAttachmentObserver,
     };
@@ -320,7 +320,7 @@ mod tests {
         )));
         calls
     }
-    fn key() -> horizon_world::attachments::index::AttachmentKey {
+    fn key() -> horizon_mod_runtime::attachments::index::AttachmentKey {
         ("chunk_test".into(), "value".into())
     }
     fn saved_chunk() -> Arc<Chunk> {

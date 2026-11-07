@@ -585,7 +585,7 @@ pub(super) fn host(
         }
         code.push_str("}\n");
     }
-    code.push_str(&flat_imports(types, methods, wit_text)?);
+    code.push_str(&store_imports(types, methods, wit_text)?);
     // Proxies: the mod's traits, each method calling its export.
     for owner in owners.iter().filter(|o| exports().contains(o)) {
         let iface = bound_ident(&interface(owner));
@@ -761,7 +761,7 @@ pub(super) fn host(
             };
             writeln!(
                 calls,
-                "pub(super) fn call_{name}(&self, store: &mut wasmtime::Store<super::State>, {}) -> wasmtime::Result<{ret}> {{ let r = self.{name}.call(&mut *store, {})?; {unwrap} }}",
+                "pub(super) fn call_{name}(&self, store: &mut impl wasmtime::AsContextMut<Data = super::State>, {}) -> wasmtime::Result<{ret}> {{ let r = self.{name}.call(&mut *store, {})?; {unwrap} }}",
                 typed.join(", "),
                 tuple(&args)
             )
@@ -809,6 +809,20 @@ fn host_import(
     receiver: &str,
     held: bool,
 ) -> Result<String, String> {
+    let (params, ret, body) = host_import_body(types, method, receiver, held)?;
+    Ok(format!(
+        "#[allow(unused_variables, unused_mut, clippy::all)] fn {}(&mut self, {}) -> wasmtime::Result<{ret}> {{ {body} }}",
+        bound_ident(&wit_ident(&method.name)),
+        params.join(", ")
+    ))
+}
+
+fn host_import_body(
+    types: &Types<'_>,
+    method: &Method,
+    receiver: &str,
+    held: bool,
+) -> Result<(Vec<String>, String, String), String> {
     let sig = signature(types, method)?;
     let object = |name: &str, mutable: bool| {
         format!(
@@ -848,23 +862,16 @@ fn host_import(
         }
     }
     let result = results(types, method, &sig, "r", &mut_locals);
-    let mut code = String::new();
-    writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}(&mut self, {}) -> wasmtime::Result<{}> {{ {} let r = <_ as {}>::{}({receiver}, {}); Ok({result}) }}",
-                bound_ident(&wit_ident(&method.name)),
-                params.join(", "),
-                results_type(types, method, &sig, &mut_locals),
-                out,
-                trait_path(method.via.as_deref().unwrap_or(method.owner)),
-                method.name,
-                call_args.join(", ")
-            )
-            .unwrap();
-    Ok(code)
+    let body = format!(
+        "{out} let r = <_ as {}>::{}({receiver}, {}); Ok({result})",
+        trait_path(method.via.as_deref().unwrap_or(method.owner)),
+        method.name,
+        call_args.join(", ")
+    );
+    Ok((params, results_type(types, method, &sig, &mut_locals), body))
 }
 
-fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Result<String, String> {
+fn store_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Result<String, String> {
     let mut registrations = std::collections::BTreeMap::new();
     for method in methods.iter().filter(|m| {
         (!exports().contains(&m.owner) || super::held(m.owner)) && flat_method(types, m)
@@ -986,6 +993,54 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
             return Err(format!("duplicate flat-list import {key:?}"));
         }
     }
+    for method in methods.iter().filter(|m| {
+        (!exports().contains(&m.owner) || super::held(m.owner))
+            && !flat_method(types, m)
+            && m.params.iter().any(|(_, ty)| matches!(ty, Ty::Handler(name, _) if super::CALLBACKS.contains(&name.as_str())))
+    }) {
+        let held = exports().contains(&method.owner);
+        let receiver = if held {
+            format!(
+                "&*super::held::<dyn {}>(handler)?",
+                trait_path(method.owner)
+            )
+        } else {
+            format!(
+                "frame::{}{}()?",
+                method.owner.rsplit("::").next().unwrap().to_snake_case(),
+                if method.receiver == Some(true) {
+                    "_mut"
+                } else {
+                    ""
+                }
+            )
+        };
+        let (params, _, body) = host_import_body(types, method, &receiver, held)?;
+        let (names, wire_types): (Vec<_>, Vec<_>) =
+            params.iter().map(|p| p.split_once(": ").unwrap()).unzip();
+        let tuple = |items: Vec<&str>| {
+            if items.is_empty() {
+                "()".into()
+            } else {
+                format!("({},)", items.join(", "))
+            }
+        };
+        let result = if signature(types, method)?.results.is_empty() {
+            "()"
+        } else {
+            "(r,)"
+        };
+        let interface = if held {
+            format!("held-{}", interface(method.owner))
+        } else {
+            interface(method.owner)
+        };
+        registrations.insert((interface, wit_ident(&method.name)), crate::wasm_imports::Registration {
+            parameters: format!("{}: {}", tuple(names), tuple(wire_types)),
+            body: format!("super::with_callback_store(store, || {{ let r = (|| -> wasmtime::Result<_> {{ {body} }})()?; Ok({result}) }})"),
+            shadow: true,
+        });
+    }
     let mut resolve = wit_parser::Resolve::default();
     let package = resolve
         .push_str("mod-api.wit", wit_text)
@@ -1032,7 +1087,7 @@ fn flat_imports(types: &Types<'_>, methods: &[&Method], wit_text: &str) -> Resul
         ));
     }
     Ok(format!(
-        "pub(super) fn add_flat_lists(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> {{ {emitted} Ok(()) }}\n"
+        "pub(super) fn add_store_imports(linker: &mut wasmtime::component::Linker<super::State>) -> wasmtime::Result<()> {{ {emitted} Ok(()) }}\n"
     ))
 }
 

@@ -95,7 +95,7 @@ impl GuestList {
     pub fn attachments_mut(
         &mut self,
         conn: u32,
-    ) -> Option<&mut horizon_world::attachments::ResidentAttachments> {
+    ) -> Option<&mut horizon_mod_runtime::attachments::ResidentAttachments> {
         let index = self.connection_index(conn)?;
         Some(&mut self.rows[index].attachments)
     }
@@ -271,7 +271,7 @@ struct Edit<'a> {
     list: &'a mut GuestList,
     index: usize,
     before: (u32, u128, i32, bool),
-    registration: Option<horizon_world::attachments::AttachmentRegistration>,
+    registration: Option<horizon_mod_runtime::attachments::AttachmentRegistration>,
 }
 fn index_fields(guest: &Guest) -> (u32, u128, i32, bool) {
     (
@@ -329,8 +329,8 @@ mod tests {
             );
         }
     }
-    const VALUE: horizon_world::attachments::AttachmentType<i32> =
-        horizon_world::attachments::AttachmentType {
+    const VALUE: horizon_mod_runtime::attachments::AttachmentType<i32> =
+        horizon_mod_runtime::attachments::AttachmentType {
             namespace: "guest_test",
             name: "value",
             default: || 0,
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn canonical_attachment_retirement_does_not_wait_for_removed_records_or_clones() {
-        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use horizon_mod_runtime::attachments::{Holder, index::AttachmentIndex};
         use std::sync::{Arc, Mutex};
 
         for action in ["remove", "replace", "retain", "clear", "drop", "update"] {
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn displaced_updates_retire_retained_owners() {
-        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use horizon_mod_runtime::attachments::{Holder, index::AttachmentIndex};
         use std::sync::{Arc, Mutex};
 
         for action in ["replace", "swap", "capture", "connection", "unwind"] {
@@ -435,7 +435,7 @@ mod tests {
 
     #[test]
     fn a_save_take_moves_canonical_binding_and_destruction_retires_it() {
-        use horizon_world::attachments::{Holder, index::AttachmentIndex};
+        use horizon_mod_runtime::attachments::{Holder, index::AttachmentIndex};
         use std::sync::{Arc, Mutex};
 
         let index = Arc::new(Mutex::new(AttachmentIndex::default()));

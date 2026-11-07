@@ -9,7 +9,13 @@ fn items(input: Vec<Item>) -> Vec<Value> {
         .into_iter()
         .map(|item| {
             let span = item.span();
-            let mut value = json!({"start": span.start().line, "end": span.end().line});
+            let mut value = json!({
+                "start": span.start().line,
+                "end": span.end().line,
+                "import": matches!(&item, Item::Use(_)),
+                "module_declaration": matches!(&item, Item::Mod(m) if m.content.is_none()),
+                "generated_modules": matches!(&item, Item::Macro(m) if m.mac.path.is_ident("include") && m.mac.tokens.to_string().contains("parts_modules.rs")),
+            });
             let members = match &item {
                 Item::Trait(t) => Some(
                     t.items
@@ -52,6 +58,10 @@ fn main() -> Result<(), String> {
         .read_to_string(&mut source)
         .map_err(|e| e.to_string())?;
     let file = syn::parse_file(&source).map_err(|e| e.to_string())?;
-    println!("{}", json!(items(file.items)));
+    if std::env::args().any(|arg| arg == "--canonical") {
+        print!("{}", prettyplease::unparse(&file));
+    } else {
+        println!("{}", json!(items(file.items)));
+    }
     Ok(())
 }

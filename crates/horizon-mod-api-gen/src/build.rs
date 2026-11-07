@@ -29,8 +29,8 @@ pub fn generate(root: &Path, out_dir: &Path, target: Target) -> Result<(), Strin
         ],
         Target::Api => {
             fs::write(
-                out_dir.join(super::part_table::OUTPUT),
-                super::part_table::source(root)?,
+                out_dir.join(super::parts::OUTPUT),
+                super::parts::source(root)?,
             )
             .map_err(|e| e.to_string())?;
             for (name, code) in super::exports::sources(root)? {
@@ -95,11 +95,14 @@ pub(crate) fn native_hook_modules(root: &Path) -> Result<String, String> {
 pub(crate) fn game_host_modules(root: &Path) -> Result<String, String> {
     let dir = root.join("crates/horizon-client/src/game/host");
     let mut modules = String::new();
-    for stem in Catalog::modules(&dir)? {
-        syn::parse_str::<syn::Ident>(&stem).map_err(|e| e.to_string())?;
+    for stem in ["draw", "services"] {
         let path = fs::canonicalize(dir.join(format!("{stem}.rs"))).map_err(|e| e.to_string())?;
         modules.push_str(&format!("#[path = {path:?}] pub(crate) mod {stem};\n"));
     }
+    modules.push_str(&format!(
+        "mod generated {{\n{}\n}}\n",
+        host::game_forwarders(root)?
+    ));
     Ok(modules)
 }
 
@@ -155,7 +158,7 @@ pub(super) fn track(root: &Path) -> Result<(), String> {
     }
     directory(&root.join(super::catalog::DECLARATIONS), "rs", false)?;
     directory(&root.join(super::exports::DIRECTORY), "rs", false)?;
-    directory(&root.join(super::part_table::DIRECTORY), "rs", false)?;
+    directory(&root.join("crates/horizon-mod-api/src/parts"), "rs", false)?;
     directory(&root.join("crates/horizon-client/src/game"), "rs", true)?;
     println!(
         "cargo:rerun-if-changed={}",

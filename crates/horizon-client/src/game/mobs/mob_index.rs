@@ -41,7 +41,11 @@ impl MobIndex {
     }
 
     /// The mob with this id, as `mobs.iter_mut().find(|m| m.id == id)`.
-    pub(super) fn get_mut<'a>(&mut self, mobs: &'a mut [Mob], id: u32) -> Option<&'a mut Mob> {
+    pub(super) fn get_mut<'a>(
+        &mut self,
+        mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
+        id: u32,
+    ) -> Option<&'a mut Mob> {
         let i = self.find(mobs, id)?;
         Some(&mut mobs[i])
     }

@@ -297,11 +297,6 @@ impl Game<'_> {
         self.right = play.using.is_some() || self.using.is_some();
         // The guest's vehicle (Entity.vehicle) for its turn.
         let riding = std::mem::replace(&mut self.riding, g.vehicle);
-        // The guest's boarding cooldown for its turn; `guest_server_tick`
-        // counts it down once per tick (Entity.baseTick), not per turn.
-        let host_boarding = (self.boarding_cooldown, self.riding_at_tick);
-        self.boarding_cooldown = g.boarding_cooldown;
-        self.riding_at_tick = g.vehicle;
         // `Entity.isPassenger()` for that turn, from the same vehicle: the
         // guest's body keeps no swim (`Entity.updateSwimming` needs it false).
         // Taken from `g.vehicle` each turn, so boarding and getting out land.
@@ -443,7 +438,6 @@ impl Game<'_> {
             left,
             right,
             riding,
-            host_boarding,
             host_station,
             sleeping,
             sleep_timer,
@@ -561,7 +555,6 @@ impl Game<'_> {
             left,
             right,
             riding,
-            host_boarding,
             host_station,
             sleeping,
             sleep_timer,
@@ -772,14 +765,6 @@ impl Game<'_> {
             let mut teleport = None;
             g.attachments = std::mem::replace(&mut self.player_attachments, attachments);
             let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
-            // Entity.removePassenger: 60 ticks before it may board again.
-            let guest_boarding = crate::game::boarding::after_leaving(
-                self.boarding_cooldown,
-                g.vehicle,
-                guest_vehicle,
-            );
-            (self.boarding_cooldown, self.riding_at_tick) = host_boarding;
-            g.boarding_cooldown = guest_boarding;
             if guest_vehicle.is_none() {
                 g.vehicle_good = None;
             }

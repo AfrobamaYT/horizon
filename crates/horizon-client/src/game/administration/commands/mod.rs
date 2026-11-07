@@ -996,12 +996,13 @@ impl Game<'_> {
         .into_iter()
         .find(|t| self.level_holds(*t))
     }
-    /// Whether the level in place holds the entity a target names.
+    /// `ServerLevel.getEntity`: whether the level in place still holds the
+    /// entity a target names. Discard removes mobs from lookup immediately.
     fn level_holds(&self, t: Target) -> bool {
         match t {
             // A player is in no level of its own.
             Target::Player | Target::Guest(_) => true,
-            Target::Mob(id) => self.mobs.iter().any(|m| m.id == id),
+            Target::Mob(id) => self.mobs.iter().any(|m| m.id == id && !m.removed),
             Target::Item(id) => self.dropped.iter().any(|i| i.id == id),
             Target::Orb(id) => self.orbs.iter().any(|o| o.id == id),
             Target::Projectile(id) => self.creatures.projectiles.iter().any(|p| p.id == id),
@@ -1096,6 +1097,7 @@ impl Game<'_> {
 
     fn execute_command(&mut self, id: &str, ctx: &Context) -> R<i32> {
         match id {
+            "native_mod_command" => self.run_native_command(ctx.clone()),
             "help" => self.cmd_help(ctx),
             "gamemode" => self.cmd_gamemode(ctx),
             "defaultgamemode" => {
@@ -1475,7 +1477,7 @@ impl Game<'_> {
                 while remaining > 0 {
                     let size = remaining.min(max_stack);
                     remaining -= size;
-                    let left = g.give(ItemStack {
+                    let left = g.add_stack_to_inventory(ItemStack {
                         item: id.as_str().into(),
                         count: size as u32,
                         damage,
@@ -1713,12 +1715,14 @@ impl Game<'_> {
                 }
             }
             Target::Boat(id) => {
-                if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
-                    b.position = v;
-                    b.previous = v;
-                    if let Some(r) = rotation {
-                        Entity::set_rotation(b, r);
-                    }
+                if let Some(i) = self.boats.iter().position(|b| b.id == id) {
+                    self.boats.update(i, |b| {
+                        b.position = v;
+                        b.previous = v;
+                        if let Some(r) = rotation {
+                            Entity::set_rotation(b, r);
+                        }
+                    });
                 }
             }
             Target::Cart(id) => {

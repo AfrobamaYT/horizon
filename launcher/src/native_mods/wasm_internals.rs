@@ -46,12 +46,7 @@ pub(super) fn installed(home: Option<&Path>) -> Result<Declarations, String> {
         }
         let paths = declared.entry(manifest.id.clone()).or_default();
         paths.extend(wasm.internals().iter().map(|i| i.path.clone()));
-        paths.extend(
-            wasm.points()
-                .iter()
-                .filter(|i| i.raw.is_some())
-                .filter_map(|i| i.target.clone()),
-        );
+        paths.extend(wasm.raw_injections().iter().map(|i| i.target.clone()));
     }
     Ok(declared)
 }

@@ -4,6 +4,7 @@ pub(super) enum MenuOpen {
     Opened,
     Cancelled,
     Refused,
+    Stale,
 }
 
 /// Per-guest state of the gameplay code that lives outside `Guest`.
@@ -132,7 +133,7 @@ pub(super) enum TurnRefused {
 /// The game's own state while a guest's is swapped in (`enter_guest`), and
 /// the guest's records that live outside `Guest`.
 pub(super) struct GuestSwap {
-    attachments: horizon_world::attachments::ResidentAttachments,
+    attachments: horizon_mod_runtime::attachments::ResidentAttachments,
     conn: u32,
     i: usize,
     play: GuestPlay,
@@ -183,7 +184,6 @@ pub(super) struct GuestSwap {
     left: bool,
     right: bool,
     riding: Option<u32>,
-    host_boarding: (i32, Option<u32>),
     host_station: Option<super::stations::Station>,
     sleeping: Option<[i32; 3]>,
     sleep_timer: u32,
@@ -880,7 +880,7 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             let chest = game
                 .pack
                 .assets
@@ -888,7 +888,7 @@ mod tests {
                 .default_state("minecraft:chest")
                 .unwrap();
             let pos = (0, 64, 0);
-            assert!(game.native_level_set_block(
+            assert!(game.level_set_block(
                 level,
                 [pos.0, pos.1, pos.2],
                 chest,
@@ -902,7 +902,8 @@ mod tests {
             // A block use starts before leaving the guest turn; its hand-off
             // must not start the same opener a second time.
             assert!(
-                game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                game.as_guest(12, |game| game
+                    .open_block_effect_menu([pos.0, pos.1, pos.2]))
                     .is_some()
             );
             assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_some());
@@ -924,7 +925,8 @@ mod tests {
                 vec![mod_api::ModEntry::new("stop_menu", Box::new(StopMenu))].into(),
                 || {
                     assert!(
-                        game.as_guest(12, |game| game.open_menu([pos.0, pos.1, pos.2]))
+                        game.as_guest(12, |game| game
+                            .open_block_effect_menu([pos.0, pos.1, pos.2]))
                             .is_some()
                     );
                     assert!(game.lan.as_ref().unwrap().hub.guests[0].menu.is_none());
@@ -961,13 +963,11 @@ mod tests {
                 .default_state("minecraft:shulker_box")
                 .unwrap();
             let at = [pos.0, pos.1, pos.2];
-            assert!(game.native_level_set_block(
-                level,
-                at,
-                shulker,
-                NativeBlockUpdateFlags::NEIGHBORS
-            ));
-            assert!(game.as_guest(12, |game| game.open_menu(at)).is_some());
+            assert!(game.level_set_block(level, at, shulker, NativeBlockUpdateFlags::NEIGHBORS));
+            assert!(
+                game.as_guest(12, |game| game.open_block_effect_menu(at))
+                    .is_some()
+            );
             assert_eq!(game.be_anims.shulkers[&at].open_count, 1);
             game.guest_close_all(12);
             assert_eq!(game.be_anims.shulkers[&at].open_count, 0);
@@ -989,14 +989,14 @@ mod tests {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
-            let level = game.native_level("minecraft:overworld").unwrap();
+            let level = game.level("minecraft:overworld").unwrap();
             let chest = game
                 .pack
                 .assets
                 .registry
                 .default_state("minecraft:chest")
                 .unwrap();
-            assert!(game.native_level_set_block(
+            assert!(game.level_set_block(
                 level,
                 [0, 64, 0],
                 chest,

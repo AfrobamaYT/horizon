@@ -12,13 +12,12 @@ impl Game<'_> {
         self.fire_camera_type_cycle(previous, next);
     }
     /// The window's camera type (`Options.getCameraType`).
-    pub(in crate::game) fn native_camera_type(&self) -> CameraType {
-        self.camera_type
+    pub(in crate::game) fn camera_type(&self) -> CameraType {
+        self.requested_camera_type.get().unwrap_or(self.camera_type)
     }
-    /// Sets the window's camera type (`Options.setCameraType`) as F5 does, without
-    /// cycling: a freelook mod switches to third person and back.
-    pub(in crate::game) fn native_set_camera_type(&mut self, camera_type: CameraType) {
-        self.set_camera_type(camera_type);
+    /// Queue the window's camera type without cycling, including from shared hooks.
+    pub(in crate::game) fn set_camera_type(&self, camera_type: CameraType) {
+        self.requested_camera_type.set(Some(camera_type));
     }
 }
 
@@ -33,8 +32,13 @@ mod camera_type_tests {
     struct NoFront(Arc<Mutex<Vec<(CameraType, CameraType)>>>);
     #[mod_api::__subscriptions]
     impl Hooks for NoFront {
-        fn camera_type_cycle(&self, _: &mut dyn ClientHost, event: &mut CameraTypeCycleEvent<'_>) {
+        fn camera_type_cycle(
+            &self,
+            host: &mut dyn ClientHost,
+            event: &mut CameraTypeCycleEvent<'_>,
+        ) {
             self.0.lock().unwrap().push((event.previous, *event.next));
+            host.set_camera_type(CameraType::ThirdPersonFront);
             if *event.next == CameraType::ThirdPersonFront {
                 *event.next = CameraType::FirstPerson;
             }
@@ -52,7 +56,7 @@ mod camera_type_tests {
             let mut seen = Vec::new();
             for _ in 0..3 {
                 game.cycle_camera();
-                seen.push(game.native_camera_type());
+                seen.push(game.camera_type());
             }
             use CameraType::*;
             assert_eq!(seen, [ThirdPersonBack, ThirdPersonFront, FirstPerson]);
@@ -68,15 +72,15 @@ mod camera_type_tests {
                 use CameraType::*;
                 game.options.execution_role = super::ExecutionRole::Client;
                 game.cycle_camera();
-                assert_eq!(game.native_camera_type(), ThirdPersonBack);
+                assert_eq!(game.camera_type(), ThirdPersonBack);
                 game.cycle_camera();
-                assert_eq!(
-                    game.native_camera_type(),
-                    FirstPerson,
-                    "the front view is skipped"
-                );
-                game.native_set_camera_type(ThirdPersonFront);
-                assert_eq!(game.native_camera_type(), ThirdPersonFront);
+                assert_eq!(game.camera_type(), FirstPerson, "the front view is skipped");
+                game.set_camera_type(ThirdPersonFront);
+                assert_eq!(game.camera_type(), ThirdPersonFront);
+                assert_eq!(game.camera_type, FirstPerson, "the request is pending");
+                assert_eq!(heard.lock().unwrap().len(), 2, "setting is not a cycle");
+                game.cycle_camera();
+                assert_eq!(game.camera_type, FirstPerson, "F5's final choice wins");
             });
         });
         use CameraType::*;
@@ -84,9 +88,68 @@ mod camera_type_tests {
             *heard.lock().unwrap(),
             [
                 (FirstPerson, ThirdPersonBack),
-                (ThirdPersonBack, ThirdPersonFront)
+                (ThirdPersonBack, ThirdPersonFront),
+                (ThirdPersonFront, FirstPerson)
             ],
-            "setting the type is not a cycle"
+            "a prior request changes the next F5's previous type without an extra cycle"
         );
+    }
+
+    #[derive(Default)]
+    struct Calls {
+        poses: std::sync::atomic::AtomicUsize,
+        cycles: std::sync::atomic::AtomicUsize,
+    }
+    struct SharedCamera(Arc<Calls>);
+    #[mod_api::__subscriptions]
+    impl Hooks for SharedCamera {
+        fn camera_pose(&self, host: &dyn ClientHost, event: &mut mod_api::CameraPoseEvent<'_>) {
+            self.0
+                .poses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            host.set_camera_type(CameraType::ThirdPersonFront);
+            assert_eq!(host.camera_type(), CameraType::ThirdPersonFront);
+            host.set_camera_type(CameraType::ThirdPersonBack);
+            assert_eq!(host.camera_type(), CameraType::ThirdPersonBack);
+            event.yaw += 15.0;
+        }
+        fn camera_type_cycle(&self, _: &mut dyn ClientHost, _: &mut CameraTypeCycleEvent<'_>) {
+            self.0
+                .cycles
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn shared_camera_pose_requests_apply_before_frame_consumers() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        use std::sync::atomic::Ordering;
+
+        let calls = Arc::new(Calls::default());
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "shared-camera",
+            Box::new(SharedCamera(Arc::clone(&calls))),
+        )]
+        .into();
+        with_mods(mods, || {
+            crate::game::native_entity_refs::tests::with_client_game(|game| {
+                game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+                game.title = None;
+                game.spectated_post_effect = Some("minecraft:creeper");
+                let vanilla = game.camera_view(1.0).unwrap();
+                assert_eq!(vanilla.0.z, 0.0);
+                let posed = game.native_camera_pose_now(1.0, vanilla);
+                assert_eq!(game.camera_type, CameraType::ThirdPersonBack);
+                assert_eq!(game.camera_type(), CameraType::ThirdPersonBack);
+                assert_eq!(game.spectated_post_effect, None);
+                assert!((posed.0.z + 4.0).abs() < 1e-6, "refresh unchanged position");
+                assert_eq!(posed.1, 15.0, "preserve the explicit yaw override");
+                assert_eq!(posed.2, vanilla.2);
+            });
+        });
+        assert_eq!(calls.poses.load(Ordering::Relaxed), 1);
+        assert_eq!(calls.cycles.load(Ordering::Relaxed), 0);
     }
 }
