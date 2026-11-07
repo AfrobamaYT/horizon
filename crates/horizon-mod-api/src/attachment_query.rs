@@ -113,6 +113,7 @@ pub struct AttachmentRowForm {
 }
 impl AttachmentWriteToken {
     /// Check the current dimension's residency before the ordinary write path.
+    // hidden: the owning engine validates tokens; mods use the row's set/remove methods.
     #[doc(hidden)]
     pub fn validate(
         &self,
