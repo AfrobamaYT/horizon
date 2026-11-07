@@ -1263,6 +1263,9 @@ impl Game<'_> {
     pub(super) fn tick_creature_entities(&mut self) -> Result<()> {
         // Its steps as spans for `horizon-report` (nothing is read while spans are off).
         let mut laps = horizon_client::spans::laps();
+        // `EntityEvent.Size` for the sizes that changed outside the mob ticks (spawns,
+        // commands, a player's interaction), before the ticks move by them.
+        self.native_mob_sizes();
         // LivingEntity.die runs when the killing blow lands: mobs killed
         // since the last tick (by the player, explosions...) die first.
         let killed: Vec<Mob> = self
@@ -1696,6 +1699,8 @@ impl Game<'_> {
         // The enderman teleports those hurts asked for (`Enderman.hurtServer`).
         self.settle_hurt_teleports()?;
         laps.lap("creature_outbox");
+        // And for the sizes the ticks changed (a pose, a baby grown, a scale).
+        self.native_mob_sizes();
         Ok(())
     }
     /// `LivingEntity.makePoofParticles` (entity event 60) about a mob's box.
