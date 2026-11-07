@@ -279,3 +279,46 @@ tick-time work, adapter, alias or gameplay change.
 
 [loot-player-death-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-entity-events-v1/src/main/java/net/fabricmc/fabric/mixin/entity/event/ServerPlayerMixin.java
 [loot-equipment-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-lifecycle-events-v1/src/main/java/net/fabricmc/fabric/mixin/event/lifecycle/LivingEntityMixin.java
+
+## Event counterparts: item models, tints and tooltips (#1014)
+
+Checked against the same Fabric API 26.3 revision,
+`2065040b236a0d5ac011bd6a45625dc49579b222`. Fabric line numbers below are at that
+revision; Horizon code is cited by function name, under `crates/horizon-client/src/`
+unless the file says otherwise.
+
+Scope: `item_tooltip.rs` and the seven item model and item tint hooks —
+`item_model_property`, `item_model_range_property`, `item_model_select_property`,
+`item_tint_source`, `register_item_tint_sources`, `register_select_item_model_property`
+and `register_range_select_item_model_property`. `register_block_tint_sources` is a
+block tint hook and is not part of this review. All eight hooks record a gap; no keys
+are added.
+
+In the pinned tree, `fabric-item-api-v1`'s client API declares one event that covers
+this area, `ItemTooltipCallback.EVENT`; `fabric-rendering-v1`'s client API has no item
+model or item tint event, and its only tint API is the static
+`BlockColorRegistry.register` for blocks. The item model and tint hooks therefore
+share one reason: Fabric API 26.3 declares no event for the moment they describe.
+
+| Horizon hook | Fabric event considered / status | Evidence and porting boundary |
+|---|---|---|
+| `item_tooltip` | **Gap:** `ItemTooltipCallback.EVENT` | [Item tooltip API][item-tooltip-api] lines 29–46 declare an array-backed event whose javadoc says it fires "after the game has appended all base tooltip lines to the list", passing the stack, its `Item.TooltipContext`, its `TooltipFlag` and the mutable line list; [item tooltip mixin][item-tooltip-mixin] line 38 injects at `ItemStack.getTooltipLines` `RETURN` ordinal 1, the return that has lines (the first return is the no-tooltip one). Horizon's `Game::stack_tooltip_lines` (`game/blocks/stations.rs`) is the port of that method and calls `Game::native_item_tooltip` at its end when its `shown` flag is set, which is the same "a tooltip the stack does not hide" guard; the client side, point after the base lines, and non-cancelling mutable-list behaviour align. Full argument parity is not proven: Fabric passes `Item.TooltipContext`, whereas Horizon passes local player ids, `TooltipDisplay` and advanced/creative flags, with no explicit tooltip-context argument. `ClientHost` cannot be assumed to supply every context operation. The firing coverage does not: Fabric's injection fires at every qualifying `getTooltipLines` call, and vanilla calls that method outside tooltip drawing — its `SessionSearchTrees` builds the search index from every stack's tooltip lines, which the repo's own oracles record as "SessionSearchTrees.getTooltipLines" (`VanillaCreativeTabsExporter.tooltipLines`) and "SessionSearchTrees.updateRecipes" (`VanillaRecipeBookViewOracle`, whose search tree calls `getTooltipLines`). Horizon's hook fires only where the tooltip is drawn (`Game::draw_stack_tooltip_with`, `Game::stack_tooltip`), never for a crossbow's loaded projectile, and Horizon's search reads export strings instead. A Fabric listener's added lines therefore reach the search index and a Horizon listener's do not, so the moments are not the same. No key. |
+| `item_model_property` | **Gap:** none; NeoForge counterpart `RegisterConditionalItemModelPropertyEvent` | No Fabric API 26.3 event names an item model property: `fabric-item-api-v1`'s client API declares only `ItemTooltipCallback`, and `fabric-rendering-v1`'s client API has no model property event. The nearest tint API is the static [block color registry][block-color-registry] lines 47–59, registration methods for blocks, not an event and not item models. Horizon's `Env::item_model_property` (`game/interface/item_draw.rs`, the `ItemEnv` implementation the item model resolver in `horizon-assets` asks) answers a namespaced `minecraft:condition` property each time the model picks a branch, with the stack being resolved. No event, so no key. |
+| `item_model_range_property` | **Gap:** none; NeoForge counterpart `RegisterRangeSelectItemModelPropertyEvent` | The same search applies: no Fabric API 26.3 event covers a model property, and the static [block color registry][block-color-registry] is the only tint registration in `fabric-rendering-v1`'s client API. Horizon's `Env::item_model_range_property` answers the number for a namespaced `minecraft:range_dispatch` each time it picks a branch. No key. |
+| `item_model_select_property` | **Gap:** none; NeoForge counterpart `RegisterSelectItemModelPropertyEvent` | The same search applies: no Fabric API 26.3 event covers a model property. Horizon's `Env::item_model_select_property` answers the string for a namespaced `minecraft:select` each time it picks a case. No key. |
+| `item_tint_source` | **Gap:** none; NeoForge counterpart `RegisterColorHandlersEvent.ItemTintSources` | Fabric has no event for an item tint source; [block color registry][block-color-registry] lines 47–59 register block `BlockTintSource`s and factories at init, a static call, and nothing in `fabric-item-api-v1` or `fabric-rendering-v1` takes an item `tints` entry. Horizon's `Env::item_tint_source` answers the ARGB colour of one `tints` entry per stack each time the item resolves — in hand, in a screen and on the ground — and gets the entry's JSON object. Different mechanism, moment and arguments; no key. |
+| `register_item_tint_sources` | **Gap:** none; NeoForge counterpart `RegisterColorHandlersEvent.ItemTintSources` | Fabric's nearest call is the same static block registration, which takes the tint layers and the blocks, not a list of item tint source ids collected once before resources load. Horizon's `register_item_tint_sources` (`game/modding/mods/mod.rs`) collects the ids through `Game::native_register_item_tint_sources` at start, before resources load; a `minecraft:model`'s `tints` entry then colours through `item_tint_source`. No event, so no key. |
+| `register_select_item_model_property` | **Gap:** none; NeoForge counterpart `RegisterSelectItemModelPropertyEvent` | Fabric API 26.3 declares no event for registering item model properties, and its item model surface has no such registry; the only registration API in reach is the static block tint registry above. Horizon's `register_select_item_model_properties` (`game/modding/mods/mod.rs`) collects the ids through `Game::native_register_select_item_model_property` once at start, before resources load. No key. |
+| `register_range_select_item_model_property` | **Gap:** none; NeoForge counterpart `RegisterRangeSelectItemModelPropertyEvent` | As above: no Fabric API 26.3 event and no item model property registry. Horizon's `register_range_select_item_model_properties` (`game/modding/mods/mod.rs`) collects the ids through `Game::native_register_range_select_item_model_property` once at start, before resources load. No key. |
+
+The `item_tooltip` hook remains a gap: the search callers recorded in the repo's
+oracles demonstrate different firing coverage, and full tooltip-context argument
+parity is not proven. A key requires evidence for all four parts of the contract;
+matching the drawing path alone is insufficient.
+
+The change is metadata only: no dispatch, tick-time work, adapter, alias or gameplay
+change.
+
+[item-tooltip-api]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/api/client/item/v1/ItemTooltipCallback.java
+[item-tooltip-mixin]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-item-api-v1/src/client/java/net/fabricmc/fabric/mixin/item/client/ItemStackMixin.java
+[block-color-registry]: https://github.com/FabricMC/fabric/blob/2065040b236a0d5ac011bd6a45625dc49579b222/fabric-rendering-v1/src/client/java/net/fabricmc/fabric/api/client/rendering/v1/BlockColorRegistry.java

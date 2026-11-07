@@ -106,6 +106,7 @@ use {
 };
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
+pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;
