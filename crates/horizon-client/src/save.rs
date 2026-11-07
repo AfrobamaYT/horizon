@@ -132,12 +132,28 @@ fn compound_or_empty(tag: Option<Tag>) -> Tag {
     }
 }
 
-/// `dimensions/<namespace>/<path>` inside a world folder.
+/// `dimensions/<namespace>/<path>` inside a world folder. An id that is no safe folder name
+/// (`test:../minecraft/overworld`, an absolute path) never leaves the world: it gets a folder
+/// of its own under `dimensions/%invalid/`, named by its bytes, which no valid id can reach.
 pub fn dimension_dir(world: &Path, dimension: &str) -> PathBuf {
-    let (namespace, path) = dimension
-        .split_once(':')
-        .unwrap_or(("minecraft", dimension));
-    world.join("dimensions").join(namespace).join(path)
+    let id = if dimension.contains(':') {
+        dimension.to_owned()
+    } else {
+        format!("minecraft:{dimension}")
+    };
+    let dimensions = world.join("dimensions");
+    match id.split_once(':') {
+        Some((namespace, path))
+            if horizon_world::worldgen::overrides::valid_level_namespace(namespace)
+                && horizon_world::worldgen::overrides::valid_level_path(path) =>
+        {
+            dimensions.join(namespace).join(path)
+        }
+        _ => {
+            let hex: String = id.bytes().map(|b| format!("{b:02x}")).collect();
+            dimensions.join("%invalid").join(hex)
+        }
+    }
 }
 /// `DirectoryLock`: `session.lock` holds "\u{2603}" (UTF-16BE) under an exclusive
 /// file lock for as long as the world is open, so two instances cannot share it.
@@ -8390,6 +8406,41 @@ mod tests {
         );
         assert!(!file.exists());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A level id never names a folder outside the world's `dimensions` folder, and no two ids
+    /// share a folder.
+    #[test]
+    fn a_level_folder_stays_inside_the_world() {
+        let world = Path::new("/w");
+        assert_eq!(
+            dimension_dir(world, "minecraft:the_nether"),
+            Path::new("/w/dimensions/minecraft/the_nether")
+        );
+        assert_eq!(
+            dimension_dir(world, "test:a/b"),
+            Path::new("/w/dimensions/test/a/b")
+        );
+        let mut seen = std::collections::HashSet::new();
+        for id in [
+            "test:../minecraft/overworld",
+            "test:a/../../b",
+            "test:/abs",
+            "..:x",
+            "test:a//b",
+            "test:Pocket",
+        ] {
+            let dir = dimension_dir(world, id);
+            assert!(
+                dir.starts_with("/w/dimensions/%invalid")
+                    && dir
+                        .components()
+                        .all(|c| !matches!(c, std::path::Component::ParentDir)),
+                "{id}: {}",
+                dir.display()
+            );
+            assert!(seen.insert(dir), "{id} shares a folder");
+        }
     }
 
     #[test]
