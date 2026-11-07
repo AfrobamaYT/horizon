@@ -198,6 +198,7 @@ fn wasm(mode: &str, count: i64) -> (Game, String) {
             unsafe {
                 callback(
                     mod_points::PointId::HandleChatInput as usize,
+                    index,
                     (&raw mut game).cast(),
                     (&raw mut record).cast(),
                 );

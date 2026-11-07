@@ -283,7 +283,6 @@ unsafe fn fire(place: usize, index: u32, receiver: *mut (), record: *mut ()) {
         });
         if answer.is_none() && listener.exports.stopped() {
             mod_points::stop(id);
-            return;
         }
     }
 }
