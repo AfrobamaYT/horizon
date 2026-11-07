@@ -940,6 +940,57 @@ fn prepare_stack_boundary_tests() {
         "minecraft:diamond_sword",
         "minecraft:netherite_chestplate",
         "minecraft:diamond_chestplate",
+        "minecraft:potion",
     ])
     .unwrap();
+}
+
+#[cfg(test)]
+mod brewed_boundary_tests {
+    use super::*;
+    struct NoHost;
+    impl mod_api::Host for NoHost {}
+    mod_api::impl_host_areas!(NoHost);
+    impl mod_api::ServerHost for NoHost {}
+    mod_api::impl_server_host_areas!(NoHost);
+    struct Watch(std::sync::Arc<std::sync::Mutex<Vec<(u128, i32, String, u32)>>>);
+    #[mod_api::__subscriptions]
+    impl mod_api::Hooks for Watch {
+        fn player_brewed_potion(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::PlayerBrewedPotionEvent<'_>,
+        ) {
+            self.0.lock().unwrap().push((
+                event.player,
+                event.player_entity_id,
+                mod_api::__private::item_key_id(event.stack.item())
+                    .unwrap()
+                    .to_owned(),
+                event.stack.count(),
+            ));
+        }
+    }
+    #[test]
+    fn brewed_event_reports_player_and_converted_stack() {
+        prepare_stack_boundary_tests();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "watch",
+                Box::new(Watch(seen.clone())),
+            )]
+            .into(),
+            || {
+                let stack = EngineStack::new("minecraft:potion", 1)
+                    .try_into_api()
+                    .unwrap();
+                mod_api::dispatch_player_brewed_potion(&mut NoHost, 7, 41, &stack);
+            },
+        );
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [(7, 41, "minecraft:potion".to_owned(), 1)]
+        );
+    }
 }
