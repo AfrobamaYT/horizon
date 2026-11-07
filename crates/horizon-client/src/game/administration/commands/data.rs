@@ -530,7 +530,9 @@ impl Game<'_> {
                     self.state_from_nbt(t).is_some()
                 });
                 self.roll_cart_loot(&mut cart, &tag);
-                self.carts[i] = cart;
+                if !self.store_cart_back(i, cart) {
+                    return Err(stale());
+                }
                 set_key(&mut tag, "UUID", Tag::IntArray(uuid.to_vec()));
             }
             _ => return Err(stale()),
