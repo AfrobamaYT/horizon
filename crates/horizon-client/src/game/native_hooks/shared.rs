@@ -1568,16 +1568,18 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
             mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
-            HitLevel(level.reborrow()).native_fall_on(super::fire::FallOnCall {
-                dimension,
-                entity: c.entity,
-                kind: c.kind,
-                state: c.state,
-                pos: c.position,
-                distance,
-                damage,
-                writes,
-            });
+            HitLevel(level.reborrow()).native_fall_on(
+                crate::game::native_hooks::fire::FallOnCall {
+                    dimension,
+                    entity: c.entity,
+                    kind: c.kind,
+                    state: c.state,
+                    pos: c.position,
+                    distance,
+                    damage,
+                    writes,
+                },
+            );
         },
         bounce_on: |dimension, level, c, fall_distance, movement| {
             let mut answer = [movement.x, movement.y, movement.z];
