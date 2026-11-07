@@ -22,9 +22,11 @@ use horizon_core::{
     jmath,
     random::RandomSource,
 };
+use horizon_core::{position::BlockPos, random::LegacyRandom};
 use horizon_items::items::ConsumeEffect;
 use horizon_world::registry::BlockStateId;
-use horizon_world::teleport_consume::TeleportConsume;
+use horizon_world::teleport_consume::TeleportConsumeWorld;
+use std::convert::Infallible;
 
 // Fox.DATA_FLAGS_ID, kept in `extra.ints[0]` (and sent to clients as is).
 pub const SITTING: i32 = 1;
@@ -333,7 +335,7 @@ pub fn apply_consumption(
     if !decision.still_valid(m) {
         return false;
     }
-    consume(w, m, events, &decision.stack.item);
+    consume(w, m, events, &decision.stack);
     let remainder = w
         .items
         .and_then(|i| i.items.get(&decision.stack.item))
@@ -454,121 +456,125 @@ fn eats(w: &MobWorld, item: &str) -> bool {
 
 /// `Consumable.onConsume`'s `on_consume_effects` when a fox finishes an item
 /// (`Item.finishUsingItem`): the teleport that a chorus fruit gives it.
-fn consume(w: &MobWorld, m: &mut Mob, events: &mut Vec<MobEvent>, item: &str) {
+fn consume(
+    w: &MobWorld,
+    m: &mut Mob,
+    events: &mut Vec<MobEvent>,
+    stack: &horizon_items::items::ItemStack,
+) {
     let Some(consumable) = w
         .items
-        .and_then(|i| i.items.get(item))
-        .and_then(|i| i.consumable.as_ref())
+        .and_then(|items| items.items.get(&stack.item))
+        .and_then(|info| stack.consumable(Some(info)))
     else {
         return;
     };
     for effect in &consumable.effects {
         if let ConsumeEffect::TeleportRandomly(teleport) = effect {
-            teleport_randomly(w, m, events, teleport);
+            let Ok(_) = teleport.apply(
+                &mut Teleporter {
+                    world: w,
+                    mob: m,
+                    events,
+                },
+                (),
+            );
         }
     }
 }
 
-/// `TeleportRandomlyConsumeEffect.apply` for a fox: 16 draws of a point in a
-/// cube of `diameter` around it, the first it can stand at takes it, with the
-/// fox's own teleport sound and the portal trail (level event 2017).
-fn teleport_randomly(
-    w: &MobWorld,
-    m: &mut Mob,
-    events: &mut Vec<MobEvent>,
-    teleport: &TeleportConsume,
-) {
-    let origin = m.position;
-    let diameter = f64::from(teleport.diameter);
-    // `Mth.clamp(y, level.getMinY(), getMinY() + logicalHeight - 1)`.
-    let low = f64::from(w.world.bottom_y());
-    let high = low + f64::from(w.world.shape.logical_height) - 1.0;
-    for _ in 0..16 {
-        let x = origin.x + (m.random.next_double() - 0.5) * diameter;
-        let y = (origin.y + (m.random.next_double() - 0.5) * diameter).clamp(low, high);
-        let z = origin.z + (m.random.next_double() - 0.5) * diameter;
-        if m.extra.passenger {
-            riders::stop_riding(m, None);
-        }
-        let old = m.position;
-        if !random_teleport(w, m, Vec3::new(x, y, z)) {
-            continue;
-        }
-        // `LivingEntity.checkPositionAndTeleport` broadcasts entity event 46
-        // before the teleport sound and the directional trail.
-        events.push(MobEvent::EntityEvent {
-            mob: m.id,
-            event: 46,
-            at: [m.position.x, m.position.y, m.position.z],
+/// Standalone AI uses the same candidate/effect algorithm and living landing
+/// helper as Game's owning-host adapter. Native hooks belong to the Game pause;
+/// this borrowed model never manufactures a narrower host for a callback.
+struct Teleporter<'a, 'w> {
+    world: &'a MobWorld<'w>,
+    mob: &'a mut Mob,
+    events: &'a mut Vec<MobEvent>,
+}
+impl TeleportConsumeWorld for Teleporter<'_, '_> {
+    type Error = Infallible;
+    type Level = ();
+    type Random = ();
+    type Source = LegacyRandom;
+    fn position_field(&self) -> Vec3 {
+        self.mob.position
+    }
+    fn get_random(&mut self) -> Result<(), Infallible> {
+        Ok(())
+    }
+    fn random_source(&mut self, (): ()) -> &mut LegacyRandom {
+        &mut self.mob.random
+    }
+    fn min_y(&mut self, (): ()) -> Result<i32, Infallible> {
+        Ok(self.world.world.bottom_y())
+    }
+    fn logical_height(&mut self, (): ()) -> Result<i32, Infallible> {
+        Ok(self.world.world.shape.logical_height)
+    }
+    fn is_passenger(&mut self) -> Result<bool, Infallible> {
+        Ok(self.mob.extra.passenger)
+    }
+    fn stop_riding(&mut self) -> Result<(), Infallible> {
+        riders::stop_riding(self.mob, None);
+        Ok(())
+    }
+    fn position(&mut self) -> Result<Vec3, Infallible> {
+        Ok(self.mob.position)
+    }
+    fn random_teleport(&mut self, target: Vec3) -> Result<bool, Infallible> {
+        Ok(super::living::random_teleport(
+            self.mob,
+            self.world,
+            target,
+            Some("minecraft:consumable_does_not_teleport_to"),
+            self.events,
+        ))
+    }
+    fn teleport_event(&mut self, (): (), old: Vec3) -> Result<(), Infallible> {
+        self.events.push(MobEvent::GameEvent {
+            event: "minecraft:teleport",
+            at: [old.x, old.y, old.z],
+            source: self.mob.id,
+            state: BlockStateId(0),
         });
-        // `SoundEvents.FOX_TELEPORT`, else the chorus fruit's own; the sound
-        // plays at the point reached.
-        events.push(MobEvent::Sound(
+        Ok(())
+    }
+    fn is_fox(&self) -> bool {
+        true
+    }
+    fn teleport_sound(&mut self, (): (), at: Vec3, _: bool) -> Result<(), Infallible> {
+        self.events.push(MobEvent::Sound(
             "entity.fox.teleport",
-            [m.position.x, m.position.y, m.position.z],
+            [at.x, at.y, at.z],
             1.0,
             1.0,
         ));
-        if teleport.directional_particles {
-            let at = |p: Vec3| [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
-            let (from, to) = (at(old), at(m.position));
-            // `BlockPos` offset clamped to a byte per axis, packed as vanilla does.
-            let axis = |a: i32, b: i32| (b - a).clamp(-127, 127) + 127;
-            events.push(MobEvent::LevelEvent {
-                id: 2017,
-                pos: from,
-                data: (axis(from[0], to[0]) << 16)
-                    | (axis(from[1], to[1]) << 8)
-                    | axis(from[2], to[2]),
-            });
-        }
-        m.fall_distance = 0.0;
-        return;
+        Ok(())
     }
-}
-
-/// `Entity.randomTeleport`: the drawn point drops to the first
-/// motion-blocking ground below it and takes the fox only if its box there
-/// is free and holds no liquid, on a block the consume effect allows.
-/// Otherwise the fox stays where it was.
-fn random_teleport(w: &MobWorld, m: &mut Mob, to: Vec3) -> bool {
-    let (x, z) = (to.x, to.z);
-    let (bx, bz) = (x.floor() as i32, z.floor() as i32);
-    if !w.world.loaded(bx, bz) {
-        return false;
+    fn block_position(&mut self) -> Result<BlockPos, Infallible> {
+        Ok(BlockPos::containing(self.mob.position))
     }
-    // `while (!foundGround && pos.getY() > level().getMinY())`: every step
-    // down that is not ground lowers the landing height by one.
-    let mut y = to.y;
-    let mut by = to.y.floor() as i32;
-    let mut ground = false;
-    while by > w.world.bottom_y() {
-        by -= 1;
-        if w.facts.get(w.world.block(bx, by, bz)).full_collision {
-            ground = true;
-            break;
-        }
-        y -= 1.0;
+    fn directional_particles(
+        &mut self,
+        (): (),
+        origin: BlockPos,
+        offset: i32,
+    ) -> Result<(), Infallible> {
+        self.events.push(MobEvent::LevelEvent {
+            id: 2017,
+            pos: [origin.x, origin.y, origin.z],
+            data: offset,
+        });
+        Ok(())
     }
-    if !ground {
-        return false;
+    fn reset_fall_distance(&mut self) -> Result<(), Infallible> {
+        self.mob.fall_distance = 0.0;
+        Ok(())
     }
-    // `level().noCollision(this) && !level().containsAnyLiquid(getBoundingBox())
-    // && !getBlockState(blockPosition()).is(CONSUMABLE_DOES_NOT_TELEPORT_TO)`.
-    let at = Vec3::new(x, y, z);
-    let bounds = m.bounds_at(at);
-    let landing = w.block_name(x.floor() as i32, y.floor() as i32, z.floor() as i32);
-    if !w.no_collision(bounds)
-        || w.contains_any_liquid(bounds)
-        || w.has_tag("minecraft:consumable_does_not_teleport_to", landing)
-    {
-        return false;
+    fn reset_impulse(&mut self) -> Result<(), Infallible> {
+        // Mob has no separate CurrentImpulseContext state.
+        Ok(())
     }
-    m.position = at;
-    m.previous = at;
-    m.velocity = Vec3::ZERO;
-    m.ai.nav.stop();
-    true
 }
 
 /// `Fox.FoxBehaviorGoal.hasShelter`: out of the sky's sight and not a bad spot.
@@ -1404,6 +1410,8 @@ mod consume_tests {
                 let kind = std::sync::Arc::new(types.types["minecraft:fox"].clone());
                 let mut m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 0.5), 0.0);
                 m.on_ground = true;
+                let velocity = Vec3::new(0.2, 0.0, -0.1);
+                m.velocity = velocity;
                 m.extra.set_main_hand(Some("minecraft:chorus_fruit".into()));
                 // Past the 600 ticks `Fox.aiStep` waits before it finishes the item.
                 m.extra.ints[TICKS_SINCE_EATEN] = 601;
@@ -1416,6 +1424,35 @@ mod consume_tests {
                     (1.0..2.0).contains(&m.position.y),
                     "it stands on the stone floor, got {}",
                     m.position.y
+                );
+                assert_eq!(m.velocity, velocity, "randomTeleport preserves motion");
+                let entity = events
+                    .iter()
+                    .position(|e| matches!(e, MobEvent::EntityEvent { event: 46, .. }))
+                    .unwrap();
+                let game = events
+                    .iter()
+                    .position(|e| {
+                        matches!(
+                            e,
+                            MobEvent::GameEvent {
+                                event: "minecraft:teleport",
+                                ..
+                            }
+                        )
+                    })
+                    .unwrap();
+                let sound = events
+                    .iter()
+                    .position(|e| matches!(e, MobEvent::Sound("entity.fox.teleport", ..)))
+                    .unwrap();
+                let trail = events
+                    .iter()
+                    .position(|e| matches!(e, MobEvent::LevelEvent { id: 2017, .. }))
+                    .unwrap();
+                assert!(
+                    entity < game && game < sound && sound < trail,
+                    "the normal landing, game event, sound and trail preserve vanilla order"
                 );
                 assert_eq!(m.extra.main_hand_id(), None, "the fruit was eaten");
                 assert_eq!(m.extra.ints[TICKS_SINCE_EATEN], 0);

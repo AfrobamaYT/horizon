@@ -11587,6 +11587,7 @@ mod mob_pearl_hook_tests {
         mode: Arc<AtomicU8>,
         owners: Arc<Mutex<Vec<u32>>>,
     }
+    #[mod_api::__subscriptions]
     impl Hooks for PearlProbe {
         fn ender_pearl_teleport(
             &self,
@@ -11620,6 +11621,7 @@ mod mob_pearl_hook_tests {
     }
 
     struct PlayerPearlProbe(Arc<AtomicU8>);
+    #[mod_api::__subscriptions]
     impl Hooks for PlayerPearlProbe {
         fn ender_pearl_teleport(
             &self,

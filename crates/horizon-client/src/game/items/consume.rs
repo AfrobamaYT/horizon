@@ -672,6 +672,7 @@ mod teleport_hook_tests {
     use std::sync::{Arc, Mutex};
 
     struct ConsumptionProbe(Arc<Mutex<Vec<ItemStack>>>);
+    #[mod_api::__subscriptions]
     impl Hooks for ConsumptionProbe {
         fn item_consumption_teleport(
             &self,
@@ -764,6 +765,7 @@ mod fox_consumption_hook_tests {
         heard: Arc<Mutex<Vec<(u32, ItemStack)>>>,
         spawned: Arc<Mutex<Vec<u32>>>,
     }
+    #[mod_api::__subscriptions]
     impl Hooks for Probe {
         fn item_consumption_teleport(
             &self,
@@ -805,6 +807,11 @@ mod fox_consumption_hook_tests {
                 5 => {
                     match event.consumer.entity().id() {
                         200 => {
+                            assert_eq!(
+                                event.from,
+                                [8.5, 64.0, 8.5],
+                                "the hook precedes this fox's movement"
+                            );
                             // Full owning-host access, before this fox moves and
                             // before any later mob's AI/consumption step.
                             let next = host.entity(201).unwrap();
@@ -987,7 +994,6 @@ mod fox_consumption_hook_tests {
                 }
                 game.next_entity = 300;
                 let ty = game.res.mob_types().get("minecraft:fox").unwrap().clone();
-                let from = Vec3::new(8.5, 64.0, 8.5);
                 for (id, x) in [(200, 8.5), (201, 11.5), (202, 13.5), (204, 6.5)] {
                     let mut actor = Mob::new(id, ty.clone(), Vec3::new(x, 64.0, 8.5), 0.0);
                     actor.persistent = true;
@@ -1010,7 +1016,11 @@ mod fox_consumption_hook_tests {
                 assert!(heard.iter().all(|(_, stack)| stack.count == 7));
                 let first = game.mobs.iter().find(|m| m.id == 200).unwrap();
                 assert_eq!(first.age, 1, "base tick must not repeat after the callback");
-                assert_eq!(first.previous, from);
+                assert_eq!(
+                    first.previous,
+                    Vec3::new(4.5, 64.0, 4.5),
+                    "the normal teleport resets interpolation before resumed movement"
+                );
                 assert_eq!(first.extra.main_hand_stack().unwrap().count, 6);
                 assert!(
                     first.position.x < 6.0,
