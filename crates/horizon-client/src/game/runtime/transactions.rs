@@ -160,13 +160,6 @@ impl Game<'_> {
         let _ = seal;
         self.close_storage_transaction(commit);
     }
-    /// Keep enrolled host storage writes atomic with a callback's validated outputs.
-    pub(in crate::game) fn with_storage_snapshot(&mut self, edit: impl FnOnce(&mut Self) -> bool) -> bool {
-        self.open_storage_transaction();
-        let accepted = edit(self);
-        self.close_storage_transaction(accepted);
-        accepted
-    }
     fn open_storage_transaction(&mut self) {
         self.transactions.push(Level {
             dimension: Some(self.dim),

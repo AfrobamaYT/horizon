@@ -3888,6 +3888,52 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[ignore = "requires prepared resources"]
+    fn staged_slot_refusal_restores_contents_and_on_take_side_effects() {
+        let mut ran = false;
+        with_menu(Kind::Brewing, |env, menu| {
+            ran = true;
+            let potion = ItemStack::new("minecraft:potion", 1);
+            for take in [false, true] {
+                for accepted in [false, true] {
+                    *menu = Menu::new(Kind::Brewing);
+                    menu.brewed_potion_hook = true;
+                    if take {
+                        menu.set_slot(env, 0, Some(potion.clone()));
+                    }
+                    let committed = MenuSlotView { menu, env, slot: 0 }.with_staged(&mut |slot| {
+                        if take {
+                            assert_eq!(slot.safe_take(1, 1), Some(potion.clone()));
+                        } else {
+                            assert!(slot.safe_insert(Some(potion.clone()), 1).is_none());
+                        }
+                        accepted
+                    });
+                    assert_eq!(committed, accepted);
+                    assert_eq!(menu.slot(0), (take != accepted).then_some(&potion));
+                    assert_eq!(
+                        menu.brewed_potion_takes.as_slice(),
+                        if take && accepted {
+                            std::slice::from_ref(&potion)
+                        } else {
+                            &[]
+                        }
+                    );
+                    assert_eq!(
+                        menu.brewed.as_slice(),
+                        if take && accepted {
+                            std::slice::from_ref(&potion)
+                        } else {
+                            &[]
+                        }
+                    );
+                }
+            }
+        });
+        assert!(ran, "prepared menu fixture was not loaded");
+    }
+
+    #[test]
     fn menu_keeps_the_open_window_registry_identity() {
         let mut menu = Menu::new(Kind::Chest(3));
         assert_eq!(menu.registry_id(), None);

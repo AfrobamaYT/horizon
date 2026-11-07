@@ -466,6 +466,9 @@ impl TryIntoEngine for ApiStack {
         } else {
             1
         };
+        if !(1..=99).contains(&maximum) {
+            return Err(StackWriteError::InvalidMaximum);
+        }
         if !horizon_world::item_template::durability_allows_stack_size(
             stack.carries_component(Some(definition), "minecraft:max_damage"),
             i64::from(maximum),
@@ -1529,13 +1532,20 @@ impl super::Game<'_> {
             return;
         };
         let revision = api.revision();
-        self.native_menu_quick_move(pos, &mut api, container_slots, slot, &mut held, handled);
+        let mut candidate_handled = *handled;
+        self.native_menu_quick_move(
+            pos,
+            &mut api,
+            container_slots,
+            slot,
+            &mut held,
+            &mut candidate_handled,
+        );
         if let Ok(held) = held.try_into_engine(self.items())
             && apply_block_entity_snapshot(entity, &api, revision, self.items()).is_ok()
         {
             *stack = held;
-        } else {
-            *handled = false;
+            *handled = candidate_handled;
         }
     }
 }
@@ -1760,6 +1770,144 @@ mod stack_limit_tests {
                 reason: mod_api::StackError::InvalidDamage
             })
         );
+    }
+
+    #[test]
+    fn stack_maximum_respects_the_vanilla_codec_range() {
+        let items = catalog();
+        let key = mod_api::__private::item_key("minecraft:stick").unwrap();
+        for maximum in [i32::MIN, -1, 0, 100, i32::MAX] {
+            let mut stack = ApiStack::of(key);
+            stack
+                .set_components(
+                    [(
+                        JavaString::from("minecraft:max_stack_size"),
+                        Tag::Int(maximum),
+                    )]
+                    .into(),
+                )
+                .unwrap();
+            assert_eq!(
+                stack.try_into_engine(&items),
+                Err(StackWriteError::InvalidMaximum),
+                "maximum {maximum}"
+            );
+        }
+        for maximum in [1, 99] {
+            let mut stack = ApiStack::new(key, maximum).unwrap();
+            stack
+                .set_components(
+                    [(
+                        JavaString::from("minecraft:max_stack_size"),
+                        Tag::Int(maximum as i32),
+                    )]
+                    .into(),
+                )
+                .unwrap();
+            assert_eq!(stack.try_into_engine(&items).unwrap().count, maximum);
+        }
+    }
+
+    #[test]
+    fn production_snapshots_preserve_component_corpus_contents() {
+        let items = catalog();
+        let cases = [
+            ("minecraft:iron_sword", None),
+            (
+                "minecraft:iron_sword",
+                Some(Tag::compound([("minecraft:damage", Tag::Int(0))])),
+            ),
+            (
+                "minecraft:iron_sword",
+                Some(Tag::compound([("minecraft:damage", Tag::Int(5))])),
+            ),
+            (
+                "minecraft:iron_sword",
+                Some(Tag::compound([(
+                    "!minecraft:damage",
+                    Tag::Compound(Default::default()),
+                )])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([(
+                    "minecraft:custom_name",
+                    Tag::String("Named".into()),
+                )])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([(
+                    "minecraft:custom_data",
+                    Tag::compound([
+                        ("list", Tag::List(vec![Tag::Int(3), Tag::Int(7)])),
+                        ("bytes", Tag::ByteArray(vec![1, 2, 3])),
+                    ]),
+                )])),
+            ),
+            (
+                "minecraft:iron_sword",
+                Some(Tag::compound([("minecraft:max_stack_size", Tag::Int(1))])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([("minecraft:max_stack_size", Tag::Int(99))])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([(
+                    "!minecraft:max_stack_size",
+                    Tag::Compound(Default::default()),
+                )])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([(
+                    "minecraft:container",
+                    Tag::List(vec![Tag::compound([
+                        ("slot", Tag::Int(0)),
+                        (
+                            "item",
+                            Tag::compound([
+                                ("id", Tag::String("minecraft:stick".into())),
+                                ("count", Tag::Int(2)),
+                            ]),
+                        ),
+                    ])]),
+                )])),
+            ),
+            (
+                "minecraft:stick",
+                Some(Tag::compound([(
+                    "minecraft:enchantments",
+                    Tag::compound([("minecraft:sharpness", Tag::Int(2))]),
+                )])),
+            ),
+        ];
+        for (item, patch) in cases {
+            let (damage, extra) = horizon_items::item_data::decode_components(patch.as_ref());
+            let original = EngineStack {
+                damage,
+                extra,
+                ..EngineStack::new(item, 1)
+            };
+            // The engine's canonical component codec is independent of the snapshot adapter.
+            let expected = horizon_items::item_data::encode_extra_components(&original);
+            let api = original.try_into_api().unwrap();
+            assert_eq!(
+                api.components()
+                    .map(|components| Tag::Compound(components.as_nbt().clone())),
+                expected,
+                "read {patch:?}"
+            );
+            let back = api.try_into_engine(&items).unwrap();
+            assert_eq!(
+                horizon_items::item_data::encode_components(&original),
+                horizon_items::item_data::encode_components(&back),
+                "write {patch:?}"
+            );
+            assert_eq!(original, back, "round trip {patch:?}");
+        }
     }
 
     #[test]

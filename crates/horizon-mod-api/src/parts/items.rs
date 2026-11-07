@@ -743,7 +743,7 @@ pub mod tests {
         assert_eq!(insert(host, 3, &sticks, 60), 54);
         assert_eq!(insert(host, 38, &sticks, 1), 0);
         assert_eq!(insert(host, 39, &helmet_, 1), 1);
-        assert_eq!(player_of(&player).slots[&3].count, 64);
+        assert_eq!(player_of(&player).slots[&3].count(), 64);
         assert_eq!(player_of(&player).slots[&103], helmet());
         assert!(player_of(&player).given.is_empty());
         // Without an index, as `Inventory.add`: the selected slot's sticks first, then an
@@ -1234,7 +1234,7 @@ pub mod tests {
         let sticks = |n| Some(stack("minecraft:stick", n, 0));
         let apples = Some(stack("minecraft:apple", 3, 0));
         let mut world = two_chests([sticks(5), apples, sticks(4)]);
-        let only_sticks = |r: &ItemResource| r.item() == "minecraft:stick";
+        let only_sticks = |r: &ItemResource| r.item() == fixture_item_key("minecraft:stick");
         let moved = |world: &mut FakeHost, max| {
             let host: &mut dyn ServerHost = world;
             let from = here().capability(host, &ITEMS, FROM, None).unwrap();
@@ -1392,7 +1392,10 @@ pub mod tests {
         let stick = ItemResource::of(&stick());
         let set = |id, value: Tag| {
             let id = ComponentId::new(id).unwrap();
-            stick.with_component(&report, &id, value).component(&id)
+            stick
+                .with_component(&report, &id, value)
+                .unwrap()
+                .component(&id)
         };
         // `custom_data` is kept as the NBT given (`CustomData.equals`): a byte where the report
         // has an int is a change, while the same int is the default.
@@ -1871,7 +1874,7 @@ pub mod tests {
             Ok(0)
         );
         assert_eq!(
-            player_of(&player).slots[&24].count,
+            player_of(&player).slots[&24].count(),
             3,
             "disabled writes leave the place unchanged"
         );

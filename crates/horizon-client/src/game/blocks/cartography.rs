@@ -269,6 +269,31 @@ impl MapData {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn staged_maps_restore_id_reservations_and_pending_copies_on_refusal() {
+        for accepted in [false, true] {
+            let maps = LevelMaps {
+                states: RefCell::new(HashMap::from([(7, (false, 0))])),
+                next_id: Cell::new(42),
+                made: RefCell::new(Vec::new()),
+            };
+            assert_eq!(
+                maps.with_staged(&mut |staged| {
+                    assert_eq!(staged.derive(7, true), Some(42));
+                    assert_eq!(staged.state(42), Some((false, 1)));
+                    accepted
+                }),
+                accepted
+            );
+            assert_eq!(maps.next_id.get(), if accepted { 43 } else { 42 });
+            assert_eq!(maps.state(42), accepted.then_some((false, 1)));
+            assert_eq!(
+                maps.made.borrow().as_slice(),
+                if accepted { &[(42, 7, true)][..] } else { &[] }
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn crafting_map_takes_use_real_saved_maps() {
         use horizon_client::menu::{Env, Input, Kind, Menu};

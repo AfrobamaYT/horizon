@@ -2,6 +2,13 @@ use super::{self as api_values, EngineStack, stack_limit_tests};
 use crate::{items::Items, menu::SlotView};
 use mod_api::{Flow, Hooks, ModEntry, testing::with_mods};
 
+fn context() -> horizon_world::native_load_context::LoopContext {
+    use horizon_world::native_load_context::{DataLoadOrigin, LoadContext, LoadInputs, LoopSide};
+    let inputs = std::sync::Arc::new(LoadInputs::new(Default::default(), Default::default()));
+    LoadContext::new(DataLoadOrigin::ServerDataLoad, inputs, [] as [&str; 0])
+        .loop_context(LoopSide::Server, [] as [&str; 0])
+}
+
 struct Slot<'a> {
     items: &'a Items,
     value: Option<EngineStack>,
@@ -99,9 +106,7 @@ fn invalid_cursor_rolls_back_insert_and_take_without_item_duplication() {
         let mut cursor = (!take).then(|| original.clone());
         let before_slot = slot.value.clone();
         let before_cursor = cursor.clone();
-        let context = crate::test_resources::loop_context(
-            horizon_world::native_load_context::LoopSide::Server,
-        );
+        let context = context();
         let mut canceled = false;
         with_mods(
             vec![ModEntry::new(
@@ -146,9 +151,7 @@ fn valid_cursor_commits_slot_writes_and_flags_together() {
             writes: 0,
         };
         let mut cursor = (!take).then(|| original.clone());
-        let context = crate::test_resources::loop_context(
-            horizon_world::native_load_context::LoopSide::Server,
-        );
+        let context = context();
         let mut canceled = false;
         with_mods(
             vec![ModEntry::new(

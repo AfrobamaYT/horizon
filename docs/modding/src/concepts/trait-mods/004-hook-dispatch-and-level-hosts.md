@@ -50,10 +50,10 @@ and `is_loaded(pos)` (`Level.isLoaded`: inside the build height and in a loaded 
 None of them loads a chunk. Light above the build height reads as full sky and below it as
 none, and a chunk that isn't loaded reads as the game's query does (full sky, no block light),
 so check `is_loaded` first. It also answers tag and fluid questions without a `Host`: `block_in_tag(block_key, tag)`,
-`item_stack_in_tag(&stack, tag)`, `fluid_state(pos)` (`getFluidState`, `None` where the block read is),
+`fluid_state(pos)` (`getFluidState`, `None` where the block read is),
 `state_fluid_state(state)` and `fluid_in_tag(fluid_name, tag)`. Fluid reads return `FluidState` with a
 `FluidKey`, amount, falling flag and engine-derived source flag; `is_empty()` and `is_source()` report
-those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. Shared `Host::tag_members` and `Host::item_stack_in_tag` likewise return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
+those states without a registry lookup. `block_state_id(name)` parses a block and properties, and `block_state_default(block)` gives a block's default state, as on `Host`; both return `None` for invalid input or unavailable context. Tag reads are `None` when authoritative tags are unavailable, including on a client level. For item membership and member lists, use `Host::tags()`: resolve a `TagKey` with `Tags::key`, then call `Tags::is_in_tag`, `Tags::items` or `Tags::fluids`. Membership reads return `None` on clients until server-sent tags are synchronized; they never substitute local resource-pack tags.
 `LevelHost` has no random, by design: a draw from a read-only hook inside a level write would shift the level's random sequence away from vanilla's order. A hook that may draw is given a `LevelRandomHost`.
 `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
