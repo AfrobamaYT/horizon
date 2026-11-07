@@ -1593,9 +1593,7 @@ impl Game<'_> {
         // before the dragon's own borrow of the game.
         let creative = match cause.or(by) {
             Some(Target::Player) => self.creative,
-            Some(Target::Guest(conn)) => {
-                self.command_guest(conn).is_some_and(|g| g.creative())
-            }
+            Some(Target::Guest(conn)) => self.command_guest(conn).is_some_and(|g| g.creative()),
             _ => false,
         };
         if self.saved_refuses_damage(id, ty, creative) {

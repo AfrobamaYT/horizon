@@ -23,9 +23,10 @@ impl Game<'_> {
                 Some(PlayerFacts {
                     mode: g.game_mode,
                     alive: !g.dead && g.health > 0.0,
-                    invulnerable: g.motion.as_ref().is_some_and(|p| {
-                        p.invulnerable || p.health.invulnerable_time > 0
-                    }),
+                    invulnerable: g
+                        .motion
+                        .as_ref()
+                        .is_some_and(|p| p.invulnerable || p.health.invulnerable_time > 0),
                     uuid: horizon_client::lan::playerdata::uuid_ints(g.uuid),
                 })
             }

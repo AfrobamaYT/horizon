@@ -40,11 +40,7 @@ impl Game<'_> {
         match self.native_entity_target(entity)? {
             Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_flag),
             t @ (Target::Player | Target::Guest(_)) => {
-                Some(
-                    self.native_player_body(t)?
-                        .health
-                        .permanently_invulnerable,
-                )
+                Some(self.native_player_body(t)?.health.permanently_invulnerable)
             }
             t => Some(self.saved_invulnerable_flag(t)?),
         }
@@ -67,11 +63,10 @@ impl Game<'_> {
                 None => false,
             },
             Some(t @ (Target::Player | Target::Guest(_))) => {
-                self.native_player_body_mut(t)
-                    .is_some_and(|p| {
-                        p.health.permanently_invulnerable = invulnerable;
-                        true
-                    })
+                self.native_player_body_mut(t).is_some_and(|p| {
+                    p.health.permanently_invulnerable = invulnerable;
+                    true
+                })
             }
             Some(t) => self.set_saved_invulnerable_flag(t, invulnerable),
             None => false,
@@ -122,11 +117,7 @@ impl Game<'_> {
     /// `Entity.setInvulnerableTime` (#916): the write side of
     /// [`native_entity_invulnerable_time`](Self::native_entity_invulnerable_time).
     /// False where the entity is gone or keeps no such field.
-    pub(super) fn entity_set_invulnerable_time(
-        &mut self,
-        entity: EntityRef,
-        ticks: i32,
-    ) -> bool {
+    pub(super) fn entity_set_invulnerable_time(&mut self, entity: EntityRef, ticks: i32) -> bool {
         let ticks = ticks.max(0);
         match self.native_entity_target(entity) {
             Some(Target::Mob(id)) => match self.mobs.iter_mut().find(|m| m.id == id) {
@@ -136,12 +127,12 @@ impl Game<'_> {
                 }
                 None => false,
             },
-            Some(t @ (Target::Player | Target::Guest(_))) => self
-                .native_player_body_mut(t)
-                .is_some_and(|p| {
+            Some(t @ (Target::Player | Target::Guest(_))) => {
+                self.native_player_body_mut(t).is_some_and(|p| {
                     p.health.invulnerable_time = ticks;
                     true
-                }),
+                })
+            }
             Some(t) => self.set_saved_invulnerable_time(t, ticks),
             None => false,
         }
@@ -187,9 +178,9 @@ impl Game<'_> {
             return false;
         }
         let registry = &self.health_resources.damage;
-        let bypass = registry.id(damage_type).is_some_and(|kind| {
-            registry.in_tag(kind, "minecraft:bypasses_invulnerability")
-        });
+        let bypass = registry
+            .id(damage_type)
+            .is_some_and(|kind| registry.in_tag(kind, "minecraft:bypasses_invulnerability"));
         !(bypass || creative_source)
     }
     /// Writes the `invulnerable_time` tag into a non-mob entity's saved data
@@ -313,20 +304,18 @@ mod tests {
             game.lan_acting_entity = Some(20);
             let player = game.entity(20).unwrap();
             game.armor_stands
-                .push(horizon_client::entities::ArmorStand::new(14, Vec3::ZERO, 0.0));
+                .push(horizon_client::entities::ArmorStand::new(
+                    14,
+                    Vec3::ZERO,
+                    0.0,
+                ));
             let stand = game.entity(14).unwrap();
 
             // A player's flag, on their body, refusing their damage — and
             // `#bypasses_invulnerability` still getting past.
-            assert_eq!(
-                game.entity_permanently_invulnerable(player),
-                Some(false)
-            );
+            assert_eq!(game.entity_permanently_invulnerable(player), Some(false));
             assert!(game.entity_set_invulnerable(player, true));
-            assert_eq!(
-                game.entity_permanently_invulnerable(player),
-                Some(true)
-            );
+            assert_eq!(game.entity_permanently_invulnerable(player), Some(true));
             game.hurt_player_by("minecraft:generic", 5.0);
             assert_eq!(
                 game.player.as_ref().unwrap().health.health(),
@@ -341,10 +330,7 @@ mod tests {
 
             // A stand without saved data reads false, and the write lands in
             // the saved `Invulnerable` tag the item damage path refuses by.
-            assert_eq!(
-                game.entity_permanently_invulnerable(stand),
-                Some(false)
-            );
+            assert_eq!(game.entity_permanently_invulnerable(stand), Some(false));
             assert!(game.entity_set_invulnerable(stand, true));
             assert_eq!(game.entity_permanently_invulnerable(stand), Some(true));
             let raw = game.persist.raw.get(&14).cloned().unwrap();
@@ -365,9 +351,7 @@ mod tests {
         for (x, z) in (-1..=1).flat_map(|x| (-1..=1).map(move |z| (x, z))) {
             let mut chunk = horizon_client::chunk::Chunk::empty(x, z);
             chunk.lit = true;
-            game.world
-                .chunks
-                .insert((x, z), std::sync::Arc::new(chunk));
+            game.world.chunks.insert((x, z), std::sync::Arc::new(chunk));
         }
         let stone = game
             .pack
@@ -431,19 +415,18 @@ mod tests {
             // writes them (`Invulnerable`, `invulnerable_time`).
             game.mobs.push(Mob::new(
                 30,
-                game.res.mob_types().get("minecraft:zombie").unwrap().clone(),
+                game.res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone(),
                 Vec3::new(0.5, 64.0, 0.5),
                 0.0,
             ));
             game.mobs[0].invulnerable_flag = true;
             game.mobs[0].invulnerable_time = 9;
-            let tag = horizon_client::entity_nbt::mob_to_nbt(
-                &game.mobs[0],
-                [0; 4],
-                None,
-                None,
-                |_| None,
-            );
+            let tag =
+                horizon_client::entity_nbt::mob_to_nbt(&game.mobs[0], [0; 4], None, None, |_| None);
             let back =
                 horizon_client::entity_nbt::mob_from_nbt(&tag, game.res.mob_types(), 30, None)
                     .unwrap();

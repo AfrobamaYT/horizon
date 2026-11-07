@@ -369,12 +369,8 @@ impl Game<'_> {
                         s.item.clone(),
                     );
                 }
-                let hurt = g.mob_hits_player_from(
-                    s.amount,
-                    s.from,
-                    "minecraft:player_attack",
-                    s.creative,
-                );
+                let hurt =
+                    g.mob_hits_player_from(s.amount, s.from, "minecraft:player_attack", s.creative);
                 g.combat.player_attacker = None;
                 let (strength, xd, zd) = s.knockback;
                 if hurt && strength > 0.0 {
