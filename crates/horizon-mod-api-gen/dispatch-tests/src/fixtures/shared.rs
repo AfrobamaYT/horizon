@@ -7,6 +7,20 @@ use std::time::Duration;
 struct ItemStack {
     item: Arc<str>,
 }
+// Dispatch tests isolate the runtime key table: the fixture key retains its name.
+// Production key resolution and slot stability are tested in mod-runtime.
+#[derive(Clone, Copy)]
+struct ItemKey<'a>(&'a str);
+impl ItemStack {
+    fn item(&self) -> ItemKey<'_> {
+        ItemKey(&self.item)
+    }
+}
+mod registry_keys {
+    pub(super) fn item_id(key: super::ItemKey<'_>) -> Option<&str> {
+        Some(key.0)
+    }
+}
 struct StackView {
     count: i32,
 }
@@ -89,6 +103,7 @@ mod generated {
         }
     }
     pub(super) mod mod_api {
+        pub(super) use super::super::ItemStack;
         include!(concat!(env!("OUT_DIR"), "/dispatch_fixtures_api.rs"));
     }
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
