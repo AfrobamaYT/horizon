@@ -319,6 +319,9 @@ pub trait CameraDrawContext {
 pub trait WorldDrawContext {
     /// Draw a retained group once per view, with per-view culling and the batch route rules.
     /// Repeated submissions in one view are ignored. Only visible copies consume its budget.
+    /// The shared limit is 16,384 visible copies and 16,384 groups per view. Refusal is atomic.
+    /// Shader packs and overlays use the same CPU path as transient model batches.
+    /// Retired or foreign groups return [`GroupError::Stale`], even if drawn earlier this view.
     fn draw_instance_group(&mut self, group: InstanceGroupRef) -> Result<(), GroupError> {
         unimplemented!("WorldDrawContext::draw_instance_group")
     }
