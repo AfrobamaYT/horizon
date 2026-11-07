@@ -1783,6 +1783,20 @@ pub(in crate::game) fn block_entity_declarations()
         .collect()
 }
 
+impl TryIntoEngine<()> for mod_api::GameRuleDecl {
+    type Engine = horizon_client_core::gamerules::Rule;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        Ok(Self::Engine {
+            name: self.name.clone(),
+            category: self.category.clone(),
+            default: horizon_client_core::gamerules::Value::Bool(self.default),
+            min: 0,
+            max: 0,
+        })
+    }
+}
+
 #[cfg(test)]
 mod declaration_snapshot_tests {
     use super::*;
@@ -1864,6 +1878,8 @@ fn text_metadata(
         "insertion",
         "click_event",
         "hover_event",
+        "clickEvent",
+        "hoverEvent",
     ] {
         out.remove(key);
     }
@@ -2054,7 +2070,6 @@ fn owned_text_style(
                 }
                 fields
             }
-            C::OpenFile(v) => text_action("open_file", "path", v.clone().into()),
         };
         let mut action = text_action_metadata(style, "click_event");
         action.extend(fields);
@@ -2220,6 +2235,23 @@ mod text_encoding_tests {
     }
 
     #[test]
+    fn raw_file_action_metadata_does_not_reach_the_engine() {
+        let mut text = Text::literal("remote");
+        for metadata in [&mut text.metadata, &mut text.style.metadata] {
+            for field in ["click_event", "clickEvent"] {
+                metadata.insert(
+                    field.into(),
+                    json!({"action":"open_file", "path":"test-file"}),
+                );
+            }
+        }
+        let engine = text.try_into_engine(&()).unwrap();
+        assert!(engine.spans.iter().all(|span| span.style.click.is_none()));
+        assert!(engine.component().get("click_event").is_none());
+        assert!(engine.component().get("clickEvent").is_none());
+    }
+
+    #[test]
     fn owned_text_keeps_hover_uuid_name_and_nullable_component_patch() {
         let mut text = Text::literal("entity");
         text.style.hover = Some(TextHover::Entity {
@@ -2317,20 +2349,6 @@ impl TryIntoApi for horizon_client_core::gamerules::Value {
         Ok(match *self {
             Self::Bool(value) => mod_api::GameRuleValue::Bool(value),
             Self::Int(value) => mod_api::GameRuleValue::Int(value),
-        })
-    }
-}
-
-impl TryIntoEngine<()> for mod_api::GameRuleDecl {
-    type Engine = horizon_client_core::gamerules::Rule;
-    type Error = std::convert::Infallible;
-    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
-        Ok(Self::Engine {
-            name: self.name.clone(),
-            category: self.category.clone(),
-            default: horizon_client_core::gamerules::Value::Bool(self.default),
-            min: 0,
-            max: 0,
         })
     }
 }

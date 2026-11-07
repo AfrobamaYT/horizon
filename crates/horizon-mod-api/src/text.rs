@@ -131,6 +131,10 @@ pub struct TextStyle {
 }
 
 /// A text component's click action.
+///
+/// File-opening actions are intentionally absent: mods can neither produce nor
+/// round-trip `OpenFile`. Capture drops untrusted file-opening action metadata.
+/// Part of the [per-node origin tracking follow-up](https://github.com/arismoko/horizon/issues/1738).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // exhaustive: closed serialized component vocabulary; new cases change the link contract
 pub enum TextClick {
@@ -153,8 +157,6 @@ pub enum TextClick {
         /// Payload retained without interpretation.
         payload: Option<serde_json::Value>,
     },
-    /// Open a local file; the game's remote-text policy still applies.
-    OpenFile(String),
 }
 
 /// A text component's hover action.
