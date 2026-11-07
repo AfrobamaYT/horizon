@@ -14,6 +14,7 @@ use std::{
 use syn::{ImplItem, Item, Type};
 
 mod guest;
+pub mod source;
 pub use guest::{GuestInject, guest_exports};
 
 /// One point, as `points.json` lists it.
@@ -449,16 +450,31 @@ pub(crate) fn file_points<'a>(
     keep: &dyn Fn(&Found<'_>) -> bool,
     out: &mut Vec<Found<'a>>,
 ) {
+    file_functions(module, items, keep, &point_shape::eligible, out);
+}
+
+fn file_functions<'a>(
+    module: &str,
+    items: &'a [Item],
+    keep: &dyn Fn(&Found<'_>) -> bool,
+    eligible: &dyn Fn(&[syn::Attribute], &syn::Signature) -> bool,
+    out: &mut Vec<Found<'a>>,
+) {
     for item in items {
         match item {
             Item::Mod(inline) if !gated(&inline.attrs) => {
                 if let Some((_, inner)) = &inline.content {
-                    file_points(&format!("{module}::{}", inline.ident), inner, keep, out);
+                    file_functions(
+                        &format!("{module}::{}", inline.ident),
+                        inner,
+                        keep,
+                        eligible,
+                        out,
+                    );
                 }
             }
             Item::Fn(function)
-                if !gated(&function.attrs)
-                    && point_shape::eligible(&function.attrs, &function.sig) =>
+                if !gated(&function.attrs) && eligible(&function.attrs, &function.sig) =>
             {
                 let found = Found {
                     module: module.to_owned(),
@@ -482,7 +498,7 @@ pub(crate) fn file_points<'a>(
                 }
                 for member in &block.items {
                     if let ImplItem::Fn(method) = member
-                        && point_shape::eligible(&method.attrs, &method.sig)
+                        && eligible(&method.attrs, &method.sig)
                     {
                         let found = Found {
                             module: module.to_owned(),
@@ -874,7 +890,7 @@ fn locked_with(lock: &str, name: &str, added: &[&str]) -> Option<String> {
 }
 
 /// `mod_points`: records, typed function constructors, dispatchers and place ids.
-pub(crate) fn records(points: &[GamePoint]) -> String {
+pub(crate) fn records(points: &[GamePoint], sources: &[source::Point]) -> String {
     let parse = |code: &str| {
         code.parse::<proc_macro2::TokenStream>()
             .expect("generated points")
@@ -902,6 +918,16 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
             std::iter::once(head).chain((point.at_return || point.raw).then_some(back))
         })
         .collect();
+    let mut places = places;
+    for point in sources {
+        places.push((point.name.clone(), &point.target, ""));
+        places.push((format!("{}_return", point.name), &point.target, ""));
+    }
+    let private_variants = sources.iter().map(|point| {
+        let head = quote::format_ident!("{}", point_shape::camel(&point.name));
+        let back = quote::format_ident!("{}Return", point_shape::camel(&point.name));
+        quote!(#head, #back,)
+    });
     let names = places.iter().map(|place| &place.0);
     let targets = places.iter().map(|place| place.1);
     let shapes = places.iter().map(|place| place.2);
@@ -918,7 +944,7 @@ pub(crate) fn records(points: &[GamePoint]) -> String {
         #[repr(usize)]
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         #[non_exhaustive]
-        pub enum PointId { #(#variants)* __Count }
+        pub enum PointId { #(#variants)* #(#private_variants)* __Count }
         /// The number of places, the length of the game's slot table.
         #[doc(hidden)]
         pub const POINT_COUNT: usize = PointId::__Count as usize;
@@ -1248,7 +1274,7 @@ mod tests {
                 ("tick", "horizon_client::game::Game<'_>::tick", "both", true),
             ]
         );
-        let api = records(&points);
+        let api = records(&points, &[]);
         assert!(
             api.contains("fn tick_return")
                 && !api.contains("fn slot_return")
