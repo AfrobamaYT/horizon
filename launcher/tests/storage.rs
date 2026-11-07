@@ -12,9 +12,13 @@ impl Home {
         fs::write(&path, contents).unwrap();
         path
     }
-    fn clear(&self, row: &str) -> serde_json::Value {
-        let output = Command::new(env!("CARGO_BIN_EXE_horizon-launcher"))
-            .args(["storage", "--clear", row])
+    fn run(&self, row: Option<&str>) -> std::process::Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_horizon-launcher"));
+        command.arg("storage");
+        if let Some(row) = row {
+            command.args(["--clear", row]);
+        }
+        command
             .current_dir(self.0.path())
             .env("HORIZON_HOME", self.0.path().join("game"))
             .env("HORIZON_LAUNCHER_HOME", self.0.path().join("launcher"))
@@ -27,9 +31,26 @@ impl Home {
             )
             .env("HORIZON_LAUNCHER_DESKTOP", self.0.path().join("desktop"))
             .env("HORIZON_LAUNCHER_NO_SELF_UPDATE", "1")
-            .env("HORIZON_NO_AUDIO", "1")
-            .output()
-            .unwrap();
+            .env("HORIZON_NO_AUDIO", "1");
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            command.pre_exec(|| {
+                let limit = libc::rlimit {
+                    rlim_cur: 256,
+                    rlim_max: 256,
+                };
+                if libc::setrlimit(libc::RLIMIT_NOFILE, &limit) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        }
+        command.output().unwrap()
+    }
+    fn clear(&self, row: &str) -> serde_json::Value {
+        let output = self.run(Some(row));
         assert!(output.status.success(), "{output:?}");
         serde_json::from_slice(&output.stdout).unwrap()
     }
@@ -155,15 +176,15 @@ fn retention_removes_only_reports_older_than_fourteen_days_and_keeps_the_newest(
     use std::time::{Duration, SystemTime};
     let home = Home::new();
     home.installed_version();
-    for (name, days) in [
-        ("logs/old.log", 15),
-        ("logs/recent.log", 13),
+    for (name, half_days) in [
+        ("logs/old.log", 29),
+        ("logs/recent.log", 27),
         ("logs/latest.log", 0),
-        ("crash-reports/old.txt", 20),
-        ("crash-reports/newest.txt", 16),
+        ("crash-reports/old.txt", 40),
+        ("crash-reports/newest.txt", 32),
     ] {
         let path = home.file(&format!("game/{name}"), b"report");
-        let modified = SystemTime::now() - Duration::from_secs(days * 86400);
+        let modified = SystemTime::now() - Duration::from_secs(half_days * 43200);
         fs::OpenOptions::new()
             .write(true)
             .open(path)
@@ -173,23 +194,103 @@ fn retention_removes_only_reports_older_than_fourteen_days_and_keeps_the_newest(
     }
     home.clear("other-caches");
     assert!(
-        !home.0.join("game/logs/old.log").exists(),
-        "15-day log was not cleared"
+        !home.0.path().join("game/logs/old.log").exists(),
+        "14.5-day log was not cleared"
     );
     assert!(
-        home.0.join("game/logs/recent.log").exists(),
-        "13-day log was cleared"
+        home.0.path().join("game/logs/recent.log").exists(),
+        "13.5-day log was cleared"
     );
     assert!(
-        home.0.join("game/logs/latest.log").exists(),
+        home.0.path().join("game/logs/latest.log").exists(),
         "latest log was cleared"
     );
     assert!(
-        !home.0.join("game/crash-reports/old.txt").exists(),
+        !home.0.path().join("game/crash-reports/old.txt").exists(),
         "old crash report was not cleared"
     );
     assert!(
-        home.0.join("game/crash-reports/newest.txt").exists(),
+        home.0.path().join("game/crash-reports/newest.txt").exists(),
         "newest crash report must survive even after 14 days"
+    );
+}
+
+#[test]
+fn all_clears_other_caches_but_never_worlds_or_mod_packages() {
+    let home = Home::new();
+    home.installed_version();
+    let cache = home.file("game/.horizon-cache/output", b"cache");
+    let world = home.file("game/worlds/precious/level.dat", b"world");
+    let package = home.file("game/horizon-mods/precious.hmod", b"mod package");
+    home.clear("all");
+    assert!(!cache.exists(), "Clear all skipped Other caches");
+    assert_eq!(
+        fs::read(world).unwrap(),
+        b"world",
+        "worlds selected as instance cache"
+    );
+    assert_eq!(
+        fs::read(package).unwrap(),
+        b"mod package",
+        "installed packages selected as instance cache"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_named_instance_is_refused_without_touching_its_outside_target() {
+    let home = Home::new();
+    home.installed_version();
+    let outside = Home::new();
+    let precious = outside.file(".horizon-cache/decoy", b"outside cache");
+    fs::create_dir_all(home.0.path().join("game/instances")).unwrap();
+    std::os::unix::fs::symlink(
+        outside.0.path(),
+        home.0.path().join("game/instances/linked"),
+    )
+    .unwrap();
+    let output = home.run(Some("other-caches"));
+    assert_eq!(
+        fs::read(precious).unwrap(),
+        b"outside cache",
+        "outside instance target was touched"
+    );
+    assert!(
+        !output.status.success(),
+        "symlink-named instance was accepted"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn hundreds_of_reports_and_jars_fit_the_descriptor_budget_and_clear_repeatedly() {
+    let home = Home::new();
+    home.installed_version();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(15 * 86400);
+    for index in 0..400 {
+        let path = home.file(&format!("game/logs/{index}.log"), b"old log");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        home.file(&format!("game/jars/{index}.jar"), b"unused jar");
+    }
+    let report = home.run(None);
+    assert!(
+        report.status.success(),
+        "read-only report exceeded 256 FDs: {report:?}"
+    );
+    home.clear("other-caches");
+    home.clear("other-caches");
+    assert!(!home.0.path().join("game/jars/399.jar").exists());
+    assert_eq!(
+        fs::read_dir(home.0.path().join("game/logs"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "log"))
+            .count(),
+        1
     );
 }

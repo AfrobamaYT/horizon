@@ -777,7 +777,7 @@ enum Cmd {
     },
     /// Show disposable storage by category as JSON. Builds must be idle
     Storage {
-        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler or all implemented rows
+        /// Clear build-files, prebuilt-games, spare-game-builds, rust-compiler, other-caches or all implemented rows
         #[arg(long, value_parser = parse_storage_row)]
         clear: Option<ClearStorage>,
     },
@@ -4008,8 +4008,7 @@ mod tests {
         assert!(Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "worlds"]).is_err());
         assert!(Cli::try_parse_from(["horizon-launcher", "native-cache"]).is_err());
         assert!(
-            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"])
-                .is_err()
+            Cli::try_parse_from(["horizon-launcher", "storage", "--clear", "other-caches"]).is_ok()
         );
         let mut settings = backend::Settings::default();
         set_setting(&mut settings, "native-cache-gib", "12").unwrap();
