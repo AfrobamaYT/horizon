@@ -347,3 +347,19 @@ fn window_resize_delivers_physical_and_gui_dimensions() {
     );
     assert_eq!(*heard.lock().unwrap(), [(1200, 900, 400, 300)]);
 }
+
+/// Compile-only: a server mod reaches the server's inventory and menu operations through the
+/// `&mut dyn ServerHost` its hooks get, not only through the concrete game.
+#[allow(dead_code)]
+fn server_inventory_operations_take_a_server_host(
+    host: &mut dyn ServerHost,
+    player: PlayerRef,
+    menu: MenuRef,
+    stack: ItemStack,
+) -> (bool, Option<ItemStack>, bool) {
+    (
+        player.set_selected_slot(host, 0),
+        player.drop_stack(host, stack, false),
+        menu.close_container(host),
+    )
+}
