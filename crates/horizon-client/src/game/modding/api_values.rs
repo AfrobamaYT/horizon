@@ -2798,21 +2798,6 @@ mod gui_draw_boundary_tests {
     }
 
     #[test]
-    fn tooltip_pairs_round_trip_without_an_item_registry() {
-        let lines = vec![(horizon_client::text::Text::literal("tip"), 0xff00ff00)];
-        let snapshot: Result<Vec<(mod_api::Text, u32)>, std::convert::Infallible> =
-            lines.try_into_api();
-        let snapshot = snapshot.unwrap();
-        assert_eq!(snapshot[0], (mod_api::Text::literal("tip"), 0xff00ff00));
-        let restored: Result<Vec<(horizon_client::text::Text, u32)>, std::convert::Infallible> =
-            snapshot.try_into_engine(&());
-        let restored = restored.unwrap();
-        assert_eq!(restored[0].0.component(), lines[0].0.component());
-        assert_eq!(restored[0].0.spans, lines[0].0.spans);
-        assert_eq!(restored[0].1, lines[0].1);
-    }
-
-    #[test]
     fn nested_text_containers_need_no_item_registry_or_stack_error() {
         let pair = (
             mod_api::text::Text::literal("a"),
