@@ -11760,6 +11760,111 @@ mod tests {
             }
         });
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn menu_title_snapshot_follows_packet_and_close_paths() {
+        use horizon_protocol::{
+            nbt::Tag,
+            packets::play::{self, Clientbound as C},
+        };
+        use std::sync::Arc;
+
+        super::super::native_entity_refs::tests::with_client_game(|game| {
+            let (client, _server) = horizon_protocol::connection::Pipe::pair();
+            game.connect_local(client, "menu-title-paths").unwrap();
+            let menu_id = |game: &super::Game<'_>, name: &str| {
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .builtin
+                    .get("minecraft:menu")
+                    .unwrap()
+                    .id(name)
+                    .unwrap()
+            };
+            let chest = menu_id(game, "minecraft:generic_9x3");
+            let lectern = menu_id(game, "minecraft:lectern");
+            let open = |game: &mut super::Game<'_>, menu, title: &str| {
+                game.handle_packet(C::OpenScreen(play::OpenScreen {
+                    container: 7,
+                    menu,
+                    title: Tag::String(title.into()),
+                }))
+                .unwrap();
+            };
+            let snapshot = |game: &super::Game<'_>| {
+                let shared = game
+                    .remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .unwrap();
+                let view = game.observed_screen_view().unwrap();
+                assert!(std::ptr::eq(view.title.unwrap(), shared.as_ref()));
+                shared
+            };
+            open(game, chest, "first");
+            let first = snapshot(game);
+            open(game, chest, "replacement");
+            let replacement = snapshot(game);
+            assert!(!Arc::ptr_eq(&first, &replacement));
+            assert_ne!(first, replacement);
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 7 }))
+                .unwrap();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            assert!(
+                game.observed_screen_view()
+                    .is_none_or(|view| view.title.is_none())
+            );
+            open(game, chest, "again");
+            snapshot(game);
+            game.remote_close_container();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            open(game, chest, "before lectern");
+            snapshot(game);
+            open(game, lectern, "lectern");
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            game.remote_lectern_page(1);
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            game.handle_packet(C::ContainerClose(play::ContainerClose { container: 7 }))
+                .unwrap();
+            assert!(
+                game.remote
+                    .as_ref()
+                    .unwrap()
+                    .shared_menu_title_snapshot()
+                    .is_none()
+            );
+            assert!(
+                game.observed_screen_view()
+                    .is_none_or(|view| view.title.is_none())
+            );
+        });
+    }
     /// The remote player animation uses the scoped item answer once per tick.
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
