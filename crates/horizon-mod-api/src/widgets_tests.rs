@@ -297,8 +297,14 @@ fn a_focused_widget_made_inactive_takes_no_input() {
         Outcome::Ignored
     );
     let edit = &widgets.text_field(a).unwrap().edit;
-    assert_eq!((edit.value.as_str(), edit.highlight, edit.cursor), ("hello", 0, 0));
-    assert_eq!(widgets.key_pressed(&host, "key.keyboard.tab", 0), Outcome::Handled);
+    assert_eq!(
+        (edit.value.as_str(), edit.highlight, edit.cursor),
+        ("hello", 0, 0)
+    );
+    assert_eq!(
+        widgets.key_pressed(&host, "key.keyboard.tab", 0),
+        Outcome::Handled
+    );
     assert_eq!(widgets.focused(), Some(b));
 }
 

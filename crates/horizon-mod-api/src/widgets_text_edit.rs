@@ -317,7 +317,10 @@ mod tests {
         edit.value.clear();
         assert_eq!(edit.selected_text(), "");
         edit.insert_text("x");
-        assert_eq!((edit.value.as_str(), edit.cursor, edit.highlight), ("x", 1, 1));
+        assert_eq!(
+            (edit.value.as_str(), edit.cursor, edit.highlight),
+            ("x", 1, 1)
+        );
         let mut edit = field("hello world");
         edit.value = "hi".into();
         assert!(edit.key(EditKey::Backspace, true, false));
