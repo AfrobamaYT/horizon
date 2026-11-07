@@ -1,6 +1,7 @@
 //! Typed native-mod data attached to server-owned holders.
 #[doc(hidden)]
 pub mod index;
+mod index_key;
 mod lifetime;
 #[doc(hidden)]
 pub mod observer;
