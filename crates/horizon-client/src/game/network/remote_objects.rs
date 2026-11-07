@@ -195,11 +195,11 @@ impl Game<'_> {
                 && self.ominous_spawners.iter().any(|s| s.id == id)
             {
                 // OminousItemSpawner.DATA_ITEM.
-                if let (Some(item), Some(s)) = (
+                if let (Some(item), Some(i)) = (
                     self.to_stack(stack),
-                    self.ominous_spawners.iter_mut().find(|s| s.id == id),
+                    self.ominous_spawners.iter().position(|s| s.id == id),
                 ) {
-                    s.item = item;
+                    self.ominous_spawners.update(i, |s| s.item = item);
                 }
             } else if self.item_frames.iter().any(|f| f.id == id) {
                 // HangingEntity.DATA_DIRECTION, ItemFrame.DATA_ITEM and DATA_ROTATION.
@@ -274,8 +274,8 @@ impl Game<'_> {
                         _ => {}
                     }
                 });
-            } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                match (index, value) {
+            } else if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+                self.carts.update(i, |c| match (index, value) {
                     (8, Value::Int(v)) => c.hurt_time = *v,
                     (9, Value::Int(v)) => c.hurt_dir = *v,
                     (10, Value::Float(v)) => c.damage = *v,
@@ -308,7 +308,7 @@ impl Game<'_> {
                         ));
                     }
                     _ => {}
-                }
+                });
             }
         }
     }
@@ -350,21 +350,21 @@ impl Game<'_> {
                 let _ = yaw;
                 b.on_ground = on_ground;
             });
-        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id)
+        } else if let Some(i) = self.carts.iter().position(|c| c.id == id)
             && let Some(yaw) = yaw
         {
-            c.yaw = yaw;
+            self.carts.update(i, |c| c.yaw = yaw);
         }
     }
 
     /// `MinecartTNT.handleEntityEvent(70)`: the client's fuse starts at 80.
     pub(super) fn remote_cart_primed(&mut self, id: u32) {
-        if let Some(c) = self
+        if let Some(i) = self
             .carts
-            .iter_mut()
-            .find(|c| c.id == id && c.kind == super::minecarts::CartKind::Tnt)
+            .iter()
+            .position(|c| c.id == id && c.kind == super::minecarts::CartKind::Tnt)
         {
-            c.fuse = 80;
+            self.carts.update(i, |c| c.fuse = 80);
         }
     }
 
@@ -378,7 +378,7 @@ impl Game<'_> {
         mut turn: impl FnMut(u32, f32) -> f32,
         mut lerp_cart: impl FnMut(&mut super::minecarts::Minecart) -> bool,
     ) {
-        for c in &mut self.carts {
+        self.carts.for_each_mut(|c| {
             c.previous = c.position;
             c.previous_yaw = c.yaw;
             c.previous_pitch = c.pitch;
@@ -416,7 +416,7 @@ impl Game<'_> {
                     [0.0; 3],
                 );
             }
-        }
+        });
         // The boat the player drives moves here, not where the server says.
         let driven = self.riding.filter(|&id| self.controls_boat(id));
         self.boats.for_each_mut(|b| {

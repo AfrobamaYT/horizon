@@ -11,6 +11,7 @@
 
 use super::{Game, Result};
 use horizon_client::join_seq::{JoinSeq, Joined};
+use horizon_core::geometry::Vec3;
 use horizon_core::random::RandomSource as _;
 
 /// What this tick has ticked of the three kinds.
@@ -57,17 +58,6 @@ enum Pending {
 /// The lowest join number in a batch, or none when it is empty.
 pub(super) fn first_join<T: Joined>(list: &[T]) -> Option<JoinSeq> {
     list.iter().map(Joined::join_seq).min()
-}
-
-/// Where the entity that joined as `join` is in `list`, if still there. A list
-/// is usually in join order (spawns append), so a binary search finds it; a
-/// list put back out of order falls back to the walk.
-fn find_join<T: Joined>(list: &[T], join: JoinSeq) -> Option<usize> {
-    match list.binary_search_by_key(&join, Joined::join_seq) {
-        // Join numbers are unique, so a hit is the entity even in a list out of order.
-        Ok(i) => Some(i),
-        Err(_) => list.iter().position(|e| e.join_seq() == join),
-    }
 }
 
 impl Game<'_> {
@@ -130,39 +120,78 @@ impl Game<'_> {
             .iter()
             .for_each(|e| offer(e.join, Pending::Falling));
         pending.sort_unstable_by_key(|&(j, _)| j);
+        // EntityGetter.getEntityCollisions: the boxes that stop these moves (a
+        // boat, a shulker, a happy ghast held still), gathered once for the
+        // run and again after an explosion, which can move or remove them.
+        let mut obstacles: Option<horizon_client::entities::ObstacleGrid> = None;
+        let mut nearby = Vec::new();
         for (join, kind) in pending {
             self.ordered.done = Some(join);
             // ServerLevel.tick: only entities in entity-ticking chunks tick.
             match kind {
                 Pending::Tnt => {
-                    let Some(i) = find_join(&self.tnts, join) else {
+                    let Some(i) = self.tnts.locate(join) else {
                         continue;
                     };
                     let at = self.tnts[i].position;
-                    if entity_ticking(at.x.floor() as i32, at.z.floor() as i32)
-                        && let Err(e) = self.tick_one_tnt(i)
-                    {
-                        first_error.get_or_insert(e);
+                    if entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
+                        let t = &self.tnts[i];
+                        let area = t.bounds().expand_towards(t.velocity);
+                        obstacles
+                            .get_or_insert_with(|| {
+                                horizon_client::entities::ObstacleGrid::new(
+                                    self.item_entity_collisions(),
+                                )
+                            })
+                            .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);
+                        let count = self.tnts.len();
+                        if let Err(e) = self.tick_one_tnt(i, &nearby) {
+                            first_error.get_or_insert(e);
+                        }
+                        if self.tnts.len() < count {
+                            obstacles = None;
+                        }
                     }
                 }
                 Pending::Falling => {
-                    let Some(i) = find_join(&self.falling, join) else {
+                    let Some(i) = self.falling.locate(join) else {
                         continue;
                     };
                     let at = self.falling[i].position;
                     if entity_ticking(at.x.floor() as i32, at.z.floor() as i32) {
                         events = true;
-                        if let Err(e) = self.tick_one_falling(i) {
+                        let f = &self.falling[i];
+                        let area = horizon_client::falling_block::bounds(f.position)
+                            .expand_towards(f.velocity);
+                        obstacles
+                            .get_or_insert_with(|| {
+                                horizon_client::entities::ObstacleGrid::new(
+                                    self.item_entity_collisions(),
+                                )
+                            })
+                            .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);
+                        if let Err(e) = self.tick_one_falling(i, &nearby) {
                             first_error.get_or_insert(e);
                         }
                     }
                 }
                 Pending::Orb => {
-                    let Some(i) = find_join(&self.orbs, join) else {
+                    let Some(i) = self.orbs.locate(join) else {
                         continue;
                     };
                     let followed = followed.get_or_insert_with(|| self.orb_followed());
                     let target = self.orb_target(i, followed);
+                    // A block of slack around the move: gravity and the pull
+                    // towards a player change it before it is made.
+                    let o = &self.orbs[i];
+                    let area = o.bounds().expand_towards(o.velocity);
+                    obstacles
+                        .get_or_insert_with(|| {
+                            horizon_client::entities::ObstacleGrid::new(
+                                self.item_entity_collisions(),
+                            )
+                        })
+                        .near(area.inflate(Vec3::new(1.0, 1.0, 1.0)), &mut nearby);
                     let o = &mut self.orbs[i];
                     // An orb has no random of its own here: lava draws from one
                     // made on first use, apart from the level stream.
@@ -177,7 +206,7 @@ impl Game<'_> {
                         let mut on_sound = |pos: [f64; 3], pitch: f32| {
                             audio.play("minecraft:entity.generic.burn", Some(pos), 0.4, pitch);
                         };
-                        o.tick(
+                        o.tick_among(
                             &self.world,
                             self.res.facts(),
                             self.collision,
@@ -188,6 +217,7 @@ impl Game<'_> {
                             &self.res.motion().fluids,
                             &self.loop_context,
                             &mut on_sound,
+                            &nearby,
                         )
                     };
                     // PowderSnowBlock.entityInside during the move, before an
@@ -219,35 +249,44 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::find_join;
-    use horizon_client::join_seq::{JoinList, JoinSeq, Joined as _};
+    use horizon_client::chunk::Chunk;
+    use horizon_core::position::ChunkPos;
+    use std::sync::Arc;
 
-    #[derive(Clone)]
-    struct E {
-        join: JoinSeq,
-    }
-    horizon_client::impl_joined!(E);
-
-    /// The run looks each entity up by join number: in a list in join order,
-    /// one put back out of order, and after the entity left.
     #[test]
-    fn find_join_finds_by_number_in_or_out_of_order() {
-        let mut list = JoinList::<E>::default();
-        for _ in 0..5 {
-            list.push(E {
-                join: JoinSeq::UNJOINED,
-            });
-        }
-        let joins: Vec<JoinSeq> = list.iter().map(|e| e.join_seq()).collect();
-        for (i, &j) in joins.iter().enumerate() {
-            assert_eq!(find_join(&list, j), Some(i));
-        }
-        list.swap(0, 4);
-        list.swap(1, 3);
-        assert_eq!(find_join(&list, joins[0]), Some(4));
-        assert_eq!(find_join(&list, joins[4]), Some(0));
-        assert_eq!(find_join(&list, joins[1]), Some(3));
-        let gone = list.remove(2).join_seq();
-        assert_eq!(find_join(&list, gone), None);
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn dispatch_ticks_both_owners_of_each_located_kind() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.build_registries();
+            game.set_allow_commands(true);
+            game.world
+                .chunks
+                .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(0, 0))
+                .unwrap();
+            for x in [4, 12] {
+                assert!(game.run_command(&format!("summon tnt {x} 70 4 {{fuse:80}}")));
+                assert!(game.run_command(&format!(
+                    "summon falling_block {x} 70 8 {{BlockState:{{Name:\"minecraft:sand\"}},Time:1}}"
+                )));
+                assert!(game.run_command(&format!("summon experience_orb {x} 70 12 {{Value:1}}")));
+            }
+            // Existing residents whose spawn packets were already announced.
+            game.ordered.announced = horizon_client::join_seq::JoinSeq::MAX;
+            game.tickets.update(None);
+            game.begin_ordered_ticks();
+            game.run_ordered_ticks(horizon_client::join_seq::JoinSeq::MAX, false)
+                .unwrap();
+            assert_eq!(
+                game.tnts.iter().map(|t| t.fuse).collect::<Vec<_>>(),
+                [79, 79]
+            );
+            assert_eq!(
+                game.falling.iter().map(|f| f.age).collect::<Vec<_>>(),
+                [2, 2]
+            );
+            assert_eq!(game.orbs.iter().map(|o| o.age).collect::<Vec<_>>(), [1, 1]);
+        });
     }
 }

@@ -125,9 +125,9 @@ impl Game<'_> {
         let held = match t {
             Target::Cart(_) => self
                 .carts
-                .iter_mut()
-                .find(|c| c.id == id)
-                .and_then(|c| take(c.position, &mut c.items)),
+                .iter()
+                .position(|c| c.id == id)
+                .and_then(|i| self.carts.update(i, |c| take(c.position, &mut c.items))),
             _ => self
                 .boats
                 .iter()
@@ -155,7 +155,7 @@ impl Game<'_> {
                 Target::Crystal(id) => self.crystals.retain(|c| c.id != id),
                 Target::Dragon(id) => {
                     if self.dragon.as_ref().is_some_and(|d| d.id == id) {
-                        self.dragon = None;
+                        self.dragon.discard();
                     }
                 }
                 Target::Player | Target::Guest(_) | Target::Mob(_) => {}
@@ -172,6 +172,42 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use crate::game::api_values::{StackReadError, TryIntoApi, test_snapshot};
+    #[test]
+    #[ignore = "needs prepared resources"]
+    fn destroying_a_cart_spills_all_slots_after_the_removal_flush() {
+        use super::super::{
+            minecarts::{CartKind, Minecart},
+            native_entity_refs::tests::with_game,
+        };
+        use super::*;
+        with_game(|game| {
+            let mut cart = Minecart::new(600, CartKind::Chest, Vec3::new(1.0, 70.0, 2.0));
+            cart.items[0] = Some(ItemStack::new("minecraft:stone", 64));
+            cart.items[5] = Some(ItemStack::new("minecraft:stone", 19));
+            cart.items[26] = Some(ItemStack::new("minecraft:sand", 7));
+            game.carts.push(cart);
+            let entity = game.entity(600).unwrap();
+            assert!(game.entity_remove(entity, NativeRemovalReason::Killed));
+            assert!(game.dropped.is_empty());
+            game.native_removals_flush();
+            assert!(game.carts.is_empty());
+            let mut totals = std::collections::BTreeMap::new();
+            for item in game.dropped.iter() {
+                *totals.entry(item.stack.item.to_string()).or_insert(0) += item.stack.count;
+            }
+            assert_eq!(
+                totals,
+                std::collections::BTreeMap::from([
+                    ("minecraft:stone".to_owned(), 83),
+                    ("minecraft:sand".to_owned(), 7),
+                ])
+            );
+            let count = game.dropped.len();
+            game.native_removals_flush();
+            assert_eq!(game.dropped.len(), count);
+        });
+    }
+
     #[test]
     #[ignore = "needs prepared resources"]
     fn discard_other_clears_nbt_and_saved_entity() {
@@ -193,6 +229,7 @@ mod tests {
                 .chunks
                 .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:text_display".into(),
                 position: Vec3::new(1.0, 70.0, 1.0),
@@ -373,6 +410,7 @@ mod tests {
 
         with_game(|game| {
             game.others.push(OtherEntity {
+                item_transformation: None,
                 id: 12,
                 kind: "minecraft:marker".into(),
                 position: Vec3::ZERO,

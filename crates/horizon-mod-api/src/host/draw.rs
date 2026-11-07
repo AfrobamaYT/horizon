@@ -122,6 +122,23 @@ pub trait DrawContext {
     fn gui_draw_item_with(&mut self, stack: &ItemStack, at: [f32; 2], text: Option<&str>) {
         unimplemented!("DrawContext::gui_draw_item_with")
     }
+    /// A button as the game's screens draw one (`AbstractButton`): `label` centred on the
+    /// `widget/button` sprite (`button_highlighted` when `highlighted`, `button_disabled` and
+    /// grey when not `active`), scrolling when it doesn't fit, and recorded for the narrator and
+    /// a controller's focus. `rect` is `[x, y, w, h]` in GUI pixels. What
+    /// [`crate::widgets::Widgets`] draws its buttons with.
+    fn widget_button(&mut self, rect: [f32; 4], label: &Text, active: bool, highlighted: bool) {
+        unimplemented!("DrawContext::widget_button")
+    }
+    /// A text field as the game's screens draw one (`EditBox`): its text from the first
+    /// character `field.scroll` shows, scrolled on to keep the cursor in view, the selection
+    /// highlighted, the caret, the suggestion, the `widget/text_field` sprite when bordered, and
+    /// a record for the narrator and a controller's focus. Answers the scroll it drew with and
+    /// the x of each shown character boundary, for the next press. What
+    /// [`crate::widgets::Widgets`] draws its fields with.
+    fn widget_text_field(&mut self, field: &TextFieldView) -> TextFieldLayout {
+        unimplemented!("DrawContext::widget_text_field")
+    }
 }
 /// What a block entity, mob or player submit hook draws with, in blocks under a pose stack (`PoseStack`): one per hook call.
 pub trait BlockEntityDrawContext {
@@ -239,7 +256,8 @@ pub trait BlockEntityDrawContext {
     }
     /// Draws the resolved standalone model under `draw`'s pose: unturned, from
     /// the block's lower north-west corner, lit by `draw.light`. Faces with a tint
-    /// index are multiplied by 0xRRGGBB `tint` (0xFFFFFF for none), others unchanged.
+    /// index are multiplied by `tint` (`0xAARRGGBB`, the same as [`crate::WorldQuad::color`];
+    /// `0xFFFFFFFF` for none), alpha included. Faces with no tint index stay opaque.
     /// A stale generation or absent slot returns an error without appending geometry.
     fn model(&mut self, model: ModelRef, tint: u32) -> Result<(), ModelError> {
         unimplemented!("BlockEntityDrawContext::draw_model")
@@ -293,5 +311,27 @@ pub trait WorldDrawContext {
     /// Capacity is allocated during setup, never grown during submission.
     fn usage(&self) -> WorldDrawUsage {
         unimplemented!("WorldDrawContext::world_draw_usage")
+    }
+    /// Draw every copy in `instances` of the resolved `model`.
+    ///
+    /// One batch per model. The engine uploads only the instance records on the opaque
+    /// and cutout route, and bakes the same prepared geometry on the CPU when a shader
+    /// pack, a copy with an [`Overlay`], or another route cannot take instances. A model
+    /// with a translucent face is refused with [`InstanceError::Translucent`] and is never
+    /// drawn as solid. Tint is `0xAARRGGBB` and light is [`LightCoords`]: both stay in
+    /// vanilla's space, and the engine converts them to the frame. A tint's alpha
+    /// multiplies only faces that have a tint index, the same as vanilla's model
+    /// renderer. The view budget is 16,384 copies. Pass at most that many: a longer
+    /// list is refused with [`InstanceError::CapacityExceeded`] before any copy is
+    /// examined. On wasm the guest pays for the list it passes, because the runtime
+    /// lifts the slice before that check. Within the bound, copies outside the frustum
+    /// are omitted and do not count. On `Err`, nothing from this call is drawn.
+    fn draw_model_instances(
+        &mut self,
+        model: ModelRef,
+        instances: &[ModelInstance],
+    ) -> Result<(), InstanceError> {
+        let _ = (model, instances);
+        unimplemented!("WorldDrawContext::draw_model_instances")
     }
 }
