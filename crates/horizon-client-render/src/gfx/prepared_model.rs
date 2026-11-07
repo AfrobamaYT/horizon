@@ -67,39 +67,107 @@ pub struct EntityRangePass<'a> {
     pub hdr: bool,
 }
 
-/// CPU ranges, then the prepared draw that sits at each cut. Cuts are entity-stream vertices.
-pub fn fill_ordered_ranges(
+/// One slice of the ordinary entity stream, then the instanced copies at its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OrderedSpan {
+    pub start: u32,
+    pub end: u32,
+    pub run: Option<InstanceRun>,
+}
+
+/// Consecutive prepared copies drawn as one `draw_indexed`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InstanceRun {
+    pub first: u32,
+    pub count: u32,
+}
+
+/// CPU ranges and instanced runs in stream order. Same cut, generation and slot coalesce.
+pub fn fill_instance_ranges(
     vertices: u32,
-    cuts: impl IntoIterator<Item = u32>,
-    ranges: &mut Vec<(u32, u32, Option<usize>)>,
+    draws: &[PreparedModelDraw],
+    cuts: &[u32],
+    offset: u32,
+    ranges: &mut Vec<OrderedSpan>,
 ) {
     ranges.clear();
-    let mut cursor = 0;
-    for (index, cut) in cuts.into_iter().enumerate() {
-        let cut = cut.min(vertices);
+    debug_assert_eq!(draws.len(), cuts.len());
+    let mut cursor = 0u32;
+    let mut index = 0usize;
+    while index < draws.len() {
+        let cut = cuts
+            .get(index)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(offset)
+            .min(vertices);
         if cut > cursor {
-            ranges.push((cursor, cut, None));
+            ranges.push(OrderedSpan {
+                start: cursor,
+                end: cut,
+                run: None,
+            });
         }
-        ranges.push((cut, cut, Some(index)));
+        let generation = draws[index].generation;
+        let slot = draws[index].slot;
+        let first = index;
+        index += 1;
+        while index < draws.len() {
+            let next = cuts
+                .get(index)
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(offset)
+                .min(vertices);
+            if next != cut || draws[index].generation != generation || draws[index].slot != slot {
+                break;
+            }
+            index += 1;
+        }
+        ranges.push(OrderedSpan {
+            start: cut,
+            end: cut,
+            run: Some(InstanceRun {
+                first: first as u32,
+                count: (index - first) as u32,
+            }),
+        });
         cursor = cut;
     }
     if vertices > cursor {
-        ranges.push((cursor, vertices, None));
+        ranges.push(OrderedSpan {
+            start: cursor,
+            end: vertices,
+            run: None,
+        });
     }
 }
 
-/// Draw entity ranges and prepared copies in stream order. An HDR mark follows its color draw.
+/// Draws after `fallback` whose cut is at or past its cut move forward by `added`.
+#[cfg(test)]
+fn shift_cuts_after_cpu_fallback(draws: &mut [PreparedModelDraw], fallback: usize, added: u32) {
+    let Some(at) = draws.get(fallback).map(|draw| draw.cpu_vertices) else {
+        return;
+    };
+    for draw in draws.iter_mut().skip(fallback + 1) {
+        if draw.cpu_vertices >= at {
+            draw.cpu_vertices = draw.cpu_vertices.saturating_add(added);
+        }
+    }
+}
+
+/// Draw entity ranges and prepared runs in stream order. An HDR mark follows its color draw.
 pub fn draw_ordered<'a>(
     pass: &mut wgpu::RenderPass<'a>,
     entities: &EntityRangePass<'a>,
     models: Option<&'a PreparedModels>,
     instances: &'a wgpu::Buffer,
     draws: &[PreparedModelDraw],
-    ranges: &[(u32, u32, Option<usize>)],
+    ranges: &[OrderedSpan],
 ) {
-    for &(start, end, draw) in ranges {
-        if end / 4 > start / 4 {
-            let (first, last) = (start / 4 * 6, end / 4 * 6);
+    for span in ranges {
+        if span.end / 4 > span.start / 4 {
+            let (first, last) = (span.start / 4 * 6, span.end / 4 * 6);
             pass.set_pipeline(entities.pipeline);
             pass.set_vertex_buffer(0, entities.vertices.slice(..));
             pass.set_index_buffer(entities.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -109,18 +177,21 @@ pub fn draw_ordered<'a>(
                 pass.draw_indexed(first..last, 0, 0..1);
             }
         }
-        let Some(index) = draw else {
+        let Some(run) = span.run else {
             continue;
         };
         let Some(models) = models else {
             continue;
         };
-        let Ok(range) = models.indices(draws[index].generation, draws[index].slot) else {
+        let Some(draw) = draws.get(run.first as usize) else {
             continue;
         };
-        models.draw_at(pass, false, instances, range, index as u32);
+        let Ok(range) = models.indices(draw.generation, draw.slot) else {
+            continue;
+        };
+        models.draw_run(pass, false, instances, range, run);
         if entities.hdr {
-            models.draw_at(pass, true, instances, range, index as u32);
+            models.draw_run(pass, true, instances, range, run);
         }
     }
     pass.set_pipeline(entities.pipeline);
@@ -303,15 +374,18 @@ impl PreparedModels {
         })
     }
 
-    /// Draw one copy from `instance` at `instance_index`. `hdr` is the alpha mark, not a second mesh.
-    pub fn draw_at<'a>(
+    /// Draw `run.count` copies starting at `run.first`. `hdr` is the alpha mark, not a second mesh.
+    pub fn draw_run<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
         hdr: bool,
         instance: &'a wgpu::Buffer,
         range: (u32, u32),
-        instance_index: u32,
+        run: InstanceRun,
     ) {
+        if run.count == 0 {
+            return;
+        }
         pass.set_pipeline(if hdr {
             &self.hdr_pipeline
         } else {
@@ -323,7 +397,28 @@ impl PreparedModels {
         pass.draw_indexed(
             range.0..range.0 + range.1,
             0,
-            instance_index..instance_index + 1,
+            run.first..run.first.saturating_add(run.count),
+        );
+    }
+
+    /// Draw one copy from `instance` at `instance_index`. `hdr` is the alpha mark, not a second mesh.
+    pub fn draw_at<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        hdr: bool,
+        instance: &'a wgpu::Buffer,
+        range: (u32, u32),
+        instance_index: u32,
+    ) {
+        self.draw_run(
+            pass,
+            hdr,
+            instance,
+            range,
+            InstanceRun {
+                first: instance_index,
+                count: 1,
+            },
         );
     }
 
@@ -339,18 +434,32 @@ impl PreparedModels {
     }
 }
 
+/// How many instances of `stride` bytes fit in `limit`.
+pub fn max_instance_slots(stride: u64, limit: u64) -> u64 {
+    if stride == 0 || limit < stride {
+        0
+    } else {
+        limit / stride
+    }
+}
+
+/// How many of `incoming` copies still fit after `already` are staged.
+pub fn instance_room(already: u64, incoming: usize, slots: u64) -> usize {
+    usize::try_from(slots.saturating_sub(already).min(incoming as u64)).unwrap_or(incoming)
+}
+
 /// Slots to allocate for `count` instances. The size stays within `limit`, and `count` itself must fit.
 pub fn instance_slot_capacity(count: u64, stride: u64, limit: u64) -> Result<u64> {
     if count == 0 {
         return Ok(0);
     }
-    if stride == 0 || limit < stride {
+    let max_slots = max_instance_slots(stride, limit);
+    if max_slots == 0 {
         return Err(format!(
             "prepared instance of {stride} bytes does not fit the {limit}-byte limit"
         )
         .into());
     }
-    let max_slots = limit / stride;
     if count > max_slots {
         return Err(format!(
             "prepared instances need {count} slots of {stride} bytes, above the {limit}-byte limit ({max_slots} slots)"
@@ -457,20 +566,122 @@ mod tests {
         assert!(draws.capacity() >= capacity);
     }
 
+    fn draw_at(slot: u32, generation: u64, cut: u32) -> PreparedModelDraw {
+        PreparedModelDraw {
+            cpu_vertices: cut,
+            generation,
+            slot,
+            instance: PreparedModelInstance::zeroed(),
+        }
+    }
+
+    fn cpu(start: u32, end: u32) -> OrderedSpan {
+        OrderedSpan {
+            start,
+            end,
+            run: None,
+        }
+    }
+
+    fn run(at: u32, first: u32, count: u32) -> OrderedSpan {
+        OrderedSpan {
+            start: at,
+            end: at,
+            run: Some(InstanceRun { first, count }),
+        }
+    }
+
     #[test]
     fn prepared_draws_keep_the_entity_stream_order() {
+        let draws = [draw_at(0, 1, 4), draw_at(0, 1, 8)];
         let mut ranges = Vec::new();
-        fill_ordered_ranges(16, [4, 8], &mut ranges);
+        fill_instance_ranges(16, &draws, &[4, 8], 0, &mut ranges);
         assert_eq!(
             ranges,
+            vec![cpu(0, 4), run(4, 0, 1), cpu(4, 8), run(8, 1, 1), cpu(8, 16)]
+        );
+    }
+
+    #[test]
+    fn the_same_model_at_one_cut_is_one_run() {
+        let draws = [
+            draw_at(3, 7, 0),
+            draw_at(3, 7, 0),
+            draw_at(3, 7, 0),
+            draw_at(4, 7, 0),
+            draw_at(3, 8, 0),
+            draw_at(3, 7, 12),
+            draw_at(3, 7, 12),
+        ];
+        let cuts = [0, 0, 0, 0, 0, 12, 12];
+        let mut ranges = Vec::new();
+        fill_instance_ranges(20, &draws, &cuts, 0, &mut ranges);
+        let runs: Vec<_> = ranges.iter().filter_map(|span| span.run).collect();
+        assert_eq!(
+            runs,
             vec![
-                (0, 4, None),
-                (4, 4, Some(0)),
-                (4, 8, None),
-                (8, 8, Some(1)),
-                (8, 16, None),
+                InstanceRun { first: 0, count: 3 },
+                InstanceRun { first: 3, count: 1 },
+                InstanceRun { first: 4, count: 1 },
+                InstanceRun { first: 5, count: 2 },
             ]
         );
+        assert!(
+            ranges
+                .iter()
+                .any(|span| span.run.is_none() && span.end > span.start)
+        );
+    }
+
+    #[test]
+    fn a_cpu_segment_between_copies_breaks_the_run() {
+        let mut draws = [
+            draw_at(1, 1, 0),
+            draw_at(1, 1, 0),
+            draw_at(1, 1, 0),
+            draw_at(1, 1, 0),
+        ];
+        shift_cuts_after_cpu_fallback(&mut draws, 1, 8);
+        assert_eq!(draws.map(|draw| draw.cpu_vertices), [0, 0, 8, 8]);
+        let kept = [draws[0], draws[2], draws[3]];
+        let cuts = [
+            kept[0].cpu_vertices,
+            kept[1].cpu_vertices,
+            kept[2].cpu_vertices,
+        ];
+        let mut ranges = Vec::new();
+        fill_instance_ranges(16, &kept, &cuts, 0, &mut ranges);
+        assert_eq!(
+            ranges,
+            vec![run(0, 0, 1), cpu(0, 8), run(8, 1, 2), cpu(8, 16)]
+        );
+    }
+
+    #[test]
+    fn overflow_copies_bake_after_the_instanced_prefix() {
+        assert_eq!(instance_room(0, 5, 2), 2);
+        assert_eq!(instance_room(2, 5, 2), 0);
+        assert_eq!(instance_room(1, 5, 4), 3);
+        let draws = [
+            draw_at(1, 1, 4),
+            draw_at(1, 1, 4),
+            draw_at(1, 1, 4),
+            draw_at(1, 1, 12),
+            draw_at(1, 1, 12),
+        ];
+        let room = instance_room(0, draws.len(), 3);
+        let (prefix, suffix) = draws.split_at(room);
+        assert_eq!(suffix.len(), 2);
+        assert!(
+            suffix
+                .iter()
+                .all(|draw| draw.cpu_vertices >= prefix.last().unwrap().cpu_vertices)
+        );
+        let cuts: Vec<_> = prefix.iter().map(|draw| draw.cpu_vertices).collect();
+        let mut ranges = Vec::new();
+        let vertices = 20 + suffix.len() as u32 * 8;
+        fill_instance_ranges(vertices, prefix, &cuts, 0, &mut ranges);
+        assert_eq!(ranges, vec![cpu(0, 4), run(4, 0, 3), cpu(4, vertices)]);
     }
 
     #[test]

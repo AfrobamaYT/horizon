@@ -797,21 +797,36 @@ impl Game<'_> {
         *out = draw.vertices;
     }
 
-    /// Keep, spin, or a missing upload bakes the model into the vertex span.
-    /// Otherwise the copy is drawn from the prepared buffer at the same cut.
+    /// Keep, spin, or no renderer bakes every copy into the vertex span.
+    /// Otherwise copies that fit the instance buffer are staged, and the rest are
+    /// baked at their own cut so they stay after the instanced prefix.
     fn finish_prepared_draw(&self, draw: &mut BlockEntityDraw, origin: DVec3, camera: DVec3) {
         if draw.records.is_empty() {
             return;
         }
-        let count = self.prepared_model_draws.borrow().len() as u64 + draw.records.len() as u64;
-        let fits = self
+        if draw.kept || !draw.spins.is_empty() {
+            draw.bake_recorded(&self.standalone_geometry.slots);
+            return;
+        }
+        let already = self.prepared_model_draws.borrow().len() as u64;
+        let incoming = draw.records.len();
+        let Some(room) = self
             .renderer
             .as_ref()
-            .is_some_and(|renderer| renderer.prepared_instances_fit(count));
-        if draw.kept || !draw.spins.is_empty() || !fits {
+            .map(|renderer| renderer.prepared_instance_room(already, incoming))
+        else {
             draw.bake_recorded(&self.standalone_geometry.slots);
-        } else {
-            draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());
+            return;
+        };
+        if room == 0 {
+            draw.bake_recorded(&self.standalone_geometry.slots);
+            return;
+        }
+        let overflow = (room < draw.records.len()).then(|| draw.records.split_off(room));
+        draw.push_instances(origin, camera, &mut self.prepared_model_draws.borrow_mut());
+        if let Some(overflow) = overflow {
+            draw.records = overflow;
+            draw.bake_recorded(&self.standalone_geometry.slots);
         }
     }
 }

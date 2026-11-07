@@ -1366,7 +1366,7 @@ pub struct Renderer {
     prepared_draws: Vec<PreparedModelDraw>,
     /// Ordinary-stream cuts for `prepared_draws`, filled once per frame.
     prepared_cuts: Vec<u32>,
-    prepared_ranges: Vec<(u32, u32, Option<usize>)>,
+    prepared_ranges: Vec<prepared_model::OrderedSpan>,
     prepared_uploaded: Vec<PreparedModelInstance>,
     prepared_instance_buffer: wgpu::Buffer,
     prepared_instance_capacity: u64,
@@ -2654,6 +2654,18 @@ impl Renderer {
             self.device.limits().max_buffer_size,
         )
         .is_ok()
+    }
+
+    /// How many of `incoming` copies still fit after `already` are staged.
+    pub fn prepared_instance_room(&self, already: u64, incoming: usize) -> usize {
+        prepared_model::instance_room(
+            already,
+            incoming,
+            prepared_model::max_instance_slots(
+                std::mem::size_of::<PreparedModelInstance>() as u64,
+                self.device.limits().max_buffer_size,
+            ),
+        )
     }
 
     fn finish_prepared_frame(&mut self) {
@@ -8714,11 +8726,11 @@ impl Renderer {
                 oit_on,
                 &mut self.prepared_cuts,
             );
-            prepared_model::fill_ordered_ranges(
+            prepared_model::fill_instance_ranges(
                 entity_quads * 4,
-                self.prepared_cuts
-                    .iter()
-                    .map(|cut| cut.saturating_add(posed)),
+                &self.prepared_draws,
+                &self.prepared_cuts,
+                posed,
                 &mut self.prepared_ranges,
             );
         }
