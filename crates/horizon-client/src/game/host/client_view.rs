@@ -11,6 +11,20 @@ impl ClientViewHost for Game<'_> {
     }
 }
 impl ClientViewClientHost for Game<'_> {
+    fn camera_type(&self) -> CameraType {
+        mod_api::__private::check_access(
+            "camera_type",
+            mod_api::__private::LoadAccess::ClientSetup,
+        );
+        self.native_camera_type()
+    }
+    fn set_camera_type(&self, camera_type: CameraType) {
+        mod_api::__private::check_access(
+            "set_camera_type",
+            mod_api::__private::LoadAccess::WorldOnly,
+        );
+        self.native_set_camera_type(camera_type)
+    }
     fn clock(&self) -> Option<NativeClock> {
         mod_api::__private::check_access("clock", mod_api::__private::LoadAccess::ClientSetup);
         self.native_clock()
@@ -33,20 +47,6 @@ impl ClientViewClientHost for Game<'_> {
             mod_api::__private::LoadAccess::ClientSetup,
         );
         self.native_camera_entity()
-    }
-    fn camera_type(&self) -> CameraType {
-        mod_api::__private::check_access(
-            "camera_type",
-            mod_api::__private::LoadAccess::ClientSetup,
-        );
-        self.native_camera_type()
-    }
-    fn set_camera_type(&mut self, camera_type: CameraType) {
-        mod_api::__private::check_access(
-            "set_camera_type",
-            mod_api::__private::LoadAccess::WorldOnly,
-        );
-        self.native_set_camera_type(camera_type)
     }
     fn is_paused(&self) -> bool {
         mod_api::__private::check_access("is_paused", mod_api::__private::LoadAccess::ClientSetup);
