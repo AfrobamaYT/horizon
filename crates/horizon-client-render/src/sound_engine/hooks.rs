@@ -59,6 +59,15 @@ pub fn native_sound_engine_load(context: &horizon_world::native_load_context::Lo
     mod_api::dispatch_sound_engine_load(&OwningLoop::new(context));
 }
 
+// Validate a mod's changed parameters at the playback boundary, leaving vanilla
+// inputs alone. Starts and refreshes use the same contract.
+fn valid_playback_edit(original: &SoundPlay, edited: &SoundPlay) -> bool {
+    (edited.volume.to_bits() == original.volume.to_bits()
+        || edited.volume.is_finite() && edited.volume >= 0.0)
+        && (edited.pitch.to_bits() == original.pitch.to_bits()
+            || edited.pitch.is_finite() && edited.pitch > 0.0)
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct LiveSettings {
     original: SoundPlay,
@@ -164,6 +173,9 @@ impl SoundEngine {
         match sound {
             None => false,
             Some(edited) => {
+                if !valid_playback_edit(&original, &edited) {
+                    return false;
+                }
                 if edited != original {
                     instance.apply_play_settings(edited);
                 }
@@ -190,11 +202,7 @@ impl SoundEngine {
         instance.write_play_settings(edited.as_mut()?);
         native_play_sound(source, id, false, original, edited);
         let edited = edited.as_ref()?;
-        let volume_edited = edited.volume.to_bits() != original.volume.to_bits();
-        let pitch_edited = edited.pitch.to_bits() != original.pitch.to_bits();
-        if volume_edited && (!edited.volume.is_finite() || edited.volume < 0.0)
-            || pitch_edited && (!edited.pitch.is_finite() || edited.pitch <= 0.0)
-        {
+        if !valid_playback_edit(original, edited) {
             return None;
         }
         Some((edited.volume, edited.pitch))
@@ -428,5 +436,40 @@ mod tests {
             engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
             assert!(engine.instance(id).unwrap().stopped);
         });
+    }
+    #[test]
+    fn invalid_play_sound_edits_refuse_starts_and_stop_live_channels() {
+        struct Poison(bool);
+        #[mod_api::__subscriptions]
+        impl mod_api::Hooks for Poison {
+            fn play_sound(
+                &self,
+                _: &dyn mod_api::LoopContext,
+                event: &mut mod_api::PlaySoundEvent<'_>,
+            ) {
+                if event.starting == self.0 {
+                    let sound = event.sound.as_mut().unwrap();
+                    sound.volume = f32::NAN;
+                    sound.pitch = 0.0;
+                }
+            }
+        }
+        for at_start in [true, false] {
+            let mods = vec![mod_api::ModEntry::new("poison", Box::new(Poison(at_start)))];
+            mod_api::testing::with_mods(mods.into(), || {
+                let (mut engine, mut backend) = (engine(), Null::default());
+                let instance =
+                    SoundInstance::for_ui("minecraft:block.plain", 1.0, 1.0, LegacyRandom::new(1));
+                let (id, result) = engine.play_new(instance, true, &mut backend);
+                if at_start {
+                    assert_eq!(result, crate::sound_engine::PlayResult::NotStarted);
+                    assert!(backend.volume.is_empty());
+                } else {
+                    assert_eq!(result, crate::sound_engine::PlayResult::Started);
+                    engine.refresh_category_volume(crate::sound_engine::MASTER, &mut backend);
+                    assert!(engine.instance(id).unwrap().stopped);
+                }
+            });
+        }
     }
 }
