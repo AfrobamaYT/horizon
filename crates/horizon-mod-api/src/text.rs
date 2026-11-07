@@ -237,9 +237,26 @@ pub struct TextNode {
     /// Parent node index, or None for the root.
     pub parent: Option<u32>,
     /// Relation to the parent (child, argument, separator, fallback or hover).
-    pub relation: u8,
+    pub relation: TextRelation,
     /// Serialized shallow component, with recursive fields removed.
     pub data: String,
+}
+/// Node relation. Case order is append-only because it is part of the wasm link contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TextRelation {
+    /// Appended component.
+    Child,
+    /// Translation argument.
+    Argument,
+    /// Selector or NBT separator.
+    Separator,
+    /// Inline object fallback.
+    Fallback,
+    /// Hover text.
+    HoverText,
+    /// Hover entity name.
+    HoverEntityName,
 }
 /// Maximum depth of a component tree, counted in nodes.
 pub const MAX_TEXT_DEPTH: usize = 512;
@@ -315,7 +332,7 @@ impl TryFrom<&Text> for TextForm {
     type Error = TextFormError;
     fn try_from(value: &Text) -> Result<Self, Self::Error> {
         let mut nodes = Vec::new();
-        let mut pending = vec![(value, None, 0, 1)];
+        let mut pending = vec![(value, None, TextRelation::Child, 1)];
         while let Some((text, parent, relation, depth)) = pending.pop() {
             if depth > MAX_TEXT_DEPTH {
                 return Err(TextFormError::TooDeep);
@@ -323,7 +340,7 @@ impl TryFrom<&Text> for TextForm {
             let index = u32::try_from(nodes.len()).map_err(|_| TextFormError::Malformed)?;
             let mut children = Vec::new();
             for child in &text.children {
-                children.push((child, 0));
+                children.push((child, TextRelation::Child));
             }
             let content = match &text.content {
                 TextContent::Literal(s) => TextContent::Literal(s.clone()),
@@ -337,7 +354,7 @@ impl TryFrom<&Text> for TextForm {
                     fallback,
                     arguments,
                 } => {
-                    children.extend(arguments.iter().map(|x| (x, 1)));
+                    children.extend(arguments.iter().map(|x| (x, TextRelation::Argument)));
                     TextContent::Translatable {
                         key: key.clone(),
                         fallback: fallback.clone(),
@@ -346,7 +363,7 @@ impl TryFrom<&Text> for TextForm {
                 }
                 TextContent::Selector { pattern, separator } => {
                     if let Some(x) = separator {
-                        children.push((x.as_ref(), 2));
+                        children.push((x.as_ref(), TextRelation::Separator));
                     }
                     TextContent::Selector {
                         pattern: pattern.clone(),
@@ -360,7 +377,7 @@ impl TryFrom<&Text> for TextForm {
                     separator,
                 } => {
                     if let Some(x) = separator {
-                        children.push((x.as_ref(), 2));
+                        children.push((x.as_ref(), TextRelation::Separator));
                     }
                     TextContent::Nbt {
                         path: path.clone(),
@@ -375,7 +392,7 @@ impl TryFrom<&Text> for TextForm {
                     fallback,
                 }) => {
                     if let Some(x) = fallback {
-                        children.push((x.as_ref(), 3));
+                        children.push((x.as_ref(), TextRelation::Fallback));
                     }
                     TextContent::Object(TextObject::Player {
                         profile: profile.clone(),
@@ -389,7 +406,7 @@ impl TryFrom<&Text> for TextForm {
                     fallback,
                 }) => {
                     if let Some(x) = fallback {
-                        children.push((x.as_ref(), 3));
+                        children.push((x.as_ref(), TextRelation::Fallback));
                     }
                     TextContent::Object(TextObject::Atlas {
                         atlas: atlas.clone(),
@@ -400,12 +417,12 @@ impl TryFrom<&Text> for TextForm {
             };
             let hover = match &text.style.hover {
                 Some(TextHover::Text(x)) => {
-                    children.push((x.as_ref(), 4));
+                    children.push((x.as_ref(), TextRelation::HoverText));
                     None
                 }
                 Some(TextHover::Entity { kind, id, name }) => {
                     if let Some(x) = name {
-                        children.push((x.as_ref(), 5));
+                        children.push((x.as_ref(), TextRelation::HoverEntityName));
                     }
                     Some(TextHover::Entity {
                         kind: kind.clone(),
@@ -446,6 +463,7 @@ impl TryFrom<&Text> for TextForm {
     }
 }
 impl TextStyle {
+    // Listed deliberately: new fields must be handled; cloning the style would recurse into hover.
     fn clone_without_hover(&self) -> Self {
         Self {
             color: self.color.clone(),
@@ -471,7 +489,7 @@ impl TryFrom<TextForm> for Text {
         let mut depths = Vec::with_capacity(value.nodes.len());
         for (index, node) in value.nodes.into_iter().enumerate() {
             let depth = match node.parent {
-                None if index == 0 && node.relation == 0 => 1,
+                None if index == 0 && node.relation == TextRelation::Child => 1,
                 Some(parent) if (parent as usize) < index => depths[parent as usize] + 1,
                 _ => return Err(TextFormError::Malformed),
             };
@@ -527,15 +545,15 @@ impl TryFrom<TextForm> for Text {
             }
             let target = nodes[parent].2.as_mut().ok_or(TextFormError::Malformed)?;
             match relation {
-                0 => target.children.push(child),
-                1 => {
+                TextRelation::Child => target.children.push(child),
+                TextRelation::Argument => {
                     if let TextContent::Translatable { arguments, .. } = &mut target.content {
                         arguments.push(child);
                     } else {
                         return Err(TextFormError::Malformed);
                     }
                 }
-                2 => match &mut target.content {
+                TextRelation::Separator => match &mut target.content {
                     TextContent::Selector { separator, .. }
                     | TextContent::Nbt { separator, .. }
                         if separator.is_none() =>
@@ -544,16 +562,16 @@ impl TryFrom<TextForm> for Text {
                     }
                     _ => return Err(TextFormError::Malformed),
                 },
-                3 => match &mut target.content {
+                TextRelation::Fallback => match &mut target.content {
                     TextContent::Object(
                         TextObject::Player { fallback, .. } | TextObject::Atlas { fallback, .. },
                     ) if fallback.is_none() => *fallback = Some(Box::new(child)),
                     _ => return Err(TextFormError::Malformed),
                 },
-                4 if target.style.hover.is_none() => {
+                TextRelation::HoverText if target.style.hover.is_none() => {
                     target.style.hover = Some(TextHover::Text(Box::new(child)))
                 }
-                5 => match &mut target.style.hover {
+                TextRelation::HoverEntityName => match &mut target.style.hover {
                     Some(TextHover::Entity { name, .. }) if name.is_none() => {
                         *name = Some(Box::new(child))
                     }
@@ -642,14 +660,28 @@ mod tests {
         assert_eq!(Text::try_from(form).unwrap(), root);
     }
     #[test]
-    fn malformed_parent_and_relation_are_rejected() {
-        let mut form =
+    fn invalid_parents_and_relations_refuse() {
+        let form =
             TextForm::try_from(&Text::literal("root").append(Text::literal("child"))).unwrap();
-        form.nodes[1].parent = Some(1);
-        assert!(matches!(
-            Text::try_from(form),
-            Err(TextFormError::Malformed)
-        ));
+        let mut bad = form.clone();
+        bad.nodes[0].parent = Some(0);
+        assert!(matches!(Text::try_from(bad), Err(TextFormError::Malformed)));
+        let mut bad = form.clone();
+        bad.nodes[1].parent = Some(1);
+        assert!(matches!(Text::try_from(bad), Err(TextFormError::Malformed)));
+        for relation in [
+            TextRelation::Argument,
+            TextRelation::Separator,
+            TextRelation::Fallback,
+            TextRelation::HoverEntityName,
+        ] {
+            let mut bad = form.clone();
+            bad.nodes[1].relation = relation;
+            assert!(matches!(Text::try_from(bad), Err(TextFormError::Malformed)));
+        }
+        let mut valid = form.clone();
+        valid.nodes[1].relation = TextRelation::HoverText;
+        assert!(Text::try_from(valid).is_ok());
     }
     #[test]
     fn via_accepts_infallible_and_fallible_forms() {
@@ -701,5 +733,66 @@ mod tests {
             matches!(&decoded.content, TextContent::Translatable { key, .. } if key == "chat.type.text")
         );
         assert_eq!(decoded.children[0].style.bold, Some(false));
+    }
+    #[test]
+    fn object_fallback_form_distinguishes_omitted_styled_and_translatable() {
+        use serde_json::json;
+        let styled = json!({"content":{"Literal":"styled"}, "style":{"bold":false}, "children":[]});
+        let translated = json!({"content":{"Translatable":{"key":"test.head", "arguments":[]}}, "style":{}, "children":[]});
+        for object in [
+            json!({"Player":{"profile":{"name":"Test"}, "hat":true}}),
+            json!({"Atlas":{"atlas":"minecraft:blocks", "sprite":"test:icon"}}),
+        ] {
+            for fallback in [None, Some(styled.clone()), Some(translated.clone())] {
+                let mut object = object.clone();
+                if let Some(fallback) = &fallback {
+                    object.as_object_mut().unwrap().values_mut().next().unwrap()["fallback"] =
+                        fallback.clone();
+                }
+                let tree =
+                    json!({"content":{"Object":object}, "style":{}, "children":[]}).to_string();
+                let text: Text = serde_json::from_str(&tree).unwrap();
+                let TextContent::Object(object) = &text.content else {
+                    panic!("object contents")
+                };
+                let captured = match object {
+                    TextObject::Player { fallback, .. } | TextObject::Atlas { fallback, .. } => {
+                        fallback
+                    }
+                };
+                match &fallback {
+                    None => assert!(captured.is_none()),
+                    Some(value) if value == &styled => {
+                        assert_eq!(captured.as_ref().unwrap().style.bold, Some(false))
+                    }
+                    Some(_) => assert!(
+                        matches!(&captured.as_ref().unwrap().content, TextContent::Translatable { key, .. } if key == "test.head")
+                    ),
+                }
+                assert_eq!(
+                    Text::try_from(TextForm::try_from(&text).unwrap()).unwrap(),
+                    text
+                );
+            }
+        }
+    }
+    #[test]
+    fn form_keeps_unknown_metadata_and_refuses_malformed_trees() {
+        let mut value = serde_json::to_value(Text::literal("value")).unwrap();
+        value["metadata"]["future_component"] = serde_json::json!({"version": 7});
+        value["style"]["metadata"]["future_style"] = serde_json::json!([1, 2]);
+        let text: Text = serde_json::from_value(value.clone()).unwrap();
+        let decoded = Text::try_from(TextForm::try_from(&text).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        assert!(
+            Text::try_from(TextForm {
+                nodes: vec![TextNode {
+                    parent: None,
+                    relation: TextRelation::Child,
+                    data: "{\"content\": 42}".into()
+                }]
+            })
+            .is_err()
+        );
     }
 }
