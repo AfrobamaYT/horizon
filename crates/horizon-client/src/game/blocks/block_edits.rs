@@ -1,5 +1,5 @@
 //! A server mod's bulk block edit (`edit_blocks`): its palette and
-//! filters read as commands read blocks, its heights read, and its runs made
+//! filters compile to the command matcher, its heights read, and its runs made
 //! at once through `World::edit_runs`, with what `fill ... strict` does for
 //! the block entities and the watched blocks of each block changed.
 use super::Game;
@@ -8,7 +8,6 @@ use super::native_world_edit::{NativeBlockEdit as BlockEdit, NativeHeightmap as 
 use horizon_client::{
     block_edit::Run,
     chunk::ColumnLayout,
-    command::{Reader, args::BlockInput, block},
     containers::BlockEntity,
     fast_hash::{FxHashMap, FxHashSet},
     world::World,
@@ -24,36 +23,13 @@ type Tracked = ((i32, i32, i32), u32, u32);
 impl Game<'_> {
     /// Make a mod's block edit; how many blocks changed, or why none did.
     /// Every palette entry, filter and run is checked before anything
-    /// changes: an entry or filter that doesn't read, one with NBT (`{...}`,
-    /// refused: the bulk path sets states only), a run naming a palette entry
+    /// changes: an invalid typed state or predicate (NBT cannot be represented),
+    /// a run naming a palette entry
     /// or filter past the end, or more than 65536 filters, and nothing is
     /// made.
     pub(super) fn apply_block_edit(&mut self, edit: &BlockEdit) -> Result<u64, String> {
-        let parse = |name: &str, testing: bool| -> Result<BlockInput, String> {
-            let mut reader = Reader::new(name);
-            let b = block::parse(&mut reader, &self.ui.registries, testing)
-                .map_err(|e| format!("{name:?}: {}", e.message.plain()))?;
-            if reader.can_read() {
-                return Err(format!("{name:?}: more after the block"));
-            }
-            if b.nbt.is_some() {
-                return Err(format!("{name:?}: block NBT is not supported here"));
-            }
-            Ok(b)
-        };
-        let mut palette = Vec::with_capacity(edit.palette.len());
-        for name in &edit.palette {
-            let b = parse(name, false)?;
-            let state = self
-                .block_state(&b)
-                .map_err(|e| format!("{name:?}: {}", e.message.plain()))?;
-            palette.push(state.0);
-        }
-        let filters = edit
-            .filters
-            .iter()
-            .map(|f| parse(f, true))
-            .collect::<Result<Vec<_>, _>>()?;
+        let super::api_values::block_edit::PreparedBlockEdit { palette, filters } =
+            super::api_values::block_edit::prepare(edit)?;
         let runs = resolve_runs(edit, &palette, filters.len(), |h, x, z| {
             self.edit_height(h, x, z)
         })?;
@@ -138,11 +114,8 @@ impl Game<'_> {
     ) -> Result<ColumnBlocks, String> {
         read_size(columns.len(), below, above, self.world.layout().height())?;
         let bases = self.loaded_column_heights(columns, h);
-        let facts = self.res.facts();
-        let (palette, blocks) = column_blocks(&self.world, columns, &bases, below, above, |s| {
-            facts.get(s).name.clone()
-        })
-        .ok_or("the read is too big")?;
+        let (palette, blocks) = column_blocks(&self.world, columns, &bases, below, above)
+            .ok_or("the read is too big")?;
         let biomes = self.res.biomes();
         let mut tints = Vec::with_capacity(columns.len() * 3);
         for (&(x, z), base) in columns.iter().zip(&bases) {
@@ -165,7 +138,7 @@ impl Game<'_> {
             }
         }
         Ok(ColumnBlocks {
-            palette,
+            palette: super::api_values::block_edit::column_palette(palette)?,
             bases,
             blocks,
             tints,
@@ -266,7 +239,7 @@ fn loaded_heights(
 }
 
 /// The blocks of each column from `below` under its base to `above` - 1 over
-/// it, bottom first, as indices into the names (`name`) seen: air outside the
+/// it, bottom first, as indices into full numeric states: air outside the
 /// column's chunk's own height and where there is no base. None, reading
 /// nothing, past `read_size`'s bound.
 fn column_blocks(
@@ -275,8 +248,7 @@ fn column_blocks(
     bases: &[Option<i32>],
     below: u32,
     above: u32,
-    name: impl Fn(BlockStateId) -> Arc<str>,
-) -> Option<(Vec<String>, Vec<u16>)> {
+) -> Option<(Vec<BlockStateId>, Vec<u16>)> {
     let total = read_size(
         columns.len(),
         below,
@@ -286,19 +258,13 @@ fn column_blocks(
     .ok()?;
     let per = (below + above) as usize;
     let mut blocks = Vec::with_capacity(total);
-    let mut palette: Vec<String> = Vec::new();
+    let mut palette: Vec<BlockStateId> = Vec::new();
     // (a state's index into the names, worked out once a state)
     let mut seen: FxHashMap<u32, u16> = FxHashMap::default();
     let mut index = |s: BlockStateId| -> u16 {
         *seen.entry(s.0).or_insert_with(|| {
-            let name = name(s);
-            let i = palette
-                .iter()
-                .position(|n| **n == *name)
-                .unwrap_or_else(|| {
-                    palette.push(name.to_string());
-                    palette.len() - 1
-                });
+            let i = palette.len();
+            palette.push(s);
             i as u16
         })
     };
@@ -463,8 +429,8 @@ mod tests {
     }
     fn edit(runs: Vec<BlockRun>) -> BlockEdit {
         BlockEdit {
-            palette: vec!["stone".into(), "air".into()],
-            filters: vec!["#dirt".into()],
+            palette: vec![],
+            filters: vec![],
             runs,
         }
     }
@@ -720,12 +686,11 @@ mod tests {
             &[Some(65), Some(319), None],
             2,
             3,
-            |s| names(s.0),
         )
         .unwrap();
-        let read: Vec<&str> = blocks.iter().map(|&i| &*palette[i as usize]).collect();
+        let read: Vec<u32> = blocks.iter().map(|&i| palette[i as usize].0).collect();
         // (`names` calls state 2 a chest: here it stands for leaves)
-        let (leaves, stone, air) = ("minecraft:chest", "minecraft:stone", "minecraft:air");
+        let (leaves, stone, air) = (2, 1, 0);
         assert_eq!(
             read,
             [
@@ -751,7 +716,7 @@ mod tests {
         assert!(read_size(usize::MAX, 2, 0, 384).is_err());
         assert_eq!(read_size(1 << 12, 256, 0, 384), Ok(MAX_READ));
         let w = columns_world();
-        assert!(column_blocks(&w, &[(1, 1)], &[Some(0)], u32::MAX, 2, |s| names(s.0)).is_none());
+        assert!(column_blocks(&w, &[(1, 1)], &[Some(0)], u32::MAX, 2).is_none());
     }
 
     #[test]
