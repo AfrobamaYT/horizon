@@ -42,7 +42,7 @@ ItemEntity.teleport	inline	crates/horizon-client/src/entities.rs::merge_with_nei
 ItemEntity.getVisualRotationYInDegrees	inline	crates/horizon-client/src/game/interface/item_draw.rs::Game::dropped_item_geometry	spin is applied in radians there; no degree conversion
 ItemEntity.getSlot	missing		a dropped item is not addressable as an entity slot: `game/administration/commands/mod.rs` has no item entity case
 PrimedTnt.defineSynchedData	skip:other		fuse and block state are struct fields; spawn sets fuse 80; the block is always TNT
-PrimedTnt.explode	inline	crates/horizon-client/src/game/entities/tnt.rs::Game::tick_tnt	the power is the tnt's own field (`explosion_power`, 4 by default); gap: minor: no used-portal damage calculator
+PrimedTnt.explode	inline	crates/horizon-client/src/game/entities/tnt.rs::Game::tick_one_tnt	the power is the tnt's own field (`explosion_power`, 4 by default); gap: minor: no used-portal damage calculator
 PrimedTnt.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::tnt_to_nbt	the fuse and the block state are saved
 PrimedTnt.restoreFrom	missing		`PrimedTnt` has no owner field, so the igniter is not kept through a dimension change
 PrimedTnt.teleport	missing		`PrimedTnt` carries no used-portal flag and the portal damage calculator is not applied to it
@@ -67,7 +67,7 @@ Enderman.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob
 Enderman.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	the same state round-trips through the registry
 Enderman.canRandomlyTeleportTo	port	crates/horizon-client/src/mobs/enderman.rs::teleport_to	the water check on the ground block
 Enderman.repeatedlyTryToTeleport	port	crates/horizon-client/src/mobs/enderman.rs::ai_step	pending teleports retry up to 64 times
-Enderman.dropCustomDeathLoot	port	crates/horizon-client/src/mobs/enderman.rs::carried_block_drops	the carried block's drops with a silk-touch diamond axe (carried_block_tool), drawn from the block table's random sequence (game/mobs/creatures/mod.rs, the death handling)
+Enderman.dropCustomDeathLoot	port	crates/horizon-client/src/mobs/enderman.rs::carried_block_roll	the carried block's drops with a silk-touch diamond axe (carried_block_tool), drawn from the block table's random sequence (game/mobs/creatures/mod.rs, the death handling)
 Enderman.hurtWithCleanWater	inline	crates/horizon-client/src/game/blocks/splash_water.rs::Game::affect_entities_around	
 Enderman.EndermanLeaveBlockGoal.canPlaceBlock	inline	crates/horizon-client/src/mobs/enderman.rs::LeaveBlock::tick	gap: minor: the place-on blacklist tag and the carried block canSurvive check are not in the tick
 Endermite.registerGoals	port	crates/horizon-client/src/mobs/ai.rs::register	Hostile family defaults; Float and ClimbOnTopOfPowderSnow at 1 are in mobs/hostile.rs

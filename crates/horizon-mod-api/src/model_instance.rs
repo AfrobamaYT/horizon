@@ -115,6 +115,96 @@ pub enum InstanceError {
     Translucent,
 }
 
+/// Persistent copies of one resolved model, retired on reload, world close or destroy.
+/// Only the creating mod may access or submit the group; others receive [`GroupError::Stale`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: only the engine creates handles
+#[horizon_mod_api_macros::wasm(host_constructor = from_parts)]
+pub struct InstanceGroupRef(pub(crate) u64, pub(crate) u32);
+
+impl InstanceGroupRef {
+    pub(crate) fn from_parts(generation: u64, slot: u32) -> Result<Self, &'static str> {
+        if generation == 0 {
+            return Err("unpublished instance group generation");
+        }
+        Ok(Self(generation, slot))
+    }
+    /// Atomically overwrite a range, extending length up to reserved capacity.
+    /// That range and any newly exposed gap are converted again. Visible copies still
+    /// enter the shared per-view GPU upload on every frame.
+    pub fn write(
+        self,
+        host: &dyn crate::ClientHost,
+        first: u32,
+        instances: &[ModelInstance],
+    ) -> Result<(), GroupError> {
+        host.instance_group_write(self, first, instances)
+    }
+    /// Atomically change the drawn length. Unwritten slots contain identity, full-bright copies.
+    /// Growth converts the newly exposed range using the current group pose.
+    pub fn set_len(self, host: &dyn crate::ClientHost, len: u32) -> Result<(), GroupError> {
+        host.instance_group_set_len(self, len)
+    }
+    /// Atomically replace the row-major 3x4 group pose (identity by default).
+    /// World position = origin + group_transform * (copy_transform * local).
+    /// The origin stays in world space; transformed bounds are used for culling.
+    /// Non-finite components return [`GroupError::NonFinite`]. Rebuilds the drawn
+    /// copies' cached render records; it does not allocate or rewrite the API copies.
+    pub fn set_group_transform(
+        self,
+        host: &dyn crate::ClientHost,
+        transform: [f32; 12],
+    ) -> Result<(), GroupError> {
+        host.instance_group_set_transform(self, transform)
+    }
+    /// Retire this handle and release its reserved copies.
+    pub fn destroy(self, host: &dyn crate::ClientHost) -> Result<(), GroupError> {
+        host.instance_group_destroy(self)
+    }
+}
+
+/// Why a persistent group operation was refused. Errors leave storage and view unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum GroupError {
+    /// The group belongs to another mod, was destroyed, or its world/resources retired.
+    Stale,
+    /// The model could not be resolved.
+    Model(crate::ModelError),
+    /// An origin or transform component is not finite.
+    NonFinite,
+    /// A light channel is outside 0..=15.
+    InvalidLight,
+    /// The range exceeds reserved capacity.
+    OutOfRange,
+    /// The mod's reserved capacity or the view budget would be exceeded.
+    CapacityExceeded,
+    /// Translucent models cannot use this route.
+    Translucent,
+}
+
+impl From<InstanceError> for GroupError {
+    fn from(error: InstanceError) -> Self {
+        match error {
+            InstanceError::Model(error) => Self::Model(error),
+            InstanceError::NonFinite => Self::NonFinite,
+            InstanceError::InvalidLight => Self::InvalidLight,
+            InstanceError::CapacityExceeded => Self::CapacityExceeded,
+            InstanceError::Translucent => Self::Translucent,
+        }
+    }
+}
+
+impl crate::__private::game::Fields for InstanceGroupRef {
+    type Fields<'a> = crate::__private::game::ModelRefFields;
+    fn fields(&self) -> Self::Fields<'_> {
+        crate::__private::game::ModelRefFields {
+            generation: self.0,
+            slot: self.1,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

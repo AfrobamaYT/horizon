@@ -132,20 +132,63 @@ fn after_pre<S>(s: &mut HurtState<S>, container: &DamageContainer, cooldown: i32
         s.cooldown = ticks;
     }
 }
+/// A hit stopped where `hurtServer` calls `hurtHelmet`: what its guards, the incoming damage
+/// and the block left. It owns no borrow, so a caller can wear the helmet on a world
+/// [`hurt_until_helmet`] could not reach, then resume with [`hurt_after_helmet`], which runs
+/// none of that again.
+#[derive(Clone, Copy, Debug)]
+pub struct PendingHurt<U> {
+    container: DamageContainer,
+    damage: f32,
+    original: f32,
+    item: U,
+    blocked_amount: f32,
+    helmet: bool,
+}
+impl<U> PendingHurt<U> {
+    /// What `hurtHelmet` is given, if the source damages a helmet and one is worn.
+    pub fn helmet_damage(&self) -> Option<f32> {
+        self.helmet.then_some(self.damage)
+    }
+}
 pub fn hurt_server<W: HurtWorld>(
     s: &mut HurtState<W::Source>,
     w: &mut W,
-    mut damage: f32,
+    damage: f32,
 ) -> Result<bool, W::Error> {
-    if w.invulnerable(s)? || w.dead_or_dying(s)? {
+    let hit = hurt_until_helmet(s, w, damage)?;
+    hurt_from_helmet(s, w, hit)
+}
+/// The rest of a hit [`hurt_until_helmet`] left, with `w` wearing the helmet; false for one it
+/// refused.
+pub fn hurt_from_helmet<W: HurtWorld>(
+    s: &mut HurtState<W::Source>,
+    w: &mut W,
+    hit: Option<PendingHurt<W::UseItem>>,
+) -> Result<bool, W::Error> {
+    let Some(hit) = hit else {
         return Ok(false);
+    };
+    if let Some(damage) = hit.helmet_damage() {
+        w.hurt_helmet(s, damage)?;
+    }
+    hurt_after_helmet(s, w, hit)
+}
+/// `hurtServer` up to `hurtHelmet`; none for a hit refused on the way.
+pub fn hurt_until_helmet<W: HurtWorld>(
+    s: &mut HurtState<W::Source>,
+    w: &mut W,
+    mut damage: f32,
+) -> Result<Option<PendingHurt<W::UseItem>>, W::Error> {
+    if w.invulnerable(s)? || w.dead_or_dying(s)? {
+        return Ok(None);
     }
     if w.tag(s, HurtTag::Fire)? && w.fire_resistance(s)? {
-        return Ok(false);
+        return Ok(None);
     }
     let mut container = DamageContainer::new(damage);
     if w.hurt_start(s, &mut container)? {
-        return Ok(false);
+        return Ok(None);
     }
     damage = container.new_damage();
     if w.sleeping(s)? {
@@ -159,13 +202,36 @@ pub fn hurt_server<W: HurtWorld>(
     let item = w.use_item(s)?;
     let blocked_amount = w.apply_blocking(s, damage)?;
     damage -= blocked_amount;
-    let blocked = blocked_amount > 0.0;
     container.record_block(blocked_amount);
     if w.tag(s, HurtTag::Freezing)? && w.freeze_hurts_extra(s)? {
         damage *= 5.0;
     }
-    if w.tag(s, HurtTag::DamagesHelmet)? && !w.helmet_empty(s)? {
-        w.hurt_helmet(s, damage)?;
+    let helmet = w.tag(s, HurtTag::DamagesHelmet)? && !w.helmet_empty(s)?;
+    Ok(Some(PendingHurt {
+        container,
+        damage,
+        original,
+        item,
+        blocked_amount,
+        helmet,
+    }))
+}
+/// `hurtServer` from just after `hurtHelmet`, on the live state.
+pub fn hurt_after_helmet<W: HurtWorld>(
+    s: &mut HurtState<W::Source>,
+    w: &mut W,
+    hit: PendingHurt<W::UseItem>,
+) -> Result<bool, W::Error> {
+    let PendingHurt {
+        mut container,
+        mut damage,
+        original,
+        item,
+        blocked_amount,
+        helmet,
+    } = hit;
+    let blocked = blocked_amount > 0.0;
+    if helmet {
         damage *= 0.75;
     }
     if !damage.is_finite() {

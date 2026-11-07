@@ -148,11 +148,20 @@ fn read_attachments(
     tag: &Tag,
     uuid: [i32; 4],
     maps: &mut HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    live: bool,
 ) {
     if let Ok(Some(data)) = attachment_compound(tag.get(ATTACHMENTS_KEY)) {
-        maps.entry(uuid).or_insert_with(|| {
-            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone())
-        });
+        match maps.get_mut(&uuid) {
+            // Made by `entity_constructing` listeners just now: saved values win.
+            Some(map) if !live => map.read_saved_over(data.clone()),
+            Some(_) => {}
+            None => {
+                maps.insert(
+                    uuid,
+                    horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
+                );
+            }
+        }
     }
 }
 
@@ -564,8 +573,9 @@ impl Game<'_> {
     pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
         let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
-        if let Some(e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
+        if let Some(mut e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
             self.remember(e.id, uuid, tag);
+            self.bind_saved_entity_attachments(e.id, &mut e.attachment_lifetime);
             self.dropped.push(e);
         }
     }
@@ -579,6 +589,7 @@ impl Game<'_> {
             // Horizon splits a saved `count` into orbs: the first is the saved one.
             if i == 0 {
                 self.remember_uuid(id, uuid, &tag);
+                self.bind_saved_entity_attachments(id, &mut orb.attachment_lifetime);
             }
             // An orb that came through a portal keeps its cooldown.
             self.restore_portal_cooldown(id, &tag);
@@ -608,13 +619,15 @@ impl Game<'_> {
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_tags(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
         }
     }
 
     /// A saved llama spit or shulker bullet.
     pub(super) fn load_spit_or_bullet(&mut self, tag: Tag, player_uuid: Option<[i32; 4]>) {
-        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid) {
+        let target = self.bullet_target(&tag);
+        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid, target) {
             self.claim_owner(&mut p);
             self.next_entity += 1;
             p.id = self.next_entity;
@@ -622,6 +635,14 @@ impl Game<'_> {
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
+    }
+    /// `ShulkerBullet.readAdditionalSaveData`'s `Target`, resolved over the UUID
+    /// bridge: the `Who` of the loaded player or mob that UUID names, or `None`
+    /// for one that is not here. Vanilla keeps the UUID and re-resolves it every
+    /// tick; a `Who` can only name an entity in the level, so a target that is
+    /// away leaves the bullet with none and it falls (`ShulkerBullet.tick`).
+    fn bullet_target(&self, tag: &Tag) -> Option<Who> {
+        self.who_by_uuid(entity_nbt::bullet_target(tag)?)
     }
     /// A saved fireball or wind charge.
     pub(super) fn load_fireball(
@@ -637,6 +658,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -656,6 +678,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -794,6 +817,7 @@ impl Game<'_> {
             // AbstractBoat.readAdditionalSaveData: the lead's holder.
             b.leash_pending = horizon_client::mobs::leash::pending_from_nbt(tag.get("leash"));
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut b.attachment_lifetime);
             self.boats.push(b);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -814,6 +838,7 @@ impl Game<'_> {
             self.roll_cart_loot(&mut c, &tag);
             self.next_entity = id;
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut c.attachment_lifetime);
             self.carts.push(c);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -828,6 +853,7 @@ impl Game<'_> {
             a.live
                 .retain_supplier(&self.motion.attributes, "minecraft:armor_stand");
             self.remember(a.id, uuid, tag);
+            self.bind_saved_entity_attachments(a.id, &mut a.attachment_lifetime);
             self.armor_stands.push(a);
         }
     }
@@ -873,6 +899,7 @@ impl Game<'_> {
             let item = f.item.take();
             f.set_item(item);
             self.remember(f.id, uuid, tag);
+            self.bind_saved_entity_attachments(f.id, &mut f.attachment_lifetime);
             self.item_frames.push(f);
         }
     }
@@ -988,6 +1015,7 @@ impl Game<'_> {
         horizon_client::mobs::armor::prepare(&m, &self.motion.attributes);
         let id = m.id;
         self.remember(id, uuid, tag);
+        self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
@@ -1302,6 +1330,28 @@ impl Game<'_> {
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         let id = self.mobs[i].id;
         let uuid = self.uuid_for(id);
+        // A warden's anger names each suspect by UUID. A mob that has never been
+        // loaded or saved has no UUID yet, so give it one, or the save would
+        // drop the anger at it (`who_uuid` writes nothing for a mob the map does
+        // not know).
+        let suspects: Vec<u32> = self.mobs[i]
+            .extra
+            .warden
+            .as_ref()
+            .map(|st| {
+                st.anger
+                    .suspects()
+                    .iter()
+                    .filter_map(|who| match who {
+                        Who::Mob(id) => Some(*id),
+                        Who::Player => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for suspect in suspects {
+            self.uuid_for(suspect);
+        }
         // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
         // absolute game time, so it goes on while the chunk is unloaded, and
         // the target is the entity the mob is angry at.
@@ -1354,6 +1404,7 @@ impl Game<'_> {
     /// Forget an entity that left the world (its UUID and loaded compound).
     pub(super) fn forget_entity(&mut self, id: u32) {
         if let Some(uuid) = self.persist.uuids.remove(&id) {
+            self.forget_entity_initialization(uuid);
             self.entity_attachments.remove(&uuid);
         }
         self.persist.raw.remove(&id);
@@ -1447,7 +1498,16 @@ impl Game<'_> {
     pub(super) fn remember_uuid(&mut self, id: u32, uuid: Option<[i32; 4]>, tag: &Tag) {
         if let Some(u) = uuid {
             self.persist.uuids.insert(id, u);
-            read_attachments(tag, u, &mut self.entity_attachments);
+        }
+        // `EntityType.create` then `Entity.load`: the constructing listeners set their
+        // values first and the saved attachments are read over them. An entity whose map
+        // is already live (told before) keeps it, as before.
+        let live = uuid.is_some_and(|u| self.entity_attachments.contains_key(&u));
+        if let Some(kind) = text(tag.get("id")) {
+            self.initialize_entity(mod_api::Holder::Entity(id), &kind);
+        }
+        if let Some(u) = uuid {
+            read_attachments(tag, u, &mut self.entity_attachments, live);
         }
         self.join_saved_team(id, tag);
     }
@@ -1905,6 +1965,15 @@ impl Game<'_> {
         if !keys.contains(&chunk_of(p.position)) || !entity_nbt::saved_with_chunk(p) {
             return None;
         }
+        // `ShulkerBullet`'s target, over the UUID bridge: a mob the level has
+        // no UUID for writes no `Target` rather than a made-up one.
+        let target = match &p.kind {
+            horizon_client::projectiles::ProjectileKind::ShulkerBullet {
+                target: Some(who),
+                ..
+            } => self.save_who_uuid(*who),
+            _ => None,
+        };
         let owner = p.owner_uuid;
         let raw = anon_raw(&self.persist, p.kind.id(), p.position);
         let uuid = saved_uuid(&self.persist, p.id);
@@ -1916,7 +1985,7 @@ impl Game<'_> {
         let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
+            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, target, raw.as_ref()))?;
         // HasBeenShot is modeled for these projectiles. The generic raw
         // overlay also serves entity types whose shot flag is still opaque.
         let shot = tag.get("HasBeenShot").cloned();
@@ -1925,6 +1994,13 @@ impl Game<'_> {
             map.insert("HasBeenShot".into(), shot);
         }
         Some((chunk_of(p.position), tag))
+    }
+    /// The UUID a save writes for a reference to `who`, as `mob_to_nbt`'s
+    /// `angry_at` does: the bridge's `who_uuid` over `EntityMemory::uuid_of`,
+    /// which answers the UUID the entity was loaded or saved with. A mob the
+    /// level has none for writes nothing.
+    pub(in crate::game) fn save_who_uuid(&self, who: Who) -> Option<[i32; 4]> {
+        entity_nbt::who_uuid(who, &mut |id| self.persist.uuid_of(id))
     }
     pub(super) fn save_falling(
         &mut self,
@@ -2050,6 +2126,15 @@ impl Game<'_> {
             .get(&id)
             .copied()
             .unwrap_or_else(random_uuid)
+    }
+}
+
+/// The mob layer's [`horizon_client::mobs::WhoLookup`]: a warden's anger keeps
+/// the suspects that left by UUID, and resolves the ones that are back through
+/// the same map a save writes them from (`mob_to_nbt`'s `uuid_of`).
+impl horizon_client::mobs::WhoLookup for Game<'_> {
+    fn who_by_uuid(&self, uuid: [i32; 4]) -> Option<Who> {
+        Game::who_by_uuid(self, uuid)
     }
 }
 
@@ -2384,11 +2469,70 @@ mod tests {
             panic!("passenger missing");
         };
         let mut loaded = HashMap::new();
-        read_attachments(&children[0], child_id, &mut loaded);
+        read_attachments(&children[0], child_id, &mut loaded, false);
         assert_eq!(
             key.get(loaded.get_mut(&child_id).unwrap(), Holder::Level),
             Ok(29)
         );
+    }
+
+    /// `remember_uuid`'s read: a map an `entity_constructing` listener made just now takes the
+    /// saved values over its own (`Entity.load` after the constructor), a live map that came
+    /// with the entity keeps its values, and no map at all is the saved one.
+    #[test]
+    fn saved_attachments_read_over_a_constructed_map_but_not_a_live_one() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+        };
+        fn key(name: &'static str) -> AttachmentType<i32> {
+            AttachmentType {
+                namespace: "test",
+                name,
+                default: || 0,
+                codec: Some(AttachmentCodec {
+                    encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                    decode: |c| match c.get(&"count".into()) {
+                        Some(Tag::Int(n)) => Ok(*n),
+                        _ => Err(AttachmentError::Decode),
+                    },
+                }),
+                copy_on_death: false,
+                sync: false,
+            }
+        }
+        let (saved, unsaved) = (key("saved"), key("unsaved"));
+        let uuid = [1, 2, 3, 4];
+        let mut data = Attachments::default();
+        saved.set(&mut data, Holder::Level, 7).unwrap();
+        let tag = Tag::compound([
+            ("UUID", Tag::IntArray(uuid.to_vec())),
+            (ATTACHMENTS_KEY, Tag::Compound(data.to_nbt())),
+        ]);
+        let listener = || {
+            let mut map = Attachments::default();
+            saved.set(&mut map, Holder::Level, 41).unwrap();
+            unsaved.set(&mut map, Holder::Level, 41).unwrap();
+            HashMap::from([(uuid, map)])
+        };
+
+        let mut constructed = listener();
+        read_attachments(&tag, uuid, &mut constructed, false);
+        let map = constructed.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(41));
+
+        let mut live = listener();
+        read_attachments(&tag, uuid, &mut live, true);
+        assert_eq!(
+            saved.get(live.get_mut(&uuid).unwrap(), Holder::Level),
+            Ok(41)
+        );
+
+        let mut none = HashMap::new();
+        read_attachments(&tag, uuid, &mut none, false);
+        let map = none.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(0));
     }
 
     /// Entities as a save before every entity held attachments wrote them (a vanilla compound

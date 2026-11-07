@@ -148,20 +148,27 @@ impl Catalog {
                 record_name: Some(point.record_export),
             });
         }
+        let mut sites = listed.sites;
+        for site in horizon_mod_api_gen::sites::source::read(dir)? {
+            if sites.iter().any(|public| public.name == site.name) {
+                return Err(format!("E_SOURCE_COLLISION: {}", site.name));
+            }
+            sites.push(site.into());
+        }
         Ok(Self {
             internals: internals::read(&path)?,
             points,
-            sites: listed.sites,
+            sites,
             discovery: false,
         })
     }
 
     pub(super) fn check(&self, manifest: &horizon_mod_package::Manifest) -> Result<(), Error> {
         super::slots::check(self, manifest).map_err(Error::Inject)?;
-        let Some(native) = &manifest.native else {
+        if manifest.native.is_none() {
             return Ok(());
-        };
-        for declared in &native.internals {
+        }
+        for declared in &manifest.internals {
             internals::check(&self.internals, &manifest.id, declared)?;
         }
         for injection in sites::of(manifest) {
@@ -230,12 +237,7 @@ impl Catalog {
     /// exact raw constructors from the normal facade; they are not internal-use declarations.
     fn discovery_facade(&self, manifest: &horizon_mod_package::Manifest) -> Result<Facade, Error> {
         let mut manifest = manifest.clone();
-        manifest
-            .native
-            .as_mut()
-            .expect("native project")
-            .internals
-            .clear();
+        manifest.internals.clear();
         let mut facade = self.facade(&manifest)?;
         facade.source.insert_str(0, "#![allow(deprecated)]\n");
         let mut tree = Module::default();
@@ -258,8 +260,8 @@ impl Catalog {
         self.check(manifest)?;
         let mut tree = Module::default();
         let mut crates = BTreeSet::from(["horizon_client".into()]);
-        if let Some(native) = &manifest.native {
-            for declared in &native.internals {
+        if manifest.native.is_some() {
+            for declared in &manifest.internals {
                 let entry = internals::resolve(
                     &self.internals,
                     &manifest.id,
@@ -444,12 +446,12 @@ impl Module {
 
 pub(super) fn needed(manifest: &horizon_mod_package::Manifest) -> bool {
     !manifest.inject.is_empty()
+        || !manifest.internals.is_empty()
         || manifest.native.as_ref().is_some_and(|native| {
-            !native.internals.is_empty()
-                || native
-                    .injection
-                    .iter()
-                    .any(|injection| injection.raw.is_some())
+            native
+                .injection
+                .iter()
+                .any(|injection| injection.raw.is_some())
         })
 }
 
@@ -490,7 +492,7 @@ mod tests {
         super::super::tests::write_bundle(&dir, "example", "");
         fs::write(dir.join("Cargo.toml"), "[package]\nname='example'\nversion='1.0.0'\nedition='2024'\n[dependencies]\nhorizon-mod-api={version='0.1'}\n").unwrap();
         let path = dir.join(horizon_mod_package::manifest::MANIFEST);
-        let text = fs::read_to_string(&path).unwrap().replace("[native]", "[native]\ninternals = [{ path = 'horizon_client::game::Game', hash = '1234' }, { path = 'horizon_client::game::maps::dimension_id', hash = '5678' }]")
+        let text = fs::read_to_string(&path).unwrap().replace("[native]", "internals = [{ path = 'horizon_client::game::Game', hash = '1234' }, { path = 'horizon_client::game::maps::dimension_id', hash = '5678' }]\n[native]\n")
             + "[[native.injection]]\nid = 'count'\ntarget = \"horizon_client::game::Game<'_>::tick\"\nkind = 'HEAD'\nraw = 'count'\n";
         fs::write(path, text).unwrap();
         let bundle = super::super::bundle_in(&dir).unwrap().unwrap();
@@ -654,7 +656,7 @@ pub mod raw {
     fn method_entries_export_the_owner_and_return_listeners_use_the_return_place() {
         let (dir, mut bundle, catalog) = fixture("owner-return");
         let native = bundle.manifest.native.as_mut().unwrap();
-        native.internals[1] = horizon_mod_package::manifest::Internal {
+        bundle.manifest.internals[1] = horizon_mod_package::manifest::Internal {
             path: "horizon_client::game::maps::Game<'_>::dimension_id".into(),
             kind: None,
             hash: "abcd".into(),
@@ -690,21 +692,20 @@ pub mod raw {
         field.hash = "field".into();
         field.signature = "u8".into();
         catalog.internals.insert(2, field);
-        bundle.manifest.native.as_mut().unwrap().internals[1] =
-            horizon_mod_package::manifest::Internal {
-                path: method.path.clone(),
-                kind: Some("method".into()),
-                hash: method.hash,
-            };
+        bundle.manifest.internals[1] = horizon_mod_package::manifest::Internal {
+            path: method.path.clone(),
+            kind: Some("method".into()),
+            hash: method.hash,
+        };
         let facade = catalog.facade(&bundle.manifest).unwrap();
         assert!(facade
             .source
             .contains("pub use horizon_client::game::Game;"));
-        bundle.manifest.native.as_mut().unwrap().internals[1].hash = "field".into();
+        bundle.manifest.internals[1].hash = "field".into();
         assert!(
             matches!(catalog.check(&bundle.manifest), Err(Error::Changed { signature, .. }) if signature == method.signature)
         );
-        bundle.manifest.native.as_mut().unwrap().internals[1].kind = None;
+        bundle.manifest.internals[1].kind = None;
         let error = catalog.check(&bundle.manifest).unwrap_err();
         assert!(matches!(error, Error::Ambiguous { .. }));
         let text = error.to_string();

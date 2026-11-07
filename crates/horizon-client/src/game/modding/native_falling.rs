@@ -137,6 +137,15 @@ mod tests {
             );
             assert_eq!(game.falling[0].age, 1);
             assert!(game.falling[0].position.y < 70.0);
+            game.tick_one_falling(1, &[]).unwrap();
+            assert_eq!(
+                game.falling
+                    .iter()
+                    .map(|f| (f.id, f.join))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!([game.falling[0].age, game.falling[1].age], [1, 1]);
             // A corrupt resident palette makes the real collision lookup fail.
             Arc::make_mut(game.world.chunks.get_mut(&(0, 0)).unwrap()).set(0, 69, 0, 65_535);
             let position = game.falling[0].position;

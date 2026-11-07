@@ -344,6 +344,7 @@ impl Game<'_> {
         // the game, before the staging worker starts: each listener keeps its
         // registering mod for crash attribution.
         let client_listeners = self.register_client_reload_listeners();
+        let runtime_sprites = super::client_reload::collect_runtime_sprites();
         self.pack_reload = Some(PackReload::spawn(kind, move |progress| {
             stage_pack(
                 &vanilla,
@@ -351,6 +352,7 @@ impl Game<'_> {
                 &server,
                 &mod_sources,
                 client_listeners,
+                &runtime_sprites,
                 &assets,
                 &res,
                 &context,
@@ -462,6 +464,7 @@ impl Game<'_> {
         self.pack = pack;
         self.gui = gui;
         self.standalone_geometry = standalone_geometry;
+        self.instance_groups.borrow_mut().clear();
         // The new atlas's skin and map slots are blank: players and maps
         // upload into it again instead of naming sprites it does not have.
         self.skin_slots.forget();
@@ -576,6 +579,7 @@ pub(super) fn stage_pack(
     server: &[Pack],
     mod_sources: &super::mods::ModsState,
     client_listeners: mod_api::ClientListenerRegistry,
+    runtime_sprites: &[mod_api::RuntimeSprite],
     assets: &Arc<Assets>,
     res: &Resources,
     context: &WorkerContext,
@@ -584,6 +588,7 @@ pub(super) fn stage_pack(
     progress: &super::Progress,
 ) -> horizon_client::Result<StagedPack> {
     let resource_root = startup_root(vanilla_root, selected, server, mod_sources)?;
+    let resource_root = super::client_reload::stage_runtime_sprites(resource_root, runtime_sprites);
     let root = resource_root.prepared().to_path_buf();
     let source = resource_root.source().clone();
     progress.set(1);

@@ -27,7 +27,7 @@ pub(super) fn installed(home: Option<&Path>) -> Result<Declarations, String> {
                     ("path", &directory.display().to_string()),
                     ("error", &e.to_string()),
                 ],
-            ))
+            ));
         }
     };
     for file in files {
@@ -40,13 +40,21 @@ pub(super) fn installed(home: Option<&Path>) -> Result<Declarations, String> {
         if !crate::browser::java::is_enabled(home, &manifest.id) {
             continue;
         }
-        let Some(wasm) = &manifest.wasm else { continue };
-        if wasm.internals().is_empty() {
+        if manifest.wasm.is_none() {
+            continue;
+        }
+        if manifest.internals.is_empty() {
             continue;
         }
         let paths = declared.entry(manifest.id.clone()).or_default();
-        paths.extend(wasm.internals().iter().map(|i| i.path.clone()));
-        paths.extend(wasm.raw_injections().iter().map(|i| i.target.clone()));
+        paths.extend(manifest.internals.iter().map(|i| i.path.clone()));
+        paths.extend(
+            manifest
+                .inject
+                .iter()
+                .filter(|i| i.access == horizon_mod_package::manifest::inject::Access::Internals)
+                .map(|i| i.at.clone()),
+        );
     }
     Ok(declared)
 }
@@ -94,7 +102,10 @@ mod tests {
     use super::*;
 
     fn install(home: &Path, id: &str, internals: &str) {
-        let text = format!("id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}", horizon_mod_package::manifest::sha512_of(b"\0asmfixture"));
+        let text = format!(
+            "id = '{id}'\nname = 'Fixture'\nversion = '0.1.0'\napi = '0.2'\ncapabilities = ['registries']\n[wasm]\nsha512 = '{}'\ntoolchain = 'nightly'\n{internals}",
+            horizon_mod_package::manifest::sha512_of(b"\0asmfixture")
+        );
         let bytes = Package::write_files(
             &text,
             &[
@@ -120,10 +131,12 @@ mod tests {
         install(
             &root,
             "wasm_only",
-            "\n[[native.internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
+            "\n[[internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n",
         );
         fs::write(root.join(mod_list::FILE), "mod.wasm_only:true\n").unwrap();
-        let native = super::super::stage_installed(&root, native).unwrap();
+        let native = super::super::stage_installed(&root, native)
+            .unwrap()
+            .unwrap();
         let (bundles, declared) = super::super::build_inputs(&native, Some(&root))
             .map_err(String::from)
             .unwrap();
@@ -147,8 +160,7 @@ mod tests {
         fs::create_dir_all(&seed).unwrap();
         fs::write(seed.join("uninstalled.txt"), "Never::include").unwrap();
         install(&root, "plain", "");
-        let internal =
-            "\n[[native.internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n[[native.injection]]\nid = 'tick'\ntarget = \"horizon_client::game::Game<'_>::tick\"\nkind = 'HEAD'\nraw = 'tick'\n";
+        let internal = "\n[[internals]]\npath = 'horizon_client::game::Game'\nhash = '1234'\n[[inject]]\nid = 'tick'\nat = \"horizon_client::game::Game<'_>::tick\"\nkind = 'head'\naccess = 'internals'\nhash = 'signature'\nwith = 'tick'\n";
         install(&root, "example", internal);
         fs::write(
             root.join(mod_list::FILE),

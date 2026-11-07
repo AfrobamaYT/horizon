@@ -320,7 +320,7 @@ fn within_budget(source: &ResourceSource, files: &[&String], budget: u64) -> Has
 }
 /// A PNG's width and height from its first 24 bytes (`IHDR`), before any
 /// pixel buffer is made.
-fn png_bytes_size(data: &[u8]) -> Option<(u32, u32)> {
+pub fn png_bytes_size(data: &[u8]) -> Option<(u32, u32)> {
     let header = data.get(..24)?;
     if header[..8] != *b"\x89PNG\r\n\x1a\n" || header[12..16] != *b"IHDR" {
         return None;
@@ -1301,6 +1301,36 @@ impl HudAtlas {
             }
         }
         if full {
+            // Official Recipes artwork from Just Enough Items, under MIT.
+            for (name, png) in [
+                (
+                    "button_enabled_v2",
+                    include_bytes!("jei_recipes/button_enabled_v2.png").as_slice(),
+                ),
+                (
+                    "button_disabled_v2",
+                    include_bytes!("jei_recipes/button_disabled_v2.png").as_slice(),
+                ),
+                (
+                    "button_highlight_v2",
+                    include_bytes!("jei_recipes/button_highlight_v2.png").as_slice(),
+                ),
+                (
+                    "icons/arrow_previous_v2",
+                    include_bytes!("jei_recipes/icons/arrow_previous_v2.png").as_slice(),
+                ),
+                (
+                    "icons/arrow_next_v2",
+                    include_bytes!("jei_recipes/icons/arrow_next_v2.png").as_slice(),
+                ),
+                (
+                    "search_background_v2",
+                    include_bytes!("jei_recipes/search_background_v2.png").as_slice(),
+                ),
+            ] {
+                let (width, height, rgba) = decode_bytes(png)?;
+                images.push((format!("horizon/jei/{name}"), width, height, rgba));
+            }
             Self::slots(&mut images, crate::trims::slot_size(root), mod_image);
             // MissingTextureAtlasSprite.generateMissingImage: 16x16, magenta
             // and black quarters.

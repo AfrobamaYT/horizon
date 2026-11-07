@@ -413,6 +413,18 @@ impl<T> JoinList<T> {
     }
 }
 
+impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime, const DIRECT: bool>
+    JoinList<T, DIRECT>
+{
+    /// Remove an owner leaving this level, retiring its source registration now.
+    /// The retained token records whether arrival must rebind; it owns no live row.
+    pub fn remove_for_transfer(&mut self, index: usize) -> T {
+        let mut entity = self.remove(index);
+        entity.attachment_lifetime().retire();
+        entity
+    }
+}
+
 impl<T: horizon_mod_runtime::attachments::HasAttachmentLifetime> JoinList<T, false> {
     /// Audited state edit; debug assertions detect a changed bound registration.
     pub fn update<R>(&mut self, index: usize, edit: impl FnOnce(&mut T) -> R) -> R {

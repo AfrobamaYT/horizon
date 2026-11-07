@@ -186,7 +186,7 @@ impl Game<'_> {
     /// `findLightningTargetAround`: the closest lightning rod, else a living
     /// entity under open sky in the column (3 blocks around), else the top of
     /// the column.
-    fn lightning_target(&mut self, x: i32, z: i32) -> Option<[i32; 3]> {
+    pub(in crate::game) fn lightning_target(&mut self, x: i32, z: i32) -> Option<[i32; 3]> {
         if !self.world.loaded(x, z) {
             return None;
         }
@@ -903,7 +903,11 @@ mod tests {
                 let weapon = outcome
                     .and_then(|entity| host.living(entity))
                     .and_then(|living| living.equipment(host, EquipmentSlot::MainHand))
-                    .map(|stack| stack.item.to_string());
+                    .map(|stack| {
+                        mod_api::__private::item_key_id(stack.item())
+                            .unwrap()
+                            .to_string()
+                    });
                 let mushrooms = host
                     .level("minecraft:overworld")
                     .and_then(|level| {
@@ -913,7 +917,11 @@ mod tests {
                     .into_iter()
                     .filter_map(|entity| host.item_entity(entity))
                     .filter_map(|item| item.stack(host))
-                    .filter(|stack| stack.item.ends_with("mushroom"))
+                    .filter(|stack| {
+                        mod_api::__private::item_key_id(stack.item())
+                            .unwrap()
+                            .ends_with("mushroom")
+                    })
                     .count();
                 self.seen.lock().unwrap().push(SeenConversion {
                     old,

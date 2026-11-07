@@ -43,6 +43,9 @@ fn projectile_restore_entries_keep_the_bound_arrow() {
             game.world
                 .chunks
                 .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+            game.block_ticks
+                .add_empty_chunk(horizon_core::position::ChunkPos::new(0, 0))
+                .unwrap();
             game.creatures.projectiles.push(arrow(71, at));
             game.creatures
                 .projectiles
@@ -68,6 +71,9 @@ fn projectile_restore_entries_keep_the_bound_arrow() {
                 let state = picked.arrow.as_mut().unwrap();
                 state.in_ground = true;
                 state.pickup = horizon_client::arrows::Pickup::Allowed;
+                for id in [73, 74] {
+                    game.creatures.projectiles.push(arrow(id, at));
+                }
                 game.creatures.projectiles.push(picked);
                 if path == 1 {
                     crate::game::entity::taken_pass_tests::assert_projectile_spawn_survives(
@@ -93,7 +99,7 @@ fn projectile_restore_entries_keep_the_bound_arrow() {
                         .iter()
                         .map(|p| p.id)
                         .collect::<Vec<_>>(),
-                    [71]
+                    [71, 73, 74]
                 );
             }
             let current = game

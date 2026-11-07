@@ -365,6 +365,13 @@ pub(in crate::game) fn assert_projectile_spawn_survives(
         p.id = ID;
         game.creatures.projectiles.push(p);
     }
+    let mut expected: Vec<_> = game
+        .creatures
+        .projectiles
+        .iter()
+        .filter(|p| p.id != 72)
+        .map(|p| (p.id, p.join))
+        .collect();
     with_spawn(spawn, || action(game));
     let p = game
         .creatures
@@ -374,6 +381,15 @@ pub(in crate::game) fn assert_projectile_spawn_survives(
         .expect("pickup dropped a nested projectile");
     assert_eq!(p.age, 0);
     let join = p.join;
+    expected.push((ID, join));
+    assert_eq!(
+        game.creatures
+            .projectiles
+            .iter()
+            .map(|p| (p.id, p.join))
+            .collect::<Vec<_>>(),
+        expected
+    );
     let mut original = game.creatures.projectiles.lift();
     game.creatures
         .projectiles
@@ -426,5 +442,62 @@ fn data_merge_preserves_two_distinct_other_joins_for_every_runtime_kind() {
                 assert_eq!(game.others[game.others.locate(join).unwrap()].id, id);
             }
         }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn mob_tick_restores_spawn_buffer_before_multiple_survivors_without_renumbering() {
+    fn seed(game: &mut Game<'_>, ids: std::ops::RangeInclusive<u32>, x: f64) {
+        for (index, id) in ids.enumerate() {
+            let kind = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            let mut mob = horizon_client::mobs::Mob::new(
+                id,
+                kind,
+                horizon_core::geometry::Vec3::new(x + index as f64 * 2.0, 80.0, 1.5),
+                0.0,
+            );
+            mob.no_ai = true;
+            game.mobs.push(mob);
+        }
+    }
+    crate::game::native_entity_refs::tests::with_game(|game| {
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(horizon_client::chunk::Chunk::empty(0, 0)));
+        seed(game, 71..=73, 1.5);
+        let original: Vec<_> = game.mobs.iter().map(|m| (m.id, m.join)).collect();
+        // Synthetic additions at the actual lift, then the complete production
+        // tick (not a reconstructed restore or a helper replacing that tick).
+        with_spawn(
+            |g| seed(g, 81..=82, 9.5),
+            || game.tick_creature_entities().unwrap(),
+        );
+        assert_eq!(
+            game.mobs.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [81, 82, 71, 72, 73]
+        );
+        assert_eq!(
+            game.mobs
+                .iter()
+                .skip(2)
+                .map(|m| (m.id, m.join))
+                .collect::<Vec<_>>(),
+            original
+        );
+        assert_eq!(
+            game.mobs.iter().map(|m| m.age).collect::<Vec<_>>(),
+            [0, 0, 1, 1, 1]
+        );
+        let all: Vec<_> = game.mobs.iter().map(|m| (m.id, m.join)).collect();
+        game.tick_creature_entities().unwrap();
+        assert_eq!(
+            game.mobs.iter().map(|m| (m.id, m.join)).collect::<Vec<_>>(),
+            all
+        );
+        assert_eq!(
+            game.mobs.iter().map(|m| m.age).collect::<Vec<_>>(),
+            [1, 1, 2, 2, 2]
+        );
     });
 }
