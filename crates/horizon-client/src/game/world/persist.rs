@@ -573,8 +573,9 @@ impl Game<'_> {
     pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
         let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
-        if let Some(e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
+        if let Some(mut e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
             self.remember(e.id, uuid, tag);
+            self.bind_saved_entity_attachments(e.id, &mut e.attachment_lifetime);
             self.dropped.push(e);
         }
     }
@@ -588,6 +589,7 @@ impl Game<'_> {
             // Horizon splits a saved `count` into orbs: the first is the saved one.
             if i == 0 {
                 self.remember_uuid(id, uuid, &tag);
+                self.bind_saved_entity_attachments(id, &mut orb.attachment_lifetime);
             }
             // An orb that came through a portal keeps its cooldown.
             self.restore_portal_cooldown(id, &tag);
@@ -617,6 +619,7 @@ impl Game<'_> {
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_tags(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
         }
     }
@@ -655,6 +658,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -674,6 +678,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -812,6 +817,7 @@ impl Game<'_> {
             // AbstractBoat.readAdditionalSaveData: the lead's holder.
             b.leash_pending = horizon_client::mobs::leash::pending_from_nbt(tag.get("leash"));
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut b.attachment_lifetime);
             self.boats.push(b);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -832,6 +838,7 @@ impl Game<'_> {
             self.roll_cart_loot(&mut c, &tag);
             self.next_entity = id;
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut c.attachment_lifetime);
             self.carts.push(c);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -846,6 +853,7 @@ impl Game<'_> {
             a.live
                 .retain_supplier(&self.motion.attributes, "minecraft:armor_stand");
             self.remember(a.id, uuid, tag);
+            self.bind_saved_entity_attachments(a.id, &mut a.attachment_lifetime);
             self.armor_stands.push(a);
         }
     }
@@ -891,6 +899,7 @@ impl Game<'_> {
             let item = f.item.take();
             f.set_item(item);
             self.remember(f.id, uuid, tag);
+            self.bind_saved_entity_attachments(f.id, &mut f.attachment_lifetime);
             self.item_frames.push(f);
         }
     }
