@@ -123,6 +123,13 @@ fn registered_layers_replace_vanilla_and_each_reader_asks_its_method() {
         ),
         ("mymod:missing".to_string(), Arc::from([])),
     ]);
+    assert_eq!(tables.default_tint(state("minecraft:stone"), 0, 0), None);
+    assert!(
+        tables
+            .apply_tint_layers(assets.registry, &layers, None)
+            .is_err()
+    );
+    assert_eq!(tables.default_tint(state("minecraft:stone"), 0, 0), None);
     tables
         .apply_tint_layers(assets.registry, &layers, Some(tint_values(assets.registry)))
         .unwrap();
