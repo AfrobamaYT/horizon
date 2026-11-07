@@ -42,7 +42,7 @@ pub(super) fn world_brightness(world: &World, layer: LightLayer, pos: [i32; 3]) 
 
 impl Game<'_> {
     /// The border of a resident server level, through the handle's lifetime check.
-    pub(super) fn native_level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
+    pub(super) fn level_world_border(&self, level: LevelRef) -> Option<[f64; 4]> {
         self.native_level_world(level)?;
         Some(self.border.bounds())
     }

@@ -1,8 +1,9 @@
 # API PR 2c scripts
 
 Part of #1608. Initial base: `cb01ae304c7136f1598f97650c63ccfc1da47b90`.
-The first main merge brought in `57f0b36960`. The final replay after the host-method
-pause uses main `5d27928c5ce0ca8c041b0856ef56bfe5430bb6fc` as its comparison base.
+The first main merge brought in `57f0b36960`. The paused-main replay used `5d27928c5ce0ca8c041b0856ef56bfe5430bb6fc`.
+The authorized follow-up merge includes sync #1660; final comparisons now use
+main `658fb76daddef2101540d4c716baa09a2c6595ca`.
 
 ## Generated boundary
 
@@ -69,7 +70,8 @@ old forwarders from the main tree, retains already-converted targets and extends
 the declared table with the two additions. The merged `open_chat` API target
 collides with the existing screen-initialisation method, so the latter becomes
 `begin_chat_screen` first; its callers are compiler-span rewrites, not a blanket
-rename. The target table now has 682 rows and the internal table has 27 rows.
+rename. The target table now has 683 rows (including #1660's `level_world_border`)
+and the internal table has 27 rows.
 
 The handwritten changes are the generator, proc macro, phase policy, docs,
 contributor helper and proof scripts. The declarations, target renames, internal
