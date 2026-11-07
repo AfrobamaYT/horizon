@@ -298,7 +298,7 @@ pub(super) fn areas_source(root: &Path) -> Result<String, String> {
 /// refuse a missing inherent implementation instead of inheriting a trait default.
 pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
     let mut code = String::from(
-        "use crate::game::Game;\nuse crate::game::api_values::{IntoWriteResult, TryIntoApi, TryIntoEngine};\nuse mod_api::*;\n",
+        "use crate::game::Game;\nuse crate::game::api_values::{call_stack_write, call_write, TryIntoApi, TryIntoEngine};\nuse mod_api::*;\n",
     );
     for area in load(root)? {
         for (tier, entries) in &area.tiers {
@@ -345,12 +345,11 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     syn::ReturnType::Default => false,
                 };
                 let call = if checked_write {
-                    let convert = if crosses_output {
-                        "value.try_into_api().map_err(|error| error.into_write_error())?"
+                    if crosses_output {
+                        format!("call_stack_write(|| {call})")
                     } else {
-                        "value"
-                    };
-                    format!("let value = {call}.into_write_result()?; Ok({convert})")
+                        format!("call_write(|| {call})")
+                    }
                 } else if crosses_output {
                     let is_result = match &entry.sig.output {
                         syn::ReturnType::Type(_, ty) => outer_type(ty, "Result"),
