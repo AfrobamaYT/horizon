@@ -805,7 +805,7 @@ fn stack_crossing(
         }
         let local = format!("__api_{name}");
         let value = if infallible {
-            format!("{name}.try_into_api().unwrap()")
+            format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
         } else if stack || block {
             format!("match {name}.try_into_api() {{ Ok(value) => value, Err(_) => return }}")
         } else {
@@ -827,7 +827,9 @@ fn stack_crossing(
         if mutable {
             let converted = format!("__engine_{name}");
             let value = if infallible {
-                format!("{local}.try_into_engine(&()).unwrap()")
+                format!(
+                    "match {local}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return }}"
+                )
             } else if block {
                 format!(
                     "match {local}.try_into_engine(&*self) {{ Ok(value) => value, Err(_) => return }}"
@@ -1017,12 +1019,14 @@ mod stack_crossing_tests {
                 .before
                 .starts_with("if !mod_api::__private::listened")
         );
-        assert!(crossing.before.contains("draws.try_into_api().unwrap()"));
         assert!(
             crossing
-                .after
-                .contains("__api_draws.try_into_engine(&()).unwrap()")
+                .before
+                .contains("match draws.try_into_api() { Ok(value) => value, Err(_) => return }")
         );
+        assert!(crossing.after.contains(
+            "match __api_draws.try_into_engine(&()) { Ok(value) => value, Err(_) => return }"
+        ));
         assert!(crossing.after.ends_with("*draws = __engine_draws; "));
         assert!(!crossing.before.contains("ItemBoundary"));
         assert!(!crossing.after.contains("StackWriteError"));

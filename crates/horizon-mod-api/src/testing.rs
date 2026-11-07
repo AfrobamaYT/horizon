@@ -455,12 +455,17 @@ impl crate::prelude::EntitiesBackendMut for FakeHost {
     }
 }
 impl crate::prelude::PlayersBackendMut for FakeHost {
-    fn player_action_bar(&mut self, player: PlayerRef, line: Text) -> bool {
+    fn player_action_bar(
+        &mut self,
+        player: PlayerRef,
+        line: Text,
+    ) -> Result<bool, crate::text::TextFormError> {
+        line.validate_depth()?;
         let Some(player) = self.players.get_mut(player.uuid()) else {
-            return false;
+            return Ok(false);
         };
         player.action_bar.push(line);
-        true
+        Ok(true)
     }
 }
 crate::impl_backend_mut_areas!(FakeHost, except(entities, fluids_energy, items, players));

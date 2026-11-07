@@ -576,7 +576,7 @@ impl Game<'_> {
                     {
                         widgets::widget_cursor(style.click.is_some(), true);
                         if let Some(hover) = style.hover {
-                            tooltip = Some(*hover);
+                            tooltip = Some(std::sync::Arc::unwrap_or_clone(hover));
                         }
                     }
                 }

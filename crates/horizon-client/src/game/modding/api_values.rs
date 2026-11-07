@@ -104,7 +104,7 @@ fn block_definition_import_preserves_defaults_and_is_immutable_after_load() {
 
 impl TryIntoApi for horizon_client::boss_overlay::ModBar {
     type Api = mod_api::ClientBossBar;
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
 
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         Ok(mod_api::ClientBossBar {
@@ -464,14 +464,14 @@ impl<C: ?Sized, T: TryIntoEngine<C>> TryIntoEngine<C> for [T] {
 }
 impl TryIntoApi for (horizon_client::text::Text, u32) {
     type Api = (mod_api::Text, u32);
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         Ok((self.0.try_into_api()?, self.1))
     }
 }
 impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, u32) {
     type Engine = (horizon_client::text::Text, u32);
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         Ok((self.0.try_into_engine(context)?, self.1))
     }
@@ -486,7 +486,7 @@ impl<A: TryIntoApi, B: TryIntoApi<Error = A::Error>> TryIntoApi for (A, B) {
 }
 impl<C: ?Sized> TryIntoEngine<C> for (mod_api::Text, mod_api::Text) {
     type Engine = (horizon_client::text::Text, horizon_client::text::Text);
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_engine(&self, context: &C) -> Result<Self::Engine, Self::Error> {
         Ok((
             self.0.try_into_engine(context)?,
@@ -925,7 +925,7 @@ impl TryIntoEngine for mod_api::Ingredient {
                 .children
                 .as_ref()
                 .map(|(shape, kids)| {
-                    Ok((
+                    Ok::<_, StackWriteError>((
                         shape.clone(),
                         kids.iter()
                             .map(|k| k.try_into_engine(_items))
@@ -2574,7 +2574,7 @@ macro_rules! gui_draw_value {
                 color,
                 shadow,
             } => $to::Text {
-                text: text.$convert($($args),*).unwrap(),
+                text: text.$convert($($args),*)?,
                 x: *x,
                 y: *y,
                 color: *color,
@@ -2603,7 +2603,7 @@ macro_rules! gui_draw_value {
 
 impl TryIntoApi for horizon_client::hud_layout::GuiDraw {
     type Api = mod_api::hud_layout::GuiDraw;
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
         use mod_api::hud_layout::GuiDraw as Api;
@@ -2612,7 +2612,7 @@ impl TryIntoApi for horizon_client::hud_layout::GuiDraw {
 }
 impl<C: ?Sized> TryIntoEngine<C> for mod_api::hud_layout::GuiDraw {
     type Engine = horizon_client::hud_layout::GuiDraw;
-    type Error = std::convert::Infallible;
+    type Error = mod_api::text::TextFormError;
     fn try_into_engine(&self, _: &C) -> Result<Self::Engine, Self::Error> {
         use horizon_client::hud_layout::GuiDraw as Engine;
         use mod_api::hud_layout::GuiDraw as Api;
@@ -2693,7 +2693,7 @@ mod gui_draw_boundary_tests {
             D::Pop,
         ];
         let api = commands.try_into_api().unwrap();
-        let actual: Result<Vec<D>, std::convert::Infallible> = api.try_into_engine(&());
+        let actual: Result<Vec<D>, mod_api::text::TextFormError> = api.try_into_engine(&());
         let actual = actual.unwrap();
         assert_eq!(actual, commands);
         let D::Text { text: actual, .. } = &actual[4] else {
@@ -2705,11 +2705,11 @@ mod gui_draw_boundary_tests {
     #[test]
     fn tooltip_pairs_round_trip_without_an_item_registry() {
         let lines = vec![(horizon_client::text::Text::literal("tip"), 0xff00ff00)];
-        let snapshot: Result<Vec<(mod_api::Text, u32)>, std::convert::Infallible> =
+        let snapshot: Result<Vec<(mod_api::Text, u32)>, mod_api::text::TextFormError> =
             lines.try_into_api();
         let snapshot = snapshot.unwrap();
         assert_eq!(snapshot[0], (mod_api::Text::literal("tip"), 0xff00ff00));
-        let restored: Result<Vec<(horizon_client::text::Text, u32)>, std::convert::Infallible> =
+        let restored: Result<Vec<(horizon_client::text::Text, u32)>, mod_api::text::TextFormError> =
             snapshot.try_into_engine(&());
         let restored = restored.unwrap();
         assert_eq!(restored[0].0.component(), lines[0].0.component());
@@ -2725,7 +2725,7 @@ mod gui_draw_boundary_tests {
         );
         let values = Some(vec![[pair.clone(), pair]]);
         let reference = &values;
-        let actual: Result<_, std::convert::Infallible> = reference.try_into_engine(&());
+        let actual: Result<_, mod_api::text::TextFormError> = reference.try_into_engine(&());
         let actual = actual.unwrap().unwrap();
         assert_eq!(actual[0][1].0.plain(), "a");
         assert_eq!(actual[0][1].1.plain(), "b");

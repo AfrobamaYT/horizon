@@ -4,11 +4,11 @@ use super::glue::{
     InPlace, conversions, flat_element, flat_method, lift, lower, lower_owned, prepare_value,
     rust_path, unpack,
 };
-use super::ty::{Kind, List, Str, Ty, Types, bound_ident, wit_ident};
+use super::ty::{Kind, List, Payload, Str, Ty, Types, bound_ident, wit_ident};
 use super::wit::{self, Signature, interface, signature};
 use super::{Method, exports};
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use std::fmt::Write;
+use std::{collections::BTreeSet, fmt::Write};
 
 /// `ty` as Rust names it in a trait method's signature.
 pub(super) fn rust_ty(types: &Types<'_>, ty: &Ty, ret: bool) -> String {
@@ -116,7 +116,7 @@ fn header(wit_text: &str, macro_call: &str, options: &str) -> String {
 
 /// A copy of what `local`, a `&mut` record argument, holds before the call, so only what the
 /// call changed is sent back.
-fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
+pub(super) fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut String) {
     if let Ty::Named(def) = ty
         && sig.results.contains(&wit::out_name(&types.defs[*def]))
     {
@@ -125,7 +125,7 @@ fn before(types: &Types<'_>, sig: &Signature, ty: &Ty, local: &str, out: &mut St
 }
 
 /// The function returning what the method's results tuple holds, after the call.
-fn results(
+pub(super) fn results(
     types: &Types<'_>,
     method: &Method,
     sig: &Signature,
@@ -307,15 +307,22 @@ pub(super) fn guest(
                 None => format!("super::handler::<dyn {}>(handler)", trait_path(owner)),
             };
             let result = results(types, method, &sig, "r", &mut_locals);
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}({}) {} {{ super::expect((|| -> Result<_, Refused> {{ {} let r = {receiver}.{}({}); Ok({result}) }})()) }}",
-                bound_ident(&wit_ident(&method.name)),
-                export_params(types, method, &sig)?,
-                export_ret(&sig),
-                out,
+            let call = format!(
+                "(|| -> Result<_, Refused> {{ {out} let r = {receiver}.{}({}); Ok({result}) }})()",
                 method.name,
                 call_args.join(", ")
+            );
+            let answer = export_answer(types, method, &call);
+            let wire_sig = Signature {
+                params: sig.params.clone(),
+                results: wit::wire_results(types, method, &sig),
+            };
+            writeln!(
+                code,
+                "#[allow(unused_variables, unused_mut, clippy::all)] fn {}({}) {} {{ {answer} }}",
+                bound_ident(&wit_ident(&method.name)),
+                export_params(types, method, &sig)?,
+                export_ret(&wire_sig),
             )
             .unwrap();
         }
@@ -324,13 +331,45 @@ pub(super) fn guest(
     Ok(code)
 }
 
-struct Writeback {
-    prepare: String,
-    apply: String,
+/// Refuse the whole answer before preparing or applying any returned field.
+pub(super) fn export_payload(
+    types: &Types<'_>,
+    method: &Method,
+    call: &str,
+    no_answer: &str,
+) -> String {
+    if !wit::text_export_refusal(types, method) {
+        return call.into();
+    }
+    let error = lift(types, &wit::text_error(types), "why");
+    format!(
+        "match {call} {{ Ok(value) => value, Err(why) => return Ok(super::unsent(&self.module, Refused::Text({error}), {no_answer})) }}"
+    )
+}
+
+/// Keep Text refusal as data on the wire; only unrelated transport failures trap.
+pub(super) fn export_answer(types: &Types<'_>, method: &Method, call: &str) -> String {
+    if !wit::text_export_refusal(types, method) {
+        return format!("super::expect({call})");
+    }
+    let error = lower_owned(types, &wit::text_error(types), "why");
+    format!(
+        "match {call} {{ Ok(value) => Ok(value), Err(Refused::Text(why)) => Err(super::expect((|| -> Result<_, Refused> {{ Ok({error}) }})())), Err(why) => super::expect(Err(why)) }}"
+    )
+}
+
+pub(super) struct Writeback {
+    pub(super) prepare: String,
+    pub(super) apply: String,
 }
 
 /// Validate every returned parameter before applying any of them (or the return value).
-fn writeback(types: &Types<'_>, method: &Method, sig: &Signature, names: &[String]) -> Writeback {
+pub(super) fn writeback(
+    types: &Types<'_>,
+    method: &Method,
+    sig: &Signature,
+    names: &[String],
+) -> Writeback {
     let mut out = Writeback {
         prepare: String::new(),
         apply: String::new(),
@@ -369,8 +408,89 @@ fn writeback(types: &Types<'_>, method: &Method, sig: &Signature, names: &[Strin
     out
 }
 
+#[test]
+fn text_host_methods_have_fallible_signatures() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+    let mut included = vec![
+        ("mod_api_generated.rs", generated.hooks.as_str()),
+        ("mod_api_generated_host.rs", generated.host.as_str()),
+        ("mod_api_host_areas.rs", generated.areas.as_str()),
+    ];
+    let providers = super::providers_code(
+        &super::key_shapes(&mut super::Index::new(&root, &included)).unwrap(),
+    );
+    included.push(("capability_providers_generated.rs", &providers));
+    let surface = super::surface(&root, &included).unwrap();
+    let unhandled: Vec<_> = surface
+        .methods
+        .iter()
+        .filter(|m| {
+            !super::exports().contains(&m.owner)
+                && !matches!(m.ret, Ty::Result(..))
+                && m.params
+                    .iter()
+                    .map(|(_, t)| t)
+                    .chain([&m.ret])
+                    .any(|t| contains_text(&surface.types, t, &mut BTreeSet::new()))
+        })
+        .map(|m| format!("{}::{}", m.owner, m.name))
+        .collect();
+    assert!(
+        unhandled.is_empty(),
+        "Text host methods need typed refusal results: {unhandled:?}"
+    );
+}
+
+/// Whether a type contains Text, including inside records, variants and containers.
+pub(super) fn contains_text(types: &Types<'_>, ty: &Ty, seen: &mut BTreeSet<usize>) -> bool {
+    match ty {
+        Ty::Named(id) => {
+            let def = &types.defs[*id];
+            if def.rust == "mod_api::Text" {
+                return true;
+            }
+            if !seen.insert(*id) {
+                return false;
+            }
+            match &def.kind {
+                Kind::Record(fields) => fields.iter().any(|f| contains_text(types, &f.ty, seen)),
+                Kind::TupleRecord(items) => items.iter().any(|t| contains_text(types, t, seen)),
+                Kind::Variant(cases) => cases.iter().any(|c| match &c.payload {
+                    Payload::Tuple(items) => items.iter().any(|t| contains_text(types, t, seen)),
+                    Payload::Record(_, fields) => {
+                        fields.iter().any(|f| contains_text(types, &f.ty, seen))
+                    }
+                    Payload::None => false,
+                }),
+                Kind::Via(t) | Kind::Chain { frame: t, .. } => contains_text(types, t, seen),
+                _ => false,
+            }
+        }
+        Ty::Ref(t, _)
+        | Ty::Boxed(t)
+        | Ty::Shared(t)
+        | Ty::List(t, _)
+        | Ty::Option(t)
+        | Ty::Array(t, _) => contains_text(types, t, seen),
+        Ty::Result(a, b) => contains_text(types, a, seen) || contains_text(types, b, seen),
+        Ty::Tuple(items) => items.iter().any(|t| contains_text(types, t, seen)),
+        _ => false,
+    }
+}
+
+fn typed_text_refusal(types: &Types<'_>, method: &Method) -> bool {
+    matches!(method.ret, Ty::Result(..))
+        && method
+            .params
+            .iter()
+            .map(|(_, t)| t)
+            .chain([&method.ret])
+            .any(|t| contains_text(types, t, &mut BTreeSet::new()))
+}
+
 /// A guest method calling import `callee` (with `lead`, the held object's index, first).
-fn guest_call(
+pub(super) fn guest_call(
     types: &Types<'_>,
     method: &Method,
     callee: &str,
@@ -411,10 +531,20 @@ fn guest_call(
     if let Some(lead) = lead {
         args.insert(0, lead.to_string());
     }
-    Ok(format!(
-        "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ super::expect((|| -> Result<_, Refused> {{ {prep} let {pattern} = {callee}({}); {prepare} let value = {value}; {apply} Ok(value) }})()) }}\n",
-        rust_sig(types, method),
+    let call = format!(
+        "(|| -> Result<_, Refused> {{ {prep} let {pattern} = {callee}({}); {prepare} let value = {value}; {apply} Ok(value) }})()",
         args.join(", ")
+    );
+    let answer = if typed_text_refusal(types, method) {
+        format!(
+            "match {call} {{ Err(Refused::Text(why)) => Err(why.into()), other => super::expect(other) }}"
+        )
+    } else {
+        format!("super::expect({call})")
+    };
+    Ok(format!(
+        "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ {answer} }}\n",
+        rust_sig(types, method)
     ))
 }
 
@@ -681,13 +811,17 @@ pub(super) fn host(
                     "let ({sent},) = match super::lowering(&self.module, || -> Result<_, super::Refused> {{ {prep} Ok(({sent},)) }}) {{ Ok(a) => a, Err(why) => return super::unsent(&self.module, why, {no_answer}) }};"
                 );
             }
-            writeln!(
-                code,
-                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {}, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = m.horizon_mod_api_{iface}().call_{}(store, {})?; {prepare} let value = {value}; {apply} Ok(value) }}) }}",
-                rust_sig(types, method),
-                super::call_class(types, method),
+            let call = format!(
+                "m.horizon_mod_api_{iface}().call_{}(store, {})?",
                 bound_ident(&wit_ident(&method.name)),
                 args.join(", ")
+            );
+            let call = export_payload(types, method, &call, no_answer);
+            writeln!(
+                code,
+                "#[allow(unused_variables, unused_mut, clippy::all)] {} {{ let mut frame = super::Frame::default(); {frame} {prep} self.call_or(frame, {}, {no_answer}, |m, store| -> wasmtime::Result<_> {{ let {pattern} = {call}; {prepare} let value = {value}; {apply} Ok(value) }}) }}",
+                rust_sig(types, method),
+                super::call_class(types, method),
             )
             .unwrap();
         }
@@ -716,7 +850,10 @@ pub(super) fn host(
             entries.push((
                 wit_ident(&method.name),
                 sig.params.iter().map(|(_, w)| wire_rust(w)).collect(),
-                sig.results.iter().map(|r| wire_rust(r)).collect(),
+                wit::wire_results(types, method, &sig)
+                    .iter()
+                    .map(|r| wire_rust(r))
+                    .collect(),
             ));
         }
         if super::SUBSCRIBED.iter().any(|(o, _)| o == owner) {
@@ -817,7 +954,7 @@ fn guest_import_call(types: &Types<'_>, method: &Method) -> Result<String, Strin
 
 /// The game's side of an import: `method` called on `receiver` (taking the held object's index
 /// first when `held`).
-fn host_import(
+pub(super) fn host_import(
     types: &Types<'_>,
     method: &Method,
     receiver: &str,
@@ -876,12 +1013,25 @@ fn host_import_body(
         }
     }
     let result = results(types, method, &sig, "r", &mut_locals);
-    let body = format!(
+    let mut body = format!(
         "{out} let r = <_ as {}>::{}({receiver}, {}); Ok({result})",
         trait_path(method.via.as_deref().unwrap_or(method.owner)),
         method.name,
         call_args.join(", ")
     );
+    if typed_text_refusal(types, method) {
+        if sig.results.len() != 1 {
+            return Err(format!(
+                "Text refusal with write-back outputs is not supported: {}",
+                method.name
+            ));
+        }
+        let ret = rust_ty(types, &method.ret, false);
+        let refused = super::glue::lower_owned(types, &method.ret, "r");
+        body = format!(
+            "match (|| -> wasmtime::Result<_> {{ {body} }})() {{ Err(why) => match why.downcast::<Refused>() {{ Ok(Refused::Text(why)) => {{ let r: {ret} = Err(why.into()); Ok({refused}) }}, Ok(why) => Err(why.into()), Err(why) => Err(why) }}, answer => answer }}"
+        );
+    }
     Ok((params, results_type(types, method, &sig, &mut_locals), body))
 }
 

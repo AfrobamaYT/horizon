@@ -131,8 +131,10 @@ impl mod_api::ServerHost for Server {}
 mod_api::impl_server_host_areas!(Server, except(services));
 
 impl mod_api::Messages for Server {
-    fn broadcast(&self, line: Text) {
+    fn broadcast(&self, line: Text) -> Result<(), mod_api::text::TextFormError> {
+        line.validate_depth()?;
         self.0.lock().unwrap().push(line);
+        Ok(())
     }
 }
 

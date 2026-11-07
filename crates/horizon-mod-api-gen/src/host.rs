@@ -345,15 +345,34 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                     syn::ReturnType::Type(_, ty) => boundary_value(ty),
                     syn::ReturnType::Default => false,
                 };
-                let infallible_output = match &entry.sig.output {
-                    syn::ReturnType::Type(_, ty) => infallible_value(ty),
+                let text_output = match &entry.sig.output {
+                    syn::ReturnType::Type(_, ty) => text_value(ty),
                     syn::ReturnType::Default => false,
                 };
-                let call = if checked_write {
+                let text_result = result_error(&entry.sig.output)
+                    .is_some_and(|error| outer_type(error, "TextFormError"));
+                let call = if text_output {
+                    if text_result {
+                        format!("{call}.try_into_api().map_err(Into::into)")
+                    } else {
+                        format!("{call}.try_into_api().unwrap_or_else(|error| Err(error.into()))")
+                    }
+                } else if text_result {
+                    // Writes with converted Text arguments call an infallible engine
+                    // body. A read returning an API-owned aggregate already converts
+                    // its fields in the backend and therefore already returns Result.
+                    let text_input =
+                        entry.sig.inputs.iter().any(
+                            |arg| matches!(arg, syn::FnArg::Typed(arg) if text_value(&arg.ty)),
+                        );
+                    if text_input {
+                        format!("Ok({call})")
+                    } else {
+                        call
+                    }
+                } else if checked_write {
                     if crosses_output {
                         format!("call_stack_write(|| {call})")
-                    } else if infallible_output {
-                        format!("call_write(|| {call}).try_into_api().unwrap()")
                     } else {
                         format!("call_write(|| {call})")
                     }
@@ -367,8 +386,6 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
                         ),
                         None => format!("{call}.try_into_api().unwrap_or_default()"),
                     }
-                } else if infallible_output {
-                    format!("{call}.try_into_api().unwrap()")
                 } else {
                     call
                 };
@@ -396,8 +413,8 @@ pub(super) fn game_forwarders(root: &Path) -> Result<String, String> {
 
 /// API records whose game representation is owned by another crate. Conversions are
 /// implemented once by the game; this rule only selects the boundary, never its behaviour.
-fn infallible_value(ty: &Type) -> bool {
-    contains_value(ty, &["Text"])
+fn text_value(ty: &Type) -> bool {
+    contains_value(ty, &["Text", "GuiDraw"])
 }
 
 fn boundary_value(ty: &Type) -> bool {
@@ -490,12 +507,12 @@ fn boundary_arguments(
             return Err(format!("{method}: unsupported argument"));
         };
         let name = pat.ident.to_string();
-        let infallible = infallible_value(&arg.ty);
-        if !boundary_value(&arg.ty) && !infallible {
+        let text = text_value(&arg.ty);
+        if !boundary_value(&arg.ty) && !text {
             args.push(name);
             continue;
         }
-        let conversion = if infallible {
+        let conversion = if text {
             format!("{name}.try_into_engine(&())")
         } else {
             format!("{name}.try_into_engine(self.items())")
@@ -504,8 +521,8 @@ fn boundary_arguments(
             format!(
                 "match {name}.try_into_engine(&()) {{ Ok(value) => value, Err(_) => return Default::default() }}"
             )
-        } else if infallible {
-            format!("{conversion}.unwrap()")
+        } else if text {
+            format!("{conversion}?")
         } else if checked_write {
             format!("{conversion}?")
         } else if result_error(&sig.output).is_some() {
@@ -1058,11 +1075,11 @@ mod tests {
     }
 
     #[test]
-    fn text_arguments_are_infallible_even_with_checked_stack_writes() {
-        let text = entry("fn set_text(&mut self, text: &Text);");
+    fn text_arguments_refuse_before_even_checked_stack_writes() {
+        let text = entry("fn set_text(&mut self, text: &Text) -> Result<(), TextFormError>;");
         let (setup, args, checked) = boundary_arguments(&text.sig, "set_text").unwrap();
         assert!(!checked);
-        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert!(setup.contains("text.try_into_engine(&())?"));
         assert_eq!(args, "&text");
         let mixed = entry(
             "fn update(&mut self, stack: ItemStack, text: Option<&Text>) -> Result<Text, Refused>;",
@@ -1070,12 +1087,12 @@ mod tests {
         let (setup, args, checked) = boundary_arguments(&mixed.sig, "update").unwrap();
         assert!(checked);
         assert!(setup.contains("stack.try_into_engine(self.items())?"));
-        assert!(setup.contains("text.try_into_engine(&()).unwrap()"));
+        assert!(setup.contains("text.try_into_engine(&())?"));
         assert_eq!(args, "stack, text.as_ref()");
         let syn::ReturnType::Type(_, output) = &mixed.sig.output else {
             panic!()
         };
-        assert!(infallible_value(output));
+        assert!(text_value(output));
         assert!(!boundary_value(output));
     }
 

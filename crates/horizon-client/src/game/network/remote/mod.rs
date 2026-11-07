@@ -11822,7 +11822,7 @@ impl ClientMenu {
 
 impl Remote {
     pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
-        self.menu_title_snapshot = title.try_into_api().unwrap().map(Arc::new);
+        self.menu_title_snapshot = title.try_into_api().ok().flatten().map(Arc::new);
         self.menu_title = title;
     }
 
