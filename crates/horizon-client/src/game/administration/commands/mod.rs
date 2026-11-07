@@ -1576,6 +1576,25 @@ impl Game<'_> {
         relative: [bool; 3],
         turn_riders: bool,
     ) {
+        let from = self.place_teleport_in_level(t, pos, rotation, relative, turn_riders);
+        if self.options.dedicated.is_some()
+            && let (Some(entity), Some(from), Some(to)) =
+                (self.network_entity_id(t), from, self.target_position(t))
+        {
+            self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
+        }
+    }
+
+    /// `Entity.teleportSameDimension`: shared entity/passenger placement.
+    /// Returns its old position for the command caller's completion notification.
+    pub(super) fn place_teleport_in_level(
+        &mut self,
+        t: Target,
+        pos: [f64; 3],
+        rotation: Option<[f32; 2]>,
+        relative: [bool; 3],
+        turn_riders: bool,
+    ) -> Option<[f64; 3]> {
         use super::entity::Entity;
         let from = self.target_position(t);
         // Entity.calculatePassengerTransition compares a rider's angle with the
@@ -1842,12 +1861,7 @@ impl Game<'_> {
             });
             self.teleport_passengers(t, from, to, placed);
         }
-        if self.options.dedicated.is_some()
-            && let (Some(entity), Some(from), Some(to)) =
-                (self.network_entity_id(t), from, self.target_position(t))
-        {
-            self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
-        }
+        from
     }
 
     /// A server's player teleported into another level than theirs

@@ -447,6 +447,7 @@ pub fn resume_after_consumption(
     index: usize,
     w: &MobWorld,
     level: &mut super::DamageLevel<'_>,
+    was_on_fire: bool,
     events: &mut Vec<super::MobEvent>,
 ) -> bool {
     tick_with(
@@ -455,7 +456,7 @@ pub fn resume_after_consumption(
         w,
         level,
         events,
-        super::ai::resume_after_consumption,
+        |m, w, level, events| super::ai::resume_after_consumption(m, w, level, was_on_fire, events),
     )
 }
 

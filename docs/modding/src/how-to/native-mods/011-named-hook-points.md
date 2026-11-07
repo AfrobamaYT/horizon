@@ -23,7 +23,8 @@ checked raw listener signature, and the ordinary registry owns its priority and 
 `ender_pearl_teleport` version **2** covers player-owned and mob-owned pearls. Its `owner` is an
 `EntityRef`; listeners can cancel or redirect `target`. Player owners retain the
 acting-player context and mutable fall `damage`. Mob owners take no pearl damage
-and make no endermite roll. The pearl is consumed even when teleportation is canceled.
+and make no endermite roll. Pearl placement does not emit the command-only
+`entity_teleport` notification. The pearl is consumed even when teleportation is canceled.
 
 `item_consumption_teleport` version **2** covers players and foxes with the random-teleport
 consume effect. Its `consumer` is a `LivingRef`, and `consumed` is the stack captured

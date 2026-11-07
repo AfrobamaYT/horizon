@@ -672,7 +672,11 @@ fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
 #[derive(Debug)]
 pub enum TickProgress {
     Complete(bool),
-    Consumption(super::fox::Consumption),
+    Consumption {
+        decision: super::fox::Consumption,
+        /// The base-tick snapshot, before contact ignition or listener writes.
+        was_on_fire: bool,
+    },
 }
 
 /// Run a whole mob tick when no owning-host pause is needed by the caller.
@@ -684,9 +688,12 @@ pub fn tick(
 ) -> bool {
     match tick_until_consumption(m, w, level, events) {
         TickProgress::Complete(kept) => kept,
-        TickProgress::Consumption(decision) => {
+        TickProgress::Consumption {
+            decision,
+            was_on_fire,
+        } => {
             super::fox::apply_consumption(&decision, w, m, events);
-            resume_after_consumption(m, w, level, events)
+            resume_after_consumption(m, w, level, was_on_fire, events)
         }
     }
 }
@@ -771,9 +778,12 @@ pub fn tick_until_consumption(
         && !m.no_ai
         && let Some(decision) = super::fox::ai_step_until_consumption(m, w, events)
     {
-        return TickProgress::Consumption(decision);
+        return TickProgress::Consumption {
+            decision,
+            was_on_fire,
+        };
     }
-    TickProgress::Complete(ai_and_finish_tick(m, w, level, events))
+    TickProgress::Complete(ai_and_finish_tick(m, w, level, was_on_fire, events))
 }
 
 /// Resume a fox after its item effect, before the living AI/movement step.
@@ -781,19 +791,21 @@ pub fn resume_after_consumption(
     m: &mut Mob,
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
     events: &mut Vec<MobEvent>,
 ) -> bool {
     if m.removed {
         return false;
     }
     super::fox::before_living_ai_step(m, w);
-    ai_and_finish_tick(m, w, level, events)
+    ai_and_finish_tick(m, w, level, was_on_fire, events)
 }
 
 fn ai_and_finish_tick(
     m: &mut Mob,
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
     events: &mut Vec<MobEvent>,
 ) -> bool {
     if m.no_ai {
@@ -855,7 +867,7 @@ fn ai_and_finish_tick(
     if m.no_ai && m.species() == Species::Fox {
         super::fox::finish_ai_step(m, w, events);
     }
-    finish_tick(m, w, level, events)
+    finish_tick(m, w, level, was_on_fire, events)
 }
 
 /// Resume the living tick after species AI, before block effects and animation.
@@ -866,6 +878,7 @@ pub fn finish_tick(
     m: &mut Mob,
     w: &MobWorld,
     level: &mut DamageLevel<'_>,
+    was_on_fire: bool,
     events: &mut Vec<MobEvent>,
 ) -> bool {
     effects_from_blocks(m, w, level, events);

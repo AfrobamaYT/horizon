@@ -1323,6 +1323,7 @@ impl Game<'_> {
         let mut resuming = false;
         let mut resume_from = 0;
         let mut resume_credit_expiring = false;
+        let mut resume_was_on_fire = false;
         let mut resume_sampled = None;
         let mut resume_guest = None;
         loop {
@@ -1534,6 +1535,7 @@ impl Game<'_> {
                                 i,
                                 &w,
                                 &mut level,
+                                resume_was_on_fire,
                                 &mut events,
                             ),
                         )
@@ -1548,7 +1550,10 @@ impl Game<'_> {
                     };
                     let kept = match progress {
                         horizon_client::mobs::ai::TickProgress::Complete(kept) => kept,
-                        horizon_client::mobs::ai::TickProgress::Consumption(decision) => {
+                        horizon_client::mobs::ai::TickProgress::Consumption {
+                            decision,
+                            was_on_fire,
+                        } => {
                             // Return every player loan before ending the world borrow.
                             if seen_guest.is_none() {
                                 base.player = w.player;
@@ -1559,6 +1564,7 @@ impl Game<'_> {
                             }
                             resume_from = from;
                             resume_credit_expiring = credit_expiring;
+                            resume_was_on_fire = was_on_fire;
                             resume_sampled = sampled;
                             resume_guest = seen_guest;
                             pause = Some(decision);
@@ -5593,9 +5599,16 @@ impl Game<'_> {
             if !target.iter().all(|v| v.is_finite()) {
                 target = [pearl.previous.x, pearl.previous.y, pearl.previous.z];
             }
-            if !game.entity_teleport_to(owner, target, None) {
+            if !super::native_entity_moves::in_bounds(target) {
                 return Ok(());
             }
+            let _ = game.place_teleport_in_level(
+                super::commands::Target::Mob(id),
+                target,
+                None,
+                [false; 3],
+                true,
+            );
             if let Some(m) = game.mobs.iter_mut().find(|m| m.id == id) {
                 m.fall_distance = 0.0;
                 // Entity.teleport's setOldRot: keep the owner's angles without
@@ -11736,7 +11749,7 @@ mod pickable_projectile_tests {
 mod mob_pearl_hook_tests {
     use super::*;
     use crate::game::native_entity_refs::tests::with_game;
-    use mod_api::{EnderPearlTeleportEvent, Flow, Hooks, ModEntry, ServerHost};
+    use mod_api::{EnderPearlTeleportEvent, EntityTeleportEvent, Flow, Hooks, ModEntry, ServerHost};
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicU8, Ordering},
@@ -11745,9 +11758,14 @@ mod mob_pearl_hook_tests {
     struct PearlProbe {
         mode: Arc<AtomicU8>,
         owners: Arc<Mutex<Vec<u32>>>,
+        command_teleports: Arc<Mutex<Vec<u32>>>,
     }
     #[mod_api::__subscriptions]
     impl Hooks for PearlProbe {
+        fn entity_teleport(&self, _: &mut dyn ServerHost, event: &mut EntityTeleportEvent<'_>) {
+            self.command_teleports.lock().unwrap().push(event.entity);
+        }
+
         fn ender_pearl_teleport(
             &self,
             host: &mut dyn ServerHost,
@@ -11875,16 +11893,19 @@ mod mob_pearl_hook_tests {
     fn mob_pearls_use_the_hook_and_recheck_listener_writes_without_player_side_effects() {
         let mode = Arc::new(AtomicU8::new(0));
         let owners = Arc::new(Mutex::new(Vec::new()));
+        let command_teleports = Arc::new(Mutex::new(Vec::new()));
         let mods: mod_api::Mods = vec![ModEntry::new(
             "mob-pearl-proof",
             Box::new(PearlProbe {
                 mode: Arc::clone(&mode),
                 owners: Arc::clone(&owners),
+                command_teleports: Arc::clone(&command_teleports),
             }),
         )]
         .into();
         mod_api::testing::with_mods(mods, || {
             with_game(|game| {
+                game.options.dedicated = Some(Vec::new());
                 for action in 0..4 {
                     mode.store(action, Ordering::SeqCst);
                     let id = 40 + u32::from(action);
@@ -11940,6 +11961,11 @@ mod mob_pearl_hook_tests {
                         _ => unreachable!(),
                     }
                     assert!(!game.mobs.iter().any(|m| m.species() == Species::Endermite));
+                    assert_eq!(
+                        *command_teleports.lock().unwrap(),
+                        if action < 2 { vec![] } else { vec![42] },
+                        "only the listener's explicit teleport emits the command notification"
+                    );
                 }
                 assert_eq!(*owners.lock().unwrap(), [40, 41, 42, 43]);
             })
