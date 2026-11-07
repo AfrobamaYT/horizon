@@ -15,7 +15,7 @@ extern crate self as mod_api;
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct UnresolvedFluid(u64);
 
-/// A block requested once through [`Registrar::block_key`]. Its load-owned slot survives reload.
+/// A block requested once through [`Registrar::block_key`](BlocksRegistrar::block_key). Its load-owned slot survives reload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
@@ -67,7 +67,7 @@ pub enum GameRuleError {
 }
 
 /// Why an entity type's attribute declaration was refused
-/// ([`Registrar::declare_entity_attributes`](crate::Registrar)).
+/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntityAttributeError {
@@ -87,7 +87,7 @@ pub enum EntityAttributeError {
 // exhaustive: only the registration table creates keys
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct BoolGameRuleKey(u32);
-/// A load-owned fluid identity requested through [`Registrar::fluid_key`] or resolved through
+/// A load-owned fluid identity requested through [`Registrar::fluid_key`](FluidsRegistrar::fluid_key) or resolved through
 /// [`DataLoadContext::fluid_key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
@@ -99,7 +99,7 @@ pub struct FluidKey(u32);
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
 pub struct ItemKey(u32);
 
-/// An effect requested once through [`Registrar::effect_key`]. The registry is fixed until restart.
+/// An effect requested once through [`Registrar::effect_key`](EffectsRegistrar::effect_key). The registry is fixed until restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: its field is private, so only registration creates a key
 #[horizon_mod_api_macros::wasm(host_constructor = from_slot)]
