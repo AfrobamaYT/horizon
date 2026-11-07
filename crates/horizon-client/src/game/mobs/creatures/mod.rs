@@ -5301,6 +5301,63 @@ impl Game<'_> {
             }
         }
     }
+    /// `ThrownEnderpearl.onHit` for a living non-player owner: the same hook,
+    /// then the normal entity teleport, without a player's endermite roll or damage.
+    fn mob_pearl_teleport(&mut self, pearl: &Projectile, id: u32) {
+        let Some(owner) = self.entity(id) else { return };
+        let Some(from) = self
+            .mobs
+            .iter()
+            .find(|m| {
+                m.id == id
+                    && m.alive()
+                    && !m.removed
+                    && !horizon_client::mobs::villager::sleeping(m)
+            })
+            .map(|m| m.position)
+        else {
+            return;
+        };
+        let _: std::result::Result<(), ()> = mod_api::run_transaction(self, |game, _| {
+            let mut target = [pearl.previous.x, pearl.previous.y, pearl.previous.z];
+            let mut damage = 0.0;
+            let mut cancel = false;
+            game.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
+                owner,
+                pearl: pearl.id,
+                from: [from.x, from.y, from.z],
+                target: &mut target,
+                damage: &mut damage,
+                cancel: &mut cancel,
+            });
+            // Listener writes stay in the transaction; never overwrite a changed,
+            // dead, sleeping or removed owner using the old decision.
+            if cancel
+                || !game.mobs.iter().any(|m| {
+                    m.id == id
+                        && m.alive()
+                        && !m.removed
+                        && m.position == from
+                        && !horizon_client::mobs::villager::sleeping(m)
+                })
+            {
+                return Ok(());
+            }
+            if !target.iter().all(|v| v.is_finite()) {
+                target = [pearl.previous.x, pearl.previous.y, pearl.previous.z];
+            }
+            if !game.entity_teleport_to(owner, target, None) {
+                return Ok(());
+            }
+            if let Some(m) = game.mobs.iter_mut().find(|m| m.id == id) {
+                m.fall_distance = 0.0;
+            }
+            game.audio
+                .play("minecraft:entity.player.teleport", Some(target), 1.0, 1.0);
+            Ok(())
+        });
+    }
+
     /// A projectile's hit, landed in the attack of its owner.
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
         let mut attack = self.attack_of_who(p.owner);
@@ -5890,13 +5947,14 @@ impl Game<'_> {
                 // EntityTeleportEvent.EnderPearl: a server player's pearl.
                 if p.owner == Some(Who::Player)
                     && let Some(from) = self.player.as_ref().map(|pl| pl.position)
-                    && let (Some(uuid), Some(name)) =
-                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                    && let Some(owner) = self
+                        .lan_acting_uuid
+                        .and_then(|uuid| self.player(uuid))
+                        .map(|player| player.entity())
                 {
                     let mut target = [to.x, to.y, to.z];
                     self.native_ender_pearl_teleport(mod_api::__private::EnderPearlTeleportCall {
-                        player: uuid,
-                        name: &name,
+                        owner,
                         pearl: p.id,
                         from: [from.x, from.y, from.z],
                         target: &mut target,
@@ -5955,6 +6013,9 @@ impl Game<'_> {
                         1.0,
                         1.0,
                     );
+                }
+                if let Some(Who::Mob(id)) = p.owner {
+                    self.mob_pearl_teleport(p, id);
                 }
             }
             (ProjectileKind::SmallFireball, hit) => match hit {
@@ -11150,5 +11211,197 @@ mod pickable_projectile_tests {
             ),
             other => panic!("the pearl flew through the fireball: {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod mob_pearl_hook_tests {
+    use super::*;
+    use crate::game::native_entity_refs::tests::with_game;
+    use mod_api::{EnderPearlTeleportEvent, Flow, Hooks, ModEntry, ServerHost};
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU8, Ordering},
+    };
+
+    struct PearlProbe {
+        mode: Arc<AtomicU8>,
+        owners: Arc<Mutex<Vec<u32>>>,
+    }
+    impl Hooks for PearlProbe {
+        fn ender_pearl_teleport(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut EnderPearlTeleportEvent<'_>,
+        ) -> Flow {
+            self.owners.lock().unwrap().push(event.owner.id());
+            assert_eq!(event.owner.position(host), Some(event.from));
+            assert_eq!(
+                *event.damage, 0.0,
+                "non-player owners take no vanilla fall damage"
+            );
+            match self.mode.load(Ordering::SeqCst) {
+                0 => Flow::Cancel,
+                1 => {
+                    *event.target = [12.0, 80.0, -4.0];
+                    Flow::Continue
+                }
+                2 => {
+                    assert!(event.owner.teleport_to(host, [3.0, 70.0, 3.0], None));
+                    *event.target = [12.0, 80.0, -4.0];
+                    Flow::Continue
+                }
+                3 => {
+                    assert!(event.owner.discard(host));
+                    Flow::Continue
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    struct PlayerPearlProbe(Arc<AtomicU8>);
+    impl Hooks for PlayerPearlProbe {
+        fn ender_pearl_teleport(
+            &self,
+            host: &mut dyn ServerHost,
+            event: &mut EnderPearlTeleportEvent<'_>,
+        ) -> Flow {
+            assert_eq!(
+                host.players().acting_player().unwrap().entity(),
+                event.owner
+            );
+            assert_eq!(*event.damage, 5.0);
+            if self.0.load(Ordering::SeqCst) == 0 {
+                return Flow::Cancel;
+            }
+            *event.target = [12.0, 80.0, -4.0];
+            *event.damage = 0.0;
+            Flow::Continue
+        }
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    fn player_pearl_keeps_acting_context_cancellation_and_mutable_damage() {
+        use horizon_client::motion::PlayerMotion;
+        let mode = Arc::new(AtomicU8::new(0));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "player-pearl-proof",
+            Box::new(PlayerPearlProbe(Arc::clone(&mode))),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                let from = Vec3::new(0.0, 65.0, 0.0);
+                game.player = Some(PlayerMotion::new(game.motion, from).unwrap());
+                game.lan_acting_uuid = Some(7);
+                game.lan_acting_name = Some("PearlTest".into());
+                game.lan_acting_entity = Some(2);
+                game.ui.difficulty = 0;
+                let pearl = Projectile::new(
+                    ProjectileKind::EnderPearl,
+                    Vec3::new(6.0, 75.0, 6.0),
+                    Some(Who::Player),
+                );
+                let hit = || Hit::Block {
+                    pos: [6, 75, 6],
+                    at: pearl.position,
+                    face: [0; 3],
+                };
+                let mut expected_random = game.world.random.clone();
+                let health = game.player.as_ref().unwrap().health.health();
+                game.projectile_hit(&pearl, hit()).unwrap();
+                assert_eq!(game.player.as_ref().unwrap().position, from);
+                assert_eq!(game.player.as_ref().unwrap().health.health(), health);
+                assert_eq!(game.world.random.next_long(), expected_random.next_long());
+                mode.store(1, Ordering::SeqCst);
+                expected_random = game.world.random.clone();
+                expected_random.next_float();
+                game.projectile_hit(&pearl, hit()).unwrap();
+                let player = game.player.as_ref().unwrap();
+                assert_eq!(player.position, Vec3::new(12.0, 80.0, -4.0));
+                assert_eq!(
+                    player.health.health(),
+                    health,
+                    "listener suppressed player fall damage"
+                );
+                assert_eq!(player.fall_distance, 0.0);
+                assert_eq!(game.world.random.next_long(), expected_random.next_long());
+            })
+        });
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources and an isolated native-mod process"]
+    fn mob_pearls_use_the_hook_and_recheck_listener_writes_without_player_side_effects() {
+        let mode = Arc::new(AtomicU8::new(0));
+        let owners = Arc::new(Mutex::new(Vec::new()));
+        let mods: mod_api::Mods = vec![ModEntry::new(
+            "mob-pearl-proof",
+            Box::new(PearlProbe {
+                mode: Arc::clone(&mode),
+                owners: Arc::clone(&owners),
+            }),
+        )]
+        .into();
+        mod_api::testing::with_mods(mods, || {
+            with_game(|game| {
+                for action in 0..4 {
+                    mode.store(action, Ordering::SeqCst);
+                    let id = 40 + u32::from(action);
+                    let from = Vec3::new(0.0, 65.0, 0.0);
+                    let ty = game.res.mob_types().get("minecraft:cow").unwrap().clone();
+                    let mut mob = Mob::new(id, ty, from, 37.0);
+                    mob.head_pitch = -12.0;
+                    mob.velocity = Vec3::new(0.5, -0.25, 0.75);
+                    mob.fall_distance = 9.0;
+                    let health = mob.health;
+                    game.mobs.push(mob);
+                    let mut pearl = Projectile::new(
+                        ProjectileKind::EnderPearl,
+                        Vec3::new(6.0, 75.0, 6.0),
+                        Some(Who::Mob(id)),
+                    );
+                    pearl.id = 100 + id;
+                    let mut expected_random = game.world.random.clone();
+                    game.projectile_hit(
+                        &pearl,
+                        Hit::Block {
+                            pos: [6, 75, 6],
+                            at: pearl.position,
+                            face: [0; 3],
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        game.world.random.next_long(),
+                        expected_random.next_long(),
+                        "mob pearl handling makes no player endermite draw"
+                    );
+                    let mob = game.mobs.iter().find(|m| m.id == id && !m.removed);
+                    match action {
+                        0 => {
+                            let m = mob.unwrap();
+                            assert_eq!(m.position, from);
+                            assert_eq!(m.fall_distance, 9.0);
+                        }
+                        1 => {
+                            let m = mob.unwrap();
+                            assert_eq!(m.position, Vec3::new(12.0, 80.0, -4.0));
+                            assert_eq!(m.velocity, Vec3::ZERO);
+                            assert_eq!(m.fall_distance, 0.0);
+                            assert_eq!((m.yaw, m.head_pitch), (37.0, -12.0));
+                            assert_eq!(m.health, health);
+                        }
+                        2 => assert_eq!(mob.unwrap().position, Vec3::new(3.0, 70.0, 3.0)),
+                        3 => assert!(mob.is_none()),
+                        _ => unreachable!(),
+                    }
+                    assert!(!game.mobs.iter().any(|m| m.species() == Species::Endermite));
+                }
+                assert_eq!(*owners.lock().unwrap(), [40, 41, 42, 43]);
+            })
+        });
     }
 }

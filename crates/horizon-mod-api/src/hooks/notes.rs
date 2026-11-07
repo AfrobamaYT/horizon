@@ -157,12 +157,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `PlayerRef::tell` and the acting-player helpers
   work. Ender pearls and chorus fruit have their own hooks below; not heard yet: a spectator's teleport menu; portals
   and respawns are not teleports here.
-- **`native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)`**: a server player's ender pearl
-  landed and is about to teleport them (NeoForge's `EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`).
-  `pearl` is the pearl's entity id, `from` their feet, `target` where the pearl started its last tick and `damage` the
-  fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
-  player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
-  pearls are not heard.
+- **`native_ender_pearl_teleport(owner, pearl, from, target, damage, cancel)`**: a server player's or mob's
+  pearl landed and is about to teleport its live `EntityRef` owner. `target` may be moved; cancellation spends
+  the pearl without teleport, sound, damage or endermite roll. Players retain acting-player context and
+  mutable fall damage (5). Mobs preserve rotation, reset fall distance, take no player fall damage and
+  make no endermite draw. The pending move refuses an owner changed by the listener.
 - **`native_item_consumption_teleport(player, name, consumed, from, target, cancel)`**: a server player whose `teleport_randomly`
   consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ItemConsumption`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
@@ -2592,7 +2591,7 @@ registration path.
 
 - A server player's `teleport_randomly` consume effect (chorus fruit) is about to try a spot: `native_item_consumption_teleport(player, name, consumed, from, target, cancel)`, once per attempt (up to 16). `consumed` is the stack captured before the use, with its count and components, rather than the current contents of the hand. A mod may move `target`; the game still looks down from it for ground to land on. `cancel` ends the effect with no teleport and no more attempts. Foxes are not heard.
 
-- A server player's ender pearl landed: `native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)` runs before the endermite roll and the teleport. A mod may move `target` or change the fall `damage` (5; 0 or less is none); `cancel` keeps the player where they are, without the endermite roll, damage or sound, and the pearl is used up either way.
+- A server player's or mob's ender pearl landed: `native_ender_pearl_teleport(owner, pearl, from, target, damage, cancel)` runs before teleporting the live `EntityRef` owner. A mod may move `target`; cancellation spends the pearl without a teleport, sound, player damage or endermite roll. A player retains acting-player context and the mutable fall damage (5). A mob preserves rotation, resets fall distance, takes no player fall damage and makes no endermite draw. A listener that moves, kills, removes or puts the mob to sleep invalidates the pending move; it is refused rather than overwriting that write. `owner` replaces the player-only UUID/name context; use its handle and the host services. No compatibility fields are retained.
 
 - Drawing an item stack on a screen: `native_item_stack(batch, stack, at, size)` draws its model, glint, damage bar, cooldown and mod decorations, but not its count. It draws nothing and returns false for an unknown item or an empty stack (air, or a count of 0).
 

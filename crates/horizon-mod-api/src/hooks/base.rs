@@ -3081,17 +3081,17 @@ requires a farmer at work and `mob_griefing` enabled."#]
         neoforge = "none (NeoForge has no such event)"
     )]
     fn enchant_item();
-    /// A server player's ender pearl landed and is about to teleport them
-    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
-    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
-    /// entity id, `from` their feet now, `target` where the pearl started
-    /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` (a value that is not a number is ignored) or change
-    /// `damage` (0 or less: none). Canceling
-    /// keeps the player where they are: no endermite roll, no teleport, no
-    /// damage and no sound; the pearl is used up either way. The player's
-    /// state is swapped in (`host.players().acting_player()`). The hit itself is
-    /// heard by `native_projectile_impact`.
+    /// A server player's or mob's ender pearl is about to teleport its `owner`
+    /// (`EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`). `owner` is
+    /// the live entity handle, `pearl` its projectile id, `from` the owner's feet
+    /// and `target` the pearl's previous position. A mod may move the target;
+    /// non-finite changes keep the original spot. Canceling leaves the owner
+    /// in place with no teleport sound, damage or endermite roll; the pearl is
+    /// used up. Player owners keep their acting-player context and mutable fall
+    /// `damage` (5; nonpositive is none). Mob owners take no fall damage and
+    /// make no endermite draw; their `damage` starts at zero and is player-only.
+    /// A mob moved, removed, killed or put to sleep by a listener is not moved
+    /// again using the old decision. The impact hook still hears the hit.
     #[hook(
         side = "server",
         contract = "cancel",
@@ -3100,8 +3100,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         cancellable = true
     )]
     fn ender_pearl_teleport(
-        player: u128,
-        name: &str,
+        owner: EntityRef,
         pearl: u32,
         from: [f64; 3],
         target: &mut [f64; 3],
