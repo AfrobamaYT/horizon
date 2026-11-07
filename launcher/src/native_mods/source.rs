@@ -56,6 +56,12 @@ fn lower(
             "source listeners require a non-generic signature",
         ));
     }
+    if !point_shape::eligible(&[], signature) {
+        return Err(invalid(
+            "at",
+            "source listeners require a plain, safe, synchronous Rust signature",
+        ));
+    }
     // Length-prefixed UTF-8, not another signature hasher. Encoding every byte also keeps
     // the symbol distinct after the raw-record generator's CamelCase conversion.
     let mut identity = String::from("source");
@@ -88,6 +94,7 @@ pub(super) fn stage(
     root: &std::path::Path,
     catalog_dir: &std::path::Path,
     mods: &[super::Bundle],
+    report: &dyn Fn(&str) -> Result<(), String>,
 ) -> Result<(), String> {
     use horizon_mod_api_gen::points::source::{self, Point};
     use syn::parse::Parser;
@@ -142,7 +149,7 @@ pub(super) fn stage(
             )
             .map_err(|error| error.to_string())?
             .expect("source route");
-            super::append_log(&format!(
+            report(&format!(
                 "{}:{}: {} -> source (private slot, {}, {})",
                 manifest.id, adapter.inject.id, adapter.inject.at, adapter.kind, adapter.reason
             ))?;
@@ -267,11 +274,15 @@ fn source_adapter_inputs_compile_and_write_back() {
 }
 
 #[test]
-fn generic_source_signatures_are_refused() {
+fn unsupported_source_signatures_are_refused() {
     for signature in [
         "fn target<T>(value: T)",
         "fn target(value: impl Copy)",
         "fn target<const N: usize>()",
+        "async fn target()",
+        "unsafe fn target()",
+        "const fn target()",
+        "extern \"C\" fn target()",
     ] {
         let manifest = declaration("one", "generic", "game::target", "head");
         assert!(matches!(

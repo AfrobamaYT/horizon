@@ -26,7 +26,7 @@ const UNPACKED_LIMIT: u64 = 8 << 30;
 /// Why a build compiles the game from source instead of using the prebuilt game.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum SourceReason {
-    /// A mod has a helper `[[native.injection]]` or a module: they change the game's own code.
+    /// A mod has a checked private source point, legacy helper, or module changing game code.
     Injections { mod_id: String },
     /// A mod has a build script, which the prebuilt route doesn't run.
     BuildScript { mod_id: String },
