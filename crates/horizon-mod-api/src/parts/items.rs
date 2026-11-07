@@ -440,6 +440,8 @@ pub mod tests {
             "minecraft:iron_helmet",
             "minecraft:iron_sword",
             "minecraft:diamond",
+            "minecraft:emerald",
+            "minecraft:potion",
             "minecraft:stone",
             "minecraft:apple",
             "minecraft:bread",
