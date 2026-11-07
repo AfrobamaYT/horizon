@@ -112,8 +112,10 @@ pub struct WorldDrawUsage {
     /// Maximum quads per view.
     pub quad_capacity: u32,
     /// Model copies accepted for this view. Culled copies are not included.
+    /// A call may pass at most [`instances_capacity`](Self::instances_capacity)
+    /// copies; that bound is applied before culling.
     pub instances_used: u32,
-    /// Maximum model copies per view.
+    /// Maximum model copies per view, and the most copies one call may pass.
     pub instances_capacity: u32,
 }
 impl WorldDrawUsage {
