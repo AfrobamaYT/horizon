@@ -151,9 +151,9 @@ fn a_record_crosses_and_takes_back_what_a_listener_changed() {
     assert!(matches!(kept.message, Cow::Borrowed("keep")));
 
     let mut reach = mod_points::ReachArgs::__new();
-    mod_points::dispatch::reach(&Host, &mut reach);
+    mod_points::dispatch::reach(&FakeHost::new(), &mut reach);
     assert_eq!(reach.result, Some(6.0));
-    mod_points::dispatch::reach_return(&Host, &mut reach);
+    mod_points::dispatch::reach_return(&FakeHost::new(), &mut reach);
     assert_eq!(reach.result, Some(7.0));
 
     let mut turn = mod_points::TurnPlayerArgs::__new(1.0, 2.0);

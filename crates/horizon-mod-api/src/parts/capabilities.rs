@@ -210,32 +210,6 @@ pub mod tests {
     }
 
     #[cfg(test)]
-    /// Player 1, whose main hand is hotbar slot 5, holding `main_hand`; entity 2 a pig, 3 a mod's
-    /// robot and 4 a player in another level. An iron helmet stacks to one and goes on the head.
-    pub(crate) fn player_world(main_hand: Option<ItemStack>) -> FakeHost {
-        let mut host = FakeHost::new();
-        let player = host.join(1, 1);
-        player.selected_slot = 5;
-        player.slots.extend(main_hand.map(|stack| (5, stack)));
-        host.level.entity(2, "minecraft:pig");
-        host.level.entity(3, "test:robot");
-        let nether = LevelRef::new(NativeWorldEpoch::new(1), crate::DimensionKey::NETHER);
-        host.players.join(4, 4, nether);
-        let head = [("slot".into(), Tag::String("head".into()))];
-        host.registries
-            .item_component(
-                "minecraft:iron_helmet",
-                "minecraft:max_stack_size",
-                Tag::Int(1),
-            )
-            .item_component(
-                "minecraft:iron_helmet",
-                "minecraft:equippable",
-                Tag::Compound(head.into_iter().collect()),
-            );
-        host
-    }
-    #[cfg(test)]
     /// A pipe at (0, 64, 0), and east of it a vanilla chest of one slot that holds one item,
     /// answered by the game.
     pub(crate) fn pipe_world() -> FakeHost {
