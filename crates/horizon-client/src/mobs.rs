@@ -262,6 +262,19 @@ impl ModelNormals {
         }
         self
     }
+    fn part_rotated(mut self, pose: [f32; 9], rotation: glam::Mat3) -> Self {
+        self.matrix *= rotation;
+        let scale = glam::Vec3::new(pose[6], pose[7], pose[8]);
+        if scale.x.abs() == scale.y.abs() && scale.x.abs() == scale.z.abs() {
+            if scale.min_element() < 0.0 {
+                self.matrix *= glam::Mat3::from_diagonal(scale.signum());
+            }
+        } else {
+            self.matrix *= glam::Mat3::from_diagonal(scale.recip());
+            self.trusted = false;
+        }
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1167,6 +1180,10 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 pub struct Extra {
     /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
     pub from_bucket: bool,
+    /// Tags a mod gave the mob before it joined a level (`finalize_spawn`'s
+    /// `UnspawnedMobEdits`): the level keeps a joined entity's tags with its
+    /// saved data, so they move there when the mob joins.
+    pub spawn_tags: Vec<String>,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
@@ -1788,6 +1805,9 @@ pub struct Mob {
     pub profile: Option<horizon_protocol::entity_data::Profile>,
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
+    /// What `entity_size` answered for its pose and vanilla size (`EntityEvent.Size`):
+    /// `dims` uses it while it holds.
+    pub size_answer: Option<crate::pose::SizeAnswer>,
 }
 impl crate::entity_rules::EntityRules for Mob {
     fn is_no_gravity(&self) -> bool {
@@ -2366,6 +2386,10 @@ pub enum MobEvent {
         /// The mob whose breaking this is, when it is one `LivingDestroyBlockEvent`
         /// hears (a wither's, a ravager's, a silverfish's, a zombie's).
         by: Option<u32>,
+        /// The entity `destroyBlock` names when that event doesn't hear of it (a
+        /// villager's harvest, a ravager's crop): it asks the mods nothing, and
+        /// its loot's `LootContextParams.THIS_ENTITY` is this one, as `by`'s is.
+        breaker: Option<u32>,
     },
     /// `EndermanTakeBlockGoal`: the enderman `mob` picks up the block `state` at
     /// `pos` (it already holds it); the block turns to air unless a mod stops it
@@ -3219,6 +3243,7 @@ pub fn apply_brain_events(
                     attacker: mob as i32,
                     // Pufferfish.touch uses DamageSources.sting: the fish, no projectile.
                     projectile: None,
+                    direct: None,
                     held: [held, None],
                     player_uuid: None,
                 };
@@ -3467,6 +3492,10 @@ pub struct MobWorld<'a> {
     pub asks_living_destroy_block: bool,
     /// Whether a server listener can cancel baby spawning.
     pub asks_baby_spawn: bool,
+    /// `Level.getEntity(uuid)`, for the UUIDs a mob kept of entities that were
+    /// not in the level (a warden's anger, `AngerManagement.angerByUuid`).
+    /// None: this world keeps no entity UUIDs, so nothing is resolved.
+    pub who_lookup: Option<&'a dyn WhoLookup>,
     /// The level's world border, whose walls stop a mob's moves
     /// (`Entity.collectColliders`); None: nothing stops them there.
     pub border: Option<&'a horizon_core::geometry::border::BorderGeometry>,
@@ -3528,6 +3557,13 @@ impl MobWorld<'_> {
         };
         visibility.clamp(0.0, 10.0)
     }
+}
+/// `Level.getEntity(UUID)` for a reference a mob stored: the entity that UUID
+/// names while it is in the level, never some other entity as a stand-in. Only
+/// the game layer keeps entity UUIDs, so it answers this (`Game::who_by_uuid`)
+/// and the mob layer reaches it through `MobWorld`.
+pub trait WhoLookup {
+    fn who_by_uuid(&self, uuid: [i32; 4]) -> Option<Who>;
 }
 /// `Entity.getTeam` of the player and of the mobs on a team.
 #[derive(Clone, Debug, Default)]
@@ -3655,6 +3691,7 @@ impl Mob {
             cape: None,
             profile: None,
             random_textures: Default::default(),
+            size_answer: None,
             attrs: Attrs {
                 speed: kind.speed,
                 attack_damage: kind.attack_damage,
@@ -3853,11 +3890,22 @@ impl Mob {
         self.damage_with(level, amount, source, None)
     }
     /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
-    /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
+    /// past the flag. Fire-immune mobs also refuse fire, except a ghast's reflected fireball.
+    /// The guard every damage hook runs after (`LivingIncomingDamageEvent`).
     pub fn refuses_damage(&self, source: &Damage) -> bool {
         !self.alive()
             || self.removed
             || (self.is_invulnerable() && !source.kind.bypasses_invulnerability())
+            || (source.is_fire()
+                && self.kind.flags.fire_immune
+                && !self.reflected_fireball(source))
+    }
+    /// `Ghast.isReflectedFireball`: its fire immunity does not refuse a
+    /// player's return hit.
+    fn reflected_fireball(&self, source: &Damage) -> bool {
+        &*self.kind.id == "minecraft:ghast"
+            && source.kind == DamageKind::Fireball
+            && source.attacker == Some(Who::Player)
     }
     /// `LivingEntity.hurtServer`'s partial mob adapter, with health reductions inline.
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
@@ -3906,12 +3954,7 @@ impl Mob {
         }
         // Ghast.isReflectedFireball: a fireball a player turned back is
         // no fire to it, and kills it (Ghast.hurtServer: 1000 damage).
-        let reflected = &*self.kind.id == "minecraft:ghast"
-            && source.kind == DamageKind::Fireball
-            && source.attacker == Some(Who::Player);
-        if source.is_fire() && (self.kind.flags.fire_immune) && !reflected {
-            return false;
-        }
+        let reflected = self.reflected_fireball(&source);
         if !ai::accepts_damage(self, &source, amount, level.attack().player_uuid) {
             return false;
         }

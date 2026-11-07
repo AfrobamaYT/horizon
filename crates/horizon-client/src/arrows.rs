@@ -172,6 +172,8 @@ pub struct ArrowState {
     pub pickup: Pickup,
     /// Its entity type is `SpectralArrow` (the type is its own, not the pickup item's).
     pub spectral: bool,
+    /// `SpectralArrow` saved duration; its constructor default is 200.
+    pub spectral_duration: i32,
     /// `pickupItemStack`: what picking the arrow up gives.
     pub pickup_item: crate::items::ItemStack,
     /// `AbstractArrow.firedFromWeapon`: the crossbow or bow it was shot from.
@@ -243,6 +245,7 @@ impl ArrowState {
             last_state: None,
             pickup: Pickup::Disallowed,
             spectral: false,
+            spectral_duration: 200,
             pickup_item: crate::items::ItemStack::new("minecraft:arrow", 1),
             fired_from_weapon: None,
             no_physics: false,
@@ -885,7 +888,7 @@ impl Ticker<'_, '_, '_, '_> {
         }
         let owner = targets
             .iter()
-            .find(|(who, _)| Some(*who) == self.p.owner)
+            .find(|(who, _)| Some(*who) == self.p.collision_owner())
             .map(|(_, b)| *b);
         let swept = bounds(self.p.position)
             .expand_towards(self.p.velocity)
@@ -935,7 +938,7 @@ impl Ticker<'_, '_, '_, '_> {
         // ThrownTrident.findHitEntity: none once it has dealt damage.
         let targets = if self.st.dealt_damage { &[] } else { targets };
         for (who, b) in targets {
-            if Some(*who) == self.p.owner && !self.p.left_owner || !b.intersects(area) {
+            if Some(*who) == self.p.collision_owner() && !self.p.left_owner || !b.intersects(area) {
                 continue;
             }
             // canHitEntity: not an entity a piercing arrow has gone through.

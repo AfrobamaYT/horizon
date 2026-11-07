@@ -968,7 +968,7 @@ mod tests {
             assert!(!mob.set_baby(game, true));
             assert_eq!(game.mobs.last().unwrap().extra.age, 0);
             game.mobs.last_mut().unwrap().removed = false;
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert_eq!(mob.requires_custom_persistence(game), None);
             assert!(!mob.set_baby(game, true));
             game.mobs = taken;
@@ -1305,7 +1305,7 @@ mod tests {
             assert!(game.mob(stale.entity()).is_none());
             assert!(!game.mob_set_target(stale, None));
             assert_eq!(game.mob_is_aggressive(stale), None);
-            let taken = std::mem::take(&mut game.mobs);
+            let taken = game.mobs.lift();
             assert_eq!(game.mob_target(mob), None);
             assert!(!game.mob_set_target(mob, None));
             assert_eq!(taken[0].ai.target, Some(Who::Mob(13)));

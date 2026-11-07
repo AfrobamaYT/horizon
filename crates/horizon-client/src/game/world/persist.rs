@@ -56,8 +56,9 @@ pub struct EntityMemory {
     /// increasing order), type, and whether the last leave sweep saw it.
     /// Only filled while a mod is loaded.
     pub(super) live: Vec<(u32, String, bool)>,
-    /// Entities a native mod removed (`entity_discard`), taken out at
-    /// the next sweep of departed entities. Mobs go at once and never wait here.
+    /// Entities a native mod removed (`entity_discard`): gone for every
+    /// lookup from the call on, taken out of their lists at the next sweep of
+    /// departed entities. Mobs go at once and never wait here.
     pub(super) removals: Vec<super::commands::Target>,
 }
 
@@ -148,11 +149,20 @@ fn read_attachments(
     tag: &Tag,
     uuid: [i32; 4],
     maps: &mut HashMap<[i32; 4], horizon_mod_runtime::attachments::Attachments>,
+    live: bool,
 ) {
     if let Ok(Some(data)) = attachment_compound(tag.get(ATTACHMENTS_KEY)) {
-        maps.entry(uuid).or_insert_with(|| {
-            horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone())
-        });
+        match maps.get_mut(&uuid) {
+            // Made by `entity_constructing` listeners just now: saved values win.
+            Some(map) if !live => map.read_saved_over(data.clone()),
+            Some(_) => {}
+            None => {
+                maps.insert(
+                    uuid,
+                    horizon_mod_runtime::attachments::Attachments::from_nbt(data.clone()),
+                );
+            }
+        }
     }
 }
 
@@ -195,6 +205,90 @@ fn block_entity_pos(tag: &Tag) -> [i32; 3] {
 }
 fn chunk_of(p: Vec3) -> (i32, i32) {
     ((p.x.floor() as i32) >> 4, (p.z.floor() as i32) >> 4)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ItemDisplayTransformation {
+    translation: [f32; 3],
+    left_rotation: [f32; 4],
+    scale: [f32; 3],
+    right_rotation: [f32; 4],
+}
+
+impl From<mod_api::NativeTransformation> for ItemDisplayTransformation {
+    fn from(value: mod_api::NativeTransformation) -> Self {
+        Self {
+            translation: value.translation,
+            left_rotation: value.left_rotation,
+            scale: value.scale,
+            right_rotation: value.right_rotation,
+        }
+    }
+}
+
+impl ItemDisplayTransformation {
+    pub(super) fn from_tag(tag: Option<&Tag>) -> Option<Self> {
+        match tag {
+            None => Some(Self {
+                translation: [0.0; 3],
+                left_rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+                right_rotation: [0.0, 0.0, 0.0, 1.0],
+            }),
+            Some(tag @ Tag::Compound(_)) => {
+                let (translation, left_rotation, scale, right_rotation) =
+                    horizon_client::text_display::transformation(tag)?;
+                let value = Self {
+                    translation,
+                    left_rotation,
+                    scale,
+                    right_rotation,
+                };
+                // Keep unsupported numerical forms on the existing raw path, too.
+                [
+                    translation.as_slice(),
+                    left_rotation.as_slice(),
+                    scale.as_slice(),
+                    right_rotation.as_slice(),
+                ]
+                .iter()
+                .all(|v| v.iter().all(|x| x.is_finite()))
+                .then_some(value)
+                .filter(|v| {
+                    [v.left_rotation, v.right_rotation]
+                        .iter()
+                        .all(|q| q.iter().map(|x| x * x).sum::<f32>() > 1.0e-12)
+                })
+            }
+            // Matrix and invalid shapes keep their previous unprojected/raw path.
+            Some(_) => None,
+        }
+    }
+
+    pub(super) fn to_tag(self) -> Tag {
+        transformation_tag(
+            self.translation,
+            self.left_rotation,
+            self.scale,
+            self.right_rotation,
+        )
+    }
+}
+
+/// The transformation-only portion of Display.addAdditionalSaveData and the native writer.
+fn transformation_tag(
+    translation: [f32; 3],
+    left_rotation: [f32; 4],
+    scale: [f32; 3],
+    right_rotation: [f32; 4],
+) -> Tag {
+    let floats = |v: &[f32]| Tag::List(v.iter().map(|x| Tag::Float(x.to_bits())).collect());
+    let mut t = horizon_core::nbt::Compound::new();
+    t.insert("translation".into(), floats(&translation));
+    t.insert("left_rotation".into(), floats(&left_rotation));
+    t.insert("scale".into(), floats(&scale));
+    t.insert("right_rotation".into(), floats(&right_rotation));
+    Tag::Compound(t)
 }
 
 impl Game<'_> {
@@ -480,8 +574,9 @@ impl Game<'_> {
     pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         self.next_entity += 1;
         let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
-        if let Some(e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
+        if let Some(mut e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
             self.remember(e.id, uuid, tag);
+            self.bind_saved_entity_attachments(e.id, &mut e.attachment_lifetime);
             self.dropped.push(e);
         }
     }
@@ -495,6 +590,7 @@ impl Game<'_> {
             // Horizon splits a saved `count` into orbs: the first is the saved one.
             if i == 0 {
                 self.remember_uuid(id, uuid, &tag);
+                self.bind_saved_entity_attachments(id, &mut orb.attachment_lifetime);
             }
             // An orb that came through a portal keeps its cooldown.
             self.restore_portal_cooldown(id, &tag);
@@ -524,20 +620,37 @@ impl Game<'_> {
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_tags(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
         }
     }
 
     /// A saved llama spit or shulker bullet.
-    pub(super) fn load_spit_or_bullet(&mut self, tag: Tag, player_uuid: Option<[i32; 4]>) {
-        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid) {
+    pub(super) fn load_spit_or_bullet(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
+        let target = self.bullet_target(&tag);
+        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid, target) {
             self.claim_owner(&mut p);
             self.next_entity += 1;
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
+    }
+    /// `ShulkerBullet.readAdditionalSaveData`'s `Target`, resolved over the UUID
+    /// bridge: the `Who` of the loaded player or mob that UUID names, or `None`
+    /// for one that is not here. Vanilla keeps the UUID and re-resolves it every
+    /// tick; a `Who` can only name an entity in the level, so a target that is
+    /// away leaves the bullet with none and it falls (`ShulkerBullet.tick`).
+    fn bullet_target(&self, tag: &Tag) -> Option<Who> {
+        self.who_by_uuid(entity_nbt::bullet_target(tag)?)
     }
     /// A saved fireball or wind charge.
     pub(super) fn load_fireball(
@@ -553,6 +666,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -572,6 +686,7 @@ impl Game<'_> {
             p.id = self.next_entity;
             self.restore_portal_cooldown(p.id, &tag);
             self.remember_uuid(p.id, uuid, &tag);
+            self.bind_saved_entity_attachments(p.id, &mut p.attachment_lifetime);
             self.add_projectile(p);
             self.remember_last_projectile_tags(&tag);
         }
@@ -648,8 +763,7 @@ impl Game<'_> {
         }
     }
 
-    /// A saved primed TNT.
-    // PrimedTnt.readAdditionalSaveData: its fuse (80 when absent) and motion.
+    /// `PrimedTnt.readAdditionalSaveData`: its numeric short fuse (80 when absent) and motion.
     // Its Passengers ride it (EntityType.loadEntityRecursive forces them on).
     pub(super) fn load_tnt(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
         let mut tag = tag;
@@ -657,10 +771,13 @@ impl Game<'_> {
         if let Some(position) = entity_nbt::position(&tag) {
             self.next_entity += 1;
             let id = self.next_entity;
-            let fuse = match tag.get("fuse") {
-                Some(Tag::Short(f)) => i32::from(*f),
-                _ => 80,
-            };
+            // getShortOr uses NumericTag.shortValue: floor floating values
+            // to int before short narrowing; integer tags narrow directly.
+            let fuse = i32::from(match tag.get("fuse") {
+                Some(Tag::Float(v)) => f32::from_bits(*v).floor() as i32 as i16,
+                Some(Tag::Double(v)) => f64::from_bits(*v).floor() as i32 as i16,
+                other => horizon_client::save::number(other).unwrap_or(80) as i16,
+            });
             self.tnts.push(super::tnt::PrimedTnt {
                 rotation: [0.0, 0.0],
                 join: Default::default(),
@@ -708,6 +825,7 @@ impl Game<'_> {
             // AbstractBoat.readAdditionalSaveData: the lead's holder.
             b.leash_pending = horizon_client::mobs::leash::pending_from_nbt(tag.get("leash"));
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut b.attachment_lifetime);
             self.boats.push(b);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -728,6 +846,7 @@ impl Game<'_> {
             self.roll_cart_loot(&mut c, &tag);
             self.next_entity = id;
             self.remember(id, uuid, tag);
+            self.bind_saved_entity_attachments(id, &mut c.attachment_lifetime);
             self.carts.push(c);
             for rider in riders {
                 self.load_mob(rider, Some(id));
@@ -742,6 +861,7 @@ impl Game<'_> {
             a.live
                 .retain_supplier(&self.motion.attributes, "minecraft:armor_stand");
             self.remember(a.id, uuid, tag);
+            self.bind_saved_entity_attachments(a.id, &mut a.attachment_lifetime);
             self.armor_stands.push(a);
         }
     }
@@ -787,6 +907,7 @@ impl Game<'_> {
             let item = f.item.take();
             f.set_item(item);
             self.remember(f.id, uuid, tag);
+            self.bind_saved_entity_attachments(f.id, &mut f.attachment_lifetime);
             self.item_frames.push(f);
         }
     }
@@ -902,6 +1023,7 @@ impl Game<'_> {
         horizon_client::mobs::armor::prepare(&m, &self.motion.attributes);
         let id = m.id;
         self.remember(id, uuid, tag);
+        self.bind_saved_entity_attachments(id, &mut m.attachment_lifetime);
         self.mobs.push(m);
         for rider in riders {
             if let Some(r) = self.load_mob(rider, Some(id))
@@ -968,13 +1090,18 @@ impl Game<'_> {
         kind: &str,
     ) -> Option<super::commands::OtherEntity> {
         let position = entity_nbt::position(tag)?;
+        let item_transformation = (kind == "minecraft:item_display")
+            .then(|| ItemDisplayTransformation::from_tag(tag.get("transformation")))
+            .flatten();
         let rotation = entity_nbt::rotation(tag);
         Some(super::commands::OtherEntity {
+            join: Default::default(),
             id,
             kind: kind.to_owned(),
             position,
             yaw: rotation[0],
             pitch: rotation[1],
+            item_transformation,
         })
     }
 
@@ -1023,6 +1150,9 @@ impl Game<'_> {
                 ]),
             );
             c.insert("UUID".into(), Tag::IntArray(uuid.to_vec()));
+            if let Some(transformation) = o.item_transformation {
+                c.insert("transformation".into(), transformation.to_tag());
+            }
             if matches!(o.kind.as_str(), "minecraft:interaction" | "interaction") {
                 // Interaction.addAdditionalSaveData always writes these settings.
                 c.entry("width".into())
@@ -1208,6 +1338,28 @@ impl Game<'_> {
     pub(super) fn mob_tree_nbt(&mut self, i: usize) -> Tag {
         let id = self.mobs[i].id;
         let uuid = self.uuid_for(id);
+        // A warden's anger names each suspect by UUID. A mob that has never been
+        // loaded or saved has no UUID yet, so give it one, or the save would
+        // drop the anger at it (`who_uuid` writes nothing for a mob the map does
+        // not know).
+        let suspects: Vec<u32> = self.mobs[i]
+            .extra
+            .warden
+            .as_ref()
+            .map(|st| {
+                st.anger
+                    .suspects()
+                    .iter()
+                    .filter_map(|who| match who {
+                        Who::Mob(id) => Some(*id),
+                        Who::Player => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for suspect in suspects {
+            self.uuid_for(suspect);
+        }
         // `NeutralMob.addPersistentAngerSaveData`: the anger ends at an
         // absolute game time, so it goes on while the chunk is unloaded, and
         // the target is the entity the mob is angry at.
@@ -1260,6 +1412,7 @@ impl Game<'_> {
     /// Forget an entity that left the world (its UUID and loaded compound).
     pub(super) fn forget_entity(&mut self, id: u32) {
         if let Some(uuid) = self.persist.uuids.remove(&id) {
+            self.forget_entity_initialization(uuid);
             self.entity_attachments.remove(&uuid);
         }
         self.persist.raw.remove(&id);
@@ -1353,7 +1506,16 @@ impl Game<'_> {
     pub(super) fn remember_uuid(&mut self, id: u32, uuid: Option<[i32; 4]>, tag: &Tag) {
         if let Some(u) = uuid {
             self.persist.uuids.insert(id, u);
-            read_attachments(tag, u, &mut self.entity_attachments);
+        }
+        // `EntityType.create` then `Entity.load`: the constructing listeners set their
+        // values first and the saved attachments are read over them. An entity whose map
+        // is already live (told before) keeps it, as before.
+        let live = uuid.is_some_and(|u| self.entity_attachments.contains_key(&u));
+        if let Some(kind) = text(tag.get("id")) {
+            self.initialize_entity(mod_api::Holder::Entity(id), &kind);
+        }
+        if let Some(u) = uuid {
+            read_attachments(tag, u, &mut self.entity_attachments, live);
         }
         self.join_saved_team(id, tag);
     }
@@ -1711,7 +1873,7 @@ impl Game<'_> {
         self.persist.uuids.retain(|id, _| alive.contains(id));
         self.persist.raw.retain(|id, _| alive.contains(id));
     }
-    /// A loaded projectile's `Owner`: a connected guest, else a mob by UUID.
+    /// A loaded projectile's `Owner`: living hit credit and vehicle collision identity.
     fn claim_owner(&self, p: &mut horizon_client::projectiles::Projectile) {
         let Some(uuid) = p.owner_uuid else {
             return;
@@ -1729,6 +1891,12 @@ impl Game<'_> {
         } else if p.owner.is_none() {
             p.owner = self.mob_by_uuid(uuid).map(Who::Mob);
         }
+        use super::commands::Target;
+        p.owner_vehicle =
+            match self.target_by_uuid(horizon_client::lan::playerdata::ints_uuid(uuid)) {
+                Some(Target::Boat(id) | Target::Cart(id)) => Some(id),
+                _ => None,
+            };
     }
     /// Save and remove the entities of chunks that unloaded.
     pub(super) fn unload_entities(&mut self, unloaded: &[Arc<Chunk>]) {
@@ -1777,8 +1945,12 @@ impl Game<'_> {
         keys.contains(&chunk_of(at)).then(|| {
             let id = self.dropped[i].id;
             let uuid = self.uuid_for(id);
-            let tag =
-                entity_nbt::item_entity_to_nbt(&self.dropped[i], uuid, self.persist.raw.get(&id));
+            let tag = entity_nbt::item_entity_to_nbt_with_items(
+                &self.dropped[i],
+                uuid,
+                self.persist.raw.get(&id),
+                self.items(),
+            );
             (chunk_of(at), tag)
         })
     }
@@ -1807,6 +1979,15 @@ impl Game<'_> {
         if !keys.contains(&chunk_of(p.position)) || !entity_nbt::saved_with_chunk(p) {
             return None;
         }
+        // `ShulkerBullet`'s target, over the UUID bridge: a mob the level has
+        // no UUID for writes no `Target` rather than a made-up one.
+        let target = match &p.kind {
+            horizon_client::projectiles::ProjectileKind::ShulkerBullet {
+                target: Some(who),
+                ..
+            } => self.save_who_uuid(*who),
+            _ => None,
+        };
         let owner = p.owner_uuid;
         let raw = anon_raw(&self.persist, p.kind.id(), p.position);
         let uuid = saved_uuid(&self.persist, p.id);
@@ -1818,7 +1999,7 @@ impl Game<'_> {
         let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
+            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, target, raw.as_ref()))?;
         // HasBeenShot is modeled for these projectiles. The generic raw
         // overlay also serves entity types whose shot flag is still opaque.
         let shot = tag.get("HasBeenShot").cloned();
@@ -1827,6 +2008,13 @@ impl Game<'_> {
             map.insert("HasBeenShot".into(), shot);
         }
         Some((chunk_of(p.position), tag))
+    }
+    /// The UUID a save writes for a reference to `who`, as `mob_to_nbt`'s
+    /// `angry_at` does: the bridge's `who_uuid` over `EntityMemory::uuid_of`,
+    /// which answers the UUID the entity was loaded or saved with. A mob the
+    /// level has none for writes nothing.
+    pub(in crate::game) fn save_who_uuid(&self, who: Who) -> Option<[i32; 4]> {
+        entity_nbt::who_uuid(who, &mut |id| self.persist.uuid_of(id))
     }
     pub(super) fn save_falling(
         &mut self,
@@ -1952,6 +2140,15 @@ impl Game<'_> {
             .get(&id)
             .copied()
             .unwrap_or_else(random_uuid)
+    }
+}
+
+/// The mob layer's [`horizon_client::mobs::WhoLookup`]: a warden's anger keeps
+/// the suspects that left by UUID, and resolves the ones that are back through
+/// the same map a save writes them from (`mob_to_nbt`'s `uuid_of`).
+impl horizon_client::mobs::WhoLookup for Game<'_> {
+    fn who_by_uuid(&self, uuid: [i32; 4]) -> Option<Who> {
+        Game::who_by_uuid(self, uuid)
     }
 }
 
@@ -2286,11 +2483,70 @@ mod tests {
             panic!("passenger missing");
         };
         let mut loaded = HashMap::new();
-        read_attachments(&children[0], child_id, &mut loaded);
+        read_attachments(&children[0], child_id, &mut loaded, false);
         assert_eq!(
             key.get(loaded.get_mut(&child_id).unwrap(), Holder::Level),
             Ok(29)
         );
+    }
+
+    /// `remember_uuid`'s read: a map an `entity_constructing` listener made just now takes the
+    /// saved values over its own (`Entity.load` after the constructor), a live map that came
+    /// with the entity keeps its values, and no map at all is the saved one.
+    #[test]
+    fn saved_attachments_read_over_a_constructed_map_but_not_a_live_one() {
+        use horizon_mod_runtime::attachments::{
+            AttachmentCodec, AttachmentError, AttachmentType, Attachments, Holder,
+        };
+        fn key(name: &'static str) -> AttachmentType<i32> {
+            AttachmentType {
+                namespace: "test",
+                name,
+                default: || 0,
+                codec: Some(AttachmentCodec {
+                    encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                    decode: |c| match c.get(&"count".into()) {
+                        Some(Tag::Int(n)) => Ok(*n),
+                        _ => Err(AttachmentError::Decode),
+                    },
+                }),
+                copy_on_death: false,
+                sync: false,
+            }
+        }
+        let (saved, unsaved) = (key("saved"), key("unsaved"));
+        let uuid = [1, 2, 3, 4];
+        let mut data = Attachments::default();
+        saved.set(&mut data, Holder::Level, 7).unwrap();
+        let tag = Tag::compound([
+            ("UUID", Tag::IntArray(uuid.to_vec())),
+            (ATTACHMENTS_KEY, Tag::Compound(data.to_nbt())),
+        ]);
+        let listener = || {
+            let mut map = Attachments::default();
+            saved.set(&mut map, Holder::Level, 41).unwrap();
+            unsaved.set(&mut map, Holder::Level, 41).unwrap();
+            HashMap::from([(uuid, map)])
+        };
+
+        let mut constructed = listener();
+        read_attachments(&tag, uuid, &mut constructed, false);
+        let map = constructed.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(41));
+
+        let mut live = listener();
+        read_attachments(&tag, uuid, &mut live, true);
+        assert_eq!(
+            saved.get(live.get_mut(&uuid).unwrap(), Holder::Level),
+            Ok(41)
+        );
+
+        let mut none = HashMap::new();
+        read_attachments(&tag, uuid, &mut none, false);
+        let map = none.get_mut(&uuid).unwrap();
+        assert_eq!(saved.get(map, Holder::Level), Ok(7));
+        assert_eq!(unsaved.get(map, Holder::Level), Ok(0));
     }
 
     /// Entities as a save before every entity held attachments wrote them (a vanilla compound
@@ -2967,5 +3223,318 @@ mod loaded_tag_tests {
             failures.is_empty(),
             "actual load/getter/save/mutation failures: {failures:#?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod item_display_saved_transform_tests {
+    use super::*;
+    use crate::game::{Audio, Options, Progress, Settings, commands::Target, load_resources};
+    use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+    use horizon_core::{geometry::Vec3, position::ChunkPos, random::LegacyRandom};
+    fn with_game(test: impl FnOnce(&mut Game<'_>)) {
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.game_dir = Some(
+            std::path::PathBuf::from(std::env::var_os("HORIZON_HOME").unwrap())
+                .join(format!("h132-{:?}", std::thread::current().id())),
+        );
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.native_lifecycle
+            .begin_open(mod_api::NativeAuthority::IntegratedServer);
+        game.build_registries();
+        game.set_allow_commands(true);
+
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("difficulty normal"));
+        assert!(game.run_command("forceload add 0 0"));
+        for (x, z) in [(0, 1), (1, 0), (1, 1)] {
+            game.world
+                .chunks
+                .insert((x, z), Arc::new(Chunk::empty(x, z)));
+            game.block_ticks
+                .add_empty_chunk(ChunkPos::new(x, z))
+                .unwrap();
+        }
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(2.5, 200.0, 2.5)).unwrap());
+        game.creative = true;
+        assert!(game.run_command("fill 0 199 0 31 199 31 stone"));
+        assert!(
+            game.run_command("summon pig 13.5 200 2.5 {UUID:[I;132,0,0,99],NoAI:1b,NoGravity:1b}")
+        );
+        game.world.random = LegacyRandom::new(132);
+        test(&mut game);
+    }
+    const IDENTITY: &str = "{translation:[0f,0f,0f],left_rotation:[0f,0f,0f,1f],scale:[1f,1f,1f],right_rotation:[0f,0f,0f,1f]}";
+    const CHANGED: &str = "{translation:[1.25f,-2.5f,3f],left_rotation:[0f,1f,0f,0f],scale:[2f,3f,4f],right_rotation:[0f,0f,0f,1f]}";
+    fn expected(translation: [f32; 3], left: [f32; 4], scale: [f32; 3]) -> Tag {
+        let floats = |v: &[f32]| Tag::List(v.iter().map(|x| Tag::Float(x.to_bits())).collect());
+        Tag::Compound(
+            [
+                ("translation".into(), floats(&translation)),
+                ("left_rotation".into(), floats(&left)),
+                ("scale".into(), floats(&scale)),
+                ("right_rotation".into(), floats(&[0.0, 0.0, 0.0, 1.0])),
+            ]
+            .into_iter()
+            .collect(),
+        )
+    }
+    fn summon(game: &mut Game<'_>, n: i32, transform: Option<&str>) -> u32 {
+        let suffix = transform
+            .map(|t| format!(",transformation:{t}"))
+            .unwrap_or_default();
+        assert!(game.run_command(&format!("summon item_display 6.5 200 6.5 {{UUID:[I;132,0,0,{n}],Rotation:[12.5f,-20f],NoGravity:1b,CustomName:\"display\",Tags:[\"h132\"],item:{{id:\"minecraft:diamond\",count:2,components:{{\"minecraft:custom_data\":{{h132:7}}}}}}{suffix}}}")));
+        let o = game
+            .others
+            .iter()
+            .find(|o| game.persist.uuid_of(o.id) == Some([132, 0, 0, n]))
+            .unwrap();
+        assert_eq!(o.kind, "minecraft:item_display");
+        assert_eq!(o.position, Vec3::new(6.5, 200.0, 6.5));
+        assert_eq!([o.yaw, o.pitch], [12.5, -20.0]);
+        let id = o.id;
+        let saved = game.command_target_nbt(Target::Other(id)).unwrap();
+        let stack = horizon_client::save::item_from_nbt(saved.get("item").unwrap()).unwrap();
+        assert_eq!(&*stack.item, "minecraft:diamond");
+        assert_eq!(stack.count, 2);
+        assert_eq!(
+            saved
+                .get("item")
+                .unwrap()
+                .get("components")
+                .unwrap()
+                .get("minecraft:custom_data")
+                .unwrap()
+                .get("h132"),
+            Some(&Tag::Int(7))
+        );
+        id
+    }
+    #[test]
+    #[ignore = "prepared resources; actual item-display registered load and no-raw save"]
+    fn omitted_item_display_transformation_is_saved_as_typed_identity() {
+        with_game(|game| {
+            let clock = game.world.game_time;
+            let id = summon(game, 1, None);
+            let identity = expected([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]);
+            let tag = game.command_target_nbt(Target::Other(id)).unwrap();
+            assert_eq!(tag.get("transformation"), Some(&identity));
+            let raw = game.persist.raw.remove(&id).unwrap();
+            let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
+            assert_eq!(fresh.get("transformation"), Some(&identity));
+            assert_eq!(fresh.get("UUID"), tag.get("UUID"));
+            assert_eq!(fresh.get("Pos"), tag.get("Pos"));
+            for key in [
+                "interpolation_duration",
+                "teleport_duration",
+                "start_interpolation",
+            ] {
+                assert!(fresh.get(key).is_none());
+            }
+            game.persist.raw.insert(id, raw);
+            assert_eq!(game.world.game_time, clock);
+        });
+    }
+    #[test]
+    #[ignore = "prepared resources; actual explicit load must survive removal of raw source"]
+    fn admitted_compound_item_transforms_are_actual_saved_state() {
+        with_game(|game| {
+            let clock = game.world.game_time;
+            for (n, text, want) in [
+                (
+                    2,
+                    CHANGED,
+                    expected([1.25, -2.5, 3.0], [0.0, 1.0, 0.0, 0.0], [2.0, 3.0, 4.0]),
+                ),
+                (
+                    3,
+                    IDENTITY,
+                    expected([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
+                ),
+            ] {
+                let id = summon(game, n, Some(text));
+                let before = game.command_target_nbt(Target::Other(id)).unwrap();
+                assert_eq!(before.get("transformation"), Some(&want));
+                let raw = game.persist.raw.remove(&id).unwrap();
+                let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
+                assert_eq!(
+                    fresh.get("transformation"),
+                    Some(&want),
+                    "real loaded state survives without raw"
+                );
+                game.persist.raw.insert(id, raw);
+            }
+            assert_eq!(game.world.game_time, clock);
+        });
+    }
+    #[test]
+    #[ignore = "prepared resources; actual native setter, stale raw and no-raw writer"]
+    fn existing_native_item_display_setter_carries_only_transform_state() {
+        use mod_api::NativeTransformation;
+        with_game(|game| {
+            // Same actual server-context setup as existing native machine/contact fixtures.
+            game.options.dedicated = Some(Vec::new());
+            let id = summon(game, 4, None);
+            let uuid = game.persist.uuid_of(id);
+            let clock = game.world.game_time;
+            let update = NativeTransformation {
+                translation: [9.0, 8.0, 7.0],
+                scale: [2.0; 3],
+                ..NativeTransformation::IDENTITY
+            };
+            let display = game.display(game.entity(id).unwrap()).unwrap();
+            assert!(game.display_set_transformation(display, update));
+            assert!(game.display_set_interpolation_duration(display, 13));
+            assert!(game.display_set_teleport_duration(display, 5));
+            assert!(game.display_set_start_interpolation(display, 0));
+            let raw = game.persist.raw.get_mut(&id).unwrap();
+            assert_eq!(raw.get("interpolation_duration"), Some(&Tag::Int(13)));
+            assert_eq!(raw.get("teleport_duration"), Some(&Tag::Int(5)));
+            assert_eq!(raw.get("start_interpolation"), Some(&Tag::Int(0)));
+            let Tag::Compound(c) = raw else {
+                panic!("compound")
+            };
+            c.insert(
+                "transformation".into(),
+                expected([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
+            );
+            assert!(game.display_set_shadow_radius(display, 1.25));
+            let want = expected([9.0, 8.0, 7.0], [0.0, 0.0, 0.0, 1.0], [2.0; 3]);
+            assert_eq!(
+                game.command_target_nbt(Target::Other(id))
+                    .unwrap()
+                    .get("transformation"),
+                Some(&want)
+            );
+            let raw = game.persist.raw.remove(&id).unwrap();
+            let fresh = game.command_target_nbt(Target::Other(id)).unwrap();
+            assert_eq!(fresh.get("transformation"), Some(&want));
+            for key in [
+                "interpolation_duration",
+                "teleport_duration",
+                "start_interpolation",
+            ] {
+                assert!(fresh.get(key).is_none());
+            }
+            game.persist.raw.insert(id, raw);
+            let invalid = NativeTransformation {
+                left_rotation: [0.0; 4],
+                ..update
+            };
+            let before = game.persist.raw.get(&id).unwrap().clone();
+            assert!(!game.display_set_transformation(display, invalid));
+            assert_eq!(game.persist.raw.get(&id), Some(&before));
+            assert_eq!(
+                game.command_target_nbt(Target::Other(id))
+                    .unwrap()
+                    .get("transformation"),
+                Some(&want)
+            );
+            assert_eq!(game.persist.uuid_of(id), uuid);
+            assert_eq!(game.world.game_time, clock);
+        });
+    }
+    #[test]
+    #[ignore = "prepared resources; preservation controls, not Java matrix/invalid admission"]
+    fn unprojected_forms_and_non_item_classes_keep_their_existing_saved_route() {
+        with_game(|game| {
+            for (n, form) in [
+                (5, "[1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]"),
+                (6, "{}"),
+                (7, "\"invalid\""),
+            ] {
+                assert!(game.run_command(&format!("summon item_display 6.5 200 6.5 {{UUID:[I;132,0,0,{n}],transformation:{form},item:{{id:\"minecraft:diamond\",count:1}}}}")));
+                let id = game
+                    .others
+                    .iter()
+                    .find(|o| game.persist.uuid_of(o.id) == Some([132, 0, 0, n]))
+                    .unwrap()
+                    .id;
+                let before = game
+                    .persist
+                    .raw
+                    .get(&id)
+                    .unwrap()
+                    .get("transformation")
+                    .unwrap()
+                    .clone();
+                assert_eq!(
+                    game.command_target_nbt(Target::Other(id))
+                        .unwrap()
+                        .get("transformation"),
+                    Some(&before)
+                );
+                let raw = game.persist.raw.remove(&id).unwrap();
+                assert!(
+                    game.command_target_nbt(Target::Other(id))
+                        .unwrap()
+                        .get("transformation")
+                        .is_none()
+                );
+                game.persist.raw.insert(id, raw);
+            }
+            for (n, kind, extra) in [
+                (8, "marker", ",data:{audit:7}"),
+                (9, "leash_knot", ""),
+                (10, "text_display", ",text:\"control\""),
+            ] {
+                assert!(game.run_command(&format!(
+                    "summon {kind} 10.5 200 10.5 {{UUID:[I;132,0,0,{n}]{extra}}}"
+                )));
+                let id = game
+                    .others
+                    .iter()
+                    .find(|o| game.persist.uuid_of(o.id) == Some([132, 0, 0, n]))
+                    .unwrap()
+                    .id;
+                assert!(
+                    game.command_target_nbt(Target::Other(id))
+                        .unwrap()
+                        .get("transformation")
+                        .is_none()
+                );
+            }
+            assert_eq!(
+                game.mobs
+                    .iter()
+                    .find(|m| game.persist.uuid_of(m.id) == Some([132, 0, 0, 99]))
+                    .unwrap()
+                    .health,
+                10.0
+            );
+        });
     }
 }

@@ -298,6 +298,7 @@ mod durability_tests {
                     sound: false,
                     knockback: false,
                     canceled: false,
+                    dealt: 0.0,
                 },
                 (None, false),
                 HurtSource {

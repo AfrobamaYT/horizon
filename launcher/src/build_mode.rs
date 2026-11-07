@@ -7,6 +7,12 @@ use crate::glass_ui as ui;
 use native_mods::{Profile, Route, Stage};
 use native_status::State;
 
+/// The running or finished native snapshot; serialize readers to avoid racing cache leases.
+pub(super) struct RouteMemo {
+    key: String,
+    result: Option<Result<native_mods::Routes, String>>,
+}
+
 /// What a mod in the list is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ModKind {
@@ -463,21 +469,47 @@ impl Launcher {
             )
     }
 
-    /// Each turned-on native mod's route under the chosen mode, read again when the files or the
-    /// mode change.
-    fn native_routes(&self) -> native_mods::Routes {
+    /// Each turned-on native mod's route; filesystem and release reads never run while drawing.
+    fn native_routes(&self, cx: &mut Context<Self>) -> native_mods::Routes {
         let home = self.mods.home();
-        let profile = Profile::chosen(&self.settings);
-        let key = format!("{}{profile:?}", native_status::fingerprint(&home, None));
+        let plays = self
+            .selected_instance()
+            .and_then(|instance| self.version_of(instance));
+        let base = native_mods::base_for(plays.map(String::as_str), &self.installed, false);
+        let key = format!(
+            "{}{:?}",
+            native_status::fingerprint(&home, base.as_deref()),
+            self.settings.native_mods_allowed_at
+        );
         let mut memo = self.mods.native_routes.borrow_mut();
-        match memo.as_ref() {
-            Some((k, routes)) if *k == key => routes.clone(),
-            _ => {
-                let routes = native_mods::routes(&home, profile);
-                *memo = Some((key, routes.clone()));
-                routes
+        if let Some(previous) = memo.as_ref() {
+            let Some(result) = &previous.result else {
+                return native_mods::Routes::default();
+            };
+            if previous.key == key {
+                return result.as_ref().ok().cloned().unwrap_or_default();
             }
         }
+        *memo = Some(RouteMemo {
+            key: key.clone(),
+            result: None,
+        });
+        drop(memo);
+        let work = cx.background_executor().spawn(async move {
+            native_mods::routes(&home, base.as_deref()).map_err(String::from)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                *this.mods.native_routes.borrow_mut() = Some(RouteMemo {
+                    key,
+                    result: Some(result),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+        native_mods::Routes::default()
     }
 
     /// The chip that says how `mod_id` reaches the game, with its menu when open.
@@ -488,8 +520,12 @@ impl Launcher {
         let state = self.native_state_of(instance);
         let busy = self.native_step.is_some();
         let building = busy && self.native_for.as_deref() == Some(instance.id.as_str());
-        let routes = self.native_routes();
-        let route = routes.iter().find(|(id, _)| id == mod_id).map(|(_, r)| r)?;
+        let routes = self.native_routes(cx);
+        let route = routes
+            .mods
+            .iter()
+            .find(|(id, _)| id == mod_id)
+            .map(|(_, r)| r)?;
         let profile = Profile::chosen(&self.settings);
         let last = self
             .version_of(instance)
@@ -524,6 +560,7 @@ impl Launcher {
             )
         } else {
             match route {
+                Route::Invalid { reason } => ("alert-circle", pal.warn, tr("Needs attention"), reason.clone()),
                 Route::Prebuilt => (
                     "flash",
                     pal.accent,
