@@ -16,6 +16,8 @@ mod players;
 
 #[cfg(test)]
 mod painting_tests;
+#[cfg(test)]
+mod player_tests;
 
 impl Game<'_> {
     /// Publish saved contents only when an authoritative entity owns their lifetime.

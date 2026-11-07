@@ -161,10 +161,7 @@ impl Game<'_> {
         if let mod_api::Holder::Player(uuid) = holder {
             if self.lan_acting_uuid == Some(uuid) {
                 if access == AttachmentAccess::Store
-                    && let Some(conn) = self
-                        .lan
-                        .as_ref()
-                        .and_then(|host| host.hub.holder_guest(uuid, self.dim.id()).map(|g| g.conn))
+                    && let Some(conn) = self.lan_acting
                 {
                     self.bind_player_attachments(conn, true);
                 }
