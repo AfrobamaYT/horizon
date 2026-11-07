@@ -52,6 +52,7 @@ pub mod shortcut;
 pub mod signed;
 pub mod skins;
 pub mod sources;
+pub mod storage;
 pub mod tailscale;
 pub mod themes;
 pub mod uninstall_aside;

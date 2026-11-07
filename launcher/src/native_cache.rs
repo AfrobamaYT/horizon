@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 const PROFILES: [&str; 2] = ["fast", "release"];
 
 #[derive(Debug)]
-pub(crate) enum Error {
+pub enum Error {
     Busy,
     Unsafe(PathBuf),
     Io(io::Error),
@@ -36,7 +36,7 @@ impl Drop for Locked {
     }
 }
 
-fn linked(metadata: &Metadata) -> bool {
+pub(crate) fn linked(metadata: &Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -49,7 +49,7 @@ fn linked(metadata: &Metadata) -> bool {
     }
 }
 
-fn checked(path: &Path, directory: bool) -> Result<Option<Metadata>, Error> {
+pub(crate) fn checked(path: &Path, directory: bool) -> Result<Option<Metadata>, Error> {
     match fs::symlink_metadata(path) {
         Ok(meta)
             if linked(&meta)
