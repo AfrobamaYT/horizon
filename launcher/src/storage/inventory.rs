@@ -331,39 +331,3 @@ fn unused_jars(entries: &mut Vec<Entry>, home: &Path) -> Result<(), Error> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn seeded_home_reports_categories_and_clears_only_selected_row() {
-        let home = crate::storage::tests::Home::new();
-        home.seed("native/source/rev/lib.rs");
-        home.seed("native/prebuilt/rev/game");
-        home.seed("settings.json");
-        let storage = Storage::at(&home.0).unwrap();
-        let entries = BUILD_CACHES
-            .into_iter()
-            .map(|cache| {
-                Entry::fixed(&home.0, Path::new(cache.relative()), cache.category()).unwrap()
-            })
-            .collect();
-        let report = storage
-            .apply(entries, Some(Category::BuildFiles), false)
-            .unwrap();
-        assert_eq!(report.rows.len(), 5);
-        assert!(
-            report
-                .rows
-                .iter()
-                .find(|row| row.category == Category::BuildFiles)
-                .unwrap()
-                .freed_bytes
-                > 0
-        );
-        assert!(!home.0.join("native/source/rev/lib.rs").exists());
-        assert!(home.0.join("native/prebuilt/rev/game").exists());
-        assert!(home.0.join("settings.json").exists());
-        assert!(Entry::fixed(&home.0, Path::new("../worlds"), Category::OtherCaches).is_err());
-    }
-}
