@@ -1132,7 +1132,7 @@ impl Game<'_> {
                 }
             }
         }
-        self.award_recipes(&rewards);
+        self.recipe_unlocked(&rewards);
     }
     /// `AdvancementRewards.grant`: the experience, recipes, loot and function of
     /// a finished advancement, and the recipes it unlocked for the
@@ -1149,6 +1149,10 @@ impl Game<'_> {
             .filter(|r| world_stations!(self).recipe_index.contains(r))
             .cloned()
             .collect();
+        let (_, unlocked) = self
+            .level
+            .recipe_book
+            .add_recipes(&world_stations!(self).recipe_index, &rewards);
         for table in &a.rewards.loot {
             let items = world_items!(self).loot_table(table, false, None, &mut self.world.random);
             for s in items {
@@ -1168,7 +1172,7 @@ impl Game<'_> {
         if let Some(function) = &a.rewards.function {
             self.run_advancement_reward_function(function);
         }
-        rewards
+        unlocked
     }
     /// `InventoryChangeTrigger`, checked when the inventory changes.
     pub(super) fn check_inventory_trigger(&mut self) {
