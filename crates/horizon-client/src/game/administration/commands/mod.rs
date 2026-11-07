@@ -1735,24 +1735,28 @@ impl Game<'_> {
                 }
             }
             Target::Fangs(id) => {
-                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
-                    f.pos = [v.x, v.y, v.z];
-                    if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
-                        f.yaw = yaw;
-                    }
+                if let Some(i) = self.fangs.list.iter().position(|e| e.id == id) {
+                    self.fangs.list.update(i, |f| {
+                        f.pos = [v.x, v.y, v.z];
+                        if let Some([yaw, _]) = rotation.filter(|r| r[0].is_finite()) {
+                            f.yaw = yaw;
+                        }
+                    });
                 }
             }
             Target::Other(id) => {
-                if let Some(o) = self.others.iter_mut().find(|o| o.id == id) {
-                    o.position = v;
-                    if let Some([yaw, pitch]) = rotation {
-                        if yaw.is_finite() {
-                            o.yaw = yaw;
+                if let Some(i) = self.others.iter().position(|e| e.id == id) {
+                    self.others.update(i, |o| {
+                        o.position = v;
+                        if let Some([yaw, pitch]) = rotation {
+                            if yaw.is_finite() {
+                                o.yaw = yaw;
+                            }
+                            if !pitch.is_nan() {
+                                o.pitch = entity_pitch(pitch);
+                            }
                         }
-                        if !pitch.is_nan() {
-                            o.pitch = entity_pitch(pitch);
-                        }
-                    }
+                    });
                 }
             }
             Target::Crystal(id) => {
