@@ -776,6 +776,40 @@ pub(crate) fn offset(source: &str, lines: &[usize], at: proc_macro2::LineColumn)
         .map_or(source.len(), |(i, _)| line + i)
 }
 
+/// The game crate root's no-op the source tree carries; staging gives it the catalog install.
+const INSTALL_STUB: &str = "pub fn install_points_catalog() {}";
+
+/// The head call layout of every raw point's head and return places, in `PointId` terms, and the
+/// installer the staged game runs before the wasm host initializes. Both phases of a point share
+/// the plan its head call names.
+fn install_items(points: &[(usize, Found<'_>)], calls: &Calls) -> proc_macro2::TokenStream {
+    let mut pairs = Vec::new();
+    for (_, found) in points {
+        let Some(Ok(call)) = calls.get(&found.target()) else {
+            continue;
+        };
+        let head = call.head;
+        let name = found.name();
+        for place in [name.clone(), format!("{name}_return")] {
+            let variant = quote::format_ident!("{}", point_shape::camel(&place));
+            pairs.push(quote::quote!((mod_points::PointId::#variant, #head)));
+        }
+    }
+    quote::quote! {
+        /// Each raw place and the head call layout its staged plan is keyed by.
+        pub fn head_calls() -> Vec<(mod_points::PointId, usize)> {
+            vec![#(#pairs),*]
+        }
+        /// Gives the wasm host this catalog, to resolve manifest internals against.
+        pub fn install() {
+            horizon_mod_wasm::install_catalog(horizon_mod_wasm::InternalsCatalog {
+                schema: catalog(),
+                head_calls: head_calls(),
+            });
+        }
+    }
+}
+
 /// The once-per-source readers, planners and decoders, and the pure schema catalog the loader
 /// resolves manifest declarations against, appended to the game crate's root.
 fn emit_runtime_module(
@@ -818,12 +852,14 @@ fn emit_runtime_module(
         let (path, hash) = (&entry.path, &entry.hash);
         fields.push(quote::quote!(mod_points::endpoint_policy::InternalField { path: String::from(#path), kind: String::from("field"), hash: String::from(#hash), receiver: #receiver, field: String::from(#field) }));
     }
+    let install = install_items(points, calls);
     let module = quote::quote! {
         #[doc(hidden)]
         #[allow(dead_code, clippy::all)]
         pub mod __horizon_points {
             #windows
             #patches
+            #install
             /// The exact catalog the generated readers were emitted from.
             pub fn catalog() -> mod_points::endpoint_policy::SchemaCatalog {
                 mod_points::endpoint_policy::SchemaCatalog {
@@ -836,6 +872,14 @@ fn emit_runtime_module(
     };
     let (_, lib) = crate_root(root, "horizon_client")?;
     let mut source = fs::read_to_string(&lib).map_err(|e| format!("{}: {e}", lib.display()))?;
+    if !source.contains(INSTALL_STUB) {
+        return Err(format!("{}: no `{INSTALL_STUB}` to stage", lib.display()));
+    }
+    source = source.replacen(
+        INSTALL_STUB,
+        "pub fn install_points_catalog() { __horizon_points::install() }",
+        1,
+    );
     source.push_str("\n");
     source.push_str(&module.to_string());
     fs::write(&lib, source).map_err(|e| format!("{}: {e}", lib.display()))

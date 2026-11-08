@@ -1370,16 +1370,18 @@ mod internals {
         }
     }
     fn manifest(internals: &[(&str, &str)]) -> Manifest {
+        Manifest::parse(&manifest_text(internals)).unwrap()
+    }
+    fn manifest_text(internals: &[(&str, &str)]) -> String {
         let list: Vec<_> = internals
             .iter()
             .map(|(path, hash)| format!("{{path='{path}',kind='field',hash='{hash}'}}"))
             .collect();
-        Manifest::parse(&format!(
+        format!(
             "id = 'p'\nname = 'P'\nversion = '1.0.0'\napi = '0.2'\ncapabilities = ['registries']\ninternals = [{}]\n[wasm]\nsha512 = '{}'\ntoolchain = 'test'\nbuilt_with = 'test'\n",
             list.join(","),
             "a".repeat(128)
-        ))
-        .unwrap()
+        )
     }
     fn place() -> [mod_points::PointId; 1] {
         [mod_points::RAW_PLACES[POINT].0]
@@ -1457,5 +1459,84 @@ mod internals {
             Err(Listen::Internals(InternalsRefusal::NoCatalog))
         ));
         assert!(install_policy(&manifest(&[]), &module, &place(), None).is_ok());
+    }
+
+    /// A manifest listening at the catalog's raw point, declaring `internals`.
+    fn listening(internals: &[(&str, &str)]) -> Manifest {
+        let (_, target, _) = mod_points::RAW_PLACES[POINT];
+        let text = manifest_text(internals);
+        Manifest::parse(&format!(
+            "{text}\n[[inject]]\nid = 'l'\nat = '''{target}'''\nkind = 'head'\nwith = 'listener'\naccess = 'internals'\nhash = 'x'\n"
+        ))
+        .unwrap()
+    }
+    /// A guest whose subscription list answers: one raw listener at the catalog's point.
+    fn subscribing() -> crate::WasmMod {
+        let mut out = mod_api::wire::Writer::new();
+        let place = mod_points::RAW_PLACES[POINT].0 as u32 | 0x4000_0000;
+        out.put(&vec![(place, String::from("l"))]);
+        let bytes = out.into_bytes();
+        let stores: String = bytes
+            .iter()
+            .enumerate()
+            .map(|(at, byte)| format!("i32.const {} i32.const {byte} i32.store8 ", 1024 + at))
+            .collect();
+        module(&format!(
+            "local.get 0 i32.const -1073741825 i32.eq if (result i64) {stores} i64.const {} else i64.const {} end",
+            (1024u64 << 32) | bytes.len() as u64,
+            512u64 << 32
+        ))
+    }
+    fn load(manifest: Manifest) -> (crate::WasmMod, Result<(), Vec<(String, crate::Refusal)>>) {
+        let module = subscribing();
+        let loaded = crate::Loaded {
+            manifests: vec![manifest],
+            modules: vec![module.clone()],
+            ..Default::default()
+        }
+        .with_catalog(catalog());
+        let result = loaded.initialize(&[]);
+        (module, result)
+    }
+
+    #[test]
+    fn loader_installs_only_the_granted_receiver_fields_for_a_listener() {
+        let (module, result) = load(listening(&[("Game::a", "ha"), ("Game::b", "hb")]));
+        result.unwrap();
+        let plan = module
+            .downgrade()
+            .plan(3)
+            .expect("the listener's point has a plan");
+        assert!(plan.field(0, None, 0) && plan.field(0, None, 1));
+        assert!(
+            !plan.field(0, None, 2),
+            "the undeclared member stays hidden"
+        );
+    }
+
+    #[test]
+    fn loader_refuses_invalid_declarations_with_the_typed_reason() {
+        for (declared, expected) in [
+            (
+                ("Game::nope", "h"),
+                InternalsRefusal::UnknownPath("Game::nope".into()),
+            ),
+            (
+                ("Game::a", "wrong"),
+                InternalsRefusal::HashMismatch("Game::a".into()),
+            ),
+            (
+                ("Game::secret", "hs"),
+                InternalsRefusal::OpaqueReceiverMember("Game::secret".into()),
+            ),
+        ] {
+            let (module, result) = load(listening(&[declared]));
+            let refused = result.unwrap_err();
+            assert!(
+                matches!(&refused[..], [(id, crate::Refusal::Internals(why))] if id == "p" && *why == expected),
+                "{declared:?}: {refused:?}"
+            );
+            assert!(module.downgrade().plan(3).is_none());
+        }
     }
 }
