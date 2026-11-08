@@ -86,7 +86,7 @@ pub(super) fn trait_path(owner: &str) -> String {
 }
 
 /// A method's Rust signature, its arguments named `p0…`.
-fn rust_sig(types: &Types<'_>, method: &Method) -> String {
+pub(super) fn rust_sig(types: &Types<'_>, method: &Method) -> String {
     let mut params = Vec::new();
     match method.receiver {
         Some(true) => params.push("&mut self".to_string()),
@@ -112,7 +112,11 @@ pub(super) fn imports<'m>(methods: &'m [Method]) -> Vec<&'m Method> {
         .collect()
 }
 
-fn has_frame(ty: &Ty) -> bool {
+pub(super) fn held_methods(methods: &[Method]) -> Vec<&Method> {
+    methods.iter().filter(|m| super::held(m.owner)).collect()
+}
+
+pub(super) fn has_frame(ty: &Ty) -> bool {
     match ty {
         Ty::Dyn(..) | Ty::Handler(..) => true,
         Ty::List(t, _)
@@ -174,7 +178,7 @@ fn lend_ret(ty: &Ty, e: &str) -> Option<String> {
 }
 
 /// A plain method: nothing in it needs the call frame.
-fn plain(m: &Method) -> bool {
+pub(super) fn plain(m: &Method) -> bool {
     !m.params
         .iter()
         .any(|p| has_frame(&p.1) || matches!(&p.1, Ty::Ref(_, true)))
@@ -234,7 +238,7 @@ pub(super) fn guest(
 }
 
 /// Whether `ty` names a type that borrows (`CubeFace<'_>`), which has no owned wire form.
-fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
+pub(super) fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
     match ty {
         Ty::Named(d) => types.defs[*d].lifetimes != 0,
         Ty::Ref(t, _)
@@ -251,7 +255,7 @@ fn lifetime_def(types: &Types<'_>, ty: &Ty) -> bool {
 
 /// A borrow inside a list, tuple or `Option` the generated code can't write as one value
 /// (`&[(&str, &str)]`).
-fn has_ref_in_data(ty: &Ty) -> bool {
+pub(super) fn has_ref_in_data(ty: &Ty) -> bool {
     fn inner(ty: &Ty) -> bool {
         match ty {
             Ty::Ref(..) | Ty::Str(Str::Borrowed) | Ty::List(_, List::Slice) => true,
@@ -392,19 +396,19 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
     })
 }
 
-fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
+pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
     held_in(types, ty, false)
 }
 
 /// How a field of a borrowed record is read into one: the expression building it from `local`,
 /// the local's owned type, and whether the mod may change it (so it is sent back).
-struct Lent {
-    owned: String,
-    expr: String,
-    mutable: bool,
+pub(super) struct Lent {
+    pub(super) owned: String,
+    pub(super) expr: String,
+    pub(super) mutable: bool,
 }
 
-fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
+pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
     let (owned, expr, mutable) = match ty {
         Ty::Ref(inner, m) if !matches!(**inner, Ty::Dyn(..)) => (
             held(types, inner)?,
@@ -436,8 +440,66 @@ fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
     })
 }
 
-/// A record that borrows, as the statements reading it into locals, the expression building it
-/// from them, and the statements sending back what a mod may change.
+pub(super) struct Writeback {
+    pub(super) local: String,
+    pub(super) path: String,
+    pub(super) owned: String,
+    pub(super) reference: bool,
+    pub(super) optional: bool,
+    pub(super) by_ref: bool,
+}
+/// Writable leaves in wire order, shared by the guest's reply and host's atomic apply.
+pub(super) fn writeback_fields(
+    types: &Types<'_>,
+    def: usize,
+    name: &str,
+    mutable: bool,
+) -> Option<Vec<Writeback>> {
+    let super::ty::Kind::Record(fields) = &types.defs[def].kind else {
+        return None;
+    };
+    let mut own = Vec::new();
+    let mut refs = Vec::new();
+    for (i, f) in fields.iter().enumerate() {
+        let local = format!("{name}_{i}");
+        if matches!(f.ty, Ty::Dyn(..)) {
+            continue;
+        }
+        let (inner, m) = match &f.ty {
+            Ty::Ref(t, m) => (&**t, *m),
+            ty => (ty, false),
+        };
+        if let Ty::Named(d) = inner
+            && types.defs[*d].lifetimes != 0
+        {
+            for mut leaf in writeback_fields(types, *d, &local, mutable && m)? {
+                leaf.path = leaf.path.replacen(&local, &format!("{name}.{}", f.rust), 1);
+                own.push(leaf);
+            }
+            continue;
+        }
+        let lent = lend(types, &f.ty, &local)?;
+        if mutable && lent.mutable {
+            let by_ref = matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local;
+            let leaf = Writeback {
+                local,
+                path: format!("{name}.{}", f.rust),
+                owned: lent.owned,
+                reference: matches!(f.ty, Ty::Ref(_, true)),
+                optional: matches!(&f.ty,Ty::Option(t) if matches!(**t,Ty::Ref(_,true))),
+                by_ref,
+            };
+            if by_ref {
+                refs.push(leaf);
+            } else {
+                own.push(leaf);
+            }
+        }
+    }
+    own.extend(refs);
+    Some(own)
+}
+
 fn borrowed(
     types: &Types<'_>,
     def: usize,
@@ -448,8 +510,7 @@ fn borrowed(
     let super::ty::Kind::Record(fields) = &d.kind else {
         return None;
     };
-    let (mut read, mut build, mut back_ref, mut back_own) =
-        (String::new(), Vec::new(), String::new(), String::new());
+    let (mut read, mut build, mut back) = (String::new(), Vec::new(), String::new());
     for (i, f) in fields.iter().enumerate() {
         let local = format!("{name}_{i}");
         // A frame object the event carries is the guest's own, never sent.
@@ -482,9 +543,7 @@ fn borrowed(
                     String::new()
                 }
             ));
-            if mutable {
-                back_own.push_str(&send);
-            }
+            let _ = send;
             continue;
         }
         let lent = lend(types, &f.ty, &local)?;
@@ -497,13 +556,14 @@ fn borrowed(
         };
         writeln!(read, "let {m}{local}: {} = input.take()?;", lent.owned).unwrap();
         build.push(format!("{}: {}", f.rust, lent.expr));
-        if mutable && lent.mutable {
-            if matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local {
-                write!(back_ref, "out.put(&{local});").unwrap();
-            } else {
-                write!(back_own, "out.put(&{name}.{});", f.rust).unwrap();
-            }
-        }
+    }
+    for leaf in writeback_fields(types, def, name, mutable)? {
+        write!(
+            back,
+            "out.put(&{});",
+            if leaf.by_ref { leaf.local } else { leaf.path }
+        )
+        .unwrap();
     }
     let m = if mutable { "mut " } else { "" };
     read.push_str(&format!(
@@ -511,7 +571,7 @@ fn borrowed(
         d.rust,
         build.join(", ")
     ));
-    Some((read, format!("{name}"), format!("{back_own}{back_ref}")))
+    Some((read, format!("{name}"), back))
 }
 
 /// The export a mod answers with the hooks it listens to: they cross as names, which stay
@@ -533,7 +593,7 @@ pub(super) fn hook_names(hooks: &[(String, String)]) -> String {
 
 /// Whether an export has what its dispatch arm needs: every argument decodes to an owned value
 /// or is the frame's host, and the answer is owned.
-fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
+pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
     is_subscription(m)
         || !has_frame(&m.ret)
             && !borrowed_ret(&m.ret)

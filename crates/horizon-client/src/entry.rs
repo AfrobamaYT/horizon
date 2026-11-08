@@ -53,13 +53,15 @@ pub fn main_with(
             std::process::exit(game::exit_code::USAGE);
         }
     };
-    // Wasm mods are refused until the shared-memory boundary exists; the Mods page says why.
-    horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
+    let wasm = horizon_mod_wasm::load_installed(&launch.context.game_dir, &launch.context.dev_mods);
+    let mut mods = mods;
+    mods.extend(wasm.mods);
     // One installed dispatch order for both targets; ties retain bundle order.
     let manifests: Vec<_> = native
         .packages()
         .iter()
         .map(|p| &p.manifest)
+        .chain(wasm.manifests.iter())
         .filter(|m| mods.iter().any(|entry| entry.fields().id == m.id))
         .collect();
     assert_eq!(
