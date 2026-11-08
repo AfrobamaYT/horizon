@@ -5577,8 +5577,26 @@ impl Game<'_> {
                 let [x, y, z] = p.pos.pos;
                 self.spawn = (p.pos.dimension == "minecraft:overworld")
                     .then(|| Vec3::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5));
+                // 1.20.2 handleSetSpawn notified ReceivingLevelScreen here; the later
+                // LEVEL_CHUNKS_LOAD_START game event did not exist yet.
+                if let Some(r) = self.remote.as_mut()
+                    && r.session
+                        .server_version()
+                        .at_most(horizon_protocol::adapter::ServerVersion::V1_20_2)
+                {
+                    r.level_load.loading_packets_received();
+                }
             }
-            C::ServerData(p) => self.remote_server_data(p.icon.as_deref()),
+            C::ServerData(p) => {
+                if let Some(r) = self.remote.as_mut()
+                    && let Some(enforced) = r.session.legacy_secure_chat_enforcement()
+                    && r.enforces_secure_chat != enforced
+                {
+                    r.enforces_secure_chat = enforced;
+                    r.chat_validators.clear();
+                }
+                self.remote_server_data(p.icon.as_deref());
+            }
             C::MapItemData(p) => self.remote_map_item_data(&p),
             // handleTickingState / handleTickingStep: the level's TickRateManager.
             C::TickingState(p) => {
@@ -6285,11 +6303,28 @@ impl Game<'_> {
             .iter()
             .position(|p| p.id == id as u32)
         {
-            self.creatures.projectiles.update(i, |p| p.velocity = v);
+            self.creatures.projectiles.update(i, |p| {
+                p.velocity = v;
+                // AbstractArrow.lerpMotion: the stuck timer restarts, and an
+                // arrow the server set moving leaves the block it was stuck in.
+                if let Some(st) = p.arrow.as_mut() {
+                    st.life = 0;
+                    if st.in_ground && v.length_squared() > 0.0 {
+                        st.in_ground = false;
+                        p.stuck = false;
+                    }
+                }
+            });
         } else if let Some(b) = self.dragon_fireballs.iter_mut().find(|b| b.id == id as u32) {
             b.velocity = v;
         } else if let Some(t) = self.tridents.iter_mut().find(|t| t.id == id as u32) {
             t.velocity = v;
+            // AbstractArrow.lerpMotion (ThrownTrident keeps it): `life`
+            // restarts, and a trident set moving leaves its block.
+            t.in_ground_time = 0;
+            if t.in_ground && v.length_squared() > 0.0 {
+                t.in_ground = false;
+            }
         } else if let Some(r) = self.rockets.iter_mut().find(|r| r.id == id as u32) {
             r.velocity = v;
         } else if self.remote_hook_motion(id as u32, v) {
@@ -14602,6 +14637,121 @@ mod tests {
         items::ItemStack,
     };
     use horizon_core::nbt::Tag;
+
+    /// #12040: a server's client moves at the speed the server's attributes give it, never its
+    /// effects' own. Vanilla's server removes a Speed that runs out in ServerPlayer.doTick, after
+    /// the tick's sendDirtyEntityData: ClientboundRemoveMobEffectPacket goes out at once and the
+    /// movement speed without the effect's modifier a tick later, so for that tick the client still
+    /// runs fast (a potion drunk starts the same way). A client a tick off is what GrimAC's
+    /// Simulation flagged.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_servers_client_takes_its_speed_from_the_attributes_not_the_effect() {
+        use crate::game::{Audio, Game, Options, Progress, Settings, load_resources};
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::geometry::Vec3;
+        use horizon_protocol::packets::play::{
+            AttributeModifier, AttributeSnapshot, Clientbound as C, RemoveMobEffect,
+            UpdateAttributes, UpdateMobEffect,
+        };
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::Client,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.init_remote_for_replay().unwrap();
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(0.5, 64.0, 0.5)).unwrap());
+        let me = game.remote.as_ref().unwrap().entity_id;
+        let speed = game.remote_effect_network_id("speed").unwrap();
+        let attribute = {
+            let p = game.player.as_ref().unwrap();
+            let key = p.attributes.key("minecraft:movement_speed").unwrap();
+            key.attribute().registry_id()
+        };
+        // Player.createAttributes: 0.1F.
+        let walking = f64::from(0.1f32);
+        // Speed II: 0.2 (a float) a level, multiplying the total.
+        let amount = f64::from(0.2f32) * 2.0;
+        let attributes = |sped: bool| {
+            C::UpdateAttributes(UpdateAttributes {
+                id: me,
+                values: vec![AttributeSnapshot {
+                    attribute,
+                    base: walking,
+                    modifiers: sped
+                        .then(|| AttributeModifier {
+                            id: "minecraft:effect.speed".into(),
+                            amount,
+                            operation: 2,
+                        })
+                        .into_iter()
+                        .collect(),
+                }],
+            })
+        };
+        // Each step: the packets of one server tick, then a client tick.
+        let mut step = |packets: Vec<C>| {
+            for packet in packets {
+                game.handle_packet(packet).unwrap();
+            }
+            game.tick_client_effects();
+            game.player
+                .as_mut()
+                .unwrap()
+                .attribute("minecraft:movement_speed")
+                .unwrap()
+        };
+        let effect = C::UpdateMobEffect(UpdateMobEffect {
+            id: me,
+            effect: speed,
+            amplifier: 1,
+            duration: 60,
+            flags: 2 | 4,
+        });
+        let fast = walking * (1.0 + amount);
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let seen = [
+            step(vec![effect]),
+            step(vec![attributes(true)]),
+            step(Vec::new()),
+            step(vec![C::RemoveMobEffect(RemoveMobEffect {
+                id: me,
+                effect: speed,
+            })]),
+            step(vec![attributes(false)]),
+        ];
+        let expected = [walking, fast, fast, fast, walking];
+        assert!(
+            seen.iter().zip(expected).all(|(&s, e)| close(s, e)),
+            "speed on each tick: {seen:?}, vanilla's client: {expected:?}"
+        );
+    }
 
     /// `ItemFrame.interact`, `AbstractBoat.interact`, and `Minecart.interact`:
     /// interactions that pass leave the click to the held item without swinging;
