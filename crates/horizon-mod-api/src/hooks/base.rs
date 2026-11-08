@@ -920,7 +920,8 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "EntityLeaveLevelEvent"
+        neoforge = "EntityLeaveLevelEvent",
+        paper = "EntityRemoveFromWorldEvent"
     )]
     fn entity_leave_level();
     /// Block `block`'s block entity has fluid tanks: set `fluids` when the
@@ -2338,7 +2339,6 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "EntityMountEvent",
-        paper = "EntityMountEvent",
         cancellable = true
     )]
     fn entity_mount(
@@ -3118,8 +3118,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "EntitiesLoadEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn entities_load();
     /// Entities in `chunk` left the active server world and were queued for
@@ -3127,8 +3126,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "EntitiesUnloadEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn entities_unload();
     /// A mob broke the door at `pos`.
