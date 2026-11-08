@@ -2,6 +2,9 @@
 use horizon_mod_package::manifest::Package;
 use horizon_mod_wasm::{WasmPackage, load};
 
+/// The game's points registry is process-global and sealed once, so the loading tests take turns.
+static GAME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct Quiet;
 impl mod_api::Host for Quiet {}
 mod_api::impl_host_areas!(Quiet);
@@ -42,6 +45,7 @@ fn dump_members() {
 
 #[test]
 fn real_library_dependency() {
+    let _game = GAME.lock().unwrap_or_else(|e| e.into_inner());
     let (Ok(library), Ok(dependent), Ok(observer), Ok(std)) = (
         std::env::var("HORIZON_WASM_LIBRARY"),
         std::env::var("HORIZON_WASM_DEPENDENT"),
@@ -122,6 +126,7 @@ fn real_library_dependency() {
 
 #[test]
 fn real_member() {
+    let _game = GAME.lock().unwrap_or_else(|e| e.into_inner());
     let (Ok(fixture), Ok(std)) = (
         std::env::var("HORIZON_WASM_FIXTURE"),
         std::env::var("HORIZON_WASM_STD"),
