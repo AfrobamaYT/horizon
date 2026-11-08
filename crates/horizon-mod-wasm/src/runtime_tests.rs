@@ -417,6 +417,24 @@ fn real_members_link_when_built() {
     );
     assert!(subscriptions.contains(&("server_stopped".into(), 37, false)));
     assert!(subscriptions.contains(&("render_gui_pre".into(), -12, true)));
+    // A cancelled event enters the real guest; its receive-cancelled listener clears it.
+    let cancelled: mod_api::RenderGuiPreEvent = Reader::new(&[1]).take().unwrap();
+    assert!(cancelled.cancelled);
+    let pre = crate::boundary::export_id("Hooks", "render_gui_pre").unwrap();
+    let cleared = modules[0]
+        .call(
+            CallClass::Hook,
+            Frame::default(),
+            pre,
+            None,
+            |w| w.put(&cancelled),
+            |r| {
+                assert_eq!(r.take::<mod_api::Flow>()?, mod_api::Flow::Continue);
+                r.take::<mod_api::RenderGuiPreEvent>()
+            },
+        )
+        .expect("real guest cancellation writeback failed");
+    assert!(!cleared.cancelled);
     let event: mod_api::ClientTickPostEvent = Reader::new(&[]).take().unwrap();
     let tick = crate::boundary::export_id("Hooks", "client_tick_post").unwrap();
     assert_eq!(
