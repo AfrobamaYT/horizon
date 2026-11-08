@@ -331,11 +331,6 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self, prepared: PreparedWorldReload) {
-        self.install_world_tables(prepared);
-        self.run_native_advancement_grants();
-    }
-
     /// Publish tables before function admission, leaving advancement rewards queued
     /// until the reload's new function store is available.
     pub(super) fn install_world_tables(&mut self, prepared: PreparedWorldReload) {
