@@ -1169,6 +1169,40 @@ impl Game<'_> {
         let kind = mob.kind.id.clone();
         self.finalize_spawn_lent(&kind, at, reason, spawner, difficulty, Some(mob), group)
     }
+    /// `Mob.getMaxSpawnClusterSize` as the entity parts of the finalized `mob`'s type answer it
+    /// (`EntityPart::spawn_cluster_size`), asked with `mob` lent as it stands before it joins the
+    /// level: the first part in dispatch order to answer wins, and none answering leaves vanilla's
+    /// `vanilla` to the spawner. A type with no part costs one table lookup. Server-side.
+    pub(super) fn spawn_cluster_size(
+        &self,
+        mob: &mut Mob,
+        reason: SpawnReason,
+        spawner: Option<mod_api::NativeSpawner>,
+        vanilla: u32,
+    ) -> Option<u32> {
+        if !mod_api::__private::has_entity_parts() {
+            return None;
+        }
+        let parts = mod_api::__private::entity_parts();
+        let kind = mob.kind.id.clone();
+        let list = parts.entity_parts(&kind);
+        if list.is_empty() {
+            return None;
+        }
+        let at = [mob.position.x, mob.position.y, mob.position.z];
+        self.lend_unspawned(&kind, at, Some(mob), |lent, _| {
+            list.iter().find_map(|attached| {
+                let _guard = mod_api::crash::enter_native_mod(mod_api::crash::NativeModCall {
+                    id: attached.mod_id(),
+                    hook: "spawn_cluster_size",
+                    part: Some(attached.type_name()),
+                });
+                attached
+                    .part()
+                    .spawn_cluster_size(self, lent, reason, spawner, vanilla)
+            })
+        })
+    }
     /// The shared finalization decision for a mob type the game keeps apart
     /// from mobs (the dragon), before the entity joins the level: its lend has
     /// a kind and a position and no mob.
