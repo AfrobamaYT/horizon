@@ -71,10 +71,6 @@ pub(crate) struct Def {
     pub(super) kind: Kind,
     pub(super) append: Option<super::append::Append>,
     pub(super) projection: Option<Vec<Field>>,
-    /// A checked tuple-record constructor used only when the host receives untrusted fields.
-    pub(super) host_constructor: Option<String>,
-    /// A via form applied by the type, preserving its native mutation contract.
-    pub(super) writeback: Option<String>,
     pub(super) view: Option<View>,
 }
 
@@ -107,17 +103,6 @@ pub(crate) enum Kind {
     /// A unit struct.
     Unit,
     Variant(Vec<Case>),
-    /// Crosses as its form, declared on the type with `#[wasm(via = Form)]`.
-    Via(Ty),
-    /// An enum one case of which holds another of it in a box (`ItemPlace::Nested`), or a struct
-    /// with an optional boxed one of it (`LootEntity::vehicle`): it crosses as the list of its
-    /// frames (`frame`: the same cases less that field, or the struct with it left at `None`),
-    /// outermost first, the last one not that case or with no next. `case` is empty for a struct.
-    Chain {
-        frame: Ty,
-        case: String,
-        link: String,
-    },
     /// Crosses as JSON through its own serde derives.
     Json,
     /// It can't cross; why.
@@ -155,9 +140,6 @@ pub(crate) struct Case {
     pub(super) rust: String,
     pub(super) wit: String,
     pub(super) payload: Payload,
-    /// The field of its record holding the next of a chain, left out of the frame
-    /// (`Kind::Chain`).
-    pub(super) link: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -172,17 +154,11 @@ pub(crate) enum Payload {
 pub(crate) struct Types<'a> {
     pub(super) index: Index<'a>,
     pub(super) defs: Vec<Def>,
-    /// Why each def can't cross, if it can't (`wit::refuse`).
-    pub(super) refused: Vec<Option<String>>,
     by_item: HashMap<ItemId, usize>,
     /// Names given to definitions so far, to keep WIT names unique.
     wit_names: HashMap<String, usize>,
     /// The `mod_api` root module, where re-exported names are looked up.
     api_root: usize,
-    /// The forms of the types `mod_api` re-exports with `#[wasm(via = Form)]` on the `pub use`.
-    exported_via: HashMap<ItemId, Type>,
-    /// The same for re-exports of types the index can't read (made by a macro), by name.
-    exported_via_names: HashMap<String, Type>,
     /// Each exported trait with the exported traits its handlers answer as (`super::views`).
     pub(super) views: Vec<(String, Vec<String>)>,
     /// Whether the side being generated is the guest's: only a mod hands a handler over.
@@ -194,35 +170,12 @@ pub(crate) struct Types<'a> {
 impl<'a> Types<'a> {
     pub(super) fn new(mut index: Index<'a>) -> Result<Self, String> {
         let api_root = index.module("mod_api", &[])?;
-        let mut exported_via = HashMap::new();
-        let mut exported_via_names = HashMap::new();
-        let uses: Vec<(String, Type)> = index.modules[api_root]
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Use(item) => Some((use_name(&item.tree)?, via(&item.attrs)?)),
-                _ => None,
-            })
-            .collect();
-        for (name, form) in uses {
-            match index.resolve(api_root, &name) {
-                Ok(Found::Item(id)) => {
-                    exported_via.insert(id, form);
-                }
-                _ => {
-                    exported_via_names.insert(name, form);
-                }
-            }
-        }
         Ok(Self {
             index,
-            exported_via,
-            exported_via_names,
             views: Vec::new(),
             guest: std::cell::Cell::new(false),
             current: None,
             defs: Vec::new(),
-            refused: Vec::new(),
             by_item: HashMap::new(),
             wit_names: HashMap::new(),
             api_root,
@@ -334,25 +287,6 @@ impl<'a> Types<'a> {
             Ok(Found::Item(_)) => None,
         };
         if let Some(std) = external {
-            if let Some(form) = self.exported_via_names.get(&std).cloned() {
-                let wit = std.to_kebab_case();
-                if let Some(&def) = self.wit_names.get(&wit) {
-                    return Ok(Ty::Named(def));
-                }
-                let def = self.push(Def {
-                    projection: None,
-                    append: None,
-                    host_constructor: None,
-                    writeback: None,
-                    view: None,
-                    rust: format!("mod_api::{std}"),
-                    wit,
-                    lifetimes: 0,
-                    kind: Kind::Opaque("recursive".into()),
-                });
-                self.defs[def].kind = Kind::Via(self.ty(self.api_root, &form, &[])?);
-                return Ok(Ty::Named(def));
-            }
             return Ok(match std.as_str() {
                 "String" => Ty::Str(Str::Owned),
                 "Option" => Ty::Option(one(&args)?),
@@ -426,8 +360,6 @@ impl<'a> Types<'a> {
         Ok(self.push(Def {
             projection: None,
             append: None,
-            host_constructor: None,
-            writeback: None,
             view: None,
             rust: rust.into(),
             wit: format!("json-{}", name.to_kebab_case()),
@@ -446,32 +378,6 @@ impl<'a> Types<'a> {
     /// The named item `id`, used with type arguments `args`.
     fn item(&mut self, id: ItemId, name: &str, args: Vec<Ty>) -> Result<Ty, String> {
         let item = self.index.item(id).clone();
-        let form = match self.exported_via.get(&id) {
-            Some(form) => Some((self.api_root, form.clone())),
-            None => via(attrs(&item)).map(|form| (id.module, form)),
-        };
-        if let Some((module, form)) = form {
-            if let Some(&def) = self.by_item.get(&id) {
-                return Ok(Ty::Named(def));
-            }
-            let rust = self.public_path(id, name);
-            let wit = self.unique_wit(id, name);
-            let def = self.push(Def {
-                projection: None,
-                append: None,
-                host_constructor: None,
-                writeback: None,
-                view: None,
-                rust,
-                wit,
-                lifetimes: generics(&item).lifetimes().count(),
-                kind: Kind::Opaque("recursive".into()),
-            });
-            self.by_item.insert(id, def);
-            self.defs[def].kind = Kind::Via(self.ty(module, &form, &[])?);
-            self.defs[def].writeback = conversion_method(attrs(&item), "writeback")?;
-            return Ok(Ty::Named(def));
-        }
         if let Item::Type(alias) = &item {
             let params: Vec<String> = alias
                 .generics
@@ -494,8 +400,6 @@ impl<'a> Types<'a> {
         let def = self.push(Def {
             projection: None,
             append: None,
-            host_constructor: None,
-            writeback: None,
             view: None,
             rust,
             wit: wit.clone(),
@@ -507,13 +411,6 @@ impl<'a> Types<'a> {
         let kind = self.kind(id, &item, name, &wit);
         self.current = outer;
         let kind = kind?;
-        let constructor = conversion_method(attrs(&item), "host_constructor")?;
-        if constructor.is_some() && (lifetimes != 0 || !matches!(kind, Kind::TupleRecord(_))) {
-            return Err(format!(
-                "{name}: host_constructor requires an owned tuple struct"
-            ));
-        }
-        self.defs[def].host_constructor = constructor;
         self.defs[def].kind = kind;
         self.defs[def].append = super::append::detect(self, id, &item)?;
         self.defs[def].projection = self.projection(id, &item)?;
@@ -731,7 +628,6 @@ impl<'a> Types<'a> {
                         rust: v.ident.to_string(),
                         wit: v.ident.to_string().to_kebab_case(),
                         payload,
-                        link: None,
                     })
                 })
                 .collect::<Result<_, String>>()
@@ -743,72 +639,6 @@ impl<'a> Types<'a> {
             Err(_) if serde => Kind::Json,
             Err(why) => Kind::Opaque(why),
         })
-    }
-
-    /// `kind` of def `id`, as a chain when one case's record holds a boxed `id`: that field
-    /// leaves the case, which becomes the frame's (a def of its own).
-    fn chain(&mut self, id: usize, kind: Kind) -> Kind {
-        let own = Ty::Boxed(Box::new(Ty::Named(id)));
-        if let Kind::Record(mut fields) = kind {
-            let next = Ty::Option(Box::new(own));
-            let Some(at) = fields.iter().position(|f| f.ty == next) else {
-                return Kind::Record(fields);
-            };
-            // The frame keeps the field, as a unit that doesn't cross and lifts as `None`.
-            fields[at].ty = Ty::Unit;
-            let link = fields[at].rust.clone();
-            let def = &self.defs[id];
-            let frame = Def {
-                projection: None,
-                append: None,
-                host_constructor: None,
-                writeback: None,
-                view: None,
-                rust: def.rust.clone(),
-                wit: format!("{}-frame", def.wit),
-                lifetimes: def.lifetimes,
-                kind: Kind::Record(fields),
-            };
-            let frame = self.push(frame);
-            return Kind::Chain {
-                frame: Ty::Named(frame),
-                case: String::new(),
-                link,
-            };
-        }
-        let Kind::Variant(mut cases) = kind else {
-            return kind;
-        };
-        let linked = cases.iter_mut().find_map(|case| match &mut case.payload {
-            Payload::Record(_, fields) => {
-                let at = fields.iter().position(|f| f.ty == own)?;
-                let link = fields.remove(at).rust;
-                case.link = Some(link.clone());
-                Some((case.rust.clone(), link))
-            }
-            _ => None,
-        });
-        let Some((case, link)) = linked else {
-            return Kind::Variant(cases);
-        };
-        let def = &self.defs[id];
-        let frame = Def {
-            projection: None,
-            append: None,
-            host_constructor: None,
-            writeback: None,
-            view: None,
-            rust: def.rust.clone(),
-            wit: format!("{}-frame", def.wit),
-            lifetimes: def.lifetimes,
-            kind: Kind::Variant(cases),
-        };
-        let frame = self.push(frame);
-        Kind::Chain {
-            frame: Ty::Named(frame),
-            case,
-            link,
-        }
     }
 
     fn fields<'f>(
@@ -947,76 +777,6 @@ impl Types<'_> {
     /// field is guarded by its type's constructor, which a decoder must go through.
     fn reachable(&self, _id: ItemId, vis: &syn::Visibility) -> bool {
         matches!(vis, syn::Visibility::Public(_))
-    }
-}
-
-/// An item's attributes.
-fn attrs(item: &Item) -> &[syn::Attribute] {
-    match item {
-        Item::Struct(item) => &item.attrs,
-        Item::Enum(item) => &item.attrs,
-        Item::Type(item) => &item.attrs,
-        _ => &[],
-    }
-}
-
-/// The form `#[wasm(via = Form)]` names.
-fn via(attrs: &[syn::Attribute]) -> Option<Type> {
-    attrs.iter().find_map(|attr| {
-        if attr.path().segments.last()?.ident != "wasm" {
-            return None;
-        }
-        let mut form = None;
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("via") {
-                form = Some(meta.value()?.parse::<Type>()?);
-            } else if meta.path.is_ident("writeback") {
-                let _ = meta.value()?.parse::<syn::Ident>()?;
-            }
-            Ok(())
-        })
-        .ok()?;
-        form
-    })
-}
-
-/// The checked constructor declared on an owned tuple struct.
-fn conversion_method(attrs: &[syn::Attribute], name: &str) -> Result<Option<String>, String> {
-    let mut constructor = None;
-    for attr in attrs {
-        if !attr
-            .path()
-            .segments
-            .last()
-            .is_some_and(|part| part.ident == "wasm")
-        {
-            continue;
-        }
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("host_constructor") || meta.path.is_ident("writeback") {
-                let method = meta.value()?.parse::<syn::Ident>()?.to_string();
-                if meta.path.is_ident(name) {
-                    constructor = Some(method);
-                }
-            } else if meta.path.is_ident("via") {
-                let _ = meta.value()?.parse::<Type>()?;
-            } else {
-                return Err(meta.error("expected via, writeback or host_constructor"));
-            }
-            Ok(())
-        })
-        .map_err(|error| error.to_string())?;
-    }
-    Ok(constructor)
-}
-
-/// The name a `use` tree of one path brings in.
-fn use_name(tree: &syn::UseTree) -> Option<String> {
-    match tree {
-        syn::UseTree::Path(path) => use_name(&path.tree),
-        syn::UseTree::Name(name) => Some(name.ident.to_string()),
-        syn::UseTree::Rename(rename) => Some(rename.rename.to_string()),
-        _ => None,
     }
 }
 

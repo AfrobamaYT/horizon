@@ -186,7 +186,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
             Kind::Variant(cases) => variants(types, &def.rust, cases),
             Kind::Unit => Some(unit(&def.rust)),
             Kind::Json => Some(json(&def.rust)),
-            Kind::Chain { .. } | Kind::Via(_) | Kind::Opaque(_) => None,
+            Kind::Opaque(_) => None,
         };
         match body {
             Some(code) => out.push_str(&code),

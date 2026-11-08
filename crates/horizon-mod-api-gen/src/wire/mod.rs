@@ -1,6 +1,6 @@
 //! The WebAssembly interface of the mod API: every method of the traits a mod calls (the hosts,
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
-//! capability handlers), as one WIT world and the glue on both sides of it.
+//! capability handlers), through one shared-memory boundary and the glue on both sides of it.
 mod append;
 mod calls;
 mod emit;
