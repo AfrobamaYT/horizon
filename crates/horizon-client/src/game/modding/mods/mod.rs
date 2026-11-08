@@ -237,6 +237,20 @@ pub(super) fn register_standalone_models(role: ExecutionRole) {
     if let Some(names) = collect_standalone_models(role) {
         horizon_client::models::register_standalone(names);
     }
+    if let Some(models) = collect_fluid_models(role) {
+        horizon_client::fluid_models::register(models);
+    }
+}
+
+fn collect_fluid_models(
+    role: ExecutionRole,
+) -> Option<Vec<horizon_mod_package::content::FluidModel>> {
+    if !role.is_client() {
+        return None;
+    }
+    let mut models = Vec::new();
+    Game::native_register_fluid_models(&RegistrationContext::new(), &mut models);
+    Some(models)
 }
 
 fn collect_standalone_models(role: ExecutionRole) -> Option<Vec<String>> {
@@ -1365,6 +1379,48 @@ mod tests {
         assert_eq!(
             (loaded.kind.id.as_str(), loaded.species()),
             ("ruby:merchant", Species::WanderingTrader)
+        );
+    }
+
+    #[test]
+    fn fluid_models_collect_only_on_the_client() {
+        use horizon_mod_package::content::FluidModel;
+        use mod_api::{Hooks, ModEntry, RegisterFluidModelsEvent, testing::with_mods};
+        #[derive(Default)]
+        struct Models;
+        #[mod_api::horizon_mod]
+        impl Hooks for Models {
+            fn register_fluid_models(
+                &self,
+                _: &RegistrationContext,
+                event: &mut RegisterFluidModelsEvent<'_>,
+            ) {
+                event.models.push(FluidModel {
+                    fluid: "registration_test:oil".into(),
+                    flowing: Some("registration_test:block/oil_flow".into()),
+                    ..FluidModel::default()
+                });
+            }
+        }
+        with_mods(
+            vec![ModEntry::new("registration_test", Box::new(Models))].into(),
+            || {
+                mod_api::__private::with_test_packages(&["registration_test"], || {
+                    for server in [
+                        ExecutionRole::IntegratedServer,
+                        ExecutionRole::DedicatedServer,
+                    ] {
+                        assert_eq!(collect_fluid_models(server), None);
+                    }
+                    let models = collect_fluid_models(ExecutionRole::Client).unwrap();
+                    assert_eq!(models.len(), 1);
+                    assert_eq!(models[0].fluid, "registration_test:oil");
+                    assert_eq!(
+                        models[0].flowing.as_deref(),
+                        Some("registration_test:block/oil_flow")
+                    );
+                });
+            },
         );
     }
 

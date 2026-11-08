@@ -669,9 +669,20 @@ pub struct MeshTables {
     water_overlay: u16,
     lava_still: u16,
     lava_flow: u16,
+    /// Each mod fluid's sprites, in registration order; none draws it as water.
+    mod_fluids: Vec<Option<ModFluidLayers>>,
     animated_layers: Vec<bool>,
     /// The layers of the states mods colour (`register_block_tint_sources`).
     mod_tints: mod_tint::ModTints,
+}
+/// What a mod's fluid draws with ([`crate::fluid_models`]).
+#[derive(Clone, Copy)]
+struct ModFluidLayers {
+    still: u16,
+    flow: u16,
+    overlay: Option<u16>,
+    /// `0xRRGGBB`, or none for the biome's water colour.
+    tint: Option<u32>,
 }
 fn redstone_color(power: u8) -> u32 {
     // RedstoneWireBlock.COLORS
@@ -752,6 +763,22 @@ impl MeshTables {
                 .map(|&l| l as u16)
                 .ok_or_else(|| format!("missing fluid sprite {name}").into())
         };
+        let fluid_models = crate::fluid_models::resolved();
+        let mod_fluids = horizon_world::fluid::mod_fluids()
+            .into_iter()
+            .map(|(_, fluid)| {
+                let model = fluid_models.iter().find(|model| model.fluid == fluid.id)?;
+                Some(ModFluidLayers {
+                    still: layer(&model.still).ok()?,
+                    flow: layer(&model.flowing).ok()?,
+                    overlay: model.overlay.as_deref().and_then(|name| layer(name).ok()),
+                    tint: match model.tint {
+                        crate::fluid_models::FluidTint::Biome => None,
+                        crate::fluid_models::FluidTint::Fixed(tint) => Some(tint),
+                    },
+                })
+            })
+            .collect();
         let max_animated = render.animations.iter().map(|a| a.layer).max().unwrap_or(0);
         let mut animated_layers = vec![false; max_animated as usize + 1];
         for animation in &render.animations {
@@ -891,6 +918,7 @@ impl MeshTables {
             water_overlay: layer("minecraft:block/water_overlay")?,
             lava_still: layer("minecraft:block/lava_still")?,
             lava_flow: layer("minecraft:block/lava_flow")?,
+            mod_fluids,
             animated_layers,
             mod_tints: mod_tint::ModTints::default(),
         };

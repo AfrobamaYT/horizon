@@ -94,6 +94,7 @@ mod generated {
         pub mod content {
             pub struct Block;
             pub struct Item;
+            pub struct FluidModel;
         }
     }
     pub(super) mod mod_api {

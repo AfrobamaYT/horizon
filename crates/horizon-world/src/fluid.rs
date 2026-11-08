@@ -124,6 +124,10 @@ pub fn mod_fluid_of_bucket(bucket: &str) -> Option<ModFluid> {
 }
 
 impl ModFluid {
+    /// Its place in [`mod_fluids`], for a table built from that list.
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
     /// What was registered for this fluid.
     pub fn get(self) -> &'static ModFluidType {
         mod_fluid_table()[usize::from(self.0)]
