@@ -178,6 +178,45 @@ fn put(ty: &Ty, expr: &str) -> String {
     }
 }
 
+fn event_input(
+    types: &super::ty::Types<'_>,
+    def: usize,
+    expr: &str,
+    setup: &mut String,
+    put: &mut String,
+) {
+    let Kind::Record(fields) = &types.defs[def].kind else {
+        return;
+    };
+    for f in fields {
+        let path = format!("{expr}.{}", f.rust);
+        match &f.ty {
+            Ty::Dyn(name, m) => {
+                write!(
+                    setup,
+                    "frame.set_{}{}(&{}*{path});",
+                    snake(name),
+                    if *m { "_mut" } else { "" },
+                    if *m { "mut " } else { "" }
+                )
+                .unwrap();
+            }
+            ty => {
+                let inner = match ty {
+                    Ty::Ref(t, _) => &**t,
+                    t => t,
+                };
+                if let Ty::Named(d) = inner
+                    && types.defs[*d].lifetimes != 0
+                {
+                    event_input(types, *d, &path, setup, put);
+                } else {
+                    put.push_str(&self::put(ty, &path));
+                }
+            }
+        }
+    }
+}
 fn fallback(types: &super::ty::Types<'_>, m: &Method) -> &'static str {
     match &m.ret {
         Ty::Result(ok, _) if **ok == Ty::Unit => "Ok(())",
@@ -380,25 +419,24 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                             let Kind::Record(fields) = &types.defs[*d].kind else {
                                 unreachable!()
                             };
-                            for f in fields {
-                                put.push_str(&self::put(&f.ty, &format!("p{i}.{}", f.rust)));
-                            }
-                            for (j, lent, _) in
+                            event_input(types, *d, &format!("p{i}"), &mut setup, &mut put);
+                            for leaf in
                                 writeback_fields(types, *d, &format!("p{i}"), *mutable).unwrap()
                             {
-                                let f = &fields[j];
-                                write!(take, "let b{i}_{j}: {} = r.take()?;", lent.owned).unwrap();
-                                write!(
-                                    apply,
-                                    "{}p{i}.{} = b{i}_{j};",
-                                    if matches!(f.ty, Ty::Ref(_, true)) {
-                                        "*"
-                                    } else {
-                                        ""
-                                    },
-                                    f.rust
-                                )
-                                .unwrap();
+                                let local = format!("b_{}", leaf.local);
+                                write!(take, "let {local}: {} = r.take()?;", leaf.owned).unwrap();
+                                let path = leaf.path;
+                                if leaf.optional {
+                                    write!(take,"if {path}.is_some() != {local}.is_some() {{ return Err(WireError::Tag(u32::MAX)); }}").unwrap();
+                                    write!(apply,"if let (Some(target),Some(value)) = ({path}.as_deref_mut(),{local}) {{ *target=value; }}").unwrap();
+                                } else {
+                                    write!(
+                                        apply,
+                                        "{}{path} = {local};",
+                                        if leaf.reference { "*" } else { "" }
+                                    )
+                                    .unwrap();
+                                }
                             }
                         }
                         _ => {
