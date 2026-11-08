@@ -97,7 +97,7 @@ fn inherited_exclusion_exact_handles_arguments_and_failure_release() {
         unrelated.is_ok(),
         "HANDLE_LIST inherited an unselected file object"
     );
-    let registry = Registry::at(&data).unwrap();
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     assert!(matches!(
         registry.lock(&trees[0], LockMode::Exclusive),
         Err(Error::Busy)
@@ -112,7 +112,7 @@ fn inherited_exclusion_exact_handles_arguments_and_failure_release() {
         .is_err());
     std::fs::write(&stop, b"stop").unwrap();
     assert_eq!(child.wait().unwrap().code(), Some(37));
-    let registry = Registry::at(&data).unwrap();
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     assert!(registry.lock(&trees[0], LockMode::Exclusive).is_ok());
     drop(registry);
     assert!(File::options()
@@ -145,7 +145,7 @@ fn inherited_exclusion_exact_handles_arguments_and_failure_release() {
             .expect("invalid FFI input launched a child");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
-    let registry = Registry::at(&data).unwrap();
+    let registry = Registry::with_release(&data, Release::Unlock).unwrap();
     assert!(registry.lock(&trees[0], LockMode::Exclusive).is_ok());
     drop(registry);
     assert!(File::options()
