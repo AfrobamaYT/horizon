@@ -142,14 +142,29 @@ pub(super) fn detect(
                 return Ok(None);
             }
             for (argument, expected) in value.args.iter().zip(payload) {
-                let Expr::Path(argument) = argument else {
-                    return Ok(None);
+                // Owning a borrowed string preserves its value exactly; no other
+                // transformation is admitted by the append-only proof.
+                let (argument, owned_string) = match argument {
+                    Expr::Path(path) => (path, false),
+                    Expr::MethodCall(call) if call.method == "to_owned" && call.args.is_empty() => {
+                        let Expr::Path(path) = &*call.receiver else {
+                            return Ok(None);
+                        };
+                        (path, true)
+                    }
+                    _ => return Ok(None),
                 };
                 let Some(parameter)=method.sig.inputs.iter().find_map(|p|match p {
                     syn::FnArg::Typed(p) if matches!(&*p.pat,syn::Pat::Ident(i) if argument.path.is_ident(&i.ident))=>Some(p),
                     _=>None,
                 }) else {return Ok(None)};
-                if types.ty(module, &parameter.ty, &[])? != *expected {
+                let actual = types.ty(module, &parameter.ty, &[])?;
+                if if owned_string {
+                    actual != Ty::Str(super::ty::Str::Borrowed)
+                        || *expected != Ty::Str(super::ty::Str::Owned)
+                } else {
+                    actual != *expected
+                } {
                     return Ok(None);
                 }
             }

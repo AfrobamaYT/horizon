@@ -195,7 +195,7 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
             event: &mut mod_api::ApplyEffectTickEvent<'_>,
         ) {
             event.heal(2.5);
-            event.hurt(mod_api::NativeEffectDamage::Wither, 3.);
+            event.hurt("minecraft:wither", 3.);
             event.eat(2, 0.25);
             event.add_exhaustion(0.5);
             event.keep = false;
@@ -625,7 +625,7 @@ fn wire_loopback_readonly_private_projection() {
 }
 #[test]
 fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
-    use mod_api::{EffectTickChange, NativeEffectDamage};
+    use mod_api::EffectTickChange;
     struct World;
     impl mod_api::Host for World {}
     mod_api::impl_host_areas!(World);
@@ -674,7 +674,7 @@ fn wire_loopback_checked_append_is_atomic_and_bit_exact() {
                     &changes[1..],
                     &[
                         EffectTickChange::Heal(2.5),
-                        EffectTickChange::Hurt(NativeEffectDamage::Wither, 3.),
+                        EffectTickChange::Hurt("minecraft:wither".into(), 3.),
                         EffectTickChange::Eat(2, 0.25),
                         EffectTickChange::AddExhaustion(0.5)
                     ]
