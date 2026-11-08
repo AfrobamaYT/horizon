@@ -296,6 +296,7 @@ fn host_reply(mut caller: Caller<'_, State>, ptr: u32) -> wasmtime::Result<()> {
 }
 
 impl WasmMod {
+    pub(crate) fn disable(&self) { self.running.poisoned.store(true, Ordering::Relaxed); }
     pub(crate) fn instantiate(
         engine: &Engine,
         members: &[Member<'_>],
@@ -341,6 +342,10 @@ impl WasmMod {
                     built: layout,
                     game: mod_api::wire::LAYOUT,
                 });
+            }
+            if instance.get_func(&mut group.store, "horizon_layout_ext").is_some() {
+                let built = instance.get_typed_func::<(), u64>(&mut group.store, "horizon_layout_ext").map_err(load)?.call(&mut group.store, ()).map_err(load)?;
+                if built != mod_points::POINT_LAYOUT { return Err(Refusal::PointLayout { built, game: mod_points::POINT_LAYOUT }); }
             }
             let input = instance
                 .get_typed_func(&mut group.store, "horizon_in")
