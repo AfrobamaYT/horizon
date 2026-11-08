@@ -940,6 +940,7 @@ impl Game<'_> {
         paths.retain(|p| !self.mods.dev.contains(p));
         paths.extend(self.mods.dev.iter().cloned());
         let (mut content_ids, mut live_ids) = Default::default();
+        let mut info = std::collections::BTreeMap::new();
         self.settings.mods.installed = paths
             .iter()
             .map(|path| {
@@ -962,6 +963,10 @@ impl Game<'_> {
                     .iter()
                     .find(|(id, _)| *id == m.id);
                 live_switch_of(path, &package, &mut content_ids, &mut live_ids);
+                info.insert(
+                    m.id.clone(),
+                    mod_list::ModInfo::of(m, package.icon.as_ref()),
+                );
                 Installed {
                     id: m.id.clone(),
                     title: format!("{} {}", m.name, m.version),
@@ -972,8 +977,8 @@ impl Game<'_> {
                 }
             })
             .collect();
+        self.settings.mods.info = info;
         (self.mods.content_ids, self.mods.live_ids) = (content_ids, live_ids);
-        self.ui.options.mods_live = self.mods_live_now();
         if self.mods.applied.is_none() {
             self.mods.applied = Some(self.settings.mods.enabled.clone());
         }
@@ -990,15 +995,6 @@ impl Game<'_> {
         let unbuilt = not_built(&native_dir, built, &self.settings.mods.installed);
         self.settings.mods.installed.extend(unbuilt);
         self.mods.report_refusals(&mut self.settings.mods.installed);
-    }
-    /// The content mods the Mods page lets the player switch with a world
-    /// open: in single player and on an open LAN world, those with only
-    /// assets and data; none on another server, which owns its data.
-    pub(super) fn mods_live_now(&self) -> std::collections::BTreeSet<String> {
-        match self.integrated.is_some() || self.remote.is_none() {
-            true => self.mods.live_ids.clone(),
-            false => Default::default(),
-        }
     }
     /// The content mods the resources load with: the ones applied, which a
     /// switch that needs a restart doesn't change.

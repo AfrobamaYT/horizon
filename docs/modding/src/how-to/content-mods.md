@@ -42,11 +42,21 @@ name = "My mod"
 version = "0.1.0"
 description = "..."
 authors = ["..."]
+license = "MIT"              # optional: the Mods screen shows it
+license_url = "https://..."  # optional: makes the license a link
+credits = "..."              # optional: thanks, shown under the authors
+homepage = "https://..."     # optional: the Mods screen's Homepage button
+issues = "https://..."       # optional: the Mods screen's Issues button
 api = "0.2"                  # content mods
 side = "both"
 capabilities = ["registries"]
 namespaces = []              # optional: more namespaces the mod's files use (below)
 ```
+
+The optional fields fill the game's Mods screen, which lists every mod with its icon, name, version, id, license,
+authors, credits and description, as NeoForge's mod list does. A link must be `http` or `https` and at most 2048
+characters; the others are plain text. The screen has no switch: a mod runs or not by what the launcher and
+`horizon-mods.txt` say.
 
 Unknown keys are refused, so a typo is an error, not a silently ignored permission. The shared manifest
 uses exactly `api = "0.2"` and `capabilities = ["registries"]`, with `side = "client"` (the default) or `"both"`.
