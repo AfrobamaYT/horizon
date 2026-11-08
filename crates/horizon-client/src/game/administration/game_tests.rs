@@ -543,7 +543,10 @@ fn summary_coordinates(key: &str, at: [i32; 3], dim: Dim, rotation: [i32; 2], co
             rotation[0],
             rotation[1]
         ))),
-        hover: Some(Box::new(Text::translate("chat.coordinates.tooltip", &[]))),
+        hover: Some(std::sync::Arc::new(Text::translate(
+            "chat.coordinates.tooltip",
+            &[],
+        ))),
         ..Style::color(color)
     })
 }
