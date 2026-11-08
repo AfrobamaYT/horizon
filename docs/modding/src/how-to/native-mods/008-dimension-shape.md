@@ -82,28 +82,30 @@ generator is code, and `register_chunk_generator` is native only.
 
 ### Sending a player to a dimension
 
-There is no portal to a registered level, and no travel call: a mod sends a player there with the
-command vanilla has for it, from a server hook.
+There is no portal to a registered level. A mod sends an entity there with
+`entity.teleport_to_level(host, dimension, pos, rotation)` from a server hook, the call vanilla has
+as `Entity.teleportTo(ServerLevel, ..)`. It works for a player, a mob, a boat and a minecart (a
+vehicle takes its passengers along).
 
 ```rust,ignore
 fn run_mod_command(&self, host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
     let CommandSource::Player { player, .. } = event.source else {
         return Flow::Continue;
     };
-    let Some(name) = player.name(&*host) else {
-        return Flow::Continue;
-    };
-    let line = format!("execute in mymod:pocket run tp {name} 8 100 8");
-    host.commands().run_command(&line);
+    let entity = player.entity();
+    entity.teleport_to_level(host, "mymod:pocket", [8.5, 100.0, 8.5], None);
     Flow::Cancel
 }
 ```
 
-The teleport happens at the next tick's start, and the level opens then if it isn't open. Name the
-player, as the line runs as the console. `run_command` answers whether the command
-ran, not whether the player arrived: a level that won't open, such as one naming a generator
-nobody registered, logs an error and leaves the player where they were. Nothing builds a platform
-at the destination, so look for the ground first, or place one.
+`pos` is in the destination's own coordinates: nothing scales it by the level's
+`coordinate_scale`. A level nobody has entered opens first, and a player arrives after the current
+tick, when `player_teleported` and `player_changed_dimension` report the move. The call
+answers whether the move was taken, not whether the player arrived: a level that won't open, such
+as one naming a generator nobody registered, logs an error and leaves the player where they were.
+It is false for an unregistered dimension and for an entity that cannot change level (an item, an
+orb, a projectile); a fake player stays where it is. Nothing builds a platform at the destination, so look for the
+ground first, or place one.
 
 ### Chunk generators
 
