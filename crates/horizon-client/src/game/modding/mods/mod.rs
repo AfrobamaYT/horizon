@@ -1392,6 +1392,29 @@ pub(super) fn living_mod_types()
         .collect()
 }
 
+/// Registered callbacks indexed directly by the slots resolved in enchantment content.
+pub(in crate::game) static ENCHANTMENT_DAMAGE_EFFECTS: std::sync::OnceLock<
+    Vec<std::sync::Arc<dyn mod_api::EnchantmentDamageEffect>>,
+> = std::sync::OnceLock::new();
+
+pub(super) fn register_enchantment_damage_effects() {
+    let mut effects = mod_api::EnchantmentDamageRegistry::default();
+    Game::native_register_enchantment_damage_effects(
+        &mod_api::RegistrationContext::new(),
+        &mut effects,
+    );
+    let (ids, callbacks): (Vec<_>, Vec<_>) = effects
+        .into_entries()
+        .into_iter()
+        .map(|(id, effect)| (id.to_string(), effect))
+        .unzip();
+    horizon_items::enchant::register_damage_effects(ids);
+    assert!(
+        ENCHANTMENT_DAMAGE_EFFECTS.set(callbacks).is_ok(),
+        "damage effects already registered"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11339,6 +11339,7 @@ impl Game<'_> {
         &mut self,
         target_kind: &str,
         living: bool,
+        victim: Option<u32>,
     ) -> (f32, f32, bool, bool) {
         if self.legacy_rules() {
             return self.legacy_melee_damage(target_kind, living);
@@ -11350,7 +11351,7 @@ impl Game<'_> {
         let scale = self.attack_strength_scale();
         // getEnchantedDamage(target, damage, source) - damage, taken before the
         // attack strength scales the base damage.
-        let enchant_bonus = self.enchanted_damage(target_kind, damage) - damage;
+        let enchant_bonus = self.enchanted_damage(target_kind, damage, victim) - damage;
         let mut amount = damage * (0.2 + scale * scale * 0.8);
         // Player.attack decides the critical hit only for a hit with base or
         // enchantment damage: checked before the mace's smash bonus is added.
@@ -11414,7 +11415,8 @@ impl Game<'_> {
         let attack = self.attack_of(self.player.as_ref().map_or(0, |p| p.entity_id));
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
-        let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
+        let (amount, scale, crit, magic) =
+            self.melee_damage(&target_kind, true, Some(self.mobs[index].id));
         let sweep = self.sweep_attack_position(scale, crit, &target_kind);
         let (knockback, knockback_attack) = self.extra_knockback(&target_kind, scale);
         self.attack_ticks = 0;
@@ -17649,6 +17651,7 @@ pub fn run_with(
     mods::register_range_select_item_model_properties(options.execution_role);
     mods::register_select_item_model_properties(options.execution_role);
     mods::register_item_tint_sources(options.execution_role);
+    mods::register_enchantment_damage_effects();
     mods::register_dimension_transition_screens(options.execution_role);
     mods::register_block_tint_sources(options.execution_role);
     mods::register_particle_providers(options.execution_role);

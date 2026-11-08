@@ -750,6 +750,24 @@ pub trait LevelsBackendMut {
     #[access(WorldOnly)]
     fn level_game_event(&mut self, level: LevelRef, event: &str, at: [f64; 3]) -> bool;
     /// Side: server.
+    /// Queues block event `a`, `b` for `block` at `pos`, as `ServerLevel.blockEvent(pos, block,
+    /// a, b)` does: after this tick's scheduled ticks the level runs the block's
+    /// `triggerEvent` with them (a powered piston's 0 extends it, a note block's plays its
+    /// note, a bell's 1 rings it) if `pos` still holds `block`, and a handled event reaches the
+    /// players' copy of the block. The same event queued twice runs once; one in a chunk
+    /// that isn't ticking waits for it. True means queued, not handled. False for a block
+    /// key no block has, a position outside the level's build height, a parked level, a stale
+    /// handle or a client.
+    #[access(WorldOnly)]
+    fn level_block_event(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        block: BlockKey,
+        a: i32,
+        b: i32,
+    ) -> bool;
+    /// Side: server.
     /// Explodes at `center` with no source entity, as `Level.explode(null,
     /// x, y, z, radius, fire, interaction)` does (`native_explode`): `fire`
     /// lights some of the air around, `interaction` says what happens to

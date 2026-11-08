@@ -142,6 +142,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::local_player` | crosses | Wire call |
 | `ClientHost::open_chat` | crosses | Wire call |
 | `ClientHost::net_send_to_server` | crosses | Wire call |
+| `ClientHost::chat_line` | crosses | Wire call |
 | `ClientHost::send_chat` | crosses | Wire call |
 | `ClientHost::send_packet` | crosses | Wire call |
 | `ClientHost::push_player` | crosses | Wire call |
@@ -664,6 +665,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::level_send_particles` | crosses | Wire call |
 | `BackendMut::level_level_event` | crosses | Wire call |
 | `BackendMut::level_game_event` | crosses | Wire call |
+| `BackendMut::level_block_event` | crosses | Wire call |
 | `BackendMut::level_explode` | crosses | Wire call |
 | `BackendMut::level_strike_lightning` | crosses | Wire call |
 | `BackendMut::level_pop_resource` | crosses | Wire call |
@@ -1015,6 +1017,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `PackFinders::add_pack_finders` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
 | `ParticleProviders::register` | crosses | Wire call |
+| `EnchantmentDamageEffects::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
 | `BlockAndTintGetter::fluid_state` | crosses | Wire call |
 | `BlockAndTintGetter::brightness` | crosses | Wire call |
@@ -1530,6 +1533,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::register_debug_entries` | crosses | Wire call |
 | `Hooks::register_debug_renderers` | crosses | Wire call |
 | `Hooks::register_dimension_transition_screen` | crosses | Wire call |
+| `Hooks::register_enchantment_damage_effects` | crosses | Wire call |
 | `Hooks::register_fluid_models` | crosses | Wire call |
 | `Hooks::register_game_tests` | crosses | Wire call |
 | `Hooks::register_gui_layers` | crosses | Wire call |
@@ -1677,6 +1681,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
 | `BlockTintSource::relevant_properties` | crosses | Wire call |
 | `ParticleProvider::tick` | crosses | Wire call |
+| `EnchantmentDamageEffect::apply` | crosses | Wire call |
 | `GroundStateProvider::state_at` | crosses | Wire call |
 | `PlaceProvider::stack` | crosses | Wire call |
 | `PlaceProvider::insert` | crosses | Wire call |
