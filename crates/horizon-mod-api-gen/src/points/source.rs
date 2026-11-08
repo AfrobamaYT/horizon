@@ -243,7 +243,10 @@ fn private_rows_do_not_become_listed_and_handwritten_points_stay_refused() {
     fs::create_dir_all(root.join("crates/horizon-mod-api-gen/slots")).unwrap();
     put("crates/horizon-mod-api-gen/internals.txt", "");
     put("crates/horizon-client/src/entry.rs", "");
-    put("crates/horizon-client/src/lib.rs", "mod game; mod entry;");
+    put(
+        "crates/horizon-client/src/lib.rs",
+        "mod game; mod entry;\npub fn install_points_catalog() {}\n",
+    );
     put(
         "crates/horizon-client/Cargo.toml",
         "[package]\nname='horizon-client'\n",

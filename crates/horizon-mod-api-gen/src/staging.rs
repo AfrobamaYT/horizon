@@ -76,7 +76,7 @@ mod tests {
         std::fs::write(source.parent().unwrap().join("entry.rs"), "").unwrap();
         std::fs::write(
             source.parent().unwrap().join("lib.rs"),
-            "mod game; mod entry;\n",
+            "mod game; mod entry;\npub fn install_points_catalog() {}\n",
         )
         .unwrap();
         std::fs::write(
