@@ -547,7 +547,7 @@ impl mobs::part_goals::GoalHost for Game<'_> {
                 // selection while the persisted binding is still borrowed.
                 let redirected = world
                     .player_selection
-                    .filter(|selection| selection.has_switched())
+                    .filter(|selection| mob.id == actor.id && selection.has_switched())
                     .and_then(|selection| selection.selected())
                     .map(|player| player.entity_id);
                 let id = match redirected {
