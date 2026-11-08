@@ -106,6 +106,38 @@ fn real_members_link_when_built() {
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
+    let subscriptions: Vec<String> = modules[0]
+        .call(
+            CallClass::Load,
+            Frame::default(),
+            crate::boundary::SUBSCRIBED,
+            None,
+            |_| {},
+            |r| r.take(),
+        )
+        .expect("real guest subscription hook failed");
+    assert!(
+        subscriptions
+            .iter()
+            .all(|name| crate::boundary::hook_id(name).is_some())
+    );
+}
+
+#[test]
+fn unresolved_namespaced_functions_are_not_stubbed() {
+    let bytes = wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "fixture:missing" (func)))"#).unwrap();
+    let error = Group::link(
+        &wasmtime::Engine::default(),
+        &[Member {
+            name: "test",
+            module: &bytes,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, crate::link::LinkError::Unresolved { symbol, .. } if symbol == "env.fixture:missing")
+    );
 }
 
 #[test]
