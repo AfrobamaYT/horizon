@@ -218,6 +218,10 @@ fn event_input(
                     && types.defs[*d].view.is_none()
                 {
                     event_input(types, *d, &path, setup, put);
+                } else if lifetime_def(types, ty)
+                    && !matches!(inner, Ty::Named(d) if types.defs[*d].view.is_some())
+                {
+                    put.push_str(&super::calls::snapshot(types, ty, &path).unwrap());
                 } else {
                     put.push_str(&self::put(ty, &path));
                 }
@@ -359,9 +363,13 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
             || m.params
                 .iter()
                 .any(|(_, t)| !matches!(t, Ty::Dyn(..)) && has_frame(t) && !supported_resource(t))
-            || m.params.iter().any(|(_, t)| matches!(t, Ty::Ref(_, true)))
+            || m.params
+                .iter()
+                .any(|(_, t)| matches!(t, Ty::Ref(_, true)) && !mutable_scalar(t))
             || m.params.iter().any(|(_, t)| {
-                lifetime_def(types, t)
+                (lifetime_def(types, t)
+                    && (super::calls::snapshot(types, t, "p").is_none()
+                        || lend(types, t, "p").is_none()))
                     || (has_ref_in_data(t) && lend(types, t, "p").is_none())
                     || (!matches!(t, Ty::Dyn(..)) && !resource(t) && held(types, t).is_none())
             })
@@ -391,13 +399,14 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
             }
             writeln!(
                 body,
-                "let p{i}: {} = {};",
+                "let {mutable}p{i}: {} = {};",
                 if resource(ty) {
                     rust_ty(types, ty, false)
                 } else {
                     held(types, ty).unwrap()
                 },
-                "input.take()?"
+                "input.take()?",
+                mutable = if mutable_scalar(ty) { "mut " } else { "" }
             )
             .unwrap();
             let arg = match ty {
@@ -411,7 +420,7 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
             };
             args.push(arg);
         }
-        let answer: String = if resource(&m.ret) {
+        let mut answer: String = if resource(&m.ret) {
             "out.put_owned(answer);".into()
         } else if matches!(&m.ret,Ty::Option(t) if matches!(**t,Ty::Str(super::ty::Str::Borrowed | super::ty::Str::Static) | Ty::Ref(..) | Ty::List(_,super::ty::List::Slice)))
         {
@@ -419,6 +428,11 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
         } else {
             "out.put_owned(answer);".into()
         };
+        for (i, (_, ty)) in m.params.iter().enumerate() {
+            if mutable_scalar(ty) {
+                write!(answer, "out.put(&p{i});").unwrap();
+            }
+        }
         let receiver = if is_held {
             format!(
                 "unsafe {{ (&*cx).held.get(held_id).map_err(|_| ServeError::Stale)?.downcast_ref::<OwnerThread<std::sync::Arc<dyn {}>>>().ok_or(ServeError::Stale)?.get()?.clone() }}",

@@ -148,10 +148,37 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         ) {
             REGISTERED_ITEM.set(Some(registrar.item_key("minecraft:stone")));
             let kind = registrar.block_entity_type("counter").blocks(&[]).build();
+            REGISTERED_KIND.set(Some(kind));
             registrar.block_entity_part(&kind, MachineBlock).unwrap();
         }
         fn subscribed(&self) -> &'static [Option<mod_api::HookId>] {
             &[]
+        }
+        fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
+            assert_eq!(event.mob.kind, "test:mob");
+            assert_eq!(event.mob.custom_name, Some("custom"));
+            if let Some(who) = event.who {
+                assert_eq!((who.name, who.local), ("test:player", true));
+                event.draw.set_light(42);
+            } else {
+                event.draw.set_light(7);
+            }
+        }
+        fn game_rule_changed(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::GameRuleChangedEvent<'_>,
+        ) {
+            assert_eq!(event.rule, "test:rule");
+            if let Some(actor) = event.actor {
+                assert_eq!(
+                    (actor.uuid, actor.entity_id, actor.name),
+                    (123, 45, "test:actor")
+                );
+                event.value = mod_api::GameRuleValue::Bool(true);
+            } else {
+                event.value = mod_api::GameRuleValue::Bool(false);
+            }
         }
         fn loot_drops(
             &self,
@@ -273,6 +300,132 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     assert_eq!(entity.revision().changes(), before);
 }
 #[test]
+fn wire_loopback_optional_borrowed_render_record() {
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    struct Draw(u32);
+    impl mod_api::BlockEntityDrawContext for Draw {
+        fn set_light(&mut self, value: u32) {
+            self.0 = value;
+        }
+    }
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let mob = mod_api::NativeMobRender {
+        id: 1,
+        kind: "test:mob",
+        custom_name: Some("custom"),
+        baby: false,
+        partial: 0.5,
+        age: 1.,
+        body_yaw: 0.,
+        head_yaw: 0.,
+        pitch: 0.,
+        walk_position: 0.,
+        walk_speed: 0.,
+        hurt_time: 0,
+        death_time: 0,
+        on_ground: true,
+    };
+    let player = mod_api::NativePlayerRender {
+        name: "test:player",
+        local: true,
+    };
+    for who in [None, Some(&player)] {
+        let mut draw = Draw(0);
+        module.mob_layer(
+            &Client,
+            &mut mod_api::MobLayerEvent {
+                mob: &mob,
+                who,
+                draw: &mut draw,
+            },
+        );
+        assert_eq!(draw.0, if who.is_some() { 42 } else { 7 });
+    }
+}
+#[test]
+fn wire_loopback_optional_borrowed_record() {
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let actor: mod_api::GameRuleActor = mod_api::GameRuleActor {
+        uuid: 123,
+        entity_id: 45,
+        name: "test:actor",
+    };
+    for actor in [None, Some(&actor)] {
+        let mut event = mod_api::GameRuleChangedEvent {
+            rule: "test:rule",
+            value: mod_api::GameRuleValue::Bool(!actor.is_some()),
+            actor,
+        };
+        module.game_rule_changed(&mut World, &mut event);
+        assert_eq!(event.value, mod_api::GameRuleValue::Bool(actor.is_some()));
+    }
+}
+#[test]
+fn wire_loopback_array_of_optional_borrowed_records() {
+    use mod_api::BlockEntityDrawContext;
+    struct Draw(bool);
+    impl BlockEntityDrawContext for Draw {
+        fn cube(
+            &mut self,
+            from: [f32; 3],
+            to: [f32; 3],
+            faces: [Option<mod_api::CubeFace<'_>>; 6],
+            tint: u32,
+        ) -> bool {
+            assert_eq!((from, to, tint), ([1.; 3], [2.; 3], 0x123456));
+            assert!(faces[0].is_none());
+            let face = faces[1].unwrap();
+            assert_eq!(face.sprite, "test:face");
+            assert_eq!(face.uv, Some([1., 2., 3., 4.]));
+            assert!(faces[2..].iter().all(Option::is_none));
+            self.0 = true;
+            true
+        }
+    }
+    let mut draw = Draw(false);
+    let mut cx = Box::new(boundary::Cx::default());
+    let mut frame = boundary::Frame::default();
+    frame.set_block_entity_draw_context_mut(&mut draw);
+    cx.frames.push(frame);
+    let pointer = &mut *cx as *mut boundary::Cx;
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+    let sprite = String::from("test:face");
+    let faces = [
+        None,
+        Some(mod_api::CubeFace::new(&sprite).with_uv([1., 2., 3., 4.])),
+        None,
+        None,
+        None,
+        None,
+    ];
+    assert!(guest::Guest.cube([1.; 3], [2.; 3], faces, 0x123456));
+    assert!(draw.0);
+    guest::set_transport(None);
+}
+#[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
     install_counter();
     let table = "t".repeat(300);
@@ -331,7 +484,10 @@ fn wire_loopback_nested_tuple_reference_writes_back() {
     assert!(stack.carried.0.is_none());
     assert!(stack.cancellation_result);
 }
-thread_local! { static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)}; }
+thread_local! {
+    static REGISTERED_ITEM:std::cell::Cell<Option<mod_api::ItemKey>> = const {std::cell::Cell::new(None)};
+    static REGISTERED_KIND:std::cell::Cell<Option<mod_api::BlockEntityTypeKey>> = const {std::cell::Cell::new(None)};
+}
 fn install_counter() {
     let mods = [mod_api::ModEntry::new(
         "wire_test",
@@ -516,6 +672,152 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
     assert_eq!(start.draws, 1);
     assert!(out.bytes().is_empty());
 }
+#[test]
+fn wire_loopback_provider_queries_return_owned_options_and_atomic_cursor_writeback() {
+    use mod_api::*;
+    struct Table;
+    impl CapabilityProviders for Table {}
+    impl BlockEntitiesCapabilityProviders for Table {
+        fn block_entity_provider(
+            &self,
+            _: &str,
+            _: BlockEntityTypeKey,
+            index: &mut u32,
+        ) -> Option<(BlockProviderOf, &'static str, bool)> {
+            *index += 1;
+            Some((
+                BlockProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: BlockSide| {
+                    None::<Box<dyn EnergyHandler>>
+                })),
+                "test:block",
+                true,
+            ))
+        }
+    }
+    impl EntitiesCapabilityProviders for Table {
+        fn entity_provider(
+            &self,
+            _: &str,
+            _: &str,
+            index: &mut u32,
+        ) -> Option<(EntityProviderOf, &'static str, bool)> {
+            *index += 2;
+            Some((
+                EntityProviderOf::EnergyHandlerOptionDirection(Arc::new(
+                    |_: &mut dyn ServerHost, _: EntityRef, _: Option<Direction>| {
+                        None::<Box<dyn EnergyHandler>>
+                    },
+                )),
+                "test:entity",
+                false,
+            ))
+        }
+    }
+    impl ItemsCapabilityProviders for Table {
+        fn item_provider(
+            &self,
+            _: &str,
+            _: ItemKey,
+            index: &mut u32,
+        ) -> Option<(ItemProviderOf, &'static str, bool)> {
+            *index += 3;
+            Some((
+                ItemProviderOf::EnergyHandler(Arc::new(|_: &mut dyn ServerHost, _: &ItemPlace| {
+                    None::<Box<dyn EnergyHandler>>
+                })),
+                "test:item",
+                true,
+            ))
+        }
+        fn place_provider(&self, _: &str) -> Option<(Arc<dyn PlaceProvider>, &'static str)> {
+            None
+        }
+    }
+    impl CapabilitiesCapabilityProviders for Table {
+        fn provided(&self, _: ProvidedBy, _: &str) -> bool {
+            true
+        }
+    }
+    struct World;
+    impl Host for World {
+        fn capability_providers(&self) -> &'static dyn CapabilityProviders {
+            &Table
+        }
+    }
+    mod_api::impl_host_areas!(World);
+    install_counter();
+    let world = World;
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let mut cx = Box::new(boundary::Cx::default());
+    let mut frame = boundary::Frame::default();
+    frame.set_host(&world);
+    cx.frames.push(frame);
+    cx.module = &module;
+    let pointer = &mut *cx as *mut boundary::Cx;
+    let _root = unsafe { boundary::resource_scope(pointer, true) };
+    let _guest = guest::resource_scope();
+    let corrupt = Rc::new(std::cell::Cell::new(false));
+    let flag = corrupt.clone();
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        if id == mod_api::wire::HOST_LOG {
+            return Vec::new();
+        }
+        if id == mod_api::wire::HOST_RELEASE {
+            let id = Reader::decode(bytes).unwrap();
+            let released = unsafe { (&mut *pointer).held.remove(id) }.unwrap();
+            drop(released);
+            return Vec::new();
+        }
+        let _scope = unsafe { boundary::resource_scope(pointer, false) };
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
+        if flag.get() && id != mod_api::wire::HOST_RELEASE {
+            out.put(&0xffu8)
+        }
+        out.into_bytes()
+    })));
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            guest::set_transport(None);
+        }
+    }
+    let _reset = Reset;
+    let mut index = 5;
+    let (block, owner, before) = guest::Guest
+        .block_entity_provider("test:energy", REGISTERED_KIND.get().unwrap(), &mut index)
+        .unwrap();
+    assert!(matches!(block, BlockProviderOf::EnergyHandler(_)));
+    assert_eq!((index, owner, before), (6, "test:block", true));
+    let (entity, owner, before) = guest::Guest
+        .entity_provider("test:energy", "test:mob", &mut index)
+        .unwrap();
+    assert!(matches!(
+        entity,
+        EntityProviderOf::EnergyHandlerOptionDirection(_)
+    ));
+    assert_eq!((index, owner, before), (8, "test:entity", false));
+    let (item, owner, before) = guest::Guest
+        .item_provider("test:energy", REGISTERED_ITEM.get().unwrap(), &mut index)
+        .unwrap();
+    assert!(matches!(item, ItemProviderOf::EnergyHandler(_)));
+    assert_eq!((index, owner, before), (11, "test:item", true));
+    corrupt.set(true);
+    index = 42;
+    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        guest::Guest.item_provider("test:energy", REGISTERED_ITEM.get().unwrap(), &mut index)
+    }));
+    assert!(refused.is_err());
+    assert_eq!(
+        index, 42,
+        "trailing bytes applied the cursor before validating the whole reply"
+    );
+}
+
 #[test]
 fn wire_loopback_panic_hook_without_transport_does_not_panic_again() {
     install_counter();
