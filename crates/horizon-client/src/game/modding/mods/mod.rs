@@ -321,6 +321,13 @@ pub(super) fn register_debug_entries(role: ExecutionRole) {
     Game::native_register_debug_entries(&RegistrationContext::new(), &mut entries);
     horizon_client::debug_entries::register(entries);
 }
+/// The native mods' map decoration types (`native_map_decoration_types`), frozen once at start on
+/// every side.
+pub(super) fn register_map_decoration_types() {
+    let mut types = Vec::new();
+    Game::native_map_decoration_types(&RegistrationContext::new(), &mut types);
+    horizon_client::map_decoration_types::register(types, Game::is_vanilla_decoration_sprite);
+}
 /// The native mods' HUD layers (`native_register_gui_layers`), placed among vanilla's once at
 /// start.
 pub(super) fn register_gui_layers(role: ExecutionRole) {
@@ -375,6 +382,16 @@ pub(super) fn register_item_tint_sources(role: ExecutionRole) {
     Game::native_register_item_tint_sources(&RegistrationContext::new(), &mut sources);
     horizon_assets::item_model::register_tint_sources(sources);
 }
+/// Resolve client dimension-transition registrations once, before the first level opens.
+pub(super) fn register_dimension_transition_screens(role: ExecutionRole) {
+    if !role.is_client() {
+        return;
+    }
+    let mut screens = Vec::new();
+    Game::native_register_dimension_transition_screen(&RegistrationContext::new(), &mut screens);
+    horizon_client_render::dimension_transition::register(screens);
+}
+
 /// The native mods' block tint sources (`native_register_block_tint_sources`), kept once at
 /// start, before resources load; every resource load applies them to its mesh tables.
 pub(super) fn register_block_tint_sources(role: ExecutionRole) {
