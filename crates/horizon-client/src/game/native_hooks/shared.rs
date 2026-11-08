@@ -4032,7 +4032,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn declared_types_create_tick_and_reload_through_game() {
-        use super::super::native_entity_refs::tests::{run_fresh_cases, with_game_at};
+        use super::super::native_entity_refs::tests::{record_key, run_fresh_cases, with_game_at};
         use horizon_client::{chunk::Chunk, containers::BlockEntity, save};
         use mod_api::{self, *};
         use std::sync::Arc;
@@ -4102,11 +4102,11 @@ mod tests {
                     .expect("native type");
                 registrar
                     .block_entity_capability(&PROBE, &kind, |_, _| Some(Box::new(Marker(6300))));
-                self.keys.shared.set(kind).unwrap();
+                record_key(&self.keys.shared, kind);
                 let vanilla = registrar.block_entity_type_key("minecraft:chest");
                 registrar
                     .block_entity_capability(&PROBE, &vanilla, |_, _| Some(Box::new(Marker(26))));
-                self.keys.vanilla.set(vanilla).unwrap();
+                record_key(&self.keys.vanilla, vanilla);
                 if let Some(id) = self.unknown {
                     registrar.block_entity_type_key(id);
                 }
@@ -4127,7 +4127,7 @@ mod tests {
                         &[FIRST, SECOND]
                     })
                     .build();
-                self.keys.own.set(kind).unwrap();
+                record_key(&self.keys.own, kind);
                 registrar
                     .block_entity_type("empty")
                     .blocks(&[EMPTY])
@@ -4213,18 +4213,18 @@ mod tests {
                     Ok(true)
                 );
                 let pos = (x, 64, 0);
+                if block == PLAIN {
+                    // No declared type claims it, and no mod adds it to `minecraft:banner`'s
+                    // valid blocks, so its template creates no entity (`validateBlockState`).
+                    assert!(game.world.block_entities.get(&pos).is_none());
+                    assert!(game.block_entity(level, [x, 64, 0]).is_none());
+                    continue;
+                }
                 let handle = game.block_entity(level, [x, 64, 0]).unwrap();
                 if block == "minecraft:chest" {
                     assert_eq!(handle.kind(game).as_ref(), keys.vanilla.get());
                     let probe = level.capability(game, &PROBE, [x, 64, 0], None).unwrap();
                     assert_eq!((probe.value(), probe.owner()), (26, "be_user".into()));
-                    continue;
-                }
-                if block == PLAIN {
-                    assert!(matches!(
-                        game.world.block_entities.get(&pos),
-                        Some(BlockEntity::Banner(_))
-                    ));
                     continue;
                 }
                 let Some(BlockEntity::Mod(entity)) = game.world.block_entities.get(&pos) else {
