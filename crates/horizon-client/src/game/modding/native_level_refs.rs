@@ -1375,6 +1375,10 @@ mod tests {
             let height = level.height(host).unwrap();
             assert_eq!(
                 level.fluid_tick_delay(host, water, at(1, height.0, 1)),
+                Some(5)
+            );
+            assert_eq!(
+                level.fluid_tick_delay(host, water, at(1, height.0 - 1, 1)),
                 None
             );
 
