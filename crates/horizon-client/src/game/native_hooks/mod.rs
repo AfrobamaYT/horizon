@@ -75,7 +75,7 @@ use mod_api::{
     ClientMiningPrediction, ClientModifiers, ClientReloadListeners, CommandInvocation,
     EnchantmentInfo, EntityRef, GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition,
     LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
-    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
+    NativeLifecycleContext, NativeNoteBlockChange, ParticleProviders, PathComputationType, Placement, PlayerRef,
     RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
     ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
