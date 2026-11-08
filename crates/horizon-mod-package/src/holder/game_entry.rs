@@ -16,12 +16,12 @@ pub fn acquire_entry(context: &ModSelectionContext) -> io::Result<Option<Acquire
     reference.acquire(context).map(Some)
 }
 /// First operation in ordinary and generated main. Private holder mode never returns.
-pub fn bootstrap() -> Option<Capture> {
+pub fn bootstrap() -> (Option<Capture>, Option<LaunchArguments>) {
     enter();
     if std::env::var_os(ENTRY).is_none() {
-        return None;
+        return (None, None);
     }
-    let result = (|| -> io::Result<Capture> {
+    let result = (|| -> io::Result<(Capture, LaunchArguments)> {
         let mut command = Command::new(std::env::current_exe()?);
         command.args(std::env::args_os().skip(1));
         let selection = LaunchArguments::for_command(&command)?;
@@ -48,10 +48,11 @@ pub fn bootstrap() -> Option<Capture> {
                 }
             }
         }
-        Capture::install(ownership._capture.as_ref().unwrap())
+        let capture = Capture::install(ownership._capture.as_ref().unwrap())?;
+        Ok((capture, selection))
     })();
     match result {
-        Ok(capture) => Some(capture),
+        Ok((capture, selection)) => (Some(capture), Some(selection)),
         Err(error) => {
             eprintln!("Horizon: {error}");
             std::process::exit(78);

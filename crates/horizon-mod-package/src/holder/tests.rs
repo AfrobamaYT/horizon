@@ -254,15 +254,20 @@ fn assert_record_owned(data: &Path, expected: bool) {
         .unwrap()
         .unwrap()
         .path();
-    let directory = open_directory(&record).unwrap();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&fs::read(record.join("launch.json")).unwrap()).unwrap();
+    let entry: Entry = serde_json::from_value(payload["entry"].clone()).unwrap();
     let registry = Registry::existing(data).unwrap();
-    assert_eq!(
-        matches!(
-            registry.lock(&directory, LockMode::Exclusive),
-            Err(crate::runtime_leases::Error::Busy)
-        ),
-        expected
-    );
+    for tree in entry.trees {
+        assert_eq!(
+            matches!(
+                registry.lock(&tree.recheck().unwrap(), LockMode::Exclusive),
+                Err(crate::runtime_leases::Error::Busy)
+            ),
+            expected,
+            "a selected tree or record lost ownership"
+        );
+    }
 }
 fn released_record(data: &Path) {
     let end = deadline();

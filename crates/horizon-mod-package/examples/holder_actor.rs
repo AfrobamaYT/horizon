@@ -44,9 +44,13 @@ fn main() {
                     }
                 }
             }
-            let _capture = holder::bootstrap();
+            let (_capture, launch) = holder::bootstrap();
+            let launch = launch.unwrap();
             let ready = PathBuf::from(std::env::var_os("READY").unwrap());
             let root = ready.parent().unwrap();
+            std::env::set_current_dir(root).unwrap(); // Emulate a native hook changing cwd after bootstrap.
+            assert_eq!(launch.context.game_dir, root.join("world"));
+            assert_eq!(launch.context.home, root.join("world"));
             std::fs::write(&ready, b"capture ready").unwrap();
             scene::until(|| {
                 if root.join("emit").is_file() && !root.join("emitted").is_file() {

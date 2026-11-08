@@ -67,10 +67,16 @@ fn bounded_record_authentication_roots_and_file_replacement_are_enforced() {
             assert!(reference.acquire(&context).is_err());
         }
         drop(file);
-        assert!(record::Reference::decode(&" ".repeat(4097)).is_err());
+        assert!(record::Reference::decode(&format!("{encoded}{}", " ".repeat(4097))).is_err());
         let mut value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         value["version"] = 99.into();
         assert!(record::Reference::decode(&value.to_string()).is_err());
+        value["version"] = crate::local_control::VERSION.into();
+        let mut expanded_path = context.home.clone();
+        expanded_path.push("a".repeat(5000));
+        value["tree"]["path"] = serde_json::to_value(expanded_path.into_os_string()).unwrap();
+        let expanded: record::Reference = serde_json::from_value(value).unwrap();
+        assert!(expanded.encode().is_err());
     }
 }
 #[cfg(unix)]
