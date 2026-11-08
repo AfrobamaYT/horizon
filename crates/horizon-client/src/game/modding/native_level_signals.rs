@@ -168,8 +168,9 @@ impl SignalAccess for ReadLevel<'_, '_> {
 }
 
 impl LevelHost for ReadLevel<'_, '_> {
-    fn block_state(&self, [x, y, z]: [i32; 3]) -> BlockStateId {
-        self.game.world.block(x, y, z)
+    fn block_state(&self, [x, y, z]: [i32; 3]) -> Option<mod_api::BlockState> {
+        use super::api_values::TryIntoApi;
+        self.game.world.block(x, y, z).try_into_api().ok()
     }
     fn state_block(&self, state: BlockStateId) -> Option<&str> {
         self.game
