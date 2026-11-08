@@ -1,18 +1,20 @@
 use super::*;
 
 /// The hook points. Each does nothing in Horizon.
-impl Game<'_> {
-    /// `Block.entityInside`: an entity's sweep crossed a block with a part for it (`precise`
-    /// is `Entity.checkInsideBlocks`' flag). The part gets `&mut dyn ServerHost` once the
-    /// entity's batch (mobs, projectiles, items) has ticked, not mid-sweep.
+impl HitLevel<'_> {
+    /// `Block.entityInside`: an entity's sweep crossed a block with a part for it
+    /// (`precise` is `Entity.checkInsideBlocks`' flag), told mid-sweep, on the level
+    /// host a hit or a landing uses. The part draws the level's random in vanilla's
+    /// order and queues its writes on the event: the typed entity writes and effects
+    /// apply to the swept entity inside its own tick, and the level writes land at the
+    /// touched block at the batch end, guarded on the state. Generated dispatch stages
+    /// every requested API `InsideWrite` before committing; an invalid state refuses
+    /// the whole callback's output.
     pub(in crate::game) fn native_entity_inside(
         &mut self,
-        state: BlockStateId,
-        pos: BlockPos,
-        entity: EntityRef,
-        precise: bool,
+        call: super::fire::EntityInsideCall<'_>,
     ) {
-        self.fire_entity_inside(state, pos, entity, precise);
+        self.fire_entity_inside(call);
     }
 }
 
@@ -20,9 +22,7 @@ impl Game<'_> {
 mod entity_inside_tests {
     use super::*;
     use horizon_client::block_contact::{in_level, inside};
-    use mod_api::{
-        BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, ServerHost, testing::with_mods,
-    };
+    use mod_api::{BlockPart, EntityInsideEvent, Hooks, ModEntry, Registrar, testing::with_mods};
     use std::sync::{Arc, Mutex};
 
     /// Landing writes reach the level at the batch end, in the order asked, and only
@@ -118,14 +118,18 @@ mod entity_inside_tests {
 
     /// What the part on stone heard: the entity's id, the position and `precise`.
     #[derive(Clone, Default)]
-    struct Stone(Arc<Mutex<Vec<(u32, BlockPos, bool)>>>);
+    struct Stone(Arc<Mutex<Vec<(i32, BlockPos, bool)>>>);
     #[mod_api::horizon_part]
     impl BlockPart for Stone {
-        fn entity_inside(&self, _: &mut dyn ServerHost, event: &mut EntityInsideEvent) {
+        fn entity_inside(
+            &self,
+            _: &mut dyn mod_api::LevelRandomHost,
+            event: &mut EntityInsideEvent<'_>,
+        ) {
             self.0
                 .lock()
                 .unwrap()
-                .push((event.entity.id(), event.pos, event.precise));
+                .push((event.entity, event.pos, event.precise));
         }
     }
     struct Mod(Stone);
@@ -178,7 +182,10 @@ mod entity_inside_tests {
                 game.drain_entity_inside();
                 assert_eq!(
                     *heard.0.lock().unwrap(),
-                    vec![(kept.id(), at(1), true), (kept.id(), at(2), false)]
+                    vec![
+                        (kept.id() as i32, at(1), true),
+                        (kept.id() as i32, at(2), false)
+                    ]
                 );
                 game.drain_entity_inside();
                 assert_eq!(

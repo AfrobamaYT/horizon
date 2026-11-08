@@ -1291,8 +1291,42 @@ impl Game<'_> {
                     if let Some(entity) = u32::try_from(inside.entity)
                         .ok()
                         .and_then(|id| self.entity(id))
+                        && let Some(kind) = self.entity_kind(entity)
                     {
-                        self.native_entity_inside(state, pos, entity, inside.precise);
+                        // The recorded contacts of the kinds not yet on the shared sweep
+                        // (mobs, projectiles, items) deliver the notification through the
+                        // level host, as the mid-sweep contact will. Their level writes
+                        // apply here, at the batch end, guarded on the touched state; the
+                        // queued entity writes and effects need the entity's own tick,
+                        // which the recorded route is past, so they apply when each kind
+                        // moves onto the shared walk.
+                        let mut lent = horizon_client::health::LentLevel::take(&mut self.world);
+                        let level = horizon_client::health::DamageLevel::lent(
+                            &self.world,
+                            self.pack.assets.registry,
+                            &mut lent,
+                            Some(world_items!(self)),
+                            Some(&self.pack.block_registries),
+                            &self.damage_hooks,
+                        );
+                        let mut effects = mod_api::InsideEffects::default();
+                        let mut writes = Vec::new();
+                        HitLevel(level).native_entity_inside(fire::EntityInsideCall {
+                            dimension: self.dim.id(),
+                            entity: inside.entity,
+                            kind: &kind,
+                            state,
+                            pos,
+                            precise: inside.precise,
+                            effects: &mut effects,
+                            writes: &mut writes,
+                        });
+                        lent.give_back(&mut self.world);
+                        if let Some(level) = self.level(self.dim.id()) {
+                            for write in writes {
+                                self.apply_inside_write(level, pos, write);
+                            }
+                        }
                     }
                 }
                 Pending::MinecartPass(pass) => {
@@ -1328,6 +1362,27 @@ impl Game<'_> {
                 let _ = self.level_set_block(level, at, state, flags);
             }
             horizon_world::level::LandingWrite::DestroyBlock { drop } => {
+                self.level_destroy_block(level, at, drop, None, false);
+            }
+            // A write a later API adds that this game does not know is not applied.
+            _ => {}
+        }
+    }
+    /// A write an `entity_inside` part asked for, applied as a landing write is: at the
+    /// touched block, once the entity's batch has ticked.
+    fn apply_inside_write(
+        &mut self,
+        level: mod_api::LevelRef,
+        pos: BlockPos,
+        write: horizon_world::level::InsideWrite,
+    ) {
+        let at = [pos.x, pos.y, pos.z];
+        match write {
+            horizon_world::level::InsideWrite::SetBlock(state) => {
+                let flags = NativeBlockUpdateFlags::NEIGHBORS | NativeBlockUpdateFlags::CLIENTS;
+                let _ = self.level_set_block(level, at, state, flags);
+            }
+            horizon_world::level::InsideWrite::DestroyBlock { drop } => {
                 self.level_destroy_block(level, at, drop, None, false);
             }
             // A write a later API adds that this game does not know is not applied.
