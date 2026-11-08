@@ -966,6 +966,22 @@ mod tests {
     }
 
     #[test]
+    fn reduction_adjustments_survive_wire_in_order() {
+        use crate::{Reduction::*, ReductionChange::*};
+        let changes = vec![
+            (Armor, Add(2.5)),
+            (Enchantments, Scale(0.5)),
+            (MobEffects, AtLeast(3.0)),
+            (Absorption, AtMost(4.0)),
+            (Invulnerability, Add(-1.0)),
+            (InnateResistance, Scale(2.0)),
+        ];
+        round(changes);
+        assert!(Reader::decode::<crate::Reduction>(&[6]).is_err());
+        assert!(Reader::decode::<crate::ReductionChange>(&[4, 0, 0, 0, 0]).is_err());
+    }
+
+    #[test]
     fn values_survive_a_round_trip() {
         round(7u32);
         round(-3i64);

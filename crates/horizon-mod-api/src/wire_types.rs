@@ -650,6 +650,56 @@ impl Wire for crate::ParticleOptions {
         })
     }
 }
+impl Wire for crate::Reduction {
+    const MIN: usize = 1;
+    fn put(&self, out: &mut Writer) {
+        out.put(
+            &(match self {
+                Self::Invulnerability => 0u8,
+                Self::Armor => 1,
+                Self::Enchantments => 2,
+                Self::MobEffects => 3,
+                Self::Absorption => 4,
+                Self::InnateResistance => 5,
+            }),
+        );
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(match input.take::<u8>()? {
+            0 => Self::Invulnerability,
+            1 => Self::Armor,
+            2 => Self::Enchantments,
+            3 => Self::MobEffects,
+            4 => Self::Absorption,
+            5 => Self::InnateResistance,
+            _ => return Err(WireError::Invalid("invalid reduction kind")),
+        })
+    }
+}
+impl Wire for crate::ReductionChange {
+    const MIN: usize = 5;
+    fn put(&self, out: &mut Writer) {
+        let (kind, value) = match *self {
+            Self::Add(v) => (0u8, v),
+            Self::Scale(v) => (1, v),
+            Self::AtLeast(v) => (2, v),
+            Self::AtMost(v) => (3, v),
+        };
+        out.put(&kind);
+        out.put(&value);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        let kind: u8 = input.take()?;
+        let value = input.take()?;
+        Ok(match kind {
+            0 => Self::Add(value),
+            1 => Self::Scale(value),
+            2 => Self::AtLeast(value),
+            3 => Self::AtMost(value),
+            _ => return Err(WireError::Invalid("invalid reduction change")),
+        })
+    }
+}
 impl Wire for crate::DamageContainer {
     const MIN: usize = 53;
     fn put(&self, out: &mut Writer) {
@@ -661,6 +711,7 @@ impl Wire for crate::DamageContainer {
         out.put(&v.post_attack_invulnerability_ticks);
         out.put(&v.should_cause_side_effects);
         out.put(&v.reductions);
+        out.put(&v.reduction_modifiers);
         out.put(&v.entered_pre);
         out.put(&v.inflicted);
         out.put(&v.health_damage);
@@ -674,6 +725,7 @@ impl Wire for crate::DamageContainer {
             post_attack_invulnerability_ticks: input.take()?,
             should_cause_side_effects: input.take()?,
             reductions: input.take()?,
+            reduction_modifiers: input.take()?,
             entered_pre: input.take()?,
             inflicted: input.take()?,
             health_damage: input.take()?,

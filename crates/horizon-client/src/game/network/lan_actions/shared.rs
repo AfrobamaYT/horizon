@@ -138,6 +138,7 @@ pub(super) struct GuestSwap {
     i: usize,
     play: GuestPlay,
     player: Option<PlayerMotion>,
+    player_save_projection: (Option<i32>, Option<bool>),
     /// The guest's eye height and the game's.
     eye: (f32, f32),
     yaw: f32,
@@ -208,6 +209,7 @@ pub(super) struct GuestSwap {
         Option<u128>,
         Option<u8>,
         Option<u32>,
+        Option<i32>,
     ),
     /// Whether the outer turn is a fake player.
     acting_fake: bool,
@@ -521,6 +523,8 @@ mod tests {
                     slots: 27,
                     data_slots: 0,
                     results: Vec::new(),
+                    crafting: None,
+                    links: None,
                 }));
                 for is_mod in [false, true] {
                     game.world.block_entities.insert(
@@ -1371,6 +1375,7 @@ mod tests {
                             ))],
                             ticks: 0,
                             playing: false,
+                            song_clock_present: false,
                         },
                     ),
                 );
@@ -2428,6 +2433,7 @@ mod pickup_xp_tests {
                 ticks: 0,
                 health: 5,
                 no_gravity: true,
+                following: None,
             });
             game.guest_orbs(0);
             let left = game.orbs.iter().any(|o| o.id == 40);

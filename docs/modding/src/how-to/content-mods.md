@@ -99,7 +99,15 @@ by declaring them in `data/<id>/horizon/block/*.json` and `data/<id>/horizon/ite
 template ([modpacks.md](../../../modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
 effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside
 them. `fluid/` gives a fluid a client look (`sprite`, an atlas sprite id, and `tint`, `0xAARRGGBB`, both optional), as
-NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block, and a recipe page draws its well from it. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
+NeoForge's `IClientFluidTypeExtensions`; the fluid needs no block, and a recipe page draws its well from it. Its `world`
+object makes it exist in the world: `{"world": {}}` adds the block `<id>:<path>`, a copy of `minecraft:water` that flows
+with vanilla's fluid simulation, and the bucket item `<id>:<path>_bucket`, which needs its model as any item does. `world`
+takes `tick_delay` (1 or more, default 5), `drop_off` (1 to 7, default 1), `slope_find_distance` (1 to 4, default 4),
+`source_conversion` (default false) and `bucket` (default true). The fluid is in no vanilla fluid tag, so entities don't
+swim in it or get pushed by it. In the world it draws its `sprite`, a block atlas texture such as `mymod:block/oil`, times
+its `tint`; with neither it looks like water, and a `tint` alone colours water's textures. A client mod's
+`register_fluid_models` hook collects `mod_api::FluidModel` values with separate flowing and overlay sprites.
+It is collected again before each resource bake, so a resource reload can change model identifiers as well as textures. Far terrain (LOD) doesn't draw mod fluids yet. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
 content is refused when it joins, with the reason.
 
 Every Horizon server checks loaded mods in the configuration phase (`horizon_protocol::mod_list`, channel
@@ -275,6 +283,11 @@ outline also becomes collision, otherwise the template collision is retained. An
 table can be used without an outline override, and overrides `thickness` collision too.
 
 ### Entity-context shape declarations
+
+Native declarations use the same fields on `mod_api::Block`, with API-owned
+`ShapeEntityKind::{Item, Player, Living, Other}` keys and `BlockShapes` values.
+`interaction_shapes` is an optional `BlockShapes`. The game validates these drafts
+at content admission, just like their JSON counterparts.
 
 `outline_context_shapes` and `collision_context_shapes` independently override
 `shapes` and `collision_shapes` for a captured entity class. Their keys are

@@ -1,7 +1,6 @@
 #[test]
 #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES; runs in an isolated scratch process"]
 fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
-    use crate::game::api_values::TryIntoApi;
     use crate::game::native_entity_refs::tests::{run_fresh_cases, with_game_at};
     use horizon_client::{chunk::Chunk, containers::BlockEntity};
     use mod_api::{self, *};
@@ -90,8 +89,9 @@ fn stateful_creation_uses_actual_state_and_preserves_existing_entity() {
             "the factory must see a non-default state"
         );
         assert_ne!(empty, populated);
-        let populated_api: BlockState = populated.try_into_api().unwrap();
-        let empty_api: BlockState = empty.try_into_api().unwrap();
+        use crate::game::api_values::TryIntoApi;
+        let populated_api = populated.try_into_api().unwrap();
+        let empty_api = empty.try_into_api().unwrap();
         observed.populated.set(populated_api).unwrap();
         let level = game.level(game.dim.id()).unwrap();
         let stone = registry.default_state("minecraft:stone").unwrap();

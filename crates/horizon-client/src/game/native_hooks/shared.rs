@@ -2958,10 +2958,13 @@ impl Game<'_> {
         self.native_slot_tick(-106, false);
     }
     fn native_slot_tick(&mut self, slot: i32, selected: bool) {
-        if self.native_carried_slot(slot).is_none_or(|s| s.is_none()) {
+        if !mod_api::__private::has_part_hook(mod_api::HookId::InventoryTick) {
             return;
         }
-        self.native_inventory_tick(slot, selected);
+        let Some(stack) = self.native_carried_slot(slot).and_then(|s| s.clone()) else {
+            return;
+        };
+        self.native_inventory_tick(&stack, slot, selected);
         if let Some(stack) = self.native_carried_slot(slot)
             && stack.as_ref().is_some_and(|s| s.count == 0)
         {
@@ -3614,6 +3617,9 @@ impl Game<'_> {
     }
     /// A client mod's command (the `command` hook); a server never asks.
     pub(super) fn client_mod_command(&mut self, command: &str) -> bool {
+        if self.lan_acting.is_some() {
+            return false;
+        }
         let mut ran = false;
         self.native_command(command, &mut ran);
         ran
@@ -5127,6 +5133,10 @@ mod tests {
             (s.damage_type, s.causing, s.direct)
         };
         let zombie = Some(Who::Mob(3));
+        // A registered type of a datapack reaches the hook under its own id.
+        let scorch = K::Named(horizon_client::mobs::NamedDamage::new("demo:scorch", 0));
+        assert_eq!(source(scorch, None), ("demo:scorch", 0, 0));
+        assert_eq!(source(scorch, zombie), ("demo:scorch", 3, 0));
         assert_eq!(source(K::MobAttack, zombie), ("minecraft:mob_attack", 3, 3));
         assert_eq!(source(K::Thorns, zombie), ("minecraft:thorns", 3, 3));
         assert_eq!(source(K::Arrow, zombie), ("minecraft:arrow", 3, 0));
@@ -5354,6 +5364,7 @@ pub(super) mod particle_count_tests {
             count: 1,
             ticks: 0,
             health: 5,
+            following: None,
         }
     }
 

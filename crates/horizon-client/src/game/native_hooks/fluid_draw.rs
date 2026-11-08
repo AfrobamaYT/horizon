@@ -1,5 +1,36 @@
 use super::*;
 
+impl Game<'_> {
+    /// `stack`'s tooltip lines: the game's own, as `fluid_tooltip` listeners left them.
+    pub(in crate::game) fn fluid_tooltip_lines(&self, stack: &FluidStack) -> Vec<(Text, u32)> {
+        let mut lines =
+            horizon_client::fluid_tooltip::lines(stack, self.options_advanced_tooltips());
+        if mod_api::__private::listened(mod_api::HookId::FluidTooltip) {
+            use crate::game::api_values::{TryIntoApi, TryIntoEngine};
+            if let Ok(mut snapshot) = lines.try_into_api() {
+                self.native_fluid_tooltip(mod_api::__private::FluidTooltipCall {
+                    stack,
+                    lines: &mut snapshot,
+                });
+                if let Ok(replacement) = snapshot.try_into_engine(&()) {
+                    lines = replacement;
+                }
+            }
+        }
+        lines
+    }
+    /// `stack`'s tooltip at `x`, `y`, laid out and drawn as every tooltip is.
+    pub(in crate::game) fn draw_fluid_tooltip(
+        &self,
+        batch: &mut HudBatch,
+        stack: &FluidStack,
+        x: f32,
+        y: f32,
+    ) {
+        self.draw_tooltip_lines(batch, &self.fluid_tooltip_lines(stack), x, y);
+    }
+}
+
 /// Helpers for native mods, kept as stable as the hook points.
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
@@ -41,6 +72,55 @@ impl Game<'_> {
     /// Fluid `fluid`'s name as the lang names it (`fluid_type.<mod>.<name>`, vanilla's by its block),
     /// else its path in words.
     pub(in crate::game) fn fluid_name(&self, fluid: &str) -> String {
-        crate::game::native_panel_recipes::fluid_name(fluid)
+        horizon_client::fluid_tooltip::fluid_name(fluid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mod_api::{ClientHost, FluidTooltipEvent, Hooks, ModEntry, Mods};
+
+    struct Relabel;
+    #[mod_api::__subscriptions]
+    impl Hooks for Relabel {
+        fn fluid_tooltip(&self, _: &dyn ClientHost, event: &mut FluidTooltipEvent<'_>) {
+            event.lines.remove(0);
+            event
+                .lines
+                .push((mod_api::Text::literal("Tank 3"), 0xff55ffff));
+        }
+    }
+
+    /// A mod rewrites a fluid's tooltip, with no item and no item tooltip hook: the lines the
+    /// game draws are its own, a mod's edit applied.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_mod_edits_a_fluid_tooltip() {
+        mod_api::__private::part_tests::game_thread();
+        let water = mod_api::__private::fluid_key("minecraft:water").unwrap();
+        let stack = FluidStack::new(water, 750);
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            let plain = |lines: Vec<(Text, u32)>| -> Vec<(String, u32)> {
+                lines.into_iter().map(|(t, c)| (t.plain(), c)).collect()
+            };
+            assert_eq!(
+                plain(game.fluid_tooltip_lines(&stack)),
+                [
+                    ("Water".to_owned(), u32::MAX),
+                    ("750 mB".to_owned(), rgba(170, 170, 170, 255))
+                ]
+            );
+            let mods: Mods = vec![ModEntry::new("fluid-tips", Box::new(Relabel))].into();
+            mod_api::testing::with_mods(mods, || {
+                assert_eq!(
+                    plain(game.fluid_tooltip_lines(&stack)),
+                    [
+                        ("750 mB".to_owned(), rgba(170, 170, 170, 255)),
+                        ("Tank 3".to_owned(), 0xff55ffff)
+                    ]
+                );
+            });
+        });
     }
 }

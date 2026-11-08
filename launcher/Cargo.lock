@@ -2997,6 +2997,8 @@ version = "0.1.0"
 name = "horizon-world"
 version = "0.1.0"
 dependencies = [
+ "cap-fs-ext",
+ "cap-std",
  "flate2",
  "horizon-assets",
  "horizon-core",
@@ -3005,6 +3007,7 @@ dependencies = [
  "log",
  "lz4_flex",
  "postcard",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

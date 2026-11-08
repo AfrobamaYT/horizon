@@ -1413,6 +1413,9 @@ impl Game<'_> {
         // of coasting on the velocity of the ride that just ended.
         self.boats.update(i, |b| b.velocity = Vec3::ZERO);
         self.boats.update(i, |b| b.delta_rotation = 0.0);
+        if self.dismount_in_portal(self.boats[i].position) {
+            return;
+        }
         let target = self.boat_player_dismount_target(i, self.yaw);
         if let Some(p) = self.player.as_mut() {
             p.position = target;
@@ -1660,7 +1663,21 @@ impl Game<'_> {
         let (kind, id) = (self.boats[i].entity_type(), self.boats[i].id as i32);
         let (damage, scale, _, magic) = self.melee_damage(&kind, false);
         let sweep = self.sweep_before_hit(&kind, false);
+        let chest = self.boats[i].chest;
         let hurt = self.hurt_boat_result(i, damage, self.creative);
+        // AbstractChestBoat.destroy -> ContainerEntity.chestVehicleDestroyed:
+        // with entity_drops on, a player whose hit breaks a chest boat (not a
+        // creative discard) angers the piglins that see it.
+        if chest
+            && hurt == Some(true)
+            && !self.creative
+            && self
+                .ui
+                .rules
+                .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+        {
+            self.anger_piglins(true);
+        }
         self.vehicle_attack_sounds(area, sweep, magic.then_some(id));
         if damage > 0.0
             && let Some(destroyed) = hurt
@@ -1723,18 +1740,17 @@ impl Game<'_> {
             let id = self.boats[i].id;
             self.release_vehicle_container(id);
             let b = self.boats.remove(i);
-            // AbstractBoat.remove: a destroyed boat drops its lead.
-            self.boat_removed(&b);
             // `AbstractChestBoat.remove` spills the chest through
-            // `Containers.dropContents` for every destroying removal reason;
-            // that has no `entity_drops` gate of its own.
-            for stack in b.items.iter().flatten() {
-                self.spawn_item(stack.clone(), at, super::dispenser::new_item_motion(), 10);
-            }
+            // `Containers.dropContents` for every destroying removal reason
+            // (the kill below, and a creative hit's discard); that has no
+            // `entity_drops` gate of its own. A plain boat has no slots.
+            self.drop_vehicle_contents(at, &b.items);
+            // AbstractBoat.remove, after that: a destroyed boat drops its lead.
+            self.boat_removed(&b);
             // `VehicleEntity.destroy(level, dropItem)`: `kill` (the boat's own
-            // ENTITY_DIE), then the boat item on the death path only, and only
-            // with `entity_drops` on, by `spawnAtLocation` (an ItemEntity's own
-            // random motion).
+            // ENTITY_DIE after that removal), then the boat item on the death
+            // path only, and only with `entity_drops` on, by `spawnAtLocation`
+            // (an ItemEntity's own random motion).
             if !creative {
                 self.entity_killed_event(at, false);
             }
@@ -1747,7 +1763,7 @@ impl Game<'_> {
                     .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
             {
                 let item = b.entity_type();
-                self.spawn_item(
+                self.spawn_item_own(
                     ItemStack {
                         item: Arc::from(item.as_str()),
                         count: 1,
@@ -1755,9 +1771,14 @@ impl Game<'_> {
                         extra: None,
                     },
                     at,
-                    super::dispenser::new_item_motion(),
                     10,
                 );
+                // AbstractChestBoat.destroy: `chestVehicleDestroyed` drops the
+                // emptied chest again, which only draws each slot's spot.
+                if b.chest {
+                    let empty = vec![None; b.items.len()];
+                    self.drop_vehicle_contents(at, &empty);
+                }
             }
         }
         Some(destroyed)
@@ -1782,6 +1803,7 @@ impl Game<'_> {
                 continue;
             }
             let entity_start = out.len();
+            self.mark_motion(entity_start, Self::MOTION_OBJECT | u64::from(b.id));
             let models = if b.chest {
                 &self.boat_models.chest_models
             } else {

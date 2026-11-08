@@ -623,8 +623,10 @@ mod tests {
                         game.armor_stands.push(ArmorStand::new(id, Vec3::ZERO, 0.0));
                     } else {
                         game.others.push(super::super::commands::OtherEntity {
+                            knot_check: None,
                             join: Default::default(),
                             item_transformation: None,
+                            interaction: None,
                             id,
                             kind: vehicle_kind.into(),
                             position: Vec3::ZERO,
@@ -1365,8 +1367,10 @@ mod tests {
             assert_eq!(cow.dismount_location(game, LivingRef::new(player)), None);
             // An entity Horizon doesn't simulate keeps no box to stand on.
             game.others.push(super::super::commands::OtherEntity {
+                knot_check: None,
                 join: Default::default(),
                 item_transformation: None,
+                interaction: None,
                 id: 132,
                 kind: "minecraft:marker".into(),
                 position: at,

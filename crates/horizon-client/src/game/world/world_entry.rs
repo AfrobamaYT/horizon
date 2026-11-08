@@ -239,6 +239,7 @@ impl Game<'_> {
         };
         let mut data_map_types = Vec::new();
         self.native_data_map_types(&mut data_map_types);
+        self.data_map_registries = native_data_maps::registries_of(&data_map_types);
         let base = if reload {
             &self.health_resources
         } else {
@@ -331,7 +332,9 @@ impl Game<'_> {
     }
     /// Reload the content tables with the world's packs, as
     /// `/reload` reloads a server's (`ReloadableServerResources`).
-    pub(super) fn reload_world_tables(&mut self, prepared: PreparedWorldReload) {
+    /// Publish tables before function admission, leaving advancement rewards queued
+    /// until the reload's new function store is available.
+    pub(super) fn install_world_tables(&mut self, prepared: PreparedWorldReload) {
         let PreparedWorldReload {
             tables,
             health,
@@ -376,7 +379,6 @@ impl Game<'_> {
             && let Some(sync) = wire
         {
             self.with_advancement_hub(|hub, owners| hub.reload_resources(sync, owners));
-            self.run_native_advancement_grants();
         }
         let overlay = pack_files(&self.world_tables);
         self.adv.tree = Arc::new(horizon_client::advancements::Tree::load_with(
@@ -385,6 +387,7 @@ impl Game<'_> {
         ));
         self.adv.reset_tree();
         self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
+        self.announce_data_maps_updated(mod_api::DataMapsUpdateCause::ServerReload);
     }
 
     pub(super) fn join_world_rest(&mut self) -> Result<()> {
@@ -465,7 +468,7 @@ impl Game<'_> {
 
     pub(super) fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        let tags = self.block_tag_sets(items);
+        let tags = native_world_read::prepare_block_tags(items);
         let parts = mod_api::__private::prepare_parts(
             &items.block_tags,
             &items.item_tags,
@@ -547,9 +550,9 @@ impl Game<'_> {
     /// Ask the parts of each block `isPathfindable` once per state and type: the answer depends
     /// on nothing else, so path finding and spawning read it with no dispatch.
     pub(super) fn install_parts(&self, prepared: PreparedParts) {
+        api_values::install_block_states(prepared.block_states);
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);
-        api_values::install_block_states(prepared.block_states);
         self.resolve_pathfindable();
     }
     pub(super) fn resolve_pathfindable(&self) {

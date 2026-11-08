@@ -3,10 +3,9 @@ use std::sync::LazyLock;
 use alloc::borrow::ToOwned as _;
 
 use objc2::{
-    available,
-    rc::{autoreleasepool, Retained},
+    ClassType, Message, available,
+    rc::{Retained, autoreleasepool},
     runtime::ProtocolObject,
-    ClassType, Message,
 };
 use objc2_core_foundation::{CFString, CGSize};
 use objc2_core_graphics::CGColorSpace;
@@ -314,7 +313,9 @@ impl crate::Surface for super::Surface {
                 // The ITUR_2100 color space constants require macOS 11.0/iOS 14.0;
                 // `surface_capabilities` only reports BT.2100 PQ/HLG on those OS versions.
                 if !available!(macos = 11.0, ios = 14.0, tvos = 14.0, visionos = 1.0) {
-                    unreachable!("BT.2100 PQ/HLG color spaces are only reported on macOS 11.0+/iOS 14.0+/tvOS 14.0+");
+                    unreachable!(
+                        "BT.2100 PQ/HLG color spaces are only reported on macOS 11.0+/iOS 14.0+/tvOS 14.0+"
+                    );
                 }
                 Some(if config.color_space == wgt::SurfaceColorSpace::Bt2100Pq {
                     COLOR_SPACES.as_ref().map_err(|e| e.clone())?.itur_bt2100_pq

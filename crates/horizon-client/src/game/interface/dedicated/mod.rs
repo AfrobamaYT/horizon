@@ -180,6 +180,11 @@ pub(super) fn player_joined(id: u128, name: &str) {
     }
 }
 
+/// A player in the user cache by id, on a dedicated server.
+pub(super) fn cached_user_by_id(id: u128) -> Option<NameAndId> {
+    USER_CACHE.lock().unwrap().as_mut()?.get_by_id(id)
+}
+
 /// `server.toml`'s `[anticheat]`, beside server.properties when horizon-server runs the game; the
 /// default (on) without the file or the section, off (with an error logged) when the section is wrong.
 fn load_anticheat() -> horizon_anticheat::Config {
@@ -1062,6 +1067,7 @@ impl Game<'_> {
         // Nothing is kept around the spawn while nobody is on.
         self.streaming.radius = -1;
         self.settle_spawn()?;
+        self.prepare_levels()?;
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
             // `ServerActivityMonitor.reportLoginActivity`: a login attempt, however it ends. The management
@@ -1164,6 +1170,7 @@ impl Game<'_> {
                 Vec::new()
             },
             owner_profile: None,
+            singleplayer_profile: None,
         };
         let config = HubConfig {
             allow_flight: props.allow_flight,

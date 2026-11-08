@@ -120,6 +120,7 @@ const EXPORTS: &[&str] = &[
     "BlockEntityPart",
     "ItemPart",
     "MenuPart",
+    "FluidPart",
     "ServerReloadListener",
     "ClientReloadListener",
     "BlockTintSource",
@@ -231,6 +232,7 @@ pub(super) const SUBSCRIBED: &[(&str, &str)] = &[
     ("BlockEntityPart", "block_entity_subscribed"),
     ("ItemPart", "item_subscribed"),
     ("MenuPart", "menu_subscribed"),
+    ("FluidPart", "fluid_subscribed"),
 ];
 
 /// One trait method as it crosses.

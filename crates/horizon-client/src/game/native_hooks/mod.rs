@@ -69,14 +69,14 @@ use mod_api::CommandSource;
 use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
-    self, Answered, BlockPlacement, BlockTintSources, ClientAudioOptions, ClientChatOptions,
-    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientMiningPrediction,
-    ClientModifiers, ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef,
-    GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera,
-    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
-    NativeNoteBlockChange, PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId,
-    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
-    ToolUse, WorldPhase,
+    self, Answered, BlockPlacement, BlockTintSources, CameraDrawContext, ClientAudioOptions,
+    ClientChatOptions, ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions,
+    ClientMiningPrediction, ClientModifiers, ClientReloadListeners, CommandInvocation,
+    EnchantmentInfo, EntityRef, GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition,
+    LivingRef, NativeCamera, NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping,
+    NativeLifecycleContext, NativeNoteBlockChange, PathComputationType, Placement, PlayerRef,
+    RecipeBookCategory, ScreenId, ScreenOpening, ScreenshotImage, ServerReloadListeners,
+    ServerTickPhase, TicketController, ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
@@ -84,7 +84,8 @@ use mod_api::{
     NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
 use mod_api::{
-    BlockKey, CameraDrawContext, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite,
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, MapDecorationType, RuntimeSprite,
+    TaskId,
 };
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
@@ -117,6 +118,7 @@ use {
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
+pub(in crate::game) use fishing_medium::NativeFishingMedium;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;

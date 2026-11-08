@@ -993,55 +993,6 @@ pub mod tests {
     use serde_json::json;
 
     #[test]
-    fn native_payloads_are_retained_and_invalid_definitions_refused() {
-        let tags = HashMap::new();
-        let lang = HashMap::new();
-        let definition = json!({"effects":{"minecraft:post_attack":[
-            {"effect":{"type":"minecraft:ignite","duration":4}},
-            {"effect":{"type":"example:charge","amount":42}}
-        ]}});
-        let entry = parse_entry("example:charge", &definition, &tags, &lang).unwrap();
-        assert!(!entry.native_post_attack.contains_key(&0));
-        let payload = &entry.native_post_attack[&1];
-        assert_eq!(
-            payload.get("amount"),
-            Some(&horizon_core::nbt::Tag::Byte(42))
-        );
-        assert!(Arc::ptr_eq(payload, &entry.clone().native_post_attack[&1]));
-        let bad = json!({"effects":{"minecraft:post_attack":[{"effect":{"type":"example:charge","bad":null}}]}});
-        assert!(parse_entry("example:charge", &bad, &tags, &lang).is_err());
-        let base = sample();
-        let before = base.list.len();
-        let error = base
-            .with_entries([("example:valid", &definition), ("example:invalid", &bad)])
-            .err()
-            .unwrap();
-        assert!(error.to_string().contains("example:invalid"));
-        assert_eq!(base.list.len(), before);
-        assert!(base.get("example:valid").is_none());
-
-        let root = std::env::temp_dir().join(format!(
-            "horizon-enchant-refusal-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(root.join("data/example/enchantment")).unwrap();
-        std::fs::write(root.join("items.json"), "{}").unwrap();
-        std::fs::write(
-            root.join("data/example/enchantment/invalid.json"),
-            bad.to_string(),
-        )
-        .unwrap();
-        let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let error = Enchantments::load(&root, &defaults).err().unwrap();
-        assert!(error.to_string().contains("example:invalid"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
     fn world_pack_definitions_join_catalog_in_overlay_priority() {
         let root = std::env::temp_dir().join(format!(
             "horizon-enchantment-overlay-{}-{}",
@@ -1113,7 +1064,7 @@ pub mod tests {
         ];
         write("items.json", &json!({}));
         let defaults = horizon_world::item_defaults::read(&root).unwrap();
-        let base = Enchantments::load(&root, &defaults);
+        let base = Enchantments::load(&root, &defaults).unwrap();
         let loaded = Enchantments::load_with(
             &root,
             &horizon_world::loot::PackOverlay {
@@ -1121,7 +1072,8 @@ pub mod tests {
                 ..horizon_world::loot::PackOverlay::NONE
             },
             &defaults,
-        );
+        )
+        .unwrap();
         assert_eq!(
             loaded.get("minecraft:mending").unwrap().description,
             "Vanilla retained"
@@ -1157,8 +1109,87 @@ pub mod tests {
         );
         assert!(
             Enchantments::load(&root, &defaults)
+                .unwrap()
                 .get("wpenchant:loaded")
                 .is_none()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_payloads_are_retained_and_invalid_definitions_refused() {
+        let tags = HashMap::new();
+        let lang = HashMap::new();
+        let definition = json!({"effects":{"minecraft:post_attack":[
+            {"effect":{"type":"minecraft:ignite","duration":4}},
+            {"effect":{"type":"example:charge","amount":42}}
+        ]}});
+        let entry = parse_entry("example:charge", &definition, &tags, &lang).unwrap();
+        assert!(!entry.native_post_attack.contains_key(&0));
+        let payload = &entry.native_post_attack[&1];
+        assert_eq!(
+            payload.get("amount"),
+            Some(&horizon_core::nbt::Tag::Byte(42))
+        );
+        assert!(Arc::ptr_eq(payload, &entry.clone().native_post_attack[&1]));
+        let bad = json!({"effects":{"minecraft:post_attack":[{"effect":{"type":"example:charge","bad":null}}]}});
+        assert!(parse_entry("example:charge", &bad, &tags, &lang).is_err());
+        let base = sample();
+        let before = base.list.len();
+        let error = base
+            .with_entries([("example:valid", &definition), ("example:invalid", &bad)])
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("example:invalid"));
+        assert_eq!(base.list.len(), before);
+        assert!(base.get("example:valid").is_none());
+
+        let root = std::env::temp_dir().join(format!(
+            "horizon-enchant-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("data/example/enchantment")).unwrap();
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        std::fs::write(
+            root.join("data/example/enchantment/invalid.json"),
+            bad.to_string(),
+        )
+        .unwrap();
+        let defaults = horizon_world::item_defaults::read(&root).unwrap();
+        let error = Enchantments::load(&root, &defaults).err().unwrap();
+        assert!(error.to_string().contains("example:invalid"));
+        std::fs::remove_file(root.join("data/example/enchantment/invalid.json")).unwrap();
+        let files = vec![(
+            "enchantment/example:charge".to_owned(),
+            vec![serde_json::to_vec(&definition).unwrap()],
+        )];
+        let overlay = horizon_world::loot::PackOverlay {
+            files: &files,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        let loaded = Enchantments::load_with(&root, &overlay, &defaults).unwrap();
+        assert_eq!(
+            loaded.get("example:charge").unwrap().native_post_attack[&1].get("amount"),
+            Some(&horizon_core::nbt::Tag::Byte(42))
+        );
+        let files = vec![(
+            "enchantment/example:invalid".to_owned(),
+            vec![serde_json::to_vec(&bad).unwrap()],
+        )];
+        let overlay = horizon_world::loot::PackOverlay {
+            files: &files,
+            ..horizon_world::loot::PackOverlay::NONE
+        };
+        assert!(
+            Enchantments::load_with(&root, &overlay, &defaults)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("example:invalid")
         );
         std::fs::remove_dir_all(root).unwrap();
     }

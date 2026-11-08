@@ -11,6 +11,7 @@ use crate::browser::horizon::pack as horizon_pack;
 use crate::other_launchers::{self, Found};
 use crate::sources::{Folders, Os};
 use horizon_port_pack::{
+    datapacks,
     fetch::{Fetched, How},
     import::Pack,
     pipeline::{self, Log},
@@ -58,11 +59,13 @@ pub struct Imported {
     pub resourcepacks: usize,
     /// Index-listed resource packs the port step can obtain (separate from Java mods).
     pub indexed_resources: usize,
+    /// Data packs from jars that hold nothing else; new worlds in the profile start with them.
+    pub datapacks: usize,
 }
 
 impl Imported {
     pub fn can_play(&self) -> bool {
-        !self.mods.is_empty() || self.resourcepacks > 0
+        !self.mods.is_empty() || self.resourcepacks > 0 || self.datapacks > 0
     }
     pub fn can_port(&self) -> bool {
         self.portable > 0 || self.indexed_resources > 0
@@ -168,29 +171,91 @@ impl Imported {
 pub fn row_plain(row: &Row) -> String {
     use crate::i18n::{tr, trf};
     let plain = match row.plain.as_str() {
-        "Its blocks and items came over and passed Horizon's checks; the mod's own code is not run." => tr("Its blocks and items came over and passed Horizon's checks; the mod's own code is not run."),
-        "Part of it came over, but something is left out, differs from the original or has not been checked yet; the technical detail says what." => tr("Part of it came over, but something is left out, differs from the original or has not been checked yet; the technical detail says what."),
+        "Its blocks and items came over and passed Horizon's checks; the mod's own code is not run." => {
+            tr(
+                "Its blocks and items came over and passed Horizon's checks; the mod's own code is not run.",
+            )
+        }
+        "Part of it came over, but something is left out, differs from the original or has not been checked yet; the technical detail says what." => {
+            tr(
+                "Part of it came over, but something is left out, differs from the original or has not been checked yet; the technical detail says what.",
+            )
+        }
         "It does not come over yet." => tr("It does not come over yet."),
-        "Nothing to port: Horizon has it built in or does not need it." => tr("Nothing to port: Horizon has it built in or does not need it."),
-        "Horizon cannot tell yet what this mod does (it needs its jar or a reviewed entry), so it cannot say whether it will come over." => tr("Horizon cannot tell yet what this mod does (it needs its jar or a reviewed entry), so it cannot say whether it will come over."),
-        "It joins other mods together, so it waits until those are ported." => tr("It joins other mods together, so it waits until those are ported."),
-        "Content only (blocks, items, structures). Its jar is here, but it has not been carried over yet." => tr("Content only (blocks, items, structures). Its jar is here, but it has not been carried over yet."),
-        "Content only (blocks, items, structures). It can come over once its jar is here." => tr("Content only (blocks, items, structures). It can come over once its jar is here."),
-        "Needs what blocks and items do when used, placed, broken or ticked, which Horizon's mod API cannot run from a mod yet, so it does not come over." => tr("Needs what blocks and items do when used, placed, broken or ticked, which Horizon's mod API cannot run from a mod yet, so it does not come over."),
-        "Needs machine-style features (block entities, menus, item, fluid and energy handling, networking) that Horizon's mod API does not have yet, so it does not come over." => tr("Needs machine-style features (block entities, menus, item, fluid and energy handling, networking) that Horizon's mod API does not have yet, so it does not come over."),
-        "Needs mobs, custom rendering and models, dimensions or new game hooks that Horizon's mod API does not have yet, so it does not come over." => tr("Needs mobs, custom rendering and models, dimensions or new game hooks that Horizon's mod API does not have yet, so it does not come over."),
-        "Needs the game's client interfaces (keys, targeting, inventory reading, interface, rendering), so it does not come over yet." => tr("Needs the game's client interfaces (keys, targeting, inventory reading, interface, rendering), so it does not come over yet."),
-        "Horizon has not worked out what this mod needs yet." => tr("Horizon has not worked out what this mod needs yet."),
-        "A library other mods build on. Horizon's mod API and SDK take its place, so there is nothing to port." => tr("A library other mods build on. Horizon's mod API and SDK take its place, so there is nothing to port."),
-        "It makes the game faster. Horizon's own engine does that, so there is nothing to port." => tr("It makes the game faster. Horizon's own engine does that, so there is nothing to port."),
-        "Pack tooling or a game feature that Horizon already has, so there is nothing to port." => tr("Pack tooling or a game feature that Horizon already has, so there is nothing to port."),
-        "Built into Horizon already, so there is nothing to port." => tr("Built into Horizon already, so there is nothing to port."),
+        "Nothing to port: Horizon has it built in or does not need it." => {
+            tr("Nothing to port: Horizon has it built in or does not need it.")
+        }
+        "Horizon cannot tell yet what this mod does (it needs its jar or a reviewed entry), so it cannot say whether it will come over." => {
+            tr(
+                "Horizon cannot tell yet what this mod does (it needs its jar or a reviewed entry), so it cannot say whether it will come over.",
+            )
+        }
+        "It joins other mods together, so it waits until those are ported." => {
+            tr("It joins other mods together, so it waits until those are ported.")
+        }
+        "Content only (blocks, items, structures). Its jar is here, but it has not been carried over yet." => {
+            tr(
+                "Content only (blocks, items, structures). Its jar is here, but it has not been carried over yet.",
+            )
+        }
+        "Content only (blocks, items, structures). It can come over once its jar is here." => {
+            tr("Content only (blocks, items, structures). It can come over once its jar is here.")
+        }
+        "Needs what blocks and items do when used, placed, broken or ticked, which Horizon's mod API cannot run from a mod yet, so it does not come over." => {
+            tr(
+                "Needs what blocks and items do when used, placed, broken or ticked, which Horizon's mod API cannot run from a mod yet, so it does not come over.",
+            )
+        }
+        "Needs machine-style features (block entities, menus, item, fluid and energy handling, networking) that Horizon's mod API does not have yet, so it does not come over." => {
+            tr(
+                "Needs machine-style features (block entities, menus, item, fluid and energy handling, networking) that Horizon's mod API does not have yet, so it does not come over.",
+            )
+        }
+        "Needs mobs, custom rendering and models, dimensions or new game hooks that Horizon's mod API does not have yet, so it does not come over." => {
+            tr(
+                "Needs mobs, custom rendering and models, dimensions or new game hooks that Horizon's mod API does not have yet, so it does not come over.",
+            )
+        }
+        "Needs the game's client interfaces (keys, targeting, inventory reading, interface, rendering), so it does not come over yet." => {
+            tr(
+                "Needs the game's client interfaces (keys, targeting, inventory reading, interface, rendering), so it does not come over yet.",
+            )
+        }
+        "Horizon has not worked out what this mod needs yet." => {
+            tr("Horizon has not worked out what this mod needs yet.")
+        }
+        "A library other mods build on. Horizon's mod API and SDK take its place, so there is nothing to port." => {
+            tr(
+                "A library other mods build on. Horizon's mod API and SDK take its place, so there is nothing to port.",
+            )
+        }
+        "It makes the game faster. Horizon's own engine does that, so there is nothing to port." => {
+            tr(
+                "It makes the game faster. Horizon's own engine does that, so there is nothing to port.",
+            )
+        }
+        "Pack tooling or a game feature that Horizon already has, so there is nothing to port." => {
+            tr(
+                "Pack tooling or a game feature that Horizon already has, so there is nothing to port.",
+            )
+        }
+        "Built into Horizon already, so there is nothing to port." => {
+            tr("Built into Horizon already, so there is nothing to port.")
+        }
         "Nothing to port." => tr("Nothing to port."),
-        "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later." => tr("Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later."),
+        "Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later." => {
+            tr("Made for Minecraft 1.20 or older: Horizon ports mods made for 1.21 and later.")
+        }
         "Shader packs are not converted yet." => tr("Shader packs are not converted yet."),
-        "Copied as a resource pack; Horizon has not checked how it renders. Turn it on in the game's Resource Packs screen." => tr("Copied as a resource pack; Horizon has not checked how it renders. Turn it on in the game's Resource Packs screen."),
+        "Copied as a resource pack; Horizon has not checked how it renders. Turn it on in the game's Resource Packs screen." => {
+            tr(
+                "Copied as a resource pack; Horizon has not checked how it renders. Turn it on in the game's Resource Packs screen.",
+            )
+        }
         "Not downloaded yet; Port gets it." => tr("Not downloaded yet; Port gets it."),
-        "Horizon could not use this resource pack yet; the technical detail says why." => tr("Horizon could not use this resource pack yet; the technical detail says why."),
+        "Horizon could not use this resource pack yet; the technical detail says why." => {
+            tr("Horizon could not use this resource pack yet; the technical detail says why.")
+        }
         other => other,
     };
     let waiting = match row.waiting {
@@ -251,6 +316,7 @@ pub fn load(work: &Path) -> Result<Imported, String> {
     Ok(Imported {
         resourcepacks,
         indexed_resources,
+        datapacks: datapacks::installed(work),
         slug: work
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -349,9 +415,9 @@ pub fn outcome(pack: &Imported) -> String {
     let not = pack.count(Status::NotYet);
     format!(
         "{} is imported{}: {} of its {} files carried over ({} ported, {} partly), {} don't \
-         yet, {} aren't needed{}. {} resource packs available; enable them in Resource Packs. Its list says why.",
+         yet, {} aren't needed{}. {} resource packs available; enable them in Resource Packs. {} data packs on in new worlds. Its list says why.",
         pack.title(),
-        if pack.mods.is_empty() {
+        if pack.mods.is_empty() && pack.datapacks == 0 {
             ""
         } else {
             " and ported"
@@ -367,6 +433,7 @@ pub fn outcome(pack: &Imported) -> String {
             n => format!("; {n} are left off (listed under the pack)"),
         },
         pack.resourcepacks,
+        pack.datapacks,
     )
 }
 
@@ -395,8 +462,14 @@ pub fn apply_profile(cmd: &mut Command, work: &Path) -> Result<(), String> {
     }
     // Only mods that load together: the game would refuse the later of two sharing a namespace.
     let (mods, _) = pipeline::loadable(&carried(work));
-    if mods.is_empty() && resourcepacks::available(work).is_empty() {
-        return Err("No content mods or resource packs are available: port the pack first.".into());
+    if mods.is_empty()
+        && resourcepacks::available(work).is_empty()
+        && datapacks::installed(work) == 0
+    {
+        return Err(
+            "No content mods, data packs or resource packs are available: port the pack first."
+                .into(),
+        );
     }
     prepare_resourcepacks(work);
     let home = profile_home(work);
@@ -557,10 +630,11 @@ mod tests {
             pack.left_off,
             ["allthemodium: CurseForge downloads coming soon"]
         );
-        assert!(pack
-            .jars()
-            .unwrap()
-            .contains("CurseForge downloads coming soon"));
+        assert!(
+            pack.jars()
+                .unwrap()
+                .contains("CurseForge downloads coming soon")
+        );
         fs::remove_dir_all(&work).unwrap();
     }
 
@@ -623,9 +697,10 @@ mod tests {
         apply_profile(&mut cmd, &work).unwrap();
         assert_eq!(cmd.get_args().count(), 0);
         assert_eq!(cmd.get_current_dir(), Some(home.as_path()));
-        assert!(cmd
-            .get_envs()
-            .any(|(k, v)| k == "HORIZON_HOME" && v == Some(home.as_os_str())));
+        assert!(
+            cmd.get_envs()
+                .any(|(k, v)| k == "HORIZON_HOME" && v == Some(home.as_os_str()))
+        );
         assert!(home.join("resourcepacks/Look/pack.mcmeta").is_file());
         assert_eq!(
             fs::read(home.join("resourcepacks/look.zip")).unwrap(),
@@ -639,12 +714,41 @@ mod tests {
         assert!(pack.can_play());
         assert!(!pack.can_port());
         assert_eq!(pack.resourcepacks, 2);
-        assert!(pack
-            .left_off
-            .iter()
-            .any(|l| l.contains("Conflict") && l.contains("look.zip")));
+        assert!(
+            pack.left_off
+                .iter()
+                .any(|l| l.contains("Conflict") && l.contains("look.zip"))
+        );
         assert!(outcome(&pack).contains("2 resource packs available"));
         apply_profile(&mut Command::new("true"), &work).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_profile_with_only_data_packs_plays_and_its_game_folder_holds_them() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-launcher-datapack-profile-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let work = root.join("ports/sky");
+        fs::create_dir_all(&work).unwrap();
+        pipeline::write_json(&work.join("pack.json"), &Pack::default()).unwrap();
+        assert!(!load(&work).unwrap().can_play());
+        let pack = datapacks::folder(&work).join("void");
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(pack.join("pack.mcmeta"), b"{}").unwrap();
+        let p = load(&work).unwrap();
+        assert!(p.can_play());
+        assert_eq!(p.datapacks, 1);
+        assert!(outcome(&p).contains("1 data packs on in new worlds"));
+        let mut cmd = Command::new("true");
+        apply_profile(&mut cmd, &work).unwrap();
+        assert_eq!(cmd.get_args().count(), 0);
+        // The game finds them in its game folder, the profile's home.
+        let home = profile_home(&work);
+        assert_eq!(cmd.get_current_dir(), Some(home.as_path()));
+        assert!(pack.starts_with(&home));
         fs::remove_dir_all(root).unwrap();
     }
 
