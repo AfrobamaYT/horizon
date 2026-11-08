@@ -45,6 +45,7 @@ pub(super) fn target_id(t: Target) -> Option<u32> {
         | Target::Fangs(id)
         | Target::Crystal(id)
         | Target::Dragon(id)
+        | Target::DragonPart(id)
         | Target::Tnt(id)
         | Target::Falling(id)
         | Target::Rocket(id)

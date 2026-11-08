@@ -669,6 +669,10 @@ impl Dragon {
     fn down(&self) -> bool {
         matches!(self.phase, Phase::Dying { .. }) || !self.alive()
     }
+    /// Where part `i` stands and its box.
+    pub(super) fn part_geometry(&self, i: usize) -> (Vec3, Aabb) {
+        (self.parts[i].0, self.part_box(i))
+    }
     fn part_box(&self, i: usize) -> Aabb {
         let (w, h) = PART_SIZES[i];
         let p = self.parts[i].0;
@@ -1521,11 +1525,17 @@ impl Game<'_> {
     /// `ServerLevel.dragonParts`: where the part with that entity id is
     /// and its box.
     pub(super) fn dragon_part(&self, id: u32) -> Option<(Vec3, Aabb)> {
-        let d = self.dragon.as_ref().filter(|d| d.alive() && d.id != 0)?;
-        (d.id + 1..=d.id + 8).contains(&id).then(|| {
-            let i = (id - d.id - 1) as usize;
-            (d.parts[i].0, d.part_box(i))
-        })
+        let (d, i) = self.resident_dragon_part(id)?;
+        d.alive().then(|| d.part_geometry(i))
+    }
+    /// The dragon the level holds and the index (`getSubEntities` order) of
+    /// its part with that entity id, while the dragon is there, dying or
+    /// not: a part is an entity for as long as its parent is.
+    pub(super) fn resident_dragon_part(&self, id: u32) -> Option<(&Dragon, usize)> {
+        let d = self.dragon.as_ref().filter(|d| d.id != 0)?;
+        (d.id + 1..=d.id + 8)
+            .contains(&id)
+            .then(|| (d, (id - d.id - 1) as usize))
     }
     /// Damage to a special id (from projectiles and melee): what the
     /// dragon part or crystal made of it. `direct` is the projectile that hit.

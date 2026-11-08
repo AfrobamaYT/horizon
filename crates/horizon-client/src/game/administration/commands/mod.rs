@@ -67,6 +67,10 @@ pub(super) enum Target {
     Crystal(u32),
     /// The Ender Dragon, by its entity id (`minecraft:ender_dragon`).
     Dragon(u32),
+    /// One of the dragon's eight `EnderDragonPart`s, by its own entity id (the
+    /// eight after the dragon's). Only a mod's handle names one: a part is no
+    /// selector's, command's or save's entity.
+    DragonPart(u32),
     /// A primed TNT, by its entity id (`minecraft:tnt`).
     Tnt(u32),
     /// A falling block, by its entity id (`minecraft:falling_block`).
@@ -184,6 +188,7 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Fangs(id)
     | Target::Crystal(id)
     | Target::Dragon(id)
+    | Target::DragonPart(id)
     | Target::Tnt(id)
     | Target::Falling(id)
     | Target::Rocket(id)
@@ -599,6 +604,10 @@ impl Game<'_> {
                 .as_ref()
                 .filter(|d| d.id == id)
                 .map(|d| [d.position.x, d.position.y, d.position.z]),
+            Target::DragonPart(id) => self.resident_dragon_part(id).map(|(d, i)| {
+                let p = d.parts[i].0;
+                [p.x, p.y, p.z]
+            }),
             Target::Tnt(id) => self
                 .tnts
                 .iter()
@@ -675,7 +684,8 @@ impl Game<'_> {
                 .find(|o| o.id == id)
                 .map_or_else(String::new, |o| o.kind.clone()),
             Target::Crystal(_) => "minecraft:end_crystal".into(),
-            Target::Dragon(_) => "minecraft:ender_dragon".into(),
+            // `EnderDragonPart` takes its parent's type.
+            Target::Dragon(_) | Target::DragonPart(_) => "minecraft:ender_dragon".into(),
             Target::Tnt(_) => "minecraft:tnt".into(),
             Target::Falling(_) => "minecraft:falling_block".into(),
             Target::Rocket(_) => "minecraft:firework_rocket".into(),
@@ -1016,6 +1026,13 @@ impl Game<'_> {
         .into_iter()
         .find(|t| self.level_holds(*t))
     }
+    /// `ServerLevel.getEntityOrPart` for a part: the `EnderDragonPart` of the
+    /// level in place with this network id. `level_entity` does not find it,
+    /// as `Level.getEntity` does not: no selector or command reaches a part.
+    pub(in crate::game) fn level_dragon_part(&self, id: u32) -> Option<Target> {
+        let part = Target::DragonPart(id);
+        self.level_holds(part).then_some(part)
+    }
     /// `ServerLevel.getEntity`: whether the level in place still holds the
     /// entity a target names. Discard removes mobs from lookup immediately.
     fn level_holds(&self, t: Target) -> bool {
@@ -1039,6 +1056,10 @@ impl Game<'_> {
             Target::Fangs(id) => self.fangs.list.iter().any(|f| f.id == id),
             Target::Crystal(id) => self.crystals.iter().any(|c| c.id == id),
             Target::Dragon(id) => self.dragon.as_ref().is_some_and(|d| d.id == id),
+            // A part is an entity for as long as its parent is, a removal included.
+            Target::DragonPart(id) => self
+                .resident_dragon_part(id)
+                .is_some_and(|(d, _)| !self.persist.removals.contains(&Target::Dragon(d.id))),
             Target::Tnt(id) => self.tnts.iter().any(|t| t.id == id),
             Target::Falling(id) => self.falling.iter().any(|f| f.id == id),
             Target::Rocket(id) => self.rockets.iter().any(|r| r.id == id),
@@ -1852,8 +1873,9 @@ impl Game<'_> {
                     });
                 }
             }
-            // Wall-mounted entities do not move; a hook follows its own tick.
-            Target::Frame(_) | Target::Painting(_) | Target::Hook(_) => {}
+            // Wall-mounted entities do not move; a hook follows its own tick and a
+            // dragon part its dragon's.
+            Target::Frame(_) | Target::Painting(_) | Target::Hook(_) | Target::DragonPart(_) => {}
         }
         // Entity.teleportSameDimension: the riders go with their vehicle at
         // once, by the offset it took and the turn it was given.
@@ -2515,6 +2537,8 @@ impl Game<'_> {
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
             Target::Cloud(id) => self.breath_clouds.retain(|c| c.id != id),
             Target::Hook(id) => self.remove_fishing_hook(id),
+            // No command names a part, and `kill` on one would not stop its dragon.
+            Target::DragonPart(_) => {}
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
         self.orbs.retain(|o| o.age < u32::MAX / 2);
