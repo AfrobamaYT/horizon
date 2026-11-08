@@ -97,6 +97,17 @@ fn emit(
             "invalid or readonly patch path"
         ))
     );
+    // An opaque leaf (a closure or trait object, however it is referenced) never takes a patch.
+    fn leaf(shape: &Shape) -> bool {
+        match shape {
+            Shape::Opaque(_) => true,
+            Shape::Ref { to, .. } | Shape::Wrapped(_, to) => leaf(to),
+            _ => false,
+        }
+    }
+    if leaf(shape) {
+        return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
+    }
     if matches!(shape, Shape::Ref { mutable: false, .. }) {
         return Ok(quote!(if !__np_tree.is_empty() { #reject; }));
     }

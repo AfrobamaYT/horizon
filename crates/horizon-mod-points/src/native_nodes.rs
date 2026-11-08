@@ -23,6 +23,27 @@ impl NativeNode for Opaque {
     }
 }
 
+/// A callback argument: an opaque typed header whose value is a host-held callable, made when
+/// the row is read and valid only within the call's lease.
+pub struct Callable<F>(pub F, pub u64);
+impl<F> NativeNode for Callable<F>
+where
+    F: Fn() -> Result<std::sync::Arc<dyn mod_api::RowFunction>, RowError>,
+{
+    fn key(&self) -> u64 {
+        self.1
+    }
+    fn value(&self, f: &mut Header<'_>) -> Result<(), RowError> {
+        f(Some(&(self.0)()?))
+    }
+    fn len(&self) -> u64 {
+        0
+    }
+    fn child(&self, _: u64, _: &mut Visitor<'_>) -> Result<(), RowError> {
+        Err(RowError::Bounds)
+    }
+}
+
 /// A plain Wire leaf, with its generated canonical schema key.
 pub struct Scalar<'a, T: Put>(pub &'a T, pub u64);
 impl<T: Put> NativeNode for Scalar<'_, T> {

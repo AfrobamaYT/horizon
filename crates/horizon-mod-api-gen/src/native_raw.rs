@@ -2,7 +2,7 @@
 //!
 //! Plans contain native expressions, not native values or wire DTO definitions. The point
 //! macro owns the exclusive input places and the private callback-owned value lease.
-use crate::{crossing::Rule, native_patch, native_schema, native_window};
+use crate::{crossing::Rule, native_callable, native_patch, native_schema, native_window};
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Signature, Type};
@@ -248,7 +248,40 @@ fn frame(
         let member = syn::Index::from(index);
         let ordinal = index as u64;
         let field = index as u32;
-        let node = if let Some((graph, _)) = runtime {
+        let callable = if native_callable::is_callback(ty) {
+            native_callable::invocation(rule, module, owner, ty, quote!((*__roots.#member))).ok()
+        } else {
+            None
+        };
+        let node = if let Some(body) = callable {
+            // A callback argument crosses as its opaque typed header carrying a host-held
+            // callable that borrows this call's leased place; the lease ends with the call.
+            let resolved = rule.shape(module, owner, ty);
+            let key = if let Some((graph, _)) = runtime {
+                let id = graph.id(&resolved).ok_or("missing runtime schema")?;
+                quote!((__raw_plan).key(#id).unwrap_or(0))
+            } else {
+                let identity = native_schema::identity(rule, &resolved, &native_schema::All)?;
+                schema.push_str(&identity);
+                schema.push(';');
+                quote!(const { mod_points::snapshot::key(#identity) })
+            };
+            quote!(mod_points::native_nodes::Callable(
+                || unsafe {
+                    mod_points::callable::FunctionSource::at(
+                        __raw_window,
+                        __raw_state,
+                        |__state, __bytes| -> Result<Vec<u8>, mod_api::RowError> {
+                            #[allow(unused_mut)]
+                            let mut __roots = __state.0.try_borrow_mut()
+                                .map_err(|_| mod_api::RowError::Reentrant)?;
+                            #body
+                        },
+                    )
+                },
+                #key
+            ))
+        } else if let Some((graph, _)) = runtime {
             {}
             native_window::generate_runtime(
                 rule,
