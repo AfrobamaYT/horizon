@@ -76,6 +76,7 @@ pub struct StackData {
     kinetic_weapon: Option<crate::kinetic_weapon::KineticComponent>,
     /// Saved consumable and its typed runtime value, replaced together.
     consumable: Option<Arc<ConsumableComponent>>,
+    death_protection: Option<Arc<Vec<crate::items::ConsumeEffect>>>,
     /// `minecraft:potion_contents.potion`.
     pub potion: Option<Arc<str>>,
     /// The rest of `minecraft:potion_contents` (`custom_color`, `custom_effects`,
@@ -298,6 +299,17 @@ impl StackData {
     }
     /// Set (or with None remove) a preserved component.
     pub fn set_other(&mut self, id: &str, value: Option<Tag>) {
+        if id == "minecraft:death_protection" {
+            self.death_protection = value
+                .as_ref()
+                .and_then(|raw| {
+                    crate::items::parse_death_effects(
+                        &horizon_client_core::scoreboard::tag_to_json(raw),
+                    )
+                    .ok()
+                })
+                .map(Arc::new);
+        }
         self.other.retain(|(k, _)| k != id);
         if id == "minecraft:kinetic_weapon" {
             self.kinetic_weapon = value.map(crate::kinetic_weapon::KineticComponent::new);
@@ -441,6 +453,23 @@ impl ItemStack {
             return false;
         }
         info.is_some_and(|info| info.components.iter().any(|c| c == id))
+    }
+    /// Death protection effects retained at patch or prototype load.
+    pub fn death_protection<'a>(
+        &'a self,
+        info: Option<&'a ItemInfo>,
+    ) -> Option<&'a [crate::items::ConsumeEffect]> {
+        if let Some(data) = self.data() {
+            if let Some(value) = &data.death_protection {
+                return Some(value);
+            }
+            if data.other("!minecraft:death_protection").is_some()
+                || data.other("minecraft:death_protection").is_some()
+            {
+                return None;
+            }
+        }
+        info.and_then(|i| i.death_protection.as_deref())
     }
     /// Effective consumable, decoded when the patch/prototype is loaded, with no tick allocation.
     pub fn consumable<'a>(
@@ -1329,6 +1358,15 @@ pub fn decode_components(components: Option<&Tag>) -> (u32, Option<Box<StackData
             .map(collapsed_text),
         potion,
         potion_extra,
+        death_protection: c
+            .get("minecraft:death_protection")
+            .and_then(|raw| {
+                crate::items::parse_death_effects(&horizon_client_core::scoreboard::tag_to_json(
+                    raw,
+                ))
+                .ok()
+            })
+            .map(Arc::new),
         consumable: c
             .get("minecraft:consumable")
             .cloned()

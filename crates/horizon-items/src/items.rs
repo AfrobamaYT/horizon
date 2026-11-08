@@ -201,6 +201,8 @@ pub struct ItemInfo {
     pub can_always_eat: bool,
     /// `consumable`: its timing, sound, particles and `on_consume_effects`.
     pub consumable: Option<horizon_world::consumable::Consumable<String, ConsumeEffect>>,
+    /// Death protection effects decoded at definition load.
+    pub death_protection: Option<Vec<ConsumeEffect>>,
     /// Kinetic pose timing decoded once from the shared item prototype.
     pub kinetic_timing: Option<crate::kinetic_weapon::UseTiming>,
     /// `use_remainder`: what a finished use leaves (`UseRemainder`).
@@ -982,6 +984,11 @@ impl Items {
                         .get("minecraft:kinetic_weapon")
                         .and_then(crate::kinetic_weapon::UseTiming::from_json),
                     // Consumable.CODEC's defaults.
+                    death_protection: c
+                        .get("minecraft:death_protection")
+                        .map(parse_death_effects)
+                        .transpose()
+                        .map_err(|e| format!("{name}: {e}"))?,
                     consumable: c
                         .get("minecraft:consumable")
                         .map(parse_consumable)
@@ -2544,6 +2551,12 @@ pub fn bucket_contents(
 /// `DeathProtection.CODEC`: the `death_effects` of a `minecraft:death_protection`
 /// component, in order (`applyEffects` runs each one). A missing or empty
 /// list, as in `death_protection={}`, has none.
+pub fn parse_death_effects(
+    component: &Value,
+) -> std::result::Result<Vec<ConsumeEffect>, horizon_core::json_nbt::JsonNbtError> {
+    parse_consumable(&serde_json::json!({"on_consume_effects": component.get("death_effects").cloned().unwrap_or_else(|| serde_json::json!([]))})).map(|value| value.effects)
+}
+
 pub fn death_effects(component: &Value) -> Vec<ConsumeEffect> {
     component
         .get("death_effects")

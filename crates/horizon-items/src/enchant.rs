@@ -969,6 +969,26 @@ pub mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn native_payloads_are_retained_and_invalid_definitions_refused() {
+        let tags = HashMap::new();
+        let lang = HashMap::new();
+        let definition = json!({"effects":{"minecraft:post_attack":[
+            {"effect":{"type":"minecraft:ignite","duration":4}},
+            {"effect":{"type":"example:charge","amount":42}}
+        ]}});
+        let entry = parse_entry("example:charge", &definition, &tags, &lang).unwrap();
+        assert!(!entry.native_post_attack.contains_key(&0));
+        let payload = &entry.native_post_attack[&1];
+        assert_eq!(
+            payload.get("amount"),
+            Some(&horizon_core::nbt::Tag::Byte(42))
+        );
+        assert!(Arc::ptr_eq(payload, &entry.clone().native_post_attack[&1]));
+        let bad = json!({"effects":{"minecraft:post_attack":[{"effect":{"type":"example:charge","bad":null}}]}});
+        assert!(parse_entry("example:charge", &bad, &tags, &lang).is_none());
+    }
+
     /// A small registry built from literal JSON matching the vanilla files.
     pub fn sample() -> Enchantments {
         let defs = [
