@@ -1561,6 +1561,72 @@ impl ExperienceOrb {
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
     ) -> bool {
+        let mut world = world;
+        self.tick_among_inner(
+            &mut world,
+            facts,
+            collision,
+            player,
+            server,
+            next_float,
+            border,
+            fluids,
+            context,
+            on_sound,
+            entities,
+            &mut |_| false,
+        )
+    }
+
+    /// As `tick_among`, consulting the hook at each actual lava hit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_among_with_hook(
+        &mut self,
+        mut world: &mut World,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        player: Option<[f64; 3]>,
+        server: bool,
+        next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
+        fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        entities: &[Aabb],
+        invulnerable: &mut dyn FnMut(&mut World) -> bool,
+    ) -> bool {
+        self.tick_among_inner(
+            &mut world,
+            facts,
+            collision,
+            player,
+            server,
+            next_float,
+            border,
+            fluids,
+            context,
+            on_sound,
+            entities,
+            &mut |world| invulnerable(world),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tick_among_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        player: Option<[f64; 3]>,
+        server: bool,
+        next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
+        fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        entities: &[Aabb],
+        invulnerable: &mut dyn FnMut(&mut W) -> bool,
+    ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
         // `Entity.baseTick`'s fluid step, whose `updateFluidOnEyes` answer the
@@ -1651,8 +1717,15 @@ impl ExperienceOrb {
             self.velocity.y = 0.0;
         }
         // ExperienceOrb.tick applies block effects after moving, before drag.
-        let discarded =
-            server && self.apply_lava_contact_damage(world, fluids, wanted, next_float, on_sound);
+        let discarded = server
+            && self.apply_lava_contact_damage_inner(
+                world,
+                fluids,
+                wanted,
+                next_float,
+                on_sound,
+                invulnerable,
+            );
         // `float friction = getAirDrag()` (0.98F), the ground's block
         // friction multiplied in as a float, widened once for the scale.
         let mut friction = 0.98_f32;
@@ -1693,6 +1766,26 @@ impl ExperienceOrb {
         next_float: &mut dyn FnMut() -> f32,
         on_sound: &mut dyn FnMut([f64; 3], f32),
     ) -> bool {
+        let mut world = world;
+        self.apply_lava_contact_damage_inner(
+            &mut world,
+            fluids,
+            wanted,
+            next_float,
+            on_sound,
+            &mut |_| false,
+        )
+    }
+
+    fn apply_lava_contact_damage_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        fluids: &crate::motion::FluidResources,
+        wanted: Vec3,
+        next_float: &mut dyn FnMut() -> f32,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        invulnerable: &mut dyn FnMut(&mut W) -> bool,
+    ) -> bool {
         if self.health <= 0 {
             return true;
         }
@@ -1712,7 +1805,7 @@ impl ExperienceOrb {
             })
         });
         for _ in 0..contacts {
-            let dead = self.hurt(4.0);
+            let dead = !invulnerable(world) && self.hurt(4.0);
             let pitch = 2.0 + next_float() * 0.4;
             on_sound([self.position.x, self.position.y, self.position.z], pitch);
             if dead {
@@ -5300,6 +5393,37 @@ mod orb_lava_tests {
             ));
             assert_eq!((orb.health, orb.age), (-3, 2));
             assert_eq!(sounds.len(), 1);
+        });
+    }
+
+    #[test]
+    fn an_invulnerable_orb_keeps_its_health_but_still_emits_lava_sound() {
+        with_fixture(|world, facts, collision, fluids, assets| {
+            let lava = assets.registry.default_state("minecraft:lava").unwrap();
+            world.set(20, 4, 20, lava).unwrap();
+            let mut orb = sample_orb(Vec3::new(20.5, 4.1, 20.5), 5);
+            let mut sounds = 0;
+            let mut calls = 0;
+            assert!(orb.tick_among_with_hook(
+                world,
+                facts,
+                collision,
+                None,
+                true,
+                &mut || 0.0,
+                None,
+                fluids,
+                crate::test_resources::server_loop_context(),
+                &mut |_, _| sounds += 1,
+                &[],
+                &mut |_| {
+                    calls += 1;
+                    true
+                },
+            ));
+            assert_eq!(orb.health, 5);
+            assert_eq!(calls, 1);
+            assert_eq!(sounds, 1);
         });
     }
 
