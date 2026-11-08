@@ -3317,6 +3317,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "FluidLevelChangeEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_fluid_level_change"
     )]
@@ -3346,7 +3347,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "FurnaceExtractEvent"
     )]
     fn furnace_extract();
     /// A furnace finished smelting `item` into `result` at `pos`. Server-side.
@@ -3361,7 +3363,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "FurnaceStartSmeltEvent"
     )]
     fn furnace_start_smelt();
     /// A hopper selected a container while searching for items to push or
@@ -3652,7 +3655,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)"
+        neoforge = "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)",
+        paper = "FoodLevelChangeEvent"
     )]
     fn food_level_changed();
     /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
