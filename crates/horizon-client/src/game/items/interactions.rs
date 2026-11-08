@@ -145,8 +145,8 @@ pub(super) struct PlayerAction {
 }
 
 impl PlayerAction {
-    fn from_tag(tag: Option<&horizon_world::nbt::Tag>) -> Option<Self> {
-        use horizon_world::nbt::Tag;
+    fn from_tag(tag: Option<&horizon_core::nbt::Tag>) -> Option<Self> {
+        use horizon_core::nbt::Tag;
         let (Some(Tag::IntArray(player)), Some(Tag::Long(timestamp))) =
             (tag?.get("player"), tag?.get("timestamp"))
         else {
@@ -157,8 +157,8 @@ impl PlayerAction {
             timestamp: *timestamp,
         })
     }
-    fn to_tag(self) -> horizon_world::nbt::Tag {
-        use horizon_world::nbt::Tag;
+    fn to_tag(self) -> horizon_core::nbt::Tag {
+        use horizon_core::nbt::Tag;
         Tag::compound([
             ("player", Tag::IntArray(self.player.to_vec())),
             ("timestamp", Tag::Long(self.timestamp)),
@@ -181,8 +181,8 @@ impl InteractionState {
     /// `getFloatOr("width", 1)`, `getFloatOr("height", 1)`, the two
     /// `PlayerAction`s (absent unless they decode) and
     /// `getBooleanOr("response", false)`.
-    pub fn from_tag(tag: &horizon_world::nbt::Tag) -> Self {
-        use horizon_world::nbt::Tag;
+    pub fn from_tag(tag: &horizon_core::nbt::Tag) -> Self {
+        use horizon_core::nbt::Tag;
         let float = |key: &str| match tag.get(key) {
             Some(Tag::Float(bits)) => f32::from_bits(*bits),
             _ => 1.0,
@@ -196,8 +196,8 @@ impl InteractionState {
         }
     }
     /// `addAdditionalSaveData`: the settings, and each action when set.
-    pub fn write(&self, c: &mut horizon_world::nbt::Compound) {
-        use horizon_world::nbt::Tag;
+    pub fn write(&self, c: &mut horizon_core::nbt::Compound) {
+        use horizon_core::nbt::Tag;
         c.insert("width".into(), Tag::Float(self.width.to_bits()));
         c.insert("height".into(), Tag::Float(self.height.to_bits()));
         for (key, action) in [("attack", self.attack), ("interaction", self.interaction)] {

@@ -1257,7 +1257,7 @@ mod tests {
 
     #[test]
     fn direct_trim_uses_actual_model_on_both_sides_without_cached_wire() {
-        let source = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:diamond_chestplate",count:1,components:{"minecraft:trim":{material:{palette_id:"minecraft:gold",description:"Inline material"},pattern:{asset_id:"minecraft:coast",description:"Inline pattern",decal:0b}},"minecraft:custom_data":{keep:284}}}"#).unwrap().0;
+        let source = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_chestplate",count:1,components:{"minecraft:trim":{material:{palette_id:"minecraft:gold",description:"Inline material"},pattern:{asset_id:"minecraft:coast",description:"Inline pattern",decal:0b}},"minecraft:custom_data":{keep:284}}}"#).unwrap().0;
         let modeled = crate::save::item_from_nbt(&source).unwrap();
         let network =
             crate::lan::guest::stack_to_network(|_| 1, |_, _| None, &Some(modeled.clone()))

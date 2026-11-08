@@ -465,6 +465,7 @@ fn filter_of(meta: &serde_json::Value) -> Vec<Filter> {
 impl Pack {
     /// A mod's asset layer, which has no resource-pack metadata.
     pub fn mod_layer(id: String, source: Source) -> Self {
+        let polytone_configs = polytone_configs(&source);
         Self {
             title: Text::literal(&id),
             id,
@@ -475,6 +476,7 @@ impl Pack {
             compatible: true,
             compatibility: crate::pack_screen::Compat::Compatible,
             overlays: Vec::new(),
+            polytone_configs,
             filter: Vec::new(),
             selection: None,
         }
@@ -510,43 +512,15 @@ fn polytone_configs(source: &Source) -> horizon_polytone::pack::Configs {
             .strip_suffix(".json")?;
         Some(format!("{namespace}:{entry}"))
     };
-    match source {
-        Source::Dir(d) => {
-            let Ok(namespaces) = fs::read_dir(d.join("assets")) else {
-                return configs;
-            };
-            for namespace in namespaces.flatten() {
-                let folder = namespace.path().join("polytone/config_entries");
-                for file in fs::read_dir(&folder).into_iter().flatten().flatten() {
-                    let name = format!(
-                        "assets/{}/polytone/config_entries/{}",
-                        namespace.file_name().to_string_lossy(),
-                        file.file_name().to_string_lossy()
-                    );
-                    if let (Some(id), Ok(bytes)) = (id_of(&name), fs::read(file.path()))
-                        && let Ok(json) = serde_json::from_slice(&bytes)
-                    {
-                        configs.add_entry(id, &json);
-                    }
-                }
-            }
-        }
-        Source::Zip(z) => {
-            let Ok(zip) = Zip::open(z) else {
-                return configs;
-            };
-            let names: Vec<String> = zip
-                .names()
-                .filter(|n| id_of(n).is_some())
-                .map(str::to_owned)
-                .collect();
-            for name in names {
-                if let (Some(id), Ok(bytes)) = (id_of(&name), zip.read(&name))
-                    && let Ok(json) = serde_json::from_slice(&bytes)
-                {
-                    configs.add_entry(id, &json);
-                }
-            }
+    let Ok(source) = source.open() else {
+        return configs;
+    };
+    for name in source.list("assets/") {
+        if let Some(id) = id_of(&name)
+            && let Ok(bytes) = source.read(&name)
+            && let Ok(json) = serde_json::from_slice(&bytes)
+        {
+            configs.add_entry(id, &json);
         }
     }
     configs
@@ -2322,6 +2296,27 @@ mod tests {
         assert_eq!(pack.overlays, ["opt_fog"]);
         let _ = fs::remove_dir_all(dir);
     }
+    #[test]
+    fn opened_resources_supply_base_polytone_configs() {
+        use horizon_assets::resource_source::{Resource, ResourceSource};
+        let source = Source::Opened(ResourceSource::indexed(BTreeMap::from([
+            (
+                "assets/example/polytone/config_entries/fog.json".into(),
+                Resource::bytes(br#"{"default_value":"ON"}"#.to_vec()),
+            ),
+            (
+                "overlay/assets/example/polytone/config_entries/fog.json".into(),
+                Resource::bytes(br#"{"default_value":"OFF"}"#.to_vec()),
+            ),
+        ])));
+        let layer = Pack::mod_layer("example".into(), source);
+        let meta = serde_json::json!({"overlays":{"entries":[{
+            "directory":"fog", "formats":[0,0],
+            "polytone_condition":"config('example:fog') == 'ON'"
+        }]}});
+        assert_eq!(overlays_of(&meta, &layer.polytone_configs), ["fog"]);
+    }
+
     #[test]
     fn overlays_and_filters() {
         let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();

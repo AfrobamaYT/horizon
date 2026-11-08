@@ -43,7 +43,7 @@ pub fn potion_name_key(item: &str, potion: Option<&str>) -> String {
 /// `item_name`. None for other items, and for a stack whose contents were
 /// taken off (`!minecraft:potion_contents`), which takes the item's name.
 pub fn contents_name_key(stack: &ItemStack) -> Option<String> {
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     let item = &*stack.item;
     let named = matches!(
         item,
@@ -557,7 +557,7 @@ mod tests {
         );
         // A potion or a tipped arrow is named by its contents, over its
         // item_name; one whose contents were taken off is not.
-        use horizon_world::nbt::Tag;
+        use horizon_core::nbt::Tag;
         let mut swift =
             ItemStack::new("minecraft:potion", 1).with_potion("minecraft:long_swiftness");
         swift

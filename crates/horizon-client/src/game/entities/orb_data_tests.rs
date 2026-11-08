@@ -3,7 +3,7 @@
 //! reads the new `Age` into the same live orb
 //! (tools/test_orb_data_parity.py measures the same on vanilla 26.3).
 use super::*;
-use horizon_world::nbt::{Tag, parse_snbt};
+use horizon_core::nbt::{Tag, parse_snbt};
 use std::sync::Arc;
 
 const ORB: &str = "00000009-0000-0000-0000-000000000001";

@@ -1581,44 +1581,6 @@ impl Items {
         }
         self.roll_block_table(table, &block.name, &block.properties, roll, random)
     }
-    /// Loot-mine command evaluation with its actual location predicate reader.
-    #[allow(clippy::too_many_arguments)]
-    pub fn block_drops_with_location<R: RandomSource>(
-        &self,
-        registry: &BlockRegistry,
-        state: BlockStateId,
-        held: Option<&ItemStack>,
-        location: &dyn Fn(&Value) -> Option<bool>,
-        random: &mut R,
-        this_entity: bool,
-        keep_empty: bool,
-    ) -> Vec<ItemStack> {
-        let Some(block) = registry.state(state) else {
-            return Vec::new();
-        };
-        let Some(table) = self
-            .block_loot_table(registry, state)
-            .and_then(|id| self.loot.get(&id))
-        else {
-            return Vec::new();
-        };
-        self.roll_block_table_at(
-            table,
-            &block.name,
-            &block.properties,
-            BlockLootRoll {
-                held,
-                breaker: this_entity,
-                keep_empty,
-                ..Default::default()
-            },
-            random,
-            Some(location),
-        )
-        .into_iter()
-        .filter(|drop| !drop.item.starts_with(DYNAMIC))
-        .collect()
-    }
     fn roll_block_table<R: RandomSource>(
         &self,
         table: &Value,
@@ -3699,15 +3661,26 @@ mod tests {
                 let mut old = LegacyRandom::new(seed);
                 let mut contextual = old.clone();
                 assert_eq!(
-                    items.block_drops(&registry, BlockStateId(0), held.as_ref(), &mut old),
-                    items.block_drops_with_location(
+                    items.block_drops(
                         &registry,
                         BlockStateId(0),
-                        held.as_ref(),
-                        &unused,
+                        BlockLootRoll {
+                            held: held.as_ref(),
+                            ..Default::default()
+                        },
+                        &mut old,
+                        None
+                    ),
+                    items.block_drops(
+                        &registry,
+                        BlockStateId(0),
+                        BlockLootRoll {
+                            held: held.as_ref(),
+                            location: Some(&unused),
+                            ..Default::default()
+                        },
                         &mut contextual,
-                        false,
-                        false,
+                        None,
                     )
                 );
                 assert_eq!(old.next_long(), contextual.next_long());

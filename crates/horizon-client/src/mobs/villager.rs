@@ -598,7 +598,7 @@ pub(crate) fn add_to_container(
 /// at the type's limit for it; what does not fit is dropped.
 pub(crate) fn load_container(
     m: &Mob,
-    items: &[horizon_world::nbt::Tag],
+    items: &[horizon_core::nbt::Tag],
     slots: usize,
 ) -> Vec<ItemStack> {
     let mut inventory = Vec::new();

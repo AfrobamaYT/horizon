@@ -1747,7 +1747,7 @@ mod tests {
 
     #[test]
     fn inline_trim_is_modeled_and_saved_without_raw_fallback() {
-        let source = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:diamond_chestplate",count:1,components:{"minecraft:custom_data":{keep:284},"minecraft:trim":{material:{palette_id:"minecraft:gold",description:"Inline material"},pattern:{asset_id:"minecraft:coast",description:"Inline pattern",decal:0b}}}}"#).unwrap().0;
+        let source = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:diamond_chestplate",count:1,components:{"minecraft:custom_data":{keep:284},"minecraft:trim":{material:{palette_id:"minecraft:gold",description:"Inline material"},pattern:{asset_id:"minecraft:coast",description:"Inline pattern",decal:0b}}}}"#).unwrap().0;
         let decoded = crate::item_nbt::item_from_nbt(&source).unwrap();
         let data = decoded.data().unwrap();
         assert!(

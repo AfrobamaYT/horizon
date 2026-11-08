@@ -18020,9 +18020,9 @@ mod player_save_projection_tests {
         lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig, playerdata},
         motion::PlayerMotion,
     };
+    use horizon_core::nbt::Tag;
     use horizon_core::position::ChunkPos;
     use horizon_protocol::packets::configuration::ClientInformation;
-    use horizon_world::nbt::Tag;
     use std::sync::{Arc, atomic::AtomicI32, mpsc};
 
     fn check(tag: &Tag, grace: i32, particles: bool, phase: &str, failures: &mut Vec<String>) {

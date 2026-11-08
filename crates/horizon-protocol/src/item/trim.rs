@@ -3,7 +3,7 @@ use crate::{
     Result,
     buf::{Reader, Writer},
 };
-use horizon_world::nbt::Tag;
+use horizon_core::nbt::Tag;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrimHolder<T> {

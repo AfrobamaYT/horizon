@@ -4,7 +4,7 @@
 //! UUID (tools/test_interaction_data_parity.py measures the same on vanilla
 //! 26.3).
 use super::*;
-use horizon_world::nbt::{Tag, parse_snbt};
+use horizon_core::nbt::{Tag, parse_snbt};
 use std::sync::Arc;
 
 const EDITED: &str = "00000042-0000-0000-0000-000000000001";

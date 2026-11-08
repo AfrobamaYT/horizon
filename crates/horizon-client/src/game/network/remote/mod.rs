@@ -7545,7 +7545,7 @@ impl Game<'_> {
         let mut mob_fx = water_fx;
         let tick_listened = mod_api::__private::listened(mod_api::HookId::PlayerTickPre)
             || mod_api::__private::listened(mod_api::HookId::PlayerTickPost);
-        for (i, rain) in rain.into_iter().enumerate() {
+        for (i, rain) in rain.iter().copied().enumerate() {
             let id = self.mobs[i].id;
             let player = self
                 .remote
