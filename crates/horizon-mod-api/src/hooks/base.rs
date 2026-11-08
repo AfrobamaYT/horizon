@@ -2819,7 +2819,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "BlockBreakProgressUpdateEvent"
     )]
     fn block_break_progress_update();
     /// On an authoritative server, fire is about to burn the block at `pos`
