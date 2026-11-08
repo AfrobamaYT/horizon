@@ -15,6 +15,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerSetSpawnEvent",
+        paper = "PlayerSetSpawnEvent",
         cancellable = true
     )]
     fn player_set_spawn(
