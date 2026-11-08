@@ -367,8 +367,10 @@ impl DimensionFacts {
     }
 
     /// `base` with the fields `json` names over it: a mod's dimension type names only what it
-    /// changes, and a data pack's names them all. Timelines and the clock stay `base`'s, and a field
-    /// the codec refuses is an error.
+    /// changes, and a data pack's names them all. Timelines and the clock change when `json` names
+    /// `timelines` as a vanilla tag (`#minecraft:in_overworld`, `in_nether` or `in_end`), a timeline
+    /// id or a list of ids (any other tag stays `base`'s), and a field the codec refuses is an
+    /// error.
     pub fn patched(base: &Self, id: &str, json: &Value) -> Result<Self, String> {
         let mut out = base.clone();
         out.id = id.to_owned();
@@ -419,6 +421,31 @@ impl DimensionFacts {
                 "default" => CardinalLight::Default,
                 "nether" => CardinalLight::Nether,
                 other => return Err(format!("unknown cardinal light {other:?}")),
+            };
+        }
+        let timelines = match &json["timelines"] {
+            Value::String(tag) => match tag.as_str() {
+                "#minecraft:in_overworld" => Some(VANILLA[0].timelines.clone()),
+                "#minecraft:in_nether" => Some(VANILLA[2].timelines.clone()),
+                "#minecraft:in_end" => Some(VANILLA[3].timelines.clone()),
+                tag if tag.starts_with('#') => None,
+                id => Some(vec![id.to_owned()]),
+            },
+            Value::Array(ids) => Some(
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            _ => None,
+        };
+        if let Some(timelines) = timelines {
+            out.timelines = timelines;
+            // A type with its own timelines has the clock it names, or none.
+            out.default_clock = match &json["default_clock"] {
+                Value::String(s) => Some(s.clone()),
+                Value::Object(o) => o.get("id").and_then(Value::as_str).map(str::to_owned),
+                _ => None,
             };
         }
         for (key, field) in [
@@ -602,6 +629,38 @@ mod level_type_tests {
         // untouched fields stay the Overworld's
         assert_eq!(facts.infiniburn, "#minecraft:infiniburn_overworld");
         assert!(facts.piglins_zombify && facts.can_start_raid && !facts.respawn_anchor_works);
+    }
+
+    /// A type that names `timelines` takes them and its clock; one that does not keeps the base's.
+    #[test]
+    fn named_timelines_and_a_clock_replace_the_bases() {
+        let with = |extra: serde_json::Value| {
+            let mut json = serde_json::json!({"min_y": 0, "height": 64});
+            json.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            DimensionFacts::patched(DimensionFacts::overworld(), "test:x", &json).unwrap()
+        };
+        let base = DimensionFacts::overworld();
+        let kept = with(serde_json::json!({}));
+        assert_eq!(
+            (&kept.timelines, &kept.default_clock),
+            (&base.timelines, &base.default_clock)
+        );
+        let nether = with(serde_json::json!({"timelines": "#minecraft:in_nether"}));
+        assert!(!nether.has_timeline("minecraft:day"));
+        assert!(nether.has_timeline("minecraft:villager_schedule"));
+        assert_eq!(nether.default_clock, None);
+        let none = with(serde_json::json!({"timelines": []}));
+        assert!(none.timelines.is_empty() && none.default_clock.is_none());
+        let own = with(serde_json::json!({
+            "timelines": ["test:cycle"], "default_clock": "test:clock",
+        }));
+        assert_eq!(own.timelines, ["test:cycle"]);
+        assert_eq!(own.default_clock.as_deref(), Some("test:clock"));
+        // a tag this table cannot expand leaves the base's
+        let unknown = with(serde_json::json!({"timelines": "#test:cycles"}));
+        assert_eq!(unknown.timelines, base.timelines);
     }
 
     #[test]
