@@ -3370,8 +3370,9 @@ pub struct PlayerView {
     pub bounds: Aabb,
     pub eye: [f64; 3],
     pub alive: bool,
-    /// The `invulnerable` ability, which `asValidTarget` refuses a target
-    /// by (#1175): a valid-target rule a goal tick's view asks.
+    /// The `invulnerable` ability, the `Invulnerable` flag or its window,
+    /// which `asValidTarget` refuses a target by (#1175, #916): a
+    /// valid-target rule a goal tick's view asks.
     pub invulnerable: bool,
     pub creative: bool,
     pub sneaking: bool,

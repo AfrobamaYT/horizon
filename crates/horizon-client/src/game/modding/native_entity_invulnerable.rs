@@ -297,13 +297,25 @@ impl Game<'_> {
     }
 
     /// `Entity.isInvulnerableToPiercingWeapon` (`isInvulnerable`): the
-    /// `Invulnerable` flag; the temporary window `Entity.invulnerableTime`
-    /// opens does not exist yet (#916), so no hit answers through it. None
-    /// for a stale handle or a kind without the flag.
+    /// `Entity.isInvulnerable()`: the `Invulnerable` flag or the window
+    /// `Entity.invulnerableTime` keeps open — a mob's own fields, a player's
+    /// health, the saved tags for the other kinds (#916). None for a stale
+    /// handle.
     pub(super) fn entity_invulnerable_to_piercing_weapon(&self, entity: EntityRef) -> Option<bool> {
         match self.native_entity_target(entity)? {
-            Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.invulnerable_flag),
-            _ => None,
+            Target::Mob(id) => Some(self.mobs.iter().find(|m| m.id == id)?.is_invulnerable()),
+            t @ (Target::Player | Target::Guest(_)) => {
+                let p = self.native_player_body(t)?;
+                Some(p.health.permanently_invulnerable || p.health.invulnerable_time > 0)
+            }
+            t => {
+                let id = match t {
+                    Target::Stand(id) | Target::Dragon(id) | Target::Item(id) => id,
+                    _ => return None,
+                };
+                let (flag, window) = self.saved_invulnerability(id);
+                Some(flag || window > 0)
+            }
         }
     }
 
@@ -882,6 +894,140 @@ mod tests {
                 game.tick_saved_invulnerable_time(14);
             }
             assert_eq!(game.entity_invulnerable_time(stand), Some(0));
+        });
+    }
+
+    /// #916, review round 2: the piercing query is `Entity.isInvulnerable()`
+    /// — the flag or the open window — for every kind that keeps either.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_piercing_query_follows_the_flag_or_the_window_of_every_kind() {
+        use horizon_client::entities::ArmorStand;
+        use horizon_client::motion::PlayerMotion;
+        with_game(|game| {
+            let pig = game.res.mob_types().get("minecraft:pig").unwrap().clone();
+            game.mobs.push(Mob::new(300001, pig, Vec3::ZERO, 0.0));
+            let mob = game.entity(300001).unwrap();
+            assert_eq!(mob.invulnerable_to_piercing_weapon(game), Some(false));
+            // The window alone, without the flag, answers it.
+            assert!(game.entity_set_invulnerable_time(mob, 3));
+            assert_eq!(mob.invulnerable_to_piercing_weapon(game), Some(true));
+            // A player's flag, apart from the abilities.
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.entity(20).unwrap();
+            assert!(game.entity_set_invulnerable(player, true));
+            assert_eq!(player.invulnerable_to_piercing_weapon(game), Some(true));
+            // A saved kind's window, over its tags.
+            game.armor_stands
+                .push(ArmorStand::new(14, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let stand = game.entity(14).unwrap();
+            assert!(game.entity_set_invulnerable_time(stand, 5));
+            assert_eq!(stand.invulnerable_to_piercing_weapon(game), Some(true));
+        });
+    }
+
+    /// #916, review round 2: a player the flag or the window covers is no
+    /// mob's target — the write handle's facts, the goal view, and
+    /// `asValidTarget` behind both.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_flagged_player_is_no_ones_target() {
+        use horizon_client::motion::PlayerMotion;
+        use super::Target;
+        with_game(|game| {
+            let zombie = game
+                .res
+                .mob_types()
+                .get("minecraft:zombie")
+                .unwrap()
+                .clone();
+            game.mobs
+                .push(Mob::new(300001, zombie, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.entity(20).unwrap();
+            // Survival and alive: a zombie takes the player as a target.
+            assert!(game.native_mob_valid_target(&game.mobs[0], Target::Player));
+            // The flag alone, with every ability untouched, refuses it.
+            assert!(game.entity_set_invulnerable(player, true));
+            assert!(
+                !game.player.as_ref().unwrap().invulnerable,
+                "the abilities stay untouched"
+            );
+            assert!(!game.native_mob_valid_target(&game.mobs[0], Target::Player));
+            assert!(
+                game.player_view().unwrap().invulnerable,
+                "the goal view agrees"
+            );
+            // The window refuses it too, until it closes.
+            assert!(game.entity_set_invulnerable(player, false));
+            assert!(game.entity_set_invulnerable_time(player, 2));
+            assert!(!game.native_mob_valid_target(&game.mobs[0], Target::Player));
+            assert!(game.entity_set_invulnerable_time(player, 0));
+            assert!(game.native_mob_valid_target(&game.mobs[0], Target::Player));
+        });
+    }
+
+    /// #916, review round 2: a stand the flag or the window covers refuses a
+    /// survival punch — no wobble, no break — while a creative player's hit
+    /// passes both, as `DamageSource.isCreativePlayer` does.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_saved_stand_refuses_the_punch_that_would_break_it() {
+        use horizon_client::entities::ArmorStand;
+        with_game(|game| {
+            game.armor_stands
+                .push(ArmorStand::new(14, Vec3::new(0.5, 64.0, 0.5), 0.0));
+            let stand = game.entity(14).unwrap();
+            // The window refuses even the first hit's wobble.
+            assert!(game.entity_set_invulnerable_time(stand, 5));
+            assert!(!game.punch_armor_stand(0));
+            assert_eq!(game.armor_stands.len(), 1);
+            // The flag holds the breaking second hit back in survival.
+            assert!(game.entity_set_invulnerable(stand, true));
+            assert!(!game.punch_armor_stand(0));
+            assert!(!game.punch_armor_stand(0));
+            assert_eq!(game.armor_stands.len(), 1, "still standing");
+            // A creative player's hit passes the flag.
+            game.creative = true;
+            assert!(game.punch_armor_stand(0));
+            assert_eq!(game.armor_stands.len(), 0);
+        });
+    }
+
+    /// #916, review round 2: the player's flag and window ride the save —
+    /// `sync_level` writes them, `load_saved_state_once` reads them back.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn the_players_flag_and_window_ride_the_save() {
+        use horizon_client::motion::PlayerMotion;
+        use horizon_core::nbt::Tag;
+        with_game(|game| {
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::ZERO).unwrap());
+            game.lan_acting_uuid = Some(123);
+            game.lan_acting_entity = Some(20);
+            let player = game.entity(20).unwrap();
+            assert!(game.entity_set_invulnerable(player, true));
+            assert!(game.entity_set_invulnerable_time(player, 7));
+            // Entity.saveWithoutId: the flag always, the window while open.
+            game.sync_level();
+            let saved = game.level.player_extra.clone().unwrap();
+            assert!(matches!(saved.get("Invulnerable"), Some(Tag::Byte(1))));
+            assert!(matches!(saved.get("invulnerable_time"), Some(Tag::Int(7))));
+            // A later load restores both onto the body.
+            game.player.as_mut().unwrap().health.permanently_invulnerable = false;
+            game.player.as_mut().unwrap().health.invulnerable_time = 0;
+            let mut pending = true;
+            game.player
+                .as_mut()
+                .unwrap()
+                .load_saved_state_once(&mut pending, &game.level)
+                .unwrap();
+            assert!(game.player.as_ref().unwrap().health.permanently_invulnerable);
+            assert_eq!(game.entity_invulnerable_time(player), Some(7));
         });
     }
 

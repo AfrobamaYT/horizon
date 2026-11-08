@@ -430,7 +430,9 @@ impl Game<'_> {
                 p.position.z,
             ],
             alive: !p.health.dead_or_dying(),
-            invulnerable: p.invulnerable || p.health.invulnerable_time > 0,
+            invulnerable: p.invulnerable
+                || p.health.permanently_invulnerable
+                || p.health.invulnerable_time > 0,
             // EntitySelector.NO_CREATIVE_OR_SPECTATOR.
             creative: self.creative || self.spectator(),
             sneaking: self.keys.held(Action::Sneak),
