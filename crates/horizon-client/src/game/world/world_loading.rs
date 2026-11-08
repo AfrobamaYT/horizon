@@ -678,33 +678,80 @@ pub(super) fn level_shapes(
     let (overrides, _) =
         horizon_client::datapack::worldgen_overrides(&enabled, |b| biomes.contains(b));
     let shapes = shapes_of(&overrides);
-    set_level_sea_levels(&shapes, resources);
+    set_level_sea_levels(
+        &overrides,
+        horizon_world::worldgen::overrides::mod_dimensions(),
+        resources,
+    );
     shapes
 }
 
-/// The sea levels of the levels the mods registered with the noise generator: the `sea_level` of
-/// the noise settings their stems name, which the game's spawning, weather and maps then use. A
-/// level of another generator, or whose noise settings are not in the game's resources, has its
-/// built-in level's.
-fn set_level_sea_levels(shapes: &horizon_client::chunk::LevelShapes, resources: &std::path::Path) {
-    use horizon_world::worldgen::overrides::{mod_dimensions, stem_sea_level};
+/// The sea levels of the levels whose stem the mods or the data packs give: a mod's own
+/// (`DimensionSettings::sea_level`), else the `sea_level` of the noise settings their stem names,
+/// the packs' over the game's. The game's spawning, weather and maps then use them. A level of a
+/// generator that reads no noise settings has its built-in level's, and the three built-in levels
+/// too unless the packs replace their stem or their noise settings.
+fn set_level_sea_levels(
+    overrides: &horizon_world::worldgen::overrides::WorldgenOverrides,
+    mods: &[horizon_world::worldgen::overrides::ModDimension],
+    resources: &std::path::Path,
+) {
+    use horizon_world::worldgen::overrides::{DIMENSIONS, NOISE_SETTINGS, stem_sea_level};
     let read = |id: &str| -> Option<serde_json::Value> {
+        if let Some((_, json)) = overrides
+            .entries(NOISE_SETTINGS)
+            .find(|(entry, _)| *entry == id)
+        {
+            return serde_json::from_str(json).ok();
+        }
         let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
         let file = resources.join(format!(
             "data/{namespace}/worldgen/noise_settings/{path}.json"
         ));
         serde_json::from_slice(&std::fs::read(file).ok()?).ok()
     };
-    let levels = shapes
-        .extra
-        .iter()
-        .filter_map(|level| {
-            let dimension = mod_dimensions().iter().find(|d| d.id == level.id)?;
-            let stem: serde_json::Value = serde_json::from_str(&dimension.stem).ok()?;
-            let sea = stem_sea_level(&stem, &read)?;
-            Some((horizon_core::LevelKey::parse(level.id).ok()?, sea))
-        })
-        .collect();
+    let mut levels: Vec<(horizon_core::LevelKey, i32)> = Vec::new();
+    for (id, stem) in overrides.entries(DIMENSIONS) {
+        let own = mods.iter().find(|d| d.id == id).and_then(|d| d.sea_level);
+        // The noise settings are what the terrain is built with; `sea_level` of the mod is for
+        // a generator that has none.
+        let stem = serde_json::from_str::<serde_json::Value>(stem).ok();
+        // A superflat generator builds at -63 (`FlatLevelSource.getSeaLevel`) whatever its level
+        // is told; a mod's explicit sea level still wins for it.
+        let flat = stem
+            .as_ref()
+            .is_some_and(|stem| stem["generator"]["type"].as_str() == Some("minecraft:flat"));
+        let sea = stem
+            .and_then(|stem| stem_sea_level(&stem, &read))
+            .or(own)
+            .or(flat.then_some(-63));
+        if let (Some(sea), Ok(key)) = (sea, horizon_core::LevelKey::parse(id)) {
+            levels.push((key, sea));
+        }
+    }
+    // A built-in level the packs gave no stem: its default noise settings, which a pack may replace.
+    for (id, settings) in [
+        ("minecraft:overworld", "minecraft:overworld"),
+        ("minecraft:the_nether", "minecraft:nether"),
+        ("minecraft:the_end", "minecraft:end"),
+    ] {
+        let Ok(key) = horizon_core::LevelKey::parse(id) else {
+            continue;
+        };
+        if levels.iter().any(|(level, _)| *level == key) {
+            continue;
+        }
+        let replaced = overrides
+            .entries(NOISE_SETTINGS)
+            .any(|(entry, _)| entry == settings);
+        let sea = replaced
+            .then(|| read(settings))
+            .flatten()
+            .and_then(|json| i32::try_from(json["sea_level"].as_i64()?).ok());
+        if let Some(sea) = sea {
+            levels.push((key, sea));
+        }
+    }
     horizon_world::level::set_sea_levels(levels);
 }
 
@@ -1145,6 +1192,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_levels_sea_level_comes_from_its_mod_or_its_noise_settings() {
+        use horizon_client::datapack::worldgen_overrides_over;
+        use horizon_world::worldgen::overrides::ModDimension;
+        let level = |id: &str, stem: &str, sea_level| ModDimension {
+            id: id.into(),
+            stem: stem.into(),
+            dimension_type: "{}".into(),
+            sea_level,
+        };
+        let mods = [
+            level(
+                "test:own",
+                r#"{"type":"test:own","generator":{"type":"test:floor"}}"#,
+                Some(10),
+            ),
+            level(
+                "test:inline",
+                r#"{"type":"test:inline","generator":{"type":"minecraft:noise","settings":{"sea_level":20}}}"#,
+                None,
+            ),
+            level(
+                "test:plain",
+                r#"{"type":"test:plain","generator":{"type":"test:floor"}}"#,
+                None,
+            ),
+        ];
+        let (overrides, _) = worldgen_overrides_over(&mods, &[], |_| true);
+        set_level_sea_levels(&overrides, &mods, std::path::Path::new("."));
+        let sea = |id: &str| {
+            horizon_world::level::sea_level_of(horizon_core::LevelKey::parse(id).unwrap())
+        };
+        assert_eq!(sea("test:own"), 10);
+        assert_eq!(sea("test:inline"), 20);
+        assert_eq!(sea("test:plain"), 63);
+        assert_eq!(sea("minecraft:the_nether"), 32);
+        horizon_world::level::set_sea_levels(Vec::new());
+    }
+
+    #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn creation_rule_selection_reaches_the_saved_world() {
         use super::super::native_entity_refs::tests::with_game;
@@ -1211,6 +1297,7 @@ mod tests {
             dimension_type:
                 r#"{"min_y":-128,"height":448,"logical_height":320,"has_skylight":false,"has_ceiling":true}"#
                     .into(),
+            sea_level: None,
         };
         let (overrides, _) = worldgen_overrides_over(&[pocket], &[], |_| true);
         let shapes = shapes_of(&overrides);
@@ -1247,6 +1334,7 @@ mod tests {
             id: "test:pocket".into(),
             stem: r#"{"type":"test:pocket","generator":{"type":"test:floor"}}"#.into(),
             dimension_type: r#"{"min_y":-128,"height":448,"logical_height":448}"#.into(),
+            sea_level: None,
         }])
         .unwrap();
         let floor: Arc<dyn ModChunkGenerator> = Arc::new(Floor);

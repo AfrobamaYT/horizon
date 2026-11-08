@@ -1751,6 +1751,7 @@ fn dimension_id(dimension: LevelDimension) -> &'static str {
         LevelDimension::Overworld => "minecraft:overworld",
         LevelDimension::Nether => "minecraft:the_nether",
         LevelDimension::End => "minecraft:the_end",
+        LevelDimension::Custom(key) => key.id(),
     }
 }
 

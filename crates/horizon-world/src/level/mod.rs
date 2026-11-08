@@ -780,10 +780,10 @@ pub trait LevelAccess {
     fn level_key(&self) -> LevelKey {
         self.dimension().key()
     }
-    /// The level's sea level (`Level.getSeaLevel`): the built-in level's, unless an implementor
-    /// knows its level's own (a mod's level with other noise settings).
+    /// The level's sea level (`Level.getSeaLevel`): a mod level's own, from its noise settings,
+    /// else the built-in level's.
     fn sea_level(&self) -> i32 {
-        vanilla_sea_level(self.level_key())
+        sea_level_of(self.level_key())
     }
     /// The level's dimension type.
     fn dimension_type(&self) -> &DimensionFacts {
@@ -1722,7 +1722,8 @@ mod dimension_key_tests {
             assert_eq!(vanilla_sea_level(key), sea);
         }
         let custom = LevelKey::parse("example:sky").unwrap();
-        assert_eq!(Dimension::of_level(custom), Dimension::Overworld);
+        assert_eq!(Dimension::of_level(custom), Dimension::Custom(custom));
+        assert_eq!(Dimension::Custom(custom).key(), custom);
         assert_eq!(vanilla_sea_level(custom), 63);
     }
 }

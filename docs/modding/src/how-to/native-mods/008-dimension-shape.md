@@ -122,12 +122,23 @@ ground first, or place one.
 
 ### Sea level
 
-`level.sea_level(host)` reads the Y a level's terrain is generated with its sea at: 63 in the Overworld, 32 in the
-Nether, 0 in the End, and for a mod's level of the noise generator the `sea_level` of its `noise_settings`. It is
-None for a level of a generator the mod wrote (that terrain has no sea level to read) and for noise settings a
-data pack replaced. It is the sea level the game uses for the level: terrain and aquifers, mob spawning and
-behaviour (drowned, turtles, phantoms), rain and snow, and maps. A level whose noise settings the game cannot read
-keeps the Overworld's.
+`level.sea_level(host)` reads `Level.getSeaLevel`: 63 in the Overworld, 32 in the Nether, 0 in the End. For a level of
+the noise generator it is the `sea_level` of its noise settings, a data pack's too when it replaces them. A level
+of a chunk generator the mod wrote has no noise settings to read: set `DimensionSettings::sea_level` to give it one
+(a level of the noise generator keeps its noise settings'), else it is 63 (-63 for a superflat generator). It is the sea
+level the game uses for the level: mob spawning and behaviour (drowned, turtles, phantoms), rain and snow, and maps.
+Terrain and aquifers are built with the generator's own sea level, which for a noise level is the noise settings' and
+which `DimensionSettings::sea_level` never changes: it only gives `level.sea_level(host)` a value for a generator that has
+none, so it does not move where the water is.
+
+### Which level a hook is in
+
+The block-behaviour hooks (`neighbor_changed`, `random_tick`, `crop_grow`, `block_changed` and the rest) name their
+level with a `LevelDimension`: `Overworld`, `Nether`, `End`, or `Custom(key)` for any other level, a mod's or a data
+pack's. `LevelDimension::key()` gives the level's key (`key.id()` its `namespace:path`) and `LevelDimension::of_level`
+goes back. Match it with a final `Custom(_)` arm. The game's own rules read the level's own dimension type for these
+too (water that evaporates, fast lava, infiniburn, piglin portals), and `player_respawn_position` may send a player to
+a `Custom` level.
 
 ### Saving a level
 

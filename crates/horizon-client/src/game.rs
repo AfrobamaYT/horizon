@@ -742,11 +742,6 @@ struct InteractTarget {
 
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
-    /// The level's sea level (`Dim::sea_level`).
-    sea_level: i32,
-    /// The level's dimension type (`Game::dimension_type`): what block behaviour reads for water
-    /// that evaporates, fast lava, infiniburn and the rest, for a mod's level too.
-    dimension_facts: &'static horizon_world::dimension_type::DimensionFacts,
     gateway_servers: &'w mut horizon_client::fast_hash::FxHashMap<
         [i32; 3],
         horizon_client::block_entity_anim::EndGateway,
@@ -1017,12 +1012,6 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
-    fn sea_level(&self) -> i32 {
-        self.sea_level
-    }
-    fn dimension_type(&self) -> &horizon_world::dimension_type::DimensionFacts {
-        self.dimension_facts
-    }
     fn within_world_border(&self, pos: BlockPos) -> bool {
         self.border
             .is_within_bounds(f64::from(pos.x), f64::from(pos.z), 0.0)
@@ -3476,7 +3465,10 @@ impl Dim {
             Self::Overworld => LevelDimension::Overworld,
             Self::Nether => LevelDimension::Nether,
             Self::End => LevelDimension::End,
-            Self::Extra(_) => LevelDimension::Overworld,
+            Self::Extra(_) => LevelDimension::of_level(
+                horizon_core::LevelKey::parse(self.id())
+                    .unwrap_or(horizon_core::LevelKey::OVERWORLD),
+            ),
         }
     }
     fn id(self) -> &'static str {
@@ -3548,6 +3540,16 @@ impl Dim {
     /// The dimensions past vanilla's three of the world being opened.
     fn set_extra<'a>(ids: impl Iterator<Item = &'a str>) {
         *EXTRA_DIMS.write().unwrap() = ids.map(mod_api::__private::dimension_key).collect();
+    }
+    /// Adds the dimension `id` a remote server sent, which no local world told of, so that
+    /// [`Self::from_id`] finds it.
+    fn add_extra(id: &str) {
+        if !Self::exists(id) {
+            EXTRA_DIMS
+                .write()
+                .unwrap()
+                .push(mod_api::__private::dimension_key(id));
+        }
     }
     /// The dimension as mods' level handles name it.
     fn key(self) -> mod_api::DimensionKey {
@@ -5184,10 +5186,7 @@ impl Game<'_> {
             golem_chests.extend(self.chest_other_half(key));
         }
         let native_authoritative = self.native_authoritative();
-        let dimension_facts = self.dimension_type();
         let mut level = GameLevel {
-            sea_level: self.dim.sea_level(),
-            dimension_facts,
             command_block_transition: None,
             gateway_servers: &mut self.be_anims.gateway_servers,
             border: self.border.geometry(),
@@ -5214,6 +5213,10 @@ impl Game<'_> {
                 LevelDimension::Overworld => self.res.environment(),
                 LevelDimension::Nether => self.res.nether_environment(),
                 LevelDimension::End => self.res.end_environment(),
+                LevelDimension::Custom(key) => horizon_client::environment::Environment::for_level(
+                    key.id(),
+                    self.res.environment(),
+                ),
             },
             raining: rain > 0.2,
             thundering: thunder > 0.9,
