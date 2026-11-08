@@ -168,6 +168,47 @@ impl BiomeSearchResult {
     }
 }
 
+/// Search parameters for `LevelRef::find_nearest_structure`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StructureSearch {
+    /// Where the search starts, in block coordinates; the distance is horizontal.
+    pub origin: [i32; 3],
+    /// How many rings of placement cells around the origin's are searched for
+    /// random-spread structure sets (vanilla's `searchRadius`); `/locate` uses 100.
+    pub radius: i32,
+}
+impl StructureSearch {
+    /// The largest radius one synchronous search takes: `/locate`'s and an
+    /// explorer map's 100 rings.
+    pub const MAX_RADIUS: i32 = 100;
+
+    /// The radius must be from 0 to [`Self::MAX_RADIUS`].
+    pub fn new(origin: [i32; 3], radius: i32) -> Self {
+        Self { origin, radius }
+    }
+}
+
+/// The nearest structure start a search found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct StructureSearchResult {
+    /// Registry id of the structure, the tag's member that matched for a `#tag`.
+    pub structure: String,
+    /// Where `/locate` reports the start (`StructurePlacement.getLocatePos`):
+    /// its chunk's corner at y 0, moved by the set's `locate_offset`.
+    pub position: [i32; 3],
+}
+impl StructureSearchResult {
+    /// Pair a found structure with its start position.
+    pub fn new(structure: String, position: [i32; 3]) -> Self {
+        Self {
+            structure,
+            position,
+        }
+    }
+}
+
 /// Build range and sky properties of a loaded level's dimension type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

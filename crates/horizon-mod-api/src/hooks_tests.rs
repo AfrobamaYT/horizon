@@ -444,9 +444,17 @@ fn level_queries_take_their_hosts(
     read: &dyn Host,
     server: &mut dyn ServerHost,
     level: LevelRef,
+    chunk: ChunkRef,
     shooter: EntityRef,
     tool: &ItemStack,
 ) {
+    let _: Option<Vec<PlayerRef>> = level.online_players(read);
+    let _: Option<Vec<PlayerRef>> = chunk.watchers(read);
+    let _: Option<StructureSearchResult> = level.find_nearest_structure(
+        read,
+        "#minecraft:village",
+        StructureSearch::new([0, 64, 0], 100),
+    );
     let _: Option<Vec<[f64; 6]>> = level.fluid_shape(read, [0, 64, 0]);
     let _: Option<i32> = level.fluid_tick_delay(read, FluidKey(0), [0, 64, 0]);
     let _: Option<f32> = level.fluid_height(read, [0, 64, 0]);
