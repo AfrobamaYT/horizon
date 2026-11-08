@@ -17161,6 +17161,7 @@ pub fn run_with(
         .select(&std::env::current_dir()?, &early_settings.mods.enabled);
     let mod_phase = mod_api::__private::PhaseOwner::new(mod_api::__private::ModPhase::Packages);
     api_values::install_packages(options.mods.native.packages(), &options.mods.selected);
+    mods::install_registration_data(&vanilla_root)?;
     mod_phase.advance(mod_api::__private::ModPhase::Registration)?;
     if let Err(refused) = crate::game::api_values::install_parts(mod_api::__private::mods()) {
         panic!("Mod parts refused:\n{}", refused.join("\n"));
