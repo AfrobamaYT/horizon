@@ -143,14 +143,33 @@ pub(super) struct NativeSound {
 }
 
 #[derive(Default)]
-struct NormalMobActions {
-    events: Vec<MobEvent>,
+struct NormalActionFrame {
+    events: std::collections::VecDeque<MobEvent>,
     broke: Vec<u32>,
 }
 #[derive(Default)]
-struct PendingMobBatch {
-    normal: std::collections::VecDeque<NormalMobActions>,
+struct NormalMobActions {
+    root: NormalActionFrame,
+    nested: Vec<NormalActionFrame>,
+}
+impl NormalMobActions {
+    fn new(events: Vec<MobEvent>) -> Self {
+        Self {
+            root: NormalActionFrame {
+                events: events.into(),
+                broke: Vec::new(),
+            },
+            nested: Vec::new(),
+        }
+    }
+}
+struct MobOutputBatch {
+    normal: NormalMobActions,
     guests: Vec<(u32, u32, MobEvent)>,
+}
+#[derive(Default)]
+struct PendingMobBatch {
+    batches: std::collections::VecDeque<MobOutputBatch>,
     pushes: horizon_client::mobs::PendingPushes,
 }
 
@@ -432,6 +451,10 @@ enum OrbOrder {
 }
 
 impl Game<'_> {
+    pub(super) fn clear_pending_mob_actions(&mut self) {
+        self.creatures.pending.clear();
+    }
+
     /// The game's own player's uuid and entity id — the identity behind
     /// [`Self::player_view`], so a tick that lends no guest's view names its
     /// player (#1077). None where the view stands for nobody: no player of
@@ -1565,17 +1588,16 @@ impl Game<'_> {
         self.creatures.seen_buf = snapshot;
         self.creatures.ticked = ticked;
         // Completed brain actions are never fed back into the producer pass.
-        if !events.is_empty() {
-            pending.normal.push_back(NormalMobActions {
-                events: std::mem::take(&mut events),
-                broke: Vec::new(),
+        if !events.is_empty() || !guest_events.is_empty() {
+            pending.batches.push_back(MobOutputBatch {
+                normal: NormalMobActions::new(std::mem::take(&mut events)),
+                guests: std::mem::take(&mut guest_events),
             });
         }
         if dispatch_panic.is_none() {
             // The successful final sweep consumed all pushes for surviving mobs.
             pending.pushes = Default::default();
         }
-        pending.guests.append(&mut guest_events);
         self.creatures.pending.insert(level_id, pending);
         self.creatures.event_buf = events;
         if let Some(payload) = dispatch_panic {
@@ -1618,11 +1640,18 @@ impl Game<'_> {
         }
         let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
-            while let Some(batch) = pending.normal.front_mut() {
-                self.handle_mob_events_pending(&mut batch.events, &mut batch.broke)?;
-                self.creatures.event_buf = pending.normal.pop_front().unwrap().events;
+            while let Some(batch) = pending.batches.front_mut() {
+                self.handle_mob_events_pending(&mut batch.normal)?;
+                self.lan_guest_mob_events(&mut batch.guests);
+                self.creatures.event_buf = pending
+                    .batches
+                    .pop_front()
+                    .unwrap()
+                    .normal
+                    .root
+                    .events
+                    .into();
             }
-            self.lan_guest_mob_events(&mut pending.guests);
             Ok(())
         }));
         self.creatures.pending.insert(level_id, pending);
@@ -2581,15 +2610,22 @@ impl Game<'_> {
     }
 
     pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
-        self.handle_mob_events_pending(events, &mut Vec::new())
+        let mut actions = NormalMobActions::new(std::mem::take(events));
+        let result = self.handle_mob_events_pending(&mut actions);
+        *events = actions.root.events.into();
+        result
     }
 
-    fn handle_mob_events_pending(
-        &mut self,
-        events: &mut Vec<MobEvent>,
-        broke: &mut Vec<u32>,
-    ) -> Result<()> {
-        for e in RemainingActions::new(events) {
+    fn handle_mob_events_pending(&mut self, actions: &mut NormalMobActions) -> Result<()> {
+        loop {
+            let frame = actions.nested.last_mut().unwrap_or(&mut actions.root);
+            let Some(e) = frame.events.pop_front() else {
+                if actions.nested.pop().is_some() {
+                    continue;
+                }
+                return Ok(());
+            };
+            let broke = &mut frame.broke;
             match e {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
@@ -3372,7 +3408,10 @@ impl Game<'_> {
                     } else {
                         otherwise
                     };
-                    self.handle_mob_events(follow)?;
+                    actions.nested.push(NormalActionFrame {
+                        events: follow.into(),
+                        broke: Vec::new(),
+                    });
                 }
                 MobEvent::Jump { mob } => {
                     if let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
@@ -3840,7 +3879,6 @@ impl Game<'_> {
                 }
             }
         }
-        Ok(())
     }
     /// `TurtleEggBlock.decreaseEggs` after an entity's step or landing won its
     /// roll (`destroyEgg`): the break sound and the remaining eggs (a stack of
