@@ -1283,39 +1283,6 @@ fn java_hash_set_order(positions: &mut [BlockPos; 7]) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::java_hash_set_order;
-    use horizon_core::position::BlockPos;
-
-    #[test]
-    fn hash_set_order_matches_vanilla_bucket_and_insertion_order() {
-        let origin = BlockPos::new(0, 0, 0);
-        let mut positions = [
-            origin,
-            BlockPos::new(0, -1, 0),
-            BlockPos::new(0, 1, 0),
-            BlockPos::new(0, 0, -1),
-            BlockPos::new(0, 0, 1),
-            BlockPos::new(-1, 0, 0),
-            BlockPos::new(1, 0, 0),
-        ];
-        java_hash_set_order(&mut positions);
-        assert_eq!(
-            positions,
-            [
-                origin,
-                BlockPos::new(0, 0, -1),
-                BlockPos::new(-1, 0, 0),
-                BlockPos::new(0, 0, 1),
-                BlockPos::new(1, 0, 0),
-                BlockPos::new(0, -1, 0),
-                BlockPos::new(0, 1, 0),
-            ]
-        );
-    }
-}
-
 impl<L: super::signal_access::SignalAccess + ?Sized> Signals<'_, L> {
     fn nibble(word: u32, direction: Direction) -> i32 {
         ((word >> (4 * direction as u32)) & 15) as i32
@@ -1670,5 +1637,38 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     ) -> BlockStateId {
         self.signals()
             .wire_connection_state_with_hook(state, pos, has_hook)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::java_hash_set_order;
+    use horizon_core::position::BlockPos;
+
+    #[test]
+    fn hash_set_order_matches_vanilla_bucket_and_insertion_order() {
+        let origin = BlockPos::new(0, 0, 0);
+        let mut positions = [
+            origin,
+            BlockPos::new(0, -1, 0),
+            BlockPos::new(0, 1, 0),
+            BlockPos::new(0, 0, -1),
+            BlockPos::new(0, 0, 1),
+            BlockPos::new(-1, 0, 0),
+            BlockPos::new(1, 0, 0),
+        ];
+        java_hash_set_order(&mut positions);
+        assert_eq!(
+            positions,
+            [
+                origin,
+                BlockPos::new(0, 0, -1),
+                BlockPos::new(-1, 0, 0),
+                BlockPos::new(0, 0, 1),
+                BlockPos::new(1, 0, 0),
+                BlockPos::new(0, -1, 0),
+                BlockPos::new(0, 1, 0),
+            ]
+        );
     }
 }

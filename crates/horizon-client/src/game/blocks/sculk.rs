@@ -2653,9 +2653,12 @@ mod tests {
                 .insert(0, Mob::new(3, warden.clone(), at(3.0), 0.0));
             assert_eq!(post(game), [2, 3], "the slots moved");
 
-            let level = std::mem::take(&mut game.mobs);
+            let level = game.mobs.lift();
             assert_eq!(post(game), [0u32; 0], "another level's list");
-            game.mobs = level;
+            game.mobs.restore(
+                level,
+                horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
+            );
             assert_eq!(post(game), [2, 3], "this level's again");
 
             game.mobs.retain(|m| m.id != 3);
