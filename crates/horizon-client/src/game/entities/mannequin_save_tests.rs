@@ -13,13 +13,14 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -34,7 +35,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -72,7 +75,7 @@ fn a_mannequin_saves_its_own_fields_and_no_mob_fields() {
     };
     let (plain, mob_input) = (id(&game, 1), id(&game, 6));
     for mob in [plain, mob_input] {
-        let tag = game.entity_nbt(commands::Target::Mob(mob)).unwrap();
+        let tag = game.command_target_nbt(commands::Target::Mob(mob)).unwrap();
         assert_eq!(tag.get("profile"), Some(&snbt("{}")), "{mob}");
         assert_eq!(tag.get("hidden_layers"), Some(&Tag::List(Vec::new())));
         assert_eq!(tag.get("main_hand"), Some(&Tag::String("right".into())));
@@ -85,7 +88,9 @@ fn a_mannequin_saves_its_own_fields_and_no_mob_fields() {
     assert!(game.run_command(
         "data merge entity 00000141-0000-0000-0000-000000000001 {pose:\"swimming\",main_hand:\"left\",hidden_layers:[\"jacket\"]}"
     ));
-    let tag = game.entity_nbt(commands::Target::Mob(plain)).unwrap();
+    let tag = game
+        .command_target_nbt(commands::Target::Mob(plain))
+        .unwrap();
     assert_eq!(tag.get("pose"), Some(&Tag::String("swimming".into())));
     assert_eq!(tag.get("main_hand"), Some(&Tag::String("left".into())));
     assert_eq!(tag.get("hidden_layers"), Some(&snbt("[\"jacket\"]")));
@@ -170,7 +175,7 @@ fn a_mannequin_reads_and_saves_from_its_own_state() {
             Some(raw) => game.persist.raw.insert(id, raw.clone()),
             None => game.persist.raw.remove(&id),
         };
-        let tag = game.entity_nbt(commands::Target::Mob(id)).unwrap();
+        let tag = game.command_target_nbt(commands::Target::Mob(id)).unwrap();
         assert_eq!(tag.get("pose"), Some(&Tag::String("crouching".into())));
         assert_eq!(tag.get("main_hand"), Some(&Tag::String("left".into())));
         assert_eq!(tag.get("hidden_layers"), Some(&snbt("[\"cape\",\"hat\"]")));
@@ -197,7 +202,9 @@ fn a_mannequin_reads_and_saves_from_its_own_state() {
     );
     // The pig's save keeps its Mob fields.
     let pig_id = game.mobs[pig].id;
-    let tag = game.entity_nbt(commands::Target::Mob(pig_id)).unwrap();
+    let tag = game
+        .command_target_nbt(commands::Target::Mob(pig_id))
+        .unwrap();
     for key in MOB_ONLY {
         assert_eq!(tag.get(key), Some(&Tag::Byte(1)), "{key}");
     }

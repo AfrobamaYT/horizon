@@ -12241,13 +12241,14 @@ mod chorus_projectile_drop_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             std::time::Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -12265,7 +12266,9 @@ mod chorus_projectile_drop_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -12365,7 +12368,11 @@ mod chorus_projectile_drop_tests {
             assert!(game.run_command("execute if block 4 200 4 chorus_flower"));
             assert!(game.dropped.is_empty());
             assert!(game.run_command("gamerule projectiles_can_break_blocks true"));
-            assert!(game.ui.rules.bool("mob_griefing"));
+            assert!(
+                game.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::MOB_GRIEFING)
+            );
             assert!(game.run_command("gamerule mob_griefing"));
             assert!(game.run_command(
                 "summon pig 12.5 200 12.5 {UUID:[I;116,0,0,99],NoAI:1b,NoGravity:1b,Health:10f}"
@@ -12427,12 +12434,22 @@ mod chorus_projectile_drop_tests {
                         &root,
                         registry,
                         game.res.facts(),
-                        &horizon_world::loot::PackOverlay { files: &files },
+                        &horizon_world::loot::PackOverlay {
+                            files: &files,
+                            conditions: &horizon_world::conditions::LoadConditions::default(),
+                        },
+                        game.res.item_defaults(),
                     )
                     .unwrap(),
                 ));
                 let state = registry.default_state("minecraft:gravel").unwrap();
-                assert_eq!(items.block_loot_sequence(registry, state).is_some(), named);
+                assert_eq!(
+                    items
+                        .block_loot_table(registry, state)
+                        .and_then(|id| items.loot_sequence(&id))
+                        .is_some(),
+                    named
+                );
                 source(game, 4, 4, "gravel");
                 game.level.seed = 116;
                 game.world.random = horizon_core::random::LegacyRandom::new(116);
@@ -12449,7 +12466,7 @@ mod chorus_projectile_drop_tests {
                     .and_then(|v| v.get("minecraft:blocks/gravel"))
                     .and_then(|v| v.get("source"))
                 {
-                    Some(horizon_world::nbt::Tag::LongArray(v)) => v.clone(),
+                    Some(horizon_core::nbt::Tag::LongArray(v)) => v.clone(),
                     _ => vec![],
                 };
                 assert_eq!(

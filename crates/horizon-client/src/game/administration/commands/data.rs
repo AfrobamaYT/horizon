@@ -845,7 +845,7 @@ impl Game<'_> {
                     (self.world.block_names.get(&key), &mut tag)
                 {
                     map.entry("CustomName".into())
-                        .or_insert_with(|| Tag::String(custom.as_str().into()));
+                        .or_insert_with(|| custom.clone());
                 }
                 Self::restore_loot_table(&self.world, key, &mut tag);
                 Ok(tag)

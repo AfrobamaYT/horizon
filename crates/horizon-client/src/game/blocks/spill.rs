@@ -489,14 +489,24 @@ impl GameLevel<'_> {
             self.pending.record_saved(at, &tag);
         }
         let dynamic = self.pending.dynamic(at);
-        let machine = self.drop_tool.as_ref().is_some_and(|(target, _)| *target == key);
-        let tool = self.drop_tool.as_ref().filter(|_| machine).and_then(|(_, tool)| tool.clone());
+        let machine = self
+            .drop_tool
+            .as_ref()
+            .is_some_and(|(target, _)| *target == key);
+        let tool = self
+            .drop_tool
+            .as_ref()
+            .filter(|_| machine)
+            .and_then(|(_, tool)| tool.clone());
         let roll = horizon_client::items::BlockLootRoll {
             held: tool.as_ref(),
             dynamic: &dynamic,
+            breaker: self.drop_breaker_at == Some(pos),
             ..Default::default()
         };
-        let entity = self.drop_entity.filter(|_| self.drop_breaker_at == Some(pos));
+        let entity = self
+            .drop_entity
+            .filter(|_| self.drop_breaker_at == Some(pos));
         let drops = self.roll_block_loot(pos, state, entity, roll);
         let dropped = self.block_dropped(pos, state, None, tool.as_ref(), drops, None);
         for item in dropped.items {
@@ -1361,7 +1371,10 @@ mod crafter_drop_name_tests {
                     &*game.res.facts().get(game.world.block(x, 199, z)).name,
                     "minecraft:stone"
                 );
-                assert_eq!(game.world.block_names.get(&key), name.map(|n| Tag::String(n.into())).as_ref());
+                assert_eq!(
+                    game.world.block_names.get(&key),
+                    name.map(|n| Tag::String(n.into())).as_ref()
+                );
                 let entity = game
                     .world
                     .block_entities

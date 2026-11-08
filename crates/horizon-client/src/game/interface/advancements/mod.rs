@@ -3345,7 +3345,7 @@ mod structure_tag_tests {
 mod random_chance_command_tests {
     use super::*;
     use crate::game::commands::Target;
-    use horizon_world::nbt::Tag;
+    use horizon_core::nbt::Tag;
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn registered_named_random_chance_uses_real_source_and_world_draws() {
@@ -3354,13 +3354,14 @@ mod random_chance_command_tests {
         let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
         let settings = Settings::default();
         let loaded = load_resources(
-            root.clone(),
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
             None,
             &root,
             &settings,
             Instant::now(),
             false,
-            true,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
             &crate::game::Progress::new(),
             &mut |_, _| unreachable!(),
         )
@@ -3374,7 +3375,9 @@ mod random_chance_command_tests {
             loaded.gui.unwrap(),
             options,
             settings,
-            Audio::silent(&root),
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
             None,
         )
         .unwrap();
@@ -3394,10 +3397,11 @@ mod random_chance_command_tests {
             "scoreboard players set pack h122 17\n",
         )
         .unwrap();
-        let rows: Vec<Value> = include_str!("../../../../docs/parity/random-chance-seeded.jsonl")
-            .lines()
-            .map(|s| serde_json::from_str(s).unwrap())
-            .collect();
+        let rows: Vec<Value> =
+            include_str!("../../../../../../docs/parity/random-chance-seeded.jsonl")
+                .lines()
+                .map(|s| serde_json::from_str(s).unwrap())
+                .collect();
         for row in &rows {
             std::fs::write(
                 folder.join(format!("case_{}.json", row["case"])),
@@ -3407,7 +3411,7 @@ mod random_chance_command_tests {
         }
         std::fs::write(folder.join("pig.json"),r#"{"type":"minecraft:entity_properties","entity":"this","predicate":{"minecraft:entity_type":"minecraft:pig"}}"#).unwrap();
         game.world_root = dir.clone();
-        game.reload_datapacks(false);
+        game.reload_datapacks(false, &[]);
         assert!(game.run_command("scoreboard objectives add h122 dummy"));
         assert!(game.run_command("function h122:admit"));
         assert_eq!(game.score.board.score("pack", "h122").unwrap().value, 17);

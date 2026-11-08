@@ -2099,7 +2099,7 @@ mod tests {
         let atlas = atlas();
         let s = Settings::default();
         let mut shell = Shell::<Probe>::default();
-        let mut batch = HudBatch::new([1708, 960]);
+        let mut batch = HudBatch::scratch([1708, 960]);
         let size = (batch.width, batch.height);
         let strip = |batch: &mut HudBatch, shell: &mut Shell<Probe>, at| {
             shell.draw(&s, batch, &atlas, at, false, None);

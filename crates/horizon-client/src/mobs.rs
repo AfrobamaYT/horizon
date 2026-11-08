@@ -4713,7 +4713,10 @@ impl Mob {
             self.extra.hidden_effects.push(effect);
         }
         if effect == "minecraft:absorption" {
-            self.absorption = self.absorption.max(4.0 * (incoming.amplifier + 1) as f32);
+            self.absorption = self
+                .absorption
+                .max(4.0 * (incoming.amplifier + 1) as f32)
+                .clamp(0.0, armor::max_absorption(self));
         }
         if changed && effect == "minecraft:health_boost" {
             finalize::health_boost_changed(self);
@@ -7208,7 +7211,6 @@ mod visibility_percent_tests {
 mod hidden_speed_mob_tick_tests {
     use super::*;
     fn full_tick_promotes(no_ai: bool) {
-        use horizon_core::random::LegacyRandom;
         let admitted = crate::mobs::world::with_built_test_world(
             &[],
             |world, registry| {
@@ -7229,22 +7231,47 @@ mod hidden_speed_mob_tick_tests {
                 m.no_gravity = true;
                 assert!(m.add_effect_with("minecraft:speed", 200, 0, false, true));
                 assert!(m.add_effect_with("minecraft:speed", 40, 1, false, true));
-                assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", 40, 1)]);
-                let mut random = LegacyRandom::new(202);
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 40, 1)]
+                );
+                let mut test_level = crate::health::TestLevel::new(202);
                 let mut events = Vec::new();
                 for _ in 0..39 {
-                    assert!(m.tick(w, &mut random, &mut events));
+                    assert!(m.tick(w, &mut test_level.level(), &mut events));
                 }
-                assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", 1, 1)]);
-                assert!(m.tick(w, &mut random, &mut events));
                 assert_eq!(
-                    m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(),
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 1, 1)]
+                );
+                assert!(m.tick(w, &mut test_level.level(), &mut events));
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
                     [("minecraft:speed", 160, 0)],
                     "actual Mob tick must promote its counted-down fallback"
                 );
                 assert_eq!(m.age, 40);
-                assert!(m.tick(w, &mut random, &mut events));
-                assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", 159, 0)]);
+                assert!(m.tick(w, &mut test_level.level(), &mut events));
+                assert_eq!(
+                    m.extra
+                        .effects
+                        .iter()
+                        .map(|e| (e.id, e.duration, e.amplifier))
+                        .collect::<Vec<_>>(),
+                    [("minecraft:speed", 159, 0)]
+                );
             },
         );
         // Without the vanilla data under .local/horizon-client there is no Mob
@@ -7278,7 +7305,11 @@ mod hidden_speed_mob_tick_tests {
         );
         assert!(!m.add_effect_with("speed", 300, 0, false, true));
         assert_eq!(
-            m.extra.effects,
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
             [
                 ("minecraft:night_vision", 400, 0),
                 ("minecraft:speed", 40, 1)
@@ -7292,16 +7323,27 @@ mod hidden_speed_mob_tick_tests {
         assert_eq!(to.extra.effect_chains, m.extra.effect_chains);
         to.extra.effect_chains[0].duration = 222;
         assert_eq!(m.extra.effect_chains[0].duration, 300);
-        m.apply_death_effect(&crate::items::ConsumeEffect::RemoveEffects(vec![
-            "minecraft:speed".into(),
-        ]));
-        assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:night_vision", 400, 0)]);
+        m.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::RemoveEffects(vec!["minecraft:speed".into()]),
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:night_vision", 400, 0)]
+        );
         assert!(m.extra.effect_chains.is_empty());
         m.add_effect("speed", 20, 0);
         assert!(m.extra.effect_chains.is_empty());
         m.add_effect("speed", 5, 1);
         assert_eq!(m.extra.effect_chains[0].duration, 20);
-        m.apply_death_effect(&crate::items::ConsumeEffect::ClearAllEffects);
+        m.apply_death_effect(
+            &mut crate::health::TestLevel::new(0).level(),
+            &crate::items::ConsumeEffect::ClearAllEffects,
+        );
         assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
         // The basic add has default incoming flags, while preserving its
         // existing active flag policy; a newly retained weaker node gets them.

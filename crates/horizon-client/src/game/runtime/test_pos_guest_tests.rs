@@ -21,13 +21,14 @@ fn game() -> Game<'static> {
     );
     let settings = Settings::default();
     let loaded = load_resources(
-        root.clone(),
+        horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+        Vec::new(),
         None,
         &root,
         &settings,
         std::time::Instant::now(),
         false,
-        true,
+        execution_role::ExecutionRole::IntegratedServer,
         &Progress::new(),
         &mut |_, _| unreachable!(),
     )
@@ -42,7 +43,9 @@ fn game() -> Game<'static> {
         loaded.gui.unwrap(),
         options,
         settings,
-        Audio::silent(&root),
+        Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+            root.clone(),
+        )),
         None,
     )
     .unwrap();
@@ -95,7 +98,6 @@ fn game() -> Game<'static> {
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         2,
         [22.5, 101.0, 9.5],
@@ -178,7 +180,12 @@ fn test_pos_refuses_other_sources_and_restores_the_views() {
     missing.entity = Some(commands::Target::Guest(99));
     assert!(key(game.execute_line("test pos", missing)).contains(requires));
     // The guest looking up: its own view finds no test.
-    game.lan.as_mut().unwrap().hub.guest_mut(2).unwrap().pitch = -90.0;
+    game.lan
+        .as_mut()
+        .unwrap()
+        .hub
+        .update_guest(2, |g| g.pitch = -90.0)
+        .unwrap();
     let mut guest = game.player_source();
     guest.entity = Some(commands::Target::Guest(2));
     assert!(

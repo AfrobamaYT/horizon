@@ -9761,13 +9761,20 @@ mod mob_hidden_speed_tests {
     }
     #[test]
     fn loaded_speed_fallback_survives_a_no_raw_save() {
-        let input = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:pig",UUID:[I;202,0,0,1],Pos:[2.5d,200d,4.5d],Health:10f,NoAI:1b,NoGravity:1b,active_effects:[{id:"minecraft:speed",amplifier:1b,duration:40,show_icon:1b,hidden_effect:{duration:200,ambient:1b,show_particles:0b,show_icon:0b}}]}"#).unwrap().0;
+        let input = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:pig",UUID:[I;202,0,0,1],Pos:[2.5d,200d,4.5d],Health:10f,NoAI:1b,NoGravity:1b,active_effects:[{id:"minecraft:speed",amplifier:1b,duration:40,show_icon:1b,hidden_effect:{duration:200,ambient:1b,show_particles:0b,show_icon:0b}}]}"#).unwrap().0;
         let m = mob_from_nbt(&input, &types(), 7, None).unwrap();
         assert_eq!(m.id, 7);
         assert_eq!(m.kind.id, "minecraft:pig");
         assert!(m.no_ai && m.no_gravity);
         assert_eq!(m.health, 10.0);
-        assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", 40, 1)]);
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", 40, 1)]
+        );
         let tag = saved(&m);
         let hidden = tag
             .get("active_effects")
@@ -9785,7 +9792,7 @@ mod mob_hidden_speed_tests {
     // Added after the frozen old proof: modeled mutation and stale raw controls.
     #[test]
     fn fallback_model_wins_over_stale_raw_and_clears_without_resurrection() {
-        let input = horizon_world::nbt::parse_snbt(r#"{id:"minecraft:pig",Pos:[2.5d,200d,4.5d],Tags:["untouched"],active_effects:[{id:"minecraft:speed",amplifier:1b,duration:40,hidden_effect:{duration:200,ambient:1b,show_particles:0b,show_icon:0b}}]}"#).unwrap().0;
+        let input = horizon_core::nbt::parse_snbt(r#"{id:"minecraft:pig",Pos:[2.5d,200d,4.5d],Tags:["untouched"],active_effects:[{id:"minecraft:speed",amplifier:1b,duration:40,hidden_effect:{duration:200,ambient:1b,show_particles:0b,show_icon:0b}}]}"#).unwrap().0;
         let mut m = mob_from_nbt(&input, &types(), 7, None).unwrap();
         let h = &m.extra.effect_chains[0];
         assert_eq!(

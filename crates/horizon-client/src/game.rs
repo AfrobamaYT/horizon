@@ -17616,22 +17616,6 @@ fn test_server_load() -> horizon_world::native_load_context::LoadContext {
 }
 
 #[cfg(test)]
-#[path = "game/entities/mannequin_save_tests.rs"]
-mod mannequin_save_tests;
-#[cfg(test)]
-#[path = "game/runtime/storage_alias_tests.rs"]
-mod storage_alias_tests;
-#[cfg(test)]
-#[path = "game/blocks/sulfur_bucket_tests.rs"]
-mod sulfur_bucket_tests;
-#[cfg(test)]
-#[path = "game/runtime/test_pos_guest_tests.rs"]
-mod test_pos_guest_tests;
-#[cfg(test)]
-#[path = "game/blocks/vibration_tests.rs"]
-mod vibration_tests;
-
-#[cfg(test)]
 mod nested_orb_spawn_tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]

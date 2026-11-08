@@ -6313,24 +6313,74 @@ mod hidden_speed_causal_tests {
         m.add_effect("speed", 200, 0);
         m.add_effect("speed", 0, 1);
         assert_eq!(m.extra.effect_chains.len(), 1);
-        tick_effects(&mut m, None);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
         assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
         m.add_effect("speed", -1, 0);
         m.add_effect("speed", 2, 1);
-        tick_effects(&mut m, None);
-        assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", 1, 1)]);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", 1, 1)]
+        );
         assert_eq!(m.extra.effect_chains[0].duration, -1);
-        tick_effects(&mut m, None);
-        assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", -1, 0)]);
-        tick_effects(&mut m, None);
-        assert_eq!(m.extra.effects.iter().map(|e| (e.id, e.duration, e.amplifier)).collect::<Vec<_>>(), [("minecraft:speed", -1, 0)]);
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", -1, 0)]
+        );
+        tick_effects(
+            &mut m,
+            crate::test_resources::server_loop_context(),
+            &mut crate::health::TestLevel::new(0).level(),
+            None,
+        );
+        assert_eq!(
+            m.extra
+                .effects
+                .iter()
+                .map(|e| (e.id, e.duration, e.amplifier))
+                .collect::<Vec<_>>(),
+            [("minecraft:speed", -1, 0)]
+        );
         assert!(m.extra.effect_chains.is_empty());
     }
     #[test]
     fn native_cancellation_drops_the_whole_chain_before_promotion() {
         struct Cancel(std::cell::Cell<usize>);
         impl crate::mobs::ModEffectTicks for Cancel {
-            fn tick_mod_effect(&self, id: &str, mob: u32, count: i32, amp: i32) -> bool {
+            fn effect_expired(&self, _: u32, _: usize, _: i32, _: &mut bool) {}
+            fn tick_mod_effect(
+                &self,
+                _: &mut DamageLevel<'_>,
+                _: usize,
+                m: &mut Mob,
+                count: i32,
+                amp: i32,
+            ) -> bool {
+                let (id, mob) = (m.extra.effects[0].id, m.id);
                 assert_eq!((id, mob, amp), ("h202:cancel", 202, 1));
                 assert!(count == 1 || count == 17);
                 self.0.set(self.0.get() + 1);
@@ -6346,6 +6396,8 @@ mod hidden_speed_causal_tests {
                 m.extra.effects[0].duration = -1;
                 let h = crate::effects::EffectInstance {
                     id: "h202:cancel",
+                    registry_index: Some(0),
+                    client_blend: (false, false),
                     duration: 200,
                     amplifier: 0,
                     ambient: false,
@@ -6359,7 +6411,12 @@ mod hidden_speed_causal_tests {
                 m.add_effect("h202:cancel", duration, 1);
             }
             let cancel = Cancel(std::cell::Cell::new(0));
-            tick_effects(&mut m, Some(&cancel));
+            tick_effects(
+                &mut m,
+                crate::test_resources::server_loop_context(),
+                &mut crate::health::TestLevel::new(0).level(),
+                Some(&cancel),
+            );
             assert_eq!(cancel.0.get(), 1);
             assert!(m.extra.effects.is_empty() && m.extra.effect_chains.is_empty());
         }

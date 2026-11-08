@@ -1160,8 +1160,9 @@ impl Game<'_> {
         }
         // CapeLayer.hasLayer: the worn stack's own `equippable` asset.
         let items = self.res.items();
-        let equippable = match m.extra.armor[1]
-            .as_ref()
+        let equippable = match m
+            .extra
+            .slot_stack(horizon_items::equipment::CHEST)
             .filter(|s| chest == Some(&*s.item))
         {
             Some(s) => horizon_client::item_sync::equippable(s, items),
