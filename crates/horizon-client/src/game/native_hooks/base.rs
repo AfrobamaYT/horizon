@@ -3510,12 +3510,18 @@ impl Game<'_> {
         self.fire_use_animation(stack, animation);
     }
     /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
-    /// when eating starts: `can_eat` arrives with vanilla's (creative,
-    /// `can_always_eat`, or hungry). Clear it to refuse the food, set it to
-    /// let a full player eat. Both sides (the client starts eating as the
+    /// when eating starts: `vanilla_can_eat` is vanilla's answer (creative,
+    /// `can_always_eat`, or hungry). Answer `Some(false)` to refuse the food,
+    /// `Some(true)` to let a full player eat; `can_eat` left `None` keeps
+    /// `vanilla_can_eat`. Both sides (the client starts eating as the
     /// server does), so answer from the stack and the player alone.
-    pub(in crate::game) fn native_can_eat(&self, stack: &ItemStack, can_eat: &mut bool) {
-        self.fire_can_eat(stack, can_eat);
+    pub(in crate::game) fn native_can_eat(
+        &self,
+        stack: &ItemStack,
+        vanilla_can_eat: bool,
+        can_eat: &mut Option<bool>,
+    ) {
+        self.fire_can_eat(stack, vanilla_can_eat, can_eat);
     }
     /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
     /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
