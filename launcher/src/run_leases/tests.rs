@@ -29,6 +29,26 @@ fn shared_readers_exclude_cleanup_but_not_an_unrelated_tree() {
     drop(registry.lock(&first, LockMode::Exclusive).unwrap());
 }
 
+#[cfg(windows)]
+#[test]
+fn an_open_initializer_allows_readers_but_excludes_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::at(root.path()).unwrap();
+    let initializing = initialize_lock(&registry.directory, "initializing").unwrap();
+    let acquire = |mode| open_lock(&registry.directory, "initializing", mode, Release::Unlock);
+    let reader = acquire(LockMode::Shared)
+        .expect("an entry creator must not spuriously refuse a concurrent shared launch");
+    drop(reader);
+    assert!(matches!(acquire(LockMode::Exclusive), Err(Error::Busy)));
+    drop(initializing);
+    drop(acquire(LockMode::Exclusive).unwrap());
+    // The old initializer's write access alone reproduces the sharing refusal.
+    let writable_initializer = registry.directory.create("initializing").unwrap();
+    assert!(acquire(LockMode::Shared).is_err());
+    drop(writable_initializer);
+    drop(acquire(LockMode::Shared).unwrap());
+}
+
 #[cfg(unix)]
 #[test]
 fn a_moved_tree_keeps_its_identity_and_redirected_registries_are_refused() {
