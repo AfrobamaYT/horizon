@@ -1059,7 +1059,7 @@ pub mod tests {
                 ["gauge", "connector", "press", "hoard"]
                     .into_iter()
                     .chain(CAPABILITY_TYPES.iter().copied())
-                    .map(|id| horizon_mod_package::content::Block {
+                    .map(|id| mod_api::Block {
                         id: format!("test:{id}"),
                         template: "minecraft:stone".into(),
                         ..Default::default()

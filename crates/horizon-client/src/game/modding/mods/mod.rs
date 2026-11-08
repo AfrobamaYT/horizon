@@ -206,6 +206,7 @@ pub(super) fn freeze_declarations() {
 }
 
 struct NativeDeclared {
+    errors: Vec<String>,
     blocks: Vec<horizon_mod_package::content::Block>,
     items: Vec<horizon_mod_package::content::Item>,
     types: Vec<horizon_mod_package::content::BlockEntityType>,
@@ -219,7 +220,36 @@ fn native_declared() -> &'static NativeDeclared {
         Game::native_blocks(&RegistrationContext::new(), &mut blocks);
         Game::native_items(&RegistrationContext::new(), &mut items);
         let types = super::api_values::block_entity_declarations();
+        use super::api_values::TryIntoEngine;
+        let mut errors = Vec::new();
+        let blocks = blocks
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
+        let items = items
+            .iter()
+            .filter_map(|v| {
+                v.try_into_engine(&())
+                    .map_err(|e| {
+                        errors.push(format!(
+                            "native blocks and items of {}: {e}",
+                            v.id.split(':').next().unwrap_or("")
+                        ))
+                    })
+                    .ok()
+            })
+            .collect();
         NativeDeclared {
+            errors,
             blocks,
             items,
             types,
@@ -485,10 +515,14 @@ pub(super) fn content_overlay(
         }
     }
     let NativeDeclared {
+        errors,
         blocks,
         items,
         types,
     } = native_declared();
+    if !errors.is_empty() {
+        return Err(errors.join("\n").into());
+    }
     if !blocks.is_empty() || !items.is_empty() || !types.is_empty() {
         let known = match &mut known {
             Some(types) => types,
