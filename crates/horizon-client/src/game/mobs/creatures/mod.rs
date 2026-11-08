@@ -142,6 +142,40 @@ pub(super) struct NativeSound {
     pub entity: Option<i32>,
 }
 
+#[derive(Default)]
+struct PendingMobBatch {
+    events: Vec<MobEvent>,
+    broke: Vec<u32>,
+    guests: Vec<(u32, u32, MobEvent)>,
+    pushes: horizon_client::mobs::PendingPushes,
+}
+
+/// Remove the current action before dispatch; retain only the unentered tail on unwind.
+pub(super) struct RemainingActions<'a, T> {
+    remaining: std::vec::IntoIter<T>,
+    target: &'a mut Vec<T>,
+}
+impl<'a, T> RemainingActions<'a, T> {
+    pub(super) fn new(target: &'a mut Vec<T>) -> Self {
+        Self {
+            remaining: std::mem::take(target).into_iter(),
+            target,
+        }
+    }
+}
+impl<T> Iterator for RemainingActions<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.remaining.next()
+    }
+}
+impl<T> Drop for RemainingActions<'_, T> {
+    fn drop(&mut self) {
+        let remaining = std::mem::replace(&mut self.remaining, Vec::new().into_iter());
+        *self.target = remaining.collect();
+    }
+}
+
 /// Mob-system state owned by the game.
 #[derive(Default)]
 pub(super) struct Creatures {
@@ -177,6 +211,7 @@ pub(super) struct Creatures {
     seen_buf: Vec<Seen>,
     /// Per-tick scratch retained between creature ticks.
     event_buf: Vec<MobEvent>,
+    pending: std::collections::HashMap<&'static str, PendingMobBatch>,
     /// The mobs whose own tick ran in the last `tick_creature_entities`:
     /// `ServerLevel.tick` ticks only the entities in entity-ticking range, so
     /// what the passes after the loop do for a mob's `aiStep`, goals or brain
@@ -1411,6 +1446,7 @@ impl Game<'_> {
         snapshot.extend(self.mobs.iter().map(|m| seen(m, uuid)));
         let mut events = std::mem::take(&mut self.creatures.event_buf);
         events.clear();
+        let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
         let mut mobs = self.mobs.lift();
         #[cfg(test)]
         super::entity::taken_pass_tests::after_take(self);
@@ -1462,6 +1498,7 @@ impl Game<'_> {
             mobs: &mut mobs,
             snapshot: &mut snapshot,
             events: &mut events,
+            pushes: &mut pending.pushes,
             dead: &mut dead,
             corpses: &mut corpses,
             died: &mut died,
@@ -1528,7 +1565,14 @@ impl Game<'_> {
         snapshot.clear();
         self.creatures.seen_buf = snapshot;
         self.creatures.ticked = ticked;
+        // Completed brain actions are never fed back into the producer pass.
+        pending.events.append(&mut events);
+        pending.guests.append(&mut guest_events);
+        self.creatures.pending.insert(level_id, pending);
+        self.creatures.event_buf = events;
         if let Some(payload) = dispatch_panic {
+            // Restoration may itself panic and replace this payload; a second
+            // destructor panic may abort. panic=abort cannot recover at all.
             std::panic::resume_unwind(payload);
         }
         self.native_tick_post_batch(round);
@@ -1564,10 +1608,18 @@ impl Game<'_> {
             let bounds = m.bounds();
             self.effects_on_death(&names, bounds, false, Some(m.id), Some(&mut m.random));
         }
-        let event_result = self.handle_mob_events_reusable(&mut events);
-        self.creatures.event_buf = events;
-        event_result?;
-        self.lan_guest_mob_events(guest_events);
+        let mut pending = self.creatures.pending.remove(level_id).unwrap_or_default();
+        let delivery = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
+            self.handle_mob_events_pending(&mut pending.events, &mut pending.broke)?;
+            pending.broke.clear();
+            self.lan_guest_mob_events(&mut pending.guests);
+            Ok(())
+        }));
+        self.creatures.pending.insert(level_id, pending);
+        match delivery {
+            Ok(result) => result?,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
         self.drain_entity_inside();
         laps.lap("creature_events");
         self.ordered_before(super::ordered_tick::Batch::Projectiles)?;
@@ -2519,8 +2571,15 @@ impl Game<'_> {
     }
 
     pub(super) fn handle_mob_events_reusable(&mut self, events: &mut Vec<MobEvent>) -> Result<()> {
-        let mut broke: Vec<u32> = Vec::new();
-        for e in events.drain(..) {
+        self.handle_mob_events_pending(events, &mut Vec::new())
+    }
+
+    fn handle_mob_events_pending(
+        &mut self,
+        events: &mut Vec<MobEvent>,
+        broke: &mut Vec<u32>,
+    ) -> Result<()> {
+        for e in RemainingActions::new(events) {
             match e {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))

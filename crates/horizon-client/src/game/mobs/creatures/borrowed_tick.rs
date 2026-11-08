@@ -6,6 +6,7 @@ pub(super) struct BorrowedMobTick<'a, 'p, F> {
     pub(super) mobs: &'a mut horizon_client::join_seq::JoinList<Mob>,
     pub(super) snapshot: &'a mut Vec<Seen>,
     pub(super) events: &'a mut Vec<MobEvent>,
+    pub(super) pushes: &'a mut horizon_client::mobs::PendingPushes,
     pub(super) dead: &'a mut Vec<Mob>,
     pub(super) corpses: &'a mut Vec<Mob>,
     pub(super) died: &'a mut horizon_client::fast_hash::FxHashSet<u32>,
@@ -37,6 +38,7 @@ impl Game<'_> {
             mobs,
             snapshot,
             events,
+            pushes,
             dead,
             corpses,
             died,
@@ -57,7 +59,6 @@ impl Game<'_> {
             nearest,
             round,
         } = borrowed;
-        let mut pushes = horizon_client::mobs::PendingPushes::default();
         let mut keep = Vec::with_capacity(mobs.len());
         let mut grid =
             horizon_client::mobs::seen_grid::SeenGrid::new(snapshot.iter().map(|s| s.bounds));
@@ -198,7 +199,7 @@ impl Game<'_> {
                     difficulty
                 }
             };
-            horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
+            horizon_client::mobs::apply_mob_pushes(m, pushes);
             horizon_client::mobs::blocks_changed(m, &path_changes);
             let from = events.len();
             // The guest's view is lent to the mob for its tick, not copied:
@@ -255,7 +256,7 @@ impl Game<'_> {
             if !kept && !m.alive() && !m.removed && !m.extra.effects.is_empty() {
                 corpses.push(m.clone());
             }
-            horizon_client::mobs::take_mob_pushes(events, from, &mut pushes);
+            horizon_client::mobs::take_mob_pushes(events, from, pushes);
             // LivingEntity.tickDeath: after twenty ticks the body is removed.
             if !kept && !m.removed && !m.alive() && m.death_time >= 20 {
                 let (width, height) = (f64::from(m.width()), f64::from(m.height()));
@@ -317,7 +318,7 @@ impl Game<'_> {
         let mut flags = keep.into_iter();
         mobs.retain(|_| flags.next().unwrap_or(true));
         for m in mobs {
-            horizon_client::mobs::apply_mob_pushes(m, &mut pushes);
+            horizon_client::mobs::apply_mob_pushes(m, pushes);
         }
     }
 }

@@ -201,7 +201,30 @@ impl Drop for Scratch {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Output {
+    Quiet,
+    Egg,
+    Guest,
+}
 fn run(family: Family) {
+    run_output(family, Output::Quiet);
+}
+fn fixture_game(output: Output, test: impl FnOnce(&mut Game<'_>)) {
+    if output == Output::Guest {
+        crate::game::native_guest_turn_tests::with_guests(test);
+    } else {
+        crate::game::native_entity_refs::tests::with_game(test);
+    }
+}
+fn eggs(game: &Game<'_>) -> u32 {
+    game.dropped
+        .iter()
+        .filter(|d| d.stack.item.as_ref() == "minecraft:egg")
+        .map(|d| d.stack.count)
+        .sum()
+}
+fn run_output(family: Family, output: Output) {
     crate::entry::install_client_hooks();
     let _ =
         horizon_client::block_contact::HOOKS.set(crate::game::native_hooks::BLOCK_CONTACT_HOOKS);
@@ -239,10 +262,27 @@ fn run(family: Family) {
                     Box::new(Hooks(probe.clone())),
                 )])
                 .unwrap();
-                crate::game::native_entity_refs::tests::with_game(|game| {
+                fixture_game(output, |game| {
                     game.world_root = scratch.0.clone();
                     game.enter_level(dim).unwrap();
                     game.options.dedicated = Some(Vec::new());
+                    if output != Output::Quiet {
+                        game.load_server_loot();
+                    }
+                    if output == Output::Guest {
+                        let host = game.lan.as_mut().unwrap();
+                        for i in 0..host.hub.guests.len() {
+                            host.hub.guests.update(i, |g| {
+                                g.dimension = dim.id().to_owned();
+                                g.position = if g.conn == 12 {
+                                    [1.5, 80.0, 0.5]
+                                } else {
+                                    [12.0, 80.0, 12.0]
+                                };
+                                g.loaded = true;
+                            });
+                        }
+                    }
                     game.world
                         .chunks
                         .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
@@ -259,7 +299,11 @@ fn run(family: Family) {
                             .res
                             .mob_types()
                             .get(if id == 71 {
-                                "minecraft:pig"
+                                match output {
+                                    Output::Egg => "minecraft:chicken",
+                                    Output::Guest => "minecraft:zombie",
+                                    Output::Quiet => "minecraft:pig",
+                                }
                             } else {
                                 "minecraft:zombie"
                             })
@@ -270,6 +314,16 @@ fn run(family: Family) {
                         mob.no_ai = true;
                         if id == 71 {
                             mob.ai.last_hurt_by_player = 5;
+                            if output != Output::Quiet {
+                                mob.no_ai = false;
+                                mob.on_ground = true;
+                            }
+                            if output == Output::Egg {
+                                mob.extra.egg_time = 1;
+                            }
+                            if output == Output::Guest {
+                                mob.ai.target = Some(horizon_client::mobs::Who::Player);
+                            }
                         }
                         if id == 72 {
                             mob.air = 100;
@@ -327,12 +381,27 @@ fn run(family: Family) {
                         .default_state("minecraft:stone")
                         .unwrap();
                     game.world.set(4, 80, 4, stone).unwrap();
+                    if output != Output::Quiet {
+                        for x in 0..5 {
+                            for z in 0..5 {
+                                game.world.set(x, 79, z, stone).unwrap();
+                            }
+                        }
+                    }
+                    if output == Output::Guest {
+                        assert_eq!(game.lan_guest_views().len(), 2);
+                    }
                     if matches!(family, Family::Movement | Family::Landing) {
                         game.world.set(2, 79, 0, stone).unwrap();
                     }
                     let writes = game.world.path_writes.clone();
                     game.world.random = LegacyRandom::new(0x5eed);
                     let draw = game.world.random.clone().next_long();
+                    let guest_health = if output == Output::Guest {
+                        game.lan.as_ref().unwrap().hub.guests[0].health
+                    } else {
+                        0.0
+                    };
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         horizon_client::block_contact::in_level(Some(game.dim.id()), || {
                             game.tick_creature_entities()
@@ -353,6 +422,36 @@ fn run(family: Family) {
                         payload.downcast_ref::<&str>().copied(),
                         Some("actual borrowed mob callback panicked")
                     );
+                    if output == Output::Egg {
+                        assert!(
+                            game.mobs[0].extra.egg_time > 1,
+                            "real egg cooldown did not advance"
+                        );
+                        assert_eq!(eggs(game), 0, "recovery executed egg action");
+                        assert!(
+                            game.creatures.pending[game.dim.id()]
+                                .events
+                                .iter()
+                                .any(|e| matches!(e, MobEvent::LayEgg { .. })),
+                            "real egg action not retained"
+                        );
+                    }
+                    if output == Output::Guest {
+                        assert_eq!(
+                            game.lan.as_ref().unwrap().hub.guests[0].health,
+                            guest_health,
+                            "recovery executed guest action"
+                        );
+                        assert!(
+                            game.creatures.pending[game.dim.id()].guests.iter().any(
+                                |(conn, mob, e)| *conn == 12
+                                    && *mob == 71
+                                    && matches!(e, MobEvent::AttackPlayer(..))
+                            ),
+                            "real guest attack not retained: {:?}",
+                            game.creatures.pending[game.dim.id()].guests
+                        );
+                    }
                     let mut pending = Vec::new();
                     journal.drain_into(&mut pending);
                     let (mut depth, mut lifts) = (0usize, 0usize);
@@ -421,6 +520,31 @@ fn run(family: Family) {
                         "real post listener never ran on retry"
                     );
                     table.end_tick().unwrap();
+                    if output == Output::Egg {
+                        assert_eq!(eggs(game), 1, "retained egg not delivered exactly once");
+                        game.tick_creature_entities().unwrap();
+                        assert_eq!(eggs(game), 1, "egg action replayed");
+                    }
+                    if output == Output::Guest {
+                        let health = game.lan.as_ref().unwrap().hub.guests[0].health;
+                        assert!(health < guest_health, "retained guest attack not delivered");
+                        assert_eq!(
+                            game.lan.as_ref().unwrap().hub.guests[1].health,
+                            guest_health,
+                            "attack routed to wrong guest"
+                        );
+                        game.mobs[0].no_ai = true;
+                        game.as_guest(12, |g| {
+                            g.player.as_mut().unwrap().health.invulnerable_time = 0
+                        })
+                        .unwrap();
+                        game.tick_creature_entities().unwrap();
+                        assert_eq!(
+                            game.lan.as_ref().unwrap().hub.guests[0].health,
+                            health,
+                            "guest action replayed"
+                        );
+                    }
                 })
             },
         );
@@ -434,3 +558,92 @@ macro_rules! cases {
     )*};
 }
 cases!(damage => Damage, shield => Shield, totem => Totem, movement => Movement, breathing => Breathing, goal => Goal, knockback => Knockback, landing => Landing);
+
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_egg() {
+    run_output(Family::Damage, Output::Egg);
+}
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_guest() {
+    run_output(Family::Damage, Output::Guest);
+}
+
+struct ConsumerPanic(Arc<AtomicUsize>);
+#[mod_api::__subscriptions]
+impl mod_api::Hooks for ConsumerPanic {
+    fn item_spawn(&self, _: &mut dyn mod_api::ServerHost, _: &mut mod_api::ItemSpawnEvent<'_>) {
+        let entered = self.0.fetch_add(1, Ordering::SeqCst);
+        eprintln!("RETAINED_ITEM_CONSUMER:{entered}");
+        if entered == 0 {
+            panic!("real item consumer");
+        }
+    }
+}
+#[test]
+#[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+fn retained_consumer_tail() {
+    crate::entry::install_client_hooks();
+    for dim in [Dim::Overworld, Dim::Nether] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let scratch = Scratch(
+            std::env::temp_dir().join(format!("horizon-consumer-{}-{dim:?}", std::process::id())),
+        );
+        mod_api::testing::with_mods(
+            vec![mod_api::ModEntry::new(
+                "consumer",
+                Box::new(ConsumerPanic(calls.clone())),
+            )]
+            .into(),
+            || {
+                crate::game::native_entity_refs::tests::with_game(|game| {
+                    game.world_root = scratch.0.clone();
+                    game.enter_level(dim).unwrap();
+                    game.options.dedicated = Some(Vec::new());
+                    game.load_server_loot();
+                    game.world
+                        .chunks
+                        .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+                    for id in [71, 72] {
+                        let kind = game
+                            .res
+                            .mob_types()
+                            .get("minecraft:chicken")
+                            .unwrap()
+                            .clone();
+                        let mut mob =
+                            Mob::new(id, kind, Vec3::new(f64::from(id - 70), 80.0, 0.5), 0.0);
+                        mob.extra.egg_time = 1;
+                        game.mobs.push(mob);
+                    }
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        game.tick_creature_entities()
+                    }));
+                    assert_eq!(
+                        result.unwrap_err().downcast_ref::<&str>(),
+                        Some(&"real item consumer")
+                    );
+                    assert_eq!(calls.load(Ordering::SeqCst), 1);
+                    assert_eq!(
+                        eggs(game),
+                        1,
+                        "entered action did not produce its observable item"
+                    );
+                    assert!(game.mobs.iter().all(|m| m.extra.egg_time > 1));
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(
+                        eggs(game),
+                        2,
+                        "unentered tail lost or current action replayed"
+                    );
+                    assert_eq!(calls.load(Ordering::SeqCst), 2);
+                    game.tick_creature_entities().unwrap();
+                    assert_eq!(eggs(game), 2);
+                    assert_eq!(calls.load(Ordering::SeqCst), 2);
+                    eprintln!("RETAINED_CONSUMER_RETRY:{dim:?}");
+                });
+            },
+        );
+    }
+}
