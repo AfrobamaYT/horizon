@@ -305,6 +305,27 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_nan_snapshots_do_not_advance_revision() {
+        let mut entity = ModBlockEntity::default();
+        entity.nbt.insert("float".into(), Tag::Float(0x7fc0_0123));
+        entity
+            .nbt
+            .insert("double".into(), Tag::Double(0x7ff8_0000_0000_0123));
+        let before = entity.revision();
+        for _ in 0..20 {
+            entity.apply_snapshot(ModBlockEntitySnapshot::from(&entity));
+            assert_eq!(entity.revision(), before);
+        }
+        let mut snapshot = ModBlockEntitySnapshot::from(&entity);
+        snapshot
+            .fields
+            .nbt
+            .insert("float".into(), Tag::Float(0x7fc0_0124));
+        entity.apply_snapshot(snapshot);
+        assert_ne!(entity.revision(), before);
+    }
+
+    #[test]
     fn returned_snapshot_changes_only_fields_and_keeps_native_revision_bookkeeping() {
         let mut entity = ModBlockEntity::new("test:machine".into(), Default::default());
         let revision = entity.revision();
