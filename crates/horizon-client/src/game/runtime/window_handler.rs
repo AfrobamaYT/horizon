@@ -167,7 +167,10 @@ impl Game<'_> {
         {
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
             if !text.is_empty() && self.text_field_focused() && self.types_text() {
-                let _ = self.type_chars_into_screen(&text);
+                self.screen_text_each(&text, |game, c| {
+                    // Err only says no box of the screen takes it.
+                    let _ = game.type_chars_into_screen(c);
+                });
             }
             return;
         }
@@ -369,17 +372,18 @@ impl Game<'_> {
         // Options keeps its text on the key: its own key path routes a key's
         // text between its boxes and its key-bind capture, and no key that
         // carries text closes that screen or moves its focus. The title's
-        // screens keep theirs for the same reason: their key path types into
-        // the world name, the seed and a server's address.
+        // screens keep theirs while no box has focus: Space presses a button
+        // there, and the box that opens must not take its character.
         let mut typed: Option<String> = None;
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
         } = &mut event
             && key_event.state == ElementState::Pressed
         {
+            let title_text = control::title_owns_text(&self.screen, self.title.is_some());
             if self.screen_hooks_open()
                 && self.screen != Screen::Options
-                && !control::title_owns_text(&self.screen, self.title.is_some())
+                && (!title_text || self.title.as_mut().is_some_and(|t| t.has_caret_field()))
             {
                 typed = key_event.text.take().map(|text| text.to_string());
             }
@@ -387,7 +391,9 @@ impl Game<'_> {
                 PhysicalKey::Code(key) => self.screen_key_pressed(key, key_event.repeat),
                 PhysicalKey::Unidentified(_) => false,
             };
-            if self.screen == Screen::Options && self.screen_hooks_open() {
+            if self.screen_hooks_open()
+                && (self.screen == Screen::Options || (title_text && self.types_text()))
+            {
                 // The hook after the key's own, then the text the key path
                 // types in place (its own routing keeps it).
                 if let Some(text) = key_event.text.as_deref() {
@@ -1435,6 +1441,7 @@ impl Game<'_> {
                         self.clock.record(started.elapsed());
                         if let Some(report) = self.clock.take_sprint_report() {
                             self.sprint_report(&report);
+                            self.on_tick_rate_changed();
                         }
                     }
                     self.extras_frame(elapsed);

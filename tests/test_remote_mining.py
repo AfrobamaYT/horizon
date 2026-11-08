@@ -27,7 +27,7 @@ class RemoteMiningTests(unittest.TestCase):
 struct Hit { pos: [i32; 3], face: u8 }
 /// The held stack: `ItemStack.item`, which the debug-stick check reads.
 struct Stack { item: &'static str }
-struct Mining { pos: [i32; 3], progress: f32, ticks: u32 }
+struct Mining { pos: [i32; 3], progress: f32, per_tick: f32, ticks: u32 }
 #[derive(Default)]
 struct Remote { destroy_delay: u32, destroying: Option<([i32; 3], u8, f32)>, destroying_item: String, is_destroying: bool }
 struct Ground { on_ground: bool }

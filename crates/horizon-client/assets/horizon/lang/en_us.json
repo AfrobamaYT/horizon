@@ -1,4 +1,11 @@
 {
+  "horizon.modprofile.started": "Mod profiling started.",
+  "horizon.modprofile.stopped": "Mod profiling stopped. Saved %s",
+  "horizon.modprofile.alreadyRunning": "Mod profiling is already running.",
+  "horizon.modprofile.notRunning": "Mod profiling is not running.",
+  "horizon.modprofile.noReport": "No completed mod profile is available.",
+  "horizon.modprofile.inHook": "Cannot stop profiling from inside a mod callback.",
+  "horizon.modprofile.writeFailed": "Could not save the mod profile: %s",
   "horizon.fluid.unknown": "Unknown fluid",
   "horizon.options.controller": "Controller",
   "horizon.options.three_d_skin_layers": "3D Skin Layers",

@@ -384,7 +384,7 @@ impl Game<'_> {
             &overlay,
         ));
         self.adv.reset_tree();
-        self.native_server_data_loaded(true);
+        self.native_tags_updated(mod_api::TagsUpdateCause::ServerDataLoad { reload: true });
     }
 
     pub(super) fn join_world_rest(&mut self) -> Result<()> {
@@ -487,11 +487,7 @@ impl Game<'_> {
             })
         })
         .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
-        let tags = native_world_read::prepare_block_tags(items, |name| {
-            registry
-                .default_state(name)
-                .map(|state| self.res.behaviours().block(state))
-        });
+        let tags = self.block_tag_sets(items);
         let parts = mod_api::__private::prepare_parts(
             &items.block_tags,
             &items.item_tags,
