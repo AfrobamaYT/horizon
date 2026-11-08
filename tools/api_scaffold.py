@@ -72,7 +72,16 @@ def handle_source(e, name):
             f'pub struct {name} {{\n    pub(crate) epoch: crate::NativeWorldEpoch,\n    pub(crate) id: u64,\n}}\n\n'
             f'impl {name} {{\n    /// Create a handle for the game.\n'
             '    // hidden: a game-side helper, not part of the mod surface\n    #[doc(hidden)]\n'
-            '    pub fn new(epoch: crate::NativeWorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n')
+            '    pub fn new(epoch: crate::NativeWorldEpoch, id: u64) -> Self {\n        Self { epoch, id }\n    }\n}\n\n'
+            # Opaque handles have no generated Wire impl (as `BossBarRef`), and the game reads them through `Fields`.
+            f'impl crate::wire::Wire for {name} {{\n    const MIN: usize = 16;\n'
+            '    fn put(&self, out: &mut crate::wire::Writer) {\n        out.put(&self.epoch);\n        out.put(&self.id);\n    }\n'
+            '    fn take(input: &mut crate::wire::Reader<\'_>) -> Result<Self, crate::wire::WireError> {\n'
+            '        Ok(Self { epoch: input.take()?, id: input.take()? })\n    }\n}\n\n'
+            f'/// What the game reads of a [`{name}`].\n#[doc(hidden)]\npub struct {name}Fields {{\n'
+            '    pub epoch: crate::NativeWorldEpoch,\n    pub id: u64,\n}\n\n'
+            f'impl crate::__private::game::Fields for {name} {{\n    type Fields<\'a> = {name}Fields;\n'
+            f'    fn fields(&self) -> {name}Fields {{\n        {name}Fields {{ epoch: self.epoch, id: self.id }}\n    }}\n}}\n')
 
 
 def backend_source(e, name):
@@ -173,7 +182,7 @@ def scaffold(entry, plan):
     plan.append(API / 'exports' / f'{topic}.rs', f'pub use crate::{topic}::{name};\n',
                 f'// hidden: a module of game-side types; mods use their re-exports\n#[doc(hidden)]\npub mod {topic};\n')
     if entry.get('methods'):
-        header = '//! Host method declarations; access defaults and game forwarders are generated.\nuse crate::*;\n\n'
+        header = '//! Host method declarations; access defaults and game forwarders are generated.\n#![allow(unused_variables)]\nuse crate::*;\n\n'
         plan.append(API / 'host' / f'{topic}.rs', backend_source(entry, name), header)
     conv = CONV / f'{topic}.rs'
     plan.append(conv, conversion_source(entry, name),
