@@ -56,23 +56,7 @@ struct Snapshot {
 impl Snapshot {
     /// Captures settings for `mod_ids`; the registry inputs are shared, not scanned again.
     fn capture<'a>(inputs: Arc<LoadInputs>, mod_ids: impl IntoIterator<Item = &'a str>) -> Self {
-        let mut settings = BTreeMap::new();
-        for mod_id in mod_ids {
-            let directory = inputs.settings_root.join(mod_id);
-            let Ok(files) = fs::read_dir(&directory) else {
-                continue;
-            };
-            let mut values = BTreeMap::new();
-            for file in files.flatten() {
-                let Ok(key) = file.file_name().into_string() else {
-                    continue;
-                };
-                if let Some(value) = read_setting(&directory, &key) {
-                    values.insert(key, value);
-                }
-            }
-            settings.insert(mod_id.to_owned(), values);
-        }
+        let settings = capture_settings(&inputs.settings_root, mod_ids);
         Self { inputs, settings }
     }
 
@@ -210,6 +194,32 @@ impl LoopContext {
     pub fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
         self.snapshot.setting(mod_id, key)
     }
+}
+
+/// Every setting file of each of `mod_ids` under `settings_root`, read once. A mod with no
+/// folder has no entry; no folder is created.
+pub fn capture_settings<'a>(
+    settings_root: &Path,
+    mod_ids: impl IntoIterator<Item = &'a str>,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut settings = BTreeMap::new();
+    for mod_id in mod_ids {
+        let directory = settings_root.join(mod_id);
+        let Ok(files) = fs::read_dir(&directory) else {
+            continue;
+        };
+        let mut values = BTreeMap::new();
+        for file in files.flatten() {
+            let Ok(key) = file.file_name().into_string() else {
+                continue;
+            };
+            if let Some(value) = read_setting(&directory, &key) {
+                values.insert(key, value);
+            }
+        }
+        settings.insert(mod_id.to_owned(), values);
+    }
+    settings
 }
 
 /// Read the same per-key storage as the runtime settings service. No folder is
