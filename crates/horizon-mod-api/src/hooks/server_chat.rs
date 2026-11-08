@@ -15,6 +15,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "cancel",
         neoforge = "ServerChatEvent",
+        paper = "AsyncChatEvent",
         cancellable = true
     )]
     fn server_chat(

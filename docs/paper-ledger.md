@@ -836,3 +836,35 @@ Scope: the 20 entity hooks below. A key is added only where moment, side, inform
 [paper-BlockMultiPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockMultiPlaceEvent.html
 [paper-EntityZapEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/EntityZapEvent.html
 [paper-PreCreatureSpawnEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/entity/PreCreatureSpawnEvent.html
+
+## Event counterparts: miscellaneous portal, brewing, recipe and server hooks (#1015)
+
+Paper API 26.3 (`26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the 20 hooks below.
+A key is added only where moment, server side, information and result all agree; otherwise the row records the boundary.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `portal_spawn` | **Gap:** none (nearest [`EntityPortalEvent`][paper-EntityPortalEvent]) | Paper's portal events cover an entity teleporting through a portal, not a fire filling an obsidian frame with a portal block; no candidate exposes the frame shape/state or a portal-formation cancel. No key. |
+| `potion_brew_post` | **Gap:** none | No dossier candidate describes a brewing stand completing a brew; potion splash and witch events are different moments and expose no stand slots. No key. |
+| `potion_brew_pre` | **Gap:** none | No Paper event covers the pre-brew moment; the candidates are splash/witch potion use, not brewing-stand slots or a brew cancel. No key. |
+| `pre_remove_side_effects` | **Gap:** none | No Paper event covers block-entity side effects on removal or collecting extra drops; the potion-effect candidates are unrelated. No key. |
+| `recipe_book_categories` | **Gap:** none | Paper's recipe-book events are player clicks, settings or discovery, not registration of categories for custom recipe types; there is no data-load declaration event. No key. |
+| `recipe_property_sets` | **Gap:** none | No Paper event adds station-slot property sets during data load; recipe discovery and click events do not expose the set keys or accepted items. No key. |
+| `right_click_item` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | The event is cancellable and carries player, hand, item, block/face and clicked position, matching the server half of `right_click_item`, but it is the generic air/block interaction event rather than a field-limited "immediately before `Item.use`" moment, and it cannot express the hook's interaction result. No key. |
+| `server_chat` | **Covered:** [`AsyncChatEvent`][paper-AsyncChatEvent] | Fires for a player's chat message before broadcast, server-side (asynchronously for incoming packets), exposes the player and original/current message, and is cancellable with a mutable message, matching `server_chat`'s cancel and replacement. Key added. |
+| `server_tick_rate_changed` | **Gap:** none | No dossier event covers a server tick-rate change; the player world, main-hand and equipment candidates are unrelated. No key. |
+| `should_check_weak_power` | **Gap:** none | No Paper event asks whether indirect power is read through a block; the block-lock, creeper-power and server-full candidates are unrelated. No key. |
+| `should_redstone_wire_connect_to` | **Gap:** none (nearest [`BlockRedstoneEvent`][paper-BlockRedstoneEvent]) | `BlockRedstoneEvent` reports a current change and lets listeners set the new current, not whether wire connects to a neighbouring state; it cannot answer the hook's shape query. No key. |
+| `spread_players_teleport` | **Partial:** [`PlayerTeleportEvent`][paper-PlayerTeleportEvent] | For players this cancellable event offers from/to, a mutable destination and a cause, matching the hook's cancel and target move, but it is generic to all player teleports and cannot express non-player entities or limit itself to `/spreadplayers`. No key. |
+| `stateful_block_entity` | **Gap:** none | No Paper event declares static block-entity factory ownership per block; this is a creation-time registry decision, not a Bukkit event. No key. |
+| `sweep_attack` | **Gap:** none (nearest [`EntityDamageEvent`][paper-EntityDamageEvent]) | Damage events fire later for damage and expose no sweep decision or `sweeping` flag, so they cannot force or stop the sweep as `sweep_attack` does. No key. |
+| `tags_updated` | **Gap:** none | No dossier event reports rebuilt tags or their data-load cause; Paper has no candidate for rebinding tag-derived caches. No key. |
+| `teleport_command` | **Partial:** [`PlayerTeleportEvent`][paper-PlayerTeleportEvent] | The event matches player teleports with a mutable destination and cancel, but `/tp` also moves non-player entities, and the event is not limited to command teleports by a documented field. No key. |
+| `use_item_on_block` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | `Action.RIGHT_CLICK_BLOCK` gives the block, face, hand, item and player and is cancellable, but the hook's chosen phase and cancellation result are not exposed, and the generic event also fires outside that moment. No key. |
+| `validate_tickets` | **Gap:** none | No Paper event exposes a level's saved chunk tickets for a controller to validate; login and item-transport target validation are different systems. No key. |
+| `vanilla_game_event` | **Partial:** [`GenericGameEvent`][paper-GenericGameEvent] | It is the generic cancellable game-event event with event id, location and causing entity, but it exposes no `affected_state` (the block state the event touched), which `vanilla_game_event` passes to mods. No key. |
+| `wind_burst` | **Gap:** none | No Paper event exposes the shuffled wind-burst block candidates for removal; no candidate covers breeze block interaction. No key. |
+
+[paper-AsyncChatEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/AsyncChatEvent.html
+[paper-BlockRedstoneEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockRedstoneEvent.html
+[paper-GenericGameEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/GenericGameEvent.html
