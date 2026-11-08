@@ -1697,6 +1697,16 @@ mod dimension_key_tests {
     }
 
     #[test]
+    fn a_built_in_level_keeps_the_sea_level_its_generator_registered() {
+        // A superflat Overworld builds with -63, not the Overworld's 63.
+        register_sea_level(LevelKey::OVERWORLD, -63);
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), -63);
+        assert_eq!(sea_level_of(LevelKey::NETHER), 32);
+        set_sea_levels(Vec::new());
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), 63);
+    }
+
+    #[test]
     fn dimension_and_key_round_trip_and_sea_levels() {
         for (dim, key, sea) in [
             (Dimension::Overworld, LevelKey::OVERWORLD, 63),
