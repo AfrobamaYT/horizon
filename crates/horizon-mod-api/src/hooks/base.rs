@@ -4057,6 +4057,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's VehicleDamageEvent)",
+        paper = "VehicleDamageEvent",
         cancellable = true
     )]
     fn vehicle_damage();
@@ -4083,7 +4084,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)"
+        neoforge = "none (NeoForge has no vehicle move event; EntityTickEvent covers the tick)",
+        paper = "VehicleMoveEvent"
     )]
     fn vehicle_moved();
     /// The server world's border bounds changed, either immediately or when
@@ -4664,6 +4666,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "ThunderChangeEvent",
         cancellable = true
     )]
     fn thunder_change();
@@ -4738,7 +4741,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
+        paper = "WhitelistToggleEvent"
     )]
     fn whitelist_state_update();
     /// A timed world-border size change finished on the server, after its
@@ -4748,6 +4752,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "listen",
         neoforge = "none (NeoForge has no such event; Bukkit's WorldBorderBoundsChangeFinish)",
+        paper = "WorldBorderBoundsChangeFinishEvent",
         cancellable = false
     )]
     fn world_border_bounds_change_finish();

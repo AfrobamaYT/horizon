@@ -454,3 +454,47 @@ Status is judged on moment, side, information and result; “No key” means no 
 [paper-PlayerChangedWorldEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerChangedWorldEvent.html
 
 [paper-PlayerCommandPreprocessEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerCommandPreprocessEvent.html
+
+## Event counterparts: base-target hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the base-target hooks below.
+Server-only events are compared with the hook's server half; moments with no Paper/Bukkit event are recorded as gaps.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `target_hit` | **Partial:** [`TargetHitEvent`][paper-TargetHitEvent] | Paper fires when a projectile hits a target block and exposes the signal strength, matching the moment and server side. It is cancellable and lets plugins set the strength, while the listen-only hook can neither cancel nor change it. No key. |
+| `thunder_change` | **Covered:** [`ThunderChangeEvent`][paper-ThunderChangeEvent] | Same server-side thunder-state change, with `toThunderState` and cancellation matching the hook's `cancel`. Key added. |
+| `tick_block` | **Gap:** none | No Paper/Bukkit event covers a due scheduled block tick before `BlockState.tick`; no candidate is listed and Paper has no block-tick event. No key. |
+| `time_skip` | **Partial:** [`TimeSkipEvent`][paper-TimeSkipEvent] | The event covers a server-side clock jump and can be cancelled, but the hook fires before the skip and exposes `from`, `to`, and cause, while Paper's event (through [`ClockTimeSkipEvent`][paper-ClockTimeSkipEvent]) also lets plugins change the skip amount, which the hook cannot express. No key. |
+| `tnt_primed` | **Gap:** none | No Paper/Bukkit event in the dossier covers TNT being primed before the entity is created, with the priming player and cancel result. No key. |
+| `trade_select` | **Partial:** [`TradeSelectEvent`][paper-TradeSelectEvent] | Same server-side trade-sidebar selection with the villager, player, and index. The hook only listens, whereas Paper's event is cancellable, so the cancel result cannot be expressed. No key. |
+| `trade_with_villager` | **Partial:** [`PlayerTradeEvent`][paper-PlayerTradeEvent] | Paper's event covers a player trading with a villager or wandering trader and exposes a mutable trade. It fires at the trade (cancellable) while the hook hears the completed trade once per offer with uses already counted, and the hook cannot cancel. No key. |
+| `update_shape` | **Gap:** none | No Paper/Bukkit event covers `BlockBehaviour.updateShape` neighbour recomputation with the old state, direction, neighbour, and replacement state. No key. |
+| `use_duration` | **Gap:** none (nearest [`PlayerInteractEvent`][paper-PlayerInteractEvent]) | Paper's interact event is a server-side click event, not the client-and-server item `getUseDuration` query with no user; it has no duration value to read or change. No key. |
+| `use_item` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | The right-click item use is represented by `PlayerInteractEvent` with the item, hand, and air/block action, but Paper fires before the block's own handling and its cancellation stops the interaction, while the hook runs at `Item.use` and `claimed` only takes the use. No key. |
+| `use_on` | **Partial:** [`PlayerInteractEvent`][paper-PlayerInteractEvent] | Paper exposes the clicked block, face, and item on a right-click block action, but it fires before the block lets the click through, not where `ItemStack.useOn` starts; cancellation also differs from the hook's `claimed`. No key. |
+| `vault_change_state` | **Partial:** [`VaultChangeStateEvent`][paper-VaultChangeStateEvent] | Same vault state change with old/new state and position. Paper's event is cancellable while the hook only listens, so the cancel result is not expressible. No key. |
+| `vault_loot` | **Gap:** none (nearest [`VaultDisplayItemEvent`][paper-VaultDisplayItemEvent]) | Paper's event fires when the vault is about to display an item, not when it ejects loot; it also has an item setter and cancellation the listen-only hook cannot express. No key. |
+| `vehicle_create` | **Partial:** [`VehicleCreateEvent`][paper-VehicleCreateEvent] | Paper raises the event when a vehicle is created, with the vehicle type and location. The hook only listens, while Paper's event is cancellable, so the result differs. No key. |
+| `vehicle_damage` | **Covered:** [`VehicleDamageEvent`][paper-VehicleDamageEvent] | Same server-side vehicle damage from an attack, exposing the vehicle, attacker, damage amount, and damage setter; cancellation matches the hook's `cancel` and `damage` matches its mutable amount. Key added. |
+| `vehicle_destroy` | **Partial:** [`VehicleDestroyEvent`][paper-VehicleDestroyEvent] | Paper raises it when a vehicle is destroyed, with the vehicle and attacker. The hook only listens and is not called for TNT minecarts that prime, whereas Paper's event is cancellable. No key. |
+| `vehicle_moved` | **Covered:** [`VehicleMoveEvent`][paper-VehicleMoveEvent] | Same server-side post-move notification with the vehicle and `from`/`to` locations; the hook's listener contract matches Paper's non-cancellable event. Key added. |
+| `weather_change` | **Partial:** [`WeatherChangeEvent`][paper-WeatherChangeEvent] | The event covers a server-side weather change and cancellation, but it exposes only the rain state (`toWeatherState`) and cause, not the hook's requested thundering state. No key. |
+| `whitelist_state_update` | **Covered:** [`WhitelistToggleEvent`][paper-WhitelistToggleEvent] | Same dedicated-server whitelist toggle, with `isEnabled` matching the hook's `enabled`; both are listen-only/non-cancellable. Key added. |
+| `world_border_bounds_change_finish` | **Covered:** [`WorldBorderBoundsChangeFinishEvent`][paper-WorldBorderBoundsChangeFinishEvent] | Paper fires after a moving world border finishes, matching the hook's post-application server-side moment; the event is non-cancellable, as is the hook. Key added. |
+
+[paper-TargetHitEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/block/TargetHitEvent.html
+[paper-ThunderChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/ThunderChangeEvent.html
+[paper-TimeSkipEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/TimeSkipEvent.html
+[paper-ClockTimeSkipEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/ClockTimeSkipEvent.html
+[paper-TradeSelectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/TradeSelectEvent.html
+[paper-PlayerTradeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerTradeEvent.html
+[paper-VaultChangeStateEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/block/VaultChangeStateEvent.html
+[paper-VaultDisplayItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/VaultDisplayItemEvent.html
+[paper-VehicleCreateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleCreateEvent.html
+[paper-VehicleDamageEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleDamageEvent.html
+[paper-VehicleDestroyEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleDestroyEvent.html
+[paper-VehicleMoveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/vehicle/VehicleMoveEvent.html
+[paper-WeatherChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/weather/WeatherChangeEvent.html
+[paper-WhitelistToggleEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/server/WhitelistToggleEvent.html
+[paper-WorldBorderBoundsChangeFinishEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderBoundsChangeFinishEvent.html
