@@ -385,7 +385,10 @@ pub fn set_string(value: &mut Value, text: &str) {
 pub fn load(dir: &Path, revision: &str) -> Result<Vec<ListedInternal>, String> {
     let cache = dir.join("target/horizon-mod/prebuilt").join(revision);
     let path = cache.join(CATALOG);
-    if path.is_file() {
+    if path
+        .try_exists()
+        .map_err(|e| format!("{}: {e}", path.display()))?
+    {
         let text = crate::bounded::read(&path, crate::bounded::MAX_CATALOG)?;
         return serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()));
     }

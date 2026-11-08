@@ -15,8 +15,12 @@ impl Fixture {
         Self(p)
     }
     fn run(&self, args: &[&str]) -> String {
+        self.run_launcher(args, "horizon-launcher")
+    }
+    fn run_launcher(&self, args: &[&str], launcher: &str) -> String {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cargo-horizon-mod"))
             .args(args)
+            .env("HORIZON_LAUNCHER", launcher)
             .current_dir(&self.0)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -110,6 +114,10 @@ fn bounded_slot_command() {
         fs::remove_file(&path).unwrap();
         std::os::unix::fs::symlink("/dev/zero", &path).unwrap();
         assert!(f.run(COMMANDS[2]).contains("not a regular file"));
+        fs::remove_file(&path).unwrap();
+        let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        assert!(f.run(COMMANDS[2]).contains("not a regular file"));
     }
 }
 
@@ -150,4 +158,28 @@ fn bounded_catalog_commands() {
             assert_eq!(fs::read(f.0.join("horizon-mod.toml")).unwrap(), before);
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn bounded_discovery_reread() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new("discovery");
+    f.manifest();
+    let launcher = f.0.join("launcher");
+    fs::write(
+        &launcher,
+        "#!/bin/sh\ntruncate -s 33554433 horizon-mod.toml\necho '[]'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700)).unwrap();
+    let error = f.run_launcher(COMMANDS[4], launcher.to_str().unwrap());
+    assert!(
+        error.contains("horizon-mod.toml") && error.contains("33554432"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::metadata(f.0.join("horizon-mod.toml")).unwrap().len(),
+        33554433
+    );
 }

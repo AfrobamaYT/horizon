@@ -48,12 +48,16 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     files.sort();
     let mut existing = Slots::default();
+    let mut old = String::new();
     for file in files
         .into_iter()
         .filter(|p| p.extension().is_some_and(|e| e == "txt"))
     {
         let text = crate::bounded::read(&file, crate::bounded::MAX_SLOTS)?;
         existing.extend(&file, &text).map_err(|e| e.to_string())?;
+        if file == output {
+            old = text;
+        }
     }
     let mut requested = Slots::default();
     let lines = manifest
@@ -89,11 +93,6 @@ fn sync(dir: &Path, repo: &Path) -> Result<(), String> {
     requested
         .extend(&output, &lines)
         .map_err(|e| e.to_string())?;
-    let old = match crate::bounded::read(&output, crate::bounded::MAX_SLOTS) {
-        Ok(old) => old,
-        Err(e) if e.is_not_found() => String::new(),
-        Err(e) => return Err(format!("{}: {e}", output.display())),
-    };
     let header = format!(
         "# {}: written by cargo horizon-mod inject sync\n",
         manifest.id

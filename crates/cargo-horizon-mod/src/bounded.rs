@@ -7,7 +7,8 @@ use std::{
 };
 // points.json is already about 9 MiB; leave ample growth room.
 pub const MAX_CATALOG: u64 = 256 << 20;
-// Slot lists contain declarations, not source; 4 MiB accommodates large mod lists.
+// The largest checked-in slot list is horizon.txt (2,839 bytes). Lists contain
+// declarations, not source; 4 MiB leaves substantial room for mod declarations.
 pub const MAX_SLOTS: u64 = 4 << 20;
 
 #[derive(Debug)]
