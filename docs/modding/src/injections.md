@@ -14,9 +14,12 @@ An API point injection names a crate-root `with` function and listens at an admi
 slot ([shape rules](#which-methods-are-points)). The prebuilt game fills those slots at load with the
 mods' listeners, without changing game source.
 
-A `mod.wasm` will listen at points too, once the game's shared-memory wasm boundary lands; until
-then a game refuses every `mod.wasm` ([Building a mod to `mod.wasm`](how-to/wasm-mods.md)). Helper
-injections are native-only.
+A `mod.wasm` can listen at generated function slots through the shared-memory Wire boundary
+([Building a mod to `mod.wasm`](how-to/wasm-mods.md)). Wasm listeners support `head`,
+`modify_arg`, `replace` and `return` on matching API or raw places. Call kinds and source
+routing are native-only. A mismatched listener is refused at load with
+`listener does not match its declared API head/return target`; a place without a generated
+record is refused with `no generated API snapshot/record` or `no generated raw snapshot/record`.
 
 ## Adding a pinned declaration
 
@@ -105,8 +108,7 @@ and inject id order. `modify_arg` is accepted on listed head slots but is a type
 source route. `modify_call_arg` remains a typed refusal until its operand payload is specified.
 API call sites, API source injects, `replace`, locals and extension fields remain refused.
 The `native` table accepts only build pins and supporting modules; unknown fields are rejected.
-API head/return functions also load from wasm;
-its remaining routing and full hash checks follow separately.
+Wasm function-slot listeners use the generated Wire records and are checked at load.
 
 ## For agents
 
