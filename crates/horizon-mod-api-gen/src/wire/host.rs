@@ -218,6 +218,10 @@ fn event_input(
                     && types.defs[*d].view.is_none()
                 {
                     event_input(types, *d, &path, setup, put);
+                } else if lifetime_def(types, ty)
+                    && !matches!(inner, Ty::Named(d) if types.defs[*d].view.is_some())
+                {
+                    put.push_str(&super::calls::snapshot(types, ty, &path).unwrap());
                 } else {
                     put.push_str(&self::put(ty, &path));
                 }
@@ -363,7 +367,9 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                 .iter()
                 .any(|(_, t)| matches!(t, Ty::Ref(_, true)) && !mutable_scalar(t))
             || m.params.iter().any(|(_, t)| {
-                lifetime_def(types, t)
+                (lifetime_def(types, t)
+                    && (super::calls::snapshot(types, t, "p").is_none()
+                        || lend(types, t, "p").is_none()))
                     || (has_ref_in_data(t) && lend(types, t, "p").is_none())
                     || (!matches!(t, Ty::Dyn(..)) && !resource(t) && held(types, t).is_none())
             })

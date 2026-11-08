@@ -154,6 +154,32 @@ fn __horizon_mod_hooks() -> Box<dyn Hooks> {
         fn subscribed(&self) -> &'static [Option<mod_api::HookId>] {
             &[]
         }
+        fn mob_layer(&self, _: &dyn mod_api::ClientHost, event: &mut mod_api::MobLayerEvent<'_>) {
+            assert_eq!(event.mob.kind, "test:mob");
+            assert_eq!(event.mob.custom_name, Some("custom"));
+            if let Some(who) = event.who {
+                assert_eq!((who.name, who.local), ("test:player", true));
+                event.draw.set_light(42);
+            } else {
+                event.draw.set_light(7);
+            }
+        }
+        fn game_rule_changed(
+            &self,
+            _: &mut dyn mod_api::ServerHost,
+            event: &mut mod_api::GameRuleChangedEvent<'_>,
+        ) {
+            assert_eq!(event.rule, "test:rule");
+            if let Some(actor) = event.actor {
+                assert_eq!(
+                    (actor.uuid, actor.entity_id, actor.name),
+                    (123, 45, "test:actor")
+                );
+                event.value = mod_api::GameRuleValue::Bool(true);
+            } else {
+                event.value = mod_api::GameRuleValue::Bool(false);
+            }
+        }
         fn loot_drops(
             &self,
             _: &mut dyn mod_api::ServerHost,
@@ -272,6 +298,132 @@ fn wire_loopback_machine_tick_uses_checked_snapshot_writeback() {
     );
     assert_eq!(entity.data, vec![8]);
     assert_eq!(entity.revision().changes(), before);
+}
+#[test]
+fn wire_loopback_optional_borrowed_render_record() {
+    struct Client;
+    impl mod_api::Host for Client {}
+    mod_api::impl_host_areas!(Client);
+    impl mod_api::ClientHost for Client {}
+    mod_api::impl_client_host_areas!(Client);
+    struct Draw(u32);
+    impl mod_api::BlockEntityDrawContext for Draw {
+        fn set_light(&mut self, value: u32) {
+            self.0 = value;
+        }
+    }
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let mob = mod_api::NativeMobRender {
+        id: 1,
+        kind: "test:mob",
+        custom_name: Some("custom"),
+        baby: false,
+        partial: 0.5,
+        age: 1.,
+        body_yaw: 0.,
+        head_yaw: 0.,
+        pitch: 0.,
+        walk_position: 0.,
+        walk_speed: 0.,
+        hurt_time: 0,
+        death_time: 0,
+        on_ground: true,
+    };
+    let player = mod_api::NativePlayerRender {
+        name: "test:player",
+        local: true,
+    };
+    for who in [None, Some(&player)] {
+        let mut draw = Draw(0);
+        module.mob_layer(
+            &Client,
+            &mut mod_api::MobLayerEvent {
+                mob: &mob,
+                who,
+                draw: &mut draw,
+            },
+        );
+        assert_eq!(draw.0, if who.is_some() { 42 } else { 7 });
+    }
+}
+#[test]
+fn wire_loopback_optional_borrowed_record() {
+    struct World;
+    impl mod_api::Host for World {}
+    mod_api::impl_host_areas!(World);
+    impl mod_api::ServerHost for World {}
+    mod_api::impl_server_host_areas!(World);
+    install_counter();
+    let module = WasmMod {
+        group: 0,
+        subscribed: &[],
+        corrupt: false,
+    };
+    let actor: mod_api::GameRuleActor = mod_api::GameRuleActor {
+        uuid: 123,
+        entity_id: 45,
+        name: "test:actor",
+    };
+    for actor in [None, Some(&actor)] {
+        let mut event = mod_api::GameRuleChangedEvent {
+            rule: "test:rule",
+            value: mod_api::GameRuleValue::Bool(!actor.is_some()),
+            actor,
+        };
+        module.game_rule_changed(&mut World, &mut event);
+        assert_eq!(event.value, mod_api::GameRuleValue::Bool(actor.is_some()));
+    }
+}
+#[test]
+fn wire_loopback_array_of_optional_borrowed_records() {
+    use mod_api::BlockEntityDrawContext;
+    struct Draw(bool);
+    impl BlockEntityDrawContext for Draw {
+        fn cube(
+            &mut self,
+            from: [f32; 3],
+            to: [f32; 3],
+            faces: [Option<mod_api::CubeFace<'_>>; 6],
+            tint: u32,
+        ) -> bool {
+            assert_eq!((from, to, tint), ([1.; 3], [2.; 3], 0x123456));
+            assert!(faces[0].is_none());
+            let face = faces[1].unwrap();
+            assert_eq!(face.sprite, "test:face");
+            assert_eq!(face.uv, Some([1., 2., 3., 4.]));
+            assert!(faces[2..].iter().all(Option::is_none));
+            self.0 = true;
+            true
+        }
+    }
+    let mut draw = Draw(false);
+    let mut cx = Box::new(boundary::Cx::default());
+    let mut frame = boundary::Frame::default();
+    frame.set_block_entity_draw_context_mut(&mut draw);
+    cx.frames.push(frame);
+    let pointer = &mut *cx as *mut boundary::Cx;
+    guest::set_transport(Some(Rc::new(move |id, bytes| {
+        let mut out = Writer::new();
+        unsafe { boundary::serve(id, pointer, bytes, &mut out) }.unwrap();
+        out.into_bytes()
+    })));
+    let sprite = String::from("test:face");
+    let faces = [
+        None,
+        Some(mod_api::CubeFace::new(&sprite).with_uv([1., 2., 3., 4.])),
+        None,
+        None,
+        None,
+        None,
+    ];
+    assert!(guest::Guest.cube([1.; 3], [2.; 3], faces, 0x123456));
+    assert!(draw.0);
+    guest::set_transport(None);
 }
 #[test]
 fn wire_loopback_borrowed_tuple_inside_optional_context() {
