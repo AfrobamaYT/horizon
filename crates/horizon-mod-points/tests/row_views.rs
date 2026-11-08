@@ -19,7 +19,9 @@ impl ResourceCodec for NoResources {
         Err(WireError::Invalid("unused"))
     }
 }
-fn read(values: &[u32], window: Window) -> Result<Vec<mod_api::Row>, RowError> {
+// `PageSource::new` takes a reader of `&T` for the `Vec` it pages.
+#[allow(clippy::ptr_arg)]
+fn read(values: &Vec<u32>, window: Window) -> Result<Vec<mod_api::Row>, RowError> {
     let mut out = window.builder();
     if window.node() != 0 || window.start() > values.len() {
         return Err(RowError::Bounds);
