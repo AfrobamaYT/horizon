@@ -848,41 +848,47 @@ mod tests {
         let installed = || vec![mod_api::ModEntry::new("kept-goal", Box::new(KeptGoalMod))];
         mod_api::testing::with_mods(installed().into(), || {
             with_game(|game| {
-            super::super::api_values::install_parts(&installed()).unwrap();
-            game.resolve_parts().unwrap();
-            let kind = game
-                .res
-                .mob_types()
-                .get("minecraft:zombie")
-                .unwrap()
-                .clone();
-            let mut zombie = Mob::new(70, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
-            zombie.custom_name = Some("Lent".to_owned());
-            let goals = |m: &Mob| -> Vec<&'static str> {
-                m.ai.goals.entries().map(|(_, name, _)| name).collect()
-            };
-            assert!(goals(&zombie).contains(&"Kept"), "the part attached its goal");
-            let mut kept = None;
-            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                game.lend_unspawned("minecraft:zombie", AT, Some(&mut zombie), |mob, _| {
-                    kept = Some(mob);
-                    panic!("a listener's bug");
-                })
-            }));
-            assert!(panicked.is_err());
-            assert!(
-                game.lent_mobs.borrow().0.is_empty(),
-                "the lend is withdrawn"
-            );
-            let kept = kept.expect("the call ran");
-            assert_eq!(kept.kind(game), Err(UnspawnedMobError::Expired));
-            assert_eq!(zombie.id, 70);
-            assert_eq!(zombie.custom_name.as_deref(), Some("Lent"));
-            let back = goals(&zombie);
-            assert!(back.contains(&"Kept"), "the mod goal keeps its goal: {back:?}");
-            assert!(!back.contains(&"ModGoal"), "no copied mod goal: {back:?}");
-            super::super::api_values::install_parts(&[]).unwrap();
-            game.resolve_parts().unwrap();
+                super::super::api_values::install_parts(&installed()).unwrap();
+                game.resolve_parts().unwrap();
+                let kind = game
+                    .res
+                    .mob_types()
+                    .get("minecraft:zombie")
+                    .unwrap()
+                    .clone();
+                let mut zombie = Mob::new(70, kind, horizon_core::geometry::Vec3::ZERO, 0.0);
+                zombie.custom_name = Some("Lent".to_owned());
+                let goals = |m: &Mob| -> Vec<&'static str> {
+                    m.ai.goals.entries().map(|(_, name, _)| name).collect()
+                };
+                assert!(
+                    goals(&zombie).contains(&"Kept"),
+                    "the part attached its goal"
+                );
+                let mut kept = None;
+                let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    game.lend_unspawned("minecraft:zombie", AT, Some(&mut zombie), |mob, _| {
+                        kept = Some(mob);
+                        panic!("a listener's bug");
+                    })
+                }));
+                assert!(panicked.is_err());
+                assert!(
+                    game.lent_mobs.borrow().0.is_empty(),
+                    "the lend is withdrawn"
+                );
+                let kept = kept.expect("the call ran");
+                assert_eq!(kept.kind(game), Err(UnspawnedMobError::Expired));
+                assert_eq!(zombie.id, 70);
+                assert_eq!(zombie.custom_name.as_deref(), Some("Lent"));
+                let back = goals(&zombie);
+                assert!(
+                    back.contains(&"Kept"),
+                    "the mod goal keeps its goal: {back:?}"
+                );
+                assert!(!back.contains(&"ModGoal"), "no copied mod goal: {back:?}");
+                super::super::api_values::install_parts(&[]).unwrap();
+                game.resolve_parts().unwrap();
             });
         });
     }
