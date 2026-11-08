@@ -2220,6 +2220,43 @@ mod tests {
             }
             let per_copy_spans = take_spans(game);
             let (copies, copy_spans) = batch(game);
+            // Independent run-boundary expectations for equal and alternating overlays.
+            for (overlays, expected) in [
+                (vec![], vec![]),
+                (vec![Overlay::NONE; 3], vec![0]),
+                (
+                    vec![Overlay::NONE, Overlay::new(0, true).unwrap(), Overlay::NONE],
+                    vec![0, 1, 2],
+                ),
+            ] {
+                let mut surface = crate::world_geometry::WorldGeometry::default();
+                surface.reset(camera.to_array(), Mat4::IDENTITY, [0.0, 0.0]);
+                let instances: Vec<_> = overlays
+                    .into_iter()
+                    .map(|overlay| {
+                        ModelInstance::new(corner.to_array(), rows(local), tint, light, overlay)
+                    })
+                    .collect();
+                GameWorldDrawContext {
+                    game,
+                    surface: &mut surface,
+                }
+                .draw_model_instances(model, &instances)
+                .unwrap();
+                let mut vertices = Vec::new();
+                game.commit_model_instances(&mut surface, camera, &mut vertices);
+                let spans = take_spans(game);
+                assert_eq!(
+                    spans.iter().map(|s| s.start as usize).collect::<Vec<_>>(),
+                    expected
+                        .into_iter()
+                        .map(|i| i * copies.len())
+                        .collect::<Vec<_>>()
+                );
+                assert!(spans.iter().all(
+                    |s| s.id == 0 && s.stage == horizon_shaders::render_stage("BLOCK_ENTITIES")
+                ));
+            }
             game.pack_ids = None;
             let bytes = |v: &[Vertex]| bytemuck::cast_slice::<Vertex, u8>(v).to_vec();
             assert_eq!(bytes(&copies), bytes(&per_copy.vertices), "route vertices");
