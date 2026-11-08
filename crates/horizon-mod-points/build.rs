@@ -33,10 +33,33 @@ fn main() {
         opaque_reason: None,
         refs: Default::default(),
     };
-    let rule = horizon_mod_api_gen::crossing::Rule::new(&[fixture, pair, later]);
+    let leaf = horizon_mod_api_gen::internals::Internal {
+        path: "horizon_client::Leaf".into(),
+        kind: "struct",
+        cfg: String::new(),
+        signature: "pub struct Leaf { pub n: u32 }".into(),
+        hash: String::new(),
+        shape_only: false,
+        opaque_reason: None,
+        refs: Default::default(),
+    };
+    let holder = horizon_mod_api_gen::internals::Internal {
+        path: "horizon_client::Holder".into(),
+        kind: "struct",
+        cfg: String::new(),
+        signature: "pub struct Holder { pub child: Box<Leaf>, pub items: &'static [u32], pub shared: &'static Leaf }".into(),
+        hash: String::new(),
+        shape_only: false,
+        opaque_reason: None,
+        refs: Default::default(),
+    };
+    let rule = horizon_mod_api_gen::crossing::Rule::new(&[fixture, pair, later, leaf, holder]);
     for ty in [
         "horizon_client::Pair",
         "horizon_client::Later",
+        "horizon_client::Holder",
+        "Box<Vec<u32>>",
+        "&'static [u32]",
         "Vec<u32>",
         "Option<String>",
         "(u32, String)",
@@ -64,6 +87,9 @@ fn main() {
             "(u32, String)" => "tuple",
             "horizon_client::Choice" => "choice",
             "horizon_client::Pair" => "pair",
+            "horizon_client::Holder" => "holder",
+            "Box<Vec<u32>>" => "boxed",
+            "&'static [u32]" => "slice",
             "horizon_client::Later" => "later",
             _ => "map",
         };

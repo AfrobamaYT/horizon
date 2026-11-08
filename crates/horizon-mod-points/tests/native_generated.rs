@@ -18,6 +18,15 @@ enum Later {
     Both { a: u32, b: u32 },
 }
 
+struct Leaf {
+    n: u32,
+}
+struct Holder {
+    child: Box<Leaf>,
+    items: &'static [u32],
+    shared: &'static Leaf,
+}
+
 #[test]
 fn emitted_native_projections_compile_and_read() {
     let mut paths = Locators::default();
@@ -83,4 +92,31 @@ fn emitted_native_projections_compile_and_read() {
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[2].2, 1);
     assert_eq!(mod_api::wire::Reader::decode::<u32>(&rows[2].4), Ok(2));
+    static ITEMS: [u32; 2] = [5, 6];
+    static LEAF: Leaf = Leaf { n: 9 };
+    let value = Holder {
+        child: Box::new(Leaf { n: 7 }),
+        items: &ITEMS,
+        shared: &LEAF,
+    };
+    let node = include!(concat!(env!("OUT_DIR"), "/native_window_holder.rs"));
+    let deep = RowWindow {
+        rows: 32,
+        depth: 4,
+        ..request
+    };
+    let rows = read(&node, root, &mut paths, deep).unwrap();
+    let nums: Vec<u32> = rows
+        .iter()
+        .filter(|r| r.4.len() == 4)
+        .map(|r| mod_api::wire::Reader::decode::<u32>(&r.4).unwrap())
+        .collect();
+    // child.n, items length is u64 (8 bytes, skipped), items elements, shared.n
+    assert_eq!(nums, [7, 5, 6, 9]);
+    let value = Box::new(vec![3u32]);
+    let node = include!(concat!(env!("OUT_DIR"), "/native_window_boxed.rs"));
+    assert_eq!(read(&node, root, &mut paths, request).unwrap().len(), 2);
+    let value: &[u32] = &ITEMS;
+    let node = include!(concat!(env!("OUT_DIR"), "/native_window_slice.rs"));
+    assert_eq!(read(&node, root, &mut paths, request).unwrap().len(), 3);
 }

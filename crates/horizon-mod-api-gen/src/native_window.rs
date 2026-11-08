@@ -46,7 +46,7 @@ pub fn generate(
             }
             Shape::Ref { to, .. }
             | Shape::Wrapped(Wrapper::Box | Wrapper::Arc | Wrapper::Rc, to) => {
-                return emit(rule, to, quote!(**(#place)), exposure, depth + 1);
+                return emit(rule, to, quote!(*(#place)), exposure, depth + 1);
             }
             Shape::Wrapped(Wrapper::Cow, to) => {
                 return emit(rule, to, quote!(*(#place).as_ref()), exposure, depth + 1);
