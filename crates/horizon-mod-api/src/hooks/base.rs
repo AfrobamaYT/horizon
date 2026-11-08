@@ -3772,7 +3772,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "collect",
         out = "names",
-        neoforge = "none (NeoForge 26.3 has no such event)"
+        neoforge = "none (NeoForge 26.3 has no such event)",
+        paper = "PlayerCommandSendEvent"
     )]
     fn player_commands_sent();
     /// The item `item` of the server player `player` (`name`) broke in `slot`
@@ -3830,7 +3831,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "PlayerEvent.PlayerChangeGameModeEvent"
+        neoforge = "PlayerEvent.PlayerChangeGameModeEvent",
+        paper = "PlayerGameModeChangeEvent"
     )]
     fn player_game_mode_changed();
     /// A server player inserted a book into a lectern, after the block entity and inventory changed.
@@ -4211,6 +4213,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerEditBookEvent)",
+        paper = "PlayerEditBookEvent",
         cancellable = true
     )]
     fn player_edit_book();
@@ -4235,14 +4238,16 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "PlayerExpCooldownChangeEvent"
     )]
     fn player_exp_cooldown_change();
     /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side.
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)",
+        paper = "PlayerInputEvent"
     )]
     fn player_input();
     /// An item cooldown is about to start for a server player. `item` is the item id and `ticks` its
@@ -4253,6 +4258,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
+        paper = "PlayerItemCooldownEvent",
         cancellable = true
     )]
     fn player_item_cooldown();

@@ -363,3 +363,49 @@ Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only: no Pape
 [paper-PlayerItemConsumeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemConsumeEvent.html
 [paper-PlayerStopUsingItemEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerStopUsingItemEvent.html
 [paper-EntityRegainHealthEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityRegainHealthEvent.html
+
+## Event counterparts: base player hooks (#1015)
+
+Paper API 26.3 (`26.3.build.244-stable`), public Javadoc only; Horizon cited by hook function name, not line.
+Scope: the 20 `base.rs` player hooks in this batch, each mapped by moment, side, information and result.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `player_commands_sent` | **Covered:** [`PlayerCommandSendEvent`][paper-PlayerCommandSendEvent] | Called when the command list is sent to a player (join and level change), the hook's moment, on the server; names are removed from the sent tree through the event's command collection, matching `out = "names"`, and it is non-cancellable like the collect contract. Key added. |
+| `player_container_close` | **Gap:** none | The dossier supplies no candidate and no Javadoc for a menu/container close moment, so nothing can be cited; the hook's facts (any menu, its type, optional block position) have no evidenced counterpart. No key. |
+| `player_container_open` | **Gap:** none | Same as the close hook: no Paper event Javadoc is available for a menu being opened with its type and optional block position, so nothing is mapped. No key. |
+| `player_deep_sleep` | **Partial:** [`PlayerDeepSleepEvent`][paper-PlayerDeepSleepEvent] | Same moment (slept long enough to count for the night skip), same server side, same player information; but the event is cancellable and the listen-only hook cannot stop the player counting as deeply asleep, so the result differs. No key. |
+| `player_destroy_item` | **Partial:** [`PlayerItemBreakEvent`][paper-PlayerItemBreakEvent] | Same break moment and server side, and the broken stack is exposed; the event gives no equipment slot, which the hook passes (`mainhand` … `saddle`, armour included), so the information differs even though both are listen/non-cancellable. No key. |
+| `player_died` | **Partial:** [`PlayerDeathEvent`][paper-PlayerDeathEvent] | Same death, server side, with the player plus the death message and damage source (`deathMessage()`, `getDamageSource()`); but it is cancellable where the hook only listens, and it fires after the death is applied rather than where `ServerPlayer.die` starts. No key. |
+| `player_edit_book` | **Covered:** [`PlayerEditBookEvent`][paper-PlayerEditBookEvent] | Fired when a book edit or signing packet is applied, server side, with the pages (via `BookMeta`), `isSigning()` and the slot; cancellable, matching `contract = "cancel"` and `out = "cancel"`. Key added. |
+| `player_egg_throw` | **Partial:** [`PlayerEggThrowEvent`][paper-PlayerEggThrowEvent] | Covers a thrown egg, but the event's moment is the egg possibly hatching (on landing), not the launch where the hook reports after the projectile was spawned; it is non-cancellable like the listen hook but carries hatch data the hook does not. No key. |
+| `player_elytra_boost` | **Partial:** [`PlayerElytraBoostEvent`][paper-PlayerElytraBoostEvent] | Same firework boost, but the event fires before the rocket is consumed (cancellable, with `shouldConsume()`), while the hook reports after launch and consumption; the listen-only hook cannot express that cancel. No key. |
+| `player_exp_cooldown_change` | **Covered:** [`PlayerExpCooldownChangeEvent`][paper-PlayerExpCooldownChangeEvent] | Same moment (the experience cooldown has changed), server side, with the new cooldown in ticks (`getNewCooldown()`); non-cancellable, matching the listen contract, and `getReason()` reports why the cooldown changed. Key added. |
+| `player_fish` | **Partial:** [`PlayerFishEvent`][paper-PlayerFishEvent] + nearest [`FishHookStateChangeEvent`][paper-FishHookStateChangeEvent] | `PlayerFishEvent` is one cancellable event for the cast and the three reel-in kinds via `getState()`, so no single state covers the bite the hook reports as state 1; that moment is only near `FishHookStateChangeEvent`, which is non-cancellable while the hook can call the bite off. No key. |
+| `player_flower_pot_manipulate` | **Partial:** [`PlayerFlowerPotManipulateEvent`][paper-PlayerFlowerPotManipulateEvent] | Same pot, item and player, but the event fires as the player is about to place the item (cancellable, `isPlacing()`), while the hook reports after the pot state was stored and the item consumed; the listen-only hook cannot express the cancel. No key. |
+| `player_game_mode_changed` | **Covered:** [`PlayerGameModeChangeEvent`][paper-PlayerGameModeChangeEvent] | Fired as the player's mode is changed, server side, cancellable like `contract = "cancel"`; the new mode is `getNewGameMode()` and `getCause()` separates the cases the hook hears from the join default, with `from` read off the player before the change is applied. Key added. |
+| `player_input` | **Covered:** [`PlayerInputEvent`][paper-PlayerInputEvent] | Called when a player sends updated input to the server, server side, with the `Input` object carrying the same flags the hook passes; non-cancellable, matching the listen contract. Key added. |
+| `player_insert_lectern_book` | **Partial:** [`PlayerInsertLecternBookEvent`][paper-PlayerInsertLecternBookEvent] | Same player, lectern block and book, but the event fires on the click before insertion (cancellable, `setBook()`), while the hook reports after the block entity and inventory changed; the listen-only hook cannot express the cancel. No key. |
+| `player_item_cooldown` | **Covered:** [`PlayerItemCooldownEvent`][paper-PlayerItemCooldownEvent] | Fires as an item cooldown starts for the used item, server side, with the item type and the inherited `getCooldown()` ticks; cancellable, matching `contract = "cancel"` and `out = "cancel"`. Key added. |
+| `player_item_frame_change` | **Partial:** [`PlayerItemFrameChangeEvent`][paper-PlayerItemFrameChangeEvent] | Covers putting, rotating and removing an item with `getAction()` and the stack, but not the hook's `break` action, and it fires before the change (cancellable), so the resulting rotation the hook passes is not exposed and the cancel cannot be expressed. No key. |
+| `player_item_mend` | **Partial:** [`PlayerItemMendEvent`][paper-PlayerItemMendEvent] | Same mending repair, with the item, repaired durability and consumed experience (`getRepairAmount()`, `getConsumedExperience()`, `getExperienceOrb()`); the event is cancellable and can change the repair amount, which the listen-only hook cannot express. No key. |
+| `player_jump` | **Partial:** [`PlayerJumpEvent`][paper-PlayerJumpEvent] | Same detected jump, server side, with the player; the event is cancellable (and can move `from`, with `getTo()`), while the hook only listens after the jump was applied, so the cancel cannot be expressed. No key. |
+| `player_kicked` | **Gap:** none | The dossier has no candidate and no Javadoc for a kick/disconnect carrying the rendered reason, so no counterpart can be cited; this is missing evidence, not proof that Paper lacks one. No key. |
+
+[paper-PlayerDeepSleepEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerDeepSleepEvent.html
+[paper-PlayerItemBreakEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemBreakEvent.html
+[paper-PlayerDeathEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/PlayerDeathEvent.html
+[paper-PlayerEditBookEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerEditBookEvent.html
+[paper-PlayerEggThrowEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerEggThrowEvent.html
+[paper-PlayerElytraBoostEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerElytraBoostEvent.html
+[paper-PlayerExpCooldownChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerExpCooldownChangeEvent.html
+[paper-PlayerFishEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerFishEvent.html
+[paper-FishHookStateChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/FishHookStateChangeEvent.html
+[paper-PlayerFlowerPotManipulateEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerFlowerPotManipulateEvent.html
+[paper-PlayerGameModeChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerGameModeChangeEvent.html
+[paper-PlayerInputEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerInputEvent.html
+[paper-PlayerInsertLecternBookEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerInsertLecternBookEvent.html
+[paper-PlayerItemCooldownEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerItemCooldownEvent.html
+[paper-PlayerItemFrameChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/player/PlayerItemFrameChangeEvent.html
+[paper-PlayerItemMendEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerItemMendEvent.html
+[paper-PlayerJumpEvent]: https://jd.papermc.io/paper/26.3/com/destroystokyo/paper/event/player/PlayerJumpEvent.html
