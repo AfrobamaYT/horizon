@@ -89,7 +89,6 @@ horizon-client game::native_block_entity_item_tests::internal_slots_preserve_aut
 horizon-client game::native_hooks::tests::declared_types_create_tick_and_reload_through_game #2182
 horizon-client game::native_live_holder_tests::data_slot_sizing_after_creation_and_load_joins_the_existing_journal #2182
 horizon-client game::stateful_block_entity_tests::stateful_creation_uses_actual_state_and_preserves_existing_entity #2182
-horizon-client game::native_components::item_resource_property_tests::effective_resource_properties_match_vanilla #2183
 horizon-client game::native_components::item_resource_property_tests::item_resource_changed_defaults_and_consumption #2183
 horizon-client game::transactions::tests::an_aborted_transaction_puts_back_what_it_and_its_committed_children_changed #2183
 horizon-client game::native_hooks::base::screen_open_tests::client_gui_state_matches_screen_init_hook #2184
