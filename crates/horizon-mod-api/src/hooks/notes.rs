@@ -1639,6 +1639,13 @@ one, where vanilla gives the `by` one.
   picks a chunk only as it sends it, so the watch comes just before the send. The hub records them only while a mod listens and
   the game tells them after the hub's network step for that level, so a handler sees the state after that step; the order per
   player and chunk is vanilla's. The far ring's columns past the view distance aren't told, and the server stopping doesn't unwatch.
+- A chunk's ticket level changing, on the server: `native_chunk_ticket_level_updated(chunk, old, new)` (NeoForge's
+  `ChunkTicketLevelUpdatedEvent`). The level is the chunk's loading level from its tickets (a player, a forced chunk, a portal
+  ticket, the dragon fight's arena), on `ChunkLevel`'s scale: 31 and lower entity ticking, 32 block ticking, 33 loaded without
+  ticking, and `ChunkTicketLevel::Unloaded` past it, so a non-ticking or unloaded chunk is never clamped to the ticking range.
+  Horizon keeps no level for a chunk partway through generating, and no chunk holder to hand over. The level's tickets keep each
+  change, in the order they were made, only while a mod listens: with no listener an update of the tickets looks at no chunk
+  and allocates nothing, so the tick costs what it did. A level is told in its own tick, after the tickets were updated for its players.
 
 - [the renderer's hook points](#render-hook-points): `world_drawn`, called once the world is drawn with its colour, depth, matrices and entity geometry, and
   `render_needs`, where a mod asks for the entity runs and the world's depth without a shader pack.

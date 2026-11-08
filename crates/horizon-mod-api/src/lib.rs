@@ -2686,6 +2686,31 @@ pub enum ChunkStatus {
     Full,
 }
 
+/// A chunk's ticket level (`ChunkLevel`), as the server holds it: how much of
+/// the level the chunk is kept alive for. Lower is more active. Horizon keeps
+/// no level for a chunk partway through generating, so past `FULL` a chunk is
+/// `Unloaded`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ChunkTicketLevel {
+    /// A level `ChunkLevel` knows, `FULL_CHUNK_LEVEL` (33) or lower: 31 and
+    /// lower is entity ticking (`ENTITY_TICKING_LEVEL`), 32 is block ticking
+    /// (`BLOCK_TICKING_LEVEL`) and 33 is loaded without ticking.
+    Loaded(u8),
+    /// No ticket keeps the chunk loaded.
+    Unloaded,
+}
+
+impl ChunkTicketLevel {
+    /// The `ChunkLevel` number, or `None` for an unloaded chunk.
+    pub fn level(self) -> Option<u8> {
+        match self {
+            Self::Loaded(level) => Some(level),
+            Self::Unloaded => None,
+        }
+    }
+}
+
 /// A kind of light (`LightLayer`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: a closed set the game matches without a wildcard
