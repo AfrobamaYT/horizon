@@ -134,3 +134,138 @@ pub fn villager_type(b: &BiomeFacts) -> u8 {
         0
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::finalize::{Attr, has_modifier, value};
+
+    fn types() -> Option<crate::mobs::MobTypes> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return None;
+        }
+        Some(crate::mobs::MobTypes::load(&root).unwrap())
+    }
+    fn spawn(types: &crate::mobs::MobTypes, kind: &str, id: u32) -> Mob {
+        let kind = std::sync::Arc::new(types.types.get(kind).unwrap().clone());
+        let mut m = Mob::new(
+            id,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            0.0,
+        );
+        let difficulty = LocalDifficulty::new(3, 0, 0, 1.0);
+        finalize(&mut m, &BiomeFacts::default(), &difficulty);
+        m
+    }
+    /// #2783: `/summon`, eggs, spawners and natural spawns run
+    /// `WitherSkeleton.finalizeSpawn`: attack damage base 4.0, not the
+    /// default 2.0.
+    #[test]
+    fn runtime_wither_skeletons_hit_for_four() {
+        let Some(types) = types() else { return };
+        let w = spawn(&types, "minecraft:wither_skeleton", 1);
+        assert_eq!(value(&w, Attr::AttackDamage), 4.0);
+        assert_eq!(w.attrs.attack_damage, 4.0);
+    }
+    /// #2783: runtime spawns run `Mob.finalizeSpawn`: the follow range
+    /// bonus and 5 percent left-handed mobs.
+    #[test]
+    fn runtime_spawns_run_the_mob_finalize_spawn() {
+        let Some(types) = types() else { return };
+        let mut left = 0;
+        for id in 1..=400 {
+            let m = spawn(&types, "minecraft:skeleton", id);
+            assert!(has_modifier(
+                &m,
+                Attr::FollowRange,
+                "minecraft:random_spawn_bonus"
+            ));
+            left += usize::from(m.extra.left_handed);
+        }
+        // 5 percent of 400 is 20.
+        assert!((5..=40).contains(&left), "{left} of 400 left-handed");
+        // A bred baby never ran it.
+        let mut cow = spawn(&types, "minecraft:cow", 1);
+        cow.extra.left_handed = true;
+        bred_offspring(&mut cow);
+        assert!(!has_modifier(
+            &cow,
+            Attr::FollowRange,
+            "minecraft:random_spawn_bonus"
+        ));
+        assert!(!cow.extra.left_handed);
+        assert_eq!(cow.attrs.follow_range, value(&cow, Attr::FollowRange));
+        // CaveSpider.finalizeSpawn does not call super.
+        let c = spawn(&types, "minecraft:cave_spider", 1);
+        assert!(!has_modifier(
+            &c,
+            Attr::FollowRange,
+            "minecraft:random_spawn_bonus"
+        ));
+    }
+    /// #11651: unfinalized spawns (EntityType.create) skip finalizeSpawn's rolls.
+    #[test]
+    fn unfinalized_spawns_skip_finalize_rolls() {
+        let Some(types) = types() else { return };
+        let kind = std::sync::Arc::new(types.types.get("minecraft:zombie").unwrap().clone());
+        let m = Mob::new(
+            1,
+            kind,
+            horizon_core::geometry::Vec3::new(0.5, 64.0, 0.5),
+            0.0,
+        );
+        assert!(!has_modifier(
+            &m,
+            Attr::FollowRange,
+            "minecraft:random_spawn_bonus"
+        ));
+        assert!(!m.extra.left_handed);
+        assert!(m.extra.head.is_none());
+        assert!(m.extra.main_hand.is_none());
+    }
+    /// `Zombie` / `AbstractSkeleton` halloween garb: 25% of empty heads, never
+    /// on other mobs, and not when it is not Halloween.
+    #[test]
+    fn halloween_pumpkins_only_undead_on_halloween() {
+        let Some(types) = types() else { return };
+        let mut pumpkins = 0;
+        let mut lanterns = 0;
+        for id in 1..=400 {
+            let mut m = spawn(&types, "minecraft:skeleton", id);
+            m.extra.head = None;
+            let mut random = m.random.clone();
+            crate::mobs::finalize::halloween_head(&mut m, &mut random, true);
+            match m.extra.head.as_deref() {
+                Some("minecraft:jack_o_lantern") => {
+                    pumpkins += 1;
+                    lanterns += 1;
+                    assert_eq!(crate::mobs::finalize::stored_drop_chance(&m, 5), 0.0);
+                }
+                Some("minecraft:carved_pumpkin") => {
+                    pumpkins += 1;
+                    assert_eq!(crate::mobs::finalize::stored_drop_chance(&m, 5), 0.0);
+                }
+                Some(other) => panic!("unexpected head {other}"),
+                None => {}
+            }
+        }
+        assert!(
+            (70..=130).contains(&pumpkins),
+            "{pumpkins} of 400 skeletons"
+        );
+        assert!(lanterns < pumpkins / 2, "{lanterns} lanterns of {pumpkins}");
+        let mut m = spawn(&types, "minecraft:skeleton", 1);
+        m.extra.head = None;
+        let mut random = m.random.clone();
+        crate::mobs::finalize::halloween_head(&mut m, &mut random, false);
+        assert!(m.extra.head.is_none());
+        let mut cow = spawn(&types, "minecraft:cow", 1);
+        cow.extra.head = None;
+        let mut random = cow.random.clone();
+        crate::mobs::finalize::halloween_head(&mut cow, &mut random, true);
+        assert!(cow.extra.head.is_none());
+    }
+}

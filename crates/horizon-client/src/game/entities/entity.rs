@@ -213,7 +213,7 @@ pub(super) trait Entity: EntityRules {
             return (0.0, 0.0);
         }
         let (bounds, at, eye) = (self.bounds(), self.position(), self.fluid_eye_y());
-        horizon_client::entities::update_entity_fluids(
+        let (water, lava, _) = horizon_client::entities::update_entity_fluids(
             bounds,
             at,
             eye,
@@ -221,7 +221,8 @@ pub(super) trait Entity: EntityRules {
             world,
             fluids,
             context,
-        )
+        );
+        (water, lava)
     }
     /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
     /// column lifts or drags every kind alike.
@@ -601,15 +602,18 @@ macro_rules! stored_motion {
 /// runs the halves itself, with the landing's `Block.fallOn` between them.
 impl Game<'_> {
     /// Tick an item owned by the caller. The two results are ordinary survival
-    /// and explicit consumption by a block-contact handler.
+    /// and explicit consumption by a block-contact handler. `escape_speed`:
+    /// the item is inside a block and moves without physics this tick, pushed
+    /// out at this speed.
     pub(super) fn tick_item_with_block_contacts(
         &mut self,
         item: &mut ItemEntity,
-        no_physics: bool,
+        escape_speed: Option<f32>,
         entity_boxes: &[Aabb],
         client: bool,
         splash: &mut impl FnMut(horizon_client::entities::ItemSplash),
     ) -> (bool, bool) {
+        let no_physics = escape_speed.is_some();
         let heights =
             item.push_by_fluid(&self.world, &self.res.motion().fluids, &self.loop_context);
         // Entity.baseTick splashes before moving, except on the first tick.
@@ -619,6 +623,7 @@ impl Game<'_> {
             self.res.facts(),
             self.collision,
             no_physics,
+            escape_speed,
             heights,
             entity_boxes,
             Some(self.border.geometry()),
@@ -2290,6 +2295,7 @@ mod set_rotation_tests {
             ticks: 0,
             health: 5,
             rotation: [0.0, 0.0],
+            following: None,
         };
         orb.set_rotation([90.0, 10.0]);
         assert_eq!(orb.rotation(), [90.0, 10.0]);

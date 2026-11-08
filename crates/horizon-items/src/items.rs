@@ -1426,6 +1426,11 @@ impl Items {
     pub fn has_loot_table(&self, id: &str) -> bool {
         self.loot.contains_key(id)
     }
+    /// Every loot table's id: the root's (vanilla's and the content mods')
+    /// and the packs' over them, in no order.
+    pub fn loot_table_ids(&self) -> impl Iterator<Item = &str> {
+        self.loot.ids()
+    }
     /// `LootTable.getRandomItems` of an inline table.
     pub fn inline_loot_table<R: RandomSource>(
         &self,
@@ -2098,7 +2103,15 @@ impl<R: RandomSource> LootContext<'_, R> {
                         let max = e["levels"]["max"].as_u64().map_or(u32::MAX, |m| m as u32);
                         level >= min.max(1) && level <= max
                     });
-                items_ok && enchants_ok
+                let custom_ok = c["predicate"]["predicates"]
+                    .get("minecraft:custom_data")
+                    .is_none_or(|pattern| {
+                        horizon_world::loot::custom_data_matches(
+                            pattern,
+                            self.held.and_then(ItemStack::custom_data),
+                        )
+                    });
+                items_ok && enchants_ok && custom_ok
             }
             "minecraft:killed_by_player" => self.killed_by_player,
             "minecraft:random_chance_with_enchanted_bonus" => {
@@ -2515,6 +2528,16 @@ impl<R: RandomSource> LootContext<'_, R> {
                         stack.count = stack.count.min(max as u32);
                     }
                 }
+                // SetNameFunction.run: the component the target names
+                // (custom_name by default), set as a chest's roll sets it. As in
+                // the main loot engine, an `entity` resolver is not modelled.
+                "minecraft:set_name" if !f["name"].is_null() => {
+                    let target = f["target"].as_str().unwrap_or("custom_name");
+                    let id = format!("minecraft:{target}");
+                    stack.data_mut().set_loot_name(&id, &f["name"]);
+                    stack.tidy();
+                }
+                "minecraft:set_components" => apply_components(stack, &f["components"]),
                 // A mod's own kind: the function hook changes the stack, as it
                 // does in the main loot engine.
                 k if k.contains(':') && !k.starts_with("minecraft:") => {
@@ -2525,6 +2548,42 @@ impl<R: RandomSource> LootContext<'_, R> {
             }
         }
     }
+}
+
+/// `SetComponentsFunction.run`: `ItemStack.applyComponents` with the patch
+/// (`!id` removes a component), read back as a saved stack's components are,
+/// so a modelled one (a potion's contents, a book's pages) lands in its field.
+fn apply_components(stack: &mut ItemStack, patch: &Value) {
+    use horizon_core::nbt::Tag;
+    let mut saved = match crate::item_data::encode_components(stack) {
+        Some(Tag::Compound(c)) => c,
+        _ => Default::default(),
+    };
+    for (key, value) in patch.as_object().into_iter().flatten() {
+        let (removed, id) = key
+            .strip_prefix('!')
+            .map_or((false, &**key), |id| (true, id));
+        let id = if id.contains(':') {
+            id.to_owned()
+        } else {
+            format!("minecraft:{id}")
+        };
+        saved.remove(&id.as_str().into());
+        saved.remove(&format!("!{id}").as_str().into());
+        if removed {
+            saved.insert(
+                format!("!{id}").as_str().into(),
+                Tag::compound(Vec::<(&str, Tag)>::new()),
+            );
+        } else {
+            saved.insert(
+                id.as_str().into(),
+                horizon_client_core::scoreboard::json_to_tag(value),
+            );
+        }
+    }
+    (stack.damage, stack.extra) = crate::item_data::decode_components(Some(&Tag::Compound(saved)));
+    stack.tidy();
 }
 
 /// The items engine's stack as the loot engine's (`LootStack`), for a mod's
@@ -2897,6 +2956,34 @@ mod tests {
     use super::*;
     use horizon_core::random::LegacyRandom;
     use serde_json::json;
+
+    /// The ids `/loot ... loot <id>` takes: a content mod's table in the
+    /// root and a world pack's table over it.
+    #[test]
+    fn loot_table_ids_list_the_roots_and_the_packs_tables() {
+        let root = std::env::temp_dir().join(format!("horizon-loot-ids-{}", std::process::id()));
+        fs::create_dir_all(root.join("data/mymod/loot_table/rooms")).unwrap();
+        fs::write(root.join("items.json"), "{}").unwrap();
+        fs::write(
+            root.join("data/mymod/loot_table/rooms/a.json"),
+            r#"{"pools":[]}"#,
+        )
+        .unwrap();
+        let pack = [(
+            "loot_table/mypack:b".to_owned(),
+            vec![br#"{"pools":[]}"#.to_vec()],
+        )];
+        let items = Items::catalog(
+            &root,
+            &PackOverlay::new(&pack),
+            &horizon_world::item_defaults::read(&root).unwrap(),
+        )
+        .unwrap();
+        let mut ids: Vec<&str> = items.loot_table_ids().collect();
+        ids.sort();
+        assert_eq!(ids, ["mymod:rooms/a", "mypack:b"]);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn server_json_conditions_filter_selected_songs_instruments_and_enchantments() {
@@ -3959,6 +4046,39 @@ mod tests {
         let context = ctx(&items, Some(&pick), &props, "minecraft:stone");
         let drops = context.evaluate(&binomial, &mut LegacyRandom::new(7));
         assert_eq!(drops[0].count, 1 + 255 + 3);
+    }
+    /// `/loot give` and every other table this engine rolls: set_name and
+    /// set_components reach the stack, as they do in a chest's roll.
+    #[test]
+    fn set_name_and_set_components_reach_the_rolled_item() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let effects = json!({"custom_effects":[{"id":"minecraft:absorption","duration":2400}]});
+        let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:potion",
+            "modifier":[
+                {"type":"minecraft:set_components","components":{"minecraft:potion_contents":effects}},
+                {"type":"minecraft:set_name","target":"item_name","name":{"text":"Potion of 1-Up","italic":false}},
+                {"type":"minecraft:set_name","name":"Lucky"},
+                {"type":"minecraft:set_name"}]}]}]});
+        let drops = ctx(&items, None, &props, "").evaluate(&table, &mut LegacyRandom::new(1));
+        let saved = crate::item_data::encode_components(&drops[0]).expect("components");
+        let saved = horizon_client_core::scoreboard::tag_to_json(&saved);
+        assert_eq!(saved["minecraft:custom_name"], "Lucky");
+        assert_eq!(saved["minecraft:item_name"]["text"], "Potion of 1-Up");
+        let effect = &saved["minecraft:potion_contents"]["custom_effects"][0];
+        assert_eq!(effect["id"], "minecraft:absorption");
+        assert_eq!(effect["duration"], 2400);
+        // The potion's effect is where drinking reads it, not only saved.
+        assert_eq!(
+            drops[0].custom_potion_effects(),
+            [("minecraft:absorption".to_owned(), 2400, 0)]
+        );
+        // `!id` takes away a component the item has by default.
+        let apple = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:apple",
+            "modifier":{"type":"minecraft:set_components","components":{"!food":{}}}}]}]});
+        let drops = ctx(&items, None, &props, "").evaluate(&apple, &mut LegacyRandom::new(1));
+        let saved = crate::item_data::encode_components(&drops[0]).expect("components");
+        assert!(saved.get("!minecraft:food").is_some());
     }
 
     /// `/loot give` and every other table this dispatcher rolls: the two

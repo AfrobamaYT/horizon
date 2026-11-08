@@ -138,14 +138,6 @@ enum Target {
     Stand(usize),
 }
 
-/// `new ItemEntity(level, x, y, z, stack)`'s motion, from the item's own random.
-pub(super) fn new_item_motion() -> [f64; 3] {
-    let mut r = random_source::entity();
-    let x = r.next_double() * 0.2 - 0.1;
-    let z = r.next_double() * 0.2 - 0.1;
-    [x, 0.2, z]
-}
-
 /// `EquipmentSlot`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Slot {
@@ -1838,9 +1830,7 @@ impl Game<'_> {
         y_offset: f64,
         stack: ItemStack,
     ) -> [f64; 3] {
-        let v = new_item_motion();
-        self.spawn_item(stack, [at.x, at.y + y_offset, at.z], v, 10);
-        v
+        self.spawn_item_own(stack, [at.x, at.y + y_offset, at.z], 10)
     }
     /// `MushroomCow.shear`: `player` is who sheared it, none for a dispenser.
     pub(super) fn shear_mooshroom(&mut self, index: usize, player: Option<u128>, tool: &ItemStack) {

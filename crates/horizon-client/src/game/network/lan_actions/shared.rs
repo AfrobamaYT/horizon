@@ -208,6 +208,7 @@ pub(super) struct GuestSwap {
         Option<u128>,
         Option<u8>,
         Option<u32>,
+        Option<i32>,
     ),
     /// Whether the outer turn is a fake player.
     acting_fake: bool,

@@ -3122,6 +3122,12 @@ pub(crate) fn tick_effects(
     // a totem adds its effects to it). An effect a tick appends ticks from
     // the next tick on.
     let first = m.extra.effects.len();
+    let old_boost_amp = m
+        .extra
+        .effects
+        .iter()
+        .find(|e| e.id == "minecraft:health_boost")
+        .map(|e| e.amplifier);
     let mut i = 0;
     while i < m.extra.effects.len() && i < first {
         let (effect, amp) = (m.extra.effects[i].id, m.extra.effects[i].amplifier);
@@ -3258,6 +3264,16 @@ pub(crate) fn tick_effects(
         m.needs_sync |= m.invisible != invisible;
         m.invisible = invisible;
         m.effects_dirty = false;
+    }
+
+    if old_boost_amp
+        != m.extra
+            .effects
+            .iter()
+            .find(|e| e.id == "minecraft:health_boost")
+            .map(|e| e.amplifier)
+    {
+        super::finalize::health_boost_changed(m);
     }
 }
 

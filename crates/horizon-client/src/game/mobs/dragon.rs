@@ -4660,7 +4660,7 @@ impl Game<'_> {
                 self.finalize_spawn_at("minecraft:ender_dragon", at, reason, None)
                     .0
             }
-            SpawnSite::Plain => Finalized::Done,
+            SpawnSite::Plain | SpawnSite::Raw => Finalized::Done,
         };
         match finalized {
             Finalized::Cancelled => return None,

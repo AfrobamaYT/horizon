@@ -566,6 +566,7 @@ pub fn action_button(
         label,
         active,
         hover,
+        false,
         room,
         |rect| crate::widgets::Narratable::button(label.plain(), rect, active),
     );
@@ -593,8 +594,44 @@ pub fn button_as(
         label,
         active,
         hover,
+        false,
         0.0,
         narration,
+    );
+}
+/// An options button whose focus highlights it without changing the mouse cursor.
+/// `AbstractWidget.handleCursor` tests hover, not `isHoveredOrFocused`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn focused_button(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    rect: [f32; 4],
+    label: &Text,
+    active: bool,
+    hover: bool,
+    focused: bool,
+    action: Option<crate::widgets::Action>,
+) {
+    let room = if let Some(action) = action {
+        crate::widgets::declare_action(action, rect, active);
+        if active {
+            crate::widgets::action_glyph_room()
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    button_with_room(
+        batch,
+        atlas,
+        rect,
+        label,
+        active,
+        hover,
+        focused,
+        room,
+        |rect| crate::widgets::Narratable::button(label.plain(), rect, active),
     );
 }
 /// A button whose label keeps `room` free at its left.
@@ -606,6 +643,7 @@ fn button_with_room(
     label: &Text,
     active: bool,
     hover: bool,
+    focused: bool,
     room: f32,
     narration: impl FnOnce([f32; 4]) -> crate::widgets::Narratable,
 ) {
@@ -615,11 +653,11 @@ fn button_with_room(
     if active && plain.trim().is_empty() {
         crate::widgets::target([x, y, w, h]);
     }
-    crate::widgets::narratable(|| narration([x, y, w, h]).hovered(hover));
+    crate::widgets::narratable(|| narration([x, y, w, h]).hovered(hover || focused));
     crate::widgets::widget_cursor(hover, active);
     let sprite = if !active {
         "gui/sprites/widget/button_disabled"
-    } else if hover {
+    } else if hover || focused {
         "gui/sprites/widget/button_highlighted"
     } else {
         "gui/sprites/widget/button"

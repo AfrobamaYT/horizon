@@ -1746,7 +1746,7 @@ impl Game<'_> {
             // `Containers.dropContents` for every destroying removal reason;
             // that has no `entity_drops` gate of its own.
             for stack in b.items.iter().flatten() {
-                self.spawn_item(stack.clone(), at, super::dispenser::new_item_motion(), 10);
+                self.spawn_item_own(stack.clone(), at, 10);
             }
             // `VehicleEntity.destroy(level, dropItem)`: `kill` (the boat's own
             // ENTITY_DIE), then the boat item on the death path only, and only
@@ -1764,7 +1764,7 @@ impl Game<'_> {
                     .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
             {
                 let item = b.entity_type();
-                self.spawn_item(
+                self.spawn_item_own(
                     ItemStack {
                         item: Arc::from(item.as_str()),
                         count: 1,
@@ -1772,7 +1772,6 @@ impl Game<'_> {
                         extra: None,
                     },
                     at,
-                    super::dispenser::new_item_motion(),
                     10,
                 );
             }
