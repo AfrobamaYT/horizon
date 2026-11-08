@@ -1551,6 +1551,10 @@ the hit, which doesn't tell every vanilla type apart yet:
 - A blast a mob caused (an end crystal a skeleton shot, a creeper's) is `minecraft:explosion` on the dragon, not
   `minecraft:player_explosion`
 
+A registered damage type Horizon keeps no kind of its own for keeps its id and its tags on a mob and the dragon: a
+datapack's `demo:heat` hurt through `ApplyEffectTickEvent::hurt` or `entity_hurt` reaches the hurt hooks as
+`demo:heat`.
+
 The causing and direct entities are 0 for now in these cases:
 
 - A player's direct entity outside a projectile hit, and `magic()` dealt during one (an ownerless wither
