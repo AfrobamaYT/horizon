@@ -1310,7 +1310,7 @@ impl Game<'_> {
         &self,
         mob: &NativeMobRender<'_>,
         who: Option<&NativePlayerRender<'_>>,
-        parts: Option<&mod_api::PosedParts>,
+        parts: Option<&PosedParts>,
         draw: &mut BlockEntityDraw,
     ) {
         self.fire_mob_layer(mob, who, parts, draw);

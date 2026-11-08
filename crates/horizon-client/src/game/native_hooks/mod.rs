@@ -77,7 +77,9 @@ use mod_api::{
     NativeInteractionResult, NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement,
     UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite};
+use mod_api::{
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, PosedParts, RuntimeSprite,
+};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, SoundPlay, SoundRef,
