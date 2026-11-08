@@ -113,17 +113,6 @@ impl Environment {
         dimension: &str,
         extra: &Json,
     ) -> Result<Self> {
-        Self::load_dimension_over(root, dimension, extra, &Json::Null)
-    }
-
-    /// [`Self::load_dimension_with`] with the dimension type's `timelines` replaced by
-    /// `timelines` (a holder set: ids and `#tags`) unless it is null.
-    pub fn load_dimension_over(
-        root: &ResourceSource,
-        dimension: &str,
-        extra: &Json,
-        timelines: &Json,
-    ) -> Result<Self> {
         let mut json: Json = serde_json::from_slice(
             &root.read(&format!("data/minecraft/dimension_type/{dimension}.json"))?,
         )?;
@@ -154,12 +143,7 @@ impl Environment {
         }
         builder.biome_layer(&biomes);
         let mut ids = Vec::new();
-        let timelines = if timelines.is_null() {
-            &json["timelines"]
-        } else {
-            timelines
-        };
-        timeline_ids(root, timelines, &mut ids, 0);
+        timeline_ids(root, &json["timelines"], &mut ids, 0);
         for id in ids {
             let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", &id));
             let file = format!("data/{namespace}/timeline/{path}.json");
@@ -227,14 +211,9 @@ impl Environment {
     /// client has no file for is skipped with a warning. None when the type's attributes are
     /// refused.
     pub fn with_type(base: &Environment, extra: &Json) -> Option<Environment> {
-        Self::load_dimension_over(
-            &base.source,
-            &base.dimension,
-            &extra["attributes"],
-            &extra["timelines"],
-        )
-        .map_err(|e| log::warn!("the server's dimension type: attributes refused: {e}"))
-        .ok()
+        Self::load_dimension_with(&base.source, &base.dimension, extra)
+            .map_err(|e| log::warn!("the server's dimension type: attributes refused: {e}"))
+            .ok()
     }
 
     /// `EnvironmentAttributeSystem.getValue` of one attribute, or its dimension value without
