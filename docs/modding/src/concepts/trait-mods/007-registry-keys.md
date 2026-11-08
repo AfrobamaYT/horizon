@@ -54,6 +54,13 @@ numeric IDs. `BlockStateRange::new(first, count)` returns a typed error if the s
 exceed the u16 ordinal domain, and decoded transport spans obey the same check. Membership
 checks both the block key and the ordinal. A zero-count span is empty.
 
+A restricted `LevelHost::block_state(pos)` read returns `Option<BlockState>`. A successful
+engine read retains its vanilla result: unloaded or out-of-height reads that produce air return
+`Some(air)`, using the owning registry's real air state. An unavailable owning state index or a
+refused engine-to-API conversion returns `None`; the boundary never fabricates a key or air state
+and never panics to satisfy a mandatory value. Other optional/result read contracts are unchanged;
+in particular, this does not change `LevelRef`'s loaded-position policy.
+
 `LevelRef::set_block`, `update_neighbors` and `neighbor_changed` take owned block states
 and return `Result<bool, LevelWriteError>`. `Stale` identifies a closed or reopened level;
 `Unavailable` identifies the wrong side, phase or nonactive write target; `InvalidState`

@@ -165,10 +165,8 @@ pub mod tests {
         impl BlockPart for Signal {
             fn block_signal(&self, level: &dyn LevelHost, event: &mut BlockSignalEvent) {
                 assert_eq!(
-                    level
-                        .state_block(level.block_state([event.pos.x, event.pos.y, event.pos.z]))
-                        .and_then(crate::registry_keys::block_key),
-                    Some(event.state.block())
+                    level.block_state([event.pos.x, event.pos.y, event.pos.z]),
+                    Some(event.state)
                 );
                 event.signal = if event.direct { -2 } else { 20 };
             }
