@@ -381,6 +381,11 @@ pub(super) fn surface<'a>(
             }
         }
     }
+    // A method the API keeps off wasm (`Not on wasm:`) is gated out of the trait on that target:
+    // no table holds it, and a native build of the guest answers that it is unavailable.
+    let (excused_methods, mut methods): (Vec<Method>, Vec<Method>) = methods
+        .into_iter()
+        .partition(|m| excused.iter().any(|(o, n)| *o == m.owner && *n == m.name));
     let skipped = emit::skipped(&types);
     let mut report = String::from("Skipped types:\n");
     for (def, skipped) in types.defs.iter().zip(&skipped) {
@@ -409,6 +414,8 @@ pub(super) fn surface<'a>(
     std::fs::create_dir_all(&target).map_err(|e| format!("creating wire report directory: {e}"))?;
     std::fs::write(target.join("wire-skipped.txt"), report)
         .map_err(|e| format!("writing wire report: {e}"))?;
+    let mut dropped = dropped;
+    dropped.extend(excused_methods);
     Ok(Surface {
         dropped,
         hooks,
@@ -552,6 +559,7 @@ pub fn generate(root: &Path, included: &[(&str, &str)]) -> Result<Generated, Str
         &surface.types,
         &surface.methods,
         &surface.dropped,
+        &surface.excused,
         &surface.parts,
     );
     guest.push_str(&calls::hook_names(&surface.hooks));
@@ -680,6 +688,7 @@ mod tests {
                     &surface.types,
                     &surface.methods,
                     &surface.dropped,
+                    &surface.excused,
                     &surface.parts,
                 );
                 std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
@@ -701,8 +710,30 @@ mod tests {
                     hooks.matches("answer").count(),
                     apart.len()
                 );
-                for a in apart.iter().take(40) {
-                    println!("apart {a}");
+                for m in surface
+                    .methods
+                    .iter()
+                    .filter(|m| apart.contains(&format!("{}::{}", m.owner, m.name)))
+                    .step_by(6)
+                {
+                    for p in &m.params {
+                        if let super::ty::Ty::Ref(t, _) = &p.1 {
+                            if let super::ty::Ty::Named(d) = &**t {
+                                if let super::ty::Kind::Record(fs) = &surface.types.defs[*d].kind {
+                                    for f in fs {
+                                        if super::calls::probe(&surface.types, &f.ty).is_none() {
+                                            println!("badfield {}.{} {:?}", m.name, f.rust, f.ty);
+                                        }
+                                    }
+                                } else {
+                                    println!(
+                                        "notrecord {} {:?}",
+                                        m.name, surface.types.defs[*d].kind
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 for def in &surface.types.defs {
                     if let super::ty::Kind::Opaque(why) = &def.kind {
