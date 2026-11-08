@@ -25,7 +25,11 @@ impl Aabb {
             && self.lo.z < o.hi.z && self.hi.z > o.lo.z
     }
 }
-struct ExperienceOrb { id: u32, x: f64, value: u32, count: u32, age: u32, ticks: u32 }
+struct ExperienceOrb { id: u32, join: u32, x: f64, value: u32, count: u32, age: u32, ticks: u32 }
+trait Locate { fn locate(&self, join: u32) -> Option<usize>; }
+impl Locate for Vec<ExperienceOrb> {
+    fn locate(&self, join: u32) -> Option<usize> { self.iter().position(|orb| orb.join == join) }
+}
 impl ExperienceOrb {
     fn bounds(&self) -> Aabb {
         Aabb::new(Vec3::new(self.x - 0.25, 0.0, -0.25), Vec3::new(self.x + 0.25, 0.5, 0.25))
@@ -56,7 +60,7 @@ impl Game {
     MERGE_ORB
 }
 fn orb(id: u32, x: f64, value: u32, ticks: u32) -> ExperienceOrb {
-    ExperienceOrb { id, x, value, count: 1, age: 10, ticks }
+    ExperienceOrb { id, join: id, x, value, count: 1, age: 10, ticks }
 }
 fn game(orbs: Vec<ExperienceOrb>, flip: bool, cancel: bool) -> Game {
     Game { orbs, remote: None, dim: Dim, added: vec![], flip, cancel, asked: vec![], merged: vec![] }
