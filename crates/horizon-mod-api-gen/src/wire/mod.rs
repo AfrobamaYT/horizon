@@ -1,6 +1,7 @@
 //! The WebAssembly interface of the mod API: every method of the traits a mod calls (the hosts,
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
 //! capability handlers), as one WIT world and the glue on both sides of it.
+mod append;
 mod calls;
 mod emit;
 mod host;
@@ -589,6 +590,17 @@ fn layout(surface: &Surface<'_>) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn coverage_document_is_current() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            super::generate_host(&root).unwrap();
+            let actual = std::fs::read_to_string(root.join("target/wire-coverage.md")).unwrap();
+            let checked_in = std::fs::read_to_string(root.join("docs/modding/src/wasm-coverage.md")).unwrap();
+            assert_eq!(actual, checked_in, "regenerate with HORIZON_UPDATE_WIRE_COVERAGE=1 cargo test -p horizon-mod-api-gen coverage_document_is_current");
+            assert!(actual.contains("Required gap total: 0."), "required boundary methods must not silently lose coverage");
+        }).unwrap().join().unwrap();
+    }
     #[test]
     #[ignore = "prints the resolved surface"]
     fn print_surface_stats() {

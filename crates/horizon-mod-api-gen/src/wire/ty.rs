@@ -69,6 +69,8 @@ pub(crate) struct Def {
     /// Its lifetime parameters: it borrows when there are any.
     pub(super) lifetimes: usize,
     pub(super) kind: Kind,
+    pub(super) append: Option<super::append::Append>,
+    pub(super) projection: Option<Vec<Field>>,
     /// A checked tuple-record constructor used only when the host receives untrusted fields.
     pub(super) host_constructor: Option<String>,
     /// A via form applied by the type, preserving its native mutation contract.
@@ -76,6 +78,18 @@ pub(crate) struct Def {
     pub(super) view: Option<View>,
 }
 
+impl Def {
+    pub(super) fn borrow_fields(&self) -> Option<std::borrow::Cow<'_, [Field]>> {
+        if let Some(fields) = &self.projection {
+            return Some(std::borrow::Cow::Borrowed(fields));
+        }
+        if let Some(append) = &self.append {
+            Some(std::borrow::Cow::Borrowed(&append.fields))
+        } else {
+            self.kind.fields()
+        }
+    }
+}
 #[derive(Debug)]
 pub(super) struct View {
     pub(super) field: String,
@@ -136,7 +150,7 @@ pub(crate) struct Field {
     pub(super) ty: Ty,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Case {
     pub(super) rust: String,
     pub(super) wit: String,
@@ -146,7 +160,7 @@ pub(crate) struct Case {
     pub(super) link: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Payload {
     None,
     Tuple(Vec<Ty>),
@@ -326,6 +340,8 @@ impl<'a> Types<'a> {
                     return Ok(Ty::Named(def));
                 }
                 let def = self.push(Def {
+                    projection: None,
+                    append: None,
                     host_constructor: None,
                     writeback: None,
                     view: None,
@@ -408,6 +424,8 @@ impl<'a> Types<'a> {
             return Ok(id);
         }
         Ok(self.push(Def {
+            projection: None,
+            append: None,
             host_constructor: None,
             writeback: None,
             view: None,
@@ -439,6 +457,8 @@ impl<'a> Types<'a> {
             let rust = self.public_path(id, name);
             let wit = self.unique_wit(id, name);
             let def = self.push(Def {
+                projection: None,
+                append: None,
                 host_constructor: None,
                 writeback: None,
                 view: None,
@@ -472,6 +492,8 @@ impl<'a> Types<'a> {
         let lifetimes = generics(&item).lifetimes().count();
         // Reserve the slot first: a type may refer to itself.
         let def = self.push(Def {
+            projection: None,
+            append: None,
             host_constructor: None,
             writeback: None,
             view: None,
@@ -493,10 +515,83 @@ impl<'a> Types<'a> {
         }
         self.defs[def].host_constructor = constructor;
         self.defs[def].kind = kind;
+        self.defs[def].append = super::append::detect(self, id, &item)?;
+        self.defs[def].projection = self.projection(id, &item)?;
         self.defs[def].view = self.view(id, &item)?;
         Ok(Ty::Named(def))
     }
 
+    /// Private readonly records opt in only through a type-owned typed constructor.
+    fn projection(&mut self, id: ItemId, item: &Item) -> Result<Option<Vec<Field>>, String> {
+        let Item::Struct(record) = item else {
+            return Ok(None);
+        };
+        if record.generics.lifetimes().count() != 1 {
+            return Ok(None);
+        }
+        let Fields::Named(fields) = &record.fields else {
+            return Ok(None);
+        };
+        if fields
+            .named
+            .iter()
+            .any(|f| !matches!(&f.vis, syn::Visibility::Restricted(v) if v.path.is_ident("crate")))
+        {
+            return Ok(None);
+        }
+        let constructor = self.index.modules.iter().filter(|m| m.krate == "mod_api").flat_map(|m| &m.items).find_map(|item| {
+            let Item::Impl(i) = item else { return None; };
+            if !matches!(&*i.self_ty, syn::Type::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == record.ident)) { return None; }
+            i.items.iter().find_map(|item| {
+                let syn::ImplItem::Fn(f) = item else { return None; };
+                (f.sig.ident == "__wire_from_fields" && matches!(f.vis, syn::Visibility::Public(_)) && f.attrs.iter().any(|a| matches!(&a.meta, syn::Meta::List(m) if m.path.is_ident("doc") && m.tokens.to_string() == "hidden"))).then(|| f.sig.clone())
+            })
+        });
+        let Some(constructor) = constructor else {
+            return Ok(None);
+        };
+        if constructor.inputs.len() != fields.named.len()
+            || !matches!(&constructor.output, syn::ReturnType::Type(_, t) if matches!(&**t, syn::Type::Path(p) if p.path.is_ident("Self")))
+        {
+            return Err(format!(
+                "{}: invalid borrowed projection constructor",
+                record.ident
+            ));
+        }
+        fn read_only(types: &Types<'_>, ty: &Ty) -> bool {
+            match ty {
+                Ty::Ref(_, true) | Ty::Dyn(..) => false,
+                Ty::Ref(t, false)
+                | Ty::Option(t)
+                | Ty::Array(t, _)
+                | Ty::List(t, _)
+                | Ty::Boxed(t)
+                | Ty::Shared(t) => read_only(types, t),
+                Ty::Tuple(v) => v.iter().all(|t| read_only(types, t)),
+                Ty::Result(a, b) => read_only(types, a) && read_only(types, b),
+                Ty::Named(d) => types.defs[*d].lifetimes == 0,
+                _ => true,
+            }
+        }
+        let described = self.fields(id.module, fields.named.iter())?;
+        for (field, argument) in described.iter().zip(&constructor.inputs) {
+            let syn::FnArg::Typed(argument) = argument else {
+                return Ok(None);
+            };
+            if !matches!(&*argument.pat, syn::Pat::Ident(p) if p.ident == field.rust)
+                || self.ty(id.module, &argument.ty, &[])? != field.ty
+            {
+                return Err(format!(
+                    "{}: projection constructor does not match fields",
+                    record.ident
+                ));
+            }
+            if !read_only(self, &field.ty) {
+                return Ok(None);
+            }
+        }
+        Ok(Some(described))
+    }
     fn view(&mut self, id: ItemId, item: &Item) -> Result<Option<View>, String> {
         let Item::Struct(record) = item else {
             return Ok(None);
@@ -664,6 +759,8 @@ impl<'a> Types<'a> {
             let link = fields[at].rust.clone();
             let def = &self.defs[id];
             let frame = Def {
+                projection: None,
+                append: None,
                 host_constructor: None,
                 writeback: None,
                 view: None,
@@ -696,6 +793,8 @@ impl<'a> Types<'a> {
         };
         let def = &self.defs[id];
         let frame = Def {
+            projection: None,
+            append: None,
             host_constructor: None,
             writeback: None,
             view: None,
