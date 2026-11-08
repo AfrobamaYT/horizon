@@ -1907,6 +1907,7 @@ mod tests {
             mining: Some(Mining {
                 pos,
                 progress: 0.5,
+                per_tick: 0.0,
                 ticks: 8,
             }),
             destroy_pos: Some(pos),

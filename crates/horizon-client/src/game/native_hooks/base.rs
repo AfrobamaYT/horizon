@@ -8,8 +8,13 @@ impl GameLevel<'_> {
     /// answer starts with an empty compound. The level is read-only, as
     /// `newBlockEntity` gets no level.
     #[inline(always)]
-    pub(in crate::game) fn native_block_entity(&self, block: &str, entity: &mut Option<Compound>) {
-        self.fire_block_entity(block, entity);
+    pub(in crate::game) fn native_block_entity(
+        &self,
+        block: &str,
+        state: BlockStateId,
+        entity: &mut Option<Compound>,
+    ) {
+        self.fire_block_entity(block, state, entity);
     }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side.
     #[inline(always)]

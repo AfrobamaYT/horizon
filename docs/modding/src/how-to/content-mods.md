@@ -262,6 +262,42 @@ block's `thickness` outline). Omitted `collision_shapes` preserves the existing 
 outline also becomes collision, otherwise the template collision is retained. An explicit collision
 table can be used without an outline override, and overrides `thickness` collision too.
 
+### Entity-context shape declarations
+
+`outline_context_shapes` and `collision_context_shapes` independently override
+`shapes` and `collision_shapes` for a captured entity class. Their keys are
+`item`, `player`, `living` (a non-player living entity) and `other`; each value
+is a shape table with the same properties, tuples, defaults and box validation
+as `shapes`. There is no inheritance between classes or channels. An omitted
+class keeps that channel's ordinary shape. Empty and position-only queries
+always keep the ordinary shape; a selector is not inferred from a runtime entity ID.
+
+```json
+{
+  "template": "minecraft:stone",
+  "shapes": { "default": [[0, 0, 0, 1, 0.125, 1]] },
+  "outline_context_shapes": {
+    "player": { "default": [[0, 0.125, 0, 1, 1, 1]] }
+  },
+  "collision_context_shapes": {
+    "item": { "default": [[0, 0, 0, 1, 0.3125, 1]] }
+  },
+  "interaction_shapes": { "default": [[0, 0, 0, 1, 1, 1]] }
+}
+```
+
+`interaction_shapes` uses the same state-table format. It supplies
+`BlockGetter.clipWithInteractionOverride`: an earlier interaction-shape entry
+changes the face of an existing outline hit while keeping its point. It cannot
+create a hit through an empty outline or extend the ray's reach.
+
+Tables compile once per resource snapshot. Collision scan emptiness and
+out-of-cell metadata account for every collision variant. Dropped-item movement
+and overlap checks carry `item`, player movement and placement carry `player`,
+and player selection uses its own outline channel. Callers without a captured
+entity class retain ordinary shapes. These declarations select state/class-only
+geometry, not arbitrary world-dependent block behavior or native callbacks.
+
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
 `components`, written as a data component patch is: `minecraft:<type>` sets

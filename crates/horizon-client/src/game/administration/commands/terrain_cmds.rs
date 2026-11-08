@@ -1090,6 +1090,121 @@ mod loot_mine_component_tests {
             "actual loot-mine component-copy failures: {failures:#?}"
         );
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES and scratch homes/cwd"]
+    fn loot_mine_uses_the_actual_stand_or_server_executor_presence() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("prepared resources required"),
+        );
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        game.build_registries();
+        game.set_allow_commands(true);
+        game.world
+            .chunks
+            .insert((0, 0), Arc::new(Chunk::empty(0, 0)));
+        game.block_ticks
+            .add_empty_chunk(ChunkPos::new(0, 0))
+            .unwrap();
+        assert!(game.run_command("forceload add 0 0"));
+        assert!(game.run_command("fill 0 199 0 15 199 15 stone"));
+
+        game.command_source = Some(crate::game::commands::execute::Source {
+            silent: false,
+            ..game.server_source()
+        });
+        assert!(game.source_entity().is_none());
+        assert!(game.run_command("execute unless entity @s"));
+        assert!(game.run_command("setblock 12 200 4 chest strict"));
+        assert!(game.run_command("setblock 2 200 4 snow[layers=1] strict"));
+        assert!(game.run_command("setblock 4 200 4 dirt strict"));
+        assert!(game.run_command("item replace block 12 200 4 container.26 with diamond 7"));
+        assert!(game.run_command("item replace block 12 200 4 container.2 with diamond_shovel"));
+        assert_eq!(&*slot(&game, 2).item, "minecraft:diamond_shovel");
+        assert!(game.run_command("execute if items block 12 200 4 container.2 #minecraft:shovels"));
+        assert!(game.run_command(
+            "summon armor_stand 8.5 200 8.5 {UUID:[I;60,0,0,1],Health:20f,NoGravity:1b}"
+        ));
+        let stand = "0000003c-0000-0000-0000-000000000001";
+        assert!(game.run_command(&format!("execute as {stand} if entity @s[type=armor_stand,nbt={{UUID:[I;60,0,0,1],Health:20f,NoGravity:1b,Pos:[8.5d,200d,8.5d]}}]")));
+        let id = game
+            .armor_stands
+            .iter()
+            .find(|s| game.persist.uuids.get(&s.id) == Some(&[60, 0, 0, 1]))
+            .unwrap()
+            .id;
+        let before_stand = game.entity_nbt(Target::Stand(id)).unwrap();
+        assert_eq!(
+            before_stand.get("UUID"),
+            Some(&Tag::IntArray(vec![60, 0, 0, 1]))
+        );
+        let clock = game.world.game_time;
+        // Unconditional dirt proves both sources really execute the same path.
+        for (as_stand, x, expected) in [
+            (false, 4, "minecraft:dirt"),
+            (true, 4, "minecraft:dirt"),
+            (false, 2, "minecraft:emerald"),
+            (true, 2, "minecraft:snowball"),
+        ] {
+            assert!(game.source_entity().is_none());
+            assert!(game.run_command("item replace block 12 200 4 container.0 with emerald 4"));
+            let before = slot(&game, 0);
+            let state = game.world.block(x, 200, 4);
+            let prefix = if as_stand {
+                format!("execute as {stand} run ")
+            } else {
+                String::new()
+            };
+            assert!(game.run_command(&format!(
+                "{prefix}loot replace block 12 200 4 container.0 mine {x} 200 4 diamond_shovel"
+            )));
+            let actual = slot(&game, 0);
+            assert_eq!(
+                &*actual.item, expected,
+                "executor stand={as_stand}, block x={x}"
+            );
+            if !as_stand && x == 2 {
+                assert_eq!(actual, before);
+            } else {
+                assert_eq!(actual.count, 1);
+            }
+            assert_eq!(
+                (&*slot(&game, 26).item, slot(&game, 26).count),
+                ("minecraft:diamond", 7)
+            );
+            assert_eq!(&*slot(&game, 2).item, "minecraft:diamond_shovel");
+            assert_eq!(game.world.block(x, 200, 4), state);
+            assert_eq!(game.entity_nbt(Target::Stand(id)).unwrap(), before_stand);
+            assert_eq!(game.world.game_time, clock);
+        }
+    }
 }
 
 #[cfg(test)]

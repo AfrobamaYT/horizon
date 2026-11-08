@@ -1266,6 +1266,9 @@ pub struct Extra {
     pub items: Vec<Option<crate::items::ItemStack>>,
     /// Occupied InventoryCarrier stacks: Piglin/trader (8 slots), Pillager (5).
     pub inventory: Vec<crate::items::ItemStack>,
+    /// `AbstractHorse.temper` for the seven horse/llama saved writers.
+    /// Loaded signed values are independent of the gameplay modification cap.
+    pub equine_temper: i32,
     pub tame: bool,
     pub sitting: bool,
     /// `Parrot.partyParrot` and `jukebox`: the playing jukebox it dances to.
@@ -2136,8 +2139,8 @@ pub enum MobEvent {
         kind: String,
     },
     /// The centre, the radius and the kind of the mob blowing up (it may be
-    /// gone from the list by the time the blast is handled).
-    Explode([f64; 3], f32, Species),
+    /// gone from the list by the time the blast is handled), and its `Silent`.
+    Explode([f64; 3], f32, Species, bool),
     /// `Creeper.spawnLingeringCloud`, right after its `Explode`: an `AreaEffectCloud` at the
     /// creeper with its active effects `(id, remaining ticks, amplifier)`, in their mixed colour.
     LingeringCloud {
@@ -2276,6 +2279,12 @@ pub enum MobEvent {
         mob: u32,
         item: Arc<str>,
         count: u32,
+        at: [f64; 3],
+    },
+    /// `Entity.spawnAtLocation` with the complete stack and its components.
+    DropStack {
+        mob: u32,
+        stack: crate::items::ItemStack,
         at: [f64; 3],
     },
     /// `new ItemEntity(.., stack)` thrown by `mob` (`setThrower`): `Dolphin.ItemGoal.drop`.
@@ -3448,7 +3457,7 @@ pub struct MobWorld<'a> {
     pub day_time: i64,
     pub raining: bool,
     pub thundering: bool,
-    pub nether: bool,
+    pub level: horizon_core::LevelKey,
     pub block_tags: &'a HashMap<String, std::collections::HashSet<String>>,
     /// Each block's `fallOn` rule (the player's landing registry).
     pub landing: &'a horizon_world::block_landing::BlockLandingRegistry,
@@ -3464,8 +3473,8 @@ pub struct MobWorld<'a> {
     /// `getCurrentDifficultyAt` at the mob being ticked (near the player
     /// outside the mob tick).
     pub difficulty: spawning::LocalDifficulty,
-    /// The End (its dimension type's monster spawn light rules).
-    pub end: bool,
+    /// The level's dimension type.
+    pub dimension_type: &'a horizon_world::dimension_type::DimensionFacts,
     /// The world seed (slime chunks).
     pub world_seed: i64,
     /// `Level.getSeaLevel` (63 in the overworld, -63 in a flat world).
