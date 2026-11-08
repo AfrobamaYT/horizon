@@ -380,7 +380,10 @@ fn a_mod_resolver_blends_over_the_biomes_as_vanilla_resolvers_do() {
     // Radius 1 averages columns x-1..=x+1 and z-1..=z+1: their mean is the block's own column.
     let mut tints = Tints::new(&uniform, &biomes, BiomeZoom::new(42), 1, [0, 0, 64]);
     for (x, z) in [(1, 1), (7, 3), (14, 12)] {
+        let foliage_color = biomes.get(forest).foliage & 0xFF_FFFF;
+        assert_eq!(tints.get(foliage, x, 0, z), foliage_color);
         assert_eq!(tints.get(by_column, x, 0, z), (x as u32) << 16 | z as u32);
+        assert_eq!(tints.get(foliage, x, 0, z), foliage_color);
     }
 }
 
