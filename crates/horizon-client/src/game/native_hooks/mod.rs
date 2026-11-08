@@ -78,8 +78,8 @@ use mod_api::{
     UsePhase,
 };
 use mod_api::{
-    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HumanoidPart, PosedParts,
-    RuntimeSprite,
+    BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, HumanoidPart, MapDecorationType,
+    PosedParts, RuntimeSprite, TaskId,
 };
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
@@ -112,6 +112,7 @@ use {
 
 include!(concat!(env!("OUT_DIR"), "/native_hook_modules.rs"));
 pub(in crate::game) use add_attribute_tooltips::HookedAttributeTooltips;
+pub(in crate::game) use fishing_medium::NativeFishingMedium;
 include!("shared.rs");
 
 use mod_api::ModBlockEntity;

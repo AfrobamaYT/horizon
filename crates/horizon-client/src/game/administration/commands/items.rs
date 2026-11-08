@@ -1791,7 +1791,8 @@ mod mob_equipment_command_tests {
             let prepared = game
                 .prepare_world_reload(&stack, &root, game.mods.data_switched)
                 .unwrap();
-            game.reload_world_tables(prepared);
+            game.install_world_tables(prepared);
+            game.run_native_advancement_grants();
             let raw_present = game
                 .pack_files()
                 .kind("enchantment")

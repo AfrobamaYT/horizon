@@ -25,6 +25,10 @@ impl Game<'_> {
             address: (remote.session.address != "local")
                 .then(|| horizon_client::net::shown_address(&remote.session.address)),
             integrated_local: self.integrated.is_some(),
+            save_folder: self
+                .integrated
+                .as_ref()
+                .map(|server| server.save_folder.clone()),
         })
     }
 
