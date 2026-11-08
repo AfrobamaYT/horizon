@@ -1943,6 +1943,15 @@ fn posed_body(
     let anchors = custom.map_or(Vec::new(), |c| c.anchors.clone());
     (model, poses, anchors)
 }
+/// `m`'s humanoid parts as its model is posed this frame (`setupAnim`, a pack's custom
+/// animation included), for `mob_layer`; None for a model that isn't humanoid.
+pub fn posed_parts(m: &Mob, alpha: f32, data: &MobData) -> Option<mod_api::PosedParts> {
+    let (_, poses, _) = posed_body(m, alpha, data);
+    mod_api::PosedParts::new(|part| {
+        let name = part.model_name();
+        Some((poses.pose_of(name)?, !poses.is_hidden_named(name)))
+    })
+}
 #[allow(clippy::too_many_arguments)]
 fn render_visible(
     m: &Mob,
@@ -2738,6 +2747,96 @@ mod tests {
             &*adult[1].texture,
             "entity/equipment/humanoid_leggings/iron"
         );
+    }
+
+    /// `mob_layer`'s posed parts are the poses vanilla gave the body this frame, read without
+    /// changing anything: a mob nobody listens to draws exactly as before (#2060).
+    #[test]
+    fn posed_parts_are_the_frames_vanilla_poses_and_change_nothing() {
+        let cube = |x: f32| serde_json::json!({ "pose": [x, 0.0, 0.0], "polygons": [[[x, 0.0, 0.0, 0.0, 0.0], [x + 1.0, 0.0, 0.0, 1.0, 0.0], [x + 1.0, 1.0, 0.0, 1.0, 1.0], [x, 1.0, 0.0, 0.0, 1.0]]] });
+        let mut head = cube(0.0);
+        head["children"] = serde_json::json!({ "hat": cube(0.0) });
+        let model = serde_json::json!({ "children": {
+            "head": head, "body": cube(0.0), "right_arm": cube(-5.0), "left_arm": cube(5.0),
+            "right_leg": cube(-2.0), "left_leg": cube(2.0),
+        }});
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = Species::Zombie;
+        kind.anim = super::super::Anim::Zombie;
+        kind.model = std::sync::Arc::new(Part::parse("root", &model));
+        let mut mob = Mob::new(
+            1,
+            std::sync::Arc::new(kind),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        mob.age = 37;
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+            pathfindable_overrides: Default::default(),
+        };
+        let atlas = |_: &str| Some([0.0, 0.0, 1.0, 1.0]);
+        let draw = |mob: &Mob| {
+            let mut out = Vec::new();
+            render(mob, 0.5, glam::DVec3::ZERO, &atlas, 0xf0f0, &data, &mut out);
+            out.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>()
+        };
+        let before = draw(&mob);
+        let parts = posed_parts(&mob, 0.5, &data).expect("a head and a body: a humanoid");
+        assert_eq!(
+            draw(&mob),
+            before,
+            "reading the poses changes nothing drawn"
+        );
+
+        // Independently: the model's poses after the zombie's setupAnim for this frame.
+        let mut poses = super::super::anim::Poses::new(&mob.kind.model);
+        super::super::anim::setup(
+            &mob,
+            &super::super::anim::state(&mob, 0.5),
+            &mut poses,
+            &data.animations,
+        );
+        for part in mod_api::HumanoidPart::ALL {
+            let expected = poses.pose_of(part.model_name());
+            let got = parts.get(part).map(|p| {
+                let q = p.pose;
+                [
+                    q.x, q.y, q.z, q.x_rot, q.y_rot, q.z_rot, q.x_scale, q.y_scale, q.z_scale,
+                ]
+            });
+            assert_eq!(got, expected, "{part:?}");
+        }
+        let arm = parts.get(mod_api::HumanoidPart::RightArm).unwrap();
+        assert!(
+            arm.pose.x_rot != 0.0 && arm.visible,
+            "a zombie holds its arms out"
+        );
+        assert!(
+            parts.get(mod_api::HumanoidPart::RightSleeve).is_none(),
+            "a zombie has no sleeves"
+        );
+
+        let mut cow = Mob::new(
+            2,
+            crate::mobs::sensor_scan_tests::kind(),
+            horizon_core::geometry::Vec3::ZERO,
+            0.0,
+        );
+        cow.age = 37;
+        assert!(posed_parts(&cow, 0.5, &data).is_none(), "not a humanoid");
     }
 
     #[test]
