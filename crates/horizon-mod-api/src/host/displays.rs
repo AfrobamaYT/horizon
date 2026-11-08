@@ -104,7 +104,7 @@ pub trait DisplaysBackend {
     /// Side: server.
     /// `BlockDisplay.getBlockState`; None for another kind of display.
     #[access(WorldOnly)]
-    fn display_block_state(&self, display: DisplayRef) -> Option<BlockStateId>;
+    fn display_block_state(&self, display: DisplayRef) -> Option<BlockState>;
     /// Side: server.
     /// `ItemDisplay.getItemStack`; None for another kind of display or an empty stack.
     #[access(WorldOnly)]
@@ -218,7 +218,7 @@ pub trait DisplaysBackendMut {
     /// Side: server.
     /// `BlockDisplay.setBlockState`; false for another kind of display or an unknown state.
     #[access(WorldOnly)]
-    fn display_set_block_state(&mut self, display: DisplayRef, state: BlockStateId) -> bool;
+    fn display_set_block_state(&mut self, display: DisplayRef, state: BlockState) -> bool;
     /// Side: server.
     /// `ItemDisplay.setItemStack`; None empties it. False for another kind of display.
     #[access(WorldOnly)]

@@ -73,7 +73,7 @@ pub trait EntitiesServerHost {
     fn spawn_falling_block(
         &mut self,
         dimension: &str,
-        state: BlockStateId,
+        state: BlockState,
         pos: [f64; 3],
         velocity: [f64; 3],
         falling: NativeFalling,

@@ -278,33 +278,6 @@ pub(super) fn emit<'a>(
                     "BlockState" => {
                         format!("{table}(|| super::registry_keys::block_id({key}.block()))")
                     }
-                    "BlockStateId" if table == "block" => {
-                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
-                            return Err(format!("{name} has no level to name {key}'s block"));
-                        };
-                        let state_name = if hook.side == Side::Both {
-                            format!(
-                                "match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }}"
-                            )
-                        } else {
-                            format!("{level}.state_block({key})")
-                        };
-                        format!(
-                            "block_key(({state_name}).and_then(super::registry_keys::block_key))"
-                        )
-                    }
-                    "BlockStateId" => {
-                        let Some((level, _)) = host.as_ref().filter(|_| is_level) else {
-                            return Err(format!("{name} has no level to name {key}'s block"));
-                        };
-                        if hook.side == Side::Both {
-                            format!(
-                                "{table}(|| match &{level} {{ LevelSide::Server({level}) | LevelSide::Client({level}) => {level}.state_block({key}), }})"
-                            )
-                        } else {
-                            format!("{table}(|| {level}.state_block({key}))")
-                        }
-                    }
                     "& ItemStack" => {
                         format!("{table}(|| super::registry_keys::item_id({key}.item()))")
                     }

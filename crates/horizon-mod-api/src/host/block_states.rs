@@ -21,7 +21,7 @@ pub trait BlockStatesHost {
     /// (`{...}`); and, as `/setblock`'s argument, for anything after the
     /// block.
     #[access(Metadata)]
-    fn block_state_id(&self, name: &str) -> Option<BlockStateId>;
+    fn block_state_id(&self, name: &str) -> Option<BlockState>;
     /// Side: both.
     /// The state `state` as `/setblock` takes it back
     /// (`BlockStateParser.serialize`): its block, then each property in
@@ -29,13 +29,13 @@ pub trait BlockStatesHost {
     /// the block alone for one with no properties. None for an id no state
     /// has (`Block.stateById` gives air for one).
     #[access(Metadata)]
-    fn block_state_string(&self, state: BlockStateId) -> Option<String>;
+    fn block_state_string(&self, state: BlockState) -> Option<String>;
     /// Side: both.
     /// The default state of `block` (`minecraft:oak_stairs`, or `oak_stairs`):
     /// `Block.defaultBlockState`, the one a block takes when nothing else
     /// says. None for an unknown block.
     #[access(Metadata)]
-    fn block_state_default(&self, block: BlockKey) -> Option<BlockStateId>;
+    fn block_state_default(&self, block: BlockKey) -> Option<BlockState>;
     /// Side: both.
     /// `Item.getCraftingRemainder`: Horizon currently stores the remainder's
     /// item id, so the result is a single plain stack.

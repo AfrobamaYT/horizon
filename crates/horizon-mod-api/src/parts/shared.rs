@@ -1028,10 +1028,10 @@ pub mod tests {
         fn block_state(&self, _: [i32; 3]) -> Option<crate::BlockState> {
             None
         }
-        fn state_with_property(&self, _: BlockStateId, _: &str, _: &str) -> Option<BlockStateId> {
+        fn state_with_property(&self, _: BlockState, _: &str, _: &str) -> Option<BlockState> {
             None
         }
-        fn state_block(&self, state: BlockStateId) -> Option<&str> {
+        fn state_block(&self, state: BlockState) -> Option<&str> {
             [
                 "minecraft:air",
                 "test:gauge",

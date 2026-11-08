@@ -663,7 +663,7 @@ handle, an entity the client doesn't track and a level it doesn't show:
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
-- `level.block_state(host, pos)` returns a typed `BlockStateId` without allocating a state string. For text such as
+- `level.block_state(host, pos)` returns a typed `BlockState` without allocating a state string. For text such as
   `minecraft:oak_stairs[facing=east,…]`, pass the ID to `host.block_state_string(id)`. `block` (the name alone),
   `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time` read any
   level the server has loaded, not only the one in place. A block in a chunk that isn't loaded or a `y` outside

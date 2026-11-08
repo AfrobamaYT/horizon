@@ -890,7 +890,7 @@ pub(super) mod tests {
         let ids: std::collections::HashSet<_> = (0..registry.len())
             .map(|i| {
                 registry
-                    .state(mod_api::BlockStateId(i as u32))
+                    .state(horizon_world::registry::BlockStateId(i as u32))
                     .unwrap()
                     .name
                     .clone()

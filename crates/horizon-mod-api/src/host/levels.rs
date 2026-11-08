@@ -149,7 +149,7 @@ pub trait LevelsBackend {
     /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
     /// state is the one the server sent for a chunk the client holds.
     #[access(WorldOnly)]
-    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId>;
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockState>;
     /// Side: server.
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
@@ -576,7 +576,7 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         options: &ParticleOptions,
-        state: Option<BlockStateId>,
+        state: Option<BlockState>,
         at: [f64; 3],
         spread: [f64; 3],
         speed: f64,

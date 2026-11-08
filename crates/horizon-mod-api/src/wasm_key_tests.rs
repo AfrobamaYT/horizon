@@ -104,10 +104,10 @@ fn generated_key_imports_use_canonical_slots_and_refuse_before_the_backend() {
         }
     }
     impl mod_api::prelude::BlockStatesHost for Table {
-        fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockStateId> {
+        fn block_state_default(&self, block: BlockKey) -> Option<crate::BlockState> {
             assert_eq!(block.0, 0);
             self.0.set(self.0.get() + 1);
-            Some(crate::BlockStateId(19))
+            Some(crate::BlockState(19))
         }
     }
     impl Host for Table {
