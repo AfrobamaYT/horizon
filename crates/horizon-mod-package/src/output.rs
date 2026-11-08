@@ -112,11 +112,9 @@ impl Capture {
                             Err(_) => break,
                         }
                     }
-                    let _ = sink.flush();
                     let _ = done.send(());
                 })?;
             let original = stdio::redirect(fd, &writer)?;
-            drop(writer);
             capture.0.push(Stream {
                 original: Some(original),
                 done: completed,
@@ -136,7 +134,7 @@ impl Drop for Capture {
     }
 }
 
-/// An optional bounded reader. The writer continues independently when this tail is dropped.
+/// Optional bounded reader under a held launch directory; the writer continues when dropped.
 pub struct Tail {
     directory: Dir,
     name: String,
@@ -144,7 +142,6 @@ pub struct Tail {
     position: Option<((u64, u64), u64)>,
 }
 impl Tail {
-    /// Follow a named stream under an already held launch directory.
     pub fn new(directory: Dir, name: &str) -> Self {
         Self {
             directory,
@@ -156,37 +153,34 @@ impl Tail {
     /// Drain a retained previous segment before switching. Never pin an unlinked segment
     /// between calls: a stalled UI cannot hold deleted history beyond the writer's cap.
     pub fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let Some((file, key)) = self.open_segment(&self.name)? else {
+            return Ok(0);
+        };
+        if let Some((old, _)) = self.position.filter(|(old, _)| *old != key) {
+            if let Some((previous, id)) = self.open_segment(&self.previous)? {
+                if id == old {
+                    let count = self.read_at(previous, old, buffer)?;
+                    if count != 0 {
+                        return Ok(count);
+                    }
+                }
+            }
+        }
+        self.read_at(file, key, buffer)
+    }
+    fn open_segment(&self, name: &str) -> io::Result<Option<(File, (u64, u64))>> {
         let mut options = OpenOptions::new();
         options.read(true).follow(FollowSymlinks::No);
-        let file = match self.directory.open_with(&self.name, &options) {
+        let file = match self.directory.open_with(name, &options) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
         let metadata = file.metadata()?;
         if !metadata.is_file() {
             return Err(io::ErrorKind::InvalidInput.into());
         }
-        let key = (metadata.dev(), metadata.ino());
-        if let Some((old, _)) = self.position.filter(|(old, _)| *old != key) {
-            match self.directory.open_with(&self.previous, &options) {
-                Ok(previous) => {
-                    let meta = previous.metadata()?;
-                    if !meta.is_file() {
-                        return Err(io::ErrorKind::InvalidInput.into());
-                    }
-                    if (meta.dev(), meta.ino()) == old {
-                        let count = self.read_at(previous, old, buffer)?;
-                        if count != 0 {
-                            return Ok(count);
-                        }
-                    }
-                }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-        }
-        self.read_at(file, key, buffer)
+        Ok(Some((file, (metadata.dev(), metadata.ino()))))
     }
     fn read_at(&mut self, mut file: File, key: (u64, u64), buffer: &mut [u8]) -> io::Result<usize> {
         let offset = self

@@ -86,20 +86,17 @@ mod platform {
     pub struct Restore {
         saved: Crt,
         target: i32,
-    }
-    impl Restore {
-        fn standard(&self) -> u32 {
-            if self.target == 1 {
-                STD_OUTPUT_HANDLE
-            } else {
-                STD_ERROR_HANDLE
-            }
-        }
+        standard: u32,
     }
     pub fn redirect(target: i32, writer: &os_pipe::PipeWriter) -> io::Result<Restore> {
         let original = Restore {
             saved: Crt::above_stdio(target)?,
             target,
+            standard: if target == 1 {
+                STD_OUTPUT_HANDLE
+            } else {
+                STD_ERROR_HANDLE
+            },
         };
         let pipe = writer.try_clone()?;
         // SAFETY: pipe remains owned until the CRT accepts ownership on success.
@@ -114,13 +111,12 @@ mod platform {
         }
         let _ = pipe.into_raw_handle();
         let pipe = Crt(fd);
-        let pipe = Crt::above_stdio(pipe.0)?;
         // SAFETY: these are owned CRT descriptors, and target is a fixed standard slot.
         unsafe {
             if libc::dup2(pipe.0, target) < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if SetStdHandle(original.standard(), libc::get_osfhandle(target) as _) == 0 {
+            if SetStdHandle(original.standard, libc::get_osfhandle(target) as _) == 0 {
                 return Err(io::Error::last_os_error());
             }
         }
@@ -131,7 +127,7 @@ mod platform {
             // SAFETY: restoring an owned saved CRT stream also provides the new Win32 handle.
             unsafe {
                 if libc::dup2(self.saved.0, self.target) >= 0 {
-                    SetStdHandle(self.standard(), libc::get_osfhandle(self.target) as _);
+                    SetStdHandle(self.standard, libc::get_osfhandle(self.target) as _);
                 }
             }
         }

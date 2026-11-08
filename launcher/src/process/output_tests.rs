@@ -26,7 +26,6 @@ fn durable_raw_streams_rotate_without_a_tailer_and_drain_is_bounded() {
             .args(["--exact", "process::output_tests::actor", "--nocapture"])
             .env("HORIZON_CAPTURE_TEST_ROOT", root.path())
             .env("HORIZON_CAPTURE_TEST_MODE", mode)
-            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -83,13 +82,10 @@ fn tail_drains_retained_history_then_switches_without_pinning_files() {
         use std::os::windows::fs::OpenOptionsExt;
         assert!(std::fs::File::options()
             .read(true)
-            .write(true)
             .share_mode(0)
             .open(&current)
             .is_ok());
     }
-    std::fs::remove_file(previous).unwrap();
-    std::fs::remove_file(current).unwrap();
 }
 
 #[test]
@@ -133,11 +129,27 @@ fn actor() {
     println!("after");
     eprintln!("err-after");
     // SAFETY: these small immutable buffers are valid for their complete lengths.
+    #[cfg(unix)]
     unsafe {
         assert_eq!(libc::write(1, b"raw\n".as_ptr().cast(), 4), 4);
         assert_eq!(libc::write(2, b"raw-err\n".as_ptr().cast(), 8), 8);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::BorrowedHandle;
+        use windows_sys::Win32::System::Console::{
+            GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        };
+        for (channel, bytes) in [
+            (STD_OUTPUT_HANDLE, b"raw\n".as_slice()),
+            (STD_ERROR_HANDLE, b"raw-err\n"),
+        ] {
+            // SAFETY: capture installed valid handles and stays alive throughout each borrow.
+            let handle = unsafe { BorrowedHandle::borrow_raw(GetStdHandle(channel)) };
+            let mut file = std::fs::File::from(handle.try_clone_to_owned().unwrap());
+            file.write_all(bytes).unwrap(); // File writes use WriteFile, not CRT descriptors.
+        }
+    }
     drop(capture);
-    let reopened = Capture::install(&directory(&root)).unwrap();
-    drop(reopened);
+    drop(Capture::install(&directory(&root)).unwrap());
 }
