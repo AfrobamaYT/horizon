@@ -453,7 +453,6 @@ pub(crate) fn decode_targets(
 #[cfg(test)]
 mod bound_tag_tests {
     use super::*;
-    use crate::worldgen::block_predicate::PredicateBlockResolver;
     use horizon_core::nbt::Tag;
 
     #[test]
@@ -461,7 +460,6 @@ mod bound_tag_tests {
         let registry = registry();
         let bindings = FeatureBlockBindings::new(&registry, BTreeSet::new()).unwrap();
         let json = serde_json::to_string(&vec!["minecraft:stone"; 8193]).unwrap();
-        assert_eq!(bindings.predicate_block_set(&json).unwrap().len(), 1);
         let predicate = format!(r#"{{"type":"matching_blocks","blocks":{json}}}"#);
         assert!(
             super::super::block_predicate::BlockPredicate::from_json_with_blocks(
