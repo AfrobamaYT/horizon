@@ -11,7 +11,7 @@ fn main() {
         ),
         (
             "Nested",
-            "struct Nested { value: u16, back: Option<Box<Game>> }",
+            "struct Nested { value: u16, back: Option<Box<Game>>, leaves: Vec<Unknown> }",
         ),
     ]
     .map(|(name, signature)| Internal {

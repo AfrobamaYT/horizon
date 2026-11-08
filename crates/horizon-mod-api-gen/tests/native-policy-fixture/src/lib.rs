@@ -8,6 +8,7 @@ mod model {
     pub struct Nested {
         pub value: u16,
         pub back: Option<Box<Game>>,
+        pub leaves: Vec<Unknown>,
     }
 }
 include!(concat!(env!("OUT_DIR"), "/reader.rs"));
@@ -19,6 +20,7 @@ fn opaque_argument_keeps_visible_siblings() {
         later: model::Nested {
             value: 42,
             back: None,
+            leaves: vec![model::Unknown],
         },
         other: 99,
     };
@@ -44,6 +46,18 @@ fn opaque_argument_keeps_visible_siblings() {
         Ok(())
     })
     .unwrap();
+    node.child(1, &mut |_, _, nested| {
+        nested.child(2, &mut |_, _, list| {
+            list.child(0, &mut |_, _, opaque| {
+                assert_eq!(opaque.len(), 0);
+                opaque.value(&mut |value| {
+                    assert!(value.is_none());
+                    Ok(())
+                })
+            })
+        })
+    })
+    .unwrap();
     assert_eq!(seen, 2);
 }
 
@@ -62,9 +76,11 @@ fn two_policies() {
                 later: model::Nested {
                     value: 7,
                     back: None,
+                    leaves: vec![],
                 },
                 other: 11,
             })),
+            leaves: vec![],
         },
         other: 99,
     };
