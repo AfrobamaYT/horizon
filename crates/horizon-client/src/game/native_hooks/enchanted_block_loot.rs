@@ -70,6 +70,7 @@ impl GameLevel<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::api_values::TryIntoApi;
     use crate::game::native_entity_refs::tests::with_game;
     use horizon_core::random::{LegacyRandom, RandomSource};
     use mod_api::{EnchantedBlockLootEvent, Hooks, LevelHost, ModEntry, testing::with_mods};
@@ -78,7 +79,7 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct Read {
         pos: [i32; 3],
-        state: BlockStateId,
+        state: mod_api::BlockState,
         tool: Option<String>,
         enchantment: String,
         level: u32,
@@ -177,7 +178,7 @@ mod tests {
                 reads.lock().unwrap()[0],
                 Read {
                     pos: POS,
-                    state: gravel,
+                    state: gravel.try_into_api().unwrap(),
                     tool: None,
                     enchantment: "minecraft:fortune".into(),
                     level: 0,
