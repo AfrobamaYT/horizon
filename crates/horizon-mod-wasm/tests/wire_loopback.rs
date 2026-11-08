@@ -6,6 +6,7 @@ use std::{rc::Rc, sync::Arc};
 mod boundary {
     include!(concat!(env!("OUT_DIR"), "/wire_host_generated.rs"));
 }
+#[derive(Clone)]
 struct WasmMod {
     subscribed: &'static [Option<mod_api::HookId>],
     corrupt: bool,
@@ -137,6 +138,48 @@ impl StructurePiece for Piece {
         Ok(())
     }
     fn add_additional_save_data(&self, _: &mut mod_api::Compound) {}
+}
+#[test]
+fn wire_loopback_owner_thread_guards_access_and_drop() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Local {
+        _local: Rc<()>,
+        drops: Arc<AtomicUsize>,
+    }
+    impl Drop for Local {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let drops = Arc::new(AtomicUsize::new(0));
+    let local = boundary::OwnerThread::new(Local {
+        _local: Rc::new(()),
+        drops: drops.clone(),
+    });
+    assert!(local.get().is_ok());
+    std::thread::spawn(move || {
+        assert!(matches!(
+            local.get(),
+            Err(boundary::ServeError::WrongThread)
+        ));
+        drop(local);
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        drops.load(Ordering::SeqCst),
+        0,
+        "foreign-thread destruction must leak the thread-affine value"
+    );
+    drop(boundary::OwnerThread::new(Local {
+        _local: Rc::new(()),
+        drops: drops.clone(),
+    }));
+    assert_eq!(
+        drops.load(Ordering::SeqCst),
+        1,
+        "creator-thread destruction must release the value"
+    );
 }
 #[test]
 fn wire_loopback_roundtrip_and_atomic_writeback() {

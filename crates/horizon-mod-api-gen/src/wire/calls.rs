@@ -440,14 +440,21 @@ pub(super) fn lend(types: &Types<'_>, ty: &Ty, local: &str) -> Option<Lent> {
     })
 }
 
-/// A record that borrows, as the statements reading it into locals, the expression building it
-/// from them, and the statements sending back what a mod may change.
+pub(super) struct Writeback {
+    pub(super) local: String,
+    pub(super) path: String,
+    pub(super) owned: String,
+    pub(super) reference: bool,
+    pub(super) optional: bool,
+    pub(super) by_ref: bool,
+}
+/// Writable leaves in wire order, shared by the guest's reply and host's atomic apply.
 pub(super) fn writeback_fields(
     types: &Types<'_>,
     def: usize,
     name: &str,
     mutable: bool,
-) -> Option<Vec<(usize, Lent, bool)>> {
+) -> Option<Vec<Writeback>> {
     let super::ty::Kind::Record(fields) = &types.defs[def].kind else {
         return None;
     };
@@ -455,13 +462,37 @@ pub(super) fn writeback_fields(
     let mut refs = Vec::new();
     for (i, f) in fields.iter().enumerate() {
         let local = format!("{name}_{i}");
+        if matches!(f.ty, Ty::Dyn(..)) {
+            continue;
+        }
+        let (inner, m) = match &f.ty {
+            Ty::Ref(t, m) => (&**t, *m),
+            ty => (ty, false),
+        };
+        if let Ty::Named(d) = inner
+            && types.defs[*d].lifetimes != 0
+        {
+            for mut leaf in writeback_fields(types, *d, &local, mutable && m)? {
+                leaf.path = leaf.path.replacen(&local, &format!("{name}.{}", f.rust), 1);
+                own.push(leaf);
+            }
+            continue;
+        }
         let lent = lend(types, &f.ty, &local)?;
         if mutable && lent.mutable {
             let by_ref = matches!(f.ty, Ty::Ref(..) | Ty::Option(..)) && lent.expr != local;
+            let leaf = Writeback {
+                local,
+                path: format!("{name}.{}", f.rust),
+                owned: lent.owned,
+                reference: matches!(f.ty, Ty::Ref(_, true)),
+                optional: matches!(&f.ty,Ty::Option(t) if matches!(**t,Ty::Ref(_,true))),
+                by_ref,
+            };
             if by_ref {
-                refs.push((i, lent, true));
+                refs.push(leaf);
             } else {
-                own.push((i, lent, false));
+                own.push(leaf);
             }
         }
     }
@@ -512,9 +543,7 @@ fn borrowed(
                     String::new()
                 }
             ));
-            if mutable {
-                back_own.push_str(&send);
-            }
+            let _ = send;
             continue;
         }
         let lent = lend(types, &f.ty, &local)?;
@@ -528,12 +557,13 @@ fn borrowed(
         writeln!(read, "let {m}{local}: {} = input.take()?;", lent.owned).unwrap();
         build.push(format!("{}: {}", f.rust, lent.expr));
     }
-    for (i, _, by_ref) in writeback_fields(types, def, name, mutable)? {
-        if by_ref {
-            write!(back, "out.put(&{name}_{i});").unwrap();
-        } else {
-            write!(back, "out.put(&{name}.{});", fields[i].rust).unwrap();
-        }
+    for leaf in writeback_fields(types, def, name, mutable)? {
+        write!(
+            back,
+            "out.put(&{});",
+            if leaf.by_ref { leaf.local } else { leaf.path }
+        )
+        .unwrap();
     }
     let m = if mutable { "mut " } else { "" };
     read.push_str(&format!(
