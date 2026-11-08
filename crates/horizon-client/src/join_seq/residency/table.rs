@@ -2,7 +2,7 @@
 //! there is no owner reconciliation scan or reference back to the game.
 use super::{Change, DimensionKey, Event, Identity, Journal, Owner};
 use crate::join_seq::JoinSeq;
-use horizon_core::fast_hash::{FxHashMap, FxHashSet};
+use horizon_core::fast_hash::FxHashMap;
 use std::num::NonZeroU32;
 
 /// Stable storage identity, never a cached element index.
@@ -34,7 +34,7 @@ pub struct EntityTable {
     pending: Vec<Event>,
     rows: FxHashMap<NonZeroU32, Location>,
     extracted: FxHashMap<NonZeroU32, Location>,
-    lifted: FxHashSet<Owner>,
+    lifted: FxHashMap<Owner, usize>,
 }
 impl EntityTable {
     /// Observe this game's existing structural-event sink.
@@ -44,7 +44,7 @@ impl EntityTable {
             pending: Vec::new(),
             rows: FxHashMap::default(),
             extracted: FxHashMap::default(),
-            lifted: FxHashSet::default(),
+            lifted: FxHashMap::default(),
         }
     }
     /// Check the current owner and id once, returning its already located value.
@@ -75,7 +75,7 @@ impl EntityTable {
             }
             // Finding a different entity is corruption, not a lifted absence.
         } else if self.extracted.get(&id) == Some(&location)
-            || self.lifted.contains(&location.owner)
+            || self.lifted.contains_key(&location.owner)
         {
             return EntityLookup::Taken;
         }
@@ -111,10 +111,15 @@ impl EntityTable {
                     }
                 }
                 Change::Lifted => {
-                    self.lifted.insert(event.owner);
+                    *self.lifted.entry(event.owner).or_default() += 1;
                 }
                 Change::Restored => {
-                    self.lifted.remove(&event.owner);
+                    if let Some(depth) = self.lifted.get_mut(&event.owner) {
+                        *depth -= 1;
+                        if *depth == 0 {
+                            self.lifted.remove(&event.owner);
+                        }
+                    }
                 }
             }
         }
@@ -152,6 +157,7 @@ fn forget(map: &mut FxHashMap<NonZeroU32, Location>, id: NonZeroU32, location: L
 mod tests {
     use super::*;
     use crate::join_seq::residency::{DimensionKey, Kind};
+    use crate::join_seq::{JoinList, Joined, RestoreOrder};
     const HOME: Owner = Owner {
         dimension: DimensionKey::OVERWORLD,
         kind: Kind::Mob,
@@ -198,24 +204,24 @@ mod tests {
         }
     }
 
+    struct Stored(u32, JoinSeq);
+    impl Joined for Stored {
+        fn join_seq(&self) -> JoinSeq {
+            self.1
+        }
+        fn set_join_seq(&mut self, join: JoinSeq) {
+            self.1 = join;
+        }
+    }
+    fn locate(list: &JoinList<Stored>, at: Location) -> Option<SourceEntity<usize>> {
+        list.locate(at.join).map(|i| SourceEntity {
+            id: list[i].0,
+            value: i,
+        })
+    }
+
     #[test]
     fn a_spawn_during_a_real_lift_is_found_while_the_survivor_is_taken() {
-        use crate::join_seq::{JoinList, Joined, RestoreOrder};
-        struct Stored(u32, JoinSeq);
-        impl Joined for Stored {
-            fn join_seq(&self) -> JoinSeq {
-                self.1
-            }
-            fn set_join_seq(&mut self, join: JoinSeq) {
-                self.1 = join;
-            }
-        }
-        fn locate(list: &JoinList<Stored>, at: Location) -> Option<SourceEntity<usize>> {
-            list.locate(at.join).map(|i| SourceEntity {
-                id: list[i].0,
-                value: i,
-            })
-        }
         let mut list = JoinList::default();
         list.push(Stored(7, JoinSeq::UNJOINED));
         let mut table = EntityTable::new(Journal::default());
@@ -257,6 +263,27 @@ mod tests {
                 value: 1
             }
         );
+    }
+
+    #[test]
+    fn nested_real_lifts_remain_taken_until_the_outer_restore() {
+        let mut list = JoinList::default();
+        list.push(Stored(7, JoinSeq::UNJOINED));
+        let mut table = EntityTable::new(Journal::default());
+        list.bind_residency(&table.producer(), HOME, |v| (v.0, v.1));
+        let outer = list.lift();
+        let inner = list.lift();
+        list.restore(inner, RestoreOrder::SurvivorsFirst);
+        assert_eq!(
+            table.entity_lookup(&HOME.dimension, 7, |at| locate(&list, at)),
+            EntityLookup::Taken
+        );
+        list.restore(outer, RestoreOrder::SurvivorsFirst);
+        assert!(matches!(
+            table.entity_lookup(&HOME.dimension, 7, |at| locate(&list, at)),
+            EntityLookup::Found { value: 0, .. }
+        ));
+        table.end_tick();
     }
 
     #[test]
