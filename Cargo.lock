@@ -2181,6 +2181,7 @@ dependencies = [
  "horizon-mod-api",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-point-shape",
  "quote",
  "syn 2.0.119",
 ]
