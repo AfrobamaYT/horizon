@@ -106,6 +106,15 @@ pub struct DimensionSettings {
     pub bed_destroy_on_use: bool,
     /// Whether a bed is destroyed when the player leaves it (`BedRule.destroyOnLeave`).
     pub bed_destroy_on_leave: bool,
+    /// The same four for a straw bed (`minecraft:gameplay/straw_bed_rule`): when a player can
+    /// sleep in one, `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
 }
 
 impl Default for DimensionSettings {
@@ -144,6 +153,10 @@ impl Default for DimensionSettings {
             bed_can_set_spawn: "always".into(),
             bed_destroy_on_use: false,
             bed_destroy_on_leave: false,
+            straw_bed_can_sleep: "when_dark".into(),
+            straw_bed_can_set_spawn: "never".into(),
+            straw_bed_destroy_on_use: false,
+            straw_bed_destroy_on_leave: true,
         }
     }
 }
@@ -184,6 +197,12 @@ impl DimensionSettings {
                     "can_set_spawn": self.bed_can_set_spawn,
                     "destroy_on_use": self.bed_destroy_on_use,
                     "destroy_on_leave": self.bed_destroy_on_leave,
+                },
+                "minecraft:gameplay/straw_bed_rule": {
+                    "can_sleep": self.straw_bed_can_sleep,
+                    "can_set_spawn": self.straw_bed_can_set_spawn,
+                    "destroy_on_use": self.straw_bed_destroy_on_use,
+                    "destroy_on_leave": self.straw_bed_destroy_on_leave,
                 },
             },
         })
@@ -247,11 +266,16 @@ impl DimensionSettings {
             "skybox must be overworld, end or none"
         } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
             "cardinal_light must be default or nether"
-        } else if ![&self.bed_can_sleep, &self.bed_can_set_spawn]
-            .iter()
-            .all(|rule| matches!(rule.as_str(), "always" | "when_dark" | "never"))
+        } else if ![
+            &self.bed_can_sleep,
+            &self.bed_can_set_spawn,
+            &self.straw_bed_can_sleep,
+            &self.straw_bed_can_set_spawn,
+        ]
+        .iter()
+        .all(|rule| matches!(rule.as_str(), "always" | "when_dark" | "never"))
         {
-            "bed_can_sleep and bed_can_set_spawn must be always, when_dark or never"
+            "bed_can_sleep, bed_can_set_spawn, straw_bed_can_sleep and straw_bed_can_set_spawn must be always, when_dark or never"
         } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
             "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
         } else {
@@ -325,6 +349,14 @@ pub struct LevelDimensionType {
     pub bed_destroy_on_use: bool,
     /// Whether a bed is destroyed when the player leaves it.
     pub bed_destroy_on_leave: bool,
+    /// When a player can sleep in a straw bed: `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
 }
 
 /// A registered dimension: its namespaced id (`modid:pocket`), the mod that
@@ -406,6 +438,23 @@ mod tests {
         assert_eq!(facts.bed_rule.can_sleep, BedRuleTest::Never);
         assert_eq!(facts.bed_rule.can_set_spawn, BedRuleTest::WhenDark);
         assert!(facts.bed_rule.destroy_on_use && facts.bed_rule.destroy_on_leave);
+        // the straw bed has its own rule, vanilla's by default
+        assert_eq!(facts.straw_bed_rule.can_set_spawn, BedRuleTest::Never);
+        assert!(!facts.straw_bed_rule.destroy_on_use && facts.straw_bed_rule.destroy_on_leave);
+        let straw = DimensionSettings {
+            straw_bed_can_sleep: "always".into(),
+            straw_bed_destroy_on_use: true,
+            straw_bed_destroy_on_leave: false,
+            ..Default::default()
+        };
+        let facts = DimensionFacts::patched(
+            DimensionFacts::overworld(),
+            "test:straw",
+            &straw.dimension_type(),
+        )
+        .unwrap();
+        assert_eq!(facts.straw_bed_rule.can_sleep, BedRuleTest::Always);
+        assert!(facts.straw_bed_rule.destroy_on_use && !facts.straw_bed_rule.destroy_on_leave);
         let bad = DimensionSettings {
             bed_can_sleep: "sometimes".into(),
             ..Default::default()

@@ -177,6 +177,10 @@ impl Game<'_> {
             bed_can_set_spawn: facts.bed_rule.can_set_spawn.name().to_owned(),
             bed_destroy_on_use: facts.bed_rule.destroy_on_use,
             bed_destroy_on_leave: facts.bed_rule.destroy_on_leave,
+            straw_bed_can_sleep: facts.straw_bed_rule.can_sleep.name().to_owned(),
+            straw_bed_can_set_spawn: facts.straw_bed_rule.can_set_spawn.name().to_owned(),
+            straw_bed_destroy_on_use: facts.straw_bed_rule.destroy_on_use,
+            straw_bed_destroy_on_leave: facts.straw_bed_rule.destroy_on_leave,
         })
     }
 

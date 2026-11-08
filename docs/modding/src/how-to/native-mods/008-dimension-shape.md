@@ -52,7 +52,7 @@ the `cardinal_light` and the gameplay switches (`water_evaporates`, `fast_lava`,
 `respawn_anchor_works`, `nether_portal_spawns_piglin`, `piglins_zombify`, `snow_golem_melts`,
 `can_start_raid`, `sky_light_level`) and the bed rule (`bed_can_sleep`, `bed_can_set_spawn`,
 `bed_destroy_on_use`, `bed_destroy_on_leave`: `always`, `when_dark` or `never`, and whether a bed
-explodes or breaks). A field left at its default is the Overworld's, and the game
+explodes or breaks; the same four with `straw_bed_` for the straw bed). A field left at its default is the Overworld's, and the game
 refuses a value out of range (a `coordinate_scale` outside 0.00001 to 30000000, an `ambient_light` above 1, an unknown
 `skybox`, a bed rule that is none of the three) at startup with a message naming the mod. The
 `coordinate_scale` is what `execute in mymod:pocket` scales a position by, and what a portal
