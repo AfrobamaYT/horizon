@@ -16,7 +16,6 @@ use crate::i18n::{tr, trf};
 use crate::instances::{self, Instance};
 use crate::rust_toolchain::{self, Toolchain};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
