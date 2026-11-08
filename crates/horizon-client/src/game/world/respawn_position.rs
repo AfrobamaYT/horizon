@@ -85,16 +85,19 @@ impl Game<'_> {
             pitch: &mut pitch,
             copy_original_spawn_position: &mut copy,
         });
-        // A level the world lacks leaves the player at the level found.
-        let dim = Dim::from_level(level).unwrap_or_else(|| {
-            log::warn!("Horizon: a mod chose a respawn in a level the world does not have");
-            found.dim
-        });
-        let to = Respawn {
-            dim,
-            at: Vec3::new(position[0], position[1], position[2]),
-            yaw,
-            pitch,
+        // A level the world lacks leaves the player at the whole found point: the mod's
+        // coordinates are for that level.
+        let to = match Dim::from_level(level) {
+            Some(dim) => Respawn {
+                dim,
+                at: Vec3::new(position[0], position[1], position[2]),
+                yaw,
+                pitch,
+            },
+            None => {
+                log::warn!("Horizon: a mod chose a respawn in a level the world does not have");
+                found
+            }
         };
         Some(RespawnDecision {
             to,
