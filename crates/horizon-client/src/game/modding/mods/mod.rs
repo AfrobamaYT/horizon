@@ -608,6 +608,14 @@ fn resolve_particle_providers(
                 let path = path.strip_suffix(".json")?;
                 let id = format!("{namespace}:{path}");
                 mod_api::Identifier::parse_namespaced(&id)?;
+                // A vanilla-namespace file the game has no particle for is a leftover of an
+                // older resource extraction, not a mod's declaration: skip it, never refuse startup.
+                if namespace == "minecraft"
+                    && horizon_client::particles::ParticleType::from_name(&id).is_none()
+                {
+                    log::warn!("Horizon: ignoring {id}: no such vanilla particle in this version");
+                    return None;
+                }
                 Some(id)
             }),
     );
@@ -623,6 +631,19 @@ fn resolve_particle_providers(
 }
 #[cfg(test)]
 mod particle_registry_reload_tests {
+    #[test]
+    fn an_unlisted_vanilla_provider_file_does_not_refuse_startup() {
+        mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
+        let source = horizon_assets::resource_source::ResourceSource::indexed(
+            [(
+                "assets/minecraft/particles/ambient_entity_effect.json".into(),
+                horizon_assets::resource_source::Resource::bytes(Vec::new()),
+            )]
+            .into(),
+        );
+        super::resolve_particle_providers(&source).unwrap();
+    }
+
     #[test]
     fn repeated_particle_content_load_keeps_the_published_keys() {
         mod_api::__private::part_tests::install_parts_fixture(&[]).unwrap();
