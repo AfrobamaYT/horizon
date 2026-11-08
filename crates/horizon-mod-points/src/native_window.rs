@@ -40,6 +40,11 @@ impl<'a> WindowBuilder<'a> {
         ))
     }
 
+    /// The requested node's source-local parent and final path step.
+    pub fn root_entry(&self) -> Result<(Option<u32>, Step), RowError> {
+        self.locators.entry(self.request.node)
+    }
+
     /// Requested maximum number of rows, including the requested node itself.
     pub fn remaining(&self) -> usize {
         self.request.rows as usize - self.rows.len()

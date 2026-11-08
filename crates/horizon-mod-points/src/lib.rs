@@ -25,6 +25,10 @@ pub mod locators;
 /// Bounded output for generated native row readers.
 #[doc(hidden)]
 pub mod native_window;
+
+/// Live, borrowed native row traversal.
+#[doc(hidden)]
+pub mod native_read;
 #[cfg(target_arch = "wasm32")]
 pub use guest::register;
 #[cfg(not(target_arch = "wasm32"))]
