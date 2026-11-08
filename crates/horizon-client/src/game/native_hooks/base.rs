@@ -342,7 +342,7 @@ impl GameLevel<'_> {
     pub(in crate::game) fn native_update_shape(
         &self,
         ticks: &mut Ticks,
-        call: mod_api::__private::UpdateShapeCall<'_>,
+        call: super::fire::UpdateShapeCall<'_>,
     ) {
         self.fire_update_shape(ticks, call);
     }
