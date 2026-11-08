@@ -1,5 +1,6 @@
-# CI's horizon-mixins check (#1102): a point injection and a helper injection, built by the
-# launcher at the checked-out commit. tools/ci/mixins_check.sh fills in `horizon`.
+# CI's horizon-mixins check (#1102): a point and helper injections, built by the
+# launcher at the checked-out commit. A separate helper targets an area-file method, not game.rs.
+# tools/ci/mixins_check.sh fills in `horizon`.
 id = "mixins_check"
 name = "Mixins check"
 version = "0.1.0"
@@ -26,4 +27,11 @@ id = "count"
 target = "horizon_client::game::Game<'_>::tick_mobs"
 kind = "HEAD"
 helper = "src/count.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+
+[[native.injection]]
+id = "area"
+target = "horizon_client::game::using_item::Game<'_>::start_eating"
+kind = "HEAD"
+helper = "src/area.rs"
 bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]

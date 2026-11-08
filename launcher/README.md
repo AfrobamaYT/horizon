@@ -13,8 +13,8 @@ The opening, then Play ([clip](docs/opening.webm)):
 
 ## What it does
 
-- **Versions**: lists the published builds of horizon-rust/horizon (the current Nightly, the last
-  week's, then the releases from before), installs the build for this platform into its own
+- **Versions**: lists game builds published by arismoko/horizon, when available,
+  installs the build for this platform into its own
   folder, and removes it again. **Import a game build…** takes a `horizon-client` you have (one
   built on your fork's Actions, or the zip holding it) and installs it as `imported-<date>-<sha>`:
   a copy of the selected release or Nightly's folder, game files included, with that program as the
