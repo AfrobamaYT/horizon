@@ -60,5 +60,8 @@ fn real_member() {
     assert_eq!(loaded.mods.len(), 1);
     let mut args = mod_points::TickArgs::__new();
     mod_points::dispatch::tick(mod_api::HostSide::Server(&mut Quiet), &mut args);
-    assert!(args.cancel, "real wasm listener must modify the point record");
+    assert!(
+        args.cancel,
+        "real wasm listener must modify the point record"
+    );
 }
