@@ -365,6 +365,41 @@ impl Game<'_> {
         }
         started
     }
+    /// `LivingEntity.getUseItemRemainingTicks` of mob `id`: the use's duration
+    /// less the ticks its counter has run, 0 when it uses nothing (an admiring
+    /// piglin and a drinking witch use none). None for a mob that is gone.
+    pub(super) fn mob_item_use_remaining(&self, id: u32) -> Option<i32> {
+        let mob = self.mobs.iter().find(|m| m.id == id)?;
+        if !spear_use::is_using_item(mob) {
+            return Some(0);
+        }
+        let stack = self.mob_hand_stack(id, mob.extra.using_off_hand);
+        Some(stack.map_or(0, |stack| {
+            ticks_left(
+                self.use_duration(&stack),
+                mob.extra.using_item.unsigned_abs() - 1,
+            )
+        }))
+    }
+    /// `LivingEntity.useItemRemaining` of mob `id` set to `remaining`: its use
+    /// counter moves to where that many ticks are left. A mob's use never
+    /// runs out, so nothing else changes. False when it uses nothing.
+    pub(super) fn mob_set_item_use_remaining(&mut self, id: u32, remaining: i32) -> bool {
+        let Some(mob) = self.mobs.iter().find(|m| m.id == id) else {
+            return false;
+        };
+        if !spear_use::is_using_item(mob) {
+            return false;
+        }
+        let Some(stack) = self.mob_hand_stack(id, mob.extra.using_off_hand) else {
+            return false;
+        };
+        let counter = use_counter_leaving(self.use_duration(&stack), remaining);
+        if let Some(mob) = self.mobs.iter_mut().find(|m| m.id == id) {
+            mob.extra.using_item = counter;
+        }
+        true
+    }
     /// `LivingEntity.releaseUsingItem` of mob `id`: a mod's `Stop` and
     /// `Item.releaseUsing`, the use over before them as for a player. A bow's
     /// and a trident's own release ask for a player, and a use cooldown too
@@ -482,6 +517,12 @@ pub(super) fn duration_leaving(ticks: u32, remaining: i32) -> i32 {
     remaining.saturating_add_unsigned(ticks)
 }
 
+/// The use counter of a mob (1 on the tick its use starts) that leaves
+/// `remaining` ticks of a use of `own`, none past the use's whole duration.
+fn use_counter_leaving(own: i32, remaining: i32) -> i32 {
+    i32::try_from(held(own, remaining).saturating_add(1)).unwrap_or(i32::MAX)
+}
+
 /// What a `Start` left of a use of `own` ticks: None refused (a cancel, or
 /// a time below 0, as NeoForge's `startUsingItem` returns), else whether a
 /// mod set the ticks left to none. Such a use runs out on its first tick
@@ -534,10 +575,33 @@ pub(super) fn use_pose(
 mod tests {
     use super::{
         bow_release_power, consumes_at_once, count_down, duration_leaving, held, release_parts,
-        start_of, tick_left, ticks_left, use_pose,
+        start_of, tick_left, ticks_left, use_counter_leaving, use_pose,
     };
     use horizon_client::first_person::ItemPose;
     use horizon_core::use_animation::UseAnimation;
+
+    /// A mob's use counter is 1 on the tick it starts and a bow's use lasts
+    /// 72000 ticks: 71995 left is 5 ticks in, counter 6 (what releasing
+    /// reports back as 71995), and more than the whole use is no ticks in.
+    #[test]
+    fn a_mobs_use_counter_leaves_the_remaining_ticks() {
+        for (own, remaining, counter) in [
+            (72_000, 71_995, 6),
+            (72_000, 72_000, 1),
+            (72_000, 1, 72_000),
+            (72_000, 0, 72_001),
+            (32, 40, 1),
+            (32, -3, 36),
+            (i32::MAX, i32::MIN, i32::MAX),
+        ] {
+            let got = use_counter_leaving(own, remaining);
+            assert_eq!(got, counter, "{own} {remaining}");
+            if remaining <= own && got < i32::MAX {
+                // Read back the way a use reads its ticks left.
+                assert_eq!(ticks_left(own, got.unsigned_abs() - 1), remaining);
+            }
+        }
+    }
 
     #[test]
     #[ignore = "needs prepared resources"]

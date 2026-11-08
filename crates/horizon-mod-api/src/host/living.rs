@@ -199,8 +199,10 @@ pub trait LivingBackend {
     fn living_owner(&self, living: LivingRef) -> Option<u128>;
     /// Side: server.
     /// `LivingEntity.getUseItemRemainingTicks`: the ticks left of the item a
-    /// player uses, 0 when they use none. None for the other kinds (a mob's
-    /// item use is a counter of its goal, not this timer).
+    /// player or a mob uses, 0 when it uses none (a piglin admiring gold and
+    /// a drinking witch use none: their counter is their own timer). A mob's
+    /// is the item's use duration less the ticks its use counter has run.
+    /// None for armor stands and the dragon, and for a stale handle.
     #[access(WorldOnly)]
     fn living_item_use_remaining(&self, living: LivingRef) -> Option<i32>;
     /// Side: both.
@@ -492,29 +494,33 @@ pub trait LivingBackendMut {
     #[access(WorldOnly)]
     fn living_swing(&mut self, living: LivingRef, hand: Hand, send_to_self: bool) -> bool;
     /// Side: server.
-    /// `LivingEntity.getArrowCount`: the arrows stuck in a player. None for
-    /// the other kinds, which Horizon keeps no count for.
+    /// `LivingEntity.getArrowCount`: the arrows stuck in a player or a mob.
+    /// None for armor stands and the dragon, which Horizon keeps no count
+    /// for, and for a stale handle.
     #[access(WorldOnly)]
     fn living_arrow_count(&mut self, living: LivingRef) -> Option<i32>;
     /// Side: server.
-    /// `LivingEntity.setArrowCount`: players around see the arrows (vanilla
-    /// does not limit the count). False for the other kinds.
+    /// `LivingEntity.setArrowCount`: players around see the arrows on a
+    /// player or a mob (vanilla does not limit the count). False for armor
+    /// stands and the dragon, and for a stale handle.
     #[access(WorldOnly)]
     fn living_set_arrow_count(&mut self, living: LivingRef, count: i32) -> bool;
     /// Side: server.
-    /// `LivingEntity.getStingerCount`: the bee stingers stuck in a player.
-    /// None for the other kinds.
+    /// `LivingEntity.getStingerCount`: the bee stingers stuck in a player or
+    /// a mob. None for armor stands and the dragon, and for a stale handle.
     #[access(WorldOnly)]
     fn living_stinger_count(&mut self, living: LivingRef) -> Option<i32>;
     /// Side: server.
-    /// `LivingEntity.setStingerCount`: players around see the stingers. False
-    /// for the other kinds.
+    /// `LivingEntity.setStingerCount`: players around see the stingers on a
+    /// player or a mob. False for armor stands and the dragon, and for a
+    /// stale handle.
     #[access(WorldOnly)]
     fn living_set_stinger_count(&mut self, living: LivingRef, count: i32) -> bool;
     /// Side: server.
     /// `LivingEntity.removeArrowTime`: the ticks until the next arrow falls
-    /// out of a player; at 0 or less it restarts at `20 * (30 - arrows)`.
-    /// False for the other kinds.
+    /// out of a player or a mob; at 0 or less it restarts at
+    /// `20 * (30 - arrows)`. False for armor stands and the dragon, and for a
+    /// stale handle.
     #[access(WorldOnly)]
     fn living_set_arrow_removal_ticks(&mut self, living: LivingRef, ticks: i32) -> bool;
     /// Side: server.
@@ -529,8 +535,14 @@ pub trait LivingBackendMut {
     /// vanilla. It moves the deadline the use-item Tick hook moves, so only
     /// the uses that count it (food, drink, mod items) follow it: shield, bow,
     /// trident, spear, instrument and bundle uses ignore it, and a call from
-    /// inside the Tick hook itself is overwritten by that hook's result. False
-    /// when the player uses nothing, and for the other kinds.
+    /// inside the Tick hook itself is overwritten by that hook's result.
+    ///
+    /// A mob's use never runs out, so the write moves its use counter to
+    /// where `ticks` are left: a spear's stabs, a bow's draw and the use
+    /// reads follow it on the next ticks, and a time past the item's use
+    /// duration is as long as it. False when the entity uses nothing (a
+    /// piglin admiring gold and a drinking witch use none), for armor stands
+    /// and the dragon, and for a stale handle.
     #[access(WorldOnly)]
     fn living_set_item_use_remaining(&mut self, living: LivingRef, ticks: i32) -> bool;
     /// Side: server.
@@ -560,4 +572,34 @@ pub trait LivingBackendMut {
     /// trident has no release of its own, as in vanilla.
     #[access(WorldOnly)]
     fn living_release_using_item(&mut self, living: LivingRef) -> bool;
+    /// Side: server.
+    /// Sets the style of the entity's locator bar waypoint
+    /// (`Waypoint.Icon.style`, a `waypoint_style` asset id such as
+    /// `minecraft:default`), as `/waypoint modify <entity> style` does: the
+    /// waypoint is untracked, changed and tracked again, so the players it
+    /// reaches get the new icon. Only a player's waypoint reaches other
+    /// players (`waypoint_transmit_range` is 0 for every other entity); a
+    /// mob's or an armor stand's style is kept for its waypoint. False for
+    /// the dragon, a stale handle and a client.
+    #[access(WorldOnly)]
+    fn living_set_waypoint_style(&mut self, living: LivingRef, style: &Identifier) -> bool;
+    /// Side: server.
+    /// Sets the colour of the entity's locator bar waypoint
+    /// (`Waypoint.Icon.color`) to `rgb` (`0xRRGGBB`; the bits above are
+    /// dropped), or back to none, which shows a player in their team's
+    /// colour. Reaches players as `set_waypoint_style` does. False for the
+    /// dragon, a stale handle and a client.
+    #[access(WorldOnly)]
+    fn living_set_waypoint_color(&mut self, living: LivingRef, rgb: Option<u32>) -> bool;
+    /// Side: server.
+    /// `LivingEntity.startAutoSpinAttack(ticks, damage)`: the player spins
+    /// like a Riptide launch for `ticks` ticks, hitting the first mob its box
+    /// touches for `damage` (the damage Riptide uses is 8), and the players
+    /// around see the spin. It moves the player not at all: a Riptide launch
+    /// adds its own velocity. A `ticks` of 0 or less ends a spin under way
+    /// and clears its damage. False for a mob, an armor stand and the dragon
+    /// (Horizon runs no spin for them), a dead player, a non-finite `damage`,
+    /// a stale handle and a client.
+    #[access(WorldOnly)]
+    fn living_set_riptiding(&mut self, living: LivingRef, ticks: i32, damage: f32) -> bool;
 }
