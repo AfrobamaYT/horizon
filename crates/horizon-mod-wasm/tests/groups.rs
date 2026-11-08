@@ -115,6 +115,30 @@ fn capability_is_answered_only_within_its_group() {
             .filter(|answer| !answer.is_empty())
             .collect();
         answers.sort();
-        assert_eq!(answers, ["alpha: 7 true", "beta: 7", "gamma: none"]);
+        // Each member counts its own `register` and `server_chat` calls and reports them. The game
+        // calls every member's `register` once per registration pass and fires `server_chat` once
+        // per member, so no member sees a call twice because another member of its group exists.
+        let counts: Vec<(String, String)> = answers
+            .iter()
+            .map(|answer| {
+                let (answer, counts) = answer.split_once(" [").unwrap();
+                (answer.to_string(), counts.trim_end_matches(']').to_string())
+            })
+            .collect();
+        let replies: Vec<&str> = counts.iter().map(|(answer, _)| answer.as_str()).collect();
+        assert_eq!(replies, ["alpha: 7 true", "beta: 7", "gamma: none"]);
+        let registers: Vec<&str> = counts
+            .iter()
+            .map(|(_, counts)| {
+                let (registers, chats) = counts.split_once(' ').unwrap();
+                assert_eq!(chats, "chats=1", "a hook fires once per member");
+                registers
+            })
+            .collect();
+        assert!(registers[0] != "registers=0", "register ran");
+        assert!(
+            registers.iter().all(|r| *r == registers[0]),
+            "every member registers as often as every other, in its group or not: {registers:?}"
+        );
     });
 }
