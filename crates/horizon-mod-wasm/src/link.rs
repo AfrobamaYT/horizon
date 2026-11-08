@@ -272,7 +272,10 @@ impl<T: 'static> Group<T> {
                 .collect();
             for (name, extern_) in exports {
                 if name.starts_with("__wasm_")
-                    || name.starts_with("horizon_")
+                    || matches!(
+                        name.as_str(),
+                        "horizon_layout" | "horizon_in" | "horizon_hook"
+                    )
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
                 {
@@ -364,6 +367,19 @@ impl Layout {
         let mut seen = false;
         for payload in Parser::new(0).parse_all(member.module) {
             let payload = payload.map_err(|e| malformed(e.to_string()))?;
+            match &payload {
+                Payload::MemorySection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group memory".into(),
+                    ));
+                }
+                Payload::TableSection(section) if section.count() != 0 => {
+                    return Err(malformed(
+                        "a shared member must import the group table".into(),
+                    ));
+                }
+                _ => {}
+            }
             if let Payload::CustomSection(section) = payload
                 && section.name() == "dylink.0"
             {
