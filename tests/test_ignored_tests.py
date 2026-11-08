@@ -66,6 +66,13 @@ class IgnoredTests(unittest.TestCase):
             result, _ = self.run_output(output, 101)
             self.assertIsNone(result)
 
+    def test_signal_diagnostic_does_not_echo_adjacent_output(self):
+        output = target(2, "", "") + "error: process failed (signal: 9, private fixture data)\n"
+        result, log = self.run_output(output, 101)
+        self.assertIsNone(result)
+        self.assertIn("(signal: 9)", log)
+        self.assertNotIn("private fixture data", log)
+
     def test_ignored_tests_count_toward_completion(self):
         result, _ = self.run_output(target(2, "test good ... ok\ntest skipped ... ignored\n", summary(passed=1, ignored=1)))
         self.assertEqual(result, {"good": True})

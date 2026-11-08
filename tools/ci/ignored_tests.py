@@ -106,11 +106,9 @@ def run(package, skip):
                 summaries.append(line)
                 target_count = None
                 print(f"{package}: {line}")
-        elif re.search(r"\(signal: \d+|\(exit status: \d+", line):
-            # Cargo's termination status is safe; arbitrary test output is not.
-            status = re.search(r"\((?:signal|exit status): [^)]+\)", line)
-            if status:
-                print(f"{package}: {status[0]}")
+        elif status := re.search(r"\((?:signal|exit status): \d+", line):
+            # Emit only the numeric status, never adjacent test output.
+            print(f"{package}: {status[0]})")
     if incomplete or awaiting_count or target_count is not None:
         print(f"{package}: test target did not finish (cargo exit {process.returncode})")
         return None
