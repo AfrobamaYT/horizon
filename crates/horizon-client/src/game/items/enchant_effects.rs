@@ -212,8 +212,22 @@ impl Game<'_> {
             is_direct: true,
             damage_type: Some(damage_type),
             direct_motion,
-            items: Some(world_items!(self)),
+            items: None,
             ..Default::default()
+        };
+        self.evaluate_weapon_damage(held, actors, ctx, base)
+    }
+
+    pub(super) fn evaluate_weapon_damage(
+        &mut self,
+        held: &ItemStack,
+        actors: Option<(u32, u32)>,
+        ctx: EffectContext<'_>,
+        base: f32,
+    ) -> f32 {
+        let ctx = EffectContext {
+            items: Some(world_items!(self)),
+            ..ctx
         };
         // Read effective levels once: get_enchantment_level may itself be mod-provided.
         let levels = held.all_enchantments();
@@ -983,19 +997,8 @@ impl Game<'_> {
             return (0.0, false);
         };
         let e = &world_stations!(self).enchantments;
-        let ctx = EffectContext {
-            direct_attacker: Some("minecraft:arrow"),
-            attacker: Some("minecraft:player"),
-            items: Some(world_items!(self)),
-            ..Default::default()
-        };
-        let power = e.modify_value(
-            Some(&bow),
-            "minecraft:damage",
-            &ctx,
-            &mut self.world.random,
-            0.0,
-        );
+        // Damage is evaluated at impact, with the real victim (AbstractArrow.onHitEntity).
+        let power = 0.0;
         let ammo_ctx = EffectContext {
             tool: Some(ammo),
             items: Some(world_items!(self)),

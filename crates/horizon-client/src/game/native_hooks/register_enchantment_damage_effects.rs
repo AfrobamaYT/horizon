@@ -182,6 +182,43 @@ mod tests {
                         game.attack_mob(0);
                         assert_eq!(before - game.mobs[0].health, expected);
                     }
+                    let mut trident = horizon_client::projectiles::Projectile::new(
+                        horizon_client::projectiles::ProjectileKind::Trident,
+                        Vec3::ZERO,
+                        Some(horizon_client::mobs::Who::Player),
+                    );
+                    let mut weapon = ItemStack::new("minecraft:trident", 1);
+                    weapon.data_mut().enchantments = vec![("damage_test:force".into(), 2)];
+                    trident.arrow.as_mut().unwrap().pickup_item = weapon;
+                    assert_eq!(
+                        game.shot_damage(
+                            &mut trident,
+                            Some("minecraft:iron_golem"),
+                            horizon_client::mobs::Who::Mob(21)
+                        ),
+                        22.0
+                    );
+                    let mut arrow = horizon_client::projectiles::Projectile::new(
+                        horizon_client::projectiles::ProjectileKind::Arrow {
+                            base_damage: 2.0,
+                            critical: false,
+                            effect: None,
+                        },
+                        Vec3::ZERO,
+                        Some(horizon_client::mobs::Who::Player),
+                    );
+                    arrow.velocity = Vec3::new(1.0, 0.0, 0.0);
+                    let mut bow = ItemStack::new("minecraft:bow", 1);
+                    bow.data_mut().enchantments = vec![("damage_test:force".into(), 2)];
+                    arrow.arrow.as_mut().unwrap().fired_from_weapon = Some(bow);
+                    assert_eq!(
+                        game.shot_damage(
+                            &mut arrow,
+                            Some("minecraft:iron_golem"),
+                            horizon_client::mobs::Who::Mob(21)
+                        ),
+                        10.0
+                    );
                     assert_eq!(
                         *reads.lock().unwrap(),
                         [
@@ -189,6 +226,10 @@ mod tests {
                             (7, 21, "minecraft:stick".into(), 2, 6.0),
                             (7, 21, "minecraft:stick".into(), 2, 3.0),
                             (7, 21, "minecraft:stick".into(), 2, 6.0),
+                            (7, 21, "minecraft:trident".into(), 2, 10.0),
+                            (7, 21, "minecraft:trident".into(), 2, 20.0),
+                            (7, 21, "minecraft:bow".into(), 2, 4.0),
+                            (7, 21, "minecraft:bow".into(), 2, 8.0),
                         ]
                     );
                     std::fs::remove_dir_all(root).unwrap();
