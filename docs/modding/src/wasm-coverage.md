@@ -142,6 +142,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientHost::local_player` | crosses | Wire call |
 | `ClientHost::open_chat` | crosses | Wire call |
 | `ClientHost::net_send_to_server` | crosses | Wire call |
+| `ClientHost::chat_line` | crosses | Wire call |
 | `ClientHost::send_chat` | crosses | Wire call |
 | `ClientHost::send_packet` | crosses | Wire call |
 | `ClientHost::push_player` | crosses | Wire call |
@@ -664,6 +665,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `BackendMut::level_send_particles` | crosses | Wire call |
 | `BackendMut::level_level_event` | crosses | Wire call |
 | `BackendMut::level_game_event` | crosses | Wire call |
+| `BackendMut::level_block_event` | crosses | Wire call |
 | `BackendMut::level_explode` | crosses | Wire call |
 | `BackendMut::level_strike_lightning` | crosses | Wire call |
 | `BackendMut::level_pop_resource` | crosses | Wire call |
