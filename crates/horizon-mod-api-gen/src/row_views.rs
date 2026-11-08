@@ -101,62 +101,61 @@ pub fn generate(
                 }
                 Shape::Named(path, _) => {
                     let named = self.rule.named(path).ok_or("missing named layout")?;
-                    if named.guarded || named.opaque_reason.is_some() {
-                        return Err("inaccessible layout".into());
-                    }
-                    if matches!(named.item, syn::Item::Enum(_)) {
-                        methods.push(quote!(
-                            pub fn tag(&self) -> Result<u32, mod_api::RowError> {
-                                self.0.read()
+                    if !named.guarded && named.opaque_reason.is_none() {
+                        if matches!(named.item, syn::Item::Enum(_)) {
+                            methods.push(quote!(
+                                pub fn tag(&self) -> Result<u32, mod_api::RowError> {
+                                    self.0.read()
+                                }
+                            ));
+                        }
+                        let mut ordinals = std::collections::BTreeMap::new();
+                        for (i, f) in self.rule.fields(path).iter().enumerate() {
+                            let ordinal = ordinals.entry(f.case.map(|c| c.0)).or_insert(0u32);
+                            let local = *ordinal;
+                            *ordinal += 1;
+                            if !self.exposure.field(path, f.case.map(|c| c.0), i as u32) {
+                                continue;
                             }
-                        ));
-                    }
-                    for (i, f) in self.rule.fields(path).iter().enumerate() {
-                        if !self.exposure.field(path, f.case.map(|c| c.0), i as u32) {
-                            continue;
+                            let part = self.rule.shape(&named.module, Some(path), f.ty);
+                            let member = match &f.member {
+                                syn::Member::Named(n) => n.to_string(),
+                                syn::Member::Unnamed(n) => format!("field_{}", n.index),
+                            };
+                            let accessor = if let Some((_, case)) = f.case {
+                                format!(
+                                    "{}_{}",
+                                    heck::AsSnakeCase(case.to_string()),
+                                    member.trim_start_matches("r#")
+                                )
+                            } else {
+                                member
+                            };
+                            self.field(
+                                &part,
+                                local,
+                                f.case.map(|c| c.0),
+                                format_ident!("{}", accessor),
+                                &mut methods,
+                            )?;
                         }
-                        let part = self.rule.shape(&named.module, Some(path), f.ty);
-                        if matches!(
-                            self.rule.crossing_of(&part),
-                            crate::crossing::Crossing::Opaque
-                        ) {
-                            continue;
-                        }
-                        let member = match &f.member {
-                            syn::Member::Named(n) => n.to_string(),
-                            syn::Member::Unnamed(n) => format!("field_{}", n.index),
-                        };
-                        let accessor = if let Some((_, case)) = f.case {
-                            format!(
-                                "{}_{}",
-                                heck::AsSnakeCase(case.to_string()),
-                                member.trim_start_matches("r#")
-                            )
-                        } else {
-                            member
-                        };
-                        self.field(
-                            &part,
-                            i as u32,
-                            f.case.map(|c| c.0),
-                            format_ident!("{}", accessor),
-                            &mut methods,
-                        )?;
                     }
                 }
-                Shape::Opaque(_) => return Err("opaque root".into()),
+                Shape::Opaque(_) => {}
             }
+            let writable = self.writable(shape, &mut Vec::new());
             if let Shape::Named(path, _) = shape {
-                if let Some(named) = self.rule.named(path) {
-                    if let syn::Item::Enum(item) = &named.item {
-                        for (tag, variant) in item.variants.iter().enumerate() {
-                            let encode = format_ident!(
-                                "encode_{}",
-                                heck::AsSnakeCase(variant.ident.to_string()).to_string()
-                            );
-                            let count = variant.fields.len();
-                            let tag = tag as u32;
-                            methods.push(quote! {
+                if writable {
+                    if let Some(named) = self.rule.named(path) {
+                        if let syn::Item::Enum(item) = &named.item {
+                            for (tag, variant) in item.variants.iter().enumerate() {
+                                let encode = format_ident!(
+                                    "encode_{}",
+                                    heck::AsSnakeCase(variant.ident.to_string()).to_string()
+                                );
+                                let count = variant.fields.len();
+                                let tag = tag as u32;
+                                methods.push(quote! {
                                 pub fn #encode(fields: &[&[u8]]) -> Result<Vec<u8>, mod_api::wire::WireError> {
                                     if fields.len() != #count { return Err(mod_api::wire::WireError::Length); }
                                     let mut out = mod_api::wire::Writer::new(); out.limit(1_048_576); out.put(&#tag);
@@ -164,11 +163,13 @@ pub fn generate(
                                     if let Some(e) = out.error() { return Err(e); } Ok(out.into_bytes())
                                 }
                             });
+                            }
                         }
                     }
                 }
             }
             let record_fields = match shape {
+                _ if !writable => None,
                 Shape::Tuple(parts) => Some(parts.len()),
                 Shape::Named(path, _) => self.rule.named(path).and_then(|n| {
                     matches!(n.item, syn::Item::Struct(_)).then(|| self.rule.fields(path).len())
@@ -190,6 +191,35 @@ pub fn generate(
                 }
             });
             Ok(name)
+        }
+        fn writable(&self, shape: &Shape, open: &mut Vec<String>) -> bool {
+            match shape {
+                Shape::Opaque(_) => false,
+                Shape::Named(path, _) => {
+                    let Some(n) = self.rule.named(path) else {
+                        return false;
+                    };
+                    if n.guarded || n.opaque_reason.is_some() || open.contains(path) {
+                        return false;
+                    }
+                    open.push(path.clone());
+                    let result = self.rule.fields(path).iter().enumerate().all(|(i, f)| {
+                        self.exposure.field(path, f.case.map(|c| c.0), i as u32)
+                            && self.writable(&self.rule.shape(&n.module, Some(path), f.ty), open)
+                    });
+                    open.pop();
+                    result
+                }
+                Shape::Ref { to, .. }
+                | Shape::Wrapped(_, to)
+                | Shape::Option(to)
+                | Shape::Array(to, _)
+                | Shape::Slice(to) => self.writable(to, open),
+                Shape::Tuple(parts) | Shape::Collection(_, parts) => {
+                    parts.iter().all(|p| self.writable(p, open))
+                }
+                _ => true,
+            }
         }
         fn sequence(
             &mut self,
