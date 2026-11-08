@@ -83,6 +83,23 @@ pub enum EntityAttributeError {
     Duplicate,
 }
 
+/// Why a mod's attribute type declaration was refused
+/// ([`Registrar::declare_attribute`](AttributesRegistrar::declare_attribute)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AttributeRegistrationError {
+    /// The attribute's id is malformed, empty or in a namespace the
+    /// declaring mod does not own (a vanilla attribute's included).
+    InvalidId,
+    /// Another declaration already covers the attribute.
+    Duplicate,
+    /// The default or a bound is not finite.
+    NotFinite,
+    /// `min > max`, or the default is not inside `[min, max]`
+    /// (`RangedAttribute`'s own checks).
+    InvalidBounds,
+}
+
 /// A boolean game rule declared by a mod.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 // exhaustive: only the registration table creates keys
