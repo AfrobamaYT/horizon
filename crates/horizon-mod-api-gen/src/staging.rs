@@ -53,6 +53,11 @@ pub fn stage(
     Ok(Staged { points, internals })
 }
 
+fn write(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
+    std::fs::write(path, text + "\n").map_err(|error| format!("{}: {error}", path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +74,11 @@ mod tests {
         )
         .unwrap();
         std::fs::write(source.parent().unwrap().join("entry.rs"), "").unwrap();
+        std::fs::write(
+            source.parent().unwrap().join("lib.rs"),
+            "mod game; mod entry;\n",
+        )
+        .unwrap();
         std::fs::write(
             root.join("crates/horizon-client/Cargo.toml"),
             "[package]\nname = 'horizon-client'\n",
@@ -98,9 +108,4 @@ mod tests {
         assert!(manifest["sites"].is_array());
         std::fs::remove_dir_all(root).unwrap();
     }
-}
-
-fn write(path: &Path, value: &impl serde::Serialize) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
-    std::fs::write(path, text + "\n").map_err(|error| format!("{}: {error}", path.display()))
 }
