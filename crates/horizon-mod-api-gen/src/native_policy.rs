@@ -17,6 +17,22 @@ pub struct Graph {
     ids: BTreeMap<String, usize>,
 }
 impl Graph {
+    /// Auxiliary node ID for a variant payload, map entry or UTF-16 unit.
+    pub fn auxiliary(&self, shape: &Shape, role: &str) -> Option<usize> {
+        self.id(shape).and_then(|id| {
+            self.ids
+                .get(&format!("{};{role}", self.layouts[id].name))
+                .copied()
+        })
+    }
+    /// Look up a previously added shape, transparently following references and wrappers.
+    pub fn id(&self, shape: &Shape) -> Option<usize> {
+        match shape {
+            Shape::Ref { to, .. } | Shape::Wrapped(_, to) => self.id(to),
+            Shape::Named(path, _) => self.ids.get(path).copied(),
+            _ => self.ids.get(&format!("{shape:?}")).copied(),
+        }
+    }
     /// Emit metadata owned by registration, using the runtime crate's descriptor types.
     /// Build this once per source, not per read or per mod callback.
     pub fn tokens(&self) -> proc_macro2::TokenStream {
@@ -138,6 +154,52 @@ impl Graph {
         self.layouts[id].fields = fields;
         self.layouts[id].children = children;
         self.layouts[id].opaque = opaque;
+        if matches!(
+            shape,
+            Shape::Scalar(crate::crossing::Scalar::String | crate::crossing::Scalar::Str)
+        ) {
+            let unit = self.add(
+                rule,
+                &Shape::Scalar(crate::crossing::Scalar::Unsigned("u16")),
+            );
+            self.ids
+                .insert(format!("{};unit", self.layouts[id].name), unit);
+            self.layouts[id].children.push(unit);
+        }
+        let mut auxiliaries = Vec::new();
+        match shape {
+            Shape::Option(_) => {
+                auxiliaries.push(("variant(0)".to_string(), Vec::new()));
+                auxiliaries.push(("variant(1)".to_string(), self.layouts[id].children.clone()));
+            }
+            Shape::Collection(Collection::HashMap | Collection::BTreeMap, _) => {
+                auxiliaries.push(("pair".to_string(), self.layouts[id].children.clone()))
+            }
+            Shape::Named(path, _) => {
+                if let Some(named) = rule.named(path) {
+                    if let syn::Item::Enum(item) = &named.item {
+                        for tag in 0..item.variants.len() {
+                            let targets = vec![id];
+                            auxiliaries.push((format!("variant({tag})"), targets));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        for (role, children) in auxiliaries {
+            let name = format!("{};{role}", self.layouts[id].name);
+            let aux = self.layouts.len();
+            self.ids.insert(name.clone(), aux);
+            self.layouts.push(Layout {
+                name,
+                signature: role,
+                fields: Vec::new(),
+                children,
+                opaque: None,
+            });
+            self.layouts[id].children.push(aux);
+        }
         id
     }
 }

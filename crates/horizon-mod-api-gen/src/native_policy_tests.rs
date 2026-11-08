@@ -60,6 +60,24 @@ fn partial_receiver_nested_reachability_and_shared_schema() {
     )
     .unwrap();
     assert_eq!(later.key(game), same.key(game2));
+    let mut changed = graph.layouts.clone();
+    let scalar = graph
+        .id(&crate::crossing::Shape::Scalar(
+            crate::crossing::Scalar::Unsigned("u16"),
+        ))
+        .unwrap();
+    changed[scalar].signature = "u32".into();
+    let changed = Plan::build(
+        &changed,
+        Some(game),
+        &[Grant {
+            case: None,
+            ordinal: 1,
+        }],
+        &[],
+    )
+    .unwrap();
+    assert_ne!(later.key(game), changed.key(game));
     assert!(
         Plan::build(
             &graph.layouts,
