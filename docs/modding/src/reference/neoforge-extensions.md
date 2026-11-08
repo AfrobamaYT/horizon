@@ -12,8 +12,8 @@ NeoForge source or Javadoc is copied. Counts exclude each interface's private `s
 
 | Verdict | Meaning |
 | --- | --- |
-| **Covered** | A mod can answer the same question for its own object, at the same moment, through content data, a handle or a Part method. |
-| **Partial** | The game lets a mod answer something close, but one of these differs: the object (a global hook instead of a per-block/item method), the moment, the arguments, or the answer (a factor or notice where NeoForge returns a decision). |
+| **Covered** | A mod can set the answer for its own object, at the same moment, through content data, a handle or a Part method. NeoForge's extra arguments (a level, position, direction, entity or explosion) may go unused; the row's note says what the answer cannot use. |
+| **Partial** | The game lets a mod answer something close, but one of these differs: the object (a global hook instead of a per-block/item method), the moment, or the answer (a factor or notice where NeoForge returns a decision). |
 | **Missing** | Neither data, a handle nor a hook exposes the question. |
 | **n/a** | The method has no Horizon equivalent because the architecture removes its reason to exist. |
 
@@ -31,14 +31,14 @@ It does not answer `IEntityExtension` methods; those are covered only where a gl
 
 | Interface | Public methods | Covered | Partial | Missing | n/a |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `IBlockExtension` | 60 | 11 | 15 | 34 | 0 |
-| `IBlockStateExtension` | 57 | 9 | 15 | 33 | 0 |
-| `IItemExtension` | 46 | 12 | 11 | 23 | 0 |
+| `IBlockExtension` | 60 | 9 | 17 | 34 | 0 |
+| `IBlockStateExtension` | 57 | 7 | 17 | 33 | 0 |
+| `IItemExtension` | 46 | 9 | 14 | 23 | 0 |
 | `IEntityExtension` | 33 | 1 | 16 | 16 | 0 |
-| `ILivingEntityExtension` | 6 | 1 | 2 | 3 | 0 |
+| `ILivingEntityExtension` | 6 | 0 | 3 | 3 | 0 |
 | `IBlockEntityExtension` | 9 | 1 | 3 | 4 | 1 |
 | `IFluidExtension` | 9 | 0 | 6 | 3 | 0 |
-| `IMenuTypeExtension` | 2 | 1 | 1 | 0 | 0 |
+| `IMenuTypeExtension` | 2 | 0 | 2 | 0 | 0 |
 
 Of the 60 block methods, 57 exist a second time with the state as receiver, so the state-extension counts are
 the block counts minus three; see [`IBlockStateExtension`](#iblockstateextension). The block follow-up is
@@ -53,8 +53,9 @@ counts each declared public method, so the entity total is 33 rather than 30.
 ## `IBlockExtension`
 
 Data fields are static values from a block's content declaration, inherited from its template when unset. They
-answer the method for a mod block but cannot vary by level, position or entity. The engine's own copy of the
-same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
+answer the method for a mod block but cannot vary by level, position or entity; where the NeoForge method takes
+those arguments, the row's note says so. The engine's own copy of the same facts is `StateFacts` in
+`crates/horizon-items/src/blocks.rs`.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
@@ -75,7 +76,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `addRunningEffects(state, level, pos, entity)` | Missing | — | No hook for the running dust burst. |
 | `playFallSound(state, level, pos, entity)` | Partial | `BlockProperties.sounds` | Picks a vanilla sound type; no custom event, volume or pitch. |
 | `playStepSound(state, level, pos, entity, volume, pitch)` | Partial | `BlockProperties.sounds` | Same static sound type; step volume and pitch are not settable. |
-| `canSustainPlant(state, level, pos, direction, plantState)` | Partial | `BlockPart::may_place_on` (`hooks/base.rs`) | Answers `VegetationBlock.mayPlaceOn` for a plant on your block; no general `TriState` for non-plant callers. [#1038](https://github.com/arismoko/horizon/issues/1038). |
+| `canSustainPlant(state, level, pos, direction, plantState)` | Partial | `BlockPart::may_place_on` (`hooks/base.rs`) | `may_place_on` answers for your plant (the state's part), not your soil: a modded soil block cannot decide whether a vanilla plant stands on it, and there is no general `TriState` for non-plant callers. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `onTreeGrow(state, level, posConsumer, random, pos, feature)` | Missing | — | `block_grow_feature` observes or edits the feature a sapling grows into; it does not let a block run its own tree growth. |
 | `isFertile(state, level, pos)` | Missing | — | No fertile-block query; bonemeal hooks fire later. |
 | `getExpDrop(state, level, pos, blockEntity, breaker, tool)` | Partial | `break_block.exp_to_drop` (`hooks/base.rs`) | Replaces the XP sample for a player break; global, not per-block, and the block entity/tool/breaker are not arguments. [#1038](https://github.com/arismoko/horizon/issues/1038). |
@@ -93,8 +94,8 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isStickyBlock(state)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `canStickTo(state, otherState)` | Missing | — | Same. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `isFlammable(state, level, pos, direction)` | Partial | `BlockPart::fire_odds` (`hooks/base.rs`) | Sets ignite and burn odds (`0, 0` = never burns), but there is no boolean flammable predicate. [#1038](https://github.com/arismoko/horizon/issues/1038). |
-| `getFireSpreadSpeed(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn odds replace vanilla's table for the block. |
-| `getFlammability(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite odds replace vanilla's table for the block. |
+| `getFireSpreadSpeed(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Ignite/spread odds (the first element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
+| `getFlammability(state, level, pos, direction)` | Covered | `BlockPart::fire_odds` (`hooks/base.rs`) | Burn/destruction odds (the second element of `fire_odds`'s `(ignite, burn)` tuple) replace vanilla's table for the block. The answer is state-based, with no position or direction as in NeoForge's contextual override. |
 | `onCaughtFire(state, level, pos, direction, igniter, stack)` | Missing | — | No per-block caught-fire callback. |
 | `isFireSource(state, level, pos, direction)` | Missing | — | Fire-source rules are engine-owned. |
 | `canEntityDestroy(state, level, pos, entity)` | Missing | — | Mob-grief checks are engine rules; `entity_mob_griefing` is a global event at a different moment. |
@@ -106,7 +107,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `isScaffolding(state, level, pos, entity)` | Missing | — | Scaffolding is identified by block class; no content field or Part. |
 | `hidesNeighborFace(level, pos, state, neighborState, direction)` | Missing | — | `block_render_visibility` hides a whole state from the mesher, not one face. |
 | `supportsExternalFaceHiding(state)` | Missing | — | No per-face culling query. |
-| `onBlockStateChange(level, pos, oldState, newState)` | Covered | `block_changed` (`hooks/base.rs`, a global hook) | Notice after the commit, as NeoForge's contract (neither may modify the level here). |
+| `onBlockStateChange(level, pos, oldState, newState)` | Partial | `block_changed` (`hooks/base.rs`, a global server hook) | Fires after the commit but before block side effects and neighbour updates, and only on an authoritative server; NeoForge's runs after neighbours on both sides. Neither may modify the level here. |
 | `canBeHydrated(state, level, pos, fluid)` | Missing | — | Farmland hydration is engine-owned; fluid `canHydrate` is data. |
 | `getMapColor(state, level, pos, defaultColor)` | Covered | `BlockProperties.map_color` → `StateFacts.map_color` | Static; no position. |
 | `getAppearance(state, level, pos, direction, neighborState, neighborPos)` | Missing | — | No appearance query. |
@@ -116,7 +117,7 @@ same facts is `StateFacts` in `crates/horizon-items/src/blocks.rs`.
 | `shouldHideAdjacentFluidFace(state, direction, fluid)` | Missing | — | Fluid-face culling is engine-owned. |
 | `getBounceRestitution(level, pos, state, entity)` | Partial | `BlockPart::bounce_on` (`hooks/block_landing.rs`) | Edits the entity's movement after it bounced; the restitution factor is not exposed. [#1038](https://github.com/arismoko/horizon/issues/1038). |
 | `getRelocability(level, pos, state)` | Missing | — | No relocation query (pistons, structure blocks). |
-| `canBeConnectedTo(state, direction, neighborBlock)` | Covered | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Covered for fences, walls, bars and panes; other connectable blocks are not asked. |
+| `canBeConnectedTo(state, direction, neighborBlock)` | Partial | `BlockPart::connects_to` (`hooks/connects_to.rs`) | Asks the connecting fence, wall, bars or pane (your block), not the block being connected to: a modded target cannot answer for a vanilla fence, and only those shapes ask at all. |
 | `getModelData(state, level, pos)` | Missing | — | No `ModelData`; block-entity drawing takes a `block_entity_submit` part with its own model path. |
 
 ## `IBlockStateExtension`
@@ -131,7 +132,7 @@ the parameters shifted by one. Three block methods have no state-receiver form:
 | `getMapColor(state, level, pos, defaultColor)` | Covered (content `map_color`) |
 | `makesOpenTrapdoorAboveClimbable(state, level, pos, stateAbove)` | Missing |
 
-Counts: 9 covered, 15 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
+Counts: 7 covered, 17 partial, 33 missing among the 57. The handful of signature differences (`canStickTo` takes
 the neighbour state; `getCloneItemStack` reorders its arguments; `getEnchantPowerBonus` takes a `LevelReader`)
 do not change any verdict.
 
@@ -151,7 +152,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `makesPiglinsNeutral(stack, entity)` | Missing | — | Piglin neutrality is a hard-coded item/tag rule. |
 | `isCombineRepairable(stack)` | Partial | `minecraft:repairable` component via `ItemResource::repairable` | Data answers which material repairs it; the anvil combine predicate is not exposed. |
 | `getXpRepairRatio(stack)` | Partial | `mending_repair` (`hooks/base.rs`, a global hook) | Changes the repair amount for Mending; the per-item ratio is not a separate read, and the hook is not scoped to the item. |
-| `onStopUsing(stack, entity, timeLeft)` | Covered | `ItemPart::release_using` (`hooks/base.rs`) | Runs after the vanilla release and `living_entity_use_item_stop`; both sides. |
+| `onStopUsing(stack, entity, timeLeft)` | Partial | `ItemPart::release_using` (`hooks/base.rs`) | Runs on an early release only, after the vanilla item's release; finishing the use or switching to another item stops it without asking, where NeoForge hears every stop. Both sides. |
 | `onLeftClickEntity(stack, player, entity)` | Missing | — | `hurt_enemy` only hears after the hit landed and cannot veto it. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getCraftingRemainder(instance)` | Partial | content `crafting_remainder`, `host.item_crafting_remainder` | Data and a read cover content items; no per-item Part override. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getEntityLifespan(stack, level)` | Partial | `item_expire` (`hooks/base.rs`) | Adds extra ticks to a dropped item's life; no absolute lifespan and not per-item. |
@@ -163,13 +164,13 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `getEquipmentSlot(stack)` | Covered | `ItemResource::equippable_slot`, `host.item_equippable_slot` | Read from the effective `equippable` component. |
 | `onEntitySwing(stack, entity, hand)` | Missing | — | No per-item swing callback. [#1039](https://github.com/arismoko/horizon/issues/1039). |
 | `getDamage(stack)` | Covered | `ItemStack::damage` | The stack's numeric damage override. |
-| `getMaxDamage(stack)` | Covered | `minecraft:max_damage` component, `host.max_damage` | Prototype or stack component. |
+| `getMaxDamage(stack)` | Covered | `minecraft:max_damage` effective component, `host.max_damage` | The stack's effective component includes a patch over the item default; `host.max_damage` reads that default only. |
 | `isDamaged(stack)` | Covered | `ItemStack::damage`, `damage_component` | Distinguishes explicit zero from absent. |
-| `setDamage(stack, damage)` | Covered | `ItemStack::set_damage` | Infallible; the game validates the effective maximum on write. |
+| `setDamage(stack, damage)` | Partial | `ItemStack::set_damage` | Stores the requested value; the game checks it against the effective maximum when it accepts the write instead of clamping here. |
 | `canPerformAction(instance, ability)` | Partial | `block_tool_modification` (`hooks/block_tool_modification.rs`) | Covers the block-side tool action (strip, wax, path, ...); no item-side ability query. [#1039](https://github.com/arismoko/horizon/issues/1039). |
-| `getMaxStackSize(stack)` | Covered | `max_stack_size` component, `host.max_stack_size` | Data plus a read; invalid resident values are refused at the write. |
+| `getMaxStackSize(stack)` | Covered | `max_stack_size` component, `host.max_stack_size` | The stack's effective component includes a patch over the item default; `host.max_stack_size` reads that default only, and invalid values are refused at the write. |
 | `isPrimaryItemFor(stack, enchantment)` | Partial | `host.enchantment_supports` | Answers supported items; the narrower "primary item" distinction is not exposed. |
-| `supportsEnchantment(stack, enchantment)` | Covered | `host.enchantment_supports` | `Enchantment.isSupportedItem` by the world's definitions. |
+| `supportsEnchantment(stack, enchantment)` | Partial | `host.enchantment_supports` | A client-side read of `Enchantment.isSupportedItem` for an item id; not per stack and without NeoForge's enchanted-book special case. |
 | `getEnchantmentLevel(instance, enchantment)` | Covered | `get_enchantment_level` (`hooks/get_enchantment_level.rs`) | Edits the level gameplay sees. |
 | `getAllEnchantments(stack, lookup)` | Covered | `get_enchantment_level` with no target | The hook's `target` is `None` for every-enchantment reads. |
 | `shouldCauseReequipAnimation(stack, oldStack, equipped)` | Missing | — | Client animation rule; no hook. |
@@ -181,7 +182,7 @@ which is the same place NeoForge's item components live. Reads are on `host` (`h
 | `onDestroyed(itemEntity, source)` | Missing | — | `item_despawn` is lifetime removal, not damage destruction. |
 | `isGazeDisguise(stack, player, target)` | Missing | — | No gaze-disguise query. |
 | `canWalkOnPowderedSnow(stack, entity)` | Missing | — | Powder-snow walking is engine-owned. |
-| `isDamageable(stack)` | Covered | `minecraft:max_damage` presence | A stack without the component is not damageable. |
+| `isDamageable(stack)` | Covered | `ItemResource::damageable(host)` | Reads the effective components: `minecraft:max_damage` and `minecraft:damage` present, `minecraft:unbreakable` absent. |
 | `getSweepHitBox(stack, player, target)` | Missing | — | `sweep_attack` decides whether a sweep happens, not its box. |
 | `isNotReplaceableByPickAction(stack, player, slot)` | Missing | — | Pick-block replacement is engine-owned. |
 | `canGrindstoneRepair(stack)` | Missing | — | `grindstone_place` observes or edits the result; no per-item predicate. |
@@ -240,7 +241,7 @@ and global hooks. On the server a mod can act on entities through `EntityRef` an
 | `sinkInFluid(type)` | Missing | — | Same. |
 | `canDrownInFluidType(type)` | Partial | `living_drown` (`hooks/base.rs`), `FluidTypeProperties.can_drown` | The global drown event can cancel or change damage; fluid data decides whether it applies. |
 | `moveInFluid(type, movement, fallDistance)` | Missing | — | Movement in fluid is engine-owned; no per-entity method. |
-| `onDamageTaken(container)` | Covered | `living_damage_post` (`hooks/living_damage_post.rs`), `living_incoming_damage` (`hooks/base.rs`) | Post-damage notice and a pre-damage container; both are global. |
+| `onDamageTaken(container)` | Partial | `living_damage_post` (`hooks/living_damage_post.rs`), `living_incoming_damage` (`hooks/base.rs`) | Global server hooks: the incoming container before the hit, and a post-damage notice only once health dropped, not a per-entity callback for every hurt. |
 
 ## `IBlockEntityExtension`
 
@@ -288,7 +289,7 @@ slot rules, not construct a menu.
 
 | Method | Verdict | Horizon | Notes |
 | --- | --- | --- | --- |
-| `create(IContainerFactory)` (static) | Covered | content `MenuType` declaration | Declares slot count, data slots and take-only slots; no custom factory class. |
+| `create(IContainerFactory)` (static) | Partial | content `MenuType` declaration | Declares slot count, data slots and take-only slots, but cannot supply a factory that builds the client menu from server-sent data. |
 | `create(windowId, inventory, buffer)` | Partial | menu engine + `MenuPart::menu_slot_rules` | The engine builds the menu from the declaration; a mod cannot run code at construction. |
 
 ## What the follow-up issues cover
@@ -298,8 +299,9 @@ slot rules, not construct a menu.
 their rows have landed or become partial since and should be narrowed when they are filed:
 
 - **Changed on the block side:** `shouldCheckWeakPower` and `should_redstone_wire_connect_to` (the issue says
-  reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds`; `canSustainPlant` is
-  partly `may_place_on`; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
+  reuse them) are Parts; `getFlammability` / `getFireSpreadSpeed` are now `fire_odds` (state-based, without a
+  position or direction); `canSustainPlant` is partly `may_place_on`, which answers for the plant, not the
+  soil; `canHarvestBlock` is partly `player_harvest_check`; `getToolModifiedState` is partly
   `block_tool_modification`.
 - **Changed on the item side:** `getEquipmentSlot` is `ItemResource::equippable_slot`; `getCraftingRemainder`
   has content data plus `host.item_crafting_remainder`; `canEquip` has the `equippable` component; `damageItem`
