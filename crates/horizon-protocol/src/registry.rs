@@ -118,11 +118,19 @@ pub struct Dynamic {
     /// The peer confirmed the native component registry identity.
     pub custom_components: bool,
 }
+/// The most registries whose tags one connection keeps. Vanilla names well under a hundred; a
+/// server naming more is not a registry list, and the bound keeps a hostile one from growing the
+/// client's memory with every packet.
+pub const MAX_TAG_REGISTRIES: usize = 512;
+
 impl Dynamic {
     /// A `ClientboundUpdateTagsPacket`: the registries it names replace their
-    /// tags, the others keep theirs.
+    /// tags, the others keep theirs. A registry beyond [`MAX_TAG_REGISTRIES`] is dropped.
     pub fn add_tags(&mut self, packet: &UpdateTags) {
         for r in &packet.registries {
+            if self.tags.len() >= MAX_TAG_REGISTRIES && !self.tags.contains_key(&r.registry) {
+                continue;
+            }
             let tags = r.tags.iter().map(|t| (t.name.clone(), t.ids.clone()));
             self.tags.insert(r.registry.clone(), tags.collect());
         }
@@ -305,6 +313,34 @@ mod tests {
         );
         assert_eq!(dynamic.tag("minecraft:item", "minecraft:b"), None);
         assert_eq!(dynamic.tag("minecraft:item", "minecraft:c"), Some(&[4][..]));
+    }
+
+    #[test]
+    fn tag_registries_are_bounded_and_known_ones_still_update() {
+        let packet = |registry: String, id: i32| UpdateTags {
+            registries: vec![crate::packets::configuration::RegistryTags {
+                registry,
+                tags: vec![crate::packets::configuration::TagEntry {
+                    name: "minecraft:t".into(),
+                    ids: vec![id],
+                }],
+            }],
+        };
+        let mut dynamic = Dynamic::default();
+        dynamic.add_tags(&packet("minecraft:item".into(), 1));
+        for i in 0..2 * MAX_TAG_REGISTRIES {
+            dynamic.add_tags(&packet(format!("attack:registry_{i}"), 0));
+        }
+        assert_eq!(dynamic.tags.len(), MAX_TAG_REGISTRIES);
+        // A registry kept before the bound is still replaced, and the others keep theirs.
+        dynamic.add_tags(&packet("minecraft:item".into(), 7));
+        assert_eq!(dynamic.tag("minecraft:item", "minecraft:t"), Some(&[7][..]));
+        assert_eq!(dynamic.tags.len(), MAX_TAG_REGISTRIES);
+        assert_eq!(
+            dynamic.tag("attack:registry_0", "minecraft:t"),
+            Some(&[0][..])
+        );
+        assert_eq!(dynamic.tag("attack:registry_600", "minecraft:t"), None);
     }
 
     #[test]
