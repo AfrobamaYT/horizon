@@ -379,6 +379,15 @@ fn client_heights_take_a_client_host(host: &dyn ClientHost) -> Result<Vec<Option
     host.client_surface_heights(&[(0, 0), (16, -16)], NativeHeightmap::MotionBlocking)
 }
 
+/// Compile-only: a client mod moves the view onto an entity and back through the `&mut dyn ClientHost`
+/// its hooks get.
+#[allow(dead_code)]
+fn camera_entity_takes_a_client_host(host: &mut dyn ClientHost, mob: EntityRef) -> bool {
+    let moved = host.set_camera_entity(mob);
+    let own = host.camera_entity();
+    moved && own.is_some()
+}
+
 /// Compile-only: a client mod reads the open inventory screen's slot boxes through its menu handle.
 #[allow(dead_code)]
 fn menu_slot_boxes_take_a_client_host(
