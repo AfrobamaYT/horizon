@@ -13,6 +13,8 @@ pub mod internals;
 pub mod manifest;
 pub mod mod_list;
 pub mod modpack;
+#[cfg(feature = "runtime-process")]
+pub mod output;
 pub mod packages;
 pub mod runtime;
 pub mod selection;
