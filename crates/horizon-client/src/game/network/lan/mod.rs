@@ -4232,7 +4232,13 @@ mod tests {
             None,
         )
         .unwrap();
-        let render = game.pack.assets.reload(&root).unwrap();
+        let render = game
+            .pack
+            .assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
         game.world =
             horizon_client::world::World::test_scene(&game.pack.assets, &render, 2).unwrap();
 
@@ -4262,7 +4268,13 @@ mod tests {
             integrated: true,
             levels: Default::default(),
         };
-        let mut hub = horizon_client::lan::hub::Hub::new(lan, sync, encoder, config);
+        let mut hub = horizon_client::lan::hub::Hub::new(
+            lan,
+            sync,
+            encoder,
+            config,
+            game.loop_context.clone(),
+        );
         let (tx, _rx) = mpsc::channel();
         let mut guest = Guest::new(
             Joined {
@@ -4276,7 +4288,6 @@ mod tests {
                 latency: Arc::new(AtomicI32::new(0)),
                 address: "127.0.0.1:1".parse().unwrap(),
                 expected: false,
-                configured: Default::default(),
             },
             1,
             [0.5, 4.0, 0.5],
@@ -4285,7 +4296,7 @@ mod tests {
         guest.placed = true;
         guest.dimension = "minecraft:overworld".into();
         hub.guests.push(guest);
-        let mut host = super::LanHost {
+        game.lan = Some(super::LanHost {
             hub,
             players_told_left: false,
             settings: super::LanSettings {
@@ -4306,13 +4317,11 @@ mod tests {
             quiet: Default::default(),
             far: None,
             native_commands: None,
-            native_command_nodes: Vec::new(),
-            native_usages: Vec::new(),
             sleep_ignored: Default::default(),
             states: Default::default(),
             states_next_entity: None,
             idle_states: Default::default(),
-        };
+        });
         for (block, expected) in [
             ("minecraft:ladder", false),
             ("minecraft:scaffolding", false),
@@ -4320,8 +4329,13 @@ mod tests {
         ] {
             let state = game.pack.assets.registry.default_state(block).unwrap();
             game.world.set(0, 4, 0, state).unwrap();
-            host.hub.guests[0].fall_flying = true;
-            game.as_guest(&mut host, 1, |game| {
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |g| g.fall_flying = true);
+            game.as_guest(1, |game| {
                 let player = game.player.as_mut().unwrap();
                 MotionWorld {
                     entities: &[],
@@ -4331,12 +4345,20 @@ mod tests {
                     collision_binding: game.collision,
                     resources: game.motion,
                     health: &game.health_resources,
+                    tag_items: Some(world_items!(game)),
+                    loop_context: &game.loop_context,
+                    damage_hooks: &game.damage_hooks,
+                    block_registries: Some(&game.pack.block_registries),
                 }
                 .server_travel()
                 .unwrap();
             })
             .unwrap();
-            assert_eq!(host.hub.guests[0].fall_flying, expected, "{block}");
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0].fall_flying,
+                expected,
+                "{block}"
+            );
         }
     }
 

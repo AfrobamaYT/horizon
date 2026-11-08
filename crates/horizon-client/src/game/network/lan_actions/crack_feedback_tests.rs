@@ -23,7 +23,6 @@ fn observer(conn: u32, position: [f64; 3], dimension: &str) -> (Guest, mpsc::Rec
             latency: Arc::new(AtomicI32::new(0)),
             address: "127.0.0.1:25565".parse().unwrap(),
             expected: false,
-            configured: Default::default(),
         },
         conn as i32,
         position,
@@ -168,6 +167,7 @@ fn crack_packets_follow_start_clock_and_strict_observer_radius() {
         });
         game.as_guest(1, |g| {
             g.forced_hit = Some(Hit {
+                inside: false,
                 pos,
                 face: [0, 1, 0],
                 point: [0.5, 100.5, 0.5],

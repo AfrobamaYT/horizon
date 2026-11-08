@@ -773,7 +773,7 @@ mod tests {
             .map(Arc::<str>::from),
             |n| {
                 calls.push(n.to_string());
-                (n == "machines:press").then(|| {
+                (n.as_ref() == "machines:press").then(|| {
                     BlockEntity::Mod(Box::new(horizon_client::containers::ModBlockEntity::new(
                         format!("press-{}", calls.len()),
                         Default::default(),
@@ -810,13 +810,10 @@ mod tests {
         let made = make_block_entities(&[7_u32, 8, 7, 8], |state| {
             calls.push(*state);
             (*state == 8).then(|| {
-                BlockEntity::Mod(Box::new(
-                    horizon_client::containers::ModBlockEntityFields {
-                        id: "machines:heater".into(),
-                        ..Default::default()
-                    }
-                    .into(),
-                ))
+                BlockEntity::Mod(Box::new(horizon_client::containers::ModBlockEntity::new(
+                    "machines:heater".into(),
+                    Default::default(),
+                )))
             })
         });
         assert_eq!(calls, [7, 8, 8]);

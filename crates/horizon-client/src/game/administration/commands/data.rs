@@ -2182,13 +2182,15 @@ mod falling_live_adoption_tests {
                 .iter()
                 .position(|f| game.persist.uuid_of(f.id) == Some([980, 0, 0, 1]))
                 .unwrap();
-            game.falling[index].start_pos = BlockPos::new(9, 201, 11);
-            game.falling[index].stuck = Vec3::new(0.2, 0.3, 0.4);
-            game.falling[index].portal.cooldown = 17;
-            game.falling[index].portal.process = Some(horizon_client::nether_portal::Process {
-                entry: BlockPos::new(8, 199, 8),
-                time: 7,
-                inside: true,
+            game.falling.update(index, |falling| {
+                falling.start_pos = BlockPos::new(9, 201, 11);
+                falling.stuck = Vec3::new(0.2, 0.3, 0.4);
+                falling.portal.cooldown = 17;
+                falling.portal.process = Some(horizon_client::nether_portal::Process {
+                    entry: BlockPos::new(8, 199, 8),
+                    time: 7,
+                    inside: true,
+                });
             });
             let before = game.falling[index].clone();
             assert!(before.join.is_joined());
@@ -2235,7 +2237,7 @@ mod falling_live_adoption_tests {
             assert_eq!((a.entry, a.time, a.inside), (b.entry, b.time, b.inside));
             assert_eq!(f.saved.as_ref().unwrap().0, [980, 0, 0, 1]);
             assert_eq!(game.persist.uuid_of(f.id), Some([980, 0, 0, 1]));
-            let saved = game.entity_nbt(Target::Falling(f.id)).unwrap();
+            let saved = game.command_target_nbt(Target::Falling(f.id)).unwrap();
             assert_eq!(saved.get("Time"), Some(&Tag::Int(12)));
             assert_eq!(saved.get("DropItem"), Some(&Tag::Byte(0)));
             assert_eq!(

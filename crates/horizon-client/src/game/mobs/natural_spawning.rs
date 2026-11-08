@@ -1201,23 +1201,24 @@ mod tests {
     fn authoritative_world_border_gates_positions_and_whole_chunks() {
         use horizon_core::position::BlockPos;
         use horizon_world::level::LevelAccess;
-        let mut game = crate::game::native_machines::tests::server_game();
-        game.border.set_center([8.0, 8.0]);
-        game.border.set_size(16.0);
-        assert!(game.natural_level().can_spawn_in_chunk(0, 0));
-        assert!(!game.natural_level().can_spawn_in_chunk(1, 0)); // unloaded
-        game.border.set_size(15.5);
-        assert!(!game.natural_level().can_spawn_in_chunk(0, 0)); // partial
-        assert!(game.natural_level().within_world_border(1, 1));
-        assert!(!game.natural_level().within_world_border(0, 0));
-        game.with_level(|_, level, _| {
-            assert!(level.within_world_border(BlockPos::new(1, 64, 1)));
-            assert!(!level.within_world_border(BlockPos::new(0, 64, 0)));
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            game.border.set_center([8.0, 8.0]);
+            game.border.set_size(16.0);
+            assert!(game.natural_level().can_spawn_in_chunk(0, 0));
+            assert!(!game.natural_level().can_spawn_in_chunk(1, 0)); // unloaded
+            game.border.set_size(15.5);
+            assert!(!game.natural_level().can_spawn_in_chunk(0, 0)); // partial
+            assert!(game.natural_level().within_world_border(1, 1));
+            assert!(!game.natural_level().within_world_border(0, 0));
+            game.with_level(|_, level, _| {
+                assert!(level.within_world_border(BlockPos::new(1, 64, 1)));
+                assert!(!level.within_world_border(BlockPos::new(0, 64, 0)));
+            });
+            game.border.set_size(16.5);
+            assert!(game.natural_level().can_spawn_in_chunk(0, 0));
+            assert!(game.mob_world_base(&[]).within_world_border(0, 0));
+            assert!(!game.mob_world_base(&[]).within_world_border(17, 0));
         });
-        game.border.set_size(16.5);
-        assert!(game.natural_level().can_spawn_in_chunk(0, 0));
-        assert!(game.mob_world_base(&[]).within_world_border(0, 0));
-        assert!(!game.mob_world_base(&[]).within_world_border(17, 0));
     }
 
     #[test]
@@ -1225,44 +1226,49 @@ mod tests {
     fn world_border_outer_chunk_gate_keeps_attempt_randomness() {
         use horizon_client::{chunk::Chunk, motion::PlayerMotion};
         use std::sync::Arc;
-        let mut game = crate::game::native_machines::tests::server_game();
-        // Only the center chunk can tick: its eight neighbors are loaded,
-        // but none of those has all its own neighbors. The center is partial.
-        for x in -1..=1 {
-            for z in -1..=1 {
-                let mut chunk = Chunk::empty(x, z);
-                chunk.lit = x == 0 && z == 0;
-                game.world.chunks.insert((x, z), Arc::new(chunk));
+        crate::game::native_entity_refs::tests::with_game(|game| {
+            // Only the center chunk can tick: its eight neighbors are loaded,
+            // but none of those has all its own neighbors. The center is partial.
+            for x in -1..=1 {
+                for z in -1..=1 {
+                    let mut chunk = Chunk::empty(x, z);
+                    chunk.lit = x == 0 && z == 0;
+                    game.world.chunks.insert((x, z), Arc::new(chunk));
+                }
             }
-        }
-        game.tickets.update(None);
-        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).unwrap());
-        game.border.set_center([8.0, 8.0]);
-        game.border.set_size(2.0);
-        let mut scratch = SpawnScratch::default();
-        game.spawning_chunks(&game.level_players(), &mut scratch);
-        assert_eq!(scratch.candidates, vec![(0, 0)]);
-        assert!(game.ui.rules.bool("spawn_mobs"));
-        // A contained chunk must actually reach the spawning pass, so an
-        // empty category list cannot satisfy the rejected-chunk assertion.
-        game.border.set_size(64.0);
-        game.world.random = LegacyRandom::new(12345);
-        game.spawn_natural();
-        assert_ne!(
-            game.world.random.next_long(),
-            LegacyRandom::new(12345).next_long()
-        );
-        game.world.inhabited.clear();
-        game.border.set_size(2.0);
-        game.world.random = LegacyRandom::new(12345);
-        game.spawn_natural();
-        // No shuffle draw for one candidate, and no attempt draws for a
-        // rejected chunk. Inhabited time still advances before the gate.
-        assert_eq!(game.world.inhabited.get(&(0, 0)), Some(&1));
-        assert_eq!(
-            game.world.random.next_long(),
-            LegacyRandom::new(12345).next_long()
-        );
+            game.tickets.update(None);
+            game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).unwrap());
+            game.border.set_center([8.0, 8.0]);
+            game.border.set_size(2.0);
+            let mut scratch = SpawnScratch::default();
+            game.spawning_chunks(&game.level_players(), &mut scratch);
+            assert_eq!(scratch.candidates, vec![(0, 0)]);
+            assert!(
+                game.ui
+                    .rules
+                    .bool_at(horizon_client::gamerules::vanilla::SPAWN_MOBS)
+            );
+            // A contained chunk must actually reach the spawning pass, so an
+            // empty category list cannot satisfy the rejected-chunk assertion.
+            game.border.set_size(64.0);
+            game.world.random = LegacyRandom::new(12345);
+            game.spawn_natural();
+            assert_ne!(
+                game.world.random.next_long(),
+                LegacyRandom::new(12345).next_long()
+            );
+            game.world.inhabited.clear();
+            game.border.set_size(2.0);
+            game.world.random = LegacyRandom::new(12345);
+            game.spawn_natural();
+            // No shuffle draw for one candidate, and no attempt draws for a
+            // rejected chunk. Inhabited time still advances before the gate.
+            assert_eq!(game.world.inhabited.get(&(0, 0)), Some(&1));
+            assert_eq!(
+                game.world.random.next_long(),
+                LegacyRandom::new(12345).next_long()
+            );
+        });
     }
     fn player(x: f64, y: f64, z: f64, spectator: bool) -> LevelPlayer {
         LevelPlayer {

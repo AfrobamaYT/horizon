@@ -1160,7 +1160,7 @@ mod loot_mine_component_tests {
             .find(|s| game.persist.uuids.get(&s.id) == Some(&[60, 0, 0, 1]))
             .unwrap()
             .id;
-        let before_stand = game.entity_nbt(Target::Stand(id)).unwrap();
+        let before_stand = game.command_target_nbt(Target::Stand(id)).unwrap();
         assert_eq!(
             before_stand.get("UUID"),
             Some(&Tag::IntArray(vec![60, 0, 0, 1]))
@@ -1201,7 +1201,10 @@ mod loot_mine_component_tests {
             );
             assert_eq!(&*slot(&game, 2).item, "minecraft:diamond_shovel");
             assert_eq!(game.world.block(x, 200, 4), state);
-            assert_eq!(game.entity_nbt(Target::Stand(id)).unwrap(), before_stand);
+            assert_eq!(
+                game.command_target_nbt(Target::Stand(id)).unwrap(),
+                before_stand
+            );
             assert_eq!(game.world.game_time, clock);
         }
     }

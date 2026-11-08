@@ -1,7 +1,7 @@
 use super::*;
 use horizon_client::chunk::Chunk;
+use horizon_core::nbt::Tag;
 use horizon_core::position::ChunkPos;
-use horizon_world::nbt::Tag;
 use std::sync::Arc;
 
 #[test]

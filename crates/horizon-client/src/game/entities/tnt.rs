@@ -1622,7 +1622,12 @@ mod tests {
         };
         for silent in [false, true, false] {
             let id = game
-                .spawn_mob_for("minecraft:creeper", [8.5, 64.0, 8.5], true, true)
+                .spawn_mob(
+                    "minecraft:creeper",
+                    [8.5, 64.0, 8.5],
+                    true,
+                    super::super::creatures::SpawnSite::Plain,
+                )
                 .unwrap();
             let mob = game.mobs.iter_mut().find(|m| m.id == id).unwrap();
             mob.silent = silent;

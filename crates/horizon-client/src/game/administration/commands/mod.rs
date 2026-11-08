@@ -5383,7 +5383,7 @@ mod vehicle_kill_tests {
                 Target::Cart(id)
             };
             assert_eq!(
-                game.entity_nbt(target).unwrap().get("UUID"),
+                game.command_target_nbt(target).unwrap().get("UUID"),
                 Some(&horizon_core::nbt::Tag::IntArray(uuid.to_vec()))
             );
             // The active menu's actual edited slot must win over the older model.

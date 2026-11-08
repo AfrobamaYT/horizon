@@ -2950,6 +2950,7 @@ impl Game<'_> {
     /// native mod's, made as a write of the level creates it
     /// (`GameLevel::new_block_entity`). Only a declared mod type builds the
     /// level.
+    #[cfg(test)]
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
         if horizon_client::block_entity_types::type_for(name).is_none() {
             return block_entity_for_block(
