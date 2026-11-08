@@ -998,6 +998,7 @@ impl Game<'_> {
                 {
                     canceled = o.canceled;
                 }
+
                 self.combat.forget_noted(canceled);
             }
             EffectAction::Poison => {
@@ -1344,7 +1345,8 @@ impl Game<'_> {
         new: bool,
     ) {
         if self.remote.is_none()
-            && mod_api::__private::resolved_effect(effect)
+            && mod_api::__private::effect_index(effect)
+                .and_then(horizon_client_core::potions::effect_by_index)
                 .is_some_and(|def| def.index >= brewing::EFFECTS.len())
         {
             if new {

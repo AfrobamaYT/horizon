@@ -8,6 +8,10 @@
 
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
+pub(in crate::game) use fire::{
+    BlockDropsCall, ConnectsToCall, EntityChangeBlockPreCall, ItemAfterVerticalCollisionCall,
+    UpdateShapeCall,
+};
 
 use super::native_data_maps::NativeDataMapType;
 use super::{
@@ -54,6 +58,7 @@ use horizon_client::{
 use horizon_client_core::gamerules::Value as GameRuleValue;
 use horizon_client_core::suggestion::Suggestion;
 use horizon_core::{
+    connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
     random::LegacyRandom,
@@ -75,7 +80,7 @@ use mod_api::{
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
     NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
+    NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
 use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
 use mod_api::{
@@ -102,7 +107,7 @@ use {
     },
     horizon_world::{
         fluid::FluidKind,
-        level::{BlockId, LevelAccess, PlacementContext, Ticks},
+        level::{LevelAccess, PlacementContext, Ticks},
         registry::{BlockRegistry, BlockStateId},
     },
 };

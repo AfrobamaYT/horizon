@@ -2494,6 +2494,29 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        let entries: Vec<(&str, serde_json::Value)> = registries
+            .registries
+            .get("minecraft:enchantment")
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, data)| {
+                Some((
+                    name.as_str(),
+                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
+                ))
+            })
+            .collect();
+        let enchantments = match self
+            .stations()
+            .enchantments
+            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
+        {
+            Ok(table) => table.map(Arc::new),
+            Err(error) => {
+                log::warn!("Horizon: refused enchantment registry: {error}");
+                return;
+            }
+        };
         // The server's biomes the game lacks (a world data pack's) join the
         // game's table, from the data it sent: colours, meshing and the
         // chunk format all go through that table. The window's own server
@@ -2520,23 +2543,6 @@ impl Game<'_> {
                     .collect()
             })
             .unwrap_or_default();
-        let entries: Vec<(&str, serde_json::Value)> = registries
-            .registries
-            .get("minecraft:enchantment")
-            .into_iter()
-            .flatten()
-            .filter_map(|(name, data)| {
-                Some((
-                    name.as_str(),
-                    horizon_client::scoreboard::tag_to_json(data.as_ref()?),
-                ))
-            })
-            .collect();
-        let enchantments = self
-            .stations()
-            .enchantments
-            .with_entries(entries.iter().map(|(n, v)| (*n, v)))
-            .map(Arc::new);
         if let Some(r) = self.remote.as_mut() {
             r.enchantments = enchantments;
             let bits = ceil_log2(biomes.len());
@@ -5808,7 +5814,10 @@ impl Game<'_> {
 
     /// Resolve inline `object:player` profiles through the same skin cache as
     /// player heads on items. The next frame uses the uploaded atlas texture.
-    pub(super) fn resolve_inline_profiles(&mut self, profiles: &[serde_json::Value]) {
+    pub(super) fn resolve_inline_profiles(
+        &mut self,
+        profiles: &[std::sync::Arc<serde_json::Value>],
+    ) {
         use horizon_client::skins;
         for profile in profiles {
             let skin = skins::head_skin(
@@ -11822,7 +11831,7 @@ impl ClientMenu {
 
 impl Remote {
     pub(super) fn set_menu_title(&mut self, title: Option<horizon_client::text::Text>) {
-        self.menu_title_snapshot = title.try_into_api().unwrap().map(Arc::new);
+        self.menu_title_snapshot = title.try_into_api().ok().flatten().map(Arc::new);
         self.menu_title = title;
     }
 
@@ -13618,7 +13627,12 @@ mod tests {
             assert!(!level.is_loaded(game, [160, 64, 0]));
             game.handle_packet(C::BlockUpdate(play::BlockUpdate { pos: at, state: 1 }))
                 .unwrap();
-            assert_eq!(level.block(game, at).as_deref(), Some("minecraft:stone"));
+            assert_eq!(
+                level
+                    .block(game, at)
+                    .and_then(mod_api::__private::block_key_id),
+                Some("minecraft:stone")
+            );
             assert!(level.block_state(game, at).is_some());
             assert_eq!(level.block(game, [160, 64, 0]), None);
             assert_eq!(level.block_property(game, [160, 64, 0], "facing"), None);

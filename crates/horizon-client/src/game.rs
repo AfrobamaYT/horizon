@@ -1,6 +1,5 @@
 //! The playable game loop: streaming world, player simulation at 20 ticks/s,
 //! block interaction, inventory and HUD.
-use mod_api::__private::game::PartsLookup;
 
 /// The content tables the world plays with, as field-level borrows: the
 /// world's data packs' over the game's own. The `Game::items`/`recipes`/
@@ -71,6 +70,7 @@ mod native_hooks;
 use event_loop::EventLoopCtl;
 // `Action` here is the title screen's buttons (`title::Action`).
 use self::api_values::TryIntoApi;
+pub(crate) use api_values::{block_jump_factor, block_speed_factor};
 use horizon_client::actions::Action as Mapping;
 use horizon_client::held::Source;
 use horizon_client::spans::startup;
@@ -1017,8 +1017,14 @@ impl LevelAccess for GameLevel<'_> {
         changed: horizon_world::level::BlockId,
         moved: bool,
     ) {
-        if self.native_authoritative {
-            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed, moved);
+        if self.native_authoritative
+            && api_values::block_state::block_listens(mod_api::HookId::NeighborChanged, state)
+        {
+            use api_values::TryIntoApi;
+            let Ok(changed) = self.behaviours.table.default_state(changed).try_into_api() else {
+                return;
+            };
+            self.native_neighbor_changed(ticks, self.dimension, pos, state, changed.block(), moved);
         }
     }
     fn affect_neighbors_after_removal(
@@ -1364,7 +1370,7 @@ impl LevelAccess for GameLevel<'_> {
         vanilla: bool,
     ) -> bool {
         let mut connected = vanilla;
-        self.native_connects_to(mod_api::__private::ConnectsToCall {
+        self.native_connects_to(native_hooks::ConnectsToCall {
             dimension: self.dimension,
             pos,
             state,
@@ -1455,7 +1461,7 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_update_shape(
                 ticks,
-                mod_api::__private::UpdateShapeCall {
+                native_hooks::UpdateShapeCall {
                     dimension: self.dimension,
                     pos,
                     state,
@@ -2063,8 +2069,7 @@ struct WorldTables {
 
 struct PreparedParts {
     block_states: Arc<api_values::block_state::Index>,
-    blocks: Vec<mod_api::__private::ResolvedBlock>,
-    tags: HashMap<String, horizon_world::level::data::BlockSet>,
+    tags: HashMap<String, HashSet<mod_api::BlockKey>>,
     parts: Option<mod_api::Parts>,
 }
 
@@ -7293,9 +7298,7 @@ impl Game<'_> {
                 self.use_item_on_block(hit, self.hand, held.as_ref(), mod_api::UsePhase::Block);
             if block_answer.is_none()
                 && mod_api::__private::has_part_hook(mod_api::HookId::UseItemOn)
-                && mod_api::__private::parts(mod_api::HookId::UseItemOn, "use_item_on")
-                    .for_hook(mod_api::HookId::UseItemOn)
-                    .is_some_and(|parts| !parts.block_state(state).is_empty())
+                && api_values::block_state::block_listens(mod_api::HookId::UseItemOn, state)
                 && let Ok(snapshot) = held.try_into_api()
             {
                 let click = self.block_click(hit, self.hand, snapshot.as_ref());
@@ -7430,12 +7433,10 @@ impl Game<'_> {
                 } else if self.hand == Hand::Main {
                     let mut empty_answer = None;
                     if mod_api::__private::has_part_hook(mod_api::HookId::UseWithoutItem)
-                        && mod_api::__private::parts(
+                        && api_values::block_state::block_listens(
                             mod_api::HookId::UseWithoutItem,
-                            "use_without_item",
+                            state,
                         )
-                        .for_hook(mod_api::HookId::UseWithoutItem)
-                        .is_some_and(|parts| !parts.block_state(state).is_empty())
                         && let Ok(snapshot) = self.held().try_into_api()
                     {
                         let click = self.block_click(hit, self.hand, snapshot.as_ref());
@@ -8647,16 +8648,14 @@ impl Game<'_> {
         if !mod_api::__private::listened(mod_api::HookId::EntityChangeBlockPre) {
             return false;
         }
-        let name = |s: BlockStateId| self.res.facts().get(s).name.to_string();
-        let (from, to) = (name(from), name(to));
         let mut cancel = false;
-        self.native_entity_change_block_pre(mod_api::__private::EntityChangeBlockPreCall {
+        self.native_entity_change_block_pre(native_hooks::EntityChangeBlockPreCall {
             player,
             entity: None,
             kind: "minecraft:player",
             pos: [position.x, position.y, position.z],
-            from: &from,
-            to: &to,
+            from,
+            to,
             cancel: &mut cancel,
         });
         cancel
@@ -22674,44 +22673,13 @@ impl Game<'_> {
     }
     fn prepare_parts(&self, items: &Items) -> Result<PreparedParts> {
         let registry = self.pack.assets.registry;
-        let blocks = mod_api::__private::prepare_blocks(|id| {
-            let default = registry.default_state(id)?;
-            let of_block = |state| {
-                registry
-                    .state(BlockStateId(state))
-                    .is_some_and(|s| s.name == id)
-            };
-            let mut first = default.0;
-            while first > 0 && of_block(first - 1) {
-                first -= 1;
-            }
-            let mut last = default.0;
-            while of_block(last + 1) {
-                last += 1;
-            }
-            Some(mod_api::__private::ResolvedBlock {
-                default,
-                states: horizon_world::registry::BlockStateRange::new(
-                    BlockStateId(first),
-                    last - first + 1,
-                ),
-                block: self.res.behaviours().block(default),
-            })
-        })
-        .map_err(|refused| format!("Mod block keys refused:\n{}", refused.join("\n")))?;
-        let tags = native_world_read::prepare_block_tags(items, |name| {
-            registry
-                .default_state(name)
-                .map(|state| self.res.behaviours().block(state))
-        });
+        let tags = native_world_read::prepare_block_tags(items);
         let parts = mod_api::__private::prepare_parts(
             &items.block_tags,
             &items.item_tags,
             mod_api::__private::KnownIds {
                 block: &|id| registry.default_state(id).is_some(),
                 item: &|id| items.items.contains_key(id),
-                state_count: registry.len(),
-                state_block: &|state| &registry.state(BlockStateId(state as u32)).unwrap().name,
             },
         )
         .map_err(|refused| match refused {
@@ -22731,13 +22699,11 @@ impl Game<'_> {
         let block_states = api_values::prepare_block_states(registry)?;
         Ok(PreparedParts {
             block_states,
-            blocks,
             tags,
             parts,
         })
     }
     fn install_parts(&self, prepared: PreparedParts) {
-        mod_api::__private::install_blocks(prepared.blocks);
         native_world_read::install_block_tags(prepared.tags);
         mod_api::__private::install_resolved_parts(prepared.parts);
         api_values::install_block_states(prepared.block_states);
@@ -24998,7 +24964,7 @@ pub fn run_with(
     // The structure types those mods registered, handed to the engine before
     // any world opens, as its StructureRegistry reads them.
     if horizon_world::worldgen::structure::mod_types::install_mod_structure_types(
-        mod_api::__private::installed_structure_types(),
+        native_structure_types::installed_structure_types(),
     )
     .is_err()
     {
@@ -25006,7 +24972,7 @@ pub fn run_with(
     }
     // The levels they registered, below the data packs of every world opened.
     if horizon_world::worldgen::overrides::install_mod_dimensions(
-        mod_api::__private::installed_dimensions(),
+        native_dimensions::installed_dimensions(),
     )
     .is_err()
     {
@@ -25014,7 +24980,7 @@ pub fn run_with(
     }
     // Their chunk generators, which those levels' and the packs' stems name.
     if horizon_world::worldgen::mod_generators::install_mod_chunk_generators(
-        mod_api::__private::installed_chunk_generators(),
+        native_chunk_generator::installed_chunk_generators(),
     )
     .is_err()
     {
@@ -25528,19 +25494,11 @@ mod tests {
                 game.block_in_tag(stone_key, "base_stone_overworld"),
                 Some(true)
             );
-            let stone = game
-                .pack
-                .assets
-                .registry
-                .default_state("minecraft:stone")
-                .unwrap();
-            assert!(
-                !mod_api::__private::parts(mod_api::HookId::AnalogOutput, "test")
-                    .for_hook(mod_api::HookId::AnalogOutput)
-                    .unwrap()
-                    .block_state(stone)
-                    .is_empty()
-            );
+            let stone = game.block_state_default(stone_key).unwrap();
+            assert!(api_values::block_state::block_listens(
+                mod_api::HookId::AnalogOutput,
+                stone
+            ));
             game.session_lock = None;
             let _ = std::fs::remove_dir_all(dir);
         });
@@ -25729,12 +25687,10 @@ mod tests {
                 .registry
                 .default_state("minecraft:cauldron")
                 .unwrap();
-            assert!(game.level_set_block(
-                level,
-                [0, 64, 0],
-                empty,
-                NativeBlockUpdateFlags::NEIGHBORS
-            ));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], empty, NativeBlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
             let hit = Hit {
                 pos: [0, 64, 0],
@@ -25747,7 +25703,10 @@ mod tests {
             allowed.store(true, Ordering::SeqCst);
             game.use_hand(Some(&hit)).unwrap();
             assert_ne!(game.world.block(0, 64, 0), empty);
-            assert!(game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS));
+            assert_eq!(
+                game.level_set_block(level, hit.pos, empty, NativeBlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:water_bucket", 1));
             game.keys.insert(KeyCode::ShiftLeft);
             game.use_hand(Some(&hit)).unwrap();
@@ -25760,12 +25719,10 @@ mod tests {
                 .registry
                 .default_state("minecraft:campfire")
                 .unwrap();
-            assert!(game.level_set_block(
-                level,
-                hit.pos,
-                campfire,
-                NativeBlockUpdateFlags::NEIGHBORS
-            ));
+            assert_eq!(
+                game.level_set_block(level, hit.pos, campfire, NativeBlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
             let entity = game.new_block_entity("minecraft:campfire").unwrap();
             game.world.block_entities.insert((0, 64, 0), entity);
             game.inventory[game.selected] = Some(ItemStack::new("minecraft:beef", 2));
@@ -25783,7 +25740,10 @@ mod tests {
                 .registry
                 .default_state("minecraft:oak_fence")
                 .unwrap();
-            assert!(game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS));
+            assert_eq!(
+                game.level_set_block(level, hit.pos, fence, NativeBlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
             let kind = game.res.mob_types().get("minecraft:cow").unwrap().clone();
             let mut mob = horizon_client::mobs::Mob::new(
                 12,
@@ -25833,12 +25793,10 @@ mod tests {
                 .registry
                 .default_state("minecraft:oak_fence")
                 .unwrap();
-            assert!(game.level_set_block(
-                level,
-                [0, 64, 0],
-                fence,
-                NativeBlockUpdateFlags::NEIGHBORS
-            ));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], fence, NativeBlockUpdateFlags::NEIGHBORS),
+                Ok(true)
+            );
             let hit = Hit {
                 pos: [0, 64, 0],
                 face: [0, 1, 0],

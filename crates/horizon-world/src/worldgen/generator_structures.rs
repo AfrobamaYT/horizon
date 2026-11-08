@@ -543,7 +543,10 @@ impl StructureState {
             _ => return None,
         };
         let types = super::structure::mod_types::mod_structure_types();
-        types.get(&*id)?.load_piece(map).map(Piece::Legacy)
+        types
+            .get(&*id)?
+            .load_piece(self.resources.registry, map)
+            .map(Piece::Legacy)
     }
     /// `starts_at`, or `None` when another worker is building them and
     /// `wait` is false.

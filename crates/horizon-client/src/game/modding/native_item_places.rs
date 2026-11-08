@@ -452,7 +452,7 @@ pub(super) mod tests {
             let set = |game: &mut super::Game<'_>, pos, n| {
                 let state = cauldron(game, n);
                 let flags = NativeBlockUpdateFlags::NEIGHBORS;
-                assert!(game.level_set_block(level, pos, state, flags));
+                assert_eq!(game.level_set_block(level, pos, state, flags), Ok(true));
             };
             let (a, b) = ([0, 64, 0], [2, 64, 0]);
             set(game, a, 3);
@@ -785,7 +785,10 @@ pub(super) mod tests {
             let level = game.level("minecraft:overworld").unwrap();
             let chest = game.pack.assets.registry.default_state("minecraft:chest");
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            assert!(game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], chest.unwrap(), flags),
+                Ok(true)
+            );
             let mut player = guest(1);
             player.carried = Some(ItemStack::new("minecraft:emerald", 9));
             game.lan.as_mut().unwrap().hub.guests.push(player);
@@ -871,7 +874,10 @@ pub(super) mod tests {
                 state(game, "minecraft:furnace"),
             );
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            assert!(game.level_set_block(level, [0, 64, 0], chest, flags));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], chest, flags),
+                Ok(true)
+            );
             let mut player = guest(1);
             player.inventory[8] = Some(ItemStack::new("minecraft:stick", 4));
             game.lan.as_mut().unwrap().hub.guests.push(player);
@@ -886,7 +892,10 @@ pub(super) mod tests {
                 None,
             );
             let menu = menu_of(game);
-            assert!(game.level_set_block(level, [0, 64, 0], furnace, flags));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], furnace, flags),
+                Ok(true)
+            );
             // Until the close pass, the menu still has the chest's 63 slots: 0 was the chest's
             // first, 62 is the last of the hotbar, past a furnace menu's 39.
             let (first, hotbar) = (
@@ -1033,7 +1042,10 @@ pub(super) mod tests {
             let level = game.level("minecraft:overworld").unwrap();
             let furnace = game.pack.assets.registry.default_state("minecraft:furnace");
             let flags = NativeBlockUpdateFlags::NEIGHBORS;
-            assert!(game.level_set_block(level, [0, 64, 0], furnace.unwrap(), flags));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], furnace.unwrap(), flags),
+                Ok(true)
+            );
             game.lan.as_mut().unwrap().hub.guests.push(guest(1));
             game.lan.as_mut().unwrap().hub.open_container(
                 1,
@@ -1705,7 +1717,10 @@ pub(super) mod tests {
                 .with_props(base, &[("orientation", "down_east")])
                 .unwrap();
             let level = game.level("minecraft:overworld").unwrap();
-            assert!(game.level_set_block(level, [0, 64, 0], crafter, NativeBlockUpdateFlags::NONE));
+            assert_eq!(
+                game.level_set_block(level, [0, 64, 0], crafter, NativeBlockUpdateFlags::NONE),
+                Ok(true)
+            );
             pig(game, 700, 63.0);
             for (before, after, refused) in [(0, 4, 0), (62, 64, 2), (64, 64, 4)] {
                 *bin.held.lock().unwrap() =

@@ -497,8 +497,12 @@ fn install_counter() {
             corrupt: false,
         }),
     )];
-    mod_api::__private::install_parts(&mods, &mod_api::__private::part_tests::rule_schema())
-        .unwrap();
+    mod_api::__private::install_parts(
+        &mods,
+        &mod_api::__private::part_tests::rule_schema(),
+        |_| false,
+    )
+    .unwrap();
 }
 #[test]
 fn wire_loopback_registration_attaches_subscribed_part() {
@@ -613,6 +617,9 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         }
     }
     impl mod_api::GenerationContext for Start {
+        fn metadata(&self) -> &dyn mod_api::BlockMetadata {
+            unreachable!()
+        }
         fn random(&mut self) -> &mut dyn mod_api::StructureRandom {
             self
         }
@@ -646,7 +653,7 @@ fn wire_loopback_returned_frame_resource_uses_source_permissions() {
         fn column_has_valid_biome(&mut self, _: i32, _: i32, _: i32, _: i32) -> bool {
             unreachable!()
         }
-        fn config(&self) -> Arc<serde_json::Value> {
+        fn config(&self) -> Arc<mod_api::Tag> {
             unreachable!()
         }
     }
