@@ -3954,8 +3954,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "cancel",
         out = "cancel",
-        neoforge = "LivingSwapItemsEvent.Hands",
-        paper = "PlayerSwapHandItemsEvent"
+        neoforge = "LivingSwapItemsEvent.Hands"
     )]
     fn player_swap_hands();
     /// A server player took the book from a lectern, after the menu and block entity changed. `book`
@@ -4268,6 +4267,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "PlayerSwitchHotbarSlotEvent.Pre",
+        paper = "PlayerItemHeldEvent",
         cancellable = true
     )]
     fn player_switch_hotbar_slot_pre();
@@ -4425,7 +4425,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event; Bukkit's PlayerShearEntityEvent)",
-        paper = "PlayerShearEntityEvent",
         cancellable = true
     )]
     fn player_shear_entity();
@@ -4470,8 +4469,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerStopUsingItem)",
-        paper = "PlayerStopUsingItemEvent"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerStopUsingItem)"
     )]
     fn player_stop_using_item();
     /// A server player swapped their main and off hands, after both inventory slots changed.
@@ -4489,7 +4487,6 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
-        paper = "PlayerTeleportEndGatewayEvent",
         cancellable = true
     )]
     fn player_teleport_end_gateway();
