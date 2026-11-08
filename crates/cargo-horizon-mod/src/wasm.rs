@@ -191,17 +191,20 @@ fn cargo_member(
         .args(["--config", &format!("profile.{PROFILE}.codegen-units=1")])
         .current_dir(root)
         .env("CARGO_TARGET_DIR", target_dir)
+        .env("RUSTC_WRAPPER", &exe)
+        .env("HORIZON_GROUP_WRAPPER", "{}")
+        .env("HORIZON_STD_ARTIFACTS", target_dir.join("std-artifacts"))
         .env("RUSTC_BOOTSTRAP", "1")
         // Every crate's symbols stay inside its member, but the member's own crate's, which its
         // dependents link against (`-- -Zdefault-visibility=interposable` below): a member exports
         // its own API, and the linker drops whatever only another crate's exports reached.
         .env(
             "RUSTFLAGS",
-            "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden",
+            "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts",
         )
         .env("HORIZON_GUEST_REGISTRATIONS", registrations)
         .env("HORIZON_POINT_NAMES", point_names)
-        .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", exe)
+        .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", &exe)
         .env(LINK_ENV, role)
         .env(LLD_ENV, &toolchain.lld)
         .env(PROVIDED_ENV, provided.join(","));
@@ -333,8 +336,8 @@ fn registrations(
 }
 
 /// `build --wasm`: builds `mod.wasm` beside `horizon-mod.toml` and records it in `[wasm]`.
-pub fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
-    group::build(root, catalog)
+pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Result<(), String> {
+    group::build(root, catalog, additional)
 }
 
 /// The link step, run by cargo as the linker: rust-lld linking a shared module, then rustc's
@@ -368,7 +371,13 @@ pub fn link(role: &str, args: Vec<String>) -> Result<(), String> {
     let mut output = None;
     while let Some(arg) = args.next() {
         let krate = crate_of(&arg);
-        let std = krate.as_deref().is_some_and(|k| STD_CRATES.contains(&k));
+        let std = if let Some(directory) = std::env::var_os("HORIZON_STD_ARTIFACTS") {
+            Path::new(&arg)
+                .file_name()
+                .is_some_and(|name| PathBuf::from(directory).join(name).is_file())
+        } else {
+            krate.as_deref().is_some_and(|k| STD_CRATES.contains(&k))
+        };
         if arg == "-o" {
             output = args.next();
             out.extend(["-o".to_owned(), output.clone().unwrap_or_default()]);

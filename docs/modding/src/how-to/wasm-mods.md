@@ -48,7 +48,20 @@ copies that catalog beside the std member.
 ## Dependencies
 
 `[dependencies]` work as for native mods. List the library mod in `horizon-mod.toml` and its
-crate in `Cargo.toml`; build the library with `--wasm` first. The game links a mod with its
+crate in `Cargo.toml`. The tool stages the resolved mod packages into one Cargo workspace:
+each library's single compiler unit produces both its rlib and its position-independent member,
+and dependents use that exact rlib through Cargo's ordinary dependency edges. Cargo still owns
+feature resolution, build scripts and non-mod dependencies. Registration generation is scoped to
+each package, not to the mod from which the command was launched.
+
+Ordinary Rust calls such as `my_library::function()`, statics, generics and owned Rust types need
+no generated interface or export annotations. Each member records its compiler, target, settings,
+rlib digest and dependency artifact identities in `horizon.build` metadata covered by its module
+hash. A shared crate disambiguator alone is not an ABI guarantee: the loader checks the exact
+dependency build recorded in `[wasm.linked]`.
+
+The build packages every member of the resolved group. To include additional local roots in the
+same Cargo invocation, repeat `--with path/to/another/mod`. The game links a mod with its
 dependencies at load, one copy of each library shared by every mod that uses it, and refuses a
 mod whose library is missing or another build than the one it was linked against, naming it on
 the Mods page. An optional dependency is built in with the Cargo feature of its id, so its crate's

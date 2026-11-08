@@ -42,3 +42,18 @@ impl mod_api::BlockEntityPart for Dependent {
 pub fn on_tick(_: mod_api::HostSide<'_>, args: &mut mod_points::TickArgs) {
     args.cancel = true;
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ordinary_rust_library_api() {
+        assert_eq!(wasm_test_library::shared_value(), 37);
+        assert_eq!(wasm_test_library::generic(41_u32), 42);
+        let value = wasm_test_library::owned();
+        assert_eq!(value.text, "shared");
+        assert_eq!(value.values, [7, 8]);
+        drop(value);
+        assert_eq!(unsafe { wasm_test_library::DROPS }, 1);
+        assert_eq!(wasm_test_library::object().answer(), 19);
+    }
+}

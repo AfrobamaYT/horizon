@@ -2,7 +2,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden";
+const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts";
 
 struct Member {
     root: PathBuf,
@@ -10,6 +10,8 @@ struct Member {
     manifest: toml_edit::DocumentMut,
     krate: String,
     package: String,
+    registrations: String,
+    points: String,
 }
 
 fn copy(source: &Path, destination: &Path) -> Result<(), String> {
@@ -57,22 +59,32 @@ fn paths(
     Ok(())
 }
 
-pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
+pub(super) fn build(
+    root: &Path,
+    catalog: Option<&Path>,
+    additional: &[PathBuf],
+) -> Result<(), String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let toolchain = toolchain()?;
     let target = root.join("target/horizon-mod");
     let stage = target.join("group");
-    let metadata: Value = serde_json::from_str(&output({
-        let mut c = pinned("cargo");
-        c.args(["metadata", "--format-version", "1"])
-            .current_dir(&root);
-        c
-    })?)
-    .map_err(|e| e.to_string())?;
+    let mut metadatas = Vec::new();
+    for directory in std::iter::once(root.as_path()).chain(additional.iter().map(PathBuf::as_path))
+    {
+        let metadata: Value = serde_json::from_str(&output({
+            let mut c = pinned("cargo");
+            c.args(["metadata", "--format-version", "1"])
+                .current_dir(directory);
+            c
+        })?)
+        .map_err(|e| e.to_string())?;
+        metadatas.push(metadata);
+    }
+    let metadata = &metadatas[0];
     let mut members = Vec::new();
-    for package in metadata["packages"]
-        .as_array()
-        .ok_or("Cargo metadata has no packages")?
+    for package in metadatas
+        .iter()
+        .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
     {
         let source = Path::new(
             package["manifest_path"]
@@ -89,6 +101,7 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         if manifest.contains_key("native") {
             return Err(format!("{}: native mod in wasm group", source.display()));
         }
+        let (registrations, points) = registrations(&manifest, catalog)?;
         let id = manifest["id"].as_str().ok_or("mod has no id")?;
         members.push(Member {
             root: source.canonicalize().map_err(|e| e.to_string())?,
@@ -96,7 +109,65 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
             krate: lib_name(package).ok_or("mod has no library")?,
             package: package["name"].as_str().ok_or("no package name")?.into(),
             manifest,
+            registrations,
+            points,
         });
+    }
+    let mut needed = std::collections::BTreeSet::new();
+    for directory in std::iter::once(root.as_path()).chain(additional.iter().map(PathBuf::as_path))
+    {
+        let directory = directory.canonicalize().map_err(|e| e.to_string())?;
+        let member = members
+            .iter()
+            .find(|m| m.root == directory)
+            .ok_or("group root has no horizon-mod.toml")?;
+        needed.insert(member.manifest["id"].as_str().ok_or("no id")?.to_owned());
+    }
+    loop {
+        let before = needed.len();
+        for member in &members {
+            if !needed.contains(member.manifest["id"].as_str().ok_or("no id")?) {
+                continue;
+            }
+            if let Some(deps) = member
+                .manifest
+                .get("dependencies")
+                .and_then(|d| d.as_table_like())
+            {
+                for (id, dependency) in deps.iter() {
+                    if members
+                        .iter()
+                        .any(|m| m.manifest["id"].as_str() == Some(id))
+                    {
+                        needed.insert(id.to_owned());
+                    } else if dependency
+                        .as_table_like()
+                        .and_then(|d| d.get("optional"))
+                        .and_then(|o| o.as_bool())
+                        != Some(true)
+                    {
+                        return Err(format!(
+                            "{}: declared mod dependency {id} is not a Cargo dependency",
+                            member.package
+                        ));
+                    }
+                }
+            }
+        }
+        if before == needed.len() {
+            break;
+        }
+    }
+    members.retain(|m| {
+        m.manifest["id"]
+            .as_str()
+            .is_some_and(|id| needed.contains(id))
+    });
+    let mut ids = std::collections::BTreeSet::new();
+    for member in &members {
+        if !ids.insert(member.manifest["id"].as_str().ok_or("no id")?) {
+            return Err("duplicate mod id in Cargo group".into());
+        }
     }
     let staged: BTreeMap<_, _> = members
         .iter()
@@ -113,8 +184,20 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
             .parse()
             .map_err(|e| format!("Cargo.toml: {e}"))?;
         // Expand workspace inheritance before moving this package into the group workspace.
+        let member_metadata = metadatas
+            .iter()
+            .find(|metadata| {
+                metadata["packages"].as_array().is_some_and(|packages| {
+                    packages.iter().any(|p| {
+                        p["manifest_path"]
+                            .as_str()
+                            .is_some_and(|p| Path::new(p).parent() == Some(member.root.as_path()))
+                    })
+                })
+            })
+            .ok_or("missing member metadata")?;
         let workspace = Path::new(
-            metadata["workspace_root"]
+            member_metadata["workspace_root"]
                 .as_str()
                 .ok_or("no workspace root")?,
         );
@@ -178,8 +261,8 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         cargo["lib"]["crate-type"] =
             toml_edit::value(["rlib", "cdylib"].into_iter().collect::<toml_edit::Array>());
         std::fs::write(path, cargo.to_string()).map_err(|e| e.to_string())?;
-        let (registrations, points) = registrations(&member.manifest, catalog)?;
-        configs.insert(member.package.clone(), serde_json::json!({"registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
+        let (registrations, points) = (&member.registrations, &member.points);
+        configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "source":member.root, "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
         if let Some(deps) = member
             .manifest
             .get("dependencies")
@@ -237,6 +320,7 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         .current_dir(&stage)
         .env("CARGO_TARGET_DIR", &target)
         .env("RUSTC_BOOTSTRAP", "1")
+        .env("HORIZON_STD_ARTIFACTS", target.join("std-artifacts"))
         .env("CARGO_INCREMENTAL", "0")
         .env("RUSTFLAGS", FLAGS)
         .env("RUSTC_WRAPPER", &exe)
@@ -273,7 +357,7 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         let rlib = std::fs::read(artifacts.join(format!("lib{}.rlib", member.krate)))
             .map_err(|e| e.to_string())?;
         // Included in the module hash checked by the production loader's [wasm.linked].
-        let identity = serde_json::to_vec(&serde_json::json!({"compiler":toolchain.version,"target":TARGET,"flags":FLAGS,"rlib":sha512_of(&rlib), "group_rlibs": rlibs, "profile":PROFILE, "codegen_units":1, "panic":"abort"})).map_err(|e| e.to_string())?;
+        let identity = serde_json::to_vec(&serde_json::json!({"compiler":toolchain.version,"target":TARGET,"flags":FLAGS,"rlib":sha512_of(&rlib), "dependency_rlibs": member.manifest.get("dependencies").and_then(|v| v.as_table_like()).map(|deps| deps.iter().filter_map(|(id, _)| rlibs.get(id).map(|hash| (id, hash))).collect::<BTreeMap<_,_>>()).unwrap_or_default(), "profile":PROFILE, "codegen_units":1, "panic":"abort"})).map_err(|e| e.to_string())?;
         let mut section = Vec::new();
         wasm_encoder::Encode::encode(
             &wasm_encoder::CustomSection {
@@ -308,14 +392,17 @@ pub(super) fn build(root: &Path, catalog: Option<&Path>) -> Result<(), String> {
         wasm["sha512"] = toml_edit::value(&hashes[&id]);
         wasm["toolchain"] = toml_edit::value(&toolchain.version);
         for dep in dependencies {
-            let hash = hashes.get(&dep).ok_or(format!(
-                "{id}: declared mod dependency {dep} is not in Cargo's group"
-            ))?;
+            let Some(hash) = hashes.get(&dep) else {
+                continue;
+            };
             wasm["linked"][&dep] = toml_edit::value(hash);
         }
         member.manifest["wasm"] = toml_edit::Item::Table(wasm);
         std::fs::write(member.root.join(MANIFEST), member.manifest.to_string())
             .map_err(|e| e.to_string())?;
+    }
+    for member in &members {
+        crate::build_in(&member.root)?;
     }
     Ok(())
 }
@@ -329,6 +416,26 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     let package = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
     let config = &configs[&package];
+    if args.iter().any(|a| a == "feature=\"rustc-dep-of-std\"")
+        || std::env::var("CARGO_MANIFEST_DIR")
+            .is_ok_and(|p| p.contains("/lib/rustlib/src/rust/library/"))
+    {
+        let krate = args
+            .windows(2)
+            .find(|a| a[0] == "--crate-name")
+            .map(|a| a[1].as_str());
+        let extra = args
+            .windows(2)
+            .find(|a| a[0] == "-C" && a[1].starts_with("extra-filename="))
+            .map(|a| a[1].trim_start_matches("extra-filename="))
+            .unwrap_or("");
+        if let (Some(krate), Some(dir)) = (krate, std::env::var_os("HORIZON_STD_ARTIFACTS")) {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(dir.join(format!("lib{krate}{extra}.rlib")), [])
+                .map_err(|e| e.to_string())?;
+        }
+    }
     let mut command = Command::new(compiler);
     command
         .env_remove("HORIZON_GUEST_REGISTRATIONS")
@@ -349,10 +456,37 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
                 PROVIDED_ENV,
                 config["provided"].as_str().ok_or("no provided crates")?,
             );
+        // Cargo's default disambiguator includes the staging package path. A mod's stable
+        // identity must instead agree when its author and its dependents build separately.
+        let mut index = 0;
+        while index + 1 < args.len() {
+            if args[index] == "-C" && args[index + 1].starts_with("metadata=") {
+                args.drain(index..index + 2);
+            } else {
+                index += 1;
+            }
+        }
+        let mut features: Vec<_> = args
+            .windows(2)
+            .filter(|a| a[0] == "--cfg" && a[1].starts_with("feature="))
+            .map(|a| a[1].clone())
+            .collect();
+        features.sort();
+        args.push(format!(
+            "-Cmetadata={}@{}:{}",
+            config["id"].as_str().ok_or("no id")?,
+            config["version"].as_str().ok_or("no version")?,
+            sha512_of(features.join(",").as_bytes())
+        ));
+        args.push(format!(
+            "--remap-path-prefix={}=/horizon/mod/{}",
+            config["stage"].as_str().ok_or("no stage")?,
+            config["id"].as_str().ok_or("no id")?
+        ));
         args.push("-Zdefault-visibility=interposable".into());
         args.push(format!(
             "--cfg=horizon_guest_registration=\"{}\"",
-            sha512_of(config.to_string().as_bytes())
+            sha512_of(format!("{}{}", config["registrations"], config["points"]).as_bytes())
         ));
     }
     if command

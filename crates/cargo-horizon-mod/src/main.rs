@@ -57,7 +57,7 @@ fn main() -> ExitCode {
     }
     let result = match args.first().map(String::as_str) {
         Some("new") => new(&args[1..]),
-        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new))
+        Some("build") if args.get(1).is_some_and(|a| a == "--wasm") => wasm::build(Path::new("."), flag(&args[2..], "--catalog").map(Path::new), &args[2..].windows(2).filter(|a| a[0] == "--with").map(|a| PathBuf::from(&a[1])).collect::<Vec<_>>())
             .and_then(|()| build())
             .map(|p| println!("Built {}", p.display())),
         Some("wasm-std") => wasm::wasm_std(&args[1..]),
