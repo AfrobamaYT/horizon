@@ -132,6 +132,11 @@ fn emit(
         }
         Shape::Named(path, _) => {
             let named = rule.named(path).ok_or("missing patch layout")?;
+            if named.guarded || named.opaque_reason.is_some() {
+                return Err(format!(
+                    "unimplemented: inaccessible native patch layout {path}"
+                ));
+            }
             let fields = rule.fields(path);
             if let syn::Item::Enum(item) = &named.item {
                 let ty: syn::Path = syn::parse_str(&path.replace("horizon_client::", "crate::"))

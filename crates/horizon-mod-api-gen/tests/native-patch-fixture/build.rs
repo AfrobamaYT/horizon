@@ -10,6 +10,11 @@ fn main() {
         ("plan_readonly", "Data", false),
         ("plan_shared", "&u32", true),
         ("plan_ref", "&mut u32", true),
+        (
+            "plan_complex",
+            "(Box<Option<[u32; 2]>>, std::collections::VecDeque<u32>)",
+            true,
+        ),
     ] {
         let name = quote::format_ident!("{name}");
         let ty: syn::Type = syn::parse_str(ty).unwrap();

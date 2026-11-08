@@ -38,6 +38,44 @@ mod tests {
             .fold(root, |id, s| l.intern(Some(id), *s).unwrap())
     }
     #[test]
+    fn tuple_box_option_array_deque_and_whole_replacement() {
+        let mut l = Locators::default();
+        let root = l.intern(None, Step::Root(81)).unwrap();
+        let a = path(
+            &mut l,
+            root,
+            &[
+                Step::Field(0),
+                Step::Variant(1),
+                Step::Field(0),
+                Step::Index(1),
+            ],
+        );
+        let b = path(&mut l, root, &[Step::Field(1), Step::Index(0)]);
+        let mut value = (
+            Box::new(Some([1u32, 2])),
+            std::collections::VecDeque::from([3u32]),
+        );
+        let mut p = RecordPatch::default();
+        p.set(a, &9u32).unwrap();
+        p.set(b, &8u32).unwrap();
+        let trees = PatchTree::roots(&l, &[root], &p).unwrap();
+        let mut plan = PatchPlan::default();
+        plan_complex(&mut value, &trees[0], &mut plan).unwrap();
+        plan.commit().unwrap();
+        assert_eq!(value.0.as_ref(), &Some([1, 9]));
+        assert_eq!(value.1[0], 8);
+        let mut p = RecordPatch::default();
+        // Box is transparent on Wire; option and tuple retain their ordinary codecs.
+        p.set(root, &(Some([5u32, 6]), vec![7u32, 8])).unwrap();
+        let trees = PatchTree::roots(&l, &[root], &p).unwrap();
+        let mut plan = PatchPlan::default();
+        plan_complex(&mut value, &trees[0], &mut plan).unwrap();
+        plan.commit().unwrap();
+        assert_eq!(value.0.as_ref(), &Some([5, 6]));
+        assert_eq!(value.1.len(), 2);
+    }
+    #[test]
     fn malformed_values_and_reference_retargeting_refuse() {
         let mut l = Locators::default();
         let root = l.intern(None, Step::Root(12)).unwrap();
