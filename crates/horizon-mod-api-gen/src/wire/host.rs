@@ -141,7 +141,7 @@ fn supported_resource(ty: &Ty) -> bool {
         _ => false,
     }
 }
-fn put(ty: &Ty, expr: &str) -> String {
+pub(super) fn put(ty: &Ty, expr: &str) -> String {
     match ty {
         Ty::Ref(..) => format!("w.put(&*{expr});"),
         Ty::Str(super::ty::Str::Borrowed | super::ty::Str::Static)
@@ -167,6 +167,14 @@ fn event_input(
     setup: &mut String,
     put: &mut String,
 ) {
+    if types.defs[def].append.is_some() || types.defs[def].projection.is_some() {
+        write!(
+            put,
+            "{{ use mod_api::wire::Put as _; ({expr}).put_to(w); }}"
+        )
+        .unwrap();
+        return;
+    }
     if let Some(cases) = frame_cases(types, def) {
         let tag = format!("tag_{}", expr.replace('.', "_"));
         write!(setup, "let {tag}=match &mut {expr} {{").unwrap();
@@ -544,7 +552,12 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                                 backs.push(local.clone());
                                 write!(take, "let {local}: {} = r.take()?;", leaf.owned).unwrap();
                                 let path = leaf.path;
-                                if leaf.view {
+                                if leaf.append {
+                                    let owner = path.rsplit_once('.').unwrap().0;
+                                    write!(take, "let {local} = {owner}.__wire_checked({local})?;")
+                                        .unwrap();
+                                    write!(apply, "{owner}.__wire_apply({local});").unwrap();
+                                } else if leaf.view {
                                     write!(apply, "{path}.__wire_apply({local});").unwrap();
                                 } else if leaf.optional {
                                     write!(take,"if {path}.is_some() != {local}.is_some() {{ return Err(WireError::Tag(u32::MAX)); }}").unwrap();
@@ -663,13 +676,20 @@ pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
         )
         .unwrap();
     }
-    report.push_str("\n| Library mod plain `pub fn` / `pub static` called by a dependent | OPEN | crate identity + rustc drops unused public functions in cdylib; fix owned by shm-build: group build with exact rlib through --extern, -C metadata=<id>, rlib,cdylib; see /box/shared/shm-lead/inter-mod-functions.md |\n");
+    report.push_str("\n| Library mod plain `pub fn` / `pub static` called by a dependent | crosses | shared dependency rlib, stable crate identity, and retained public exports; production-loader library fixture covers separate library/observer/dependent builds |\n");
     let gaps = report
         .lines()
         .filter(|line| line.contains("| gap |") || line.contains("| OPEN |"))
         .count();
     writeln!(report, "\nRequired gap total: {gaps}.").unwrap();
-    std::fs::write(root.join("target/wire-coverage.md"), report).map_err(|e| e.to_string())?;
+    report.push_str(include_str!("../../coverage-notes.md"));
+    std::fs::write(root.join("target/wire-coverage.md"), &report).map_err(|e| e.to_string())?;
+    if std::env::var_os("HORIZON_UPDATE_WIRE_COVERAGE").as_deref()
+        == Some(std::ffi::OsStr::new("1"))
+    {
+        std::fs::write(root.join("docs/modding/src/wasm-coverage.md"), &report)
+            .map_err(|e| e.to_string())?;
+    }
     writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
     let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;

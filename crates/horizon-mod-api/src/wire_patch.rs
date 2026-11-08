@@ -36,6 +36,11 @@ impl RecordPatch {
         Ok(())
     }
 
+    /// Iterate over source-local node identifiers and their ordinary Wire values.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, &[u8])> {
+        self.cells.iter().map(|(id, bytes)| (*id, bytes.as_slice()))
+    }
+
     /// Add or replace a field's encoded value, retaining the previous patch on refusal.
     /// The receiver, not the sender, owns the field id and write permission checks.
     pub fn set<T: Wire>(&mut self, field: u32, value: &T) -> Result<(), WireError> {
@@ -89,6 +94,58 @@ impl Wire for RecordPatch {
     }
 }
 
+/// Prepared, typed assignments for one immediate apply transaction.
+///
+/// Planning allocates one closure per changed destination. Drop the plan on any error;
+/// `commit` must only be called after every root has been validated and planned.
+#[derive(Default)]
+pub struct PatchPlan<'a> {
+    commits: Vec<Box<dyn FnOnce() + 'a>>,
+    error: Option<WireError>,
+}
+impl<'a> PatchPlan<'a> {
+    /// Decode a complete value and retain its assignment without modifying the destination.
+    pub fn prepare<T: 'a>(
+        &mut self,
+        destination: &'a mut T,
+        bytes: &[u8],
+        decode: impl FnOnce(&mut Reader<'_>) -> Result<T, WireError>,
+    ) -> Result<(), WireError> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        let mut reader = Reader::new(bytes);
+        let value = decode(&mut reader).and_then(|value| {
+            if reader.rest().is_empty() {
+                Ok(value)
+            } else {
+                Err(WireError::Trailing)
+            }
+        });
+        match value {
+            Ok(value) => {
+                self.commits.push(Box::new(move || *destination = value));
+                Ok(())
+            }
+            Err(error) => {
+                self.error = Some(error);
+                Err(error)
+            }
+        }
+    }
+
+    /// Apply all prepared assignments, unless any preparation failed.
+    pub fn commit(self) -> Result<(), WireError> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        for commit in self.commits {
+            commit();
+        }
+        Ok(())
+    }
+}
+
 /// A native destination paired with its schema's field id. The borrow remains local to the call.
 pub struct PatchCell<'a, T> {
     field: u32,
@@ -101,6 +158,24 @@ impl<'a, T> PatchCell<'a, T> {
     }
 }
 
+/// A native destination decoded by generated code without implementing `Wire` on its type.
+/// The decoder must build an owned value and use the supplied reader for all nested input.
+pub struct DecodedPatchCell<'a, T, F> {
+    field: u32,
+    value: &'a mut T,
+    decode: F,
+}
+impl<'a, T, F> DecodedPatchCell<'a, T, F> {
+    /// Bind a destination and its ordinary Wire decoder.
+    pub fn new(field: u32, value: &'a mut T, decode: F) -> Self {
+        Self {
+            field,
+            value,
+            decode,
+        }
+    }
+}
+
 /// The checked patch input used by generated field bindings.
 #[doc(hidden)]
 pub struct PatchInput<'a> {
@@ -108,10 +183,18 @@ pub struct PatchInput<'a> {
     used: usize,
 }
 impl PatchInput<'_> {
-    fn take<T: Wire>(&mut self, field: u32) -> Result<Option<T>, WireError> {
+    fn take_with<T>(
+        &mut self,
+        field: u32,
+        decode: impl FnOnce(&mut Reader<'_>) -> Result<T, WireError>,
+    ) -> Result<Option<T>, WireError> {
         match self.patch.cells.binary_search_by_key(&field, |cell| cell.0) {
             Ok(i) => {
-                let value = Reader::decode(&self.patch.cells[i].1)?;
+                let mut reader = Reader::new(&self.patch.cells[i].1);
+                let value = decode(&mut reader)?;
+                if !reader.rest().is_empty() {
+                    return Err(WireError::Trailing);
+                }
                 self.used += 1;
                 Ok(Some(value))
             }
@@ -137,7 +220,29 @@ impl PatchSet for () {
 impl<H: Wire, T: PatchSet> PatchSet for (PatchCell<'_, H>, T) {
     type Plan = (Option<H>, T::Plan);
     fn plan(&self, input: &mut PatchInput<'_>) -> Result<Self::Plan, WireError> {
-        Ok((input.take(self.0.field)?, self.1.plan(input)?))
+        Ok((
+            input.take_with(self.0.field, |reader| reader.take())?,
+            self.1.plan(input)?,
+        ))
+    }
+    fn commit(&mut self, (head, tail): Self::Plan) {
+        if let Some(value) = head {
+            *self.0.value = value;
+        }
+        self.1.commit(tail);
+    }
+}
+
+impl<H, F, T: PatchSet> PatchSet for (DecodedPatchCell<'_, H, F>, T)
+where
+    F: Fn(&mut Reader<'_>) -> Result<H, WireError>,
+{
+    type Plan = (Option<H>, T::Plan);
+    fn plan(&self, input: &mut PatchInput<'_>) -> Result<Self::Plan, WireError> {
+        Ok((
+            input.take_with(self.0.field, &self.0.decode)?,
+            self.1.plan(input)?,
+        ))
     }
     fn commit(&mut self, (head, tail): Self::Plan) {
         if let Some(value) = head {

@@ -22,7 +22,9 @@ pub use resources::{
 };
 #[path = "wire_patch.rs"]
 mod patch;
-pub use patch::{PatchCell, PatchFields, PatchInput, PatchSet, RecordPatch};
+pub use patch::{
+    DecodedPatchCell, PatchCell, PatchFields, PatchInput, PatchPlan, PatchSet, RecordPatch,
+};
 
 /// The guest's start-up call: its input is the package list.
 pub const INIT: u32 = 0xFFFF_FF00;
@@ -241,6 +243,32 @@ pub trait Record {
     fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError>;
 }
 
+/// A record projected from caller-owned state without a second wire DTO. Both closures may
+/// borrow the same interior-mutable native state; the apply closure must validate every edit
+/// before committing it, exactly as required by `Record::apply`.
+pub struct Projected<E, A> {
+    encode: E,
+    apply: A,
+}
+impl<E, A> Projected<E, A> {
+    /// Bind an ordinary encoder and an atomic reply application to their caller-owned state.
+    pub fn new(encode: E, apply: A) -> Self {
+        Self { encode, apply }
+    }
+}
+impl<E, A> Record for Projected<E, A>
+where
+    E: Fn(&mut Writer),
+    A: FnMut(&[u8]) -> Result<(), WireError>,
+{
+    fn encode(&self, out: &mut Writer) {
+        (self.encode)(out);
+    }
+    fn apply(&mut self, bytes: &[u8]) -> Result<(), WireError> {
+        (self.apply)(bytes)
+    }
+}
+
 /// A call record refused before it can be encoded, such as an oversized owned snapshot.
 /// It follows the normal Writer error path instead of sending a truncated call.
 pub struct Refused(pub WireError);
@@ -336,6 +364,17 @@ impl<T: FieldSet> Record for Fields<T> {
     }
 }
 
+/// A checked append-only delta. Only the API's type-owned validation can create it.
+#[doc(hidden)]
+pub struct Append<T>(Vec<T>);
+impl<T> Append<T> {
+    pub(crate) fn new(values: Vec<T>) -> Self {
+        Self(values)
+    }
+    pub(crate) fn into_vec(self) -> Vec<T> {
+        self.0
+    }
+}
 /// What can be written: every [`Wire`] value, and the borrowed forms a call passes
 /// (`&str`, `&[T]`, `Option<&T>`), which are written as the owned value they stand for.
 pub trait Put {

@@ -761,17 +761,16 @@ pub fn shared_data(
     shared_data_with(dir, &WorldgenOverrides::default(), registry)
 }
 /// `shared_data` with a world's data packs over the bundle: loaded once for
-/// each set of packs' entries, the most recent few kept.
+/// each registry lifetime and set of packs' entries, the most recent few kept.
 pub fn shared_data_with(
     dir: &Path,
     overrides: &WorldgenOverrides,
     registry: &'static BlockRegistry,
 ) -> crate::Result<Arc<GeneratorData>> {
     let mut cache = SHARED_DATA.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, _, data)) = cache
-        .iter()
-        .find(|(path, o, _)| path == dir && o == overrides)
-    {
+    if let Some((_, _, data)) = cache.iter().find(|(path, o, data)| {
+        path == dir && o == overrides && std::ptr::eq(data.registry(), registry)
+    }) {
         return Ok(data.clone());
     }
     let started = std::time::Instant::now();
@@ -791,6 +790,12 @@ pub fn shared_data_with(
 }
 impl ChunkGenerator for VanillaTerrain {
     type Worker = GeneratorWorker;
+    fn set_saved_starts(
+        &self,
+        source: Arc<horizon_world::worldgen::generator::SavedStructureStarts>,
+    ) {
+        self.generator.set_saved_starts(source);
+    }
     fn worker(&self) -> GeneratorWorker {
         let mut worker = self.generator.worker();
         worker.set_structure_mobs(self.structure_mobs.clone());
@@ -814,7 +819,8 @@ impl ChunkGenerator for VanillaTerrain {
         Some(self.client_surface(worker.surface_sample(x, z)?))
     }
     /// The structure starts a saved chunk references, as vanilla reads them
-    /// with the chunk: built here, on the loading worker, into the
+    /// with the chunk: read from the owning chunk's save (or regenerated for
+    /// unsupported pieces) here, on the loading worker, into the
     /// generator's cache, rather than on the game thread the first time
     /// spawning or a mob asks which structures hold a position (a village
     /// start took 70 to 110 ms there, one tick each, after a world loaded).

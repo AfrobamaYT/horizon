@@ -15,12 +15,19 @@
 
 include!(concat!(env!("OUT_DIR"), "/points_generated.rs"));
 
+/// Native scoped callable sources for generated point bridges.
+#[doc(hidden)]
+pub mod callable;
 mod registry;
 pub mod snapshot;
 
 /// Source-local paths for checked native row readers.
 #[doc(hidden)]
 pub mod locators;
+
+/// Sparse native edit path metadata.
+#[doc(hidden)]
+pub mod native_patch;
 
 /// Bounded output for generated native row readers.
 #[doc(hidden)]

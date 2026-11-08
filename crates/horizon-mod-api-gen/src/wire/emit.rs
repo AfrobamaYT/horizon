@@ -9,7 +9,7 @@ use std::fmt::Write;
 fn spell(types: &Types<'_>, ty: &Ty) -> Option<String> {
     Some(match ty {
         Ty::Unit => "()".into(),
-        Ty::Prim(rust, _) | Ty::Wide(rust) => (*rust).into(),
+        Ty::Prim(rust) | Ty::Wide(rust) => (*rust).into(),
         Ty::Duration => "::std::time::Duration".into(),
         Ty::Handler(..) => super::calls::rust_ty(types, ty, false),
         Ty::Str(Str::Static) => "&'static str".into(),
@@ -139,6 +139,33 @@ pub(super) fn types(types: &Types<'_>) -> String {
                 .join(",");
             writeln!(out, "#[doc(hidden)] pub fn __wire_record_{def_id}<'a>({args}) -> {}<'a> {{ {} {{ {names} }} }}", def.rust, def.rust).unwrap();
         }
+        if def.append.is_some() || def.projection.is_some() {
+            let put = def
+                .borrow_fields()
+                .unwrap()
+                .iter()
+                .map(|f| super::host::put(&f.ty, &format!("self.{}", f.rust)))
+                .collect::<Vec<_>>()
+                .join("");
+            let path = &def.rust;
+            writeln!(out, "impl crate::wire::Put for {path}<'_> {{ fn put_to(&self,w:&mut crate::wire::Writer) {{ {put} }} }}").unwrap();
+        }
+        if let Some(append) = &def.append {
+            let element = super::calls::rust_ty(types, &append.element, false);
+            let field = &append.fields[append.field].rust;
+            let equal = super::append::equal(types, &append.element, "a", "b").unwrap();
+            let path = &def.rust;
+            writeln!(out, "impl {path}<'_> {{
+                    #[doc(hidden)] pub fn __wire_changes(&self) -> &Vec<{element}> {{ self.{field} }}
+                    #[doc(hidden)] pub fn __wire_checked(&self, mut snapshot:Vec<{element}>) -> Result<crate::wire::Append<{element}>,crate::wire::WireError> {{
+                        let prefix = snapshot.get(..self.{field}.len()).ok_or(crate::wire::WireError::Invalid(\"deleted append prefix\"))?;
+                        if !self.{field}.iter().zip(prefix).all(|(a,b)| {equal}) {{ return Err(crate::wire::WireError::Invalid(\"changed append prefix\")); }}
+                        drop(snapshot.drain(..self.{field}.len()));
+                        Ok(crate::wire::Append::new(snapshot))
+                    }}
+                    #[doc(hidden)] pub fn __wire_apply(&mut self, delta:crate::wire::Append<{element}>) {{ self.{field}.extend(delta.into_vec()); }}
+                }}").unwrap();
+        }
         if let Some(view) = &def.view {
             let path = def.rust.split('<').next().unwrap();
             let snapshot = super::calls::rust_ty(types, &view.snapshot, false);
@@ -159,7 +186,7 @@ pub(super) fn types(types: &Types<'_>) -> String {
             Kind::Variant(cases) => variants(types, &def.rust, cases),
             Kind::Unit => Some(unit(&def.rust)),
             Kind::Json => Some(json(&def.rust)),
-            Kind::Chain { .. } | Kind::Via(_) | Kind::Opaque(_) => None,
+            Kind::Opaque(_) => None,
         };
         match body {
             Some(code) => out.push_str(&code),
@@ -296,7 +323,7 @@ fn variants(types: &Types<'_>, rust: &str, cases: &[Case]) -> Option<String> {
                 let takes: String = binds.iter().map(|_| "input.take()?,".to_string()).collect();
                 writeln!(take, "{i} => Self::{name}({takes}),").unwrap();
             }
-            Payload::Record(_, list) => {
+            Payload::Record(list) => {
                 fields(types, list)?;
                 let names: Vec<&str> = list.iter().map(|f| f.rust.as_str()).collect();
                 let puts: String = names.iter().map(|n| format!("out.put({n});")).collect();

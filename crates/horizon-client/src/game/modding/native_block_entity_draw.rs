@@ -1026,6 +1026,7 @@ impl Game<'_> {
                     0xFF00_0000 | (outline & 0xFF_FFFF)
                 },
                 light,
+                tier: 0,
             };
             push_text(&glyph, &call, &mut draw.vertices);
             x += width;
@@ -1926,6 +1927,7 @@ mod tests {
                     &[],
                     &game.mods,
                     listeners,
+                    &[],
                     &game.pack.assets,
                     &game.res,
                     &game.pack.context,
@@ -1949,6 +1951,7 @@ mod tests {
                 &[],
                 &game.mods,
                 listeners,
+                &[],
                 &game.pack.assets,
                 &game.res,
                 &game.pack.context,
@@ -2200,13 +2203,15 @@ mod tests {
             };
             assert_eq!(drawn.text_width("A"), 6.0);
             assert_eq!(drawn.text_width("AÁ"), 12.0);
-            drawn.text(
-                &mod_api::Text::literal("AÁ"),
-                [0.0, 0.0],
-                0xFF0000,
-                false,
-                0,
-            );
+            drawn
+                .text(
+                    &mod_api::Text::literal("AÁ"),
+                    [0.0, 0.0],
+                    0xFF0000,
+                    false,
+                    0,
+                )
+                .unwrap();
             assert_eq!(surface.vertices.len(), 8, "a quad per glyph");
             // Vanilla's bitmap providers: A is 8x8 with ascent 7; Á is 9x12 with ascent 10.
             // GlyphBitmap places the top at 7 - ascent; BakedSheetGlyph adds the pen's position.

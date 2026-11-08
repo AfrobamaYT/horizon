@@ -65,15 +65,16 @@ pub enum GameRuleError {
     Duplicate,
 }
 
-/// Why an entity type's attribute declaration was refused
-/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes)).
+/// Why an entity type's attribute declaration or addition was refused
+/// ([`Registrar::declare_entity_attributes`](EntityAttributesRegistrar::declare_entity_attributes),
+/// [`Registrar::modify_entity_attributes`](EntityAttributesRegistrar::modify_entity_attributes)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntityAttributeError {
-    /// The entity type's id is invalid, empty, or in a namespace the declaring
-    /// mod does not own.
+    /// The entity type's id is invalid or empty, or, for a declared set, in a
+    /// namespace the declaring mod does not own.
     InvalidId,
-    /// The set declares the same attribute twice.
+    /// The set names the same attribute twice.
     DuplicateAttribute,
     /// A base value is not finite.
     NotFinite,
@@ -299,6 +300,20 @@ impl<'a> ModBlockEntityView<'a> {
     /// Id.
     pub fn id(&self) -> &str {
         self.entity.id()
+    }
+    /// Replace the one-shot fields the block's next change sends clients; an empty compound
+    /// clears them. They go over what `block_entity_update_tag` gives (or alone, without
+    /// one) in the single packet every current viewer gets, and are gone. Call
+    /// `block_entity_sync` to send them: until a change reaches a viewer they wait, however
+    /// many chunks are sent, and they end with the block entity. They are for a one-shot
+    /// effect, not state: nothing saves, clones or compares them, and the revision stays.
+    /// A client merges them into its copy's `nbt` as any update field, where they stay until
+    /// sent again: a changing value, such as a counter, tells one effect from the next.
+    /// Fields that would take the packet past what a client reads (2 MiB of network NBT) are
+    /// dropped with a warning, and the change goes without them. A transaction that rolls the
+    /// block entity back also drops a batch queued before it.
+    pub fn set_client_update_fields(&mut self, fields: Compound) {
+        self.entity.client_update_fields = Some(fields);
     }
 }
 impl std::ops::Deref for ModBlockEntityView<'_> {
@@ -627,7 +642,7 @@ pub struct NativeLootDrops<'a> {
     /// `LootContextParams.ORIGIN`: a broken block's centre, a mob's position.
     pub origin: [f64; 3],
     /// The block broken: its position and state.
-    pub block: Option<([i32; 3], BlockStateId)>,
+    pub block: Option<([i32; 3], BlockState)>,
     /// The mob that died, or the entity a player's use dropped them from (the
     /// sheep sheared, the item frame broken): its entity ID and type
     /// (`minecraft:zombie`).
@@ -824,7 +839,35 @@ impl NativeNoteInstrument {
     };
     /// The `instrument` property's value (`harp`, `cow_bell`).
     pub fn name(self) -> &'static str {
-        horizon_world::level::data::INSTRUMENTS[self as usize]
+        match self {
+            Self::Harp => "harp",
+            Self::Basedrum => "basedrum",
+            Self::Snare => "snare",
+            Self::Hat => "hat",
+            Self::Bass => "bass",
+            Self::Flute => "flute",
+            Self::Bell => "bell",
+            Self::Guitar => "guitar",
+            Self::Chime => "chime",
+            Self::Xylophone => "xylophone",
+            Self::IronXylophone => "iron_xylophone",
+            Self::CowBell => "cow_bell",
+            Self::Didgeridoo => "didgeridoo",
+            Self::Bit => "bit",
+            Self::Banjo => "banjo",
+            Self::Pling => "pling",
+            Self::Trumpet => "trumpet",
+            Self::TrumpetExposed => "trumpet_exposed",
+            Self::TrumpetOxidized => "trumpet_oxidized",
+            Self::TrumpetWeathered => "trumpet_weathered",
+            Self::Zombie => "zombie",
+            Self::Skeleton => "skeleton",
+            Self::Creeper => "creeper",
+            Self::Dragon => "dragon",
+            Self::WitherSkeleton => "wither_skeleton",
+            Self::Piglin => "piglin",
+            Self::CustomHead => "custom_head",
+        }
     }
 }
 
@@ -1241,11 +1284,11 @@ pub struct NativeScreen {
 /// An item the panel shows (`panel_items`): its id
 /// (`minecraft:diamond`), a count (1 draws none) and its components beyond
 /// the item's own, in vanilla's item syntax, or "".
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods only read it
 pub struct NativeStack {
-    /// The item id, such as `minecraft:stick`.
-    pub item: String,
+    /// The item identity, resolved once at load.
+    pub item: ItemKey,
     /// How many are in the stack.
     pub count: u32,
     /// The stack's data components, as the game's JSON form.
@@ -2234,6 +2277,26 @@ impl ProjectileRef {
     }
 }
 
+/// A cast fishing hook of the open world (vanilla's `FishingHook`), narrowed
+/// from an entity with `host.fishing_hook(entity)`. It does not narrow to a
+/// [`ProjectileRef`]: a hook's owner is always the player who cast it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+// exhaustive: its fields are private, so mods cannot build or destructure it
+pub struct FishingHookRef(EntityRef);
+
+impl FishingHookRef {
+    /// Create a handle for the game.
+    // hidden: a game-side helper, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+}
+
 /// A villager or wandering trader (vanilla's `AbstractVillager`, a `Merchant`),
 /// narrowed from an entity with `host.merchant(entity)`. If a villager's saved
 /// profession is unresolved, offers read empty and merchant mutations are
@@ -2863,6 +2926,35 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// What made a `tags_updated` notice fire (`TagsUpdatedEvent`'s two subclasses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagsUpdateCause {
+    /// `TagsUpdatedEvent.ServerDataLoad`: a server built its data tables.
+    ServerDataLoad {
+        /// False on a world's first open, true after `/reload`.
+        reload: bool,
+    },
+    /// `TagsUpdatedEvent.ClientPacketReceived`: a client applied the tags its server sent.
+    ClientPacketReceived {
+        /// The server is the single player window's own.
+        integrated_server: bool,
+    },
+}
+
+impl TagsUpdateCause {
+    /// `TagsUpdatedEvent.shouldUpdateStaticData`: whether to update static data, which single
+    /// player's two threads share, so that there only the server side updates it.
+    pub fn should_update_static_data(self) -> bool {
+        !matches!(
+            self,
+            Self::ClientPacketReceived {
+                integrated_server: true
+            }
+        )
+    }
+}
+
 /// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
 /// that destroy it. The unloading and dimension-change reasons belong to the
 /// game.
@@ -3033,6 +3125,40 @@ pub struct NativeClipHit {
     pub world_border: bool,
 }
 
+/// The world's respawn data (`LevelData.RespawnData`): where a player without a spawn point of
+/// their own appears, and facing which way. Horizon keeps it in the Overworld.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct RespawnData {
+    /// The spawn block.
+    pub pos: [i32; 3],
+    /// The yaw in degrees, -180 to 180 (`Mth.wrapDegrees`).
+    pub yaw: f32,
+    /// The pitch in degrees, -90 to 90.
+    pub pitch: f32,
+}
+
+/// A map's saved data (`MapItemSavedData`) as it stands: where it is, how far it reaches and
+/// its pixels. The markers (players, banners, frames) are not part of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+// exhaustive: the game builds it with a literal; mods only read it
+pub struct MapState {
+    /// The centre block `[x, z]`.
+    pub center: [i32; 2],
+    /// A map pixel is `1 << scale` blocks, 0 to 4.
+    pub scale: u8,
+    /// The dimension it shows, `minecraft:overworld`.
+    pub dimension: String,
+    /// A locked map (a cartography table's glass pane) no longer reveals the world.
+    pub locked: bool,
+    /// Whether it shows its holders' markers.
+    pub tracking: bool,
+    /// Whether it shows them however far away they are.
+    pub unlimited: bool,
+    /// 128 by 128 map colour ids, row by row (`x + z * 128`).
+    pub colors: Vec<u8>,
+}
+
 /// One entity a level ray passes through (`LevelRef::ray_trace_entities`): what
 /// `ProjectileUtil.getEntityHitResult` tests for each candidate.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -3057,7 +3183,7 @@ pub enum NativeCrosshairTarget {
         /// The block's position.
         pos: BlockPos,
         /// The block's state.
-        state: BlockStateId,
+        state: BlockState,
         /// Where on the block the ray hit.
         hit: BlockHit,
     },
@@ -3530,7 +3656,7 @@ pub type Mods = Arc<[ModEntry]>;
 
 pub(crate) struct Installed {
     mods: Mods,
-    subscribers: horizon_client_core::subscribers::Subscribers,
+    subscribers: horizon_mod_runtime::subscribers::Subscribers,
     disabled: Box<[std::sync::atomic::AtomicBool]>,
 }
 
@@ -3544,7 +3670,7 @@ impl Installed {
                 .flatten()
                 .map(move |hook| (index, *hook as usize))
         });
-        let subscribers = horizon_client_core::subscribers::Subscribers::new(
+        let subscribers = horizon_mod_runtime::subscribers::Subscribers::new(
             generated::HOOK_COUNT,
             mods.len(),
             subscriptions,
@@ -3870,7 +3996,7 @@ impl ScopedActionResult {
 
 /// Why a fake player's `perform_action` did nothing at all: it was refused before any of the
 /// action ran.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ActionRefused {
     /// The handle is a real player's.
@@ -3964,7 +4090,7 @@ impl BlockHit {
 #[non_exhaustive]
 pub struct BlockTransformPreview {
     /// The resulting block state.
-    pub state: BlockStateId,
+    pub state: BlockState,
     /// Sound played by the action.
     pub sound: String,
     /// Optional loot table generated by the action.
@@ -3977,7 +4103,7 @@ pub struct BlockTransformPreview {
 impl BlockTransformPreview {
     /// Construct a transformation result from the engine's decision.
     pub fn new(
-        state: BlockStateId,
+        state: BlockState,
         sound: String,
         loot: Option<String>,
         durability: u32,
@@ -4230,14 +4356,14 @@ pub struct BlockPlacement {
     /// Where the block goes.
     pub pos: BlockPos,
     /// The state it is placed in.
-    pub state: BlockStateId,
+    pub state: BlockState,
 }
 
 impl BlockPlacement {
     /// Create a placement for the game.
     // hidden: a game-side helper, not part of the mod surface
     #[doc(hidden)]
-    pub fn new(pos: BlockPos, state: BlockStateId) -> Self {
+    pub fn new(pos: BlockPos, state: BlockState) -> Self {
         Self { pos, state }
     }
 }
@@ -4288,6 +4414,30 @@ pub enum InteractionKey {
     Use,
     /// `key.pickItem`: only with a block or entity aimed at.
     PickBlock,
+}
+
+/// What caused a client interaction mapping to act on this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionAttempt {
+    /// A queued press of the mapping.
+    Press,
+    /// A repeat or continuation from a mapping that is still held.
+    Held,
+}
+
+/// A proposed window-side block mining operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game fills all fields; mods only read the snapshot
+pub struct ClientMiningPrediction {
+    /// The targeted block.
+    pub pos: [i32; 3],
+    /// The outward unit normal of the hit face.
+    pub face: [i32; 3],
+    /// Whether this operation begins a break rather than advancing a retained target.
+    pub starting: bool,
+    /// The proposed resulting break fraction, from zero to one.
+    pub progress: f32,
 }
 
 /// The behaviour about to run in `UseItemOnBlockEvent`.
@@ -4436,25 +4586,28 @@ host_attachment_store!(
 /// }
 /// ```
 pub trait LevelHost {
-    /// Read a block through `LevelAccess::block_state`.
-    fn block_state(&self, _pos: [i32; 3]) -> BlockStateId {
-        unimplemented!("LevelHost::block_state")
+    /// Read an owned block state through the level's engine read.
+    /// Out-of-height or unloaded engine reads retain vanilla's air as `Some(air)`.
+    /// Returns `None` when the owning state index is unavailable or refuses the state;
+    /// this never substitutes an air state for a failed conversion.
+    fn block_state(&self, _pos: [i32; 3]) -> Option<BlockState> {
+        None
     }
     /// The block `state` is a state of (`BlockState.getBlock()`): `mymod:shaft`. None for an
     /// unknown state.
-    fn state_block(&self, _state: BlockStateId) -> Option<&str> {
+    fn state_block(&self, _state: BlockState) -> Option<&str> {
         unimplemented!("LevelHost::state_block")
     }
     /// Parse a block name and properties as `BlockStateParser.parseForBlock`; None for invalid input or unavailable context.
-    fn block_state_id(&self, _name: &str) -> Option<BlockStateId> {
+    fn block_state_id(&self, _name: &str) -> Option<BlockState> {
         unimplemented!("LevelHost::block_state_id")
     }
     /// The block's default state (`Block.defaultBlockState`), or None for an unknown block.
-    fn block_state_default(&self, _block: BlockKey) -> Option<BlockStateId> {
+    fn block_state_default(&self, _block: BlockKey) -> Option<BlockState> {
         unimplemented!("LevelHost::block_state_default")
     }
     /// The full block state name and properties, as `BlockStateParser.serialize`; None for an unknown id.
-    fn state_string(&self, _state: BlockStateId) -> Option<String> {
+    fn state_string(&self, _state: BlockState) -> Option<String> {
         unimplemented!("LevelHost::state_string")
     }
     /// Lowest build Y (`LevelHeightAccessor.getMinY`).
@@ -4482,7 +4635,7 @@ pub trait LevelHost {
     }
     /// `BlockState.getFluidState`: the fluid a state holds (water for a waterlogged one). None
     /// for an id no state has.
-    fn state_fluid_state(&self, _state: BlockStateId) -> Option<FluidState> {
+    fn state_fluid_state(&self, _state: BlockState) -> Option<FluidState> {
         unimplemented!("LevelHost::state_fluid_state")
     }
     /// `FluidState.is(TagKey)`: whether the fluid registry name is in the merged fluid tag, as `block_in_tag` reads.
@@ -4492,10 +4645,10 @@ pub trait LevelHost {
     /// `BlockState.setValue`, through `native_state_with_property`; None if invalid.
     fn state_with_property(
         &self,
-        _state: BlockStateId,
+        _state: BlockState,
         _key: &str,
         _value: &str,
-    ) -> Option<BlockStateId> {
+    ) -> Option<BlockState> {
         unimplemented!("LevelHost::state_with_property")
     }
     /// The stored light of one layer at `pos` (`BlockAndLightGetter.getBrightness`), 0 to 15.
@@ -4610,7 +4763,7 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     fn set_block(
         &mut self,
         _pos: [i32; 3],
-        _state: BlockStateId,
+        _state: BlockState,
         _flags: NativeBlockUpdateFlags,
     ) -> bool {
         unimplemented!("LevelWriteHost::set_block")
@@ -4644,7 +4797,7 @@ pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     fn send_particles(
         &mut self,
         _options: &ParticleOptions,
-        _state: Option<BlockStateId>,
+        _state: Option<BlockState>,
         _at: [f64; 3],
         _spread: [f64; 3],
         _speed: f64,
@@ -4777,7 +4930,9 @@ mod tests {
         impl LevelTicksHost for Empty {}
         impl LevelWriteHost for Empty {}
 
-        let _: &dyn LevelHost = &Empty;
+        let level: &dyn LevelHost = &Empty;
+        assert_eq!(level.block_state([0, 64, 0]), None);
+        assert_eq!(level.block_state([0, i32::MIN, 0]), None);
         let _: &mut dyn LevelRandomHost = &mut Empty;
         let _: &mut dyn LevelTicksHost = &mut Empty;
         let _: &mut dyn LevelWriteHost = &mut Empty;
@@ -4816,8 +4971,10 @@ mod tests {
         let host: &mut dyn ServerHost = &mut server;
         assert!(host.commands().run_command("list"));
         assert!(!host.commands().run_command("missing"));
-        host.commands().feedback(Text::literal("answer"));
-        host.messages().broadcast(Text::literal("everyone"));
+        host.commands().feedback(Text::literal("answer")).unwrap();
+        host.messages()
+            .broadcast(Text::literal("everyone"))
+            .unwrap();
         assert_eq!(host.messages().text_allowed("blocked"), Some(false));
         let player = host.players().acting_player().unwrap();
         assert_eq!(host.players().server_players(), [player]);
@@ -4909,7 +5066,7 @@ mod tests {
         }
         let mods: Mods = vec![ModEntry::new(id, Box::new(StickMod(part)))].into();
         install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
     }
 
     /// Claims a use on stone, after telling the player what the block is.
@@ -4922,8 +5079,11 @@ mod tests {
             let player = host.players().acting_player().expect("a player acts");
             let level = host.level("minecraft:overworld").expect("a loaded level");
             let block = level.block(host, event.pos).expect("a loaded block");
-            player.action_bar(host, Text::literal(block.clone()));
-            if block == "minecraft:stone" {
+            let name = __private::block_key_id(block).unwrap().to_owned();
+            player
+                .action_bar(host, Text::literal(name.clone()))
+                .unwrap();
+            if name == "minecraft:stone" {
                 Flow::Cancel
             } else {
                 Flow::Continue
@@ -5298,7 +5458,7 @@ mod tests {
         mark_game_thread();
         let mods: Mods = vec![ModEntry::new("off-hand-top", Box::new(OffHandTop))].into();
         install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let mut host = FakeHost::new();
         let mut claimed = false;
         dispatch_use_on(
@@ -5442,10 +5602,10 @@ mod tests {
         );
     }
 
-    /// `GameRuleChangedEvent` as the server's setters fire it: only for a
-    /// rule `GameRules.set` took, with its id and new value, to every mod.
+    /// API dispatch preserves each accepted rule's id and typed value for every mod.
+    /// Engine schema validation belongs to the game's rule setter tests.
     #[test]
-    fn a_game_rule_change_reaches_every_mod_once_the_rule_is_set() {
+    fn a_game_rule_change_reaches_every_mod_with_its_typed_value() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("recorder-10", Box::new(Recorder(seen.clone()))),
@@ -5453,36 +5613,11 @@ mod tests {
         ];
         install(mods.into());
         let mut host = FakeHost::new();
-        let mut rules = horizon_client_core::gamerules::GameRules::default();
-        // What `set_game_rule` and the other setters do.
-        use horizon_client_core::gamerules::Value as EngineValue;
-        // Independent engine inputs and expected API values: production conversion lives in Game.
-        for (name, engine, value) in [
-            (
-                "keep_inventory",
-                EngineValue::Bool(true),
-                GameRuleValue::Bool(true),
-            ),
-            (
-                "random_tick_speed",
-                EngineValue::Int(-1),
-                GameRuleValue::Int(-1),
-            ),
-            ("keep_inventory", EngineValue::Int(1), GameRuleValue::Int(1)),
-            (
-                "no_such_rule",
-                EngineValue::Bool(true),
-                GameRuleValue::Bool(true),
-            ),
-            (
-                "random_tick_speed",
-                EngineValue::Int(7),
-                GameRuleValue::Int(7),
-            ),
+        for (id, value) in [
+            ("minecraft:keep_inventory", GameRuleValue::Bool(true)),
+            ("minecraft:random_tick_speed", GameRuleValue::Int(7)),
         ] {
-            if rules.set(name, engine) {
-                dispatch_game_rule_changed(&mut host, &["minecraft:", name].concat(), value, None);
-            }
+            dispatch_game_rule_changed(&mut host, id, value, None);
         }
         assert_eq!(
             *seen.lock().unwrap(),
@@ -5555,7 +5690,7 @@ mod tests {
     /// which stays whether or not it cancels; a cancel stops later mods.
     #[test]
     fn a_fishing_catch_keeps_the_mods_rod_damage_and_its_cancel() {
-        install_parts(&[], &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&[], &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let mut host = FakeHost::new();
         let mods: Vec<ModEntry> = vec![
             ModEntry::new("cod-keeper", Box::new(CodKeeper)),
@@ -5629,7 +5764,7 @@ pub(crate) mod built {
         pub table: &'a str,
         pub dimension: &'a str,
         pub origin: [f64; 3],
-        pub block: Option<([i32; 3], BlockStateId)>,
+        pub block: Option<([i32; 3], BlockState)>,
         pub entity: Option<(u32, &'a str)>,
         pub player: Option<u128>,
         pub tool: Option<&'a ItemStack>,

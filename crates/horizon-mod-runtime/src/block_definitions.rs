@@ -98,6 +98,9 @@ impl BlockDefinition {
 
     /// Build a state from the default and partial property constraints.
     pub fn of(&self, properties: &[(&str, &str)]) -> Result<u16, StateError> {
+        if properties.is_empty() {
+            return Ok(self.default);
+        }
         self.apply(self.default, properties)
     }
 

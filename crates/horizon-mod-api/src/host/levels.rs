@@ -111,19 +111,21 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn chunk_status(&self, chunk: ChunkRef) -> Option<ChunkStatus>;
     /// Side: server.
-    /// `RecipeManager.getRecipeFor(CRAFTING, CraftingInput.of(width, height, items), level)`,
-    /// then the recipe's `assemble` and `getRemainingItems`: what a `width` by `height` grid
-    /// (each 1 to 3, `items` row by row) makes, through the crafting table's matcher, with the
-    /// world's data packs' recipes and the special recipes. None when no recipe matches or it
-    /// makes nothing, for a grid of another size, and off the server.
+    /// Match and assemble through the engine's recipe matcher, without consuming inputs.
+    /// Covers minecraft:crafting, smelting, blasting, smoking, campfire_cooking,
+    /// stonecutting and smithing, including data-pack recipes of those types.
+    /// Mod-owned types return RecipeLookupError::NotMatchable: cache recipes_of_type once
+    /// per load/reload and match those in mod memory (no per-tick host crossing).
+    /// Dynamic custom outputs and contextual predicates remain mod-owned.
+    /// A valid input without a match returns Ok(None); invalid shapes/items and unavailable
+    /// levels are typed refusals. Crafting dimensions are 1 through 3, with row-major slots.
     #[access(WorldOnly)]
-    fn level_craft(
+    fn level_recipe_for(
         &self,
         level: LevelRef,
-        width: u32,
-        height: u32,
-        items: &[Option<ItemStack>],
-    ) -> Option<CraftResult>;
+        recipe_type: &Identifier,
+        inputs: &RecipeInput,
+    ) -> Result<Option<RecipeMatch>, RecipeLookupError>;
     /// Side: server.
     /// Entities whose bounding boxes intersect this box (`Level.getEntities`).
     /// Face-only contact does not intersect; spectator players are excluded.
@@ -147,7 +149,7 @@ pub trait LevelsBackend {
     /// None for a chunk that isn't loaded or a `y` outside the world. On a client, the
     /// state is the one the server sent for a chunk the client holds.
     #[access(WorldOnly)]
-    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockStateId>;
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockState>;
     /// Side: server.
     /// Preview a held tool's transformation without changing the block or stack. The existing
     /// block-tool hook fires with `simulated` true; listeners must not mutate the level in a
@@ -168,7 +170,7 @@ pub trait LevelsBackend {
     /// The block at `pos` without its properties: `minecraft:oak_stairs`.
     /// None as for `block_state`. API 381.
     #[access(WorldOnly)]
-    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String>;
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<BlockKey>;
     /// Side: both.
     /// Property `key` of the block state at `pos` (`BlockState.getValue`):
     /// `east` for `facing`. None for a block without it, or as for
@@ -406,6 +408,32 @@ pub trait LevelsBackend {
     /// World-space block collision boxes under an empty collision context, without entities or border. Refuses a stale or nonresident level and invalid or overlarge boxes.
     #[access(WorldOnly)]
     fn level_collision_boxes(&self, level: LevelRef, aabb: [f64; 6]) -> Option<Vec<[f64; 6]>>;
+    /// Side: server.
+    /// The world's respawn data (`LevelData.getRespawnData`): the world spawn and the way a
+    /// player appearing there faces, as `/setworldspawn` sets them. Horizon keeps one world
+    /// spawn, in the Overworld, so every level of a world answers the same. None on a client,
+    /// for a stale handle, and before the world has chosen its spawn.
+    #[access(WorldOnly)]
+    fn level_respawn_data(&self, level: LevelRef) -> Option<RespawnData>;
+    /// Side: server.
+    /// Map `id`'s saved data (`ServerLevel.getMapData(new MapId(id))`): read from memory, or
+    /// from `data/minecraft/maps/<id>.dat` when nothing has loaded it yet, without keeping it.
+    /// Maps belong to the world, not to a level. None on a client, for a stale handle and for
+    /// a map id nothing ever made.
+    #[access(WorldOnly)]
+    fn level_map_data(&self, level: LevelRef, id: i32) -> Option<MapState>;
+    /// Side: server.
+    /// `BlockAndTintGetter.canSeeSky`: the sky light at `pos` is full (15), so nothing above
+    /// blocks it. None as for `brightness`.
+    #[access(WorldOnly)]
+    fn level_can_see_sky(&self, level: LevelRef, pos: [i32; 3]) -> Option<bool>;
+    /// Side: server.
+    /// Whether nothing solid lies on the segment `from`..`to`, as
+    /// `LivingEntity.hasLineOfSight` clips between two eyes (`ClipContext.Block.COLLIDER`,
+    /// `ClipContext.Fluid.NONE`): `clip`'s miss. Fluids, entities and the border don't block it.
+    /// None as for `clip`.
+    #[access(WorldOnly)]
+    fn level_line_of_sight(&self, level: LevelRef, from: [f64; 3], to: [f64; 3]) -> Option<bool>;
     /// Side: both.
     /// Whether any block collision shape shares volume with `aabb` (`[min_x, min_y, min_z, max_x,
     /// max_y, max_z]`): the block half of `CollisionGetter.noCollision(aabb)`, negated. The same
@@ -485,17 +513,17 @@ pub trait LevelsBackendMut {
         natural_spawning: bool,
     ) -> bool;
     /// Side: server.
-    /// Set a block in the level in place (`Level.setBlock`). Parked levels,
-    /// stale handles, clients and unloaded or out-of-height positions return
-    /// false. Client notification follows the supplied update flags.
+    /// Set a block (`Level.setBlock`). Stale/unavailable levels and invalid states return
+    /// typed errors without mutation. Ok(false) means vanilla refused an unchanged,
+    /// unloaded or out-of-height write. Notification follows the supplied update flags.
     #[access(WorldOnly)]
     fn level_set_block(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        state: BlockStateId,
+        state: BlockState,
         flags: NativeBlockUpdateFlags,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Remove a block in place (`Level.removeBlock`), preserving its fluid.
     #[access(WorldOnly)]
@@ -517,6 +545,50 @@ pub trait LevelsBackendMut {
         tool: Option<&ItemStack>,
         collect: bool,
     ) -> Result<Option<Vec<ItemStack>>, StackWriteError>;
+    /// Side: server.
+    /// `LevelData.setRespawnData(RespawnData.of(..))`, as `/setworldspawn` does: the world spawn
+    /// moves to `pos`, facing `yaw` (wrapped to -180..180) and `pitch` (clamped to -90..90), a
+    /// player whose own respawn point was the old world spawn follows it, and `spawn_change`
+    /// fires. Only the Overworld's handle, where Horizon keeps the world spawn. False for
+    /// another level, a stale handle, a client, a non-finite angle and a position outside the
+    /// spawnable bounds.
+    #[access(WorldOnly)]
+    fn level_set_respawn_data(
+        &mut self,
+        level: LevelRef,
+        pos: [i32; 3],
+        yaw: f32,
+        pitch: f32,
+    ) -> bool;
+    /// Side: server.
+    /// Repaint map `id` with `colors` (128 by 128 colour ids, row by row), pixel by pixel as
+    /// `MapItemSavedData.setColor` does: each changed pixel marks the map to save, to redraw and
+    /// to send to the players carrying or framing it. True when a pixel changed. False for
+    /// another length, a stale handle, a client and a map id nothing made.
+    #[access(WorldOnly)]
+    fn level_set_map_data(&mut self, level: LevelRef, id: i32, colors: &[u8]) -> bool;
+    /// Side: server.
+    /// Run the block at `pos`'s scheduled tick now (`ServerLevel.tickBlock`): the path a due
+    /// tick from the queue takes, the block's part first, else `BlockState.tick`, with the same
+    /// random draws and level events. The queue is not read or changed; `schedule_block_tick`
+    /// queues one. False for a refused write, a stale or parked handle, a client and an
+    /// unloaded or out-of-height position.
+    #[access(WorldOnly)]
+    fn level_block_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// Random-tick `pos` now, as `ServerLevel.tickChunk` does for a position it picked: the
+    /// block's `randomTick` when it ticks randomly (its part first), then lava's fluid random
+    /// tick, with the same random draws and level events. False as for `block_tick`.
+    #[access(WorldOnly)]
+    fn level_block_random_tick(&mut self, level: LevelRef, pos: [i32; 3]) -> bool;
+    /// Side: server.
+    /// `ServerLevel.findLightningTargetAround`: the closest lightning rod near the column at
+    /// `pos`'s `x` and `z`, else a living entity under open sky within 3 blocks of it, picked
+    /// with the level random as vanilla does (so this moves later draws), else the top of the
+    /// column. Strikes nothing. None for a refused level, a stale or parked handle, a client and
+    /// an unloaded column.
+    #[access(WorldOnly)]
+    fn level_lightning_target(&mut self, level: LevelRef, pos: [i32; 3]) -> Option<[i32; 3]>;
     /// Side: server.
     /// What the block at `pos` would drop (`Block.getDrops(state, level, pos, blockEntity,
     /// entity, tool)`), without breaking it or spawning anything: its loot table rolled with
@@ -574,7 +646,7 @@ pub trait LevelsBackendMut {
         &mut self,
         level: LevelRef,
         options: &ParticleOptions,
-        state: Option<BlockStateId>,
+        state: Option<BlockState>,
         at: [f64; 3],
         spread: [f64; 3],
         speed: f64,
@@ -701,28 +773,28 @@ pub trait LevelsBackendMut {
     /// (`updateNeighborsAtExceptFromFacing`: a diode's front) or `OutputSignal`
     /// (`updateNeighbourForOutputSignal`: the comparators beside it, when its comparator output
     /// changes without its state changing). `source` is the state whose block vanilla passes as
-    /// the one that changed. False, with nothing done, off the level in place, for a position
-    /// that isn't loaded, or for a `source` that is no block state.
+    /// the one that changed. Typed errors refuse stale/unavailable levels or invalid states
+    /// without mutation; Ok(false) means an unloaded or out-of-height position.
     #[access(WorldOnly)]
     fn level_update_neighbors(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
+        source: BlockState,
         update: NeighbourUpdate,
-    ) -> bool;
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Tell the block at `pos` that `source`'s block beside it changed (`Level.neighborChanged`),
-    /// as a diode tells the block in front of it before updating that block's neighbours. False,
-    /// with nothing done, as for `update_neighbors`: off the level in place, for a position that
-    /// isn't loaded, or for a `source` that is no block state.
+    /// as a diode tells the block in front of it before updating that block's neighbours.
+    /// Typed errors refuse stale/unavailable levels or invalid states; Ok(false) means an
+    /// unloaded or out-of-height position. Errors never mutate the level.
     #[access(WorldOnly)]
     fn level_neighbor_changed(
         &mut self,
         level: LevelRef,
         pos: [i32; 3],
-        source: BlockStateId,
-    ) -> bool;
+        source: BlockState,
+    ) -> Result<bool, LevelWriteError>;
     /// Side: server.
     /// Replace the random of the server level `level` names with `random`,
     /// a stream `native_level_random` gave and the mod drew from. False where

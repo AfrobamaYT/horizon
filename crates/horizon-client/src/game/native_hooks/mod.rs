@@ -8,6 +8,10 @@
 
 /// Generated dispatch entry points, not hand-written hook implementations.
 mod fire;
+pub(in crate::game) use fire::{
+    BlockDropsCall, BlockScreenEffectDrawCall, ConnectsToCall, EntityChangeBlockPreCall,
+    ItemAfterVerticalCollisionCall, UpdateShapeCall,
+};
 
 use super::native_data_maps::NativeDataMapType;
 use super::{
@@ -54,6 +58,7 @@ use horizon_client::{
 use horizon_client_core::gamerules::Value as GameRuleValue;
 use horizon_client_core::suggestion::Suggestion;
 use horizon_core::{
+    connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
     random::LegacyRandom,
@@ -65,19 +70,22 @@ use mod_api::GameMode;
 pub use mod_api::game::{NativeClock, NativeShake, PhantomSpawnResult, SleepProblem};
 use mod_api::{
     self, Answered, BlockPlacement, BlockTintSources, ClientAudioOptions, ClientChatOptions,
-    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientModifiers,
-    ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef, GameRuleActor,
-    InteractionKey, LayerDefinition, LivingRef, NativeCamera, NativeCommand, NativeDispensed,
-    NativeHandRender, NativeKeyMapping, NativeLifecycleContext, NativeNoteBlockChange,
-    PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId, ScreenOpening,
-    ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController, ToolUse, WorldPhase,
+    ClientGraphicsOptions, ClientGuiOptions, ClientInputOptions, ClientMiningPrediction,
+    ClientModifiers, ClientReloadListeners, CommandInvocation, EnchantmentInfo, EntityRef,
+    GameRuleActor, InteractionAttempt, InteractionKey, LayerDefinition, LivingRef, NativeCamera,
+    NativeCommand, NativeDispensed, NativeHandRender, NativeKeyMapping, NativeLifecycleContext,
+    NativeNoteBlockChange, PathComputationType, Placement, PlayerRef, RecipeBookCategory, ScreenId,
+    ScreenOpening, ScreenshotImage, ServerReloadListeners, ServerTickPhase, TicketController,
+    ToolUse, WorldPhase,
 };
 use mod_api::{
     AttachmentStore, BonemealSource, ChunkRef, FluidStack, LevelRef, LogicalSide,
     NativeActiveEffect, NativeBlockClick, NativeBlockUpdateFlags, NativeInteractionResult,
-    NativeItemClick, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
+    NativeItemClick, NativeItemDrop, NativeTriState, NeighbourUpdate, TooltipElement, UsePhase,
 };
-use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer};
+use mod_api::{
+    BlockKey, CameraDrawContext, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite,
+};
 use mod_api::{
     CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
     NativeSpawnReason, SoundPlay, SoundRef,
@@ -102,7 +110,7 @@ use {
     },
     horizon_world::{
         fluid::FluidKind,
-        level::{BlockId, LevelAccess, PlacementContext, Ticks},
+        level::{LevelAccess, PlacementContext, Ticks},
         registry::{BlockRegistry, BlockStateId},
     },
 };

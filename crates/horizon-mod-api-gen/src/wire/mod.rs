@@ -1,6 +1,7 @@
 //! The WebAssembly interface of the mod API: every method of the traits a mod calls (the hosts,
 //! the backends, the drawing contexts) and every method it implements (`Hooks`, the parts, the
-//! capability handlers), as one WIT world and the glue on both sides of it.
+//! capability handlers), through one shared-memory boundary and the glue on both sides of it.
+mod append;
 mod calls;
 mod emit;
 mod host;
@@ -25,6 +26,7 @@ pub(super) const IMPORTS: &[&str] = &[
     "DrawContext",
     "BlockEntityDrawContext",
     "WorldDrawContext",
+    "CameraDrawContext",
     "LevelHost",
     "LevelRandomHost",
     "LevelTicksHost",
@@ -125,6 +127,7 @@ const EXPORTS: &[&str] = &[
     "TooltipAppender",
     "CriterionTest",
     "RowPages",
+    "RowFunction",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -138,7 +141,7 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    ["PlaceProvider", "RowPages"].contains(&owner)
+    ["PlaceProvider", "RowPages", "RowFunction"].contains(&owner)
         || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
@@ -581,7 +584,9 @@ fn layout(surface: &Surface<'_>) -> u64 {
         feed(&format!("{method:?}"));
     }
     for def in &surface.types.defs {
-        feed(&format!("{:?}", (&def.rust, &def.kind)));
+        // Private borrowed descriptors also define bytes and checked writeback policy.
+        // Hash the complete definition so a new transport shape cannot hide behind Opaque.
+        feed(&format!("{def:?}"));
     }
     feed(&format!("{:?}", surface.hooks));
     hash
@@ -590,155 +595,58 @@ fn layout(surface: &Surface<'_>) -> u64 {
 #[cfg(test)]
 mod tests {
     #[test]
-    #[ignore = "prints the resolved surface"]
-    fn print_surface_stats() {
+    fn layout_includes_private_borrowed_shapes() {
+        let run = || {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
+            let providers = crate::capability_providers::generate(&root, &[]).unwrap().0;
+            let included = [
+                ("mod_api_generated.rs", generated.hooks.as_str()),
+                ("mod_api_generated_host.rs", generated.host.as_str()),
+                ("mod_api_host_areas.rs", generated.areas.as_str()),
+                ("capability_providers_generated.rs", providers.as_str()),
+            ];
+            let mut surface = super::surface(&root, &included).unwrap();
+            let baseline = super::layout(&surface);
+            let append = surface
+                .types
+                .defs
+                .iter()
+                .position(|d| d.append.is_some())
+                .unwrap();
+            assert!(matches!(
+                surface.types.defs[append].kind,
+                super::ty::Kind::Opaque(_)
+            ));
+            surface.types.defs[append].append.as_mut().unwrap().field += 1;
+            assert_ne!(baseline, super::layout(&surface));
+            surface.types.defs[append].append.as_mut().unwrap().field -= 1;
+            let projection = surface
+                .types
+                .defs
+                .iter_mut()
+                .find(|d| d.projection.is_some())
+                .unwrap();
+            assert!(matches!(projection.kind, super::ty::Kind::Opaque(_)));
+            projection.projection.as_mut().unwrap()[0].ty = super::ty::Ty::Unit;
+            assert_ne!(baseline, super::layout(&surface));
+        };
         std::thread::Builder::new()
             .stack_size(64 << 20)
-            .spawn(|| {
-                let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-                let generated = crate::sources(&root, crate::FillMode::Require).unwrap();
-                let included = [
-                    ("mod_api_generated.rs", generated.hooks.as_str()),
-                    ("mod_api_generated_host.rs", generated.host.as_str()),
-                    ("mod_api_host_areas.rs", generated.areas.as_str()),
-                ];
-                let surface = super::surface(&root, &included).unwrap();
-                let mut kinds = std::collections::BTreeMap::<String, usize>::new();
-                for def in &surface.types.defs {
-                    let kind = format!("{:?}", def.kind);
-                    let kind = kind
-                        .split(|c: char| !c.is_alphanumeric())
-                        .next()
-                        .unwrap()
-                        .to_owned();
-                    *kinds.entry(kind).or_default() += 1;
-                }
-                println!(
-                    "methods {} unbound {} defs {} kinds {kinds:?}",
-                    surface.methods.len(),
-                    surface.unbound.len(),
-                    surface.types.defs.len()
-                );
-                fn has(ty: &super::ty::Ty, f: &dyn Fn(&super::ty::Ty) -> bool) -> bool {
-                    use super::ty::Ty::*;
-                    f(ty)
-                        || match ty {
-                            List(t, _)
-                            | Option(t)
-                            | Array(t, _)
-                            | Ref(t, _)
-                            | Boxed(t)
-                            | Shared(t) => has(t, f),
-                            Result(a, b) => has(a, f) || has(b, f),
-                            Tuple(v) => v.iter().any(|t| has(t, f)),
-                            _ => false,
-                        }
-                }
-                let mut classes = std::collections::BTreeMap::<String, usize>::new();
-                for m in &surface.methods {
-                    let tys: Vec<&super::ty::Ty> =
-                        m.params.iter().map(|p| &p.1).chain([&m.ret]).collect();
-                    let class = if tys
-                        .iter()
-                        .any(|t| has(t, &|t| matches!(t, super::ty::Ty::Handler(..))))
-                    {
-                        "handler"
-                    } else if tys
-                        .iter()
-                        .any(|t| has(t, &|t| matches!(t, super::ty::Ty::Dyn(..))))
-                    {
-                        "dyn"
-                    } else if m
-                        .params
-                        .iter()
-                        .any(|p| has(&p.1, &|t| matches!(t, super::ty::Ty::Ref(_, true))))
-                    {
-                        "mutref"
-                    } else if has(&m.ret, &|t| {
-                        matches!(
-                            t,
-                            super::ty::Ty::Ref(..)
-                                | super::ty::Ty::Str(super::ty::Str::Borrowed)
-                                | super::ty::Ty::List(_, super::ty::List::Slice)
-                        )
-                    }) {
-                        "borrowed-ret"
-                    } else {
-                        "plain"
-                    };
-                    *classes
-                        .entry(format!(
-                            "{} {class}",
-                            if super::EXPORTS.contains(&m.owner)
-                                || super::exports().contains(&m.owner)
-                            {
-                                "export"
-                            } else {
-                                "import"
-                            }
-                        ))
-                        .or_default() += 1;
-                }
-                println!("classes {classes:?}");
-                let code = super::calls::guest(
-                    &surface.types,
-                    &surface.methods,
-                    &surface.dropped,
-                    &surface.excused,
-                    &surface.parts,
-                );
-                std::fs::write(root.join("target/guest_calls_sample.rs"), &code).unwrap();
-                for m in super::calls::imports(&surface.methods) {
-                    if !super::calls::plain_pub(m) {
-                        println!(
-                            "nonplain {}::{} ({:?}) -> {:?}",
-                            m.owner,
-                            m.name,
-                            m.params.iter().map(|p| &p.1).collect::<Vec<_>>(),
-                            m.ret
-                        );
-                    }
-                }
-                let (hooks, apart) = super::calls::dispatch(&surface.types, &surface.methods);
-                std::fs::write(root.join("target/guest_hooks_sample.rs"), &hooks).unwrap();
-                println!(
-                    "dispatch arms {} apart {}",
-                    hooks.matches("answer").count(),
-                    apart.len()
-                );
-                for m in surface
-                    .methods
-                    .iter()
-                    .filter(|m| apart.contains(&format!("{}::{}", m.owner, m.name)))
-                    .step_by(6)
-                {
-                    for p in &m.params {
-                        if let super::ty::Ty::Ref(t, _) = &p.1 {
-                            if let super::ty::Ty::Named(d) = &**t {
-                                if let super::ty::Kind::Record(fs) = &surface.types.defs[*d].kind {
-                                    for f in fs {
-                                        if super::calls::probe(&surface.types, &f.ty).is_none() {
-                                            println!("badfield {}.{} {:?}", m.name, f.rust, f.ty);
-                                        }
-                                    }
-                                } else {
-                                    println!(
-                                        "notrecord {} {:?}",
-                                        m.name, surface.types.defs[*d].kind
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                for def in &surface.types.defs {
-                    if let super::ty::Kind::Opaque(why) = &def.kind {
-                        println!("opaque {}: {why}", def.rust);
-                    }
-                }
-            })
+            .spawn(run)
             .unwrap()
             .join()
             .unwrap();
+    }
+    #[test]
+    fn coverage_document_is_current() {
+        std::thread::Builder::new().stack_size(64 << 20).spawn(|| {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            super::generate_host(&root).unwrap();
+            let actual = std::fs::read_to_string(root.join("target/wire-coverage.md")).unwrap();
+            let checked_in = std::fs::read_to_string(root.join("docs/modding/src/wasm-coverage.md")).unwrap();
+            assert_eq!(actual, checked_in, "regenerate with HORIZON_UPDATE_WIRE_COVERAGE=1 cargo test -p horizon-mod-api-gen coverage_document_is_current");
+            assert!(actual.contains("Required gap total: 0."), "required boundary methods must not silently lose coverage");
+        }).unwrap().join().unwrap();
     }
 }

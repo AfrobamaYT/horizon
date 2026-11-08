@@ -2033,10 +2033,10 @@ impl Game<'_> {
         let Some(host) = self.lan.as_ref() else {
             return;
         };
-        let Some(uuid) = host
+        let Some((uuid, name)) = host
             .hub
             .guest(conn)
-            .and_then(|g| self.records_uuid(host, g.uuid))
+            .and_then(|g| Some((self.records_uuid(host, g.uuid)?, g.name.clone())))
         else {
             return;
         };
@@ -2059,8 +2059,13 @@ impl Game<'_> {
                 g.advancements_loaded = true;
             });
         }
-        let mut stats =
-            super::stats::Stats::read(&super::stats::player_json(&self.world_root, "stats", uuid));
+        // PlayerList.getPlayerStats: locateStatsFile moves an old name-based file first.
+        let mut stats = super::stats::Stats::read(&super::stats::locate_player_json(
+            &self.world_root,
+            "stats",
+            uuid,
+            &name,
+        ));
         stats.mark_all_dirty();
         host.play.entry(conn).or_default().stats = stats;
     }
@@ -2491,8 +2496,10 @@ impl Game<'_> {
                     let mut text = original.clone();
                     let mut cancel = false;
                     let mut replies = Vec::new();
-                    if mod_api::__private::listened(mod_api::HookId::ServerChat) {
-                        let mut api_text = text.try_into_api().unwrap();
+                    let mut engine_replies = Vec::new();
+                    if mod_api::__private::listened(mod_api::HookId::ServerChat)
+                        && let Ok(mut api_text) = text.try_into_api()
+                    {
                         self.native_server_chat(mod_api::__private::ServerChatCall {
                             player_id: id,
                             player: sender,
@@ -2502,14 +2509,29 @@ impl Game<'_> {
                             replies: &mut replies,
                             cancel: &mut cancel,
                         });
-                        text = api_text.try_into_engine(&()).unwrap();
+                        // Validate all fields before applying any event writes.
+                        let converted: std::result::Result<_, mod_api::text::TextFormError> =
+                            (|| {
+                                Ok((
+                                    api_text.try_into_engine(&())?,
+                                    replies.try_into_engine(&())?,
+                                ))
+                            })();
+                        match converted {
+                            Ok((message, answers)) => {
+                                text = message;
+                                engine_replies = answers;
+                            }
+                            Err(_) => {
+                                cancel = false;
+                            }
+                        }
                     }
                     // The mods' replies reach the sender alone, as a
                     // command's do, before the message (if any) goes out.
-                    if !replies.is_empty() {
+                    if !engine_replies.is_empty() {
                         let host = self.lan.as_ref()?;
-                        for line in replies {
-                            let line = line.try_into_engine(&()).unwrap();
+                        for line in engine_replies {
                             host.hub.send_to(
                                 conn,
                                 &C::SystemChat(play::SystemChat {
@@ -4200,6 +4222,175 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn guest_climbable_glide() {
+        use crate::game::{Audio, Options, Progress, Settings, load_resources};
+        use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest};
+        use horizon_client::motion::MotionWorld;
+        use std::sync::{Arc, atomic::AtomicI32, mpsc};
+
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            horizon_assets::resource_source::ResourceRoot::directory(root.clone()),
+            Vec::new(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            crate::game::execution_role::ExecutionRole::IntegratedServer,
+            &Progress::new(),
+            &mut |_, _| unreachable!(),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let res = Box::leak(Box::new(loaded.resources));
+        let mut game = super::Game::new(
+            res,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&horizon_assets::resource_source::ResourceSource::directory(
+                root.clone(),
+            )),
+            None,
+        )
+        .unwrap();
+        let render = game
+            .pack
+            .assets
+            .reload(&horizon_assets::resource_source::ResourceRoot::directory(
+                root.clone(),
+            ))
+            .unwrap();
+        game.world =
+            horizon_client::world::World::test_scene(&game.pack.assets, &render, 2).unwrap();
+
+        let sync = Arc::new(horizon_client::lan::data::SyncData::empty());
+        let net = NetConfig {
+            listen: false,
+            ..NetConfig::loopback(0, String::new(), 2)
+        };
+        let lan = horizon_client::lan::Lan::start_with(sync.clone(), net).unwrap();
+        let encoder = horizon_client::lan::chunks::ChunkEncoder::new(
+            [] as [(Arc<str>, bool); 0],
+            &horizon_protocol::registry::Builtin::default(),
+            &[],
+            &[],
+        );
+        let config = horizon_client::lan::hub::HubConfig {
+            default_game_mode: 0,
+            guest_commands: false,
+            force_game_mode: false,
+            hardcore: false,
+            view_distance: 10,
+            simulation_distance: 10,
+            dimension: "minecraft:overworld".into(),
+            allow_flight: false,
+            seed: 0,
+            max_players: 20,
+            integrated: true,
+            levels: Default::default(),
+        };
+        let mut hub = horizon_client::lan::hub::Hub::new(
+            lan,
+            sync,
+            encoder,
+            config,
+            game.loop_context.clone(),
+        );
+        let (tx, _rx) = mpsc::channel();
+        let mut guest = Guest::new(
+            Joined {
+                conn: 1,
+                uuid: 1,
+                name: "Test".into(),
+                properties: Vec::new(),
+                info: horizon_protocol::packets::configuration::ClientInformation::new(8),
+                brand: String::new(),
+                sender: PlayerSender::new(tx, Arc::default()),
+                latency: Arc::new(AtomicI32::new(0)),
+                address: "127.0.0.1:1".parse().unwrap(),
+                expected: false,
+            },
+            1,
+            [0.5, 4.0, 0.5],
+            8,
+        );
+        guest.placed = true;
+        guest.dimension = "minecraft:overworld".into();
+        hub.guests.push(guest);
+        game.lan = Some(super::LanHost {
+            hub,
+            players_told_left: false,
+            settings: super::LanSettings {
+                port: 0,
+                guest_commands: false,
+                force_game_mode: false,
+            },
+            play: Default::default(),
+            broken: Default::default(),
+            mob_state: Default::default(),
+            poses: Default::default(),
+            mob_players: Default::default(),
+            owner: None,
+            waypoints: Default::default(),
+            waypoint_dead: Default::default(),
+            border_sent: None,
+            commands: Default::default(),
+            quiet: Default::default(),
+            far: None,
+            native_commands: None,
+            sleep_ignored: Default::default(),
+            states: Default::default(),
+            states_next_entity: None,
+            idle_states: Default::default(),
+        });
+        for (block, expected) in [
+            ("minecraft:ladder", false),
+            ("minecraft:scaffolding", false),
+            ("minecraft:vine", true),
+        ] {
+            let state = game.pack.assets.registry.default_state(block).unwrap();
+            game.world.set(0, 4, 0, state).unwrap();
+            game.lan
+                .as_mut()
+                .unwrap()
+                .hub
+                .guests
+                .update(0, |g| g.fall_flying = true);
+            game.as_guest(1, |game| {
+                let player = game.player.as_mut().unwrap();
+                MotionWorld {
+                    entities: &[],
+                    player,
+                    scene: &mut game.world,
+                    assets: &game.pack.assets,
+                    collision_binding: game.collision,
+                    resources: game.motion,
+                    health: &game.health_resources,
+                    tag_items: Some(world_items!(game)),
+                    loop_context: &game.loop_context,
+                    damage_hooks: &game.damage_hooks,
+                    block_registries: Some(&game.pack.block_registries),
+                }
+                .server_travel()
+                .unwrap();
+            })
+            .unwrap();
+            assert_eq!(
+                game.lan.as_ref().unwrap().hub.guests[0].fall_flying,
+                expected,
+                "{block}"
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "requires prepared vanilla resources"]
     fn datapack_damage_world_open_reuses_the_no_pack_preload() {
         use super::{SyncCache, SyncData, cached_sync_data, initialize_world_sync_data};
@@ -4633,7 +4824,10 @@ mod tests {
                 super::mob_meta(m, &hub, None, 0, &mut meta, &mut defaults);
                 (meta, defaults)
             };
-            assert!(mob.set_custom_name(game, Some(mod_api::Text::literal("Grumbles"))));
+            assert!(
+                mob.set_custom_name(game, Some(mod_api::Text::literal("Grumbles")))
+                    .unwrap()
+            );
             assert!(mob.set_custom_name_visible(game, true));
             let (meta, _) = meta_of(game);
             let sent = horizon_protocol::text::literal("Grumbles");
@@ -4643,7 +4837,7 @@ mod tests {
                 Value::OptText(Some(sent))
             )));
             assert!(meta.contains(&(3, serializer::BOOLEAN, Value::Bool(true))));
-            assert!(mob.set_custom_name(game, None));
+            assert!(mob.set_custom_name(game, None).unwrap());
             assert!(mob.set_custom_name_visible(game, false));
             let (meta, defaults) = meta_of(game);
             assert!(meta.iter().all(|e| e.0 != 2 && e.0 != 3), "{meta:?}");
@@ -4954,6 +5148,7 @@ mod tests {
     #[test]
     #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
     fn a_mod_changes_the_effect_particles_players_are_sent() {
+        use super::super::api_values::{TryIntoApi, TryIntoEngine};
         use super::super::lan::LanSettings;
         use horizon_client::effects::EffectInstance;
         use horizon_client::lan::{Joined, NetConfig, PlayerSender, guest::Guest, hub::HubConfig};
@@ -5010,16 +5205,24 @@ mod tests {
                     id,
                     name.clone(),
                     event.effect.amplifier,
-                    event.original_particle.clone(),
-                    event.particle.clone(),
+                    event.original_particle.try_into_engine(&()).unwrap(),
+                    event.particle.try_into_engine(&()).unwrap(),
                     event.visible,
                 ));
                 match name.as_str() {
                     "minecraft:speed" if id == ZOMBIE as u32 => {
-                        *event.particle = Some(ParticleOptions::simple(ParticleType::Flame))
+                        *event.particle = Some(
+                            ParticleOptions::simple(ParticleType::Flame)
+                                .try_into_api()
+                                .unwrap(),
+                        )
                     }
                     "minecraft:trial_omen" => {
-                        *event.particle = Some(ParticleOptions::simple(ParticleType::Flame))
+                        *event.particle = Some(
+                            ParticleOptions::simple(ParticleType::Flame)
+                                .try_into_api()
+                                .unwrap(),
+                        )
                     }
                     "minecraft:strength" | "minecraft:weakness" => event.visible = true,
                     "minecraft:regeneration" | "minecraft:slowness" => event.visible = false,
@@ -5039,7 +5242,11 @@ mod tests {
                 if event.effect.id.id(host) == "minecraft:trial_omen" {
                     assert_eq!(
                         *event.particle,
-                        Some(ParticleOptions::simple(ParticleType::Flame))
+                        Some(
+                            ParticleOptions::simple(ParticleType::Flame)
+                                .try_into_api()
+                                .unwrap()
+                        )
                     );
                     *event.particle = None;
                 }

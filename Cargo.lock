@@ -496,6 +496,7 @@ dependencies = [
  "horizon-mod-point-emit",
  "horizon-port-pack",
  "rustc-demangle",
+ "serde",
  "serde_json",
  "sha2",
  "toml",
@@ -2058,15 +2059,12 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glam",
- "horizon-assets",
- "horizon-client-core",
  "horizon-core",
  "horizon-items",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
  "horizon-mod-package",
  "horizon-mod-runtime",
- "horizon-world",
  "log",
  "serde",
  "serde_json",
@@ -2097,6 +2095,7 @@ dependencies = [
  "horizon-core",
  "horizon-mod-api-gen",
  "horizon-mod-api-macros",
+ "horizon-mod-runtime",
  "serde_json",
 ]
 
