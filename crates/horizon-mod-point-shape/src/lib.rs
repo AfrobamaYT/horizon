@@ -994,11 +994,13 @@ mod tests {
         let got = describe(
             syn::parse_quote!(fn f(a: &mut u8, b: &u8, c: *const u8, d: u8,
             fire: fn(&mut Self, u8), boxed: Box<dyn FnOnce()>, borrowed: &dyn FnMut(),
-            unknown: opaque!()) -> bool),
+            unknown: opaque!(), other: &dyn std::any::Any, other_mut: &mut dyn std::any::Any) -> bool),
         );
         assert_eq!(
             got.args.iter().map(|a| a.write_back).collect::<Vec<_>>(),
-            [true, false, false, false, false, false, false, false]
+            [
+                true, false, false, false, false, false, false, false, false, true
+            ]
         );
         assert_eq!(
             got.args.iter().map(|a| a.class).collect::<Vec<_>>(),
@@ -1010,6 +1012,8 @@ mod tests {
                 "callback",
                 "callback",
                 "callback",
+                "unclassified",
+                "unclassified",
                 "unclassified"
             ]
         );
