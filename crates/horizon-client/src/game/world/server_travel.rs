@@ -384,11 +384,14 @@ impl Game<'_> {
             g.vehicle.is_some(),
         );
         // Entity.checkInsideBlocks: the Nether portal blocks the box is in.
-        // `LivingEntity.canUsePortal` (#943): not a passenger — its vehicle
-        // goes through and carries it (`carry_riders_through_portals`) — and
-        // not asleep.
-        if !riding
-            && !sleeping
+        // `LivingEntity.canUsePortal` (#943) over the guest's body and
+        // transport — the one rule `can_use_portal_of` answers: alive,
+        // nobody's passenger (its vehicle goes through and carries it,
+        // `carry_riders_through_portals`), not asleep. A guest without a
+        // body (its turn holds it, or it has not been placed yet) stands in
+        // no portal of its own.
+        if let Some(p) = g.motion.as_deref()
+            && self.can_use_portal_of(p, riding, sleeping)
             && let Some(pos) = self.nether_portal_inside(at)
         {
             self.portals.player.set_inside(pos, PLAYER_DELAY);
