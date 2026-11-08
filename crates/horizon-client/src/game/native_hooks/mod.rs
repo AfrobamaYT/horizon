@@ -78,8 +78,7 @@ use mod_api::{
 };
 use mod_api::{BlockKey, DebugEntry, DebugRenderer, EffectKey, GuiLayer, RuntimeSprite};
 use mod_api::{
-    CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, NativeSpawnCheck,
-    NativeSpawnReason, SoundPlay, SoundRef,
+    CameraType, Identifier, MobRef, NativeDespawn, NativePermissionLevel, SoundPlay, SoundRef,
 };
 pub(crate) use mod_api::{
     ClientPacket, ClientPayload, NativeBlockRim, NativeColoredLight, NativeExplosionStart,
