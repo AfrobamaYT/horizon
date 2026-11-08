@@ -1,3 +1,1 @@
-fn area(game: &mut crate::game::Game<'_>) {
-    let _ = game;
-}
+pub fn area(_: &mut internals::game::Game<'_>, _: &mut bool) {}
