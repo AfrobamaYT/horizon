@@ -23,7 +23,7 @@ const LLD_ENV: &str = "HORIZON_MOD_LLD";
 /// The library mods' crate names, comma-separated, that a member leaves out.
 const PROVIDED_ENV: &str = "HORIZON_MOD_PROVIDED";
 const PROFILE: &str = "horizon-wasm";
-const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts";
+const FLAGS: &str = "-Crelocation-model=pic -Zshare-generics=n -Zdefault-visibility=hidden --cfg=horizon_shared_artifacts_v2";
 
 /// Guest boundary exports, kept even though they originate in an rlib dependency.
 const GUEST_EXPORTS: &[&str] = &["horizon_layout", "horizon_in", "horizon_hook"];
@@ -164,6 +164,7 @@ fn cargo_command(
         .env("RUSTC_WRAPPER", &exe)
         .env("HORIZON_GROUP_WRAPPER", "{}")
         .env("HORIZON_STD_ARTIFACTS", target_dir.join("std-artifacts"))
+        .env("HORIZON_BUILD_ROOT", target_dir)
         .env("RUSTC_BOOTSTRAP", "1")
         .env("RUSTFLAGS", FLAGS)
         .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER", &exe)
@@ -296,7 +297,7 @@ pub fn build(root: &Path, catalog: Option<&Path>, additional: &[PathBuf]) -> Res
 /// rustc emits a synthetic allocator-shim object for every final root. Its compiler-private
 /// symbols are local implementation details, not another copy of the library API.
 fn member_export(name: &str) -> bool {
-    name != "__horizon_mod_hooks"
+    !matches!(name, "__horizon_mod_hooks" | "__dso_handle" | "__tls_base")
         && !rustc_demangle::try_demangle(name)
             .is_ok_and(|symbol| format!("{symbol:#}").starts_with("__rustc::"))
 }
@@ -462,6 +463,8 @@ mod export_tests {
             "_RNvCs5fGHjzWXRav_7___rustc35___rust_no_alloc_shim_is_unstable_v2"
         ));
         assert!(!member_export("__horizon_mod_hooks"));
+        assert!(!member_export("__dso_handle"));
+        assert!(!member_export("__tls_base"));
         assert!(member_export(
             "_RNvCs5Y1sYENNevt_10shared_lib12shared_value"
         ));

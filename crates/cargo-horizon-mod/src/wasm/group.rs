@@ -208,9 +208,15 @@ pub(super) fn build(
         let manifest: toml_edit::DocumentMut =
             text.parse().map_err(|e| format!("{MANIFEST}: {e}"))?;
         if manifest.contains_key("native") {
-            return Err(format!("{}: native mod in wasm group", source.display()));
+            if source == root
+                || additional
+                    .iter()
+                    .any(|p| p.canonicalize().ok().as_deref() == Some(source))
+            {
+                return Err(format!("{}: native mod in wasm group", source.display()));
+            }
+            continue;
         }
-        let (registrations, points) = registrations(&manifest, catalog)?;
         let id = manifest["id"].as_str().ok_or("mod has no id")?;
         members.push(Member {
             root: source.canonicalize().map_err(|e| e.to_string())?,
@@ -218,8 +224,8 @@ pub(super) fn build(
             krate: lib_name(package).ok_or("mod has no library")?,
             package: package["name"].as_str().ok_or("no package name")?.into(),
             manifest,
-            registrations,
-            points,
+            registrations: String::new(),
+            points: String::new(),
         });
     }
     let mut needed = std::collections::BTreeSet::new();
@@ -273,7 +279,8 @@ pub(super) fn build(
             .is_some_and(|id| needed.contains(id))
     });
     let mut ids = std::collections::BTreeSet::new();
-    for member in &members {
+    for member in &mut members {
+        (member.registrations, member.points) = registrations(&member.manifest, catalog)?;
         if !ids.insert(member.manifest["id"].as_str().ok_or("no id")?) {
             return Err("duplicate mod id in Cargo group".into());
         }
@@ -291,6 +298,7 @@ pub(super) fn build(
     }
     let mut configs = serde_json::Map::new();
     let mut features = Vec::new();
+    let mut point_names = std::collections::BTreeSet::<String>::new();
     for member in &members {
         copy(&member.root, &member.stage)?;
         let path = member.stage.join("Cargo.toml");
@@ -392,6 +400,7 @@ pub(super) fn build(
             toml_edit::value(["rlib", "cdylib"].into_iter().collect::<toml_edit::Array>());
         std::fs::write(path, cargo.to_string()).map_err(|e| e.to_string())?;
         let (registrations, points) = (&member.registrations, &member.points);
+        point_names.extend(serde_json::from_str::<Vec<String>>(points).map_err(|e| e.to_string())?);
         configs.insert(member.package.clone(), serde_json::json!({"id":member.manifest["id"].as_str(), "version":member.manifest["version"].as_str(), "stage":member.stage, "registrations":registrations,"points":points,"provided":crates.iter().filter(|c| **c != member.krate).map(String::as_str).collect::<Vec<_>>().join(",")}));
         if let Some(deps) = member
             .manifest
@@ -458,6 +467,10 @@ pub(super) fn build(
     workspace["workspace"]["resolver"] = toml_edit::value("3");
     std::fs::write(stage.join("Cargo.toml"), workspace.to_string()).map_err(|e| e.to_string())?;
     let mut command = cargo_command("build", "member", &stage, &target, &toolchain)?;
+    command.env(
+        "HORIZON_POINT_NAMES",
+        serde_json::to_string(&point_names).map_err(|e| e.to_string())?,
+    );
     command.arg("--workspace").env(
         "HORIZON_GROUP_WRAPPER",
         serde_json::to_string(&configs).map_err(|e| e.to_string())?,
@@ -567,6 +580,16 @@ pub fn rustc(mut args: Vec<String>) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         }
     }
+    // Cargo keeps generated source under this target directory. Its location and the
+    // invocation's cwd must not alter dependency SVHs in independently staged builds.
+    let build_root = std::env::var("HORIZON_BUILD_ROOT").map_err(|e| e.to_string())?;
+    args.push(format!("--remap-path-prefix={build_root}=/horizon/target"));
+    args.push(format!(
+        "--remap-path-prefix={}=/horizon/workspace",
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .display()
+    ));
     let mut command = Command::new(compiler);
     command
         .env_remove("HORIZON_GUEST_REGISTRATIONS")
