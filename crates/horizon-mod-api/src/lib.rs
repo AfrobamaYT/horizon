@@ -2888,6 +2888,35 @@ pub enum NativeSupportType {
     Rigid,
 }
 
+/// What made a `tags_updated` notice fire (`TagsUpdatedEvent`'s two subclasses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TagsUpdateCause {
+    /// `TagsUpdatedEvent.ServerDataLoad`: a server built its data tables.
+    ServerDataLoad {
+        /// False on a world's first open, true after `/reload`.
+        reload: bool,
+    },
+    /// `TagsUpdatedEvent.ClientPacketReceived`: a client applied the tags its server sent.
+    ClientPacketReceived {
+        /// The server is the single player window's own.
+        integrated_server: bool,
+    },
+}
+
+impl TagsUpdateCause {
+    /// `TagsUpdatedEvent.shouldUpdateStaticData`: whether to update static data, which single
+    /// player's two threads share, so that there only the server side updates it.
+    pub fn should_update_static_data(self) -> bool {
+        !matches!(
+            self,
+            Self::ClientPacketReceived {
+                integrated_server: true
+            }
+        )
+    }
+}
+
 /// Why a mod removes an entity (`Entity.RemovalReason`): the two reasons
 /// that destroy it. The unloading and dimension-change reasons belong to the
 /// game.
@@ -4378,6 +4407,30 @@ pub enum InteractionKey {
     Use,
     /// `key.pickItem`: only with a block or entity aimed at.
     PickBlock,
+}
+
+/// What caused a client interaction mapping to act on this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InteractionAttempt {
+    /// A queued press of the mapping.
+    Press,
+    /// A repeat or continuation from a mapping that is still held.
+    Held,
+}
+
+/// A proposed window-side block mining operation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+// exhaustive: the game fills all fields; mods only read the snapshot
+pub struct ClientMiningPrediction {
+    /// The targeted block.
+    pub pos: [i32; 3],
+    /// The outward unit normal of the hit face.
+    pub face: [i32; 3],
+    /// Whether this operation begins a break rather than advancing a retained target.
+    pub starting: bool,
+    /// The proposed resulting break fraction, from zero to one.
+    pub progress: f32,
 }
 
 /// The behaviour about to run in `UseItemOnBlockEvent`.
