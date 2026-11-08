@@ -1186,6 +1186,7 @@ impl Game<'_> {
     }
 
     /// The hub's view of the server for packets sent outside its own tick.
+    #[cfg(test)]
     pub(super) fn server_ctx(&mut self) -> TickCtx<'_> {
         let spawn = self.world_spawn_position();
         let clock_rate = self.network_clock_rate();

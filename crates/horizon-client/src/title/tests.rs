@@ -1232,7 +1232,7 @@ fn icon_buttons_show_their_tooltip_while_hovered() {
     let f = Fixture::new();
     let atlas =
         crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
-            Path::new("/nonexistent/horizon-test-assets"),
+            Path::new("/nonexistent/horizon-test-assets").to_path_buf(),
         ))
         .unwrap();
     crate::widgets::set_narrating(true);
@@ -1278,7 +1278,7 @@ fn onboarding_common_buttons_show_their_tooltip_while_hovered() {
     f.title.start_onboarding();
     let atlas =
         crate::hud::HudAtlas::build(&horizon_assets::resource_source::ResourceSource::directory(
-            Path::new("/nonexistent/horizon-test-assets"),
+            Path::new("/nonexistent/horizon-test-assets").to_path_buf(),
         ))
         .unwrap();
     crate::widgets::set_narrating(true);

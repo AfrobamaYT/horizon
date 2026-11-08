@@ -4058,7 +4058,6 @@ mod cart_push_tests {
 #[cfg(test)]
 mod container_drop_tests {
     use super::super::boats::Boat;
-    use super::super::native_machines::tests::server_game;
     use super::{CartKind, Minecart};
     use horizon_client::items::ItemStack;
     use horizon_core::geometry::Vec3;
@@ -4098,37 +4097,42 @@ mod container_drop_tests {
         counts[0] = 5;
         counts[4] = 8;
         for boat in [true, false] {
-            let mut game = server_game();
-            assert!(game.ui.rules.bool("entity_drops"));
-            let at = Vec3::new(8.5, 64.0, 8.5);
-            if boat {
-                let mut b = Boat::new(1, Arc::from("oak"), at, 0.0);
-                b.chest = true;
-                b.items = slots.clone();
-                game.boats.push(b);
-            } else {
-                let mut c = Minecart::new(1, CartKind::Chest, at);
-                c.items = slots.clone();
-                game.carts.push(c);
-            }
-            game.world.random = LegacyRandom::new(1234);
-            if boat {
-                assert_eq!(game.hurt_boat_result(0, 100.0, false), Some(true));
-                assert!(game.boats.is_empty());
-            } else {
-                assert!(game.hurt_cart_result(0, 100.0, false, false));
-                assert!(game.carts.is_empty());
-            }
-            let mut expected = LegacyRandom::new(1234);
-            vanilla_spill_draws(&mut expected, &counts);
-            vanilla_spill_draws(&mut expected, &[0; 27]);
-            assert_eq!(
-                game.world.random.next_long(),
-                expected.next_long(),
-                "boat: {boat}"
-            );
-            // The two piles and the hull item.
-            assert_eq!(game.dropped.len(), 3, "boat: {boat}");
+            crate::game::native_entity_refs::tests::with_game(|game| {
+                assert!(
+                    game.ui
+                        .rules
+                        .bool_at(horizon_client::gamerules::vanilla::ENTITY_DROPS)
+                );
+                let at = Vec3::new(8.5, 64.0, 8.5);
+                if boat {
+                    let mut b = Boat::new(1, Arc::from("oak"), at, 0.0);
+                    b.chest = true;
+                    b.items = slots.clone();
+                    game.boats.push(b);
+                } else {
+                    let mut c = Minecart::new(1, CartKind::Chest, at);
+                    c.items = slots.clone();
+                    game.carts.push(c);
+                }
+                game.world.random = LegacyRandom::new(1234);
+                if boat {
+                    assert_eq!(game.hurt_boat_result(0, 100.0, false), Some(true));
+                    assert!(game.boats.is_empty());
+                } else {
+                    assert!(game.hurt_cart_result(0, 100.0, false, false));
+                    assert!(game.carts.is_empty());
+                }
+                let mut expected = LegacyRandom::new(1234);
+                vanilla_spill_draws(&mut expected, &counts);
+                vanilla_spill_draws(&mut expected, &[0; 27]);
+                assert_eq!(
+                    game.world.random.next_long(),
+                    expected.next_long(),
+                    "boat: {boat}"
+                );
+                // The two piles and the hull item.
+                assert_eq!(game.dropped.len(), 3, "boat: {boat}");
+            });
         }
     }
 }
