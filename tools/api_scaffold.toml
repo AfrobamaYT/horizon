@@ -1,5 +1,4 @@
 # Allow-list of engine types the scaffold may mirror or wrap. One [[type]] per type.
-#   kind    = "struct" | "enum" (value mirror) | "handle" (an `XRef`, name defaults to <Engine>Ref)
 #   topic   = file stem in crates/horizon-mod-api/src (an existing file is appended to; lib is refused)
 #   fields  = ["x: i32", ...] for a struct; variants = [...] for an enum
 #   exhaustive = "reason" keeps a struct exhaustive with public fields; otherwise it is non_exhaustive + new()
