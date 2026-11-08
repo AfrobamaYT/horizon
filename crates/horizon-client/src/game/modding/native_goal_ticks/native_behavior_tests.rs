@@ -786,6 +786,15 @@ fn animal_behaviors_join_after_vanilla_of_their_priority() {
             mobs::animal_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
         let vanilla: Vec<_> = joined.iter().filter(|k| !k.2).cloned().collect();
         assert_eq!(vanilla, bare, "vanilla's order stands");
+        let core_mod = joined
+            .iter()
+            .position(|k| k.2 && k.0 == 0 && k.1 == "core")
+            .unwrap();
+        let idle_vanilla = joined
+            .iter()
+            .position(|k| !k.2 && k.0 == 0 && k.1 == "idle")
+            .unwrap();
+        assert!(core_mod < idle_vanilla, "Core's whole bucket precedes Idle");
         for (i, key) in joined.iter().enumerate().filter(|(_, k)| k.2) {
             let before = joined
                 .iter()

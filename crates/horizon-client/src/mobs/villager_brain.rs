@@ -341,10 +341,11 @@ fn brain(m: &Mob) -> Option<&Brain> {
 }
 fn brain_mut(m: &mut Mob) -> &mut Brain {
     let (baby, farmer) = (m.is_baby(), super::villager::is_farmer(m));
-    let id = m.kind.id.clone();
-    let e = super::villager::ext_mut(m);
-    e.brain
-        .get_or_insert_with(|| Box::new(Brain::new(&id, baby, 0, farmer)))
+    if brain(m).is_none() {
+        let id = m.kind.id.clone();
+        super::villager::ext_mut(m).brain = Some(Box::new(Brain::new(&id, baby, 0, farmer)));
+    }
+    super::villager::ext_mut(m).brain.as_deref_mut().unwrap()
 }
 pub(super) fn mem(m: &mut Mob) -> &mut Memories {
     &mut brain_mut(m).mem

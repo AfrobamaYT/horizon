@@ -175,7 +175,16 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
     let before = list.len();
     attach_behaviors(&m.kind.id, &mut list);
     if list.len() > before {
-        list.sort_by_key(|e| e.prio);
+        list.sort_by_key(|e| {
+            (
+                e.prio,
+                match e.act {
+                    Act::Core => 1,
+                    Act::Idle => 5,
+                    Act::Fight => 14,
+                },
+            )
+        });
     }
     m.extra.brain = Some(Box::new(Brain {
         mem: Memories::default(),

@@ -224,7 +224,7 @@ impl Brain {
         let before = list.len();
         attach_behaviors(mob_id, &mut list);
         if list.len() > before {
-            list.sort_by_key(|e| e.prio);
+            list.sort_by_key(|e| (e.prio, e.act.slot(), e.act.order()));
         }
         Self {
             mem: Memories::default(),

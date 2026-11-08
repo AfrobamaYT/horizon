@@ -43,7 +43,16 @@ pub fn register(m: &mut Mob) {
 /// floats with `GhastMoveControl` and three goals, its brain stopped.
 fn setup(m: &mut Mob, baby: bool, w: Option<&MobWorld<'_>>) {
     let was = m.extra.scratch[0];
-    m.extra.scratch[0] = if baby { 1 } else { 2 };
+    // Feeding crosses the age boundary without a world. Clear vanilla state
+    // immediately, but leave setup pending until behavior stop callbacks can run.
+    let pending = was == 1 && !baby && w.is_none();
+    m.extra.scratch[0] = if baby || pending { 1 } else { 2 };
+    if pending {
+        if let Some(b) = m.extra.animal_brain.as_deref_mut() {
+            b.mem = super::animal_brain::Memories::default();
+        }
+        m.nav_stop();
+    }
     m.ai.goals.clear();
     m.ai.nav.stop();
     // A new move and look control (nothing wanted) and navigation.
@@ -713,6 +722,23 @@ mod tests {
         );
         assert_eq!(m.ai.nav.kind, crate::mobs::nav::NavKind::Flying);
         assert!(m.ai.nav.can_float);
+        crate::mobs::animal_brain::init(&mut m, 0);
+        crate::mobs::mod_behaviors::set_walk_target(&mut m, [5, 65, 5], 1.0, 0);
+        assert!(
+            crate::mobs::animal_brain::mem_ref(&m)
+                .unwrap()
+                .walk_target
+                .present()
+        );
+        crate::mobs::ai::age_up(&mut m, 1200, true);
+        assert!(!m.is_baby());
+        assert!(
+            !crate::mobs::animal_brain::mem_ref(&m)
+                .unwrap()
+                .walk_target
+                .present(),
+            "adultGhastSetup must clear brain memories even on feeding"
+        );
     }
 }
 

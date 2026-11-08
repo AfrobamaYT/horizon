@@ -419,7 +419,20 @@ pub fn init(m: &mut Mob, shuffle_seed: i64) {
     let before = b.list.len();
     attach_behaviors(&m.kind.id, &mut b.list);
     if b.list.len() > before {
-        b.list.sort_by_key(|e| e.prio);
+        b.list.sort_by_key(|e| {
+            (
+                e.prio,
+                match e.act {
+                    Act::Core => 1,
+                    Act::Dig => 3,
+                    Act::Idle => 5,
+                    Act::Sniff => 6,
+                    Act::Fight => 14,
+                    Act::PlayDead => 15,
+                    Act::Panic => 15,
+                },
+            )
+        });
     }
     if let Some(c) = cooldown {
         b.mem.transport_items_cooldown_ticks.set(c);
