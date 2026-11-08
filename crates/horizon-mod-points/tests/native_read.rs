@@ -63,19 +63,36 @@ impl NativeNode for Numbers {
 fn resolves_paths_against_current_value_and_refuses_removed_element() {
     let mut paths = Locators::default();
     let root = paths.intern(None, Step::Root(0)).unwrap();
+    let prefix = paths.intern(Some(root), Step::Field(2)).unwrap();
+    let unrelated = paths.intern(Some(root), Step::Field(3)).unwrap();
     let req = |node, start, rows, depth| RowWindow {
         node,
         start,
         rows,
         depth,
     };
-    let first = read(&Numbers(vec![10, 20]), root, &mut paths, req(root, 1, 2, 1)).unwrap();
+    assert!(matches!(
+        read(
+            &Numbers(vec![10]),
+            prefix,
+            &mut paths,
+            req(unrelated, 0, 1, 0)
+        ),
+        Err(RowError::Bounds)
+    ));
+    let first = read(
+        &Numbers(vec![10, 20]),
+        prefix,
+        &mut paths,
+        req(prefix, 1, 2, 1),
+    )
+    .unwrap();
     assert_eq!(Reader::decode::<u32>(&first[1].4), Ok(20));
     let id = first[1].0;
-    let second = read(&Numbers(vec![30, 40]), root, &mut paths, req(id, 0, 1, 0)).unwrap();
+    let second = read(&Numbers(vec![30, 40]), prefix, &mut paths, req(id, 0, 1, 0)).unwrap();
     assert_eq!(Reader::decode::<u32>(&second[0].4), Ok(40));
     assert!(matches!(
-        read(&Numbers(vec![30]), root, &mut paths, req(id, 0, 1, 0)),
+        read(&Numbers(vec![30]), prefix, &mut paths, req(id, 0, 1, 0)),
         Err(RowError::Bounds)
     ));
 }
