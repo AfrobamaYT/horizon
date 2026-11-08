@@ -671,6 +671,79 @@ pub(super) mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn stand_equipment_effects_wait_for_root_commit() {
+        with_game(|game| {
+            let mut stand = horizon_client::entities::ArmorStand::new(
+                40,
+                horizon_core::geometry::Vec3::ZERO,
+                0.0,
+            );
+            stand.first_tick = false;
+            game.armor_stands.push(stand);
+            game.audio.capture = Some(Vec::new());
+            let items = game
+                .entity(40)
+                .unwrap()
+                .capability(game, &ENTITY_ITEMS, ())
+                .unwrap();
+            let chest = ItemResource::of(
+                &ItemStack::new("minecraft:diamond_chestplate", 1)
+                    .try_into_api()
+                    .unwrap(),
+            );
+            super::super::dispense_fixture::start_recording();
+            let result = game.transaction(|host, tx| {
+                assert_eq!(items.insert(host, tx, 4, &chest, 1), 1);
+                Err::<(), ()>(())
+            });
+            assert_eq!(result, Err(()));
+            assert!(game.armor_stands[0].equipment.get(4).is_none());
+            assert!(
+                game.audio.capture.as_ref().unwrap().is_empty(),
+                "aborted stand equip emitted sound"
+            );
+            assert!(super::super::dispense_fixture::stop_recording().is_empty());
+
+            super::super::dispense_fixture::start_recording();
+            let result = game.transaction(|host, _| {
+                host.transaction(|host, tx| {
+                    assert_eq!(items.insert(host, tx, 4, &chest, 1), 1);
+                    Ok::<(), ()>(())
+                })?;
+                Err::<(), ()>(())
+            });
+            assert_eq!(result, Err(()));
+            assert!(game.armor_stands[0].equipment.get(4).is_none());
+            assert!(game.audio.capture.as_ref().unwrap().is_empty());
+            assert!(super::super::dispense_fixture::stop_recording().is_empty());
+
+            super::super::dispense_fixture::start_recording();
+            let result = game.transaction(|host, _| {
+                // An inner abort must not contribute effects to the root.
+                let aborted = host.transaction(|host, tx| {
+                    assert_eq!(items.insert(host, tx, 4, &chest, 1), 1);
+                    Err::<(), ()>(())
+                });
+                assert_eq!(aborted, Err(()));
+                host.transaction(|host, tx| {
+                    assert_eq!(items.insert(host, tx, 4, &chest, 1), 1);
+                    Ok::<(), ()>(())
+                })?;
+                assert!(super::super::dispense_fixture::stop_recording().is_empty());
+                super::super::dispense_fixture::start_recording();
+                Ok::<(), ()>(())
+            });
+            assert_eq!(result, Ok(()));
+            assert_eq!(game.armor_stands[0].equipment.get(4).unwrap().count, 1);
+            assert_eq!(game.audio.capture.as_ref().unwrap().len(), 1);
+            let events = super::super::dispense_fixture::stop_recording();
+            assert_eq!(events.len(), 1, "only one event at root commit: {events:?}");
+            assert!(events[0].ends_with("minecraft:equip"));
+        });
+    }
+
     /// A zombie mob, standing at the origin.
     fn zombie(game: &mut super::Game<'_>) -> u32 {
         let kind = game

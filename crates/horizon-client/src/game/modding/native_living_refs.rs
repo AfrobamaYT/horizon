@@ -895,7 +895,7 @@ impl Game<'_> {
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
         {
-            [s] => self.slot_set(s, stack.clone()),
+            [s] => self.slot_set_with_effects(s, stack.clone(), !defer),
             _ => false,
         };
         if let (true, Some(at), false) = (written, at, first_tick) {
@@ -911,9 +911,18 @@ impl Game<'_> {
                 let (Target::Stand(id) | Target::Dragon(id)) = t else {
                     unreachable!("only a stand or the dragon gets here")
                 };
-                let ctx_who = Some(horizon_client::mobs::Who::Mob(id));
-                let ctx = self.who_context(ctx_who, None);
-                self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+                if defer {
+                    self.after_commit(super::transactions::After::Equip {
+                        at: [at.x, at.y, at.z],
+                        sound,
+                        equips: equippable.is_some(),
+                        who: id,
+                    });
+                } else {
+                    let ctx_who = Some(horizon_client::mobs::Who::Mob(id));
+                    let ctx = self.who_context(ctx_who, None);
+                    self.equip_item_effects([at.x, at.y, at.z], sound, equippable.is_some(), ctx);
+                }
             }
         }
         written
