@@ -299,12 +299,10 @@ pub(crate) fn install_client_hooks() {
             mod_api::dispatch_living_flying_speed(&context, entity, kind, speed);
         },
         block_jump_factor: |context, state, factor| {
-            let context = mod_api::OwningLoop::new(context);
-            mod_api::dispatch_block_jump_factor(&context, state, factor);
+            crate::game::block_jump_factor(context, state, factor);
         },
         block_speed_factor: |context, state, factor| {
-            let context = mod_api::OwningLoop::new(context);
-            mod_api::dispatch_block_speed_factor(&context, state, factor);
+            crate::game::block_speed_factor(context, state, factor);
         },
         player_stays_on_ground_surface: |context, entity, staying| {
             let context = mod_api::OwningLoop::new(context);

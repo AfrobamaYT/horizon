@@ -1,6 +1,7 @@
 //! The game's side of the mod API: the installed tables, the reload machinery, the structs the
 //! game fills for its hooks (`built`) and what it reads of handles and the API's own types
 //! (`game`). None of it is part of the API a mod is written against.
+pub use crate::state_predicate::validate_state_predicate;
 use crate::*;
 
 /// Switch an installed mod's dispatches on or off, returning whether it was found.

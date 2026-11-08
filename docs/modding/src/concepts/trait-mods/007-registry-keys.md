@@ -35,6 +35,13 @@ and call `state.property(&metadata, "facing")` or `state.with(&metadata, "facing
 supplied `StateConstraint`s. Changes return a new value and never mutate the original.
 Unknown keys, ordinals and property combinations return typed `BlockStateError`s.
 
+`NativeSceneBlock::new(pos, state, entity)` and `StructureTemplateBlock::new(pos, state, nbt)`
+use this owned `BlockState`, including all properties. Structure reads preserve vanilla palette
+selection, mirror-then-rotation and placement order; an unavailable state mapping refuses the
+whole snapshot with `None`. `DrawContext::draw_scene` checks the entire scene before drawing:
+an unknown key, invalid ordinal or unavailable mapping draws nothing, never a partial scene or
+a replacement air block. Native and wasm use the same values and refusal rules.
+
 Tint callbacks receive the same immutable metadata resource explicitly, without a `Host`.
 The game prepares their owned state array before constructing mesh tables; renderer workers
 only copy those values and invoke metadata reads. When world numeric state IDs are reordered,
@@ -57,19 +64,27 @@ not a lost handle or a guessed replacement state. Update flags retain their vani
 Keys are small, private `u32` registration slots on both native and wasm. `key.id(host)`
 returns an owned canonical `String` through the generated read backend for diagnostics; it
 requires a game-backed host and an invalid slot is a boundary error, not an empty name.
-Normal operations use the slot's resolved numeric mapping instead of looking up its name.
-Block reload rebinds that mapping without changing the key's identity or canonical name;
-a refused rebind clears the old mapping. Effect registration is process-owned and fixed
+Block defaults come from immutable API metadata and cross through the game's sole forward/reverse
+state index. Behavior queries obtain their engine block from the resulting engine state; there is
+no separate per-key numeric block binding. Reload preserves key identity and canonical names.
+A refused resource rebind clears the active index, while failed transactional Parts preparation
+leaves the previously published Parts and index intact. Effect registration is process-owned and fixed
 until restart, matching the engine's effect registry.
 
 Block tag membership is bound from the same merged item/block tag snapshot at world load and
-reload, including worlds without pack overrides. A read maps the slot to a numeric block id,
-looks up the tag name and tests a `BlockSet` bit; it never resolves the block's name. A fully
-namespaced tag needs no allocation (a bare tag adds `minecraft:`). Binding visits each merged
-block-tag member once, resolves its default state and inserts its numeric block id; it replaces
+reload, including worlds without pack overrides. A read checks that the owning state index is
+available, looks up the tag name and tests membership in a prepared API `BlockKey` set; it never
+resolves the block's name. A fully namespaced tag needs no allocation (a bare tag adds `minecraft:`).
+Binding visits each merged block-tag member once and resolves its API key; it replaces
 the previous snapshot rather than accumulating membership. No membership work is added to ticks
 that do not call this read. Tags and block mappings belong to their resolving thread; missing
 authoritative context or an unavailable mapping returns `None`, not a stale membership result.
+
+`host.tags().blocks(tag)` reads the current authoritative block members in vanilla order as
+`BlockKey` values, including blocks no mod requested. Resolve `tag` once with `Tags::key` and
+retain it across reloads. Unknown or empty tags return `Some(Vec::new())`; an unavailable
+context or any unresolved member returns `None`, never a partial member list. The same service
+is available through restricted level Hosts, without borrowing an engine registry.
 
 `host.block_state_default(stone)`, `host.block_states().states_of(stone)`,
 `host.block_item(stone)`, `host.block_in_tag(stone, tag)` and restricted-level

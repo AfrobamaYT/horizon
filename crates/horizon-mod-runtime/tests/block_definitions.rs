@@ -95,6 +95,7 @@ fn worker_property_reads_share_immutable_values_and_allocate_nothing() {
                 .unwrap()
                 .len();
             assert_eq!(worker.property(state, "missing"), Ok(None));
+            assert_eq!(worker.of(std::hint::black_box(&[])), Ok(1));
         }
         (
             ALLOCATIONS.with(|count| count.replace(None).unwrap()),
