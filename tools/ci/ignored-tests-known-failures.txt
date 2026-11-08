@@ -67,7 +67,6 @@ horizon-client game::native_player_break::tests::drops_go_into_the_inventory_rol
 horizon-client game::explosion::tests::explosion_items_parity_fixture #2177 harness
 horizon-client game::native_live_holder_tests::thousand_live_block_entity_ticks #2177 harness
 horizon-client game::remote_vehicles::tests::steering_mount_control_matches_vanilla #2177 harness
-horizon-client game::falling_damage::tests::no_helmet_or_a_refused_hit_fires_no_helmet_wear #2178
 horizon-client game::native_damage_tests::arrow_hits_name_the_projectile_on_players_mobs_and_the_dragon #2178
 horizon-client game::native_player_modes::tests::one_player_may_harm_another_by_the_pvp_rule_and_their_teams #2178
 horizon-client game::functions::tests::world_open_loads_functions_before_first_tick #2179
