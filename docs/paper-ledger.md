@@ -144,3 +144,39 @@ Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cite
 
 [paper-BrewEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/BrewEvent.html
 [paper-BlockFromToEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockFromToEvent.html
+
+## Event counterparts: base/living hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cited by function name; scope = the hooks below.
+Decisions follow the documented moment, side, information and result; only Covered rows get a `paper` key.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `living_knockback` | **Partial:** [`EntityKnockbackEvent`][paper-EntityKnockbackEvent] | The server-side knockback moment and cancellable vector cover the push, but the event exposes no damage source, attacker id or held main/off stacks. No key. |
+| `loot_condition` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | That event fires when a loot table generates and exposes rolled loot, not when a mod-defined condition type is evaluated; there is no condition kind, JSON or `holds` result. No key. |
+| `loot_drops` | **Partial:** [`BlockDropItemEvent`][paper-BlockDropItemEvent] | It matches only player block breaks and the item list, while the hook also covers mob deaths, explosion/mob breaks, player-use and leash drops and passes table, position, entity, player, tool and explosion context. No key. |
+| `loot_function` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | The nearest event fires after table generation; it has no per-function type, JSON, context or mutable stack at the function's evaluation moment. No key. |
+| `loot_table_load` | **Gap:** none (nearest [`LootGenerateEvent`][paper-LootGenerateEvent]) | The hook runs as table JSON loads from data packs, before anything rolls it; `LootGenerateEvent` runs when a table generates in the world and offers generated loot, not the raw table document. No key. |
+| `may_place_on` | **Gap:** none (nearest [`BlockCanBuildEvent`][paper-BlockCanBuildEvent]) | `BlockCanBuildEvent` asks whether a player can place a block at a location; the hook is the server-side `mayPlaceOn` survival answer for a plant state on a ground state, with no player, hand or placement. No key. |
+| `mending_repair` | **Gap:** none | The dossier cites no Paper event for the selected Mending stack, its experience proposal and the clamped repair amount; the hook's exact repair/experience decision has no documented counterpart. No key. |
+| `menu_button` | **Gap:** none | No cited event covers a mod container's `clickMenuButton`, including the out-of-world block entity and the mutable carried stack. No key. |
+| `menu_clicked` | **Gap:** none | No cited event covers a click in a mod-opened menu that moved nothing, with its window, slot, button and mode. No key. |
+| `menu_closed` | **Gap:** none | No cited event covers a mod menu closing through player close, server/mod reopening or disconnect. No key. |
+| `menu_quick_move` | **Gap:** none | The dossier's entity and vehicle movement candidates are unrelated to the menu's `quickMoveStack` routing point. No key. |
+| `menu_slot_rules` | **Gap:** none | No cited event covers `Slot.mayPlace` or per-slot maximum rules for registered vanilla and mod menus; the both-side hook has no server event counterpart here. No key. |
+| `mob_effect_added` | **Partial:** [`EntityPotionEffectEvent`][paper-EntityPotionEffectEvent] | The added-effect moment and effect/entity/amplifier facts line up, but the Paper event is cancellable while the hook is listen-only, and it is a generic modified-effect event also covering changes and removals. No key. |
+| `mob_killed` | **Partial:** [`EntityDeathEvent`][paper-EntityDeathEvent] | Death of the living entity is the same after-the-blow moment, but the event covers all deaths and gives the damage source rather than the acting player directly, and it is cancellable while the hook cannot cancel. No key. |
+| `mob_spawned` | **Partial:** [`EntitySpawnEvent`][paper-EntitySpawnEvent] | The event fires when an entity is added to a world with a location, but it has no `natural` flag, covers all entity types rather than new mobs only, and is cancellable while the hook only listens. No key. |
+| `mod_container_viewers` | **Gap:** none | No cited event carries the aggregate viewer count and `previous`/`viewers` transition for a mod container; per-player open/close events would not supply it. No key. |
+| `modify_default_components` | **Gap:** none | No cited Paper event modifies per-item default component maps at data-load/registry-freeze time. No key. |
+| `moisture_change` | **Covered:** [`MoistureChangeEvent`][paper-MoistureChangeEvent] | The cancellable soil-moisture change is the same server-side before-change moment; the block's current state and `getNewState()` give from/to, and cancelling keeps the old moisture. Key added. |
+| `neighbor_changed` | **Gap:** none | The hook is the per-block `neighborChanged` delivery; the dossier's player/world/equipment candidates are unrelated, and its own note says `NeighborNotifyEvent` is a different broadcast. No key. |
+| `net_from_client` | **Gap:** none | No cited event carries a player's custom channel payload at the hook's tick-delayed receive point; the listed entity/block events are unrelated. No key. |
+
+[paper-EntityKnockbackEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/entity/EntityKnockbackEvent.html
+[paper-LootGenerateEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/LootGenerateEvent.html
+[paper-BlockCanBuildEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockCanBuildEvent.html
+[paper-EntityPotionEffectEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityPotionEffectEvent.html
+[paper-EntityDeathEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityDeathEvent.html
+[paper-EntitySpawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntitySpawnEvent.html
+[paper-MoistureChangeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/MoistureChangeEvent.html
