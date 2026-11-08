@@ -199,6 +199,7 @@ impl LoopContext {
 /// Capture regular UTF-8 files only, never following symlinks (even within the root).
 /// Refused keys are absent. Limits are measured before whitespace trimming.
 pub const MAX_SETTING_BYTES: usize = 64 * 1024;
+const MAX_VISITED_NAMES: usize = 4096;
 pub const MAX_SETTING_KEYS: usize = 1024;
 pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
@@ -209,7 +210,10 @@ pub fn capture_settings<'a>(
     let mut settings = BTreeMap::new();
     let mut total = 0;
     let mut refused = [false; 4];
-    for mod_id in mod_ids {
+    for mod_id in mod_ids
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+    {
         // Package ids are normally validated at load time; do not let this public
         // filesystem boundary interpret a path supplied by a caller.
         if Path::new(mod_id).components().count() != 1
@@ -260,7 +264,7 @@ pub fn capture_settings<'a>(
         settings.insert(mod_id.to_owned(), values);
     }
     for (refused, class) in refused.into_iter().zip([
-        "unsafe or unreadable entry",
+        "unsafe or unreadable entry, or enumeration limit",
         "key limit",
         "byte limit",
         "invalid UTF-8",
@@ -272,38 +276,63 @@ pub fn capture_settings<'a>(
     settings
 }
 
+// Reject the whole package beyond the enumeration budget: retaining an arbitrary
+// prefix would make the result depend on filesystem enumeration order again.
+fn sorted_names(
+    names: impl Iterator<Item = std::io::Result<String>>,
+) -> std::io::Result<Vec<String>> {
+    let mut result = Vec::new();
+    for name in names {
+        if result.len() == MAX_VISITED_NAMES {
+            return Err(std::io::ErrorKind::InvalidData.into());
+        }
+        result.push(name?);
+    }
+    result.sort_unstable();
+    Ok(result)
+}
+
 #[cfg(unix)]
 fn snapshot_files(
     root: &Path,
     mod_id: &str,
+) -> std::io::Result<impl Iterator<Item = std::io::Result<(String, fs::File)>>> {
+    snapshot_files_with_hook(root, mod_id, |_| {})
+}
+
+#[cfg(unix)]
+fn snapshot_files_with_hook(
+    root: &Path,
+    mod_id: &str,
+    after_open: impl Fn(&str),
 ) -> std::io::Result<impl Iterator<Item = std::io::Result<(String, fs::File)>>> {
     use rustix::fs::{Dir, Mode, OFlags, open, openat};
     let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
     let root = open(root, flags | OFlags::DIRECTORY, Mode::empty())?;
     let directory = openat(&root, mod_id, flags | OFlags::DIRECTORY, Mode::empty())?;
     let entries = Dir::read_from(&directory)?;
-    Ok(entries.filter_map(move |entry| {
-        let result = (|| {
-            let entry = entry?;
-            let name = entry.file_name();
-            if name.to_bytes() == b"." || name.to_bytes() == b".." {
-                return Ok(None);
-            }
-            let key = name
-                .to_str()
-                .map_err(|_| std::io::ErrorKind::InvalidData)?
-                .to_owned();
-            let file = fs::File::from(openat(&directory, name, flags, Mode::empty())?);
-            if !file.metadata()?.is_file() {
-                return Err(std::io::ErrorKind::InvalidInput.into());
-            }
-            Ok(Some((key, file)))
-        })();
-        match result {
-            Ok(Some(value)) => Some(Ok(value)),
-            Ok(None) => None,
-            Err(error) => Some(Err(error)),
+    let names = sorted_names(entries.filter_map(|entry| {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => return Some(Err(error.into())),
+        };
+        let name = entry.file_name();
+        if name.to_bytes() == b"." || name.to_bytes() == b".." {
+            return None;
         }
+        Some(
+            name.to_str()
+                .map(str::to_owned)
+                .map_err(|_| std::io::ErrorKind::InvalidData.into()),
+        )
+    }))?;
+    Ok(names.into_iter().map(move |key| {
+        let file = fs::File::from(openat(&directory, key.as_str(), flags, Mode::empty())?);
+        after_open(&key);
+        if !file.metadata()?.is_file() {
+            return Err(std::io::ErrorKind::InvalidInput.into());
+        }
+        Ok((key, file))
     }))
 }
 
@@ -321,18 +350,18 @@ fn snapshot_files(
     let parent = Dir::open_ambient_dir(parent, cap_std::ambient_authority())?;
     let root = parent.open_dir_nofollow(name)?;
     let directory = root.open_dir_nofollow(mod_id)?;
-    let entries = directory.entries()?;
-    Ok(entries.map(move |entry| {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
+    let names = sorted_names(directory.entries()?.map(|entry| {
+        entry?
+            .file_name()
+            .into_string()
+            .map_err(|_| std::io::ErrorKind::InvalidData.into())
+    }))?;
+    Ok(names.into_iter().map(move |key| {
+        let metadata = directory.symlink_metadata(&key)?;
         use cap_std::fs::MetadataExt;
         if !metadata.is_file() || metadata.file_attributes() & 0x400 != 0 {
             return Err(std::io::ErrorKind::InvalidInput.into());
         }
-        let key = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| std::io::ErrorKind::InvalidData)?;
         let mut options = OpenOptions::new();
         options.read(true).follow(FollowSymlinks::No);
         let file = directory.open_with(&key, &options)?;
@@ -428,6 +457,66 @@ mod tests {
     }
 
     #[test]
+    fn admission_is_sorted_and_enumeration_is_bounded() {
+        let root = root("ordered");
+        fs::create_dir(root.join("second")).unwrap();
+        for i in 0..1025 {
+            fs::write(root.join(format!("reader/key{i:04}")), "x").unwrap();
+            fs::write(root.join(format!("second/key{:04}", 1024 - i)), "x").unwrap();
+        }
+        let captured = capture_settings(&root, ["second", "reader"]);
+        assert_eq!(captured["reader"], captured["second"]);
+        assert!(!captured["reader"].contains_key("key1024"));
+        assert_eq!(captured["reader"]["key0000"], "x");
+        for i in 1025..4097 {
+            fs::write(root.join(format!("reader/key{i:04}")), "x").unwrap();
+        }
+        assert!(!capture_settings(&root, ["reader"]).contains_key("reader"));
+        assert!(sorted_names((0..4097).map(|i| Ok(i.to_string()))).is_err());
+        assert_eq!(
+            sorted_names((0..4096).map(|i| Ok(i.to_string())))
+                .unwrap()
+                .len(),
+            4096
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn validates_open_handle_after_entry_replacement() {
+        use std::io::Read;
+        let root = root("replaced");
+        let path = root.join("reader/value");
+        fs::write(&path, "opened value").unwrap();
+        let entries = snapshot_files_with_hook(&root, "reader", |_| {
+            fs::remove_file(&path).unwrap();
+            assert!(
+                std::process::Command::new("mkfifo")
+                    .arg(&path)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        })
+        .unwrap();
+        let (_, mut file) = entries.into_iter().next().unwrap().unwrap();
+        let mut value = String::new();
+        file.read_to_string(&mut value).unwrap();
+        assert_eq!(value, "opened value");
+
+        // Now open the FIFO, then replace its path with a regular file. Path
+        // metadata would wrongly accept it, but descriptor metadata must refuse.
+        let entries = snapshot_files_with_hook(&root, "reader", |_| {
+            fs::remove_file(&path).unwrap();
+            fs::write(&path, "replacement").unwrap();
+        })
+        .unwrap();
+        assert!(entries.into_iter().next().unwrap().is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn byte_limits_and_invalid_utf8() {
         let root = root("bytes");
         fs::write(root.join("reader/exact"), vec![b'a'; 65536]).unwrap();
@@ -459,7 +548,9 @@ mod tests {
                 fs::write(root.join(format!("{package}/key{i}")), vec![b'x'; 65536]).unwrap();
             }
         }
-        let captured = capture_settings(&root, ["reader", "second"]);
+        let captured = capture_settings(&root, ["second", "reader"]);
+        assert_eq!(captured["reader"].len(), 129);
+        assert_eq!(captured["second"].len(), 127);
         assert_eq!(
             captured
                 .values()
