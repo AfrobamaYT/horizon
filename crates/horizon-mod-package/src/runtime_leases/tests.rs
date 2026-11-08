@@ -1,4 +1,32 @@
 use super::*;
+#[cfg(windows)]
+#[test]
+fn an_open_initializer_allows_readers_but_excludes_cleanup() {
+    let root = tempfile::tempdir().unwrap();
+    let registry = Registry::with_release(root.path(), Release::Unlock).unwrap();
+    let initializing = initialize_lock(&registry.directory, "initializing").unwrap();
+    let acquire = |mode| {
+        open_lock(
+            &registry.directory,
+            "initializing",
+            mode,
+            Release::Unlock,
+            true,
+        )
+    };
+    let reader = acquire(LockMode::Shared)
+        .expect("an entry creator must not spuriously refuse a concurrent shared launch");
+    drop(reader);
+    assert!(matches!(acquire(LockMode::Exclusive), Err(Error::Busy)));
+    drop(initializing);
+    drop(acquire(LockMode::Exclusive).unwrap());
+    // The old initializer's write access alone reproduces the sharing refusal.
+    let writable_initializer = registry.directory.create("initializing").unwrap();
+    assert!(acquire(LockMode::Shared).is_err());
+    drop(writable_initializer);
+    drop(acquire(LockMode::Shared).unwrap());
+}
+
 fn directory(path: &Path) -> Dir {
     fs::create_dir_all(path).unwrap();
     Dir::open_ambient_dir(path, cap_std::ambient_authority()).unwrap()
