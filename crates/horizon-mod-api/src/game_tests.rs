@@ -121,6 +121,11 @@ impl GameTests for GameTestFunctions {
         {
             return Err("invalid or reserved test id");
         }
+        if crate::Identifier::parse(&definition.function).is_err()
+            || !definition.function.contains(':')
+        {
+            return Err("expected namespaced function id");
+        }
         if self.definitions.contains_key(id) {
             return Err("duplicate test id");
         }
@@ -201,6 +206,11 @@ mod tests {
         let mut invalid = definition;
         invalid.max_ticks = 0;
         assert!(registry.register_test("example:invalid", invalid).is_err());
+        let bare = GameTestDefinition::new("example:structure".into(), "pass".into());
+        assert_eq!(
+            registry.register_test("example:bare", bare),
+            Err("expected namespaced function id")
+        );
         assert_eq!(
             registry.definitions().map(|(id, _)| id).collect::<Vec<_>>(),
             ["example:passing"]
