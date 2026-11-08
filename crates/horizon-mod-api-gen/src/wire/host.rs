@@ -147,6 +147,18 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
     code.push_str(&frame(surface)?);
     let types = &surface.types;
     code.push_str(
+        "pub fn export_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
+    );
+    for (id, m) in surface
+        .methods
+        .iter()
+        .filter(|m| super::exports().contains(&m.owner))
+        .enumerate()
+    {
+        writeln!(code, "({:?},{:?}) => Some({id}),", m.owner, m.name).unwrap();
+    }
+    code.push_str("_ => None } }\n");
+    code.push_str(
         "pub fn import_id(owner: &str, name: &str) -> Option<u32> { match (owner,name) {\n",
     );
     for (id, m) in imports(&surface.methods).iter().enumerate() {
