@@ -623,7 +623,7 @@ fn stage_installed(home: &Path, out: PathBuf) -> Result<Option<PathBuf>, String>
         }
         count += 1;
     }
-    if count == 0 && wasm_internals::installed(Some(home))?.is_empty() {
+    if count == 0 && wasm_internals::installed(home)?.is_empty() {
         return Ok(None);
     }
     fs::create_dir_all(&out).map_err(|e| e.to_string())?;
@@ -1969,14 +1969,14 @@ struct BuildOptions<'a> {
     allow_jar_downloads: bool,
     skip: &'a [LeftOut],
     isolate: bool,
-    /// The instance whose installed wasm mods choose the game's internals table; none leaves the
-    /// committed empty table.
+    /// The instance whose enabled wasm mods choose the table; server exports instead use
+    /// packages directly in the explicit mod folder.
     home: Option<&'a Path>,
 }
 
 /// Whether an instance needs a source table even without any native code mods.
 pub fn has_wasm_internals(home: &Path) -> bool {
-    wasm_internals::installed(Some(home)).is_ok_and(|declared| !declared.is_empty())
+    wasm_internals::installed(home).is_ok_and(|declared| !declared.is_empty())
 }
 
 /// Resolve the two inputs to the source pipeline before preparing or building the game.
@@ -1985,7 +1985,10 @@ fn build_inputs(
     home: Option<&Path>,
 ) -> Result<(Vec<Bundle>, wasm_internals::Declarations), Failed> {
     let mods = scan_bundles(folder)?;
-    let declared = wasm_internals::installed(home)?;
+    let declared = match home {
+        Some(home) => wasm_internals::installed(home)?,
+        None => wasm_internals::from_directory(folder, None)?,
+    };
     if mods.is_empty() && declared.is_empty() {
         return Err(Failed::Nothing);
     }
@@ -2215,6 +2218,7 @@ fn pipeline(
             }).collect::<Vec<_>>(),
             "target": target.name(),
             "rust_target": platform.target,
+            "wasm_internals": wasm_internals,
             "secs": started.elapsed().as_secs(),
             "mods": mods.iter().map(|m| serde_json::json!({
                 "id": m.manifest.id,
