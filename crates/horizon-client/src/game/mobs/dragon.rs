@@ -747,6 +747,19 @@ impl Dragon {
     ) -> Hurt {
         self.hurt_from(level, part, damage, counts, arrow, None, false)
     }
+    /// Whether the phase, part scaling and source guards reach LivingEntity.
+    fn reaches_base_check(&self, part: usize, damage: f32, counts: bool, arrow: bool) -> bool {
+        let damage = if part != 0 && part != 1 {
+            damage / 4.0 + damage.min(1.0)
+        } else {
+            damage
+        };
+        self.alive()
+            && !matches!(self.phase, Phase::Dying { .. })
+            && !(arrow && self.phase.sitting())
+            && damage >= 0.01
+            && counts
+    }
     fn hurt_from(
         &mut self,
         level: &mut DamageLevel<'_>,
@@ -1675,10 +1688,20 @@ impl Game<'_> {
             position: from.map(|p| [p.x, p.y, p.z]),
         };
         let level = super::entity::damage_level_of!(self, scoped);
-        if level.invulnerability_check(
-            horizon_client::health::Hurting::Dragon(id as i32, source),
-            vanilla,
-        ) {
+        let reaches_base = self.dragon.as_ref().is_some_and(|d| {
+            d.reaches_base_check(
+                BODY,
+                amount,
+                player.is_some() || is_explosion_type(ty),
+                shrugs(direct.as_ref()),
+            )
+        });
+        if reaches_base
+            && level.invulnerability_check(
+                horizon_client::health::Hurting::Dragon(id as i32, source),
+                vanilla,
+            )
+        {
             // Before the hook, this command treated an otherwise valid fire
             // hit as accepted while the dragon's fire immunity absorbed it.
             if is_fire(kind) && !saved {
@@ -1834,7 +1857,16 @@ impl Game<'_> {
         let by_id = by.map(|who| self.fight_entity(who));
         let hit_source = hurt_source(kind, by_id, origin.entity_id);
         let source = counts.then_some(hit_source);
-        if !origin.invulnerability_checked {
+        // Part fire immunity is independent of LivingEntity's base check.
+        if is_fire(kind) {
+            return Hurt::Refused;
+        }
+        if !origin.invulnerability_checked
+            && self
+                .dragon
+                .as_ref()
+                .is_some_and(|d| d.reaches_base_check(part, damage, counts, shrugs(origin.direct)))
+        {
             let Some(id) = self.dragon.as_ref().map(|d| d.id) else {
                 return Hurt::Refused;
             };
