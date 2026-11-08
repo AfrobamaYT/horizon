@@ -360,6 +360,11 @@ pub enum Spread {
 
 /// The world as seen by block behaviour. Implemented by the game and tests.
 pub trait LevelAccess {
+    /// `WorldBorder.isWithinBounds(BlockPos)` for block movement.
+    fn within_world_border(&self, _pos: BlockPos) -> bool {
+        true
+    }
+
     /// Whether a hopper may pick up this dropped item stack. The default allows.
     fn allow_hopper_pickup_item(&self, _pos: BlockPos, _item: &str, _count: u32) -> bool {
         true
@@ -919,6 +924,15 @@ pub trait LevelAccess {
         _side_effects: bool,
     ) -> u8 {
         0
+    }
+    /// Ensure a new block's optional entity after its onPlace completed, as
+    /// LevelChunk.setBlockState does. The actual state is supplied; an existing
+    /// valid same-block instance must survive. Defaults to no additional factory.
+    fn ensure_block_entity(&mut self, _pos: BlockPos, _state: BlockStateId) {}
+    /// EntityBlock class identity, independent of whether this particular
+    /// state's factory creates an instance (e.g. an empty machine cage).
+    fn has_native_block_entity(&self, _state: BlockStateId) -> bool {
+        false
     }
     /// Whether a block entity a mod made lives at `pos` (`native_block_entity`),
     /// whatever its block's template: it is removed with its block and no piston
