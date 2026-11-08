@@ -163,7 +163,7 @@ impl Game<'_> {
             if g.lan.is_none() {
                 return Err("command harness: no hub".into());
             }
-            g.start_server_trip(conn, plan.dim, Some(plan));
+            g.start_server_trip(conn, plan.dim, Some(plan), false);
             Ok(())
         })
     }
@@ -267,9 +267,19 @@ impl Game<'_> {
                     self.chat_capture = Some(Vec::new());
                     self.cmds.results = Some(Vec::new());
                     self.harness_owner(|g| {
+                        let previous = g.command_source;
+                        if op["source"].as_str() == Some("console") {
+                            // Actual server source; permission-only `as_console`
+                            // otherwise keeps the connected owner's entity.
+                            g.command_source = Some(super::commands::execute::Source {
+                                silent: false,
+                                ..g.server_source()
+                            });
+                        }
                         g.as_console(|g| {
                             g.run_command(command.strip_prefix('/').unwrap_or(command))
                         });
+                        g.command_source = previous;
                         Ok(())
                     })?;
                     let messages = self.chat_capture.take().unwrap_or_default();

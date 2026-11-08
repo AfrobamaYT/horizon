@@ -938,7 +938,9 @@ impl Game<'_> {
                     "leash": m.extra.leash.map(|h| format!("{h:?}")),
                     "tame": m.extra.tame,
                     "sitting": m.extra.sitting,
-                    "temper": m.extra.variant3,
+                    "temper": if horizon_client::mobs::equine::is_equine(m.species()) {
+                        horizon_client::mobs::equine::temper(m)
+                    } else { i32::from(m.extra.variant3) },
                     "chested": m.extra.chested,
                 });
                 // Set apart: one json! with every key goes past the default macro recursion
@@ -1008,13 +1010,13 @@ impl Game<'_> {
             others_solid: None,
             daylight: self.dim != Dim::Nether && self.sky_darken() < 4,
             // day.json: false from tick 12542, true from 23460 (a step track).
-            monsters_burn: self.dim == Dim::Overworld
+            monsters_burn: self.dimension_type().has_timeline("minecraft:day")
                 && !(12542..23460).contains(&self.world.day_time.rem_euclid(24000)),
             game_time: self.world.game_time,
             day_time: self.world.day_time,
             raining: weather && rain > 0.2,
             thundering: weather && thunder > 0.9,
-            nether: self.dim == Dim::Nether,
+            level: self.level_key(),
             block_tags: &self.items().block_tags,
             landing: &self.motion.landing,
             biomes: world_biomes!(self),
@@ -1034,7 +1036,7 @@ impl Game<'_> {
                 .ui
                 .rules
                 .int_at(horizon_client::gamerules::vanilla::MAX_ENTITY_CRAMMING),
-            end: self.dim == Dim::End,
+            dimension_type: self.dimension_type(),
             world_seed: self.level.seed,
             sea_level: if self.dim == Dim::Nether { 32 } else { 63 },
             teams: std::sync::Arc::new(self.mob_teams()),
@@ -2918,7 +2920,7 @@ impl Game<'_> {
                 } => {
                     self.spawn_creeper_cloud(at, effects, hidden, ambient, color);
                 }
-                MobEvent::Explode(at, radius, species) => {
+                MobEvent::Explode(at, radius, species, silent) => {
                     // The exploding mob causes the damage (Creeper.explodeCreeper).
                     let noted = self.combat.explosion_source.is_some();
                     let source_mob = self.combat.explosion_source.or_else(|| {
@@ -2947,12 +2949,15 @@ impl Game<'_> {
                     // Only a creeper or a wither empties the hives it blows up.
                     // The creeper is already gone from the list, so the event
                     // carries its kind. A sulfur cube's blast is TNT's.
+                    let source = super::explosion::ExplosionSource::default().with_silence(silent);
                     let result = match species {
-                        Species::Creeper | Species::Wither => {
-                            self.with_hive_emptying_blast(|g| g.explode(source_mob, at, radius))
+                        Species::Creeper | Species::Wither => self.with_hive_emptying_blast(|g| {
+                            g.explode(source_mob, at, radius, source)
+                        }),
+                        Species::SulfurCube => {
+                            self.explode_sulfur_cube(source_mob, at, radius, source)
                         }
-                        Species::SulfurCube => self.explode_sulfur_cube(source_mob, at, radius),
-                        _ => self.explode(source_mob, at, radius),
+                        _ => self.explode(source_mob, at, radius, source),
                     };
                     self.combat.explosion_source = None;
                     self.combat.explosion_source_named = false;
@@ -3246,6 +3251,10 @@ impl Game<'_> {
                     if let Some(thrown) = self.just_spawned_item() {
                         thrown.thrower = Some(thrower);
                     }
+                }
+                MobEvent::DropStack { mob, stack, at } => {
+                    self.native_entity_drop_item(mob, &stack.item, stack.count as i32, at);
+                    self.spawn_item(stack, at, dispenser::new_item_motion(), 10);
                 }
                 MobEvent::DropItem {
                     mob,
@@ -3727,6 +3736,7 @@ impl Game<'_> {
                 MobEvent::CureZombieVillager { mob } => self.cure_zombie_villager(mob),
                 MobEvent::Reinforcements { mob, target } => self.call_reinforcements(mob, target),
                 MobEvent::VillagerMeet { mob, other } => self.villager_meet(mob, other),
+                MobEvent::VillagerTrade { mob, player } => self.villager_traded_by(mob, player),
                 MobEvent::VillagerOffers { mob } => {
                     if let Some(i) = self.mobs.iter().position(|m| m.id == mob) {
                         self.ensure_offers(i);
@@ -6223,7 +6233,13 @@ impl Game<'_> {
                 // shot it, or the player who sent it back.
                 let fire = self.large_fireball_fire(p.owner, p.guest);
                 self.combat.explosion_direct = Some(p.id);
-                let result = self.explode_mob(atp, *power as f32, fire);
+                let result = self.explode_mob(
+                    atp,
+                    *power as f32,
+                    fire,
+                    super::explosion::ExplosionSource::default()
+                        .with_silence(self.entity_silent(p.id)),
+                );
                 self.combat.explosion_direct = None;
                 self.set_blast_by_player(false);
                 self.combat.explosion_owner = None;
@@ -6265,7 +6281,16 @@ impl Game<'_> {
                     _ => None,
                 };
                 let owner = self.potion_owner(p.owner);
-                self.splash(stack, at, mob, block, p.age, &owner, p.velocity);
+                self.splash(
+                    stack,
+                    at,
+                    mob,
+                    block,
+                    p.age,
+                    &owner,
+                    self.entity_silent(p.id),
+                    p.velocity,
+                );
                 if stack.item.as_ref() != "minecraft:experience_bottle" {
                     let item = stack.item.to_string();
                     self.native_potion_splash(&item, [at.x, at.y, at.z]);
@@ -11168,7 +11193,7 @@ mod pearl_tests {
             day_time: 1000,
             raining: false,
             thundering: false,
-            nether: false,
+            level: horizon_core::LevelKey::OVERWORLD,
             block_tags: &items.block_tags,
             landing: &motion.landing,
             biomes: &biomes,
@@ -11177,7 +11202,7 @@ mod pearl_tests {
             mob_drops: true,
             max_entity_cramming: 24,
             difficulty: spawning::LocalDifficulty::new(2, 1000, 0, 0.0),
-            end: false,
+            dimension_type: horizon_world::dimension_type::DimensionFacts::overworld(),
             world_seed: 0,
             sea_level: 63,
             items: Some(&items),

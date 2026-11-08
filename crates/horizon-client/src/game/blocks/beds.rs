@@ -12,9 +12,12 @@ use horizon_core::geometry::Vec3;
 use horizon_world::registry::BlockStateId;
 
 impl Game<'_> {
-    /// `BedRule.canSleep` of the Overworld's bed rule: at night or in a thunderstorm.
+    /// `BedRule.canSleep` of the current dimension's bed rule.
     pub(super) fn bed_can_sleep_now(&self) -> bool {
-        self.dim == Dim::Overworld && self.sky_darken() >= 4
+        self.dimension_type()
+            .bed_rule
+            .can_sleep
+            .test(self.dark_outside())
     }
     /// What `CanContinueSleepingEvent.getProblem` holds for a sleeper: its bed gone
     /// (`checkBedExists`), or for a player (`Player.tick`) a bed rule that no longer lets
@@ -90,8 +93,8 @@ impl Game<'_> {
             // has destroy_on_leave, so a straw bed breaks when its sleeper gets up.
             let bed = self.world.block(head[0], head[1], head[2]);
             let straw = &*self.res.facts().get(bed).name == "minecraft:straw_bed";
-            if dim == Dim::Overworld
-                && straw
+            if straw
+                && self.dimension_type_of(dim).straw_bed_rule.destroy_on_leave
                 && let Err(e) = self.destroy_straw_bed(head)
             {
                 log::warn!("could not break the straw bed at {head:?}: {e}");

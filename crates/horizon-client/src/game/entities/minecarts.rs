@@ -1291,11 +1291,14 @@ impl Game<'_> {
     }
     /// Runs `push_from_cart` for the cart being ticked (`c` is a copy of the
     /// stored one): the stored cart is replaced by `c` for the push and `c`
-    /// takes back what the push changed.
+    /// takes back what the push changed. The rolled loot stays with `c`: the
+    /// stored cart is without it for the whole tick (`tick_carts_now`), and
+    /// a mineshaft's chest cart carries its whole roll as NBT.
     fn push_from_ticked_cart(&mut self, c: &mut Minecart) {
         let Some(i) = self.carts.iter().position(|x| x.id == c.id) else {
             return;
         };
+        let loot = c.loot.take();
         if !self.store_cart_back(i, c.clone()) {
             return;
         }
@@ -1303,6 +1306,7 @@ impl Game<'_> {
         if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
             *c = self.carts[i].clone();
         }
+        c.loot = loot;
     }
     /// `AbstractMinecart.tick` for one cart; returns false once it is gone.
     fn tick_cart(&mut self, c: &mut Minecart, intent: [f64; 2]) -> bool {
@@ -1528,6 +1532,7 @@ impl Game<'_> {
         let at = [c.position.x, c.position.y, c.position.z];
         // The cart is the explosion's source: it is gone before the blast
         // looks for entities, so it can't hit itself.
+        let silent = self.entity_silent(c.id);
         if let Some(i) = self.carts.iter().position(|x| x.id == c.id) {
             self.eject_cart_mobs(i);
         }
@@ -1541,7 +1546,15 @@ impl Game<'_> {
         self.combat.rail_proof_blast = c.fuse >= 0;
         self.combat.explosion_in_water = self.bounds_in_water(c.bounds());
         self.combat.explosion_direct = Some(c.id);
-        let _ = self.with_hive_emptying_blast(|g| g.server_explode(at, power, interaction, false));
+        let _ = self.with_hive_emptying_blast(|g| {
+            g.server_explode_from(
+                at,
+                power,
+                interaction,
+                false,
+                super::explosion::ExplosionSource::default().with_silence(silent),
+            )
+        });
         self.combat.explosion_direct = None;
         self.combat.explosion_in_water = false;
         self.combat.rail_proof_blast = false;
@@ -3702,5 +3715,64 @@ mod tnt_impact_tests {
             Vec3::new(8.3, 64.0, 4.5),
             Vec3::new(0.4, 0.0, 0.4)
         ));
+    }
+}
+
+#[cfg(test)]
+mod cart_push_tests {
+    use super::{CartKind, Minecart};
+    use horizon_client::{items::ItemStack, save::RolledLoot};
+    use horizon_core::geometry::Vec3;
+
+    /// Two chest carts pushed apart (`OldMinecartBehavior.pushAndPickupEntities`):
+    /// the push runs on copies of the ticked cart, and the one still holding
+    /// its mineshaft roll keeps the roll, so it is saved as its loot table.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn a_pushed_chest_cart_keeps_its_rolled_loot() {
+        super::super::native_entity_refs::tests::with_game(|game| {
+            game.options.dedicated = Some(Vec::new());
+            game.world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(horizon_client::chunk::Chunk::empty(0, 0)),
+            );
+            let stone = game
+                .pack
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            for x in 4..13 {
+                for z in 4..13 {
+                    game.world.set(x, 63, z, stone).unwrap();
+                }
+            }
+            let items = vec![Some(ItemStack::new("minecraft:rail", 12)); 27];
+            let loot = RolledLoot {
+                pos: (8, 64, 8),
+                table: "minecraft:chests/abandoned_mineshaft".into(),
+                seed: Some(42),
+                items: horizon_client::save::encode_items(&items),
+            };
+            let mut rolled = Minecart::new(1, CartKind::Chest, Vec3::new(8.3, 64.0, 8.5));
+            rolled.items = items;
+            rolled.loot = Some(loot.clone());
+            game.carts.push(rolled);
+            // Facing along X (yaw 0) and 0.4 apart on X: the old behaviour pushes.
+            game.carts
+                .push(Minecart::new(2, CartKind::Chest, Vec3::new(8.7, 64.0, 8.5)));
+            for _ in 0..5 {
+                game.tick_carts();
+            }
+            let cart = |id| game.carts.iter().find(|c| c.id == id).unwrap();
+            assert!(
+                cart(2).position.x - cart(1).position.x > 0.4,
+                "the carts were pushed apart: {} {}",
+                cart(1).position.x,
+                cart(2).position.x
+            );
+            assert_eq!(cart(1).loot.as_ref(), Some(&loot));
+            assert_eq!(cart(2).loot, None);
+        });
     }
 }

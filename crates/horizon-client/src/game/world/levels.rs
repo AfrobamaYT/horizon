@@ -308,7 +308,7 @@ impl Game<'_> {
         let mut world = World::new(self.res.facts().air, self.level.seed);
         world.attachments = save.load_attachments();
         world.shape = self.level_shapes.get(dim.id());
-        world.fast_lava = dim == Dim::Nether;
+        world.fast_lava = self.dimension_type_of(dim).fast_lava;
         Ok(Parked {
             world,
             streaming,
@@ -541,7 +541,22 @@ impl Game<'_> {
         // (each `ServerLevel.tick` only reads `runsNormally`), and the native
         // `ServerTickStart` before that level work, where NeoForge fires
         // `ServerTickEvent.Pre`. A paused pass and a held server tick nothing.
-        let running = (!paused && !self.agent.hold_server).then(|| self.clock.world_runs());
+        let running = if !paused && !self.agent.hold_server {
+            self.clock.check_sprint_completion();
+            if let Some(report) = self.clock.take_sprint_report() {
+                // ServerTickRateManager.finishTickSprint: the server's sendSuccess.
+                self.console_broadcast = Some(true);
+                self.sprint_report(&report);
+                self.console_broadcast = None;
+                self.send_admin_feedback(None);
+                self.admin_feedback.clear();
+                // Then onTickRateChanged, its mods outside the server's broadcast.
+                self.on_tick_rate_changed();
+            }
+            Some(self.clock.tick_world_runs())
+        } else {
+            None
+        };
         let server = self.serving.is_some() || self.options.dedicated.is_some();
         // A config edited while the server is paused (empty) still reloads.
         // The parts outside every level get spans of their own, so that a slow
@@ -698,8 +713,7 @@ impl Game<'_> {
         result
     }
 
-    /// The end of `MinecraftServer.runServer`'s loop for a server thread: a
-    /// finished `/tick sprint` reports to the operators as the server, then
+    /// The end of `MinecraftServer.runServer`'s loop for a server thread:
     /// the next tick starts one tick length after this one, or straight away
     /// while the sprint runs (`checkShouldSprintThisTick`). A server more
     /// than two seconds behind skips the ticks it missed: that returns how far
@@ -709,14 +723,6 @@ impl Game<'_> {
         next: &mut Instant,
         paused: bool,
     ) -> Option<Duration> {
-        if let Some(report) = self.clock.take_sprint_report() {
-            // ServerTickRateManager.finishTickSprint: the server's sendSuccess.
-            self.console_broadcast = Some(true);
-            self.sprint_report(&report);
-            self.console_broadcast = None;
-            self.send_admin_feedback(None);
-            self.admin_feedback.clear();
-        }
         let now = Instant::now();
         if !paused && self.clock.sprinting() {
             *next = now;

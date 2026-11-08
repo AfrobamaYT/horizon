@@ -48,6 +48,8 @@ pub struct ParticleOptions {
     /// A native mod's own particle type, by its namespaced name (`mymod:spark`):
     /// `SimpleParticleType` plus the provider `particles/<name>.json` names.
     pub mod_particle: Option<String>,
+    /// Pre-1.20.5 entity-effect providers use spawn velocity as RGB; true is ambient.
+    pub legacy_entity_effect: Option<bool>,
 }
 impl ParticleOptions {
     pub fn simple(ty: ParticleType) -> Self {
@@ -62,6 +64,7 @@ impl ParticleOptions {
             geyser: None,
             vibration: None,
             mod_particle: None,
+            legacy_entity_effect: None,
         }
     }
     /// A native mod's `SimpleParticleType`: the sprite set of
