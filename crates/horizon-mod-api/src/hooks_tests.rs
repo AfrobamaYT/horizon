@@ -434,6 +434,17 @@ fn level_queries_take_their_hosts(
         level.block_drops(server, [0, 64, 0], Some(tool), Some(shooter));
 }
 
+/// Compile-only: the entity queries for contact, picking and multipart parts as a mod calls
+/// them, all reads on a shared host.
+#[allow(dead_code)]
+fn entity_queries_take_a_shared_host(read: &dyn Host, entity: EntityRef) {
+    let _: Option<[f64; 3]> = entity.up_vector(read);
+    let _: Option<[i32; 3]> = entity.on_block(read);
+    let _: Option<NativeClipHit> = entity.pick(read, 4.5);
+    let _: Option<bool> = entity.is_multipart(read);
+    let _: Option<Vec<EntityRef>> = entity.parts(read);
+}
+
 /// Compile-only: the player rule reads on any host, and the writes on a server host.
 #[allow(dead_code)]
 fn player_rules_take_their_hosts(
