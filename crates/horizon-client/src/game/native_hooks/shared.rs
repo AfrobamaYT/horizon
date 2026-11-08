@@ -4186,6 +4186,7 @@ mod tests {
 
             // A level hook's `LevelWriteHost::set_block` fires the same hook in its write.
             let first = game.pack.assets.registry.default_state(FIRST).unwrap();
+            use crate::game::api_values::TryIntoApi;
             let written = game.with_level(|_, level, ticks| {
                 LevelWriteHost::set_block(
                     &mut super::super::mod_api_host::LevelTicks { level, ticks },

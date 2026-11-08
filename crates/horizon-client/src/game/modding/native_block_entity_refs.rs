@@ -612,7 +612,6 @@ fn menu_holds(menu: &Menu, key: (i32, i32, i32)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::api_values::TryIntoApi;
     use horizon_client::chunk::Chunk;
     use horizon_world::registry::BlockStateId;
     use mod_api::HostTransaction;
