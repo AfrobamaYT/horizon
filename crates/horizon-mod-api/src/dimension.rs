@@ -3,12 +3,15 @@
 //! hands it over once at startup. Data packs make dimensions with
 //! `data/<ns>/dimension` and `dimension_type` files; a registered one becomes
 //! those same two entries, below every data pack, so a pack can replace it.
-use horizon_world::worldgen::overrides::ModDimension;
-use serde_json::{Value, json};
 
 /// The generator every level has without a mod's own: vanilla's
 /// `NoiseBasedChunkGenerator`.
 pub(crate) const NOISE_GENERATOR: &str = "minecraft:noise";
+
+/// Whether `c` is `#rrggbb`.
+fn hex_color(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|d| d.is_ascii_hexdigit())
+}
 
 /// How a dimension chooses its biomes (`BiomeSource`): the level stem's `biome_source`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -97,6 +100,41 @@ pub struct DimensionSettings {
     pub can_start_raid: bool,
     /// `minecraft:gameplay/sky_light_level`: the sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// `Level.getSeaLevel`: the sea level mob spawning, rain and snow, maps and phantoms use. With
+    /// `None` it is the noise settings' own for `minecraft:noise`, and the Overworld's 63 for a
+    /// chunk generator a mod registered, which reads none; `Some` is for that generator, whose
+    /// terrain the game cannot read a sea level from. A level of `minecraft:noise` keeps its noise
+    /// settings' sea level, which the terrain is built with.
+    pub sea_level: Option<i32>,
+    /// When a player can sleep in a bed here (`BedRule.canSleep`): `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the player's respawn point here (`BedRule.canSetSpawn`): `always`,
+    /// `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it (`BedRule.explodes`), as in the Nether.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it (`BedRule.destroyOnLeave`).
+    pub bed_destroy_on_leave: bool,
+    /// The same four for a straw bed (`minecraft:gameplay/straw_bed_rule`): when a player can
+    /// sleep in one, `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
+    /// `minecraft:visual/sky_color` as `#rrggbb`: the sky overhead; None is the Overworld's.
+    pub sky_color: Option<String>,
+    /// `minecraft:visual/fog_color` as `#rrggbb`: the fog at the horizon; None is the Overworld's.
+    pub fog_color: Option<String>,
+    /// `minecraft:visual/cloud_height`: the clouds' height in blocks; None is the Overworld's.
+    pub cloud_height: Option<f32>,
+    /// The timelines and default clock the dimension type names: `overworld` (the day and moon
+    /// cycles, the villagers' schedule and the Overworld's clock), `nether` (the villagers'
+    /// schedule only, no clock), `end` (the End's timeline and clock) or `none`. They set the
+    /// level's sky over the day, whether monsters burn in daylight, and the clock `/time` reads.
+    pub day_cycle: String,
 }
 
 impl Default for DimensionSettings {
@@ -131,111 +169,20 @@ impl Default for DimensionSettings {
             snow_golem_melts: false,
             can_start_raid: true,
             sky_light_level: 15.0,
+            sea_level: None,
+            bed_can_sleep: "when_dark".into(),
+            bed_can_set_spawn: "always".into(),
+            bed_destroy_on_use: false,
+            bed_destroy_on_leave: false,
+            straw_bed_can_sleep: "when_dark".into(),
+            straw_bed_can_set_spawn: "never".into(),
+            straw_bed_destroy_on_use: false,
+            straw_bed_destroy_on_leave: true,
+            sky_color: None,
+            fog_color: None,
+            cloud_height: None,
+            day_cycle: "overworld".into(),
         }
-    }
-}
-
-impl DimensionSettings {
-    /// The dimension type's fields these settings set.
-    fn dimension_type(&self) -> Value {
-        json!({
-            "min_y": self.min_y,
-            "height": self.height,
-            "logical_height": self.logical_height,
-            "has_skylight": self.has_skylight,
-            "has_ceiling": self.has_ceiling,
-            "has_fixed_time": self.has_fixed_time,
-            "has_ender_dragon_fight": self.has_ender_dragon_fight,
-            "coordinate_scale": self.coordinate_scale,
-            "ambient_light": self.ambient_light,
-            "infiniburn": self.infiniburn,
-            "monster_spawn_light_level": {
-                "type": "minecraft:uniform",
-                "min_inclusive": self.monster_spawn_light_level.0,
-                "max_inclusive": self.monster_spawn_light_level.1,
-            },
-            "monster_spawn_block_light_limit": self.monster_spawn_block_light_limit,
-            "skybox": self.skybox,
-            "cardinal_light": self.cardinal_light,
-            "attributes": {
-                "minecraft:gameplay/water_evaporates": self.water_evaporates,
-                "minecraft:gameplay/fast_lava": self.fast_lava,
-                "minecraft:gameplay/respawn_anchor_works": self.respawn_anchor_works,
-                "minecraft:gameplay/nether_portal_spawns_piglin": self.nether_portal_spawns_piglin,
-                "minecraft:gameplay/piglins_zombify": self.piglins_zombify,
-                "minecraft:gameplay/snow_golem_melts": self.snow_golem_melts,
-                "minecraft:gameplay/can_start_raid": self.can_start_raid,
-                "minecraft:gameplay/sky_light_level": self.sky_light_level,
-            },
-        })
-    }
-    /// The level stem's `biome_source`.
-    fn biome_source(&self) -> Value {
-        match self.biome_source {
-            BiomeSourceKind::Fixed => json!({"type": "minecraft:fixed", "biome": self.biome}),
-            BiomeSourceKind::Checkerboard => json!({
-                "type": "minecraft:checkerboard",
-                "biomes": self.biomes,
-                "scale": self.biome_scale,
-            }),
-            BiomeSourceKind::MultiNoise => {
-                json!({"type": "minecraft:multi_noise", "preset": self.biome_preset})
-            }
-            BiomeSourceKind::End => json!({"type": "minecraft:the_end"}),
-        }
-    }
-    /// What the biome source's codec refuses, if anything.
-    pub(crate) fn invalid_biome_source(&self) -> Option<String> {
-        let reason = match self.biome_source {
-            BiomeSourceKind::Fixed => return None,
-            BiomeSourceKind::Checkerboard if self.biomes.is_empty() => {
-                "a checkerboard needs at least one biome"
-            }
-            BiomeSourceKind::Checkerboard if self.biome_scale > 62 => "biome_scale must be 0 to 62",
-            BiomeSourceKind::MultiNoise
-                if !matches!(
-                    self.biome_preset.as_str(),
-                    "minecraft:overworld" | "minecraft:nether"
-                ) =>
-            {
-                "biome_preset must be minecraft:overworld or minecraft:nether"
-            }
-            _ if self.generator != NOISE_GENERATOR => {
-                "only the fixed biome source suits a chunk generator of a mod's own"
-            }
-            _ => return None,
-        };
-        Some(reason.to_owned())
-    }
-    /// What the dimension type's codec refuses in the fields besides the build height, if
-    /// anything: a value out of its range, or a name the game has no such sky or lighting for.
-    pub(crate) fn invalid_field(&self) -> Option<String> {
-        let light = |n: i32| (0..=15).contains(&n);
-        let (low, high) = self.monster_spawn_light_level;
-        let reason = if !(self.coordinate_scale > 0.0 && self.coordinate_scale <= 30_000_000.0) {
-            "coordinate_scale must be above 0 and at most 30000000"
-        } else if !(0.0..=1.0).contains(&self.ambient_light) {
-            "ambient_light must be 0 to 1"
-        } else if !(0.0..=15.0).contains(&self.sky_light_level) {
-            "sky_light_level must be 0 to 15"
-        } else if !(light(low) && light(high) && low <= high) {
-            "monster_spawn_light_level must be a range inside 0 to 15"
-        } else if !light(self.monster_spawn_block_light_limit) {
-            "monster_spawn_block_light_limit must be 0 to 15"
-        } else if !matches!(self.skybox.as_str(), "overworld" | "end" | "none") {
-            "skybox must be overworld, end or none"
-        } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
-            "cardinal_light must be default or nether"
-        } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
-            "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
-        } else {
-            return None;
-        };
-        Some(reason.to_owned())
-    }
-    /// Whether the dimension type's codec accepts the build height.
-    pub(crate) fn valid_shape(&self) -> bool {
-        horizon_world::worldgen::overrides::LevelHeight::of_json(&self.dimension_type()).is_some()
     }
 }
 
@@ -291,6 +238,103 @@ pub struct LevelDimensionType {
     pub can_start_raid: bool,
     /// The sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// The timelines the dimension type names, as ids (`minecraft:day`).
+    pub timelines: Vec<String>,
+    /// The clock `/time` reads here, if the dimension type has a default one.
+    pub default_clock: Option<String>,
+    /// When a player can sleep in a bed: `always`, `when_dark` or `never`.
+    pub bed_can_sleep: String,
+    /// When a bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub bed_can_set_spawn: String,
+    /// Whether a bed explodes when a player tries to use it.
+    pub bed_destroy_on_use: bool,
+    /// Whether a bed is destroyed when the player leaves it.
+    pub bed_destroy_on_leave: bool,
+    /// When a player can sleep in a straw bed: `always`, `when_dark` or `never`.
+    pub straw_bed_can_sleep: String,
+    /// When a straw bed sets the respawn point: `always`, `when_dark` or `never`.
+    pub straw_bed_can_set_spawn: String,
+    /// Whether a straw bed explodes when a player tries to use it.
+    pub straw_bed_destroy_on_use: bool,
+    /// Whether a straw bed is destroyed when the player leaves it.
+    pub straw_bed_destroy_on_leave: bool,
+}
+
+impl DimensionSettings {
+    /// What the biome source's codec refuses, if anything.
+    pub fn invalid_biome_source(&self) -> Option<String> {
+        let reason = match self.biome_source {
+            BiomeSourceKind::Fixed => return None,
+            BiomeSourceKind::Checkerboard if self.biomes.is_empty() => {
+                "a checkerboard needs at least one biome"
+            }
+            BiomeSourceKind::Checkerboard if self.biome_scale > 62 => "biome_scale must be 0 to 62",
+            BiomeSourceKind::MultiNoise
+                if !matches!(
+                    self.biome_preset.as_str(),
+                    "minecraft:overworld" | "minecraft:nether"
+                ) =>
+            {
+                "biome_preset must be minecraft:overworld or minecraft:nether"
+            }
+            _ if self.generator != NOISE_GENERATOR => {
+                "only the fixed biome source suits a chunk generator of a mod's own"
+            }
+            _ => return None,
+        };
+        Some(reason.to_owned())
+    }
+    /// What the dimension type's codec refuses in the fields besides the build height, if
+    /// anything: a value out of its range, or a name the game has no such sky or lighting for.
+    pub fn invalid_field(&self) -> Option<String> {
+        let light = |n: i32| (0..=15).contains(&n);
+        let (low, high) = self.monster_spawn_light_level;
+        // The codec's range: `DimensionFacts::valid_coordinate_scale`.
+        let reason = if !(f64::from(1.0e-5_f32)..=3.0e7).contains(&self.coordinate_scale) {
+            "coordinate_scale must be 0.00001 to 30000000"
+        } else if !self.ambient_light.is_finite() {
+            "ambient_light must be a number"
+        } else if !(0.0..=15.0).contains(&self.sky_light_level) {
+            "sky_light_level must be 0 to 15"
+        } else if !(light(low) && light(high) && low <= high) {
+            "monster_spawn_light_level must be a range inside 0 to 15"
+        } else if !light(self.monster_spawn_block_light_limit) {
+            "monster_spawn_block_light_limit must be 0 to 15"
+        } else if !matches!(self.skybox.as_str(), "overworld" | "end" | "none") {
+            "skybox must be overworld, end or none"
+        } else if !matches!(self.cardinal_light.as_str(), "default" | "nether") {
+            "cardinal_light must be default or nether"
+        } else if ![
+            &self.bed_can_sleep,
+            &self.bed_can_set_spawn,
+            &self.straw_bed_can_sleep,
+            &self.straw_bed_can_set_spawn,
+        ]
+        .iter()
+        .all(|rule| matches!(rule.as_str(), "always" | "when_dark" | "never"))
+        {
+            "bed_can_sleep, bed_can_set_spawn, straw_bed_can_sleep and straw_bed_can_set_spawn must be always, when_dark or never"
+        } else if !self.infiniburn.starts_with('#') || self.infiniburn.len() < 2 {
+            "infiniburn must be a block tag, such as #minecraft:infiniburn_overworld"
+        } else if !self
+            .sky_color
+            .iter()
+            .chain(&self.fog_color)
+            .all(|c| hex_color(c))
+        {
+            "sky_color and fog_color must be #rrggbb"
+        } else if self.cloud_height.is_some_and(|h| !h.is_finite()) {
+            "cloud_height must be a number"
+        } else if !matches!(
+            self.day_cycle.as_str(),
+            "overworld" | "nether" | "end" | "none"
+        ) {
+            "day_cycle must be overworld, nether, end or none"
+        } else {
+            return None;
+        };
+        Some(reason.to_owned())
+    }
 }
 
 /// A registered dimension: its namespaced id (`modid:pocket`), the mod that
@@ -301,159 +345,12 @@ pub(crate) struct DimensionInfo {
     pub(crate) settings: DimensionSettings,
 }
 
-impl DimensionInfo {
-    /// The level stem and dimension type it stands for.
-    fn entries(&self) -> ModDimension {
-        let settings = &self.settings;
-        let stem = json!({
-            "type": &*self.id,
-            "generator": {
-                "type": settings.generator,
-                "settings": settings.noise_settings,
-                "biome_source": settings.biome_source(),
-            },
-        });
-        ModDimension {
-            id: self.id.to_string(),
-            stem: stem.to_string(),
-            dimension_type: settings.dimension_type().to_string(),
-        }
-    }
-}
-
-/// The dimensions the mods registered at startup, as the engine reads them.
-/// Empty before the parts are installed.
-pub fn installed_dimensions() -> Vec<ModDimension> {
+/// The dimensions registered at startup, for the game's pack-entry adapter.
+// hidden: the game's pack-entry adapter reads the registered dimensions; mods declare them through the registrar.
+#[doc(hidden)]
+pub fn dimension_declarations() -> Vec<(String, DimensionSettings)> {
     super::parts::installed_dimension_list()
         .iter()
-        .map(DimensionInfo::entries)
+        .map(|dimension| (dimension.id.to_string(), dimension.settings.clone()))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_default_settings_are_accepted_and_name_the_overworlds_type() {
-        let settings = DimensionSettings::default();
-        assert!(settings.valid_shape());
-        assert_eq!(settings.invalid_field(), None);
-        let json = settings.dimension_type();
-        assert_eq!(json["coordinate_scale"], 1.0);
-        assert_eq!(json["infiniburn"], "#minecraft:infiniburn_overworld");
-        assert_eq!(json["monster_spawn_light_level"]["max_inclusive"], 7);
-        assert_eq!(
-            json["attributes"]["minecraft:gameplay/piglins_zombify"],
-            true
-        );
-        assert_eq!(json["attributes"]["minecraft:gameplay/fast_lava"], false);
-    }
-
-    #[test]
-    fn a_field_out_of_range_is_refused_by_name() {
-        let refused = |edit: fn(&mut DimensionSettings)| {
-            let mut settings = DimensionSettings::default();
-            edit(&mut settings);
-            settings.invalid_field().unwrap_or_default()
-        };
-        assert!(refused(|s| s.coordinate_scale = 0.0).contains("coordinate_scale"));
-        assert!(refused(|s| s.coordinate_scale = f64::NAN).contains("coordinate_scale"));
-        assert!(refused(|s| s.ambient_light = 1.5).contains("ambient_light"));
-        assert!(refused(|s| s.sky_light_level = 16.0).contains("sky_light_level"));
-        assert!(
-            refused(|s| s.monster_spawn_light_level = (8, 7)).contains("monster_spawn_light_level")
-        );
-        assert!(refused(|s| s.monster_spawn_block_light_limit = 16).contains("block_light_limit"));
-        assert!(refused(|s| s.skybox = "moon".into()).contains("skybox"));
-        assert!(refused(|s| s.cardinal_light = "up".into()).contains("cardinal_light"));
-        assert!(
-            refused(|s| s.infiniburn = "minecraft:infiniburn_end".into()).contains("infiniburn")
-        );
-    }
-}
-
-#[cfg(test)]
-mod biome_source_tests {
-    use super::*;
-
-    #[test]
-    fn each_source_names_the_stem_the_data_pack_codec_reads() {
-        let mut settings = DimensionSettings::default();
-        assert_eq!(
-            settings.biome_source(),
-            json!({"type": "minecraft:fixed", "biome": "minecraft:plains"})
-        );
-        settings.biome_source = BiomeSourceKind::Checkerboard;
-        settings.biomes = vec!["minecraft:desert".into(), "minecraft:plains".into()];
-        settings.biome_scale = 3;
-        assert_eq!(
-            settings.biome_source(),
-            json!({
-                "type": "minecraft:checkerboard",
-                "biomes": ["minecraft:desert", "minecraft:plains"],
-                "scale": 3
-            })
-        );
-        settings.biome_source = BiomeSourceKind::MultiNoise;
-        settings.biome_preset = "minecraft:nether".into();
-        assert_eq!(
-            settings.biome_source(),
-            json!({"type": "minecraft:multi_noise", "preset": "minecraft:nether"})
-        );
-        settings.biome_source = BiomeSourceKind::End;
-        assert_eq!(
-            settings.biome_source(),
-            json!({"type": "minecraft:the_end"})
-        );
-    }
-
-    #[test]
-    fn a_source_the_codec_refuses_is_refused_by_name() {
-        let refused = |edit: fn(&mut DimensionSettings)| {
-            let mut settings = DimensionSettings::default();
-            edit(&mut settings);
-            settings.invalid_biome_source().unwrap_or_default()
-        };
-        assert_eq!(refused(|_| {}), "");
-        // vanilla's codec takes a holder set of any size, so 65 biomes are accepted
-        assert_eq!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::Checkerboard;
-                s.biomes = (0..65).map(|n| format!("test:biome_{n}")).collect();
-            }),
-            ""
-        );
-        assert!(
-            refused(|s| s.biome_source = BiomeSourceKind::Checkerboard).contains("checkerboard")
-        );
-        assert!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::Checkerboard;
-                s.biomes = vec!["minecraft:plains".into()];
-                s.biome_scale = 63;
-            })
-            .contains("biome_scale")
-        );
-        assert!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::MultiNoise;
-                s.biome_preset = "minecraft:end".into();
-            })
-            .contains("biome_preset")
-        );
-        assert!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::End;
-                s.generator = "mymod:void".into();
-            })
-            .contains("fixed biome source")
-        );
-        assert_eq!(
-            refused(|s| {
-                s.biome_source = BiomeSourceKind::MultiNoise;
-            }),
-            ""
-        );
-    }
 }

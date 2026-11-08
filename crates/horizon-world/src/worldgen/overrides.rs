@@ -15,6 +15,8 @@ pub const DIMENSIONS: &str = "dimensions";
 /// The bundle of `dimension_type/<id>.json` dimension types. Nothing
 /// prepared has it: the vanilla types' are `LevelHeight::vanilla`.
 pub const DIMENSION_TYPES: &str = "dimension_types";
+/// The bundle of `worldgen/noise_settings/<id>.json` noise generator settings.
+pub const NOISE_SETTINGS: &str = "settings";
 
 /// Pack folders (`data/<ns>/<kind>/`) the chunk generator reads, and the
 /// bundle each joins.
@@ -30,7 +32,7 @@ const KINDS: [(&str, &str); 16] = [
     ("worldgen/material_condition", "conditions"),
     ("worldgen/material_rule", "rules"),
     ("worldgen/noise", "noises"),
-    ("worldgen/noise_settings", "settings"),
+    ("worldgen/noise_settings", NOISE_SETTINGS),
     ("worldgen/placed_feature", "placed_features"),
     ("worldgen/processor_list", "processor_lists"),
     ("worldgen/structure", "structures"),
@@ -52,29 +54,8 @@ pub const PACK_KINDS: [&str; 5] = [
     "worldgen",
 ];
 
-/// Whether `namespace` is a resource location namespace (`[a-z0-9_.-]`) that is also one safe
-/// folder name: not empty, not `.` or `..`.
-pub fn valid_level_namespace(namespace: &str) -> bool {
-    !matches!(namespace, "" | "." | "..")
-        && namespace
-            .bytes()
-            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'.' | b'-'))
-}
-
-/// Whether `path` is a resource location path (`[a-z0-9_.-/]`) a level can be stored under:
-/// every `/`-separated segment is a safe folder name, so no empty segment (a leading, trailing
-/// or doubled `/`) and no `.` or `..`.
-pub fn valid_level_path(path: &str) -> bool {
-    !path.is_empty() && path.split('/').all(valid_level_namespace)
-}
-
-/// Whether `id` (`namespace:path`) names a level whose folder stays inside the world's
-/// `dimensions` folder. Vanilla keeps a level's folder under it through
-/// `Identifier.resolveAgainst`.
-pub fn valid_level_id(id: &str) -> bool {
-    id.split_once(':')
-        .is_some_and(|(namespace, path)| valid_level_namespace(namespace) && valid_level_path(path))
-}
+#[cfg(test)]
+use horizon_core::level_id::valid_level_id;
 
 /// A level a mod registered at startup: a level stem and a dimension type
 /// that sit below every data pack, which can replace either.
@@ -86,6 +67,9 @@ pub struct ModDimension {
     /// The fields of its dimension type the mod sets, as JSON text: the rest
     /// are the overworld's.
     pub dimension_type: String,
+    /// The sea level the mod gives the level, for a chunk generator whose terrain has none to
+    /// read (`stem_sea_level`); the noise settings' win for the noise generator.
+    pub sea_level: Option<i32>,
 }
 
 static MOD_DIMENSIONS: OnceLock<Vec<ModDimension>> = OnceLock::new();
@@ -99,6 +83,23 @@ pub fn install_mod_dimensions(dimensions: Vec<ModDimension>) -> Result<(), Vec<M
 /// The levels the mods registered; empty before they are installed.
 pub fn mod_dimensions() -> &'static [ModDimension] {
     MOD_DIMENSIONS.get().map_or(&[], Vec::as_slice)
+}
+
+/// The sea level a level stem's noise generator builds its terrain at: its `settings`
+/// (`NoiseGeneratorSettings.seaLevel`), a noise settings id that `read` resolves to its JSON or the
+/// settings inline. None for any other generator, whose terrain has no sea level to read, and for
+/// settings `read` cannot find.
+pub fn stem_sea_level(stem: &Value, read: &dyn Fn(&str) -> Option<Value>) -> Option<i32> {
+    let generator = &stem["generator"];
+    if generator["type"].as_str() != Some("minecraft:noise") {
+        return None;
+    }
+    let settings = match &generator["settings"] {
+        Value::String(id) => read(id)?,
+        inline @ Value::Object(_) => inline.clone(),
+        _ => return None,
+    };
+    i32::try_from(settings["sea_level"].as_i64()?).ok()
 }
 
 /// `ns:path` for a pack file `data/<ns>/<kind>/<path>.json`.
@@ -357,6 +358,24 @@ impl WorldgenOverrides {
         };
         LevelHeight::of_type(&ty, types)
     }
+    /// The id and JSON of the dimension type a mod or a pack gave `level`, resolved as `level_height`
+    /// does: None when the level takes a vanilla type no pack changed.
+    pub fn level_type_json(&self, level: &str) -> Option<(String, Value)> {
+        let none = BTreeMap::new();
+        let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
+        let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
+            Some(stem) => serde_json::from_str::<Value>(stem).ok()?["type"].clone(),
+            None => Value::String(level.to_owned()),
+        };
+        match &ty {
+            Value::String(id) => Some((
+                id.clone(),
+                serde_json::from_str::<Value>(types.get(id)?).ok()?,
+            )),
+            inline @ Value::Object(_) => Some((level.to_owned(), inline.clone())),
+            _ => None,
+        }
+    }
     /// The dimension type a mod or a pack gave `level`, resolved as `level_height` does: a built-in
     /// type's facts with the fields the pack's JSON names over them. None when the level takes a vanilla
     /// type unchanged, and an error when a field the game reads is refused.
@@ -365,23 +384,10 @@ impl WorldgenOverrides {
         level: &str,
     ) -> Option<Result<crate::dimension_type::DimensionFacts, String>> {
         use crate::dimension_type::DimensionFacts;
-        let none = BTreeMap::new();
-        let types = self.entries.get(DIMENSION_TYPES).unwrap_or(&none);
-        let ty = match self.entries.get(DIMENSIONS).and_then(|d| d.get(level)) {
-            Some(stem) => serde_json::from_str::<Value>(stem).ok()?["type"].clone(),
-            None => Value::String(level.to_owned()),
-        };
-        let (id, json) = match &ty {
-            Value::String(id) => (
-                id.as_str(),
-                serde_json::from_str::<Value>(types.get(id)?).ok()?,
-            ),
-            inline @ Value::Object(_) => (level, inline.clone()),
-            _ => return None,
-        };
+        let (id, json) = self.level_type_json(level)?;
         // A pack's type for a vanilla id changes that type; any other starts from the Overworld's.
-        let base = DimensionFacts::base_for_type(id);
-        Some(DimensionFacts::patched(base, id, &json))
+        let base = DimensionFacts::base_for_type(&id);
+        Some(DimensionFacts::patched(base, &id, &json))
     }
     /// The entries packs give `bundle`.
     pub fn entries(&self, bundle: &str) -> impl Iterator<Item = (&str, &str)> {
@@ -680,6 +686,7 @@ mod level_facts_tests {
             dimension_type: r#"{"min_y":-64,"height":384,"coordinate_scale":2.0,
                 "attributes":{"minecraft:gameplay/water_evaporates":true}}"#
                 .into(),
+            sea_level: None,
         });
         let facts = o.level_facts("test:pocket").unwrap().unwrap();
         assert_eq!(facts.coordinate_scale, 2.0);
@@ -710,7 +717,31 @@ mod level_facts_tests {
             id: "test:bad".into(),
             stem: r#"{"type":"test:bad"}"#.into(),
             dimension_type: r#"{"min_y":0,"height":64,"skybox":"moon"}"#.into(),
+            sea_level: None,
         });
         assert!(o.level_facts("test:bad").unwrap().is_err());
+    }
+}
+
+#[cfg(test)]
+mod stem_sea_level_tests {
+    use super::stem_sea_level;
+    use serde_json::json;
+
+    /// The sea level is the noise settings', named by id or inline; another generator has none.
+    #[test]
+    fn a_noise_stem_reads_its_settings_sea_level() {
+        let read = |id: &str| (id == "test:high").then(|| json!({"sea_level": 120}));
+        let named = |settings: &str| json!({"generator": {"type": "minecraft:noise", "settings": settings}});
+        assert_eq!(stem_sea_level(&named("test:high"), &read), Some(120));
+        assert_eq!(stem_sea_level(&named("test:absent"), &read), None);
+        let inline = json!({"generator": {
+            "type": "minecraft:noise", "settings": {"sea_level": -16},
+        }});
+        assert_eq!(stem_sea_level(&inline, &read), Some(-16));
+        let flat = json!({"generator": {"type": "minecraft:flat", "settings": {"sea_level": 5}}});
+        assert_eq!(stem_sea_level(&flat, &read), None);
+        let bad = json!({"generator": {"type": "minecraft:noise", "settings": {"sea_level": "x"}}});
+        assert_eq!(stem_sea_level(&bad, &read), None);
     }
 }
