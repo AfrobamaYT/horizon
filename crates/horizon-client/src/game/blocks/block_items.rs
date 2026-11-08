@@ -621,13 +621,10 @@ mod tests {
                     ("pick_test:plain", true, None),
                     ("pick_test:ghost", false, None),
                 ] {
-                    event.blocks.push(horizon_mod_package::content::Block {
-                        id: id.into(),
-                        template: "minecraft:stone".into(),
-                        item,
-                        pick_item: pick_item.map(Into::into),
-                        ..Default::default()
-                    });
+                    let mut block = mod_api::Block::new(id, "minecraft:stone");
+                    block.item = item;
+                    block.pick_item = pick_item.map(Into::into);
+                    event.blocks.push(block);
                 }
             }
         }
@@ -654,7 +651,8 @@ mod tests {
             for (x, block) in (1..).zip(blocks) {
                 let state = game.pack.assets.registry.default_state(block).unwrap();
                 assert!(
-                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE),
+                    game.level_set_block(level, [x, 64, 0], state, NativeBlockUpdateFlags::NONE)
+                        .unwrap(),
                     "{block} at {x}"
                 );
             }

@@ -904,6 +904,7 @@ mod combat_query_tests {
         });
         let enchantments = Enchantments::default()
             .with_entries([("test:random_damage", &definition)])
+            .unwrap()
             .unwrap();
         let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
         stack.enchant("test:random_damage", 1);

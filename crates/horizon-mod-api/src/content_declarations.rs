@@ -156,6 +156,10 @@ pub struct Block {
     /// it is not a block item of its own: an item of this mod or a vanilla
     /// one, checked to exist when the content loads. Needs `item` false.
     pub block_item: Option<String>,
+    /// The item pick-block takes from this block (`getCloneItemStack`), when it is not
+    /// the block's item: a mature crop picks its seed. An item of this mod or a vanilla
+    /// one, checked to exist when the content loads. Absent is the block's item.
+    pub pick_item: Option<String>,
     /// Its item's ordered component patch: `Some(tag)` sets a component, `None` removes it.
     /// Component names do not include the removal prefix `!`.
     pub components: Vec<(String, Option<crate::Tag>)>,

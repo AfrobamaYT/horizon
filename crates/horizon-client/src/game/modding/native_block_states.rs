@@ -503,10 +503,9 @@ mod tests {
             // service: start from the engine's state and overwrite them.
             let state = |id: &str, amount, falling, source| {
                 let kind = FluidKind::from_name(id).unwrap_or(FluidKind::Water);
-                let mut state = mod_api::__private::engine_fluid_state(
-                    host.fluid_key(id).unwrap(),
-                    EngineFluidState::new(kind, 1, falling),
-                );
+                let _ = EngineFluidState::new(kind, 1, falling);
+                let mut state =
+                    mod_api::__private::fluid_state(host.fluid_key(id).unwrap(), 1, falling, false);
                 (state.amount, state.source) = (amount, source);
                 state
             };
