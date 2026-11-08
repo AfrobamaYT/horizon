@@ -17,6 +17,18 @@ unsafe impl std::alloc::GlobalAlloc for Alloc {
 static ALLOC: Alloc = Alloc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BlockKey(u32);
+#[derive(Clone, Copy)]
+pub enum HookId {
+    Proof,
+}
+pub mod __private {
+    pub fn has_scoped_hook(_: crate::HookId) -> bool {
+        true
+    }
+    pub fn block_key_listens(_: crate::HookId, key: crate::BlockKey) -> bool {
+        key.0 == 7
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BlockState(BlockKey, u16);
 impl BlockState {

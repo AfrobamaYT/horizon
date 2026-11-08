@@ -496,11 +496,15 @@ pub(super) fn emit<'a>(
                 }
             }
             let crossing = if declared.is_empty() || block_carrier {
-                stack_crossing(
+                stack_crossing_routed(
                     &args,
                     output.as_ref(),
                     hook_id,
                     scoped.is_some(),
+                    hook.scope.as_ref().and_then(|scope| match scope.kind {
+                        PartKind::Block => Some(scope.key.as_str()),
+                        _ => None,
+                    }),
                     &surface_calls,
                 )
             } else {
@@ -719,11 +723,23 @@ struct StackCrossing {
 
 /// Declared owned-value arguments select this guarded conversion seam. Event records
 /// are built explicitly at their game call sites, not inferred from game bodies.
+#[cfg(test)]
 fn stack_crossing(
     args: &[(String, &Type)],
     output: Option<&(String, &Type)>,
     hook_id: &str,
     scoped: bool,
+    surfaces: &std::collections::HashMap<&str, String>,
+) -> Option<StackCrossing> {
+    stack_crossing_routed(args, output, hook_id, scoped, None, surfaces)
+}
+
+fn stack_crossing_routed(
+    args: &[(String, &Type)],
+    output: Option<&(String, &Type)>,
+    hook_id: &str,
+    scoped: bool,
+    block_scope: Option<&str>,
     surfaces: &std::collections::HashMap<&str, String>,
 ) -> Option<StackCrossing> {
     const STACK_VALUES: &[&str] = &[
@@ -773,9 +789,12 @@ fn stack_crossing(
         return None;
     }
     let guard = if scoped { "has_part_hook" } else { "listened" };
-    let mut before = format!(
-        "if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} use crate::game::api_values::TryIntoApi; "
-    );
+    let mut before =
+        format!("if !mod_api::__private::{guard}(mod_api::HookId::{hook_id}) {{ return; }} ");
+    if let Some(key) = block_scope {
+        before.push_str(&format!("if !crate::game::api_values::block_state::block_listens(mod_api::HookId::{hook_id}, {key}) {{ return; }} "));
+    }
+    before.push_str("use crate::game::api_values::TryIntoApi; ");
     if parameters.iter().any(|(_, ty)| {
         (contains_boundary(ty, STACK_VALUES)
             || contains_boundary(ty, INFALLIBLE_VALUES)
@@ -918,6 +937,81 @@ mod stack_crossing_tests {
             );
         }
     }
+    #[test]
+    fn per_block_routing_runtime_and_mutants() {
+        let state: Type = syn::parse_quote!(BlockState);
+        let writes: Type = syn::parse_quote!(&mut Vec<LandingWrite>);
+        let crossing = stack_crossing_routed(
+            &[
+                ("state".into(), &state),
+                ("secondary".into(), &state),
+                ("writes".into(), &writes),
+            ],
+            None,
+            "Proof",
+            true,
+            Some("state"),
+            &Default::default(),
+        )
+        .unwrap();
+        let guard = "if !crate::game::api_values::block_state::block_listens(mod_api::HookId::Proof, state) { return; }";
+        let body = format!(
+            "{} callback(__api_state, __api_secondary, &mut __api_writes); {}",
+            crossing.before, crossing.after
+        );
+        let unguarded = body.replace(guard, "");
+        let late = unguarded.replace("callback(", &format!("{guard} callback("));
+        assert_ne!(body, unguarded);
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/block-routing-proof");
+        std::fs::create_dir_all(&directory).unwrap();
+        let index = directory.join("index.rs");
+        std::fs::write(
+            &index,
+            include_str!("../../horizon-client/src/game/modding/api_values/block_state.rs"),
+        )
+        .unwrap();
+        for (name, body, success) in [
+            ("baseline", body, true),
+            ("no_guard", unguarded, false),
+            ("late_guard", late, false),
+        ] {
+            let source = directory.join(format!("{name}.rs"));
+            let binary = directory.join(name);
+            std::fs::write(
+                &source,
+                include_str!("../../../tools/refactors/api-pr3b/block_routing.rs")
+                    .replace("INDEX_PATH", index.to_str().unwrap())
+                    .replace("FIRE_BODY", &body),
+            )
+            .unwrap();
+            let compiled = std::process::Command::new("rustc")
+                .args(["--edition=2024", "-O"])
+                .arg(source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .unwrap();
+            assert!(
+                compiled.status.success(),
+                "{}",
+                String::from_utf8_lossy(&compiled.stderr)
+            );
+            let result = std::process::Command::new(binary).output().unwrap();
+            assert_eq!(
+                result.status.success(),
+                success,
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            println!(
+                "{name}: {} {}",
+                String::from_utf8_lossy(&result.stdout),
+                if success { "passed" } else { "mutant killed" }
+            );
+        }
+    }
+
     #[test]
     fn block_crossing_runtime_and_mutants() {
         let state: Type = syn::parse_quote!(&mut BlockState);

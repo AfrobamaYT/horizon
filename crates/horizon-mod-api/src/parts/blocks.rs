@@ -8,6 +8,19 @@ pub fn block_listens(hook: HookId, name: &'static str, state: BlockStateId) -> b
             .is_some_and(|table| !table.block_state(state).is_empty())
 }
 
+/// Whether this hook has a prepared subscriber for an API block key.
+/// The caller owns validation of the routing key.
+pub fn block_key_listens(hook: HookId, key: crate::BlockKey) -> bool {
+    parts(hook, "block routing")
+        .for_hook(hook)
+        .is_some_and(|table| {
+            table
+                .block_keys
+                .get(&key)
+                .is_some_and(|parts| !parts.is_empty())
+        })
+}
+
 impl HookParts {
     /// Parts for a checked API state. Key lookup does not depend on world state numbers.
     pub fn block_value(&self, state: crate::BlockState) -> &[Attached<dyn BlockPart>] {
@@ -20,8 +33,8 @@ impl HookParts {
         if definition.property(state.ordinal(), "").is_err() {
             return &[];
         }
-        crate::registry_keys::block_id(state.block())
-            .and_then(|name| self.blocks.get(name))
+        self.block_keys
+            .get(&state.block())
             .map_or(&[], |parts| parts.as_slice())
     }
     /// The block Parts attached to a block state, in dispatch order.
@@ -481,6 +494,35 @@ pub mod tests {
                 },
             },
         )
+    }
+
+    #[test]
+    fn prepared_key_routing_tracks_tag_reload() {
+        game_thread();
+        crate::registry_keys::resolve_block_keys(
+            [
+                "minecraft:air",
+                "test:gauge",
+                "test:other",
+                "test:connector",
+                "test:press",
+                "minecraft:granite",
+            ],
+            |_| {
+                horizon_mod_runtime::block_definitions::BlockDefinition::new(
+                    &[&Default::default()],
+                    0,
+                )
+                .map_err(|e| format!("{e:?}"))
+            },
+        )
+        .unwrap();
+        let other = crate::registry_keys::block_key("test:other").unwrap();
+        resolve(&["test:other"]).unwrap();
+        assert!(block_key_listens(HookId::AnalogOutput, other));
+        resolve(&[]).unwrap();
+        assert!(!block_key_listens(HookId::AnalogOutput, other));
+        assert!(has_scoped_hook(HookId::AnalogOutput));
     }
 
     #[test]

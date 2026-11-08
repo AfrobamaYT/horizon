@@ -13,6 +13,17 @@ thread_local! {
     static INDEX: RefCell<Option<Arc<Index>>> = const { RefCell::new(None) };
 }
 
+/// Routing reads the precomputed key only: no event value is converted here.
+pub(crate) fn block_listens(hook: mod_api::HookId, state: BlockStateId) -> bool {
+    mod_api::__private::has_scoped_hook(hook)
+        && INDEX.with_borrow(|index| {
+            index
+                .as_ref()
+                .and_then(|index| index.forward.get(state.0 as usize))
+                .is_some_and(|value| mod_api::__private::block_key_listens(hook, value.block()))
+        })
+}
+
 pub(super) fn clear() {
     INDEX.with_borrow_mut(|index| *index = None);
 }

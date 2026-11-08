@@ -1565,16 +1565,22 @@ pub(super) const BLOCK_CONTACT_HOOKS: horizon_client::block_contact::Hooks =
         },
         any_inside: || mod_api::__private::has_scoped_hook(mod_api::HookId::EntityInside),
         inside_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::EntityInside, "entity_inside", state)
+            super::super::api_values::block_state::block_listens(
+                mod_api::HookId::EntityInside,
+                state,
+            )
         },
         pass_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::MinecartPass, "minecart_pass", state)
+            super::super::api_values::block_state::block_listens(
+                mod_api::HookId::MinecartPass,
+                state,
+            )
         },
         fall_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::FallOn, "fall_on", state)
+            super::super::api_values::block_state::block_listens(mod_api::HookId::FallOn, state)
         },
         bounce_listens: |state| {
-            mod_api::__private::block_listens(mod_api::HookId::BounceOn, "bounce_on", state)
+            super::super::api_values::block_state::block_listens(mod_api::HookId::BounceOn, state)
         },
         fall_on: |dimension, level, c, distance, damage, writes| {
             HitLevel(level.reborrow()).native_fall_on(

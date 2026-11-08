@@ -105,6 +105,7 @@ pub struct Parts {
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct HookParts {
     pub(crate) blocks: HashMap<Box<str>, Vec<Attached<dyn BlockPart>>>,
+    pub(crate) block_keys: HashMap<crate::BlockKey, Vec<Attached<dyn BlockPart>>>,
     pub(crate) block_states: Vec<Option<NonZeroU32>>,
     pub(crate) block_slices: Vec<Arc<[Attached<dyn BlockPart>]>>,
     pub(crate) block_entities: HashMap<Box<str>, Vec<Attached<dyn BlockEntityPart>>>,
@@ -359,6 +360,13 @@ pub fn prepare_parts(
         if table.blocks.is_empty() {
             continue;
         }
+        table.block_keys = table
+            .blocks
+            .iter()
+            .filter_map(|(name, attached)| {
+                crate::registry_keys::block_key(name).map(|key| (key, attached.clone()))
+            })
+            .collect();
         let mut names = HashMap::with_capacity(table.blocks.len());
         for (name, attached) in &table.blocks {
             names.insert(
