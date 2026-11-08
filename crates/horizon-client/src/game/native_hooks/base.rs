@@ -5116,7 +5116,7 @@ impl Game<'_> {
             _ => return Ok(None),
         };
         let items = self.items();
-        let Some(ingredient) = Ingredient::parse(&json, items) else {
+        let Some(ingredient) = horizon_client::crafting::Ingredient::parse(&json, items) else {
             return Ok(None);
         };
         let known: Vec<String> = ingredient

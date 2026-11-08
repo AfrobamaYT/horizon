@@ -80,7 +80,7 @@ pub(super) fn state_fluid(
 /// Convert the engine's state using the load-owned kind-to-key mapping.
 pub(super) fn api_fluid_state(state: EngineFluidState) -> Option<FluidState> {
     Some(mod_api::__private::engine_fluid_state(
-        mod_api::__private::world_fluid_key(state.kind())?,
+        mod_api::__private::world_fluid_key(state.kind() as usize)?,
         state,
     ))
 }

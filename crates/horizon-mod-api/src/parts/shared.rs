@@ -763,13 +763,16 @@ pub mod tests {
             |id| horizon_client_core::potions::effect(id).map(|def| def.index),
         )
         .unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:empty",
-            "minecraft:water",
-            "minecraft:flowing_water",
-            "minecraft:lava",
-            "minecraft:flowing_lava",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:empty",
+                "minecraft:water",
+                "minecraft:flowing_water",
+                "minecraft:lava",
+                "minecraft:flowing_lava",
+            ],
+            &[],
+        )
         .unwrap();
         if let Some(types) = horizon_client_core::block_entity_types::current() {
             crate::registry_keys::resolve_block_entity_types(types.names(), |id| types.key(id))
@@ -1080,13 +1083,16 @@ pub mod tests {
         .into();
         crate::install(mods.clone());
         install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
-        crate::registry_keys::resolve_fluids(&[
-            "minecraft:water",
-            "minecraft:lava",
-            "minecraft:flowing_water",
-            "minecraft:flowing_lava",
-            "minecraft:empty",
-        ])
+        crate::registry_keys::resolve_fluids(
+            &[
+                "minecraft:water",
+                "minecraft:lava",
+                "minecraft:flowing_water",
+                "minecraft:flowing_lava",
+                "minecraft:empty",
+            ],
+            &[],
+        )
         .unwrap();
         crate::registry_keys::resolve_block_keys(
             [

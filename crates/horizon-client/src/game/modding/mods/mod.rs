@@ -632,7 +632,11 @@ pub(super) fn content_root(
         .iter()
         .map(|value| value.as_str().ok_or("invalid fluid registry entry"))
         .collect::<Result<Vec<_>, _>>()?;
-    mod_api::__private::resolve_fluids(&fluids).map_err(|errors| {
+    mod_api::__private::resolve_fluids(
+        &fluids,
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .map_err(|errors| {
         errors
             .into_iter()
             .map(|error| error.to_string())
@@ -998,6 +1002,7 @@ impl Game<'_> {
         // worldgen keeps the state it loaded with until a restart.
         let content = &self.mods.content_ids;
         let mut next = wanted.clone();
+
         let mut waiting = Vec::new();
         for id in applied.symmetric_difference(&wanted) {
             if !content.contains(id) || self.mods.live_ids.contains(id) {

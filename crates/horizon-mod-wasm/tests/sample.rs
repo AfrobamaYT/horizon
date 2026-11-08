@@ -116,7 +116,7 @@ impl mod_api::prelude::TagsHost for Server {
             horizon_world::fluid::FluidState::new(horizon_world::fluid::FluidKind::Water, 8, true)
         };
         Some(mod_api::__private::engine_fluid_state(
-            mod_api::__private::world_fluid_key(engine.kind())?,
+            mod_api::__private::world_fluid_key(engine.kind() as usize)?,
             engine,
         ))
     }
@@ -196,8 +196,11 @@ fn the_sample_mod_loads_subscribes_and_registers_its_part() {
         |id| horizon_client_core::potions::effect(id).map(|def| def.index),
     )
     .unwrap();
-    mod_api::__private::resolve_fluids(&["minecraft:empty", "minecraft:water", "minecraft:lava"])
-        .unwrap();
+    mod_api::__private::resolve_fluids(
+        &["minecraft:empty", "minecraft:water", "minecraft:lava"],
+        &horizon_world::fluid::FluidKind::ALL.map(|kind| kind.name()),
+    )
+    .unwrap();
     let load = horizon_world::native_load_context::LoadContext::new(
         mod_api::DataLoadOrigin::ServerDataLoad,
         std::sync::Arc::new(horizon_world::native_load_context::LoadInputs::new(
