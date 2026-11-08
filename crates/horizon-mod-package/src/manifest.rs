@@ -533,12 +533,17 @@ impl Package {
                 .take(MAX_WASM + 1)
                 .read_to_end(&mut bytes)
         } else {
-            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            zip.by_name(WASM)
-                .map_err(|_| WasmError::Missing.to_string())?
-                .take(MAX_WASM + 1)
-                .read_to_end(&mut bytes)
+            #[cfg(target_arch = "wasm32")]
+            return Err("archive I/O is unavailable on wasm32".into());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+                let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                zip.by_name(WASM)
+                    .map_err(|_| WasmError::Missing.to_string())?
+                    .take(MAX_WASM + 1)
+                    .read_to_end(&mut bytes)
+            }
         };
         read.map_err(|e| format!("{WASM}: {e}"))?;
         wasm.check(&bytes).map_err(|e| e.to_string())?;
@@ -613,9 +618,14 @@ impl Package {
                     path.display()
                 ));
             }
-            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-            let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
-            return Self::read_zip(&mut zip);
+            #[cfg(target_arch = "wasm32")]
+            return Err("archive I/O is unavailable on wasm32".into());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+                let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+                return Self::read_zip(&mut zip);
+            }
         };
         let package = Self::from_parts(&toml, icon, has_cargo, has_source, has_wasm)?;
         if let Some(wasm) = &package.manifest.wasm {
@@ -626,6 +636,7 @@ impl Package {
     }
 
     /// Read and validate an archive, including all selected source and resource entries.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn read_zip<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Result<Self, String> {
         let mut icon = None;
         let mut has_cargo = false;
@@ -770,10 +781,15 @@ impl Package {
         if path.is_dir() {
             return path.join(MANIFEST).is_file();
         }
-        std::fs::File::open(path)
-            .ok()
-            .and_then(|f| zip::ZipArchive::new(f).ok())
-            .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            std::fs::File::open(path)
+                .ok()
+                .and_then(|f| zip::ZipArchive::new(f).ok())
+                .is_some_and(|mut zip| zip.by_name(MANIFEST).is_ok())
+        }
+        #[cfg(target_arch = "wasm32")]
+        false
     }
     /// Select and validate a flat project's source and resource files deterministically.
     pub fn directory_files(
@@ -847,6 +863,7 @@ impl Package {
     }
 
     /// Pack a flat project, selecting its source and resource files deterministically.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn pack_directory(root: &Path) -> Result<Vec<u8>, String> {
         let package = Self::read(root)?;
         let mut files = package.directory_files(root)?;
@@ -860,6 +877,7 @@ impl Package {
     }
 
     /// The `.hmod` bytes for `manifest_text` and selected project files.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn write_files(manifest_text: &str, files: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
         use std::io::Write;
         let manifest = Manifest::parse(manifest_text)?;
