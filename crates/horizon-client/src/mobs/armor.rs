@@ -82,6 +82,46 @@ pub fn values(mob: &Mob) -> (f32, f32) {
     (armor.floor() as i32 as f32, toughness as f32)
 }
 
+/// `Attributes.MAX_ABSORPTION`'s range (0..2048), for a mob with no map yet.
+const MAX_ABSORPTION: f64 = 2048.0;
+
+/// Absorption's `max_absorption` modifier (`MobEffects.ABSORPTION`:
+/// +4 per level, `ADD_VALUE`) for the effects a mob has.
+pub fn absorption_bonus(effects: &[super::StoredEffect]) -> f64 {
+    effects
+        .iter()
+        .find(|e| e.id == "minecraft:absorption")
+        .map_or(0.0, |e| 4.0 * f64::from(e.amplifier + 1))
+}
+/// `getMaxAbsorption` from a mob's attribute map (its base and explicit
+/// modifiers, `/attribute` keeps them there) and the Absorption effect's
+/// `ADD_VALUE` modifier. `AttributeInstance.calculateValue` sums `ADD_VALUE`
+/// into the base before the multiplying operations, so the effect counts in
+/// that phase; the stored base and modifiers are not changed.
+pub fn max_absorption_of(map: Option<&EntityAttributes>, default: f64, bonus: f64) -> f64 {
+    effective(
+        map,
+        "minecraft:max_absorption",
+        default,
+        bonus,
+        MAX_ABSORPTION,
+    )
+}
+/// A mob's `getMaxAbsorption` (see [`max_absorption_of`]).
+pub fn max_absorption(mob: &Mob) -> f32 {
+    let default = mob
+        .kind
+        .attributes
+        .get("minecraft:max_absorption")
+        .copied()
+        .unwrap_or(0.0);
+    max_absorption_of(
+        mob.extra.armor_attributes.as_deref(),
+        default,
+        absorption_bonus(&mob.extra.effects),
+    ) as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
