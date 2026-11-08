@@ -10,7 +10,12 @@ mod fixture;
 
 struct World;
 impl Host for World {}
-mod_api::impl_host_areas!(World);
+mod_api::impl_host_areas!(World, except(levels));
+impl mod_api::prelude::LevelsHost for World {
+    fn is_loaded(&self, id: &str) -> bool {
+        id == "wasm_fixture"
+    }
+}
 impl ServerHost for World {}
 mod_api::impl_server_host_areas!(World);
 
@@ -21,46 +26,49 @@ fn measure(label: &str, mods: Vec<ModEntry>) {
             &mod_api::__private::part_tests::rule_schema(),
         )
         .unwrap();
-        assert!(
-            mod_api::__private::block_entity_types()
-                .iter()
-                .any(|kind| kind.id == "wasm_fixture:counter"),
-            "{label}: register did not declare wasm_fixture:counter"
-        );
         mod_api::__private::mark_game_thread();
-        let mut entities: Vec<_> = (0..1000)
-            .map(|_| ModBlockEntity::new("wasm_fixture:counter".into(), Default::default()))
-            .collect();
-        mod_api::dispatch_block_entity_tick(&mut World, [0, 64, 0], &mut entities[0]);
-        assert_eq!(
-            entities[0].data,
-            [23],
-            "{label}: registered tick did not write entity data"
-        );
-        assert_eq!(
-            entities[0].nbt.get(&"counter".into()),
-            Some(&mod_api::Tag::Int(17)),
-            "{label}: registered tick did not write entity NBT"
-        );
-        let mut samples = Vec::with_capacity(100);
-        for round in 0..120 {
-            let now = Instant::now();
-            for entity in &mut entities {
-                mod_api::dispatch_block_entity_tick(&mut World, [0, 64, 0], entity);
+        let _phase = mod_api::__private::PhaseOwner::scope(mod_api::__private::ModPhase::World);
+        for (kind, expected) in [("counter", 23), ("counter_reads", 25)] {
+            assert!(
+                mod_api::__private::block_entity_types()
+                    .iter()
+                    .any(|decl| decl.id == format!("wasm_fixture:{kind}")),
+                "{label}: register did not declare wasm_fixture:counter"
+            );
+            let mut entities: Vec<_> = (0..1000)
+                .map(|_| ModBlockEntity::new(format!("wasm_fixture:{kind}"), Default::default()))
+                .collect();
+            mod_api::dispatch_block_entity_tick(&mut World, [0, 64, 0], &mut entities[0]);
+            assert_eq!(
+                entities[0].data,
+                [expected],
+                "{label}: registered tick did not write entity data"
+            );
+            assert_eq!(
+                entities[0].nbt.get(&"counter".into()),
+                Some(&mod_api::Tag::Int(17)),
+                "{label}: registered tick did not write entity NBT"
+            );
+            let mut samples = Vec::with_capacity(100);
+            for round in 0..120 {
+                let now = Instant::now();
+                for entity in &mut entities {
+                    mod_api::dispatch_block_entity_tick(&mut World, [0, 64, 0], entity);
+                }
+                let elapsed = now.elapsed().as_nanos();
+                if round >= 20 {
+                    samples.push(elapsed);
+                }
             }
-            let elapsed = now.elapsed().as_nanos();
-            if round >= 20 {
-                samples.push(elapsed);
-            }
+            assert!(entities.iter().all(|entity| entity.data == [expected]
+                && entity.nbt.get(&"counter".into()) == Some(&mod_api::Tag::Int(17))));
+            samples.sort_unstable();
+            let mean = samples.iter().sum::<u128>() / samples.len() as u128;
+            println!(
+                "{label} {kind}: 1000 entities mean={mean} ns p95={} ns",
+                samples[94]
+            );
         }
-        assert!(entities.iter().all(|entity| entity.data == [23]
-            && entity.nbt.get(&"counter".into()) == Some(&mod_api::Tag::Int(17))));
-        samples.sort_unstable();
-        let mean = samples.iter().sum::<u128>() / samples.len() as u128;
-        println!(
-            "{label}: 1000 entities mean={mean} ns p95={} ns",
-            samples[94]
-        );
     });
 }
 
