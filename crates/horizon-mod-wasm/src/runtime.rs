@@ -87,8 +87,25 @@ struct Running {
     group: Mutex<Group<State>>,
     poisoned: AtomicBool,
 }
+struct FrameScope {
+    state: *mut State,
+    running: Arc<Running>,
+}
+impl Drop for FrameScope {
+    fn drop(&mut self) {
+        // SAFETY: the store is exclusively locked or lent on this thread, and its
+        // boxed state remains in place until this synchronous call scope ends.
+        let state = unsafe { &mut *self.state };
+        state.cx.frames.pop();
+        state.depth -= 1;
+        if std::thread::panicking() {
+            self.running.poisoned.store(true, Ordering::Relaxed);
+        }
+    }
+}
 #[derive(Clone)]
 pub struct WasmMod {
+    id: Arc<str>,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
     hook: TypedFunc<(u32, u32, u32), u64>,
@@ -284,7 +301,13 @@ impl WasmMod {
         let mut store = Store::new(engine, State::default());
         store.limiter(|state| &mut state.limits);
         store.set_epoch_deadline(30_000);
+        let mut armed = false;
         let mut group = Group::link_with(store, members, |store, module, name| {
+            // Compilation is not guest execution and must not consume its load deadline.
+            if !armed {
+                store.set_epoch_deadline(30_000);
+                armed = true;
+            }
             if module != "horizon" {
                 return None;
             }
@@ -297,7 +320,7 @@ impl WasmMod {
         .map_err(|e| Refusal::Runtime(e.to_string()))?;
         group.store.data_mut().memory = Some(group.memory);
         let mut exports = Vec::new();
-        for (_, instance) in group.members.clone() {
+        for (name, instance) in group.members.clone() {
             // The std member is a library, not a mod.
             if instance
                 .get_func(&mut group.store, "horizon_layout")
@@ -323,7 +346,7 @@ impl WasmMod {
             let hook = instance
                 .get_typed_func(&mut group.store, "horizon_hook")
                 .map_err(load)?;
-            exports.push((input, hook));
+            exports.push((name, input, hook));
         }
         let running = Arc::new(Running {
             group: Mutex::new(group),
@@ -338,7 +361,8 @@ impl WasmMod {
             .group = Arc::as_ptr(&running) as usize;
         Ok(exports
             .into_iter()
-            .map(|(input, hook)| Self {
+            .map(|(name, input, hook)| Self {
+                id: name.into(),
                 running: running.clone(),
                 input,
                 hook,
@@ -383,7 +407,7 @@ impl WasmMod {
                         if class != CallClass::Worker
                             && start.elapsed() >= Duration::from_secs(5) =>
                     {
-                        log::warn!("wasm group busy");
+                        log::warn!("wasm mod {}: group busy", self.id);
                         return None;
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(1)),
@@ -418,6 +442,10 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
+        let scope = FrameScope {
+            state: store.data_mut(),
+            running: self.running.clone(),
+        };
         let mut w = std::mem::take(&mut store.data_mut().inputs[depth]);
         let mut output = std::mem::take(&mut store.data_mut().outputs[depth]);
         let result = (|| -> wasmtime::Result<R> {
@@ -427,6 +455,9 @@ impl WasmMod {
                 w.clear();
                 w.put(&released);
                 self.invoke(&mut store, mod_api::wire::RELEASE, &w, &mut output)?;
+                if !output.is_empty() {
+                    return Err(WireError::Trailing.into());
+                }
             }
             w.clear();
             if let Some(handler) = handler {
@@ -443,13 +474,12 @@ impl WasmMod {
         })();
         store.data_mut().inputs[depth] = w;
         store.data_mut().outputs[depth] = output;
-        store.data_mut().cx.frames.pop();
-        store.data_mut().depth -= 1;
+        drop(scope);
         match result {
             Ok(value) => Some(value),
             Err(e) => {
                 self.running.poisoned.store(true, Ordering::Relaxed);
-                log::error!("wasm group stopped: {e:#}");
+                log::error!("wasm mod {} stopped its group: {e:#}", self.id);
                 None
             }
         }
