@@ -216,7 +216,7 @@ impl Game<'_> {
         // Move the already-lifted pass: lifting it again would leave its outer
         // pass unpaired when the empty original batch is replaced below.
         self.creatures.projectiles.restore(
-            std::mem::take(projectiles),
+            projectiles.take_owned_pass(),
             horizon_client::join_seq::RestoreOrder::SurvivorsFirst,
         );
         let canceled = self.native_projectile_impacts(&impacts);

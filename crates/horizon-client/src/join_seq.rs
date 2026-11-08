@@ -430,6 +430,12 @@ impl<T, const DIRECT: bool> JoinList<T, DIRECT> {
         }
         taken
     }
+    /// Move a pass already obtained by `lift`, leaving its temporary holder
+    /// empty and unbound. This emits no new marker: consume the moved pass with
+    /// `restore` to close its existing lift. Resident storage must use `lift`.
+    pub fn take_owned_pass(&mut self) -> Self {
+        std::mem::take(self)
+    }
     /// Restore a lifted pass using its established spawn-buffer ordering.
     /// An unbound staged batch is admitted without closing another pass.
     pub fn restore(&mut self, mut taken: Self, order: RestoreOrder) {
@@ -1110,6 +1116,22 @@ mod tests {
                 e.change
             })
             .collect()
+    }
+
+    #[test]
+    fn journal_owned_pass_handoff_closes_each_lift_exactly_once() {
+        use residency::Change::{Lifted, Restored};
+        let (mut list, journal) = journal_list();
+        let original: Vec<_> = list.iter().map(key).collect();
+        changes(&journal);
+        let mut pass = list.lift();
+        list.restore(pass.take_owned_pass(), RestoreOrder::SurvivorsFirst);
+        assert!(pass.is_empty());
+        let next = list.lift();
+        list.restore(next, RestoreOrder::SurvivorsFirst);
+        drop(pass);
+        assert_eq!(list.iter().map(key).collect::<Vec<_>>(), original);
+        assert_eq!(changes(&journal), [Lifted, Restored, Lifted, Restored]);
     }
 
     #[test]
