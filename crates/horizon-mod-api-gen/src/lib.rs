@@ -609,6 +609,8 @@ mod index;
 pub mod native_callable;
 pub mod native_patch;
 pub mod native_policy;
+/// Native raw-point frame projection plans used by staging.
+pub mod native_raw;
 /// Canonical identities for native row layouts.
 pub mod native_schema;
 
