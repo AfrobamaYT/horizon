@@ -140,6 +140,7 @@ fn scene(
         blend_radius,
         smooth_lighting,
         cutout_leaves,
+        opaque_ice: false,
         translucent_layers: &[],
         leaf_culling: LeafCullingMode::Off,
         hidden_states: &[],
@@ -201,7 +202,7 @@ pub fn main() -> Result<()> {
         root.to_path_buf(),
     ))?;
     let visibility = models::load_visibility(&root, assets.registry)?;
-    let tables = MeshTables::new(&assets, &render, &facts, visibility)?;
+    let tables = MeshTables::new(&assets, &render, &facts, visibility, None)?;
     let names: BTreeMap<u32, &str> = render
         .sprite_layers
         .iter()

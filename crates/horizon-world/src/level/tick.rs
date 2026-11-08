@@ -291,8 +291,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         }
         // Only lava's fluid state ticks randomly. A lava block is ticked twice
         // (LiquidBlock.randomTick, then FluidState.randomTick), as in vanilla.
-        let fluid = self.b.fluid(state).kind();
-        if matches!(fluid, FluidKind::Lava | FluidKind::FlowingLava) {
+        if super::fluids::fluid_randomly_ticks(self.b.fluid(state).kind()) {
             self.lava_random_tick(pos);
         }
     }
@@ -1808,7 +1807,7 @@ impl Behaviours {
         while let Ok(Some(tick)) = ticks.fluids.next_tick() {
             let mut sim = self.sim(level, ticks);
             let fluid = self.fluid(sim.state(tick.pos)).kind();
-            if TickTypeId(fluid as u32) == tick.kind {
+            if TickTypeId(fluid.tick_id()) == tick.kind {
                 sim.fluid_tick(tick.pos);
             }
         }
@@ -1857,7 +1856,7 @@ impl Behaviours {
             };
             let mut sim = self.sim(level, ticks);
             let fluid = self.fluid(sim.state(tick.pos)).kind();
-            if TickTypeId(fluid as u32) == tick.kind {
+            if TickTypeId(fluid.tick_id()) == tick.kind {
                 sim.fluid_tick(tick.pos);
             }
         } else {
@@ -1947,10 +1946,7 @@ impl Behaviours {
     /// ticks a randomly ticking block, then lava's fluid.
     pub fn random_tick_candidate(&self, state: BlockStateId) -> bool {
         self.is_randomly_ticking(state)
-            || matches!(
-                self.fluid(state).kind(),
-                FluidKind::Lava | FluidKind::FlowingLava
-            )
+            || super::fluids::fluid_randomly_ticks(self.fluid(state).kind())
     }
     /// Random-tick a single position (block then fluid), as `tickChunk` does.
     pub fn random_tick<L: LevelAccess + ?Sized>(

@@ -38,7 +38,7 @@ fn fixture() -> Fixture {
         ))
         .unwrap();
     let visibility = models::load_visibility(&root, assets.registry).unwrap();
-    let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
+    let tables = MeshTables::new(&assets, &render, &facts, visibility.clone(), None).unwrap();
     Fixture {
         assets,
         biomes,
@@ -90,6 +90,7 @@ fn mesh(
         blend_radius: 0,
         smooth_lighting: false,
         cutout_leaves: true,
+        opaque_ice: false,
         translucent_layers: &[],
         leaf_culling: mode,
         hidden_states: &[],
@@ -329,6 +330,7 @@ fn a_hidden_state_draws_nothing_and_shows_its_neighbours_face() {
             blend_radius: 0,
             smooth_lighting: false,
             cutout_leaves: true,
+            opaque_ice: false,
             translucent_layers: &[],
             leaf_culling: LeafCullingMode::Off,
             hidden_states: hidden,

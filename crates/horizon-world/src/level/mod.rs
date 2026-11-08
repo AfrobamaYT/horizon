@@ -118,7 +118,7 @@ mod hooks;
 mod interact;
 pub mod pistons;
 mod place;
-mod portal;
+pub mod portal;
 pub mod portal_travel;
 mod query;
 pub(crate) use query::data_2d;
@@ -147,6 +147,10 @@ pub use bonemeal::{BonemealCheck, TemplateSettings};
 pub use buckets::{BucketContent, fluid_bucket, fluid_pickup_sound};
 pub use data::{BlockData, ItemBinding, ItemKind, Named, Props, PushReaction, StateFacts, Tags};
 pub use falling::Landing;
+pub use fluids::{
+    fluid_can_be_replaced_with, fluid_drip_particle, fluid_explosion_resistance,
+    fluid_randomly_ticks, fluid_tick_delay,
+};
 
 /// A write a block's part asks for when an entity lands on it (`Block.fallOn`'s own
 /// `setBlockAndUpdate` or `destroyBlock`), at the block the entity landed on. The level
@@ -198,6 +202,41 @@ pub fn vanilla_sea_level(level: LevelKey) -> i32 {
         LevelKey::END => 0,
         _ => 63,
     }
+}
+
+/// The sea levels of the levels a mod registered, from the noise settings their stems name, by
+/// level key: set at each world's load (`set_sea_levels`), as the dimension types' facts are.
+static SEA_LEVELS: std::sync::LazyLock<RwLock<HashMap<LevelKey, i32>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Replaces the registered levels' sea levels, at a world's load.
+pub fn set_sea_levels(levels: Vec<(LevelKey, i32)>) {
+    *SEA_LEVELS.write().unwrap_or_else(|e| e.into_inner()) = levels.into_iter().collect();
+}
+
+/// Registers one level's sea level, as a server told a client the level of a mod or a data pack
+/// has (`CommonPlayerSpawnInfo.seaLevel`); the levels of a world's own load are set by
+/// `set_sea_levels`.
+pub fn register_sea_level(level: LevelKey, sea_level: i32) {
+    SEA_LEVELS
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(level, sea_level);
+}
+
+/// The sea level a mod's level was registered with, if it has one.
+pub fn registered_sea_level(level: LevelKey) -> Option<i32> {
+    SEA_LEVELS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&level)
+        .copied()
+}
+
+/// A level's sea level: the one its noise settings give (`registered_sea_level`), else the
+/// built-in level's (`vanilla_sea_level`).
+pub fn sea_level_of(level: LevelKey) -> i32 {
+    registered_sea_level(level).unwrap_or_else(|| vanilla_sea_level(level))
 }
 
 /// Game rules consulted by block behaviour (vanilla defaults).
@@ -398,6 +437,15 @@ pub trait LevelAccess {
     /// the fluid's own rule (`water_source_conversion`, `lava_source_conversion`).
     fn create_fluid_source(&self, _pos: BlockPos, _state: BlockStateId, vanilla: bool) -> bool {
         vanilla
+    }
+    /// What a mod's fluid does at `pos`, given what it registered (its `FluidPart`s).
+    fn mod_fluid_rules(
+        &self,
+        _pos: BlockPos,
+        _fluid: crate::fluid::ModFluid,
+        registered: crate::fluid::ModFluidRules,
+    ) -> crate::fluid::ModFluidRules {
+        registered
     }
     fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
         true
@@ -732,9 +780,14 @@ pub trait LevelAccess {
     fn level_key(&self) -> LevelKey {
         self.dimension().key()
     }
+    /// The level's sea level (`Level.getSeaLevel`): a mod level's own, from its noise settings,
+    /// else the built-in level's.
+    fn sea_level(&self) -> i32 {
+        sea_level_of(self.level_key())
+    }
     /// The level's dimension type.
     fn dimension_type(&self) -> &DimensionFacts {
-        DimensionFacts::of_builtin_level(self.level_key())
+        DimensionFacts::of_level(self.level_key())
     }
     fn game_rules(&self) -> GameRules {
         GameRules::default()
@@ -774,16 +827,16 @@ pub trait LevelAccess {
     fn item_frame_analog_output(&self, _pos: BlockPos, _facing: Direction) -> Option<i32> {
         None
     }
+    /// `ContainerOpenersCounter.getEntitiesWithContainerOpen` is not empty for
+    /// the container at `pos`: someone has it open (a double chest's menu
+    /// counts for both halves; a copper golem's open chest too).
+    fn container_open(&self, _pos: BlockPos) -> bool {
+        false
+    }
     /// `ContainerOpenersCounter.recheckOpenCount` for the chest or ender chest
     /// block entity at `pos`: recounts its openers and returns the previous
     /// and new counts (the caller plays open/close effects when they change),
     /// or None when there is no such block entity.
-    /// `ContainerOpenersCounter.getEntitiesWithContainerOpen` is not empty for
-    /// the container at `pos`: someone has it open (a double chest's menu
-    /// counts for both halves).
-    fn container_open(&self, _pos: BlockPos) -> bool {
-        false
-    }
     fn recheck_container_openers(&mut self, _pos: BlockPos) -> Option<(i32, i32)> {
         None
     }
@@ -905,6 +958,10 @@ pub trait LevelAccess {
     fn count_entities(&self, _area: Aabb, _query: EntityQuery) -> usize {
         0
     }
+    /// `ServerLevel.shouldTickBlocksAt`: ticket range, independent of chunk ticking readiness.
+    fn should_tick_blocks_at(&self, _chunk: ChunkPos) -> bool {
+        true
+    }
     /// `ServerLevel.isPositionTickingWithEntitiesLoaded` for scheduled ticks.
     fn is_ticking_chunk(&self, _chunk: ChunkPos) -> bool {
         true
@@ -950,6 +1007,7 @@ pub trait LevelAccess {
     /// placed at `pos` (`BlockEntity.loadWithComponents`): a bee nest a grown
     /// tree placed gets its bees. Levels without block entities drop it.
     fn load_block_entity(&mut self, _pos: BlockPos, _nbt: horizon_core::nbt::Compound) {}
+    fn create_feature_spawner(&mut self, _pos: BlockPos, _nbt: horizon_core::nbt::Compound) {}
     /// Biome identifier at `pos` (`minecraft:plains`), for features placed by
     /// block behaviour (bone meal flowers). None when unknown.
     fn biome_name(&self, _pos: BlockPos) -> Option<&str> {
@@ -1229,6 +1287,37 @@ impl Behaviours {
     ) -> bool {
         self.sim(level, ticks).fire_can_be_placed_at(pos, forward)
     }
+    /// `PortalShape.findAnyShape`: the frame rectangle around `pos` on one
+    /// axis, valid or not.
+    pub fn portal_shape<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        x_axis: bool,
+    ) -> portal::PortalShape {
+        self.sim(level, ticks).find_portal_shape(pos, x_axis)
+    }
+    /// `PortalShape.findEmptyPortalShape`: a valid frame with no portal block,
+    /// trying the preferred axis first.
+    pub fn empty_portal_shape<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        x_axis: bool,
+    ) -> Option<portal::PortalShape> {
+        self.sim(level, ticks).find_empty_portal_shape(pos, x_axis)
+    }
+    /// `PortalShape.createPortalBlocks`: fill the frame with portal blocks.
+    pub fn create_portal_blocks<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        shape: &portal::PortalShape,
+    ) {
+        self.sim(level, ticks).create_portal_blocks(shape);
+    }
     /// `BlockState.canSurvive(level, pos)`.
     pub fn can_survive<L: LevelAccess + ?Sized>(
         &self,
@@ -1266,6 +1355,29 @@ impl Behaviours {
     ) -> BlockStateId {
         self.sim(level, ticks)
             .update_from_neighbour_shapes(state, pos)
+    }
+    /// `ServerLevel.updateNeighboursOnBlockSet`: what `/setblock` and `/fill` do for a block once it is in
+    /// and its shape updates are done. They place it with `UPDATE_CLIENTS` and not `UPDATE_NEIGHBORS`, so
+    /// `setBlock` notified no one: the replaced block's `affectNeighborsAfterRemoval` (when the block
+    /// changed), then the neighbours' notice with the new block as its source, then the comparators' of a
+    /// block with an analog output.
+    pub fn update_neighbours_on_block_set<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+        old: BlockStateId,
+    ) {
+        let mut sim = self.sim(level, ticks);
+        let state = sim.state(pos);
+        let block = sim.block_of(state);
+        if sim.block_of(old) != block {
+            sim.affect_neighbors_after_removal(old, pos, false);
+        }
+        sim.update_neighbors_at(pos, block);
+        if sim.has_analog_output(state) {
+            sim.update_neighbour_for_output_signal(pos, block);
+        }
     }
     /// `Level.updateNeighborsAt(pos, block)`: notify the six neighbours.
     pub fn update_neighbors_at<L: LevelAccess + ?Sized>(
@@ -1573,6 +1685,31 @@ impl Behaviours {
 mod dimension_key_tests {
     use super::*;
 
+    /// A registered level has its own sea level; any other has its built-in level's, and the
+    /// table clears.
+    #[test]
+    fn a_registered_level_has_its_own_sea_level() {
+        let pocket = LevelKey::parse("test:sea_pocket").unwrap();
+        assert_eq!(sea_level_of(pocket), 63);
+        assert_eq!(registered_sea_level(pocket), None);
+        set_sea_levels(vec![(pocket, 120)]);
+        assert_eq!(sea_level_of(pocket), 120);
+        assert_eq!(registered_sea_level(pocket), Some(120));
+        assert_eq!(sea_level_of(LevelKey::NETHER), 32);
+        set_sea_levels(Vec::new());
+        assert_eq!(sea_level_of(pocket), 63);
+    }
+
+    #[test]
+    fn a_built_in_level_keeps_the_sea_level_its_generator_registered() {
+        // A superflat Overworld builds with -63, not the Overworld's 63.
+        register_sea_level(LevelKey::OVERWORLD, -63);
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), -63);
+        assert_eq!(sea_level_of(LevelKey::NETHER), 32);
+        set_sea_levels(Vec::new());
+        assert_eq!(sea_level_of(LevelKey::OVERWORLD), 63);
+    }
+
     #[test]
     fn dimension_and_key_round_trip_and_sea_levels() {
         for (dim, key, sea) in [
@@ -1585,7 +1722,8 @@ mod dimension_key_tests {
             assert_eq!(vanilla_sea_level(key), sea);
         }
         let custom = LevelKey::parse("example:sky").unwrap();
-        assert_eq!(Dimension::of_level(custom), Dimension::Overworld);
+        assert_eq!(Dimension::of_level(custom), Dimension::Custom(custom));
+        assert_eq!(Dimension::Custom(custom).key(), custom);
         assert_eq!(vanilla_sea_level(custom), 63);
     }
 }

@@ -89,7 +89,7 @@ fn data_packs_are_their_own_kind() {
     assert!(pick(Kind::DataPack, &versions[..1], true).is_none());
 
     let now = support(Kind::DataPack, &v(&[GAME]), &v(&["datapack"]));
-    assert_eq!(now.reason(), Some(DATAPACK_SUPPORT));
+    assert_eq!(now.reason(), Some(datapack_support()));
     let old = support(Kind::DataPack, &v(&["1.21.4"]), &v(&["datapack"]));
     assert!(
         old.reason().unwrap().starts_with("Made for 1.21.4"),
@@ -154,7 +154,9 @@ fn modrinth_search_asks_for_what_runs() {
         url.contains("&index=relevance&") && url.ends_with("&query=faithful"),
         "{url}"
     );
-    assert!(modrinth::search_url(&Query::new("", Kind::ResourcePack)).contains("&index=downloads&"));
+    assert!(
+        modrinth::search_url(&Query::new("", Kind::ResourcePack)).contains("&index=downloads&")
+    );
     let everything = Query {
         everything: true,
         ..Query::new("", Kind::ResourcePack)
@@ -424,9 +426,11 @@ fn live_modrinth_search_pick_and_download() {
     for kind in Kind::ALL {
         let found = source.search(&Query::new("", kind)).unwrap();
         assert!(!found.is_empty(), "{kind:?}");
-        assert!(found
-            .iter()
-            .all(|p| p.kind == kind && p.support().installable()));
+        assert!(
+            found
+                .iter()
+                .all(|p| p.kind == kind && p.support().installable())
+        );
     }
     let packs = source
         .search(&Query::new("fresh animations", Kind::ResourcePack))
