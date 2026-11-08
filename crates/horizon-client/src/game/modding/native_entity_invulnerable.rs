@@ -11,6 +11,30 @@ use horizon_client::mobs::Damage;
 use mod_api::EntityRef;
 
 impl Game<'_> {
+    /// Whether a named causing entity is a creative player.
+    pub(in crate::game) fn creative_damage_source_id(&self, id: i32) -> bool {
+        id != 0
+            && ((id == self.own_entity_id() && self.creative)
+                || self.lan.as_ref().is_some_and(|host| {
+                    host.hub
+                        .guests
+                        .iter()
+                        .any(|g| g.entity_id == id && g.creative())
+                }))
+    }
+    /// Ask listeners about a nonliving entity damage source.
+    pub(in crate::game) fn native_nonliving_invulnerable(
+        &mut self,
+        id: u32,
+        kind: &str,
+        source: horizon_client::health::HurtSource<'_>,
+        vanilla: bool,
+    ) -> bool {
+        crate::game::entity::damage_level_of!(self, scoped).invulnerability_check(
+            horizon_client::health::Hurting::Entity(id as i32, kind, source),
+            vanilla,
+        )
+    }
     /// A player's body, where it is kept now.
     pub(super) fn native_player_body(
         &self,

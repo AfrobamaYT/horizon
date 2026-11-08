@@ -484,10 +484,33 @@ impl ItemEntity {
     }
     pub fn environment_tick(
         &mut self,
-        world: &World,
+        mut world: &World,
         facts: &BlockFacts,
         registry: &horizon_world::registry::BlockRegistry,
         items: &crate::items::Items,
+    ) -> ItemEnvironmentTick {
+        self.environment_tick_inner(&mut world, facts, registry, items, |_, _| false)
+    }
+    /// As `environment_tick`, allowing the caller to decide each actual damage attempt.
+    pub fn environment_tick_with_hook(
+        &mut self,
+        mut world: &mut World,
+        facts: &BlockFacts,
+        registry: &horizon_world::registry::BlockRegistry,
+        items: &crate::items::Items,
+        mut invulnerable: impl FnMut(&mut World, &str) -> bool,
+    ) -> ItemEnvironmentTick {
+        self.environment_tick_inner(&mut world, facts, registry, items, |world, damage| {
+            invulnerable(world, damage)
+        })
+    }
+    fn environment_tick_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        facts: &BlockFacts,
+        registry: &horizon_world::registry::BlockRegistry,
+        items: &crate::items::Items,
+        mut invulnerable: impl FnMut(&mut W, &str) -> bool,
     ) -> ItemEnvironmentTick {
         let at = world.block(
             self.position.x.floor() as i32,
@@ -504,6 +527,7 @@ impl ItemEntity {
             if self.fire_ticks % 20 == 0
                 && fluid != Fluid::Lava
                 && !items.resists_fire(&self.stack, "minecraft:on_fire")
+                && !invulnerable(world, "minecraft:on_fire")
             {
                 spilled.extend(self.hurt(1).unwrap_or_default());
             }
@@ -524,7 +548,9 @@ impl ItemEntity {
                 if self.health <= 0 {
                     break;
                 }
-                if !items.resists_fire(&self.stack, "minecraft:lava") {
+                if !items.resists_fire(&self.stack, "minecraft:lava")
+                    && !invulnerable(world, "minecraft:lava")
+                {
                     spilled.extend(self.hurt(4).unwrap_or_default());
                     lava_hurt = true;
                 }
@@ -533,7 +559,9 @@ impl ItemEntity {
         let fire_damage = crate::motion::environment::fire_contact(world, registry, self.bounds());
         if fire_damage > 0.0 && !fire_immune {
             self.fire_ticks = self.fire_ticks.max(160);
-            if !items.resists_fire(&self.stack, "minecraft:in_fire") {
+            if !items.resists_fire(&self.stack, "minecraft:in_fire")
+                && !invulnerable(world, "minecraft:in_fire")
+            {
                 spilled.extend(self.hurt(fire_damage as i32).unwrap_or_default());
             }
         }
@@ -543,6 +571,7 @@ impl ItemEntity {
         // `ItemStack.canBeHurtBy` only skips it for a damage_resistant stack.
         if crate::motion::environment::cactus_contact(world, registry, self.bounds())
             && !items.resists_cactus(&self.stack)
+            && !invulnerable(world, "minecraft:cactus")
         {
             spilled.extend(self.hurt(1).unwrap_or_default());
         }
@@ -1532,6 +1561,72 @@ impl ExperienceOrb {
         on_sound: &mut dyn FnMut([f64; 3], f32),
         entities: &[Aabb],
     ) -> bool {
+        let mut world = world;
+        self.tick_among_inner(
+            &mut world,
+            facts,
+            collision,
+            player,
+            server,
+            next_float,
+            border,
+            fluids,
+            context,
+            on_sound,
+            entities,
+            &mut |_| false,
+        )
+    }
+
+    /// As `tick_among`, consulting the hook at each actual lava hit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_among_with_hook(
+        &mut self,
+        mut world: &mut World,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        player: Option<[f64; 3]>,
+        server: bool,
+        next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
+        fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        entities: &[Aabb],
+        invulnerable: &mut dyn FnMut(&mut World) -> bool,
+    ) -> bool {
+        self.tick_among_inner(
+            &mut world,
+            facts,
+            collision,
+            player,
+            server,
+            next_float,
+            border,
+            fluids,
+            context,
+            on_sound,
+            entities,
+            &mut |world| invulnerable(world),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn tick_among_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        facts: &BlockFacts,
+        collision: &BlockCollisionRegistry<'_>,
+        player: Option<[f64; 3]>,
+        server: bool,
+        next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
+        fluids: &crate::motion::FluidResources,
+        context: &horizon_world::native_load_context::LoopContext,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        entities: &[Aabb],
+        invulnerable: &mut dyn FnMut(&mut W) -> bool,
+    ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
         // `Entity.baseTick`'s fluid step, whose `updateFluidOnEyes` answer the
@@ -1622,8 +1717,15 @@ impl ExperienceOrb {
             self.velocity.y = 0.0;
         }
         // ExperienceOrb.tick applies block effects after moving, before drag.
-        let discarded =
-            server && self.apply_lava_contact_damage(world, fluids, wanted, next_float, on_sound);
+        let discarded = server
+            && self.apply_lava_contact_damage_inner(
+                world,
+                fluids,
+                wanted,
+                next_float,
+                on_sound,
+                invulnerable,
+            );
         // `float friction = getAirDrag()` (0.98F), the ground's block
         // friction multiplied in as a float, widened once for the scale.
         let mut friction = 0.98_f32;
@@ -1664,6 +1766,26 @@ impl ExperienceOrb {
         next_float: &mut dyn FnMut() -> f32,
         on_sound: &mut dyn FnMut([f64; 3], f32),
     ) -> bool {
+        let mut world = world;
+        self.apply_lava_contact_damage_inner(
+            &mut world,
+            fluids,
+            wanted,
+            next_float,
+            on_sound,
+            &mut |_| false,
+        )
+    }
+
+    fn apply_lava_contact_damage_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        fluids: &crate::motion::FluidResources,
+        wanted: Vec3,
+        next_float: &mut dyn FnMut() -> f32,
+        on_sound: &mut dyn FnMut([f64; 3], f32),
+        invulnerable: &mut dyn FnMut(&mut W) -> bool,
+    ) -> bool {
         if self.health <= 0 {
             return true;
         }
@@ -1683,7 +1805,7 @@ impl ExperienceOrb {
             })
         });
         for _ in 0..contacts {
-            let dead = self.hurt(4.0);
+            let dead = !invulnerable(world) && self.hurt(4.0);
             let pitch = 2.0 + next_float() * 0.4;
             on_sound([self.position.x, self.position.y, self.position.z], pitch);
             if dead {
@@ -2425,9 +2547,30 @@ impl ArmorStand {
     }
     pub fn environment_tick(
         &mut self,
-        world: &World,
+        mut world: &World,
         facts: &BlockFacts,
         registry: &horizon_world::registry::BlockRegistry,
+    ) -> Option<&'static str> {
+        self.environment_tick_inner(&mut world, facts, registry, |_, _| false)
+    }
+    /// As `environment_tick`, allowing the caller to decide each actual damage attempt.
+    pub fn environment_tick_with_hook(
+        &mut self,
+        mut world: &mut World,
+        facts: &BlockFacts,
+        registry: &horizon_world::registry::BlockRegistry,
+        mut invulnerable: impl FnMut(&mut World, &str) -> bool,
+    ) -> Option<&'static str> {
+        self.environment_tick_inner(&mut world, facts, registry, |world, damage| {
+            invulnerable(world, damage)
+        })
+    }
+    fn environment_tick_inner<W: std::ops::Deref<Target = World>>(
+        &mut self,
+        world: &mut W,
+        facts: &BlockFacts,
+        registry: &horizon_world::registry::BlockRegistry,
+        mut invulnerable: impl FnMut(&mut W, &str) -> bool,
     ) -> Option<&'static str> {
         let (lo, hi) = (self.bounds().min_position(), self.bounds().max_position());
         // The damage type of the last hit that lowered its health.
@@ -2454,6 +2597,7 @@ impl ArmorStand {
                 && !self.invisible
                 && !self.marker
                 && self.health > 0.5
+                && !invulnerable(world, "minecraft:on_fire")
             {
                 self.health -= 4.0;
                 hit_by = Some("minecraft:on_fire");
@@ -2468,8 +2612,10 @@ impl ArmorStand {
         // which a NoGravity stand does not feel (measured beside the server).
         if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
-                self.health -= 0.15;
-                hit_by = Some("minecraft:in_fire");
+                if !invulnerable(world, "minecraft:in_fire") {
+                    self.health -= 0.15;
+                    hit_by = Some("minecraft:in_fire");
+                }
             } else {
                 self.fire_ticks = 100;
             }
@@ -2823,6 +2969,25 @@ mod fire_environment_tests {
             stuck: Vec3::ZERO,
             was_touching_water: false,
         };
+        let mut protected = make("minecraft:oak_planks");
+        let mut heard = Vec::new();
+        let result = protected.environment_tick_with_hook(
+            &mut world,
+            &facts,
+            assets.registry,
+            &items,
+            |_, damage| {
+                heard.push(damage.to_owned());
+                damage == "minecraft:lava"
+            },
+        );
+        assert_eq!(heard, ["minecraft:lava"]);
+        assert!(result.alive && !result.lava_hurt);
+        assert_eq!(protected.health, 5);
+        assert!(
+            protected.fire_ticks > 0,
+            "immunity must not undo lava ignition"
+        );
         let mut wood = make("minecraft:oak_planks");
         let mut metal = make("minecraft:netherite_ingot");
         let first = wood.environment_tick(&world, &facts, assets.registry, &items);
@@ -2905,6 +3070,18 @@ mod fire_environment_tests {
             )
             .unwrap();
         stand.health = 4.0;
+        stand.fire_ticks = 20;
+        let mut heard = Vec::new();
+        assert_eq!(
+            stand.environment_tick_with_hook(&mut world, &facts, assets.registry, |_, damage| {
+                heard.push(damage.to_owned());
+                damage == "minecraft:on_fire"
+            }),
+            None
+        );
+        assert_eq!(heard, ["minecraft:on_fire"]);
+        assert_eq!(stand.health, 4.0);
+        assert_eq!(stand.fire_ticks, 19);
         stand.fire_ticks = 20;
         assert_eq!(
             stand.environment_tick(&world, &facts, assets.registry),
@@ -5216,6 +5393,37 @@ mod orb_lava_tests {
             ));
             assert_eq!((orb.health, orb.age), (-3, 2));
             assert_eq!(sounds.len(), 1);
+        });
+    }
+
+    #[test]
+    fn an_invulnerable_orb_keeps_its_health_but_still_emits_lava_sound() {
+        with_fixture(|world, facts, collision, fluids, assets| {
+            let lava = assets.registry.default_state("minecraft:lava").unwrap();
+            world.set(20, 4, 20, lava).unwrap();
+            let mut orb = sample_orb(Vec3::new(20.5, 4.1, 20.5), 5);
+            let mut sounds = 0;
+            let mut calls = 0;
+            assert!(orb.tick_among_with_hook(
+                world,
+                facts,
+                collision,
+                None,
+                true,
+                &mut || 0.0,
+                None,
+                fluids,
+                crate::test_resources::server_loop_context(),
+                &mut |_, _| sounds += 1,
+                &[],
+                &mut |_| {
+                    calls += 1;
+                    true
+                },
+            ));
+            assert_eq!(orb.health, 5);
+            assert_eq!(calls, 1);
+            assert_eq!(sounds, 1);
         });
     }
 

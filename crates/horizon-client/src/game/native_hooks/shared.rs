@@ -1362,6 +1362,27 @@ pub(super) fn use_totem(level: DamageLevel<'_>, hurting: Hurting<'_>, off_hand: 
 /// per hit would allocate its entity boxes.
 pub(super) struct HitLevel<'a>(pub(super) DamageLevel<'a>);
 
+/// Let listeners override the vanilla invulnerability decision for this hit.
+pub(super) fn invulnerability_check(
+    level: DamageLevel<'_>,
+    hurting: Hurting<'_>,
+    vanilla: bool,
+) -> bool {
+    if !mod_api::__private::listened(mod_api::HookId::EntityInvulnerabilityCheck) {
+        return vanilla;
+    }
+    let (entity, kind, source) = hurt_server_args(hurting, level.attack());
+    let mut invulnerable = vanilla;
+    HitLevel(level).native_entity_invulnerability_check(
+        entity,
+        kind,
+        &source,
+        vanilla,
+        &mut invulnerable,
+    );
+    invulnerable
+}
+
 /// `native_living_incoming_damage` for the damage code: whether it
 /// canceled the hit.
 pub(super) fn incoming_damage(
@@ -1524,7 +1545,8 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
         },
         Hurting::Player(_, source)
         | Hurting::Dragon(_, source)
-        | Hurting::ArmorStand(_, source) => {
+        | Hurting::ArmorStand(_, source)
+        | Hurting::Entity(_, _, source) => {
             if source.causing != 0 {
                 source.causing
             } else {
@@ -1556,6 +1578,7 @@ pub(super) fn knockback(level: DamageLevel<'_>, pushed: Hurting<'_>, knock: &mut
 
 /// The damage hooks every level of the game lends to its hits (`Game.damage_hooks`).
 pub(super) const DAMAGE_HOOKS: DamageHooks = DamageHooks {
+    invulnerable: Some(invulnerability_check),
     incoming: Some(incoming_damage),
     pre: Some(damage_pre),
     post: Some(damage_post),
@@ -1637,6 +1660,7 @@ fn hurt_server_args<'a>(hurting: Hurting<'a>, attack: &Attack) -> (i32, &'a str,
         ),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
         Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
+        Hurting::Entity(entity, kind, source) => (entity, kind, source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
@@ -5192,6 +5216,10 @@ mod tests {
         assert_eq!(
             hurt_server_args(Hurting::Dragon(5, arrow), &NO_ATTACK),
             dragon
+        );
+        assert_eq!(
+            hurt_server_args(Hurting::Entity(6, "minecraft:item", arrow), &NO_ATTACK),
+            (6, "minecraft:item", arrow)
         );
     }
 
