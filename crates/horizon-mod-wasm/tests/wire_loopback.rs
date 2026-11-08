@@ -1,17 +1,7 @@
 //! Exercise the generated proxies and service against the real guest dispatcher, without wasm.
 #![allow(dead_code, unused_variables, unused_mut, unsafe_op_in_unsafe_fn)]
-// TODO(#2273): the generated host in `out/wire_host_generated.rs` exercises every shape and is not
-// hand-formatted, so these style lints fire on emitted code (and on its two `clone()` calls on Copy
-// terrain types) rather than on code a person reads.
-#![allow(
-    clippy::needless_borrow,
-    clippy::missing_transmute_annotations,
-    clippy::let_unit_value,
-    clippy::explicit_auto_deref,
-    clippy::suspicious_else_formatting,
-    clippy::clone_on_copy,
-    clippy::borrow_deref_ref
-)]
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all)]
 use mod_api::wire::{Id, Reader, WireError, Writer, guest};
 use mod_api::{Hooks, LoopContext, StructurePiece};
 use std::{rc::Rc, sync::Arc};

@@ -1,6 +1,5 @@
-// Generated fixtures exercise every shape, so the emitted code reborrows through references and
-// bounds-checks unsigned indexes against zero; neither is code a person reads.
-#![allow(clippy::borrow_deref_ref, unused_comparisons)]
+// Generated fixtures exercise every shape; TODO(#2273): make the generator emit clippy-clean code.
+#![allow(clippy::all, unused_comparisons, unreachable_patterns, dead_code)]
 use mod_api::RowWindow;
 use mod_points::{
     locators::{Locators, Step},
