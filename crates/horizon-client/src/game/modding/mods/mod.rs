@@ -270,18 +270,7 @@ fn native_declared() -> &'static NativeDeclared {
             .collect();
         let fluids: Vec<_> = mod_api::__private::declared_world_fluids()
             .iter()
-            .map(|(id, fluid)| horizon_mod_package::content::FluidLook {
-                id: id.clone(),
-                sprite: None,
-                tint: None,
-                world: Some(horizon_mod_package::content::WorldFluid {
-                    tick_delay: fluid.tick_delay,
-                    drop_off: fluid.drop_off,
-                    slope_find_distance: fluid.slope_find_distance,
-                    source_conversion: fluid.source_conversion,
-                    bucket: fluid.bucket,
-                }),
-            })
+            .map(|draft| draft.try_into_engine(&()).unwrap())
             .collect();
         blocks.extend(fluids.iter().filter_map(|f| f.world_block()));
         items.extend(fluids.iter().filter_map(|f| f.world_bucket()));

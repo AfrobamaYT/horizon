@@ -441,3 +441,23 @@ mod effect_write_tests {
         }
     }
 }
+
+impl TryIntoEngine<()> for (String, mod_api::WorldFluid) {
+    type Engine = engine::FluidLook;
+    type Error = std::convert::Infallible;
+    fn try_into_engine(&self, _: &()) -> Result<Self::Engine, Self::Error> {
+        let (id, fluid) = self;
+        Ok(engine::FluidLook {
+            id: id.clone(),
+            sprite: None,
+            tint: None,
+            world: Some(engine::WorldFluid {
+                tick_delay: fluid.tick_delay,
+                drop_off: fluid.drop_off,
+                slope_find_distance: fluid.slope_find_distance,
+                source_conversion: fluid.source_conversion,
+                bucket: fluid.bucket,
+            }),
+        })
+    }
+}

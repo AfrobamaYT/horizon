@@ -5520,7 +5520,7 @@ mod tests {
         )]
         .into();
         install(mods.clone());
-        install_parts(&mods, &crate::parts::tests::rule_schema()).unwrap();
+        install_parts(&mods, &crate::parts::tests::rule_schema(), |_| false).unwrap();
         let mut host = FakeHost::new();
         let stone = crate::parts::tests::stack("minecraft:stone", 1, 0);
         let diamond = crate::parts::tests::stack("minecraft:diamond", 1, 0);

@@ -3894,13 +3894,11 @@ mod tests {
         after.components.push(("minecraft:trim".into(), Some(trim)));
         apply_loot(&before, &after, &mut stack);
         assert_eq!(
-            stack
-                .data()
-                .unwrap()
-                .trim
-                .as_ref()
-                .map(|(material, pattern)| (material.as_ref(), pattern.as_ref())),
-            Some(("minecraft:gold", "minecraft:sentry"))
+            stack.data().unwrap().trim.as_ref().cloned(),
+            Some((
+                crate::item_data::trim::Holder::Named("minecraft:gold".into()),
+                crate::item_data::trim::Holder::Named("minecraft:sentry".into())
+            ))
         );
         let captured = loot_of(&stack);
         assert_eq!(

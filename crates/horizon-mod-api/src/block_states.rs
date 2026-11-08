@@ -131,7 +131,7 @@ impl BlockStates<'_> {
     }
     /// `BlockState.getMapColor`: the state's `MapColor.id`, 0 for none (`MapColor.NONE`).
     /// None as for `replaceable`.
-    pub fn map_color(&self, state: BlockStateId) -> Option<u8> {
+    pub fn map_color(&self, state: BlockState) -> Option<u8> {
         self.backend?.block_state_map_color(state)
     }
     /// The block's property names and legal serialized values. None without resolved tables.

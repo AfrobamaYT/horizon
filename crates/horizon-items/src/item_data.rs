@@ -1632,10 +1632,13 @@ mod tests {
         let mut stack = ItemStack::new("minecraft:white_banner", 1);
         stack.data_mut().set_loot_component(
             "minecraft:banner_patterns",
-            &serde_json::json!([
-                {"pattern": "minecraft:stripe_bottom", "color": "red"},
-                {"pattern": "minecraft:border", "color": "blue"},
-            ]),
+            &Some(
+                horizon_core::json_nbt::json_to_tag(&serde_json::json!([
+                    {"pattern": "minecraft:stripe_bottom", "color": "red"},
+                    {"pattern": "minecraft:border", "color": "blue"},
+                ]))
+                .unwrap(),
+            ),
         );
         let layers = &stack.data().expect("a component box").banner_patterns;
         assert_eq!(
@@ -1648,7 +1651,7 @@ mod tests {
         // A null component takes them off again.
         stack
             .data_mut()
-            .set_loot_component("minecraft:banner_patterns", &serde_json::Value::Null);
+            .set_loot_component("minecraft:banner_patterns", &None);
         assert!(stack.data().is_none_or(|d| d.banner_patterns.is_empty()));
     }
 
@@ -1660,12 +1663,15 @@ mod tests {
         let mut stack = ItemStack::new("minecraft:written_book", 1);
         stack.data_mut().set_loot_component(
             "minecraft:written_book_content",
-            &serde_json::json!({
-                "title": {"raw": "A Guide"},
-                "author": "Cartographer",
-                "generation": 2,
-                "pages": [{"raw": "page one"}, {"raw": "page two"}],
-            }),
+            &Some(
+                horizon_core::json_nbt::json_to_tag(&serde_json::json!({
+                    "title": {"raw": "A Guide"},
+                    "author": "Cartographer",
+                    "generation": 2,
+                    "pages": [{"raw": "page one"}, {"raw": "page two"}],
+                }))
+                .unwrap(),
+            ),
         );
         let book = stack
             .data()
@@ -1678,7 +1684,7 @@ mod tests {
         // A null component is no component.
         stack
             .data_mut()
-            .set_loot_component("minecraft:written_book_content", &serde_json::Value::Null);
+            .set_loot_component("minecraft:written_book_content", &None);
         assert!(stack.data().is_none_or(|d| d.written.is_none()));
     }
 
@@ -2520,15 +2526,27 @@ mod tests {
         let mut swift = ItemStack::new("minecraft:splash_potion", 1);
         swift.data_mut().set_loot_component(
             "minecraft:potion_contents",
-            &json!({"potion": "minecraft:swiftness"}),
+            &Some(
+                horizon_core::json_nbt::json_to_tag(&json!({"potion": "minecraft:swiftness"}))
+                    .unwrap(),
+            ),
         );
         assert_eq!(swift.potion(), Some("minecraft:swiftness"));
         let mut custom = ItemStack::new("minecraft:potion", 1);
         let data = custom.data_mut();
-        data.set_loot_component("minecraft:custom_data", &json!({"page": 3}));
-        data.set_loot_component("minecraft:damage", &json!(5));
+        data.set_loot_component(
+            "minecraft:custom_data",
+            &Some(horizon_core::json_nbt::json_to_tag(&json!({"page": 3})).unwrap()),
+        );
+        data.set_loot_component(
+            "minecraft:damage",
+            &Some(horizon_core::json_nbt::json_to_tag(&json!(5)).unwrap()),
+        );
         let effects = json!({"custom_effects": [{"id": "minecraft:resistance", "amplifier": 1, "duration": 1800}]});
-        data.set_loot_component("minecraft:potion_contents", &effects);
+        data.set_loot_component(
+            "minecraft:potion_contents",
+            &Some(horizon_core::json_nbt::json_to_tag(&effects).unwrap()),
+        );
         assert_eq!(
             custom.custom_potion_effects(),
             [("minecraft:resistance".to_owned(), 1800, 1)]
@@ -2550,7 +2568,7 @@ mod tests {
         // A null value takes the potion away again.
         swift
             .data_mut()
-            .set_loot_component("minecraft:potion_contents", &serde_json::Value::Null);
+            .set_loot_component("minecraft:potion_contents", &None);
         assert_eq!(swift.potion(), None);
     }
 

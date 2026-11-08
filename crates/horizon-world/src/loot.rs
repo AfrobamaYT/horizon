@@ -1346,7 +1346,7 @@ impl<R: RandomSource> Context<'_, R> {
             };
             for (name, level) in &stack.enchantments {
                 let Some(e) = data.enchantments.iter().find(|e| &e.name == name) else {
-                    return stack;
+                    continue;
                 };
                 if !e.slots.iter().any(|g| slot_in_group(slot, g)) {
                     continue;
