@@ -218,8 +218,13 @@ fn policy_fixture(out_dir: &std::path::Path, fixture: PolicyFixture<'_>) {
         None => quote::quote!(None),
     };
     let layouts = graph.tokens();
-    let windows = native_window::helpers(&rule, &graph).unwrap();
-    let patches = native_patch::helpers(&rule, &graph).unwrap();
+    let every: Vec<bool> = graph
+        .layouts
+        .iter()
+        .map(|layout| layout.opaque.is_none() && rule.named(&layout.name).is_some())
+        .collect();
+    let windows = native_window::helpers(&rule, &graph, &every).unwrap();
+    let patches = native_patch::helpers(&rule, &graph, &every).unwrap();
     let (head, tail) = (
         call.head,
         call.tail

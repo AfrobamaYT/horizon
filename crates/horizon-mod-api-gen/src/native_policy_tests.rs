@@ -167,9 +167,14 @@ fn staged_helpers_are_callable_from_sibling_modules() {
         &rule,
         &rule.shape("horizon_client", None, &syn::parse_str("Game").unwrap()),
     );
+    let every: Vec<bool> = graph
+        .layouts
+        .iter()
+        .map(|l| l.opaque.is_none() && rule.named(&l.name).is_some())
+        .collect();
     for emitted in [
-        crate::native_window::helpers(&rule, &graph).unwrap(),
-        crate::native_patch::helpers(&rule, &graph).unwrap(),
+        crate::native_window::helpers(&rule, &graph, &every).unwrap(),
+        crate::native_patch::helpers(&rule, &graph, &every).unwrap(),
     ] {
         let file: syn::File = syn::parse2(emitted).unwrap();
         let fns: Vec<_> = file
