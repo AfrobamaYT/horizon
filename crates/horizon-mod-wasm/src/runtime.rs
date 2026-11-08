@@ -15,7 +15,7 @@ use std::{
     cell::Cell,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -41,6 +41,7 @@ pub(crate) struct State {
     imports: Vec<Vec<u8>>,
     depth: usize,
     group: usize,
+    lending: Arc<AtomicUsize>,
 }
 // SAFETY: frames contain borrowed native objects only while the group mutex is held.
 // They are pushed and popped synchronously on that thread; callbacks borrow the same
@@ -62,6 +63,7 @@ impl Default for State {
             imports: Vec::new(),
             depth: 0,
             group: 0,
+            lending: Arc::default(),
         }
     }
 }
@@ -86,6 +88,7 @@ pub(crate) fn engine() -> wasmtime::Result<Engine> {
 struct Running {
     group: Mutex<Group<State>>,
     poisoned: AtomicBool,
+    lending: Arc<AtomicUsize>,
 }
 struct FrameScope {
     state: *mut State,
@@ -178,11 +181,13 @@ impl Drop for WasmHandler {
 thread_local! { static LENT: Cell<*const Loan> = const { Cell::new(std::ptr::null()) }; }
 struct Loan {
     group: usize,
+    lending: Arc<AtomicUsize>,
     context: Cell<*mut StoreContextMut<'static, State>>,
     previous: *const Loan,
 }
 impl Drop for Loan {
     fn drop(&mut self) {
+        self.lending.fetch_sub(1, Ordering::Relaxed);
         LENT.set(self.previous);
     }
 }
@@ -249,7 +254,10 @@ fn host(
     // synchronous native dispatch and any nested callbacks have returned.
     let resources = unsafe { crate::boundary::resource_scope(cx) };
     let mut context = caller.as_context_mut();
+    let lending = context.data().lending.clone();
+    lending.fetch_add(1, Ordering::Relaxed);
     let loan = Loan {
+        lending,
         group: context.data().group,
         context: Cell::new((&mut context as *mut StoreContextMut<'_, State>).cast()),
         previous: LENT.get(),
@@ -379,7 +387,9 @@ impl WasmMod {
                 .map_err(load)?;
             exports.push((name, input, hook));
         }
+        let lending = group.store.data().lending.clone();
         let running = Arc::new(Running {
+            lending,
             group: Mutex::new(group),
             poisoned: AtomicBool::new(false),
         });
@@ -416,11 +426,9 @@ impl WasmMod {
             return None;
         }
         let key = Arc::as_ptr(&self.running) as usize;
-        let mut resumed = if class == CallClass::Callback {
-            Resumed::take(key)
-        } else {
-            None
-        };
+        // A synchronous import can call any provider/handler, not just a named
+        // callback trait. Such reentry shares the enclosing call's remaining budget.
+        let mut resumed = Resumed::take(key);
         let mut locked = None;
         if resumed.is_none() {
             let start = Instant::now();
@@ -436,9 +444,10 @@ impl WasmMod {
                     }
                     Err(_)
                         if class != CallClass::Worker
-                            && start.elapsed() >= Duration::from_secs(5) =>
+                            && (self.running.lending.load(Ordering::Relaxed) != 0
+                                || start.elapsed() >= Duration::from_secs(5)) =>
                     {
-                        log::warn!("wasm mod {}: group busy", self.id);
+                        log::warn!("wasm mod {}: {}", self.id, Refusal::Busy);
                         return None;
                     }
                     Err(_) => std::thread::sleep(Duration::from_millis(1)),
