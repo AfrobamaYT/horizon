@@ -1907,8 +1907,7 @@ pub trait Hooks {
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "PlayerEvent.PlayerRespawnEvent",
-        paper = "PlayerPostRespawnEvent"
+        neoforge = "PlayerEvent.PlayerRespawnEvent"
     )]
     fn player_respawned();
     /// Final world fog, after the computed color hook, ordinary calculations and Horizon's fog
@@ -3774,8 +3773,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         side = "server",
         contract = "collect",
         out = "names",
-        neoforge = "none (NeoForge 26.3 has no such event)",
-        paper = "PlayerCommandSendEvent"
+        neoforge = "none (NeoForge 26.3 has no such event)"
     )]
     fn player_commands_sent();
     /// The item `item` of the server player `player` (`name`) broke in `slot`
@@ -4245,8 +4243,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)",
-        paper = "PlayerInputEvent"
+        neoforge = "none (NeoForge has no such event; Bukkit's PlayerInputEvent)"
     )]
     fn player_input();
     /// An item cooldown is about to start for a server player. `item` is the item id and `ticks` its
