@@ -31,7 +31,27 @@ pub(crate) struct Cache {
 /// A held lock that is released before its file closes. A child process spawned at that moment
 /// (Cargo, git) holds a copy of the descriptor until its exec, and closing ours alone would leave
 /// the lock taken through that copy: the next lease or cleanup would read Busy.
-pub(crate) struct Locked(File);
+pub(crate) struct Locked {
+    file: File,
+    release: Release,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Release {
+    Unlock,
+    Close,
+}
+
+impl Locked {
+    pub(crate) fn close_only(mut self) -> Self {
+        self.release = Release::Close;
+        self
+    }
+
+    pub(crate) fn file(&self) -> &File {
+        &self.file
+    }
+}
 
 pub(crate) enum LockMode {
     Shared,
@@ -40,7 +60,9 @@ pub(crate) enum LockMode {
 
 impl Drop for Locked {
     fn drop(&mut self) {
-        let _ = self.0.unlock();
+        if matches!(self.release, Release::Unlock) {
+            let _ = self.file.unlock();
+        }
     }
 }
 
@@ -95,7 +117,10 @@ pub(crate) fn locked(file: File, mode: LockMode) -> Result<Locked, Error> {
         fs::TryLockError::WouldBlock => Error::Busy,
         fs::TryLockError::Error(error) => Error::Io(error),
     })?;
-    Ok(Locked(file))
+    Ok(Locked {
+        file,
+        release: Release::Unlock,
+    })
 }
 
 fn size(path: &Path) -> Result<u64, Error> {

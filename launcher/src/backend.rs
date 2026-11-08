@@ -4193,9 +4193,9 @@ impl Running {
     }
 }
 
-/// Holds the game's shared tree leases and Windows runtime through process exit.
+/// Launcher-owned tree-lock primitives and optional Windows runtime state.
 pub struct RuntimeGuard {
-    _leases: Vec<crate::native_cache::Locked>,
+    _leases: Vec<crate::run_leases::Claim>,
     #[cfg(windows)]
     _windows: Option<crate::windows_runtime::Guard>,
 }
