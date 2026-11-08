@@ -16,6 +16,7 @@
 - [Design: transactional block-entity removal](concepts/block-entity-removal.md)
 - [Design: client action pipeline](concepts/client-action-pipeline.md)
 - [Design: custom recipe-book settings](concepts/recipe-book-types.md)
+- [Design: travel and move hooks](concepts/travel-and-move.md)
 
 # How-to
 
