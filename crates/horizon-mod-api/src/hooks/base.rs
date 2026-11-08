@@ -814,7 +814,8 @@ pub trait Hooks {
         side = "server",
         contract = "cancel",
         out = "claimed",
-        neoforge = "PlayerInteractEvent.EntityInteract"
+        neoforge = "PlayerInteractEvent.EntityInteract",
+        paper = "PlayerInteractEntityEvent"
     )]
     fn entity_interact();
     /// A player left-clicks the block `state` at `pos`, `face` the face hit
@@ -2337,6 +2338,7 @@ pub trait Hooks {
         contract = "cancel",
         out = "canceled",
         neoforge = "EntityMountEvent",
+        paper = "EntityMountEvent",
         cancellable = true
     )]
     fn entity_mount(
@@ -3072,6 +3074,7 @@ requires a farmer at work and `mob_griefing` enabled."#]
         contract = "cancel",
         out = "cancel",
         neoforge = "none (NeoForge has no such event)",
+        paper = "DragonEggFormEvent",
         cancellable = true,
         target = "horizon_client::game::native_hooks::base::GameLevel<'_>::native_dragon_egg_form"
     )]
@@ -3115,7 +3118,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "EntitiesLoadEvent"
     )]
     fn entities_load();
     /// Entities in `chunk` left the active server world and were queued for
@@ -3123,7 +3127,8 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)"
+        neoforge = "none (NeoForge has no such event)",
+        paper = "EntitiesUnloadEvent"
     )]
     fn entities_unload();
     /// A mob broke the door at `pos`.
