@@ -4012,16 +4012,14 @@ requires a farmer at work and `mob_griefing` enabled."#]
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no resource-pack status event)",
-        paper = "PlayerResourcePackStatusEvent"
+        neoforge = "none (NeoForge has no resource-pack status event)"
     )]
     fn resource_pack_status();
     /// The world's spawn point changed to `pos` and `angle`.
     #[hook(
         side = "server",
         contract = "listen",
-        neoforge = "none (NeoForge has no such event)",
-        paper = "SpawnChangeEvent"
+        neoforge = "none (NeoForge has no such event)"
     )]
     fn spawn_change();
     /// TNT at `pos` is about to be lit (primed): a flint and steel or a fire
