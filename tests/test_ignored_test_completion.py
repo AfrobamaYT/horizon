@@ -38,6 +38,12 @@ class IgnoredTests(unittest.TestCase):
         with patch.object(ignored_tests, "known_failures", return_value={("example", "bad"): None}), patch.object(ignored_tests, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(ignored_tests.main(["example"]), 0)
 
+    def test_plain_known_failure_that_passes_requires_removal(self):
+        result, _ = self.run_output(target(1, "test repaired ... ok\n", summary(passed=1)))
+        with patch.object(ignored_tests, "known_failures", return_value={("example", "repaired"): None}), patch.object(ignored_tests, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()) as log:
+            self.assertEqual(ignored_tests.main(["example"]), 1)
+        self.assertIn("repaired: passes now; take it off", log.getvalue())
+
     def test_unexplained_nonzero_status(self):
         result, _ = self.run_output(target(1, "test good ... ok\n", summary(passed=1)), 101)
         self.assertIsNone(result)
