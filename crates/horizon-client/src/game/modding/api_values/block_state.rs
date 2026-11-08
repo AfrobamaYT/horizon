@@ -217,6 +217,15 @@ impl Index {
             .ok_or(BlockStateError::UnknownState)
     }
 }
+// Already-owned keys cross the hook carrier without revalidation or lookup.
+impl TryIntoApi for mod_api::BlockKey {
+    type Api = Self;
+    type Error = std::convert::Infallible;
+    fn try_into_api(&self) -> Result<Self::Api, Self::Error> {
+        Ok(*self)
+    }
+}
+
 impl TryIntoApi for BlockStateId {
     type Api = BlockState;
     type Error = BlockStateError;
