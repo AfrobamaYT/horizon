@@ -163,6 +163,23 @@ fn memory_present(m: &Mob, memory: mod_api::BrainMemory) -> Option<bool> {
             };
             Some(present)
         }
+        Species::Sniffer
+        | Species::CopperGolem
+        | Species::Tadpole
+        | Species::HappyGhast
+        | Species::Axolotl => {
+            let mem = super::animal_brain::mem_ref(m)?;
+            let present = match memory {
+                mod_api::BrainMemory::WalkTarget => mem.walk_target.present(),
+                mod_api::BrainMemory::LookTarget => mem.look_target.present(),
+                // Only the axolotl's brain registers an attack target.
+                mod_api::BrainMemory::AttackTarget if m.species() == Species::Axolotl => {
+                    mem.attack_target.present()
+                }
+                _ => return None,
+            };
+            Some(present)
+        }
         _ => None,
     }
 }
@@ -174,6 +191,19 @@ pub fn walk_target(m: &Mob, w: &MobWorld<'_>) -> Option<mod_api::BrainWalkTarget
     match m.species() {
         Species::Villager => {
             let walk = super::villager_brain::mem_ref(m)?.walk_target.value()?;
+            let at = walk.target.position(w)?;
+            Some(mod_api::BrainWalkTarget::new(
+                at,
+                f64::from(walk.speed),
+                walk.close,
+            ))
+        }
+        Species::Sniffer
+        | Species::CopperGolem
+        | Species::Tadpole
+        | Species::HappyGhast
+        | Species::Axolotl => {
+            let walk = super::animal_brain::mem_ref(m)?.walk_target.value()?;
             let at = walk.target.position(w)?;
             Some(mod_api::BrainWalkTarget::new(
                 at,
@@ -193,6 +223,14 @@ pub fn look_target(m: &Mob, w: &MobWorld<'_>) -> Option<[f64; 3]> {
             .look_target
             .value()?
             .position(w),
+        Species::Sniffer
+        | Species::CopperGolem
+        | Species::Tadpole
+        | Species::HappyGhast
+        | Species::Axolotl => super::animal_brain::mem_ref(m)?
+            .look_target
+            .value()?
+            .position(w),
         _ => None,
     }
 }
@@ -200,22 +238,43 @@ pub fn look_target(m: &Mob, w: &MobWorld<'_>) -> Option<[f64; 3]> {
 /// `SetWalkTarget`: writes the brain's `WALK_TARGET` memory through the
 /// engine's own path, where the species' walk sink takes it from.
 pub fn set_walk_target(m: &mut Mob, at: [i32; 3], speed: f64, close: i32) {
-    if let Species::Villager = m.species() {
-        super::villager_brain::mem(m)
-            .walk_target
-            .set(super::villager_brain::WalkTarget::block(
-                at,
-                speed as f32,
-                close,
-            ));
+    match m.species() {
+        Species::Villager => {
+            super::villager_brain::mem(m).walk_target.set(
+                super::villager_brain::WalkTarget::block(at, speed as f32, close),
+            );
+        }
+        Species::Sniffer
+        | Species::CopperGolem
+        | Species::Tadpole
+        | Species::HappyGhast
+        | Species::Axolotl => {
+            super::animal_brain::mem(m)
+                .walk_target
+                .set(super::animal_brain::WalkTarget {
+                    target: super::animal_brain::Tracker::Block(at),
+                    speed: speed as f32,
+                    close,
+                });
+        }
+        _ => {}
     }
 }
 
 /// Whether the species thinks with one of the brains wired for mod behaviors
 /// (#824): where `register_behaviors` runs at the brain's own construction.
-/// The species' brains join commit by commit: the villager first.
+/// The species' brains join commit by commit: the villager, then the
+/// animal five, then the monster pair and the warden.
 pub fn has_brain(s: Species) -> bool {
-    matches!(s, Species::Villager)
+    matches!(
+        s,
+        Species::Villager
+            | Species::Sniffer
+            | Species::CopperGolem
+            | Species::Tadpole
+            | Species::HappyGhast
+            | Species::Axolotl
+    )
 }
 
 /// Ask the installed entity parts for the mob's behaviors (#824), each into

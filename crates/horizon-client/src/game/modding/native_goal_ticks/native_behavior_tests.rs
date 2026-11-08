@@ -126,7 +126,7 @@ fn random_of(level: &mut DamageLevel<'_>) -> (u64, Option<f64>) {
 
 /// The mods of the `NoBrain` test: a part on a zombie whose one behavior add
 /// records its refusal, and a part on the villager whose adds the test
-/// switches through `VILLAGER_ADDS` (empty: a part that adds none).
+/// switches through `ADDS` (empty: a part that adds none).
 struct ZombieBehaviors;
 #[mod_api::horizon_part]
 impl EntityPart for ZombieBehaviors {
@@ -136,24 +136,43 @@ impl EntityPart for ZombieBehaviors {
         }
     }
 }
-/// What the villager part adds, one add per entry; the test sets it before
-/// the villager's brain is built.
-static VILLAGER_ADDS: Mutex<Vec<fn(&mut BehaviorRegistrar<'_>)>> = Mutex::new(Vec::new());
-struct VillagerBehaviors;
-#[mod_api::horizon_part]
-impl EntityPart for VillagerBehaviors {
-    fn register_behaviors(&self, behaviors: &mut BehaviorRegistrar<'_>) {
-        for add in VILLAGER_ADDS.lock().unwrap().iter() {
-            add(behaviors);
-        }
-    }
+/// What the parts add, one `(entity type, add)` per entry; the test sets it
+/// before the species' brain is built.
+type Add = for<'a> fn(&mut BehaviorRegistrar<'a>);
+static ADDS: Mutex<Vec<(&'static str, Add)>> = Mutex::new(Vec::new());
+/// One `(entity type, add)` entry, typed so the closures coerce.
+fn plan(id: &'static str, add: Add) -> (&'static str, Add) {
+    (id, add)
 }
+/// One part over the shared plan, for one entity type.
+macro_rules! plan_part {
+    ($name:ident, $id:literal) => {
+        struct $name;
+        #[mod_api::horizon_part]
+        impl EntityPart for $name {
+            fn register_behaviors(&self, behaviors: &mut BehaviorRegistrar<'_>) {
+                for (id, add) in ADDS.lock().unwrap().iter() {
+                    if *id == $id {
+                        add(behaviors);
+                    }
+                }
+            }
+        }
+    };
+}
+plan_part!(VillagerBehaviors, "minecraft:villager");
+plan_part!(SnifferBehaviors, "minecraft:sniffer");
+plan_part!(AxolotlBehaviors, "minecraft:axolotl");
+plan_part!(GhastlingBehaviors, "minecraft:happy_ghast");
 struct Mod;
 #[mod_api::__subscriptions]
 impl Hooks for Mod {
     fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
         r.entity_part("minecraft:zombie", ZombieBehaviors);
         r.entity_part("minecraft:villager", VillagerBehaviors);
+        r.entity_part("minecraft:sniffer", SnifferBehaviors);
+        r.entity_part("minecraft:axolotl", AxolotlBehaviors);
+        r.entity_part("minecraft:happy_ghast", GhastlingBehaviors);
     }
 }
 
@@ -394,15 +413,15 @@ fn random_states(
 #[test]
 #[ignore = "needs prepared resources"]
 fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
-    VILLAGER_ADDS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(1))
             .unwrap();
-    });
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    }));
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 5, 40, 80, &[], Probe::still_for(1))
             .unwrap();
-    });
+    }));
     with_game(|game| {
         install_game_mods();
         game.resolve_parts().unwrap();
@@ -435,10 +454,10 @@ fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
 fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
     CALLS.lock().unwrap().clear();
     READS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 99, 60, 60, &[], WalkWriter).unwrap();
-    });
+    }));
     with_game(|game| {
         install_game_mods();
         game.resolve_parts().unwrap();
@@ -465,21 +484,21 @@ fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
 #[ignore = "needs prepared resources"]
 fn only_an_active_activity_starts_but_core_always_does() {
     CALLS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().clear();
     // Hide runs only in a raid; Idle is the day's fallback activity (no job
     // site), and Core is always active.
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Hide, 50, 60, 60, &[], Probe::named("hide", 1))
             .unwrap();
-    });
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    }));
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 50, 60, 60, &[], Probe::named("idle", 1))
             .unwrap();
-    });
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    }));
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Core, 50, 60, 60, &[], Probe::named("core", 1))
             .unwrap();
-    });
+    }));
     with_game(|game| {
         install_game_mods();
         game.resolve_parts().unwrap();
@@ -509,11 +528,11 @@ fn only_an_active_activity_starts_but_core_always_does() {
 #[ignore = "needs prepared resources"]
 fn a_running_behavior_keeps_ticking_across_the_activity_change() {
     CALLS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
             .unwrap();
-    });
+    }));
     with_game(|game| {
         install_game_mods();
         game.resolve_parts().unwrap();
@@ -551,11 +570,11 @@ fn a_running_behavior_keeps_ticking_across_the_activity_change() {
 #[ignore = "needs prepared resources"]
 fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
     CALLS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().clear();
-    VILLAGER_ADDS.lock().unwrap().push(|b| {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
         b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
             .unwrap();
-    });
+    }));
     with_game(|game| {
         install_game_mods();
         game.resolve_parts().unwrap();
@@ -612,7 +631,7 @@ fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
 
         // Phase B: the mods installed, a part on the villager that adds no
         // behavior (and one on a zombie besides).
-        VILLAGER_ADDS.lock().unwrap().clear();
+        ADDS.lock().unwrap().clear();
         install_game_mods();
         game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
@@ -627,11 +646,11 @@ fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
 
         // Phase C: one behavior joined — the streams part ways, so the
         // comparison above can see a change.
-        VILLAGER_ADDS.lock().unwrap().clear();
-        VILLAGER_ADDS.lock().unwrap().push(|b| {
+        ADDS.lock().unwrap().clear();
+        ADDS.lock().unwrap().push(plan("minecraft:villager", |b| {
             b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(60))
                 .unwrap();
-        });
+        }));
         game.resolve_parts().unwrap();
         villager(game, 8, [3.5, 65.0, 3.5]);
         let mut test_level = horizon_client::health::TestLevel::new(0);
@@ -641,5 +660,158 @@ fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
         }
         let joined = random_states(game, 8, &mut level);
         assert_ne!(bare, joined, "a joined behavior shifts the level stream");
+    });
+}
+
+// ---- The animal brain (the second wiring) --------------------------------
+
+/// A mob of `kind` in the game's list, as `Mob::new` builds it.
+fn mob_of(game: &mut super::super::Game<'_>, kind: &str, id: u32, at: [f64; 3]) {
+    use horizon_core::geometry::Vec3;
+    let kind = game.res.mob_types().get(kind).unwrap().clone();
+    let mut m = Mob::new(id, kind, Vec3::new(at[0], at[1], at[2]), 0.0);
+    m.on_ground = true;
+    game.mobs.push(m);
+}
+
+/// `animal_brain::tick` once at this time, on the caller's level random.
+fn animal_tick(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    game_time: i64,
+    day_time: i64,
+    level: &mut DamageLevel<'_>,
+) {
+    with_villager_tick(
+        game,
+        id,
+        game_time,
+        day_time,
+        level,
+        |m, w, level, events| {
+            mobs::animal_brain::tick(m, w, level, events);
+        },
+    );
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_sniffer_behavior_sets_a_walk_target() {
+    READS.lock().unwrap().clear();
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
+        b.add(Activity::Idle, 99, 60, 60, &[], WalkWriter).unwrap();
+    }));
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
+        zombie(game, 9, [5.5, 65.0, 5.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        animal_tick(game, 8, 100, 3000, &mut level);
+        let reads = READS.lock().unwrap().clone();
+        assert_eq!(
+            reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
+            "the sniffer's walk target reads back at the block's centre"
+        );
+        assert_eq!(
+            reads[2], "false",
+            "the sniffer brain keeps no attack target, so the write refuses"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn animal_behaviors_join_after_vanilla_of_their_priority() {
+    ADDS.lock().unwrap().clear();
+    ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
+        b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(1))
+            .unwrap();
+    }));
+    ADDS.lock().unwrap().push(plan("minecraft:sniffer", |b| {
+        b.add(Activity::Idle, 3, 60, 60, &[], Probe::still_for(1))
+            .unwrap();
+    }));
+    with_game(|game| {
+        // The vanilla order of a parts-free sniffer, to prove the sort
+        // keeps it once the behaviors join.
+        mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        animal_tick(game, 8, 100, 3000, &mut level);
+        let bare: Vec<_> =
+            mobs::animal_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
+        game.mobs.clear();
+
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        mob_of(game, "minecraft:sniffer", 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        animal_tick(game, 8, 100, 3000, &mut level);
+        let joined =
+            mobs::animal_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap()).unwrap();
+        let vanilla: Vec<_> = joined.iter().filter(|k| !k.2).cloned().collect();
+        assert_eq!(vanilla, bare, "vanilla's order stands");
+        for (i, key) in joined.iter().enumerate().filter(|(_, k)| k.2) {
+            let before = joined
+                .iter()
+                .take(i)
+                .filter(|k| !k.2 && k.0 == key.0 && k.1 == key.1)
+                .count();
+            assert!(before > 0, "vanilla ({key:?}) comes first");
+            let after_vanilla = joined
+                .iter()
+                .skip(i + 1)
+                .any(|k| !k.2 && k.0 == key.0 && k.1 == key.1);
+            assert!(!after_vanilla, "no vanilla of the pair follows the mod's");
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn grown_up_stops_a_running_ghastling_behavior() {
+    CALLS.lock().unwrap().clear();
+    ADDS.lock().unwrap().clear();
+    ADDS.lock()
+        .unwrap()
+        .push(plan("minecraft:happy_ghast", |b| {
+            b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
+                .unwrap();
+        }));
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        mob_of(game, "minecraft:happy_ghast", 8, [3.5, 70.0, 3.5]);
+        {
+            let mut mobs = game.mobs.lift();
+            mobs::finalize::set_baby(&mut mobs[0], true);
+            game.mobs = mobs;
+        }
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        animal_tick(game, 8, 100, 3000, &mut level);
+        assert_eq!(
+            CALLS.lock().unwrap().clone(),
+            ["one/check", "one/start", "one/tick"],
+            "the ghastling's behavior runs"
+        );
+        // `HappyGhast.adultGhastSetup`: the brain stops for good.
+        {
+            let mut mobs = game.mobs.lift();
+            mobs::animal_brain::grown_up(&mut mobs[0]);
+            game.mobs = mobs;
+        }
+        for i in 0..5 {
+            animal_tick(game, 8, 101 + i, 3000, &mut level);
+        }
+        assert_eq!(
+            CALLS.lock().unwrap().clone(),
+            ["one/check", "one/start", "one/tick"],
+            "nothing more reaches it, and no stop callback runs"
+        );
     });
 }
