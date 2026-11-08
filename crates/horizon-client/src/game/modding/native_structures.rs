@@ -34,7 +34,8 @@ impl Game<'_> {
     /// those with a block entity, each by y, x, z), from the palette
     /// `/place template` picks at `at`; no processor runs, and the template's
     /// entities are left out. None for an id that doesn't parse or has a `.`
-    /// or `..` part, a template the game doesn't have, and on a client.
+    /// or `..` part, a template the game doesn't have, an unknown or unavailable
+    /// state mapping (the entire snapshot is refused), and on a client.
     /// API @API:structure_template@.
     pub(super) fn structure_template(
         &mut self,

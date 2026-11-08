@@ -65,10 +65,7 @@ mod tests {
         assert_eq!((north.ordinal(), east.ordinal()), (0, 1));
         assert_eq!(east.property(metadata, "facing"), Ok(Some("east")));
         assert_eq!(east.property(metadata, "waterlogged"), Ok(Some("true")));
-        let reordered = facts
-            .replace("north", "TEMP")
-            .replace("east", "north")
-            .replace("TEMP", "east");
+        let reordered = r#"{"defaults":{"minecraft:air":0,"minecraft:stairs":1},"states":[["a",true,false,"","minecraft:air"],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"east","waterlogged":"true"}}],["s",false,false,"",{"id":"minecraft:stairs","properties":{"facing":"north","waterlogged":"false"}}]]}"#;
         let registry = BlockRegistry::from_facts_json(reordered.as_bytes()).unwrap();
         super::super::resolve_block_definitions(&registry).unwrap();
         let nbt: Compound = [("custom".into(), Tag::Int(42))].into_iter().collect();
