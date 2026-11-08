@@ -10,7 +10,7 @@ use crate::{
 };
 use horizon_core::nbt::{Compound, Tag};
 use horizon_protocol::{
-    buf::{BitSet, Codec, List, Writer, set_bit},
+    buf::{BitSet, Codec, List, Writer, check_network_nbt, set_bit},
     chunk::{
         BIOMES, BLOCKS, BlockEntityInfo, ChunkData, Heightmaps, LightData, Paletted, Strategy,
     },
@@ -754,7 +754,9 @@ impl ChunkEncoder {
     /// The tag of a block change at `pos`: [`Self::update_tag`] with a mod's
     /// queued one-shot fields taken and put over it. It takes them, so build it
     /// once, with viewers, and send it to them all; a chunk or a single player's
-    /// resend uses `update_tag`, which leaves them for such a change.
+    /// resend uses `update_tag`, which leaves them for such a change. Fields that would take the
+    /// tag past what a client reads (`buf::check_network_nbt`) are dropped, and the plain
+    /// `update_tag` goes instead: no viewer is disconnected or misses the change.
     pub fn change_tag(&self, pos: (i32, i32, i32), entity: &BlockEntity) -> Option<Tag> {
         let tag = self.update_tag(pos, entity);
         let BlockEntity::Mod(m) = entity else {
@@ -763,12 +765,22 @@ impl ChunkEncoder {
         let Some(fields) = m.take_client_update_fields() else {
             return tag;
         };
-        let mut merged = match tag {
-            Some(Tag::Compound(tag)) => tag,
+        let mut merged = match &tag {
+            Some(Tag::Compound(tag)) => tag.clone(),
             _ => Compound::new(),
         };
         merged.extend(fields);
-        Some(Tag::Compound(merged))
+        let merged = Tag::Compound(merged);
+        match check_network_nbt(&merged) {
+            Ok(()) => Some(merged),
+            Err(e) => {
+                log::warn!(
+                    "[lan] {} at {pos:?}: one-shot client update fields dropped: {e}",
+                    m.id()
+                );
+                tag
+            }
+        }
     }
     /// Whether the state holds a fluid (water, lava, or a waterlogged block).
     pub fn has_fluid(&self, state: u32) -> bool {
@@ -1786,6 +1798,25 @@ mod tests {
             encoder.change_tag(pos, &entities[&pos]),
             Some(Tag::Compound(Compound::from([progress, effect.clone()])))
         );
+        // Fields a client can't read (one byte past vanilla's 2 MiB network quota, or one tag past
+        // the 262,144 it allows) are dropped: the change still sends the plain tag, nothing waits.
+        let BlockEntity::Mod(queued) = &entities[&pos] else {
+            unreachable!()
+        };
+        for unreadable in [
+            Tag::ByteArray(vec![0; 2_097_153]),
+            Tag::List(vec![Tag::Byte(0); 262_145]),
+        ] {
+            queued.set_client_update_fields(Compound::from([(
+                JavaString::from("effect"),
+                unreadable,
+            )]));
+            assert_eq!(
+                encoder.change_tag(pos, &entities[&pos]),
+                Some(plain.clone())
+            );
+            assert!(!queued.has_client_update_fields());
+        }
         assert_eq!(encoder.change_tag(pos, &entities[&pos]), Some(plain));
         // A block entity whose mod sends no tag still sends its fields, alone.
         let silent = ModBlockEntity::new("test:machine".into(), Default::default());

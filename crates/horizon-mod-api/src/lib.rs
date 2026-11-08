@@ -312,6 +312,9 @@ impl<'a> ModBlockEntityView<'a> {
     /// effect, not state: nothing saves, clones or compares them, and the revision stays.
     /// A client merges them into its copy's `nbt` as any update field, where they stay until
     /// sent again: a changing value, such as a counter, tells one effect from the next.
+    /// Fields that would take the packet past what a client reads (2 MiB of network NBT) are
+    /// dropped with a warning, and the change goes without them. A transaction that rolls the
+    /// block entity back also drops a batch queued before it.
     pub fn set_client_update_fields(&mut self, fields: Compound) {
         self.entity.client_update_fields = Some(fields);
     }
