@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use wasmparser::{KnownCustom, Parser, Payload};
 use wasmtime::{
-    Engine, Extern, ExternType, Func, FuncType, Global, GlobalType, Instance, Memory, MemoryType,
-    Module, Mutability, RefType, Store, Table, TableType, Val, ValType,
+    Engine, Extern, ExternType, Global, GlobalType, Instance, Memory, MemoryType, Module,
+    Mutability, RefType, Store, Table, TableType, Val, ValType,
 };
 
 const PAGE: u64 = 65536;
@@ -261,13 +261,8 @@ impl<T: 'static> Group<T> {
                                 .map_err(|e| load(e, member.name))?,
                             )
                         }
-                        ("env", symbol, ExternType::Func(ty)) => match symbols.get(symbol) {
+                        ("env", symbol, ExternType::Func(_)) => match symbols.get(symbol) {
                             Some((_, found @ Extern::Func(_))) => found.clone(),
-                            // An import the build step renamed after its member (`<member>:…`): the
-                            // mod never calls it in the game, so it traps if it ever is.
-                            _ if symbol.contains(':') => {
-                                Extern::Func(trap(&mut store, &ty, symbol))
-                            }
                             _ => return Err(unresolved()),
                         },
                         _ => return Err(unresolved()),
@@ -289,7 +284,7 @@ impl<T: 'static> Group<T> {
                 if name.starts_with("__wasm_")
                     || matches!(
                         name.as_str(),
-                        "horizon_layout" | "horizon_in" | "horizon_hook"
+                        "horizon_layout" | "horizon_layout_ext" | "horizon_in" | "horizon_hook"
                     )
                     || name == "memory"
                     || !matches!(extern_, Extern::Func(_) | Extern::Global(_))
@@ -353,14 +348,6 @@ impl<T: 'static> Group<T> {
         func.call(&mut self.store, params, results)
             .map_err(|e| fail(format!("{e:#}")))
     }
-}
-
-/// A function that traps when called.
-fn trap<T: 'static>(store: &mut Store<T>, ty: &FuncType, symbol: &str) -> Func {
-    let symbol = symbol.to_owned();
-    Func::new(&mut *store, ty.clone(), move |_, _, _| {
-        Err(wasmtime::Error::msg(format!("{symbol} is not available")))
-    })
 }
 
 /// A member read: its module, what it asks for, and where the group put it.

@@ -373,7 +373,6 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
         Ty::List(item, List::Slice) => format!("Vec<{}>", held_in(types, item, statics)?),
         Ty::Ref(inner, _) => held_in(types, inner, statics)?,
         Ty::Str(Str::Static) if statics => "String".into(),
-        ty if has_static(ty) => return None,
         Ty::Named(def) if types.defs[*def].lifetimes != 0 => return None,
         Ty::Dyn(..) | Ty::Handler(..) => return None,
         Ty::Tuple(items) => format!(
@@ -447,6 +446,7 @@ pub(super) struct Writeback {
     pub(super) reference: bool,
     pub(super) optional: bool,
     pub(super) by_ref: bool,
+    pub(super) view: bool,
 }
 /// Writable leaves in wire order, shared by the guest's reply and host's atomic apply.
 pub(super) fn writeback_fields(
@@ -470,6 +470,22 @@ pub(super) fn writeback_fields(
             ty => (ty, false),
         };
         if let Ty::Named(d) = inner
+            && let Some(view) = &types.defs[*d].view
+        {
+            if mutable && view.mutable {
+                own.push(Writeback {
+                    local,
+                    path: format!("{name}.{}", f.rust),
+                    owned: rust_ty(types, &view.snapshot, false),
+                    reference: false,
+                    optional: false,
+                    by_ref: false,
+                    view: true,
+                });
+            }
+            continue;
+        }
+        if let Ty::Named(d) = inner
             && types.defs[*d].lifetimes != 0
         {
             for mut leaf in writeback_fields(types, *d, &local, mutable && m)? {
@@ -488,6 +504,7 @@ pub(super) fn writeback_fields(
                 reference: matches!(f.ty, Ty::Ref(_, true)),
                 optional: matches!(&f.ty,Ty::Option(t) if matches!(**t,Ty::Ref(_,true))),
                 by_ref,
+                view: false,
             };
             if by_ref {
                 refs.push(leaf);
@@ -507,6 +524,19 @@ fn borrowed(
     mutable: bool,
 ) -> Option<(String, String, String)> {
     let d = &types.defs[def];
+    if let Some(view) = &d.view {
+        let pointee = rust_ty(types, &view.pointee, false);
+        let read = format!(
+            "let mut {name}_held: {pointee} = input.take()?; let mut {name} = {}::new(&{}{name}_held);",
+            d.rust,
+            if view.mutable { "mut " } else { "" }
+        );
+        return Some((
+            read,
+            name.into(),
+            format!("out.put(&{name}.__wire_snapshot());"),
+        ));
+    }
     let super::ty::Kind::Record(fields) = &d.kind else {
         return None;
     };
@@ -561,7 +591,13 @@ fn borrowed(
         write!(
             back,
             "out.put(&{});",
-            if leaf.by_ref { leaf.local } else { leaf.path }
+            if leaf.view {
+                format!("{}.__wire_snapshot()", leaf.path)
+            } else if leaf.by_ref {
+                leaf.local
+            } else {
+                leaf.path
+            }
         )
         .unwrap();
     }

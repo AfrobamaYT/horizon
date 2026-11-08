@@ -208,6 +208,7 @@ fn event_input(
                 };
                 if let Ty::Named(d) = inner
                     && types.defs[*d].lifetimes != 0
+                    && types.defs[*d].view.is_none()
                 {
                     event_input(types, *d, &path, setup, put);
                 } else {
@@ -446,7 +447,9 @@ pub(super) fn generate(surface: &mut super::Surface<'_>) -> Result<String, Strin
                                 let local = format!("b_{}", leaf.local);
                                 write!(take, "let {local}: {} = r.take()?;", leaf.owned).unwrap();
                                 let path = leaf.path;
-                                if leaf.optional {
+                                if leaf.view {
+                                    write!(apply, "{path}.__wire_apply({local});").unwrap();
+                                } else if leaf.optional {
                                     write!(take,"if {path}.is_some() != {local}.is_some() {{ return Err(WireError::Tag(u32::MAX)); }}").unwrap();
                                     write!(apply,"if let (Some(target),Some(value)) = ({path}.as_deref_mut(),{local}) {{ *target=value; }}").unwrap();
                                 } else {
@@ -509,6 +512,50 @@ pub fn generate_host(root: &std::path::Path) -> Result<String, String> {
         .position(|m| m.owner == "Hooks" && m.name == "subscribed")
         .ok_or("Hooks::subscribed absent")?;
     let mut code = generate(&mut surface)?;
+    let imports = code
+        .lines()
+        .find(|l| l.starts_with("pub const UNSUPPORTED_IMPORTS:"))
+        .unwrap_or("");
+    let exports = code
+        .lines()
+        .find(|l| l.starts_with("pub const UNSUPPORTED_EXPORTS:"))
+        .unwrap_or("");
+    let mut report = String::from(
+        "# Wire boundary coverage\n\nSurface methods excluding unbound and Not on wasm. Generated from both sides' shared surface and current host gap tables.\n\n| Method | Status | Reason |\n|---|---|---|\n",
+    );
+    for m in surface.methods.iter().chain(&surface.dropped) {
+        if surface
+            .excused
+            .iter()
+            .any(|(o, n)| *o == m.owner && *n == m.name)
+        {
+            continue;
+        }
+        let name = format!("{}::{}", m.owner, m.name);
+        let dropped = surface.dropped.iter().any(|d| std::ptr::eq(d, m));
+        let gap = dropped
+            || if super::exports().contains(&m.owner) {
+                exports.contains(&format!("{name:?}"))
+            } else {
+                imports.contains(&format!("{name:?}")) && !super::frame_accessor(m)
+            };
+        writeln!(
+            report,
+            "| `{name}` | {} | {} |",
+            if gap { "gap" } else { "crosses" },
+            if dropped {
+                "mentions skipped type"
+            } else if gap {
+                "borrow/resource shape not yet supported"
+            } else if super::frame_accessor(m) {
+                "frame accessor; no bytes"
+            } else {
+                "Wire call"
+            }
+        )
+        .unwrap();
+    }
+    std::fs::write(root.join("target/wire-coverage.md"), report).map_err(|e| e.to_string())?;
     writeln!(code, "pub const SUBSCRIBED: u32 = {count};").unwrap();
     code.push_str("pub fn hook_id(name: &str) -> Option<mod_api::HookId> { match name {\n");
     let ast = syn::parse_file(&generated.hooks).map_err(|e| e.to_string())?;

@@ -53,7 +53,12 @@ pub fn intern(value: &str) -> Result<&'static str, WireError> {
 }
 
 /// The deepest nesting of one value (a component of a component of…) a reader accepts.
-pub const MAX_DEPTH: u16 = 512;
+///
+/// It must not refuse anything its type accepts natively. The deepest such value is a `Tag`:
+/// vanilla allows 512 nested lists or compounds, with a leaf in the innermost, and a nested
+/// compound costs two levels here (the tag, then its map), so 2 × 512 + 1 for the leaf, with a
+/// little headroom for the value that carries the tag.
+pub const MAX_DEPTH: u16 = 1040;
 
 /// Why a buffer is not a value of the type it was read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,9 +243,13 @@ impl Put for str {
     }
 }
 
-impl Put for &str {
-    fn put_to(&self, out: &mut Writer) {
+impl Wire for &str {
+    const MIN: usize = 4;
+    fn put(&self, out: &mut Writer) {
         out.put_str(self);
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        intern(&input.take::<String>()?)
     }
 }
 
@@ -652,6 +661,23 @@ impl Wire for std::time::Duration {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn static_string_rows_roundtrip_through_intern() {
+        let rows: Vec<(&'static str, &'static str)> =
+            vec![("test:block", "test:glow"), ("test:block", "test:shade")];
+        let mut out = super::Writer::new();
+        out.put(&rows);
+        let decoded =
+            super::Reader::decode::<Vec<(&'static str, &'static str)>>(out.bytes()).unwrap();
+        assert_eq!(decoded, rows);
+        assert!(std::ptr::eq(decoded[0].0.as_ptr(), decoded[1].0.as_ptr()));
+        let mut oversized = super::Writer::new();
+        oversized.put(&"x".repeat(257));
+        assert_eq!(
+            super::Reader::decode::<&'static str>(oversized.bytes()),
+            Err(super::WireError::Invalid("static string too long"))
+        );
+    }
     use super::*;
 
     fn round<T: Wire + PartialEq + std::fmt::Debug>(value: T) {

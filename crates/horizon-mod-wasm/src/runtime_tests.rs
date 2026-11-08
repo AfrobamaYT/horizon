@@ -52,6 +52,15 @@ fn hook_round_trip_and_malformed_reply_poison() {
     assert_eq!(call(&module), None);
 }
 #[test]
+fn calls_do_not_leave_an_active_module_ownership_cycle() {
+    let module = module("i64.const 2199023255556");
+    let running = Arc::downgrade(&module.running);
+    assert_eq!(call(&module), Some(42));
+    drop(module);
+    assert!(running.upgrade().is_none());
+}
+
+#[test]
 fn trap_and_deadline_stop_the_group() {
     let module = module("unreachable");
     assert_eq!(call(&module), None);
@@ -106,6 +115,55 @@ fn real_members_link_when_built() {
     );
     let modules = modules.unwrap_or_else(|why| panic!("real shared members did not load: {why}"));
     assert_eq!(modules.len(), 1);
+    let subscriptions: Vec<String> = modules[0]
+        .call(
+            CallClass::Load,
+            Frame::default(),
+            crate::boundary::SUBSCRIBED,
+            None,
+            |_| {},
+            |r| r.take(),
+        )
+        .expect("real guest subscription hook failed");
+    assert!(
+        subscriptions
+            .iter()
+            .all(|name| crate::boundary::hook_id(name).is_some())
+    );
+    let event: mod_api::ClientTickPostEvent = Reader::new(&[]).take().unwrap();
+    let tick = crate::boundary::export_id("Hooks", "client_tick_post").unwrap();
+    assert_eq!(
+        modules[0].call(
+            CallClass::Hook,
+            Frame::default(),
+            tick,
+            None,
+            |w| w.put(&event),
+            |r| {
+                r.take::<()>()?;
+                r.take::<mod_api::ClientTickPostEvent>()?;
+                Ok(())
+            }
+        ),
+        Some(())
+    );
+}
+
+#[test]
+fn unresolved_namespaced_functions_are_not_stubbed() {
+    let bytes = wat::parse_str(r#"(module (@custom "dylink.0" "\01\04\00\00\00\00") (import "env" "fixture:missing" (func)))"#).unwrap();
+    let error = Group::link(
+        &wasmtime::Engine::default(),
+        &[Member {
+            name: "test",
+            module: &bytes,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, crate::link::LinkError::Unresolved { symbol, .. } if symbol == "env.fixture:missing")
+    );
 }
 
 #[test]
@@ -272,6 +330,30 @@ fn layout_mismatch_is_a_mods_page_refusal() {
         "built for another version of the mod API"
     );
 }
+#[test]
+fn point_record_layout_mismatch_is_refused() {
+    let bytes = wat::parse_str(format!(
+        r#"(module (@custom "dylink.0" "\01\04\00\00\00\00")
+        (func (export "horizon_layout") (result i64) i64.const {})
+        (func (export "horizon_layout_ext") (result i64) i64.const {})
+        (func (export "horizon_in") (param i32) (result i32) i32.const 0)
+        (func (export "horizon_hook") (param i32) (result i64) i64.const 0))"#,
+        mod_api::wire::LAYOUT,
+        mod_points::POINT_LAYOUT ^ 1
+    ))
+    .unwrap();
+    let refusal = WasmMod::instantiate(
+        &engine().unwrap(),
+        &[Member {
+            name: "points",
+            module: &bytes,
+        }],
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(refusal, Refusal::PointLayout { .. }));
+}
+
 #[test]
 fn callback_borrows_only_the_lent_context_and_restores_depth() {
     let module = module("i64.const 2199023255556");

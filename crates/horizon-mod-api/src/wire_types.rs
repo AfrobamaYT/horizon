@@ -747,6 +747,16 @@ impl Wire for crate::ItemEnchantments {
         })
     }
 }
+impl Wire for crate::containers::ModRevision {
+    const MIN: usize = 16;
+    fn put(&self, out: &mut Writer) {
+        out.put(&self.identity());
+        out.put(&self.changes());
+    }
+    fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
+        Ok(Self::from_snapshot(input.take()?, input.take()?))
+    }
+}
 impl Wire for crate::ModBlockEntity {
     const MIN: usize = 32;
     fn put(&self, out: &mut Writer) {
@@ -966,5 +976,35 @@ impl Wire for crate::ClientReloadContext {
     }
     fn take(input: &mut Reader<'_>) -> Result<Self, WireError> {
         Ok(Self::new(input.take()?))
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    /// Vanilla's semantic bound on a tag is 512 nested lists or compounds with any leaf inside the
+    /// innermost one, mixed-type lists included: the wire's nesting budget accepts all of it.
+    #[test]
+    fn a_tag_at_the_semantic_depth_limit_crosses() {
+        use horizon_core::nbt::{Compound, Tag};
+        let mixed = Tag::List(vec![Tag::Byte(1), Tag::Short(128)]);
+        let wrap_list = |inner: Tag| Tag::List(vec![inner]);
+        let wrap_compound = |inner: Tag| {
+            let mut compound = Compound::default();
+            compound.insert("k".into(), inner);
+            Tag::Compound(compound)
+        };
+        for wrap in [&wrap_list as &dyn Fn(Tag) -> Tag, &wrap_compound] {
+            // `mixed` is itself one list: 511 wrappers make 512 nested containers.
+            let mut tag = mixed.clone();
+            for _ in 0..511 {
+                tag = wrap(tag);
+            }
+            let mut out = Writer::new();
+            out.put(&tag);
+            let mut reader = Reader::new(out.bytes());
+            assert!(reader.take::<Tag>().is_ok_and(|read| read == tag));
+        }
     }
 }

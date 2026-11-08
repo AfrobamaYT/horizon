@@ -36,7 +36,8 @@ pub struct ModRevision {
     pub(crate) changes: u64,
 }
 /// An entity's transport form; identity and revision are read-only on writeback.
-pub(crate) struct ModBlockEntitySnapshot {
+#[doc(hidden)]
+pub struct ModBlockEntitySnapshot {
     pub(crate) id: String,
     pub(crate) fields: ModBlockEntityFields,
     pub(crate) revision: ModRevision,
