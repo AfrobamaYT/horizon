@@ -974,22 +974,37 @@ impl<'a> Game<'a> {
         });
         local.into_iter().chain(guests)
     }
-    /// The UUIDs of `level_players`, in its order, for a query that only names
-    /// them: no `PlayerView`, so nothing is allocated per player.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn level_player_uuids(&self) -> impl Iterator<Item = u128> + '_ {
-        let local = (self.player.is_some() && !self.lan_acting_fake)
+    /// The UUIDs of the players in level `dimension`, for a query that only
+    /// names them: no `PlayerView`, so nothing is allocated per player. For the
+    /// level in place they are `level_players`', in its order; a parked level
+    /// has only its guests.
+    pub(super) fn level_player_uuids<'s>(
+        &'s self,
+        dimension: &'s str,
+    ) -> impl Iterator<Item = u128> + 's {
+        let local = (dimension == self.dim.id() && self.player.is_some() && !self.lan_acting_fake)
             .then(|| horizon_client::lan::playerdata::ints_uuid(self.acting_uuid()));
-        local.into_iter().chain(self.level_guests().map(|g| g.uuid))
+        local
+            .into_iter()
+            .chain(self.guests_placed_in(dimension).map(|g| g.uuid))
     }
     /// The guests in the level in place, past the acting one: `player_view`
     /// already reads that guest's live body, and its record lags behind it.
     fn level_guests(&self) -> impl Iterator<Item = &horizon_client::lan::guest::Guest> + '_ {
-        self.lan.iter().flat_map(|h| {
+        self.lan
+            .iter()
+            .flat_map(|h| self.guests_placed_in(&h.hub.config.dimension))
+    }
+    /// The guests placed in level `dimension`, past the acting one.
+    fn guests_placed_in<'s>(
+        &'s self,
+        dimension: &'s str,
+    ) -> impl Iterator<Item = &'s horizon_client::lan::guest::Guest> + 's {
+        self.lan.iter().flat_map(move |h| {
             h.hub
                 .guests
                 .iter()
-                .filter(|g| h.hub.here(g) && self.lan_acting != Some(g.conn))
+                .filter(move |g| g.placed_in(dimension) && self.lan_acting != Some(g.conn))
         })
     }
     /// `Level.hasNearbyAlivePlayer` before a level is built for the spawn
