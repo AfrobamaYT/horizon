@@ -60,6 +60,12 @@ dimension type when they join.
 horizon and the clouds' height; left as None they are the Overworld's. They apply to the host's own
 world: a client of another server that has the mod's dimension shows the Overworld's sky there.
 
+`day_cycle` picks the timelines and the clock the dimension type names: `overworld` (the day and moon
+cycles, the villagers' schedule and the Overworld's clock, the default), `nether` (the schedule only,
+no clock), `end` or `none`. It sets how the level's sky and light change over the day in the host's
+world, whether monsters burn in daylight, and which clock `/time` reads there. `level.dimension_type(host)`
+gives the timelines and `default_clock` back. The day time itself is the world's one clock.
+
 The level's biomes are the one `biome` everywhere unless `biome_source` says otherwise:
 `BiomeSourceKind::Checkerboard` alternates the `biomes` in cells `2^biome_scale` chunks wide,
 `MultiNoise` uses the Overworld's or the Nether's biomes (`biome_preset`) and `End` the End's islands.

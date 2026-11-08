@@ -177,6 +177,8 @@ impl Game<'_> {
             snow_golem_melts: facts.snow_golem_melts,
             can_start_raid: facts.can_start_raid,
             sky_light_level: facts.sky_light_level,
+            timelines: facts.timelines.clone(),
+            default_clock: facts.default_clock.clone(),
         })
     }
 

@@ -108,6 +108,11 @@ pub struct DimensionSettings {
     pub fog_color: Option<String>,
     /// `minecraft:visual/cloud_height`: the clouds' height in blocks; None is the Overworld's.
     pub cloud_height: Option<f32>,
+    /// The timelines and default clock the dimension type names: `overworld` (the day and moon
+    /// cycles, the villagers' schedule and the Overworld's clock), `nether` (the villagers'
+    /// schedule only, no clock), `end` (the End's timeline and clock) or `none`. They set the
+    /// level's sky over the day, whether monsters burn in daylight, and the clock `/time` reads.
+    pub day_cycle: String,
 }
 
 impl Default for DimensionSettings {
@@ -145,6 +150,7 @@ impl Default for DimensionSettings {
             sky_color: None,
             fog_color: None,
             cloud_height: None,
+            day_cycle: "overworld".into(),
         }
     }
 }
@@ -193,6 +199,19 @@ impl DimensionSettings {
         }
         if let Some(height) = self.cloud_height {
             attributes.insert("minecraft:visual/cloud_height".into(), json!(height));
+        }
+        let (timelines, clock) = match self.day_cycle.as_str() {
+            "nether" => (json!("#minecraft:in_nether"), None),
+            "end" => (json!("#minecraft:in_end"), Some("minecraft:the_end")),
+            "none" => (json!([]), None),
+            _ => (
+                json!("#minecraft:in_overworld"),
+                Some("minecraft:overworld"),
+            ),
+        };
+        json["timelines"] = timelines;
+        if let Some(clock) = clock {
+            json["default_clock"] = json!(clock);
         }
         json
     }
@@ -264,6 +283,11 @@ impl DimensionSettings {
             "sky_color and fog_color must be #rrggbb"
         } else if self.cloud_height.is_some_and(|h| !h.is_finite()) {
             "cloud_height must be a number"
+        } else if !matches!(
+            self.day_cycle.as_str(),
+            "overworld" | "nether" | "end" | "none"
+        ) {
+            "day_cycle must be overworld, nether, end or none"
         } else {
             return None;
         };
@@ -327,6 +351,10 @@ pub struct LevelDimensionType {
     pub can_start_raid: bool,
     /// The sky light that daylight is measured against, 0 to 15.
     pub sky_light_level: f32,
+    /// The timelines the dimension type names, as ids (`minecraft:day`).
+    pub timelines: Vec<String>,
+    /// The clock `/time` reads here, if the dimension type has a default one.
+    pub default_clock: Option<String>,
 }
 
 /// A registered dimension: its namespaced id (`modid:pocket`), the mod that
@@ -384,6 +412,42 @@ mod tests {
             true
         );
         assert_eq!(json["attributes"]["minecraft:gameplay/fast_lava"], false);
+    }
+
+    /// The day cycle names the timelines and the clock, and the game's facts read them back.
+    #[test]
+    fn the_day_cycle_reaches_the_games_facts() {
+        use horizon_world::dimension_type::DimensionFacts;
+        let facts = |cycle: &str| {
+            let settings = DimensionSettings {
+                day_cycle: cycle.into(),
+                ..Default::default()
+            };
+            assert_eq!(settings.invalid_field(), None);
+            DimensionFacts::patched(
+                DimensionFacts::overworld(),
+                "test:cycle",
+                &settings.dimension_type(),
+            )
+            .unwrap()
+        };
+        let overworld = facts("overworld");
+        assert!(overworld.has_timeline("minecraft:day"));
+        assert_eq!(
+            overworld.default_clock.as_deref(),
+            Some("minecraft:overworld")
+        );
+        let nether = facts("nether");
+        assert!(!nether.has_timeline("minecraft:day") && nether.default_clock.is_none());
+        let end = facts("end");
+        assert_eq!(end.default_clock.as_deref(), Some("minecraft:the_end"));
+        let none = facts("none");
+        assert!(none.timelines.is_empty() && none.default_clock.is_none());
+        let bad = DimensionSettings {
+            day_cycle: "forever".into(),
+            ..Default::default()
+        };
+        assert!(bad.invalid_field().unwrap().contains("day_cycle"));
     }
 
     #[test]
