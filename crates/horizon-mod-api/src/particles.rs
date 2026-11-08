@@ -1,4 +1,4 @@
-//! Moved here from the game so mods can name it.
+//! Owned particle requests, with provider identities resolved once when content loads.
 #[allow(unused_imports)]
 use crate::*;
 
@@ -22,6 +22,7 @@ pub enum PositionSource {
 #[derive(Clone, Debug, PartialEq)]
 // exhaustive: the game builds it with a literal; mods use the constructors
 pub struct ParticleOptions {
+    /// Provider identity issued by `Registrar::particle_key`, never an engine enum.
     pub ty: ParticleKey,
     /// `BlockParticleOption`: the block's particle sprite and terrain tint.
     pub block: Option<(String, u32)>,
@@ -47,6 +48,7 @@ pub struct ParticleOptions {
     pub vibration: Option<(PositionSource, [f64; 3], i32)>,
 }
 impl ParticleOptions {
+    /// Construct an option for a retained vanilla or custom sprite-provider key.
     pub fn simple(ty: ParticleKey) -> Self {
         Self {
             ty,
