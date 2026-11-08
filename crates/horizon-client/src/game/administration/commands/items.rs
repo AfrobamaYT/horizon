@@ -562,6 +562,16 @@ impl Game<'_> {
     }
     /// Put a stack (or nothing) in a slot; false when the slot cannot take it.
     pub(in crate::game) fn slot_set(&mut self, s: &Slot, stack: Option<ItemStack>) -> bool {
+        self.slot_set_with_effects(s, stack, true)
+    }
+
+    /// The shared slot writer, with stand events suppressed for transactional replay.
+    pub(in crate::game) fn slot_set_with_effects(
+        &mut self,
+        s: &Slot,
+        stack: Option<ItemStack>,
+        effects: bool,
+    ) -> bool {
         match s {
             Slot::Contents(..) => false,
             Slot::ContentItem(parent, component, index) => {
@@ -685,7 +695,7 @@ impl Game<'_> {
                 if !a.equipment.set(*i, stack) {
                     return false;
                 }
-                if emit && self.remote.is_none() {
+                if effects && emit && self.remote.is_none() {
                     self.post_game_event(
                         if equippable {
                             "minecraft:equip"
