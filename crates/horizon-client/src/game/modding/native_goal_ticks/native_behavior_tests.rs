@@ -20,18 +20,19 @@ fn install_game_mods() {
     crate::game::api_values::install_parts(&[ModEntry::new("test", Box::new(Mod))]).unwrap();
 }
 
-/// What one test behavior did, in order.
-static CALLS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+/// What one test behavior did, in order, tagged by behavior.
+static CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// The refusals a `register_behaviors` saw.
 static REFUSALS: Mutex<Vec<mod_api::BehaviorRefusal>> = Mutex::new(Vec::new());
 
-fn record(call: &'static str) {
-    CALLS.lock().unwrap().push(call);
+fn record(call: &str) {
+    CALLS.lock().unwrap().push(call.to_owned());
 }
 
 /// The behavior every runner test drives: journals its calls and answers
 /// `can_still_use` for `still_for` ticks.
 struct Probe {
+    tag: &'static str,
     still_for: i32,
     ticks: i32,
     panic_in_start: bool,
@@ -39,10 +40,20 @@ struct Probe {
 impl Probe {
     fn still_for(still_for: i32) -> Self {
         Self {
+            tag: "probe",
             still_for,
             ticks: 0,
             panic_in_start: false,
         }
+    }
+    fn named(tag: &'static str, still_for: i32) -> Self {
+        Self {
+            tag,
+            ..Self::still_for(still_for)
+        }
+    }
+    fn fire(&self, call: &str) {
+        record(&format!("{}/{}", self.tag, call));
     }
 }
 impl Behavior for Probe {
@@ -50,11 +61,11 @@ impl Behavior for Probe {
         "Probe"
     }
     fn check_extra_start_conditions(&mut self, _cx: &mut BehaviorCx<'_>) -> bool {
-        record("check");
+        self.fire("check");
         true
     }
     fn start(&mut self, cx: &mut BehaviorCx<'_>) {
-        record("start");
+        self.fire("start");
         // The mob's own handle answers through the tick's view.
         assert_eq!(cx.mob().entity().id(), 8);
         if self.panic_in_start {
@@ -66,10 +77,10 @@ impl Behavior for Probe {
         self.ticks <= self.still_for
     }
     fn tick(&mut self, _cx: &mut BehaviorCx<'_>) {
-        record("tick");
+        self.fire("tick");
     }
     fn stop(&mut self, _cx: &mut BehaviorCx<'_>) {
-        record("stop");
+        self.fire("stop");
     }
 }
 
@@ -114,7 +125,8 @@ fn random_of(level: &mut DamageLevel<'_>) -> (u64, Option<f64>) {
 }
 
 /// The mods of the `NoBrain` test: a part on a zombie whose one behavior add
-/// records its refusal.
+/// records its refusal, and a part on the villager whose adds the test
+/// switches through `VILLAGER_ADDS` (empty: a part that adds none).
 struct ZombieBehaviors;
 #[mod_api::horizon_part]
 impl EntityPart for ZombieBehaviors {
@@ -124,11 +136,24 @@ impl EntityPart for ZombieBehaviors {
         }
     }
 }
+/// What the villager part adds, one add per entry; the test sets it before
+/// the villager's brain is built.
+static VILLAGER_ADDS: Mutex<Vec<fn(&mut BehaviorRegistrar<'_>)>> = Mutex::new(Vec::new());
+struct VillagerBehaviors;
+#[mod_api::horizon_part]
+impl EntityPart for VillagerBehaviors {
+    fn register_behaviors(&self, behaviors: &mut BehaviorRegistrar<'_>) {
+        for add in VILLAGER_ADDS.lock().unwrap().iter() {
+            add(behaviors);
+        }
+    }
+}
 struct Mod;
 #[mod_api::__subscriptions]
 impl Hooks for Mod {
     fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
         r.entity_part("minecraft:zombie", ZombieBehaviors);
+        r.entity_part("minecraft:villager", VillagerBehaviors);
     }
 }
 
@@ -145,7 +170,7 @@ fn a_start_that_passes_its_checks_draws_once_and_runs() {
             assert_ne!(random_of(level), before, "the duration is one draw");
         });
         assert!(probe.running());
-        assert_eq!(*CALLS.lock().unwrap(), ["check", "start"]);
+        assert_eq!(*CALLS.lock().unwrap(), ["probe/check", "probe/start"]);
     });
 }
 
@@ -196,7 +221,14 @@ fn the_duration_ends_it_and_can_still_use_keeps_it() {
         assert!(!probe.running());
         assert_eq!(
             *CALLS.lock().unwrap(),
-            ["check", "start", "tick", "tick", "tick", "stop"]
+            [
+                "probe/check",
+                "probe/start",
+                "probe/tick",
+                "probe/tick",
+                "probe/tick",
+                "probe/stop"
+            ]
         );
     });
 }
@@ -215,7 +247,10 @@ fn without_can_still_use_it_lives_one_brain_tick() {
             probe.tick_or_stop(mob, w, 0);
         });
         assert!(!probe.running());
-        assert_eq!(*CALLS.lock().unwrap(), ["check", "start", "stop"]);
+        assert_eq!(
+            *CALLS.lock().unwrap(),
+            ["probe/check", "probe/start", "probe/stop"]
+        );
     });
 }
 
@@ -236,7 +271,7 @@ fn a_panic_is_contained_and_the_behavior_is_done() {
             // The behavior is gone: no further call reaches it.
             assert!(!probe.try_start(mob, w, level.random(), 1));
         });
-        assert_eq!(*CALLS.lock().unwrap(), ["check", "start"]);
+        assert_eq!(*CALLS.lock().unwrap(), ["probe/check", "probe/start"]);
     });
 }
 
@@ -253,5 +288,358 @@ fn a_type_with_no_brain_is_refused_at_construction() {
             [mod_api::BehaviorRefusal::NoBrain],
             "the part learned at construction that a zombie has no brain"
         );
+    });
+}
+
+// ---- The villager brain (#824's first wiring) ---------------------------
+
+/// Values the villager behaviors read back, for the journal.
+static READS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Writes a walk target through the engine's setter and journals what the
+/// context then answers: the walk target read back, the absent look target,
+/// and the attack-target write a villager refuses (its brain keeps none).
+struct WalkWriter;
+impl Behavior for WalkWriter {
+    fn name(&self) -> &'static str {
+        "WalkWriter"
+    }
+    fn start(&mut self, cx: &mut BehaviorCx<'_>) {
+        record("writer/start");
+        cx.set_walk_target([7, 64, 9], 0.5, 1);
+        let read = |what: String| READS.lock().unwrap().push(what);
+        read(format!("{:?}", cx.walk_target()));
+        read(format!("{:?}", cx.look_target()));
+        let zombie = cx.host().entity(9).map(mod_api::LivingRef::new);
+        read(format!("{}", cx.set_brain_target(zombie)));
+    }
+}
+
+/// A villager in the game's list, as `Mob::new` builds it.
+fn villager(game: &mut super::super::Game<'_>, id: u32, at: [f64; 3]) {
+    use horizon_core::geometry::Vec3;
+    let kind = game
+        .res
+        .mob_types()
+        .get("minecraft:villager")
+        .unwrap()
+        .clone();
+    let mut m = Mob::new(id, kind, Vec3::new(at[0], at[1], at[2]), 0.0);
+    m.on_ground = true;
+    game.mobs.push(m);
+}
+
+/// One pass over the villager's own brain tick as `server_ai_step` reaches
+/// it: the world with the goal host beside it, the events buffer and the
+/// level random, all handed to `f` together. `level` is the caller's, so a
+/// run of ticks draws one stream.
+fn with_villager_tick(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    game_time: i64,
+    day_time: i64,
+    level: &mut DamageLevel<'_>,
+    f: impl FnOnce(&mut Mob, &MobWorld<'_>, &mut DamageLevel<'_>, &mut Vec<mobs::MobEvent>),
+) {
+    game.options.dedicated = Some(Vec::new());
+    game.world.game_time = game_time;
+    game.world.day_time = day_time;
+    let mut mobs = game.mobs.lift();
+    let snapshot: Vec<_> = mobs
+        .iter()
+        .map(|m| creatures::seen(m, game.level.player_uuid))
+        .collect();
+    let mut w = game.mob_world_base(&snapshot);
+    w.goal_host = Some(&*game);
+    let mut events = Vec::new();
+    let index = mobs.iter().position(|m| m.id == id).unwrap();
+    f(&mut mobs[index], &w, level, &mut events);
+    game.mobs = mobs;
+}
+
+/// `villager_brain::tick` once at this time, on the caller's level random.
+fn villager_tick(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    game_time: i64,
+    day_time: i64,
+    level: &mut DamageLevel<'_>,
+) {
+    with_villager_tick(
+        game,
+        id,
+        game_time,
+        day_time,
+        level,
+        |m, w, level, events| {
+            mobs::villager_brain::tick(m, w, level, events);
+        },
+    );
+}
+
+/// The mob's own random and the level random after a run of ticks: what the
+/// zero-cost test compares.
+fn random_states(
+    game: &mut super::super::Game<'_>,
+    id: u32,
+    level: &mut DamageLevel<'_>,
+) -> ((u64, Option<f64>), (u64, Option<f64>)) {
+    let mobs = game.mobs.lift();
+    let mob = mobs.iter().find(|m| m.id == id).unwrap();
+    let mob_state = (&mob.random).into();
+    game.mobs = mobs;
+    (mob_state, (&*level.random()).into())
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn behaviors_join_after_vanilla_of_their_priority_and_activity() {
+    VILLAGER_ADDS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(1))
+            .unwrap();
+    });
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Idle, 5, 40, 80, &[], Probe::still_for(1))
+            .unwrap();
+    });
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        villager_tick(game, 8, 100, 3000, &mut level);
+        let keys = mobs::villager_brain::entry_keys(game.mobs.iter().find(|m| m.id == 8).unwrap())
+            .unwrap();
+        let mods: Vec<_> = keys.iter().enumerate().filter(|(_, k)| k.2).collect();
+        assert_eq!(mods.len(), 2, "both behaviors joined");
+        for (i, key) in &mods {
+            let before = keys
+                .iter()
+                .take(*i)
+                .filter(|k| !k.2 && k.0 == key.0 && k.1 == key.1)
+                .count();
+            assert!(before > 0, "vanilla ({:?}, {:?}) comes first", key.0, key.1);
+            let after_vanilla = keys
+                .iter()
+                .skip(i + 1)
+                .any(|k| !k.2 && k.0 == key.0 && k.1 == key.1);
+            assert!(!after_vanilla, "no vanilla of the pair follows the mod's");
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_behavior_writes_the_walk_target_and_the_refusals_hold() {
+    CALLS.lock().unwrap().clear();
+    READS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Idle, 99, 60, 60, &[], WalkWriter).unwrap();
+    });
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        zombie(game, 9, [5.5, 65.0, 5.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        // Idle at day 3000 (no job site): the behavior starts.
+        villager_tick(game, 8, 100, 3000, &mut level);
+        let reads = READS.lock().unwrap().clone();
+        assert_eq!(
+            reads[0], "Some(BrainWalkTarget { at: [7.5, 64.5, 9.5], speed: 0.5, close: 1 })",
+            "the walk target reads back at the block's centre"
+        );
+        assert_eq!(reads[1], "None", "no look target is set");
+        assert_eq!(
+            reads[2], "false",
+            "the villager brain keeps no attack target"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn only_an_active_activity_starts_but_core_always_does() {
+    CALLS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().clear();
+    // Hide runs only in a raid; Idle is the day's fallback activity (no job
+    // site), and Core is always active.
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Hide, 50, 60, 60, &[], Probe::named("hide", 1))
+            .unwrap();
+    });
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Idle, 50, 60, 60, &[], Probe::named("idle", 1))
+            .unwrap();
+    });
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Core, 50, 60, 60, &[], Probe::named("core", 1))
+            .unwrap();
+    });
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        for i in 0..10 {
+            villager_tick(game, 8, 100 + i, 3000, &mut level);
+        }
+        let calls = CALLS.lock().unwrap().clone();
+        assert!(
+            calls.iter().all(|c| !c.starts_with("hide/")),
+            "a hidden activity never starts: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|c| c.starts_with("idle/")),
+            "the active activity starts: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|c| c.starts_with("core/")),
+            "core always starts: {calls:?}"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_running_behavior_keeps_ticking_across_the_activity_change() {
+    CALLS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
+            .unwrap();
+    });
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        // Day: Idle starts the behavior. Night (day 13000): Rest takes the
+        // activity, and the running behavior keeps ticking anyway, as
+        // vanilla's `tickEachRunningBehavior` ignores activities.
+        for i in 0..5 {
+            villager_tick(game, 8, 100 + i, 3000, &mut level);
+        }
+        let starts = CALLS
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| *c == "one/start")
+            .count();
+        assert_eq!(starts, 1, "it started once");
+        for i in 0..5 {
+            villager_tick(game, 8, 110 + i, 13000, &mut level);
+        }
+        let calls = CALLS.lock().unwrap().clone();
+        let ticks_after = calls.iter().filter(|c| *c == "one/tick").count();
+        assert!(ticks_after >= 5, "still ticking at night: {calls:?}");
+        assert_eq!(
+            calls.iter().filter(|c| *c == "one/start").count(),
+            1,
+            "no restart: {calls:?}"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn refresh_stops_a_running_behavior_and_the_rebuild_is_fresh() {
+    CALLS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().clear();
+    VILLAGER_ADDS.lock().unwrap().push(|b| {
+        b.add(Activity::Idle, 99, 1000, 1000, &[], Probe::named("one", 60))
+            .unwrap();
+    });
+    with_game(|game| {
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        villager_tick(game, 8, 100, 3000, &mut level);
+        assert_eq!(
+            CALLS.lock().unwrap().clone(),
+            ["one/check", "one/start", "one/tick"],
+            "it runs, ticked in the same brain tick that started it"
+        );
+        // `Villager.refreshBrain`: stopAll, then the brain rebuilt from its
+        // memories — the behaviors re-registered fresh.
+        with_villager_tick(game, 8, 101, 3000, &mut level, |m, w, level, events| {
+            mobs::villager_brain::age_boundary_reached(m, w, level, events);
+        });
+        assert_eq!(
+            CALLS.lock().unwrap().clone(),
+            ["one/check", "one/start", "one/tick", "one/stop"],
+            "refreshBrain stopped it"
+        );
+        villager_tick(game, 8, 102, 3000, &mut level);
+        assert_eq!(
+            CALLS.lock().unwrap().clone(),
+            [
+                "one/check",
+                "one/start",
+                "one/tick",
+                "one/stop",
+                "one/check",
+                "one/start",
+                "one/tick"
+            ],
+            "the rebuilt brain runs a fresh one"
+        );
+    });
+}
+
+#[test]
+#[ignore = "needs prepared resources"]
+fn a_villager_without_mod_behaviors_draws_what_a_parts_free_one_does() {
+    with_game(|game| {
+        // Phase A: no parts at all.
+        mod_api::__private::install(Vec::new().into());
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        for i in 0..50 {
+            villager_tick(game, 8, 100 + i, 3000, &mut level);
+        }
+        let bare = random_states(game, 8, &mut level);
+        game.mobs.clear();
+
+        // Phase B: the mods installed, a part on the villager that adds no
+        // behavior (and one on a zombie besides).
+        VILLAGER_ADDS.lock().unwrap().clear();
+        install_game_mods();
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        for i in 0..50 {
+            villager_tick(game, 8, 100 + i, 3000, &mut level);
+        }
+        let unadded = random_states(game, 8, &mut level);
+        assert_eq!(bare, unadded, "a part with no behaviors costs nothing");
+        game.mobs.clear();
+
+        // Phase C: one behavior joined — the streams part ways, so the
+        // comparison above can see a change.
+        VILLAGER_ADDS.lock().unwrap().clear();
+        VILLAGER_ADDS.lock().unwrap().push(|b| {
+            b.add(Activity::Core, 0, 60, 60, &[], Probe::still_for(60))
+                .unwrap();
+        });
+        game.resolve_parts().unwrap();
+        villager(game, 8, [3.5, 65.0, 3.5]);
+        let mut test_level = horizon_client::health::TestLevel::new(0);
+        let mut level = test_level.level();
+        for i in 0..50 {
+            villager_tick(game, 8, 100 + i, 3000, &mut level);
+        }
+        let joined = random_states(game, 8, &mut level);
+        assert_ne!(bare, joined, "a joined behavior shifts the level stream");
     });
 }

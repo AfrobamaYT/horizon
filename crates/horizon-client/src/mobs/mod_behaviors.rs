@@ -152,11 +152,18 @@ fn matches(want: mod_api::MemoryStatus, present: Option<bool>) -> bool {
 /// `checkMemory` answers false for an unregistered memory).
 fn memory_present(m: &Mob, memory: mod_api::BrainMemory) -> Option<bool> {
     match m.species() {
-        // The species' brains join commit by commit: the villager first.
-        _ => {
-            let _ = memory;
-            None
+        Species::Villager => {
+            let mem = super::villager_brain::mem_ref(m)?;
+            let present = match memory {
+                mod_api::BrainMemory::WalkTarget => mem.walk_target.present(),
+                mod_api::BrainMemory::LookTarget => mem.look_target.present(),
+                // The villager brain registers no attack target.
+                mod_api::BrainMemory::AttackTarget => return None,
+                _ => return None,
+            };
+            Some(present)
         }
+        _ => None,
     }
 }
 
@@ -164,29 +171,51 @@ fn memory_present(m: &Mob, memory: mod_api::BrainMemory) -> Option<bool> {
 /// the tick's view resolves its tracker to. None where the species' brain
 /// keeps no walk target.
 pub fn walk_target(m: &Mob, w: &MobWorld<'_>) -> Option<mod_api::BrainWalkTarget> {
-    let _ = (m, w);
-    None
+    match m.species() {
+        Species::Villager => {
+            let walk = super::villager_brain::mem_ref(m)?.walk_target.value()?;
+            let at = walk.target.position(w)?;
+            Some(mod_api::BrainWalkTarget::new(
+                at,
+                f64::from(walk.speed),
+                walk.close,
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// The brain's `LOOK_TARGET` memory: the position its tracker resolves to.
 /// None where the species' brain keeps no look target.
 pub fn look_target(m: &Mob, w: &MobWorld<'_>) -> Option<[f64; 3]> {
-    let _ = (m, w);
-    None
+    match m.species() {
+        Species::Villager => super::villager_brain::mem_ref(m)?
+            .look_target
+            .value()?
+            .position(w),
+        _ => None,
+    }
 }
 
 /// `SetWalkTarget`: writes the brain's `WALK_TARGET` memory through the
 /// engine's own path, where the species' walk sink takes it from.
 pub fn set_walk_target(m: &mut Mob, at: [i32; 3], speed: f64, close: i32) {
-    let _ = (m, at, speed, close);
+    if let Species::Villager = m.species() {
+        super::villager_brain::mem(m)
+            .walk_target
+            .set(super::villager_brain::WalkTarget::block(
+                at,
+                speed as f32,
+                close,
+            ));
+    }
 }
 
 /// Whether the species thinks with one of the brains wired for mod behaviors
 /// (#824): where `register_behaviors` runs at the brain's own construction.
-/// The species' brains join commit by commit: none is wired yet.
+/// The species' brains join commit by commit: the villager first.
 pub fn has_brain(s: Species) -> bool {
-    let _ = s;
-    false
+    matches!(s, Species::Villager)
 }
 
 /// Ask the installed entity parts for the mob's behaviors (#824), each into

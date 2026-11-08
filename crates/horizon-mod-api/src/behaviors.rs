@@ -302,6 +302,13 @@ pub struct BrainWalkTarget {
     /// How close counts as there.
     pub close: i32,
 }
+impl BrainWalkTarget {
+    // hidden: the game's own construction, not part of the mod surface
+    #[doc(hidden)]
+    pub fn new(at: [f64; 3], speed: f64, close: i32) -> Self {
+        Self { at, speed, close }
+    }
+}
 
 /// What a [`Behavior`] runs with: its mob and the tick's read view — the
 /// same mob-tick view [`crate::GoalContext`] is (the ticking mob itself, the
