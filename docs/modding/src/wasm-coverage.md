@@ -12,6 +12,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Host::block_state_default` | crosses | Wire call |
 | `Host::item_crafting_remainder` | crosses | Wire call |
 | `Host::block_item` | crosses | Wire call |
+| `Host::item_block` | crosses | Wire call |
 | `Host::block_collision` | crosses | Wire call |
 | `Host::on` | crosses | Wire call |
 | `Host::setting` | crosses | Wire call |
