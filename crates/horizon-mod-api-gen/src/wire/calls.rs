@@ -422,6 +422,12 @@ fn held_in(types: &Types<'_>, ty: &Ty, statics: bool) -> Option<String> {
     })
 }
 
+pub(super) fn frame_cases<'t>(types: &'t Types<'_>, def: usize) -> Option<&'t [super::ty::Case]> {
+    let super::ty::Kind::Variant(cases) = &types.defs[def].kind else {
+        return None;
+    };
+    cases.iter().all(|case|matches!(&case.payload,super::ty::Payload::Tuple(v) if matches!(v.as_slice(),[Ty::Dyn(..)]))).then_some(cases.as_slice())
+}
 pub(super) fn held(types: &Types<'_>, ty: &Ty) -> Option<String> {
     held_in(types, ty, false)
 }
@@ -482,6 +488,9 @@ pub(super) fn writeback_fields(
     name: &str,
     mutable: bool,
 ) -> Option<Vec<Writeback>> {
+    if frame_cases(types, def).is_some() {
+        return Some(Vec::new());
+    }
     let super::ty::Kind::Record(fields) = &types.defs[def].kind else {
         return None;
     };
@@ -496,6 +505,11 @@ pub(super) fn writeback_fields(
             Ty::Ref(t, m) => (&**t, *m),
             ty => (ty, false),
         };
+        if let Ty::Named(d) = inner
+            && frame_cases(types, *d).is_some()
+        {
+            continue;
+        }
         if let Ty::Named(d) = inner
             && let Some(view) = &types.defs[*d].view
         {
@@ -551,6 +565,27 @@ fn borrowed(
     mutable: bool,
 ) -> Option<(String, String, String)> {
     let d = &types.defs[def];
+    if let Some(cases) = frame_cases(types, def) {
+        let mut arms = String::new();
+        for (i, case) in cases.iter().enumerate() {
+            let super::ty::Payload::Tuple(v) = &case.payload else {
+                unreachable!()
+            };
+            let Ty::Dyn(_, m) = &v[0] else { unreachable!() };
+            write!(
+                arms,
+                "{i} => {}::{}(&{}{name}_frame),",
+                d.rust,
+                case.rust,
+                if *m { "mut " } else { "" }
+            )
+            .unwrap();
+        }
+        let read = format!(
+            "let mut {name}_frame=Guest; let {name}=match input.take::<u32>()? {{ {arms} tag=>return Err(crate::wire::WireError::Tag(tag)) }};"
+        );
+        return Some((read, name.into(), String::new()));
+    }
     if let Some(view) = &d.view {
         let pointee = rust_ty(types, &view.pointee, false);
         let read = format!(
@@ -668,6 +703,9 @@ pub(super) fn dispatchable(types: &Types<'_>, m: &Method) -> bool {
                     }
                     _ => held(types, ty).is_some(),
                 },
+                Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                    borrowed(types, *d, "e", false).is_some()
+                }
                 _ => held(types, ty).is_some(),
             })
 }
@@ -702,6 +740,11 @@ pub(super) fn dispatch(types: &Types<'_>, methods: &[Method]) -> (String, Vec<St
             match ty {
                 Ty::Dyn(_, true) => args.push("&mut host".to_string()),
                 Ty::Dyn(..) => args.push("&host".to_string()),
+                Ty::Named(d) if types.defs[*d].lifetimes != 0 => {
+                    let (read, name, _) = borrowed(types, *d, &format!("p{i}"), false).unwrap();
+                    body.push_str(&read);
+                    args.push(name);
+                }
                 Ty::Ref(inner, m) if matches!(&**inner, Ty::Named(d) if types.defs[*d].lifetimes != 0) =>
                 {
                     let Ty::Named(d) = &**inner else {
