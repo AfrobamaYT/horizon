@@ -3472,7 +3472,10 @@ impl Dim {
             Self::Overworld => LevelDimension::Overworld,
             Self::Nether => LevelDimension::Nether,
             Self::End => LevelDimension::End,
-            Self::Extra(_) => LevelDimension::Overworld,
+            Self::Extra(_) => LevelDimension::of_level(
+                horizon_core::LevelKey::parse(self.id())
+                    .unwrap_or(horizon_core::LevelKey::OVERWORLD),
+            ),
         }
     }
     fn id(self) -> &'static str {
@@ -3491,6 +3494,15 @@ impl Dim {
             "minecraft:the_end" => Self::End,
             _ => Self::extra(id).unwrap_or(Self::Overworld),
         }
+    }
+    /// `Level.getSeaLevel` of the level: the sea level its noise settings give a mod's level, else
+    /// the built-in level's.
+    fn sea_level(self) -> i32 {
+        Self::sea_level_of_id(self.id())
+    }
+    /// [`Self::sea_level`] of the level `id` names.
+    fn sea_level_of_id(id: &str) -> i32 {
+        horizon_core::LevelKey::parse(id).map_or(63, horizon_world::level::sea_level_of)
     }
     /// `DimensionType.getTeleportationScale`: how a coordinate in `source` scales into `target`,
     /// the source's `coordinate_scale` over the target's (8 into the Overworld from the Nether).
@@ -3535,6 +3547,16 @@ impl Dim {
     /// The dimensions past vanilla's three of the world being opened.
     fn set_extra<'a>(ids: impl Iterator<Item = &'a str>) {
         *EXTRA_DIMS.write().unwrap() = ids.map(mod_api::__private::dimension_key).collect();
+    }
+    /// Adds the dimension `id` a remote server sent, which no local world told of, so that
+    /// [`Self::from_id`] finds it.
+    fn add_extra(id: &str) {
+        if !Self::exists(id) {
+            EXTRA_DIMS
+                .write()
+                .unwrap()
+                .push(mod_api::__private::dimension_key(id));
+        }
     }
     /// The dimension as mods' level handles name it.
     fn key(self) -> mod_api::DimensionKey {
@@ -5199,6 +5221,10 @@ impl Game<'_> {
                 LevelDimension::Overworld => self.res.environment(),
                 LevelDimension::Nether => self.res.nether_environment(),
                 LevelDimension::End => self.res.end_environment(),
+                LevelDimension::Custom(key) => horizon_client::environment::Environment::for_level(
+                    key.id(),
+                    self.res.environment(),
+                ),
             },
             raining: rain > 0.2,
             thundering: thunder > 0.9,

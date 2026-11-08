@@ -190,6 +190,12 @@ impl Game<'_> {
         })
     }
 
+    /// The sea level the game uses for the level (`Dim::sea_level`). None as the host call says.
+    pub(super) fn level_sea_level(&self, level: LevelRef) -> Option<i32> {
+        self.native_level_world(level)?;
+        Some(Dim::sea_level_of_id(level.dimension_id()))
+    }
+
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     pub(super) fn level_seed(&self, level: LevelRef) -> Option<i64> {
         self.native_level_world(level)?;

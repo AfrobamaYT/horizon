@@ -312,6 +312,14 @@ pub trait LevelsBackend {
     #[access(WorldOnly)]
     fn level_dimension_type(&self, level: LevelRef) -> Option<LevelDimensionType>;
     /// Side: server.
+    /// `Level.getSeaLevel`: 63 in the Overworld, 32 in the Nether, 0 in the End; for a level of the
+    /// noise generator the `sea_level` of its noise settings (a data pack's too, when it replaces
+    /// them), for another level the `sea_level` its `DimensionSettings` gave, else 63. It is the sea
+    /// level the game uses for the level: terrain and aquifers, mob spawning and mob behaviour, rain
+    /// and snow, and maps. None for a stale handle and on a client.
+    #[access(WorldOnly)]
+    fn level_sea_level(&self, level: LevelRef) -> Option<i32>;
+    /// Side: server.
     /// The world's seed (`WorldOptions.seed`), as `/seed` shows it.
     #[access(WorldOnly)]
     fn level_seed(&self, level: LevelRef) -> Option<i64>;

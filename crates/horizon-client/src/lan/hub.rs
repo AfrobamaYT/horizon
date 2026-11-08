@@ -1420,7 +1420,9 @@ impl Hub {
                     pos: *pos,
                 }),
             portal_cooldown,
-            sea_level: 63,
+            // `Level.getSeaLevel` of the guest's level, as the server sends it.
+            sea_level: horizon_core::LevelKey::parse(&self.config.dimension)
+                .map_or(63, horizon_world::level::sea_level_of),
         }
     }
 

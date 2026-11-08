@@ -389,6 +389,12 @@ fn dimension_types_take_a_host(
     Some((ty.coordinate_scale, ty.fast_lava, nether_like))
 }
 
+/// Compile-only: a mod reads a level's sea level from a handle on a shared host.
+#[allow(dead_code)]
+fn sea_level_takes_a_host(host: &dyn Host, level: LevelRef) -> Option<i32> {
+    level.sea_level(host)
+}
+
 /// Compile-only: a client mod reads column heights of the world its window shows.
 #[allow(dead_code)]
 fn client_heights_take_a_client_host(host: &dyn ClientHost) -> Result<Vec<Option<i32>>, String> {
