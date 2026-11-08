@@ -218,10 +218,8 @@ fn an_empty_handed_guest_is_the_killer_and_a_missing_one_is_not() {
         .unwrap()
         .hub
         .guests
-        .iter_mut()
-        .find(|guest| guest.conn == 2)
-        .unwrap()
-        .inventory[0] = None;
+        .update_connection(2, |guest| guest.inventory[0] = None)
+        .unwrap();
     first.inventory[first.selected] = Some(looting.clone());
     let as_guest = loot_stacks(&mut first, &format!("execute as {GUEST} run {insert}"));
     assert!(

@@ -1958,7 +1958,9 @@ mod boat_passenger_tree_tests {
             if (accepted, score("#r"), score("#s")) != (true, 4, 1) {
                 failures.push("registered data command must reach live tree".into());
             }
-            game.boats[bi].leash = Some(horizon_client::mobs::leash::Holder::Mob(control));
+            game.boats.update(bi, |boat| {
+                boat.leash = Some(horizon_client::mobs::leash::Holder::Mob(control))
+            });
             let leashed = game.command_target_nbt(Target::Boat(bid)).unwrap();
             assert_eq!(
                 leashed.get("leash").and_then(|t| t.get("UUID")),
@@ -2782,12 +2784,19 @@ mod vehicle_container_tests {
                 }
                 if *expected_items == Some(1) {
                     // The model, not a stale loaded Items list, owns the inventory.
-                    let slots = match target {
-                        Target::Boat(_) => &mut game.boats.last_mut().unwrap().items,
-                        Target::Cart(_) => &mut game.carts.last_mut().unwrap().items,
+                    match target {
+                        Target::Boat(_) => {
+                            game.boats.update(game.boats.len() - 1, |boat| {
+                                boat.items[0].as_mut().unwrap().count = 4
+                            });
+                        }
+                        Target::Cart(_) => {
+                            game.carts.update(game.carts.len() - 1, |cart| {
+                                cart.items[0].as_mut().unwrap().count = 4
+                            });
+                        }
                         _ => unreachable!(),
-                    };
-                    slots[0].as_mut().unwrap().count = 4;
+                    }
                 }
                 // A normal model can save without any raw input. Boat pending tables
                 // already live in the retained source; no replacement pending state is invented.
