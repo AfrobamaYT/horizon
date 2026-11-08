@@ -126,6 +126,7 @@ const EXPORTS: &[&str] = &[
     "TooltipAppender",
     "CriterionTest",
     "RowPages",
+    "RowFunction",
 ];
 
 /// Every exported trait: [`EXPORTS`], then the handler traits `mod_api`'s capability keys name
@@ -139,7 +140,7 @@ pub(super) fn exports() -> &'static [&'static str] {
 /// another mod's provider): the mod calls one through the `held-<interface>` imports, by the
 /// index the game keeps it under.
 pub(super) fn held(owner: &str) -> bool {
-    ["PlaceProvider", "RowPages"].contains(&owner)
+    ["PlaceProvider", "RowPages", "RowFunction"].contains(&owner)
         || (exports().contains(&owner) && !EXPORTS.contains(&owner))
 }
 
