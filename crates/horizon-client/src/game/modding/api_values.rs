@@ -62,8 +62,8 @@ pub(crate) fn behavior_block(
 ) -> Option<horizon_world::level::states::BlockId> {
     Some(behaviours.block(default_state(block)?))
 }
-pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
 pub(crate) use super::native_ground::alter_ground;
+pub(in crate::game) use super::native_worldgen::prepare as prepare_block_states;
 pub(in crate::game) use block_state::install as install_block_states;
 #[path = "api_values/landing_write.rs"]
 mod landing_write;
