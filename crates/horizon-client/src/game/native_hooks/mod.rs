@@ -55,6 +55,7 @@ use horizon_client::{
 use horizon_client_core::gamerules::Value as GameRuleValue;
 use horizon_client_core::suggestion::Suggestion;
 use horizon_core::{
+    connection_kind::ConnectionKind,
     geometry::Direction,
     position::BlockPos,
     random::LegacyRandom,
