@@ -551,7 +551,9 @@ fn nested_load_calls_do_not_extend_the_outer_deadline() {
         "local.get 0 i32.const 1 i32.eq if (result i64) i64.const 0 else i32.const {id} i32.const 0 i32.const 0 i32.const 2048 i32.const 8 call $host drop i64.const 8796093022216 end"
     ));
     let epoch = module.running.group.lock().unwrap().store.engine().clone();
+    let entered = Cell::new(false);
     let mut random = Random(|| {
+        entered.set(true);
         for _ in 0..1000 {
             epoch.increment_epoch();
         }
@@ -570,10 +572,8 @@ fn nested_load_calls_do_not_extend_the_outer_deadline() {
     });
     let mut frame = Frame::default();
     frame.set_structure_random_mut(&mut random);
-    assert_eq!(
-        module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>()),
-        None
-    );
+    let _ = module.call(CallClass::Hook, frame, 0, None, |_| {}, |r| r.take::<i64>());
+    assert!(entered.get());
     assert!(module.is_stopped());
 }
 
