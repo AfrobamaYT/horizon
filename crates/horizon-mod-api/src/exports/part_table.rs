@@ -12,7 +12,7 @@ pub use parts::{
 pub(crate) use parts::{InstalledProviders, answered, ask_providers, has_part_hook, parts};
 mod __private {
     pub use crate::parts::{
-        EntityAttributeDeclaration, EntityAttributeModification, HookParts, ItemKeyError, KnownIds,
+        AttributeDeclaration, attribute_declarations, EntityAttributeDeclaration, EntityAttributeModification, HookParts, ItemKeyError, KnownIds,
         PartsRef, ResolvePartsError, SpawnPlacementDeclaration, TooltipAppenderPart,
         block_entity_types, block_key_listens, clear_game_parts, declared_world_fluids,
         entity_attribute_declarations, entity_attribute_modifications, entity_parts,
