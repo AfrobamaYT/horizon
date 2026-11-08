@@ -89,7 +89,7 @@ fn redirect_to_another_guest_switches_view_and_tags_subsequent_events() {
             assert_eq!(world.selected_player_identity().unwrap().1, second_id);
             assert_eq!(world.selected_player().unwrap().position.x, 13.0);
             assert_eq!(
-                game.mob_target(&other, &actor, &world),
+                mobs::part_goals::GoalHost::mob_target(game, &other, &actor, &world),
                 Some(LivingRef::new(game.entity(first_id).unwrap()))
             );
             let after = world.route_player_event(MobEvent::AttackPlayer(1.0, [0.0; 3]));

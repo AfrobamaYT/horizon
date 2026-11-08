@@ -6184,7 +6184,7 @@ mod tests {
         .into();
         mod_api::testing::with_mods(mods, || {
             super::super::native_entity_refs::tests::with_game(|game| {
-                game.dragon = Some(dragon(Phase::Scanning { time: 0 }));
+                game.dragon.replace(dragon(Phase::Scanning { time: 0 }));
                 let arrow = ProjectileKind::Trident;
                 let hit = |game: &mut Game<'_>, counts, direct| {
                     game.hurt_dragon_part_at(
@@ -6203,7 +6203,7 @@ mod tests {
                 };
                 assert_eq!(hit(game, true, Some(&arrow)), Hurt::Shrugged);
                 assert_eq!(heard.load(Ordering::SeqCst), 0);
-                game.dragon = Some(dragon(flying()));
+                game.dragon.replace(dragon(flying()));
                 let id = game.dragon.as_ref().unwrap().id;
                 assert!(game.command_damage_dragon(
                     id,
