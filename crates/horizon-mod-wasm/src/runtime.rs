@@ -89,6 +89,7 @@ struct Running {
 }
 struct FrameScope {
     state: *mut State,
+    previous_module: Option<WasmMod>,
     running: Arc<Running>,
 }
 impl Drop for FrameScope {
@@ -97,6 +98,7 @@ impl Drop for FrameScope {
         // boxed state remains in place until this synchronous call scope ends.
         let state = unsafe { &mut *self.state };
         state.cx.frames.pop();
+        state.cx.module = self.previous_module.take();
         state.depth -= 1;
         if std::thread::panicking() {
             self.running.poisoned.store(true, Ordering::Relaxed);
@@ -108,7 +110,7 @@ pub struct WasmMod {
     id: Arc<str>,
     running: Arc<Running>,
     input: TypedFunc<u32, u32>,
-    hook: TypedFunc<(u32, u32, u32), u64>,
+    hook: TypedFunc<u32, u64>,
     pub subscribed: &'static [Option<HookId>],
     released: Arc<Mutex<Vec<Id>>>,
     subscriptions: Arc<Mutex<std::collections::HashMap<(Id, u32), &'static [Option<HookId>]>>>,
@@ -372,7 +374,7 @@ impl WasmMod {
             })
             .collect())
     }
-    pub fn call<R>(
+    pub(crate) fn call<R>(
         &self,
         class: CallClass,
         frame: Frame,
@@ -442,7 +444,9 @@ impl WasmMod {
             store.data_mut().imports.resize_with(depth + 1, Vec::new);
         }
         store.data_mut().cx.frames.push(frame);
+        let previous_module = store.data_mut().cx.module.replace(self.clone());
         let scope = FrameScope {
+            previous_module,
             state: store.data_mut(),
             running: self.running.clone(),
         };
@@ -498,7 +502,7 @@ impl WasmMod {
             .memory
             .ok_or_else(|| wasmtime::Error::msg("no memory"))?;
         memory.write(&mut *store, ptr as usize, input.bytes())?;
-        let result = self.hook.call(&mut *store, (id, ptr, len))?;
+        let result = self.hook.call(&mut *store, id)?;
         let ptr = (result >> 32) as usize;
         let len = result as u32;
         if len == u32::MAX {

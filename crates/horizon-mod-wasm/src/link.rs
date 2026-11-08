@@ -204,6 +204,21 @@ impl<T: 'static> Group<T> {
                             )
                             .map_err(|e| load(e, member.name))?,
                         ),
+                        (
+                            "GOT.mem" | "env",
+                            "__heap_base" | "__data_end",
+                            ExternType::Global(ty),
+                        ) => Extern::Global(
+                            Global::new(&mut store, ty, Val::I32(next.next_multiple_of(16) as i32))
+                                .map_err(|e| load(e, member.name))?,
+                        ),
+                        ("GOT.mem" | "env", "__heap_end", ExternType::Global(ty)) => {
+                            let end = memory.data_size(&store) as i32;
+                            Extern::Global(
+                                Global::new(&mut store, ty, Val::I32(end))
+                                    .map_err(|e| load(e, member.name))?,
+                            )
+                        }
                         ("GOT.mem", symbol, _) => {
                             let Some((owner, Extern::Global(global))) = symbols.get(symbol) else {
                                 return Err(unresolved());
