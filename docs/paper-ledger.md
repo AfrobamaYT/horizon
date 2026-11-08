@@ -144,3 +144,44 @@ Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc; Horizon cite
 
 [paper-BrewEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/BrewEvent.html
 [paper-BlockFromToEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockFromToEvent.html
+
+## Event counterparts: base hooks (hanging, hopper, inventory, item, block state) (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), public Javadoc only; Horizon hooks are cited by function name. Scope: the 20 `base.rs` hooks below.
+A key exists only where the moment, side, facts and outcome all agree; otherwise the row says which part differs.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `hanging_break` | **Covered:** [`HangingBreakEvent`][paper-HangingBreakEvent] | The hanging entity gives the kind and the block it hangs in, `getCause()` records a hit, blast or lost support, and a player's hit arrives as the documented `HangingBreakByEntityEvent` subclass whose `getRemover()` is the player; cancelling keeps it as it was. Key added. |
+| `hanging_place` | **Covered:** [`HangingPlaceEvent`][paper-HangingPlaceEvent] | Fired when a player's placement creates the hanging entity, cancellable, with the player, the clicked block and face, the hand and the item stack: block/face give the position and the item gives the kind (frame, painting or lead), and cancelling leaves it unplaced in hand. Key added. |
+| `has_analog_output` | **Gap:** none | No Paper/Bukkit event is consulted when a comparator reads a block's analog output; the hook is a per-state virtual call with no event counterpart. No key. |
+| `hears_projectile_impacts` | **Gap:** none (nearest [`ProjectileHitEvent`][paper-ProjectileHitEvent]) | The hook is a Horizon-only opt-in gate asked once per tick (whether any mod wants impact events), not an in-world moment; `ProjectileHitEvent` is the impact itself and fires regardless of listeners. No key. |
+| `hopper_inventory_search` | **Covered:** [`HopperInventorySearchEvent`][paper-HopperInventorySearchEvent] | Fires when a hopper looks for its source/attached container, exactly the search the hook reports; the hopper block (from `BlockEvent`), the found inventory (null when none, its location or holder naming the container) and `getSearchBlock()` are present, and the event is not cancellable, matching the listen-only hook. Key added. |
+| `hopper_pickup_item` | **Covered:** [`InventoryPickupItemEvent`][paper-InventoryPickupItemEvent] | Fired when a hopper or hopper minecart takes a dropped item, cancellable; the `Item` entity gives the stack's item and count plus its position, the inventory is the hopper (filter minecarts out if needed), and cancelling leaves the stack in the world as the hook's `cancel` does. Key added. |
+| `hurt_enemy` | **Partial:** [`EntityDamageEvent`][paper-EntityDamageEvent] | Same hit before health is applied, but this is the generic damage event for every cause, the weapon is only reachable through the damage source, and it is cancellable while the hook only hears and cannot cancel; the hook also sits at `Item.hurtEnemy`, before the post-attack enchantments. No key. |
+| `ingredient` | **Gap:** none | No Paper/Bukkit event resolves a custom recipe ingredient kind to item ids while a data load parses recipes; recipes are registered through the API after load, with no pre-parse hook. No key. |
+| `inventory_block_start` | **Covered:** [`InventoryOpenEvent`][paper-InventoryOpenEvent] | Fired when a player opens an inventory, cancellable, with the player and the inventory whose location is the block; cancelling leaves it closed, as the hook's `cancel` does. The event covers every inventory, so a port filters to block-held ones. Key added. |
+| `inventory_move_item` | **Covered:** [`InventoryMoveItemEvent`][paper-InventoryMoveItemEvent] | Fired as one stack moves between two inventories, cancellable; source, destination and item are present (their locations give the reported blocks, a chest boat/minecart included), and cancelling returns the item to its source as the hook leaves it. The event also fires for non-hopper initiators, so the hook's hopper scope is a filter. Key added. |
+| `inventory_tick` | **Gap:** none | No Paper/Bukkit event ticks each carried stack: the hook is `Item.inventoryTick` per slot per tick, with no event exposing a slot tick or letting a listener change the stack in place. No key. |
+| `is_bonemeal_success` | **Gap:** none | No event asks a block whether this bone meal use grows it (the random roll inside `isBonemealSuccess`); Paper has no counterpart for the per-block success decision. No key. |
+| `is_signal_source` | **Gap:** none | No event asks whether a block state is a redstone signal source; it is a per-state virtual the level consults when wire connects, with no Paper/Bukkit equivalent. No key. |
+| `is_valid_bonemeal_target` | **Gap:** none | No event asks, before bone meal is used, whether a block accepts it; the `TargetHitEvent`, `EntityTargetEvent` and `SlimeTargetLivingEntityEvent` candidates match on the word "target" only and describe unrelated moments. No key. |
+| `item_consumption_teleport` | **Partial:** [`PlayerTeleportEvent`][paper-PlayerTeleportEvent] | The chorus-fruit teleport is the same moment (`TeleportCause.CHORUS_FRUIT`), the from/to pair is the parent `PlayerMoveEvent`'s and can be changed, and cancel refuses it; but the hook fires per candidate draw before the ground check (up to 16) and its cancel ends the whole effect, while Paper fires for the teleport itself and its cancel only refuses that teleport. No key. |
+| `item_crafted` | **Partial:** [`ItemCraftedEvent`][paper-ItemCraftedEvent] | Same moment (a player takes the result from a crafting grid, not a stonecutter, smithing table or furnace), server side and listen-only, but the event gives only the player and the crafted stack: the recipe id the hook passes is missing. No key. |
+| `item_damaged` | **Covered:** [`EntityDamageItemEvent`][paper-EntityDamageItemEvent] | Fired when an item on or used by an entity takes durability damage, cancellable, with the item stack, its damage amount (changeable) and the entity (its `EntityEvent` parent); the hook is the server-player subset of that moment, so item, amount, player and cancel agree. Key added. |
+| `item_despawn` | **Partial:** [`ItemDespawnEvent`][paper-ItemDespawnEvent] | Same 6000-tick moment with the item entity, its stack and location, but the hook only hears while cancelling the event grants 5 more minutes: a listen-only hook cannot express that cancel (the separate `item_expire` hook extends life by ticks). No key. |
+| `item_expire` | **Partial:** [`ItemDespawnEvent`][paper-ItemDespawnEvent] | Same lifetime moment, but the hook lets each mod set or add an arbitrary `extra_life` in ticks (capped at 32766) while the event offers only a cancel that extends by a fixed 5 minutes, so the hook's out cannot be expressed. No key. |
+| `item_picked_up` | **Covered:** [`EntityPickupItemEvent`][paper-EntityPickupItemEvent] | Fired when a living entity picks an item off the ground, cancellable; the `Item` entity gives the stack's item and amount, `getRemaining()` the part left, and the entity is the player (filter out non-player pickups the hook does not hear), with cancel leaving the stack on the ground. Key added. |
+
+[paper-HangingBreakEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/hanging/HangingBreakEvent.html
+[paper-HangingPlaceEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/hanging/HangingPlaceEvent.html
+[paper-ProjectileHitEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ProjectileHitEvent.html
+[paper-HopperInventorySearchEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/HopperInventorySearchEvent.html
+[paper-InventoryPickupItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryPickupItemEvent.html
+[paper-EntityDamageEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityDamageEvent.html
+[paper-InventoryOpenEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryOpenEvent.html
+[paper-InventoryMoveItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/inventory/InventoryMoveItemEvent.html
+[paper-PlayerTeleportEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/player/PlayerTeleportEvent.html
+[paper-ItemCraftedEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/inventory/ItemCraftedEvent.html
+[paper-ItemDespawnEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/ItemDespawnEvent.html
+[paper-EntityPickupItemEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/entity/EntityPickupItemEvent.html
