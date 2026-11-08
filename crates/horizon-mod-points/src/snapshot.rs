@@ -2,19 +2,22 @@
 use mod_api::wire::{Put, Reader, Wire, WireError, Writer};
 use std::{cell::RefCell, ops::Deref};
 
-/// A row's node id, parent id, declaration-order field/index id, type key and encoded plain value.
-/// A node without a plain value has an empty value buffer and is read through its child rows.
-pub type Row = (u32, Option<u32>, u32, u32, Vec<u8>);
+#[path = "snapshot_pages.rs"]
+mod pages;
+/// A row's node id, parent id, declaration-order field/index, type key and plain Wire value.
+pub use mod_api::Row;
+#[doc(hidden)]
+pub use pages::{PageSource, Root, Window, with_root};
 /// The raw call's snapshot. Generic tuple/list Wire impls carry it without a second codec.
 pub type Rows = Vec<Row>;
 
-/// A stable key for the type spellings in a generated view. Calls use constant keys, not text.
-pub const fn key(name: &str) -> u32 {
+/// A stable key for the type spellings in a generated view. Calls use constants, not text.
+pub const fn key(name: &str) -> u64 {
     let bytes = name.as_bytes();
-    let mut key = 0x811c9dc5u32;
+    let mut key = 0xcbf29ce484222325u64;
     let mut i = 0;
     while i < bytes.len() {
-        key = (key ^ bytes[i] as u32).wrapping_mul(0x01000193);
+        key = (key ^ bytes[i] as u64).wrapping_mul(0x100000001b3);
         i += 1;
     }
     key
@@ -45,7 +48,7 @@ impl<'a> Snapshot<'a> {
         Reader::decode(&row.4)
     }
     /// The generated type key, resolved by the per-mod view rather than sent as text per call.
-    pub fn ty(&self, node: u32) -> Option<u32> {
+    pub fn ty(&self, node: u32) -> Option<u64> {
         self.0
             .get(node as usize)
             .filter(|row| row.0 == node)
@@ -53,28 +56,40 @@ impl<'a> Snapshot<'a> {
     }
 }
 
-thread_local! { static POOL: RefCell<Vec<Rows>> = const { RefCell::new(Vec::new()) }; }
-fn recycle(rows: Rows) {
-    let cost = |rows: &Rows| {
-        rows.capacity() * std::mem::size_of::<Row>()
-            + rows.iter().map(|row| row.4.capacity()).sum::<usize>()
+type Buffers = (Rows, Vec<u16>);
+thread_local! { static POOL: RefCell<Vec<Buffers>> = const { RefCell::new(Vec::new()) }; }
+fn recycle(rows: Rows, depths: Vec<u16>) {
+    let cost = |buffers: &Buffers| {
+        buffers.0.capacity() * std::mem::size_of::<Row>()
+            + buffers.1.capacity() * std::mem::size_of::<u16>()
+            + buffers.0.iter().map(|row| row.4.capacity()).sum::<usize>()
     };
-    if rows.capacity() == 0 {
+    if rows.capacity() == 0 && depths.capacity() == 0 {
         return;
     }
     POOL.with(|pool| {
         let mut pool = pool.borrow_mut();
-        if cost(&rows) + pool.iter().map(cost).sum::<usize>() <= 4_194_304 {
-            pool.push(rows);
+        let buffers = (rows, depths);
+        if cost(&buffers) + pool.iter().map(cost).sum::<usize>() <= 4_194_304 {
+            pool.push(buffers);
         }
     });
 }
 
 /// A completed snapshot, kept until its synchronous hook returns. Its buffers are pooled by
-/// call depth, so steady-state primitive snapshots do not allocate even across different places.
+/// call depth, so steady-state primitive snapshots do not allocate across different places.
 pub struct Built {
     rows: Rows,
+    depths: Vec<u16>,
     used: usize,
+    pooled: bool,
+}
+impl Built {
+    fn into_rows(mut self) -> Rows {
+        self.pooled = false;
+        self.rows.truncate(self.used);
+        std::mem::take(&mut self.rows)
+    }
 }
 impl Deref for Built {
     type Target = [Row];
@@ -89,7 +104,12 @@ impl Put for Built {
 }
 impl Drop for Built {
     fn drop(&mut self) {
-        recycle(std::mem::take(&mut self.rows));
+        if self.pooled {
+            recycle(
+                std::mem::take(&mut self.rows),
+                std::mem::take(&mut self.depths),
+            );
+        }
     }
 }
 
@@ -97,37 +117,69 @@ impl Drop for Built {
 /// Refusing an oversized snapshot never truncates a row or exposes a partial tree.
 pub struct Builder {
     rows: Rows,
+    depths: Vec<u16>,
     bytes: usize,
     used: usize,
+    max_rows: usize,
+    max_depth: u16,
+    pooled: bool,
 }
 impl Default for Builder {
     fn default() -> Self {
+        let (rows, depths) = POOL
+            .with(|pool| pool.borrow_mut().pop())
+            .unwrap_or_default();
         Self {
-            rows: POOL
-                .with(|pool| pool.borrow_mut().pop())
-                .unwrap_or_default(),
+            rows,
+            depths,
             bytes: 0,
             used: 0,
+            max_rows: 65_536,
+            max_depth: mod_api::wire::MAX_DEPTH,
+            pooled: true,
         }
     }
 }
 impl Drop for Builder {
     fn drop(&mut self) {
-        recycle(std::mem::take(&mut self.rows));
+        if self.pooled {
+            recycle(
+                std::mem::take(&mut self.rows),
+                std::mem::take(&mut self.depths),
+            );
+        }
     }
 }
 impl Builder {
-    /// Add an owned node. Node ids are assigned in row order.
-    pub fn node(&mut self, parent: Option<u32>, field: u32, ty: u32) -> Result<u32, WireError> {
-        if self.used >= 65_536 {
+    // Window's constructor already owns the row/depth cap checks. Explicit owned windows do
+    // not consume the hook snapshot pool: their returned Vec belongs to the interface caller.
+    fn limited(window: Window) -> Self {
+        Self {
+            rows: Vec::new(),
+            depths: Vec::new(),
+            bytes: 0,
+            used: 0,
+            max_rows: window.rows(),
+            max_depth: window.depth(),
+            pooled: false,
+        }
+    }
+    /// Add an owned node. Node ids are assigned in row order, with checked parent depth.
+    pub fn node(&mut self, parent: Option<u32>, field: u32, ty: u64) -> Result<u32, WireError> {
+        if self.used >= self.max_rows {
             return Err(WireError::Length);
         }
         let id = self.used as u32;
         if parent.is_some_and(|parent| parent >= id) {
             return Err(WireError::Invalid("snapshot parent is not an earlier node"));
         }
+        let depth = parent.map_or(0, |parent| self.depths[parent as usize] + 1);
+        if depth > self.max_depth {
+            return Err(WireError::Depth);
+        }
         if self.used == self.rows.len() {
             self.rows.push((id, parent, field, ty, Vec::new()));
+            self.depths.push(depth);
         }
         let row = &mut self.rows[self.used];
         row.0 = id;
@@ -135,6 +187,7 @@ impl Builder {
         row.2 = field;
         row.3 = ty;
         row.4.clear();
+        self.depths[self.used] = depth;
         self.used += 1;
         Ok(id)
     }
@@ -143,10 +196,9 @@ impl Builder {
         &mut self,
         parent: Option<u32>,
         field: u32,
-        ty: u32,
+        ty: u64,
         value: &T,
     ) -> Result<u32, WireError> {
-        let before = self.bytes;
         let id = self.node(parent, field, ty)?;
         let mut encoded = Writer::new();
         encoded.replace(std::mem::take(&mut self.rows[id as usize].4));
@@ -157,7 +209,6 @@ impl Builder {
         self.rows[id as usize].4 = encoded.into_bytes();
         if let Some(error) = error {
             self.used -= 1;
-            self.bytes = before;
             return Err(error);
         }
         self.bytes += len;
@@ -167,7 +218,9 @@ impl Builder {
     pub fn finish(mut self) -> Built {
         Built {
             rows: std::mem::take(&mut self.rows),
+            depths: std::mem::take(&mut self.depths),
             used: self.used,
+            pooled: self.pooled,
         }
     }
 }
