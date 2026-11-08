@@ -31,6 +31,10 @@ pub fn register_color_resolvers(resolvers: Arc<[Arc<dyn BiomeColorResolver>]>) -
     RESOLVERS.set(resolvers).is_ok()
 }
 
+pub(super) fn resolver_exists(index: u32) -> bool {
+    RESOLVERS.get().is_some_and(|r| (index as usize) < r.len())
+}
+
 /// Mod resolver `index`'s colour of `biome` at block column `(x, z)`, 0xRRGGBB: vanilla's
 /// `ColorResolver.getColor`. White for an index no resolver has.
 pub(super) fn resolve(index: u32, biome: &BiomeInfo, x: f64, z: f64) -> u32 {

@@ -376,6 +376,28 @@ fn a_mod_resolver_blends_over_the_biomes_as_vanilla_resolvers_do() {
     }
 }
 
+#[test]
+fn unknown_mod_resolver_does_not_allocate_cache_slots() {
+    let Some(root) = resources() else { return };
+    test_resolvers();
+    let biomes = Biomes::load(&ResourceRoot::directory(root)).unwrap();
+    let region = [[None; 3]; 3];
+    let mut tints = Tints::new(&region, &biomes, BiomeZoom::new(42), 1, [0, 0, 64]);
+    // A small invalid index kills the missing-check mutant without exhausting memory.
+    for index in [32, u32::MAX] {
+        assert_eq!(tints.get(Resolver::Mod(index), 1, 0, 1), 0xFF_FFFF);
+        assert_eq!(
+            tints
+                .layers
+                .iter()
+                .flatten()
+                .map(|l| l.mods.len())
+                .sum::<usize>(),
+            0
+        );
+    }
+}
+
 /// Colours oak leaves with a mod resolver, through the level as vanilla's sources read it.
 struct Resolved(ColorResolver);
 impl BlockTintSource for Resolved {
