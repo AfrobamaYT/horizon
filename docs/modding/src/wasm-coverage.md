@@ -1013,6 +1013,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ClientReloadListeners::get_last_vanilla_listener` | crosses | Wire call |
 | `PackFinders::pack_type` | crosses | Wire call |
 | `PackFinders::add_pack_finders` | crosses | Wire call |
+| `ColorResolvers::register` | crosses | Wire call |
 | `BlockTintSources::register` | crosses | Wire call |
 | `BlockAndTintGetter::block_state` | crosses | Wire call |
 | `BlockAndTintGetter::fluid_state` | crosses | Wire call |
@@ -1526,6 +1527,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `Hooks::recipe_book_categories` | crosses | Wire call |
 | `Hooks::recipe_property_sets` | crosses | Wire call |
 | `Hooks::register_block_tint_sources` | crosses | Wire call |
+| `Hooks::register_color_resolvers` | crosses | Wire call |
 | `Hooks::register_debug_entries` | crosses | Wire call |
 | `Hooks::register_debug_renderers` | crosses | Wire call |
 | `Hooks::register_dimension_transition_screen` | crosses | Wire call |
@@ -1670,6 +1672,7 @@ Surface methods excluding unbound and Not on wasm. Generated from both sides' sh
 | `ServerReloadListener::prepare` | crosses | Wire call |
 | `GameTestFunction::run` | crosses | Wire call |
 | `ClientReloadListener::prepare` | crosses | Wire call |
+| `BiomeColorResolver::color` | crosses | Wire call |
 | `BlockTintSource::color` | crosses | Wire call |
 | `BlockTintSource::color_in_world` | crosses | Wire call |
 | `BlockTintSource::color_as_terrain_particle` | crosses | Wire call |
