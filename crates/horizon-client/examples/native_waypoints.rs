@@ -18,11 +18,16 @@ struct Markers {
 #[derive(Default)]
 struct Waypoints(Mutex<Markers>);
 
-fn waypoint_path(save: &str, dimension: &str) -> Option<ConfigPath> {
-    let dimension = dimension
-        .replace('%', "%25")
+/// `ConfigPath` rejects `:` and `\`, which an imported save folder can hold on Unix.
+fn escape(part: &str) -> String {
+    part.replace('%', "%25")
         .replace('/', "%2F")
-        .replace(':', "%3A");
+        .replace(':', "%3A")
+        .replace('\\', "%5C")
+}
+
+fn waypoint_path(save: &str, dimension: &str) -> Option<ConfigPath> {
+    let (save, dimension) = (escape(save), escape(dimension));
     ConfigPath::new(&format!("waypoints/{save}/{dimension}.json")).ok()
 }
 
@@ -154,5 +159,10 @@ mod tests {
             waypoint_path("Test World", "example:foo%2Fbar")
         );
         assert_eq!(waypoint_path("..", "minecraft:overworld"), None);
+        assert!(waypoint_path("a:b\\c", "minecraft:overworld").is_some());
+        assert_ne!(
+            waypoint_path("a:b", "minecraft:overworld"),
+            waypoint_path("a%3Ab", "minecraft:overworld")
+        );
     }
 }
