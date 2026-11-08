@@ -57,9 +57,7 @@ horizon-client game::native_player_modes::tests::one_player_may_harm_another_by_
 horizon-client game::item_contact_tests::the_active_stack_survives_a_partial_contact_and_consumption_removes_the_entity #2180
 horizon-client game::item_interact_mob_tests::actual_item_interact_mob_fallback_priority_and_filters #2180
 horizon-client game::spill::tests::a_block_entity_removing_itself_in_its_tick_is_not_asked #2180
-horizon-client game::native_block_entity_item_tests::internal_slots_preserve_automation_limits_and_nested_transactions #2182
 horizon-client game::native_hooks::tests::declared_types_create_tick_and_reload_through_game #2182
-horizon-client game::native_live_holder_tests::data_slot_sizing_after_creation_and_load_joins_the_existing_journal #2182
 horizon-client game::stateful_block_entity_tests::stateful_creation_uses_actual_state_and_preserves_existing_entity #2182
 horizon-client game::native_components::item_resource_property_tests::effective_resource_properties_match_vanilla #2183
 horizon-client game::native_components::item_resource_property_tests::item_resource_changed_defaults_and_consumption #2183
