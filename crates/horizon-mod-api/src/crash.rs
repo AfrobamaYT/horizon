@@ -12,7 +12,10 @@ thread_local! {
     static NATIVE_FRAME: Cell<Option<u64>> = const { Cell::new(None) };
     static NEXT_FRAME: Cell<u64> = const { Cell::new(0) };
     /// The converted package this thread is executing, for the panic hook to name.
-    static IN_CONVERTED_PACKAGE: RefCell<Option<Rc<ConvertedScope>>> = const { RefCell::new(None) };
+    static IN_CONVERTED_PACKAGE: RefCell<Option<ConvertedScope>> = const { RefCell::new(None) };
+    static NEXT_SCOPE: Cell<u64> = const { Cell::new(0) };
+    // Only unusual, out-of-order drops allocate; ordinary scope entry does not.
+    static ENDED_SCOPES: RefCell<Vec<(u64, Option<ConvertedScope>)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The native mod hook this thread is inside, if any.
@@ -46,7 +49,6 @@ pub fn enter_native_mod(call: NativeModCall) -> NativeModGuard {
         .flatten();
     let outer_frame = NATIVE_FRAME.try_with(|c| c.replace(frame)).ok().flatten();
     NativeModGuard {
-        _thread: std::marker::PhantomData,
         outer_frame,
         outer: IN_NATIVE_MOD
             .try_with(|c| c.replace(Some(call)))
@@ -85,7 +87,7 @@ pub fn current_converted_call() -> Option<ConvertedCall> {
             let current = current.borrow();
             let scope = current.as_ref()?;
             let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
-            (scope.live.get() && scope.frame == frame).then(|| scope.call.clone())
+            (scope.frame == frame).then(|| scope.call.clone())
         })
         .ok()
         .flatten()
@@ -160,22 +162,30 @@ impl ConvertedPackage<'_> {
             site: site.into(),
         };
         let frame = NATIVE_FRAME.try_with(Cell::get).ok().flatten()?;
-        let scope = Rc::new(ConvertedScope {
-            call,
-            frame,
-            live: Cell::new(true),
-        });
+        let token = NEXT_SCOPE
+            .try_with(|c| {
+                let next = c.get().checked_add(1)?;
+                c.set(next);
+                Some(next)
+            })
+            .ok()
+            .flatten()?;
+        let scope = ConvertedScope { call, frame, token };
         let outer = IN_CONVERTED_PACKAGE
-            .try_with(|current| current.replace(Some(scope.clone())))
+            .try_with(|current| current.replace(Some(scope)))
             .ok()?;
-        Some(ConvertedPackageGuard { outer, scope })
+        Some(ConvertedPackageGuard {
+            outer,
+            token,
+            _thread: std::marker::PhantomData,
+        })
     }
 }
 
 struct ConvertedScope {
     call: ConvertedCall,
     frame: u64,
-    live: Cell<bool>,
+    token: u64,
 }
 
 /// Restores the previous live scope on this thread. This guard is not Send or Sync.
@@ -184,17 +194,30 @@ struct ConvertedScope {
 #[must_use]
 // exhaustive: its field is private, so mods cannot build or destructure it
 pub struct ConvertedPackageGuard {
-    outer: Option<Rc<ConvertedScope>>,
-    scope: Rc<ConvertedScope>,
+    outer: Option<ConvertedScope>,
+    token: u64,
+    _thread: std::marker::PhantomData<Rc<()>>,
 }
 
 impl Drop for ConvertedPackageGuard {
     fn drop(&mut self) {
-        self.scope.live.set(false);
         let _ = IN_CONVERTED_PACKAGE.try_with(|current| {
             let mut current = current.borrow_mut();
-            if current.as_ref().is_some_and(|s| Rc::ptr_eq(s, &self.scope)) {
-                *current = self.outer.take().filter(|s| s.live.get());
+            if current.as_ref().is_some_and(|s| s.token == self.token) {
+                let mut outer = self.outer.take();
+                let restored = ENDED_SCOPES.try_with(|ended| {
+                    let mut ended = ended.borrow_mut();
+                    while let Some(index) = outer
+                        .as_ref()
+                        .and_then(|scope| ended.iter().position(|(token, _)| *token == scope.token))
+                    {
+                        outer = ended.swap_remove(index).1;
+                    }
+                });
+                *current = if restored.is_ok() { outer } else { None };
+            } else {
+                let _ = ENDED_SCOPES
+                    .try_with(|ended| ended.borrow_mut().push((self.token, self.outer.take())));
             }
         });
     }
@@ -204,7 +227,6 @@ impl Drop for ConvertedPackageGuard {
 #[must_use]
 // exhaustive: its fields are private, so mods cannot build or destructure it
 pub struct NativeModGuard {
-    _thread: std::marker::PhantomData<Rc<()>>,
     outer_frame: Option<u64>,
     outer: Option<NativeModCall>,
     _timing: Option<crate::__private::profiler::Guard>,
@@ -246,6 +268,7 @@ mod tests {
         impl<T: ?Sized> Ambiguous<()> for T {}
         impl<T: ?Sized + Send> Ambiguous<u8> for T {}
         let _ = <ConvertedPackageGuard as Ambiguous<_>>::check;
+        let _ = <NativeModGuard as Ambiguous<_>>::check;
     }
 
     #[test]
@@ -292,6 +315,26 @@ mod tests {
     }
 
     #[test]
+    fn crash_three_scopes_restore_live_ancestor() {
+        let packages = ConvertedPackages::new("runtime", ["guest"]);
+        let _native = runtime("dispatch");
+        let package = packages.package("guest").unwrap();
+        for order in [[1, 2, 0], [1, 0, 2], [0, 1, 2]] {
+            let mut guards = ["A", "B", "C"].map(|name| package.enter(name, "site"));
+            drop(guards[order[0]].take());
+            assert_eq!(current_converted_call().unwrap().export, "C");
+            drop(guards[order[1]].take());
+            if order == [1, 2, 0] {
+                assert_eq!(current_converted_call().unwrap().export, "A");
+            } else {
+                assert_eq!(current_converted_call().unwrap().export, "C");
+            }
+            drop(guards[order[2]].take());
+            assert_eq!(current_converted_call(), None);
+        }
+    }
+
+    #[test]
     fn crash_scope_reader_rejects_exited_native_frame() {
         let packages = ConvertedPackages::new("runtime", ["guest"]);
         let native = runtime("first");
@@ -306,10 +349,15 @@ mod tests {
 
     #[test]
     fn crash_tls_teardown_is_non_panicking() {
-        struct Last;
+        struct Last {
+            native: Option<NativeModGuard>,
+            scope: Option<ConvertedPackageGuard>,
+        }
         impl Drop for Last {
             fn drop(&mut self) {
+                drop(self.scope.take());
                 assert_eq!(current_converted_call(), None);
+                assert_eq!(current_native_mod(), Some("runtime"));
                 let packages = ConvertedPackages::new("runtime", ["guest"]);
                 assert!(
                     packages
@@ -318,18 +366,28 @@ mod tests {
                         .enter("run", "site")
                         .is_none()
                 );
+                drop(self.native.take());
             }
         }
-        thread_local! { static LAST: Last = const { Last }; }
+        thread_local! {
+            static LAST: RefCell<Last> = const { RefCell::new(Last { native: None, scope: None }) };
+        }
         std::thread::spawn(|| {
+            // Assumes reverse TLS destructor registration order: LAST is initialized
+            // before the converted scope TLS, so its guards outlive that TLS.
             LAST.with(|_| {});
-            let _native = runtime("first");
+            let native = runtime("first");
             let packages = ConvertedPackages::new("runtime", ["guest"]);
-            let _scope = packages
+            let scope = packages
                 .package("guest")
                 .unwrap()
                 .enter("run", "site")
                 .unwrap();
+            LAST.with(|last| {
+                let mut last = last.borrow_mut();
+                last.native = Some(native);
+                last.scope = Some(scope);
+            });
         })
         .join()
         .unwrap();
