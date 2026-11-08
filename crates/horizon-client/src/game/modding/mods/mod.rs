@@ -1406,7 +1406,10 @@ mod tests {
             vec![ModEntry::new("registration_test", Box::new(Models))].into(),
             || {
                 mod_api::__private::with_test_packages(&["registration_test"], || {
-                    for server in [ExecutionRole::IntegratedServer, ExecutionRole::DedicatedServer] {
+                    for server in [
+                        ExecutionRole::IntegratedServer,
+                        ExecutionRole::DedicatedServer,
+                    ] {
                         assert_eq!(collect_fluid_models(server), None);
                     }
                     let models = collect_fluid_models(ExecutionRole::Client).unwrap();
