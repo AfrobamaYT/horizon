@@ -44,6 +44,10 @@ pub fn identity(rule: &Rule, shape: &Shape, exposure: &dyn Exposure) -> Result<S
                 }
                 Scalar::Str | Scalar::String => "utf16".into(),
             },
+            Shape::DynError => "utf16".into(),
+            Shape::Result(ok, err) => {
+                format!("result({},{})", child(ok, open)?, child(err, open)?)
+            }
             Shape::Unit => "unit".into(),
             Shape::Ref { to, .. } | Shape::Wrapped(_, to) => child(to, open)?,
             Shape::Tuple(parts) => format!(

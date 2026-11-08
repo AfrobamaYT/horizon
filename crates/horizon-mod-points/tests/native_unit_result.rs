@@ -2,8 +2,8 @@
 
 //! A real catalog `UnitResult` point (`Split::can_join`) on a stand-in receiver. The head
 //! carries the bool cancel control; the return phase exposes the `Result` slot as its own
-//! root, distinct from that control. The slot's `Result` has no crossing shape, so it is an
-//! opaque leaf: the listener sees its identity, and no edit can reach it.
+//! root, distinct from that control. The slot's `Result<(), String>` is a tagged enum: the
+//! listener reads the Err message, and an edit that is not a valid case is refused.
 mod common;
 use common::Endpoint;
 use mod_api::RowWindow;
@@ -56,12 +56,12 @@ fn tail(snapshot: mod_points::snapshot::Snapshot<'_>, edits: &mut mod_api::wire:
         })
         .unwrap();
     let owned = mod_points::snapshot::Snapshot::new(&rows);
-    assert!(
-        owned.field(slot, 0).is_none(),
-        "an opaque slot has no children"
-    );
+    // The native body returns Err("full"): case 1, its message the payload.
+    assert_eq!(owned.read::<u32>(slot), Ok(1));
+    let payload = owned.field(owned.field(slot, 1).unwrap(), 0).unwrap();
+    assert_eq!(owned.read::<u64>(payload), Ok(4));
     if MODE.load(Ordering::Relaxed) == 2 {
-        edits.set(slot, &0u32).unwrap();
+        edits.set(slot, &7u32).unwrap();
     }
 }
 
@@ -113,7 +113,7 @@ fn unit_result_head_cancels_and_return_exposes_the_result_slot_as_its_own_root()
         (HEADS.load(Ordering::Relaxed), TAILS.load(Ordering::Relaxed)),
         (2, 1)
     );
-    // No edit reaches the Result slot: the whole patch is refused, the value returned as is.
+    // An invalid whole value is refused: the value is returned as is.
     MODE.store(2, Ordering::Relaxed);
     TAIL_REFUSED.store(true, Ordering::Relaxed);
     assert_eq!(split.can_join("no"), Err("full".to_owned()));

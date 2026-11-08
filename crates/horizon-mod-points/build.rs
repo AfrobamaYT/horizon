@@ -314,6 +314,24 @@ fn receiver_fixture(out_dir: &std::path::Path) {
             body: "{ if name == \"ok\" { Ok(()) } else { Err(\"full\".to_owned()) } }",
         },
     );
+    // A plain `Result` return with a projectable Ok payload and a `Box<dyn Error>` Err.
+    policy_fixture(
+        out_dir,
+        PolicyFixture {
+            file: "native_raw_result.rs",
+            entries: vec![entry(
+                "horizon_client::split::Split",
+                "pub struct Split { pub seats: u32 }",
+            )],
+            module: "horizon_client::split",
+            owner: Some("Split"),
+            impl_path: "split::Split",
+            signature: "fn profile_names(&self) -> Result<u32, Box<dyn std::error::Error>>",
+            name: "game_split_players_split_profile_names",
+            fields: &["seats"],
+            body: "{ if self.seats > 0 { Ok(self.seats) } else { Err(\"no seats\".into()) } }",
+        },
+    );
     // Borrowed returns: a shared `&str` (read-only) and a `&mut` struct (pointee writable).
     policy_fixture(
         out_dir,
