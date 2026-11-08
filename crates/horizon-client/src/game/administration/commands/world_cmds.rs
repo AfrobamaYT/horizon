@@ -357,7 +357,9 @@ impl Game<'_> {
                 id,
                 ty,
                 Self::damage_kind(&self.motion.health.damage, ty),
+                by,
                 cause.or(by),
+                from,
             ),
             _ => false,
         }

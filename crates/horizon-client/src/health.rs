@@ -1494,7 +1494,10 @@ impl ImmunityWorld for Environment<'_> {
         let source = HurtSource {
             damage_type: &self.source.definition().name,
             causing: self.causing,
-            direct: 0,
+            direct: self
+                .level
+                .attack()
+                .projectile_direct(&self.source.definition().name),
             position: None,
         };
         Ok(self

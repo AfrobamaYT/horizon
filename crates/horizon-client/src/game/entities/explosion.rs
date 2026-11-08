@@ -632,7 +632,7 @@ impl Game<'_> {
         if radius < 1.0e-5 {
             return Vec::new();
         }
-        self.explosion_hits_special(center, radius, blocks);
+        self.explosion_hits_special(center, radius, blocks, damage_type);
         let diameter = f64::from(radius * 2.0);
         let damage = |dist: f64, exposure: f32| {
             let pow = (1.0 - dist) * f64::from(exposure);
