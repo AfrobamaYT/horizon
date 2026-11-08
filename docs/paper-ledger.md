@@ -741,3 +741,20 @@ Server-only events are compared with the hook's server half; moments with no Pap
 [paper-TNTPrimeEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/TNTPrimeEvent.html
 
 [paper-BlockDispenseLootEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/block/BlockDispenseLootEvent.html
+
+## Event counterparts: base world border, lifecycle and save hooks (#1015)
+
+Paper API 26.3 (paper-api `26.3.build.244-stable`), cited from its public Javadoc only; Horizon hooks are cited by function name, never by line.
+Scope = the four `base.rs` hooks below: two world-border notifications, the server world lifecycle and the completed-save cycle.
+
+| Horizon hook | Paper event / status | Evidence and porting boundary |
+|---|---|---|
+| `world_border_bounds_changed` | **Partial:** [`WorldBorderBoundsChangeEvent`][paper-WorldBorderBoundsChangeEvent] | Paper describes instant changes and timed moves on the server, but its Javadoc does not establish the hook's notification after `cmd_worldborder` calls `set_size`/`lerp_to`. The event is cancellable and exposes old/new sizes and mutable size/duration, while the listen-only hook passes no size or duration and cannot cancel or alter the change. No key. |
+| `world_border_center_changed` | **Partial:** [`WorldBorderCenterChangeEvent`][paper-WorldBorderCenterChangeEvent] | Paper describes a server world-border center change, but its Javadoc does not establish the hook's notification after `cmd_worldborder` calls `set_center`. The event exposes old/new centers and permits cancellation and `setNewCenter`, whereas the listen-only hook passes only the fact of the change and cannot prevent or retarget it. No key. |
+| `world_lifecycle` | **Gap:** none (nearest [`WorldLoadEvent`][paper-WorldLoadEvent] / [`WorldUnloadEvent`][paper-WorldUnloadEvent]) | Paper describes individual world load/unload events, not the hook's server-world open-through-close phase sequence. Neither event exposes `WorldOpenFailed`/`WorldCloseFailed` with the engine's failure text, and the cancellable unload event does not establish a completed-close notification. No key. |
+| `world_saved` | **Gap:** none (nearest [`WorldSaveEvent`][paper-WorldSaveEvent]) | Paper documents a world being saved, not completion of the whole save cycle in `save_game_with` after levels, parked levels, metadata and player autosaves. Its public API has no flush/still-pending flag corresponding to `wait`, so it does not establish the hook's moment or information. No key. |
+
+[paper-WorldBorderBoundsChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderBoundsChangeEvent.html
+[paper-WorldBorderCenterChangeEvent]: https://jd.papermc.io/paper/26.3/io/papermc/paper/event/world/border/WorldBorderCenterChangeEvent.html
+
+[paper-WorldSaveEvent]: https://jd.papermc.io/paper/26.3/org/bukkit/event/world/WorldSaveEvent.html
